@@ -1,7 +1,7 @@
 // Every session is a tab beside the project's main agent. A worktree is vibest's own (detached), never herdr's.
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { repositoryDirectoryName, repositoryKey } from "@vibest/vibest/worktree"
 import { Effect, FileSystem, HashMap, PubSub, type Scope } from "effect"
@@ -36,7 +36,7 @@ describe("placement", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
@@ -84,7 +84,7 @@ describe("placement", () => {
     "the project workspace's live count is published again when a session ends, and when the last one is archived",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
@@ -120,7 +120,7 @@ describe("placement", () => {
     "a main agent in another herdr session does not place near its pane id: the id repeats in every session",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       // The main agent of another runtime does not place near its terminal: pane ids are the runtime's own.

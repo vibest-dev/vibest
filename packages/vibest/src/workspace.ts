@@ -14,7 +14,7 @@ import {
   projectRoot,
   workspaceGit,
 } from "./project-create.ts"
-import { Projects } from "./sqlite-store.ts"
+import { ProjectStore } from "./sqlite-storage.ts"
 import {
   addWorktree,
   allocationParentBlocked,
@@ -39,7 +39,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const platform = yield* Effect.context<Platform>()
     const layout = yield* Layout
-    const projects = yield* Projects
+    const projects = yield* ProjectStore
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const crypto = yield* Crypto.Crypto

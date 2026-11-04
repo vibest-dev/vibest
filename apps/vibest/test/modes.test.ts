@@ -4,9 +4,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Actions } from "@vibest/core/actions"
-import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { Plugin } from "@vibest/plugin"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import * as Server from "@vibest/server/server"
@@ -82,7 +82,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Pr
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 const asSession = (sessionId: string) =>
   Effect.gen(function* () {
-    const row = yield* (yield* Db).sessionIdentity(sessionId)
+    const row = yield* (yield* Storage).sessionIdentity(sessionId)
     return authed(
       yield* client,
       sessionHeaders({ sessionId, projectId: row && String(yield* projectNumber(row.scope)) }),
@@ -105,17 +105,17 @@ const answer = (id: string, text: string, harness: "pi" | "cursor" = "pi") =>
     yield* writeResult(id, harness, { text })
     yield* herdr.endTurn(id)
     yield* (yield* Sessions).check(id)
-    yield* until((yield* Db).getSession(id), (s) => s?.turnState !== "open")
+    yield* until((yield* Storage).getSession(id), (s) => s?.turnState !== "open")
   })
 
 /** `id` takes what is queued for it (it is idle), and its turn on it opens. */
 const takes = (id: string) =>
   Effect.gen(function* () {
     yield* (yield* Sessions).check(id)
-    yield* until((yield* Db).getSession(id), (s) => s?.turnState === "open")
+    yield* until((yield* Storage).getSession(id), (s) => s?.turnState === "open")
   })
 
-const opened = (id: string) => Effect.flatMap(Db, (db) => until(db.getSession(id), (s) => s?.turnState === "open"))
+const opened = (id: string) => Effect.flatMap(Storage, (db) => until(db.getSession(id), (s) => s?.turnState === "open"))
 
 describe("orchestration modes", () => {
   test(

@@ -6,12 +6,12 @@ import type { Polled } from "@vibest/protocol/protocol"
 // Nobody there: the row is `dropped`.
 import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, PubSub, Queue, Schedule, Stream } from "effect"
 
-import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
 import { Drain } from "./drain.ts"
 import { Harnesses } from "./harness.ts"
 import { keyedLock } from "./keyed-lock.ts"
 import { Restarting } from "./restarting.ts"
 import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runtimes.ts"
+import { Storage, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./storage.ts"
 
 export const RECONCILE = Duration.seconds(10)
 /** A row a poll handed out and nobody acked goes back to pending after this (each row its own lease). */
@@ -83,7 +83,7 @@ export class Inbox extends Context.Service<
   {
     /** `row`, one per recipient (`to`, else its default), each announced. */
     readonly enqueue: (row: NewInboxRow, to?: ReadonlyArray<string | null>) => Effect.Effect<ReadonlyArray<InboxRow>>
-    /** For rows inserted inside another transaction (Db.finishTurn). */
+    /** For rows inserted inside another transaction (Storage.finishTurn). */
     readonly announce: (row: InboxRow) => Effect.Effect<void>
     /** Try to hand a scope's owner its next batch now. */
     readonly deliver: (scope: string) => Effect.Effect<void>
@@ -110,7 +110,7 @@ export class Inbox extends Context.Service<
   static readonly layer = Layer.effect(
     Inbox,
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const drain = yield* Drain
       const runtimes = yield* Runtimes
       const harnesses = yield* Harnesses
@@ -292,7 +292,7 @@ export class Inbox extends Context.Service<
 
       // The Claude plugin's leases are memory only: per scope, each leased (`sending`) row of its owner and when
       // its lease ends; changed under the scope's lock. Also the last poll per scope, for the away check; its entry
-      // goes when the scope is away. A vibestd that starts has no leases: Db.recoverSending puts `sending` rows of a
+      // goes when the scope is away. A vibestd that starts has no leases: Storage.recoverSending puts `sending` rows of a
       // polling owner back to pending.
       const leases = new Map<string, Map<number, number>>()
       const lastPoll = new Map<string, number>()

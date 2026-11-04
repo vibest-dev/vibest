@@ -1,10 +1,10 @@
 // `vibest project create` and multi-repository worktrees: real git, temporary directories only.
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
 import { Harness } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
@@ -460,7 +460,7 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Storage
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const parent = yield* tempDirectory("vibest-multi-")
@@ -532,7 +532,7 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Storage
       const layout = yield* Layout
       const parent = yield* tempDirectory("vibest-multi-")
       const root = path.join(parent, "combo")
@@ -561,7 +561,7 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Storage
       const parent = yield* tempDirectory("vibest-multi-")
       const root = path.join(parent, "combo")
       yield* fs.makeDirectory(root)
@@ -600,7 +600,7 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Storage
       const layout = yield* Layout
       const parent = yield* tempDirectory("vibest-multi-")
       const root = path.join(parent, "combo")
@@ -634,7 +634,7 @@ describe("multi-repository isolated workspace", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Storage
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const parent = yield* tempDirectory("vibest-multi-")

@@ -1,11 +1,11 @@
 // `vibest update`'s restart in place (sessions.ts outdated / restart: the runtime's `run`) over the fake runtime, and the plan it
 // makes for vibestd from Ping (cli.ts daemonPlan).
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
 import { line } from "@vibest/core/inbox"
 import { CONTINUE, continueNotice, continueText, type Restarted } from "@vibest/core/restart"
 import { Restarting } from "@vibest/core/restarting"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -47,7 +47,7 @@ describe("vibest update's plan for vibestd", () => {
 
 /** A Pi subagent in a turn, under a main agent; its integration reported its harness's pid. */
 const started = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Storage
   const sessions = yield* Sessions
   const repo = yield* makeRepository
   const key = yield* repositoryKey(repo)
@@ -148,7 +148,7 @@ describe("restart in place", () => {
   /** The project's main agent at `test/coord`, working, on harness `harness`, its harness pid 100. */
   const workingMain = (harness: "cursor" | "pi") =>
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const herdr = yield* FakeRuntime
       const key = yield* repositoryKey(yield* makeRepository)
       yield* launchMain(key, harness, false, {

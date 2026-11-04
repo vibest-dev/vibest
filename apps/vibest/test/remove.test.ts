@@ -2,10 +2,10 @@
 // close is recorded on the row, and the worktree goes only once no process still works in it. The fake runtime and fake
 // lsof, real git.
 import { assert, describe, it, layer } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
 import { cwdHolders, livenessOf, LSOF_KILL_AFTER, lsofArgs, Processes, runFor } from "@vibest/core/processes"
 import { CWD_WAIT } from "@vibest/core/remove"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { repositoryKey } from "@vibest/vibest/worktree"
 import { Clock, Duration, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -35,7 +35,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 /** A session in its first turn, and the terminal its agent runs in. */
 const workingSession = Effect.gen(function* () {
   const sessions = yield* Sessions
-  const db = yield* Db
+  const db = yield* Storage
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const { id } = yield* sessions.spawn({

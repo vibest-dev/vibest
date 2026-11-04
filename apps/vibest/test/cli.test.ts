@@ -3,9 +3,9 @@ import net from "node:net"
 // The vibest CLI as an agent runs it (SPEC §12): a real `vibest` process against vibestd on a temp VIBEST_HOME over the fake
 // herdr. JSON on stdout, `Tag: message` on stderr with a nonzero exit, literal input, and the caller's role.
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { VERSION } from "@vibest/protocol/rpc"
 import * as Server from "@vibest/server/server"
 import { Project } from "@vibest/vibest/project"
@@ -50,7 +50,7 @@ describe("vibest CLI", () => {
     "run --archive-on-completion asks Spawn to archive on a completed result; the unreleased --archive is a usage error that spawns nothing",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const layout = yield* Layout
       const repo = yield* makeRepository
       const run = (args: ReadonlyArray<string>) => vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args)
@@ -80,7 +80,7 @@ describe("vibest CLI", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const layout = yield* Layout
       const repo = yield* makeRepository
       const run = (args: ReadonlyArray<string>, stdin?: string) =>
@@ -168,7 +168,7 @@ describe("vibest CLI", () => {
   test(
     "a session's vibest only reports, as itself; anything else is Forbidden, and an unknown session is refused at Hello",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
@@ -221,7 +221,7 @@ describe("vibest CLI", () => {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
@@ -326,7 +326,7 @@ describe("vibest CLI", () => {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const layout = yield* Layout
       const sql = yield* SqlClient.SqlClient
       const repo = yield* makeRepository

@@ -1,13 +1,27 @@
-// The storage port in memory (db.ts `DbShape`): the engine's own tests and a product with nothing to keep across
-// restarts (apps/vibest/test/engine-only.test.ts) use it. The same facts the SQLite store keeps (sessions, inbox rows,
+// The storage port in memory (storage.ts `StorageShape`): the engine's own tests and a product with nothing to keep across
+// restarts (apps/vibest/test/engine-only.test.ts) use it. The same facts the SQLite backend keeps (sessions, inbox rows,
 // append-only events, the owner of each scope), held in arrays; every read derives its rows through the shared read
-// model (read-model.ts), so both stores answer alike and pass the same contract suite (test/store-contract.ts).
+// model (read-model.ts), so both backends answer alike and pass the same conformance suite (storage-conformance.ts).
 // One lock around every operation makes each atomic.
 import { Clock, Effect, Layer, Schema, Semaphore } from "effect"
 
 import {
-  Db,
-  type DbShape,
+  type Current,
+  currentOf,
+  decodeSessions,
+  fromColumns,
+  MESSAGE_STATUSES,
+  newId,
+  type ProcessStart,
+  roundStatus,
+  type SessionFacts,
+  storedStatus,
+  summaryIn,
+  toInbox,
+} from "./read-model.ts"
+import {
+  Storage,
+  type StorageShape,
   encodeAddress,
   type EndReason,
   failureOf,
@@ -25,21 +39,7 @@ import {
   type TurnState,
   type AgentStatus,
   type MessageStatusName,
-} from "./db.ts"
-import {
-  type Current,
-  currentOf,
-  decodeSessions,
-  fromColumns,
-  MESSAGE_STATUSES,
-  newId,
-  type ProcessStart,
-  roundStatus,
-  type SessionFacts,
-  storedStatus,
-  summaryIn,
-  toInbox,
-} from "./read-model.ts"
+} from "./storage.ts"
 
 type Session = {
   readonly id: string
@@ -92,7 +92,7 @@ export const make = Effect.gen(function* () {
   const inbox: Array<Row> = []
   /** Each scope's owner session (none yet: absent). */
   const owner = new Map<string, string>()
-  // Memory only, as in the SQLite store.
+  // Memory only, as in the SQLite backend.
   const statuses = new Map<string, AgentStatus>()
   const integrations = new Map<string, Integration>()
   const prompted = new Map<number, number>()
@@ -645,7 +645,7 @@ export const make = Effect.gen(function* () {
     )
   }
 
-  const engine: DbShape = {
+  const engine: StorageShape = {
     sessionDirectory: (id) => Effect.sync(() => sessions.get(id)?.directory),
     liveSharers: (id) =>
       Effect.sync(() =>
@@ -1163,8 +1163,8 @@ export const make = Effect.gen(function* () {
               Effect.suspend(() => (op as (...a: ReadonlyArray<unknown>) => Effect.Effect<unknown>)(...args)),
             ),
     ]),
-  ) as unknown as DbShape
+  ) as unknown as StorageShape
 })
 
-/** The engine's `Db`, in memory: empty at start, gone with the layer. */
-export const layer = Layer.effect(Db, make)
+/** The engine's `Storage`, in memory: empty at start, gone with the layer. */
+export const layer = Layer.effect(Storage, make)

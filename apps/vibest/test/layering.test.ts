@@ -45,7 +45,7 @@ it("the engine runs no git and imports no worktree code or the product", () => {
   assert.notInclude(fs.readFileSync(path.join(root, "packages/core/package.json"), "utf8"), '"@vibest/vibest"')
 })
 
-it("the engine holds no SQL: storage is a port (db.ts), vibest's SQLite store implements it", () => {
+it("the engine holds no SQL: storage is a port (storage.ts), vibest's SQLite store implements it", () => {
   const core = sources("packages/core/src")
   assert.deepStrictEqual(
     core.flatMap((f) =>
@@ -59,7 +59,10 @@ it("the engine holds no SQL: storage is a port (db.ts), vibest's SQLite store im
   const manifest = fs.readFileSync(path.join(root, "packages/core/package.json"), "utf8")
   assert.notMatch(manifest, /sql/i)
   // The schema, its checks and the SQL live in the product's store.
-  assert.match(fs.readFileSync(path.join(root, "packages/vibest/src/sqlite-store.ts"), "utf8"), /CREATE TABLE session/)
+  assert.match(
+    fs.readFileSync(path.join(root, "packages/vibest/src/sqlite-storage.ts"), "utf8"),
+    /CREATE TABLE session/,
+  )
 })
 
 it("the engine-only product (engine-only.test.ts) is composed without vibest's product, server or default plugins", () => {
@@ -90,7 +93,7 @@ it("the product's notions stay out of the engine", () => {
   // `GuardArea`: the engine names neither.
   assert.deepStrictEqual(importing(core, /VIBEST_SCRATCH|layout\.projects?\b/), [])
   // The storage port and the inbox group by an opaque scope with an owner, not by project and coordinator.
-  for (const file of ["db.ts", "inbox.ts", "memory-store.ts", "read-model.ts"])
+  for (const file of ["storage.ts", "inbox.ts", "memory-storage.ts", "read-model.ts"])
     assert.notMatch(
       fs.readFileSync(path.join(root, "packages/core/src", file), "utf8"),
       /projectId|coordinator(Of|At|Launch|Pending|s\b)|pendingProjects|projectOfSession|entry_session/,

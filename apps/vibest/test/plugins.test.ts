@@ -1,10 +1,10 @@
 // Plugins (plugins.md §6): finding and loading from VIBEST_HOME, and the spawn hook's rules through Sessions.spawn.
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { AgentRefused, Builtins, pluginEntries, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore } from "@vibest/plugin"
 import { mainCheckout, repositoryKey } from "@vibest/vibest/worktree"
@@ -45,7 +45,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 
 /** The session count in db and herdr after a refused or failed spawn. */
 const sessionCount = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Storage
   const herdr = yield* FakeRuntime
   return { rows: (yield* db.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
 })
@@ -55,7 +55,7 @@ describe("plugins: spawn hook", () => {
     "P5/P8: the event has the resolved root; writes reach the row and the launch args",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const db = yield* Db
+      const db = yield* Storage
       const herdr = yield* FakeRuntime
       const nested = `${repo}/sub`
       yield* (yield* FileSystem.FileSystem).makeDirectory(nested)

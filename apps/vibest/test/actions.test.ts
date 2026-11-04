@@ -4,9 +4,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Actions } from "@vibest/core/actions"
-import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { Plugin } from "@vibest/plugin"
 import * as Server from "@vibest/server/server"
 import { Project } from "@vibest/vibest/project"
@@ -180,10 +180,10 @@ const answer = (id: string, text: string) =>
     yield* writeResult(id, "pi", { text })
     yield* (yield* FakeRuntime).endTurn(id)
     yield* (yield* Sessions).check(id)
-    yield* until((yield* Db).getSession(id), (s) => s?.turnState !== "open")
+    yield* until((yield* Storage).getSession(id), (s) => s?.turnState !== "open")
   })
 
-const opened = (id: string) => Effect.flatMap(Db, (db) => until(db.getSession(id), (s) => s?.turnState === "open"))
+const opened = (id: string) => Effect.flatMap(Storage, (db) => until(db.getSession(id), (s) => s?.turnState === "open"))
 
 /** Every row addressed to `to`: kind, sender, status and text, oldest first. */
 const inboxOf = (to: string) =>
@@ -274,7 +274,7 @@ describe("plugin actions", () => {
       // Refused as the worker (its definition starts nothing), done as the main agent its result was going to.
       assert.lengthOf(refusals, 1)
       assert.include(refusals[0]!, "may not call Spawn")
-      const row = (yield* (yield* Db).getSession(next!))!
+      const row = (yield* (yield* Storage).getSession(next!))!
       assert.strictEqual(row.name, "next")
       yield* opened(next!)
       const task = (yield* inboxOf(next!)).find((m) => m.kind === "task")!

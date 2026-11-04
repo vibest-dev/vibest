@@ -3,9 +3,9 @@ import fs from "node:fs/promises"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 // What vibest relies on from SQLite and @effect/sql-sqlite-bun: file mode, WAL synchronous, the write lock.
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
-import * as SqliteStore from "@vibest/vibest/sqlite-store"
-import { SQL_NAMES } from "@vibest/vibest/sqlite-store"
+import { Storage } from "@vibest/core/storage"
+import * as SqliteStorage from "@vibest/vibest/sqlite-storage"
+import { SQL_NAMES } from "@vibest/vibest/sqlite-storage"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -13,7 +13,7 @@ import * as Platform from "#platform"
 
 import { tempDirectory, launchMain } from "./fakes.ts"
 
-const database = (filename: string) => SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(filename)))
+const database = (filename: string) => SqliteStorage.layer.pipe(Layer.provideMerge(Platform.sqlite(filename)))
 
 const modeOf = (path: string) => Effect.promise(async () => (await fs.stat(path)).mode & 0o777)
 
@@ -140,7 +140,7 @@ describe("a vibestd restart", () => {
     Effect.gen(function* () {
       const file = `${yield* tempDirectory("vibest-sqlite-recover-")}/vibest.db`
       const ids = yield* Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const place = (id: string) => ({ runtime: "fake", address: { machine: "local", id } })
         const ids: Array<number> = []
         for (const [key, harness] of [
@@ -156,7 +156,7 @@ describe("a vibestd restart", () => {
       }).pipe(Effect.provide(database(file)))
       const statuses = yield* Effect.gen(function* () {
         // Inbox.layer runs this at start with the harnesses whose adapter polls.
-        yield* (yield* Db).recoverSending(["claude"])
+        yield* (yield* Storage).recoverSending(["claude"])
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox ORDER BY id`
       }).pipe(Effect.provide(database(file)))

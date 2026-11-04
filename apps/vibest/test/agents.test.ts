@@ -2,9 +2,9 @@
 // with `context.agent.define`, and the engine lets it do exactly that over vibest.sock, with no main-agent branch.
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { Plugin } from "@vibest/plugin"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import * as Server from "@vibest/server/server"
@@ -51,7 +51,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Pr
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 const asSession = (sessionId: string) =>
   Effect.gen(function* () {
-    const row = yield* (yield* Db).sessionIdentity(sessionId)
+    const row = yield* (yield* Storage).sessionIdentity(sessionId)
     return authed(
       yield* client,
       sessionHeaders({ sessionId, projectId: row && String(yield* projectNumber(row.scope)) }),
@@ -75,7 +75,7 @@ describe("agent definitions", () => {
   test(
     "nested lead: the main agent starts a lead, the lead starts a worker beside it, the worker's result goes to the lead, and the lead manages only its own",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const herdr = yield* FakeRuntime
       const fs = yield* FileSystem.FileSystem
       const repo = yield* makeRepository

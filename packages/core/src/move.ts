@@ -8,11 +8,11 @@ import type { Subscription } from "@vibest/schema/subscription"
 import { Cause, Clock, Context, Crypto, Effect, Exit, FileSystem, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
-import type { Db, SessionRow } from "./db.ts"
 import { Harness, harnessOptions, Harnesses, preflight } from "./harness.ts"
 import { errorMessage, type Plugins } from "./plugins.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { type Machine, type Runtime, type Terminal } from "./runtimes.ts"
+import type { Storage, SessionRow } from "./storage.ts"
 import type { Subscriptions } from "./subscriptions/service.ts"
 
 /** The platform services `Sessions.make` closes over and hands to the move. */
@@ -45,7 +45,7 @@ export const limitMoveBox = (): {
 } => ({ move: { rerun: () => Effect.die("limit move not wired") as Effect.Effect<boolean> } })
 
 export const sessionMove = (deps: {
-  readonly db: Pick<Db["Service"], "getSession" | "updateSession" | "rescheduleSource" | "endProcess">
+  readonly db: Pick<Storage["Service"], "getSession" | "updateSession" | "rescheduleSource" | "endProcess">
   readonly plugins: Plugins["Service"]
   readonly subscriptions: Subscriptions["Service"]
   readonly harness: Harness["Service"]

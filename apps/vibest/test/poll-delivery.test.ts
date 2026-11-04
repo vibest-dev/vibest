@@ -3,9 +3,9 @@
 // proof they were taken; a lease that runs out with none taken gives them back. Its turns are what its integration
 // reports: the runtime's idle is no turn end, and an interrupt waits for the interrupted turn end.
 import { assert, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
 import { LEASE } from "@vibest/core/inbox"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Http from "@vibest/server/http"
@@ -22,7 +22,7 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 
 /** A Pi subagent started and up, its integration (this test) not yet asking for anything. */
 const started = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Storage
   const sessions = yield* Sessions
   const repo = yield* makeRepository
   const key = yield* repositoryKey(repo)

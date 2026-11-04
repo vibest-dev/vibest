@@ -1,13 +1,13 @@
 // Session state machine against a fake herdr (SPEC §15: "State machine response to event sequences").
 // `it.effect` runs on TestClock: time stands still unless a test moves it, so polls and timeouts only fire on purpose.
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import type { HarnessId } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { AgentRefused } from "@vibest/core/plugins"
 import { peerAdmitPause, Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -71,7 +71,7 @@ const claudeEnd = (_reason: "aborted") => ({
 const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
-    const db = yield* Db
+    const db = yield* Storage
     yield* launchMain(yield* repositoryKey(repo), "pi", false, {
       runtime: RUNTIME,
       address: { machine: "local", id: "test/coord" },
@@ -100,7 +100,7 @@ const idleSession = (repo: string, harness: HarnessId = "pi") =>
 /** The directory the row records. */
 const sessionWorktree = (id: string) =>
   Effect.gen(function* () {
-    const located = yield* (yield* Db).sessionDirectory(id)
+    const located = yield* (yield* Storage).sessionDirectory(id)
     if (!located) return yield* Effect.die(`no worktree for ${id}`)
     return located
   })
@@ -180,7 +180,7 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(placed.env.VIBEST_SCRATCH, layout.scratch(yield* repositoryKey(repo)))
       // The same identity env for every harness: the numeric project id, the harness, and the runtime as one opaque
       // field (no terminal yet: the one it gets is opened after the env is fixed).
-      const identity = (yield* (yield* Db).sessionIdentity(id))!
+      const identity = (yield* (yield* Storage).sessionIdentity(id))!
       assert.deepInclude(placed.env, {
         VIBEST_PROJECT_ID: String(yield* projectNumber(identity.scope)),
         VIBEST_HARNESS: "pi",
@@ -354,7 +354,7 @@ describe.concurrent("Sessions", () => {
     "spawn with no logged-in harness is refused, naming the model failures",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
         Effect.filterOrFail(
           (e): e is AgentRefused => e._tag === "AgentRefused",
@@ -414,7 +414,7 @@ describe.concurrent("Sessions", () => {
       const sql = yield* SqlClient.SqlClient
       const repo = yield* makeRepository
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
@@ -610,7 +610,7 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       yield* launchMain(yield* repositoryKey(repo), "pi", false, {
@@ -653,7 +653,7 @@ describe.concurrent("Sessions", () => {
       const second = yield* herdr.hold("state", name)
       yield* first.release()
       yield* second.reached
-      assert.strictEqual((yield* (yield* Db).getSession(id))!.turnState, "open")
+      assert.strictEqual((yield* (yield* Storage).getSession(id))!.turnState, "open")
       const typing = yield* Effect.forkChild(sessions.userPrompt(id, "typed during resume"))
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       const during = yield* sql<{
@@ -792,7 +792,7 @@ describe.concurrent("Sessions", () => {
       const row = (yield* sessions.list()).find((session) => session.id === id)!
       assert.strictEqual(row.address.id, pane)
       // The terminal is the row's own now (runtime-port.md §2), not an in-memory pane id.
-      assert.strictEqual((yield* (yield* Db).getSession(id))!.address.id, pane)
+      assert.strictEqual((yield* (yield* Storage).getSession(id))!.address.id, pane)
     }),
   )
 
@@ -801,7 +801,7 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       yield* launchMain(yield* repositoryKey(repo), "pi", false, {
         runtime: RUNTIME,
@@ -1797,7 +1797,7 @@ describe.concurrent("Sessions", () => {
     "a set provider matches only that login",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const subs = yield* Subscriptions
       const open = { window: "5h", percent: 0, status: "available" as const, resetTime: null }
@@ -1986,7 +1986,7 @@ describe.concurrent("Sessions", () => {
     "a launch start that dies on its own usage limit moves and resends the launch prompt",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       yield* launchMain(yield* repositoryKey(repo), "pi", false, {
@@ -2049,7 +2049,7 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const subs = yield* Subscriptions
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       yield* launchMain(yield* repositoryKey(repo), "pi", false, {
@@ -2094,7 +2094,7 @@ describe.concurrent("Sessions", () => {
     "a start chain that pins the move back to the login that hit the limit ends instead of looping",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       yield* launchMain(yield* repositoryKey(repo), "pi", false, {
@@ -2140,7 +2140,7 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const subs = yield* Subscriptions
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       yield* launchMain(yield* repositoryKey(repo), "pi", false, {
@@ -2409,7 +2409,7 @@ describe.concurrent("Sessions", () => {
     "prompt that never registers: Enter, one re-paste, then task_not_started",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, "cursor"))
       yield* untilVirtual(db.getSession(id), (w) => w?.turnState === "not_started")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "not_started")
@@ -2452,7 +2452,7 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const { id } = yield* sessions.spawn(yield* spawnInput(yield* makeRepository, "cursor"))
       yield* untilVirtual(db.getSession(id), (w) => w?.turnState === "not_started")
       yield* sessions.send(id, "next")
@@ -2504,7 +2504,7 @@ describe.concurrent("Sessions", () => {
     "launch failure rolls back the worktree and notifies the owner",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const db = yield* Db
+      const db = yield* Storage
       const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))
       yield* until(db.getSession(id), (w) => !!w && w.exitedAt !== null)
       assert.isFalse(yield* fs.exists(yield* sessionWorktree(id)))
@@ -2550,7 +2550,7 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       // cfg is a tracked file, a directory in the main checkout only: the worktree's cfg cannot hold cfg/x.
       yield* fs.writeFileString(path.join(repo, "cfg"), "file\n")
@@ -2581,7 +2581,7 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       for (const f of ["a.json", "b.json"]) yield* fs.writeFileString(path.join(repo, f), `${f}\n`)
       // info/exclude is shared, so both are ignored in the main checkout and in the new worktree.
@@ -3214,7 +3214,7 @@ describe.concurrent("Sessions", () => {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const unknown = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: "ffffffff" }))
       assert.strictEqual(unknown._tag, "NoSuchSession")
       assert.include(unknown.message, "--peer ffffffff: no session ffffffff")
@@ -3277,7 +3277,7 @@ describe.concurrent("Sessions", () => {
   /** The other sessions that record `ownerId`'s directory. */
   const peerRows = (ownerId: string) =>
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const shared = yield* db.sessionDirectory(ownerId)
       return yield* Effect.filter(
         (yield* db.listSessions({ stopped: true })).filter((s) => s.id !== ownerId),
@@ -3506,7 +3506,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       yield* launchMain(yield* repositoryKey(repo), coordinator, false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
@@ -3526,12 +3526,17 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     error?: string,
   ) =>
     Effect.gen(function* () {
-      yield* writeResult(w.id, (yield* (yield* Db).getSession(w.id))!.harnessId, error ? { text, error } : { text })
+      yield* writeResult(
+        w.id,
+        (yield* (yield* Storage).getSession(w.id))!.harnessId,
+        error ? { text, error } : { text },
+      )
       yield* w.herdr.endTurn(w.id)
       yield* w.sessions.check(w.id)
     })
 
-  const archived = (db: Db["Service"], id: string) => db.getSession(id).pipe(Effect.map((w) => !!w?.metadata.archived))
+  const archived = (db: Storage["Service"], id: string) =>
+    db.getSession(id).pipe(Effect.map((w) => !!w?.metadata.archived))
   /** Real time for a forked archive to run, if one was started. */
   const settle = TestClock.withLive(Effect.sleep("100 millis"))
   const latestNotice = (id: string) => sqlNotices(id).pipe(Effect.map((n) => n.at(-1) ?? ""))
@@ -3591,7 +3596,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     "a Claude coordinator polling its inbox: archived once it acked the batch holding the result",
     Effect.gen(function* () {
       const inbox = yield* Inbox
-      const db = yield* Db
+      const db = yield* Storage
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const coord = yield* launchMain(yield* repositoryKey(repo), "claude", false, {
@@ -4066,7 +4071,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       // A coordinator that takes its rows by terminal text, so the result is delivered without its integration.
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       yield* launchMain(yield* repositoryKey(repo), "cursor", false, {
         runtime: RUNTIME,

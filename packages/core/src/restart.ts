@@ -5,7 +5,6 @@ import { VERSION } from "@vibest/protocol/rpc"
 // agents, whose continue notice names the subagents restarted with them.
 import { Clock, Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope } from "effect"
 
-import type { Db, OwnerRow, SessionRow } from "./db.ts"
 import type { HarnessAdapter, Harnesses, HarnessId } from "./harness.ts"
 import type { Inbox } from "./inbox.ts"
 import { errorMessage } from "./plugins.ts"
@@ -20,6 +19,7 @@ import {
   stateOf,
   type Terminal,
 } from "./runtimes.ts"
+import type { Storage, OwnerRow, SessionRow } from "./storage.ts"
 import type { TurnEnds } from "./turn-ends.ts"
 
 /** An agent `vibest update` finds on an old integration. `blocked`: why it cannot be restarted in place (null: it can). */
@@ -131,7 +131,7 @@ interface Target {
 }
 
 export const sessionRestart = (deps: {
-  readonly db: Db["Service"]
+  readonly db: Storage["Service"]
   readonly runtimes: Runtimes["Service"]
   readonly harnesses: Harnesses["Service"]
   readonly processes: Processes["Service"]

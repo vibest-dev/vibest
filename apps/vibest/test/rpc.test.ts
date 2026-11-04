@@ -5,11 +5,11 @@ import net from "node:net"
 import { assert, describe, it } from "@effect/vitest"
 import { SocketConnector } from "@vibest/client/client"
 import { cliHeaders, connect, incompatibleDaemon, protocolHeaders, withVibest } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
 import { Harness, type HarnessId, HarnessUnavailable } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { AgentRefused, Plugin } from "@vibest/plugin"
 import { MISMATCH_ACTION, PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
 import { VibestRpcs, VERSION } from "@vibest/protocol/rpc"
@@ -60,7 +60,7 @@ const asCli = (raw: Effect.Success<typeof client>, repositoryRoot: string) => au
 /** A session as its environment names it: with its project id (VIBEST_PROJECT_ID), which vibestd requires. */
 const asSession = (raw: Effect.Success<typeof client>, sessionId: string, repositoryRoot?: string) =>
   Effect.gen(function* () {
-    const row = yield* (yield* Db).sessionIdentity(sessionId)
+    const row = yield* (yield* Storage).sessionIdentity(sessionId)
     return authed(
       raw,
       sessionHeaders({ sessionId, repositoryRoot, projectId: row && String(yield* projectNumber(row.scope)) }),
@@ -75,7 +75,7 @@ const failureTag = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E
 /** What a main agent's integration's `conversation` event does (HTTP /events): kept from the session's own harness only. */
 const conversationReport = (sessionId: string, harness: string, conversation: string) =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Storage
     if ((yield* db.sessionIdentity(sessionId))?.harness === harness)
       yield* db.noteHarnessSession(sessionId, conversation)
   })
@@ -126,7 +126,7 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const { id } = yield* c.Spawn({ harness: "pi", prompt: "do it" })
@@ -153,7 +153,7 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const exact = "e".repeat(500)
@@ -188,7 +188,7 @@ describe("vibest.sock", () => {
   test(
     "Peek: the command line and the session's coordinator read its terminal on demand; an unknown or exited session has none",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const raw = yield* client
@@ -209,7 +209,7 @@ describe("vibest.sock", () => {
   test(
     "a session reports only as itself; an unknown session is refused; a coordinator cannot report",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const raw = yield* client
       const c = asCli(raw, repo)
@@ -299,7 +299,7 @@ describe("vibest.sock", () => {
   test(
     "a Coordinator manages only the sessions it spawned; the command line (the user) manages any",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const asCoordinator = (root: string, paneId: string) =>
         Effect.gen(function* () {
@@ -344,7 +344,7 @@ describe("vibest.sock", () => {
   test(
     "every protected method: no protocol and a session are refused, other coordinators read but do not manage, notifications need protocol only",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const asCoordinator = (root: string, paneId: string) =>
         Effect.gen(function* () {
@@ -453,7 +453,7 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const { id } = yield* c.Spawn({ harness: "pi", prompt: "do it" })
@@ -494,7 +494,7 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       // Cursor reports its session only through herdr; this one exits before it did, so it cannot be resumed.
@@ -642,7 +642,7 @@ describe("vibest.sock", () => {
     "one main agent per project: a start in another terminal while it runs is refused and changes nothing; once it exited the start goes ahead",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const first = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
@@ -728,7 +728,7 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const inbox = yield* Inbox
-      const db = yield* Db
+      const db = yield* Storage
       const general = {
         agent: "general",
         name: "n",
@@ -781,7 +781,7 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const inbox = yield* Inbox
-      const db = yield* Db
+      const db = yield* Storage
       const general = {
         agent: "general",
         name: "n",
@@ -895,7 +895,7 @@ describe("vibest.sock", () => {
   test(
     "one socket does not keep a caller: sequential and concurrent requests stay on their own headers",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const raw = yield* client
       const cli = asCli(raw, repo)
@@ -927,7 +927,7 @@ describe("vibest.sock", () => {
   test(
     "a missing protocol does not spawn; a legacy Ping fails closed; a different package version does not",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const raw = yield* client
       const { "vibest-protocol": _dropped, ...callerOnly } = cliHeaders(repo)

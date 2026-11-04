@@ -18,12 +18,12 @@ import {
 } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 
-import type { EndReason, SessionPatch, SessionRow } from "./db.ts"
 import type { HarnessUnavailable } from "./harness.ts"
 import type { LimitMove } from "./move.ts"
 import { isUsageLimitError } from "./results.ts"
 import { type Machine, type RuntimesShape, type Runtime, type Terminal } from "./runtimes.ts"
 import { RuntimeError } from "./runtimes.ts"
+import type { EndReason, SessionPatch, SessionRow } from "./storage.ts"
 import { removeSystemPrompt, type SystemPromptDirUnsafe } from "./system-prompt.ts"
 import type { GitError, NotInRepository, WorkspaceShape } from "./workspace.ts"
 

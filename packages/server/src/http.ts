@@ -1,4 +1,10 @@
 import { Agents } from "@vibest/core/agents"
+import { Drain } from "@vibest/core/drain"
+import * as Guard from "@vibest/core/guard"
+import { Harnesses, subagentPolls } from "@vibest/core/harness"
+import { Inbox } from "@vibest/core/inbox"
+import { Layout } from "@vibest/core/paths"
+import { Sessions } from "@vibest/core/sessions"
 // vibestd's HTTP API (`vibest-http.sock`, beside vibest.sock): what a harness integration that can only make HTTP requests
 // calls (the Claude plugin's `$.http.fetch`). Every route is `POST /<route>` with a JSON body, answered at once. The caller is
 // a session, named by the shared session headers (@vibest/protocol `sessionHeaders`); the transport is not part of it.
@@ -19,13 +25,7 @@ import { Agents } from "@vibest/core/agents"
 // Errors are `{ error }`: 409 another protocol (with @vibest/protocol `ProtocolMismatch`: protocol, version, message,
 // action), 404 no such session or route, 403 another project, another harness than the session's, or a poll from a session
 // whose harness does not poll, 503 vibestd is stopping.
-import { Db } from "@vibest/core/db"
-import { Drain } from "@vibest/core/drain"
-import * as Guard from "@vibest/core/guard"
-import { Harnesses, subagentPolls } from "@vibest/core/harness"
-import { Inbox } from "@vibest/core/inbox"
-import { Layout } from "@vibest/core/paths"
-import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import {
   HARNESS_HEADER,
   HARNESS_SESSION_HEADER,
@@ -43,7 +43,7 @@ import {
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-import { Projects } from "@vibest/vibest/sqlite-store"
+import { ProjectStore } from "@vibest/vibest/sqlite-storage"
 import { Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -74,8 +74,8 @@ const HookBody = Schema.fromJsonString(
 
 /** The request handler, transport aside: the HTTP server below and the tests call it. */
 export const make = Effect.gen(function* () {
-  const db = yield* Db
-  const projects = yield* Projects
+  const db = yield* Storage
+  const projects = yield* ProjectStore
   const inbox = yield* Inbox
   const sessions = yield* Sessions
   const drain = yield* Drain

@@ -43,7 +43,6 @@ import { Hex } from "effect/encoding"
 import { ChildProcessSpawner } from "effect/process"
 
 import { Agents } from "./agents.ts"
-import { Db, type InboxRow, type SessionRow } from "./db.ts"
 import { Drain } from "./drain.ts"
 import {
   encodeCommand,
@@ -84,6 +83,7 @@ import {
   type Terminal,
   type AgentSeen,
 } from "./runtimes.ts"
+import { Storage, type InboxRow, type SessionRow } from "./storage.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 import { SessionPrompt, writeSystemPrompt } from "./system-prompt.ts"
 import { type TurnEnded, TurnEnds } from "./turn-ends.ts"
@@ -270,7 +270,7 @@ export class Sessions extends Context.Service<
   /** `maxSessions`: non-stopped sessions on this machine; undefined = no limit. */
   static readonly make = (options: { readonly maxSessions: number | undefined }) =>
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const runtimes = yield* Runtimes
       const harness = yield* Harness
       const harnesses = yield* Harnesses

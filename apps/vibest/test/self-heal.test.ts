@@ -4,14 +4,14 @@ import path from "node:path"
 // What `vibest` fixes for the user on an interactive terminal: a vibestd to replace (`vibest daemon restart`, `vibest update`). A temporary HOME and VIBEST_HOME throughout, never the user's.
 import { assert, layer } from "@effect/vitest"
 import { cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
+import { Storage } from "@vibest/core/storage"
 import { PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { readDaemonInfo } from "@vibest/server/daemon"
-import * as SqliteStore from "@vibest/vibest/sqlite-store"
+import * as SqliteStorage from "@vibest/vibest/sqlite-storage"
 import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Stdio, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -249,7 +249,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
         // A session herdr cannot be asked about (no herdr on vibestd's PATH) and a message queued for it, written before vibestd starts.
         const pending = yield* Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Storage
           yield* db.insertSession(
             {
               id: "b0050001",
@@ -273,7 +273,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
             "seeded-project",
           )
           return (yield* db.insertInbox({ sessionId: "b0050001", kind: "send", message: "queued", details: {} }))[0]!
-        }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))))
+        }).pipe(Effect.provide(SqliteStorage.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))))
         const env = { HOME: layout.home, VIBEST_HOME: layout.home, PATH: "/usr/bin:/bin" }
         const daemon = yield* Effect.forkScoped(runVibest(layout.home, env, ["daemon", "--foreground"]))
         yield* Effect.gen(function* () {
@@ -303,8 +303,8 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
           assert.deepStrictEqual(yield* stop(old.instance!, cliHeaders(layout.home)), { instance: old.instance! })
           assert.strictEqual((yield* Fiber.join(daemon).pipe(Effect.timeout("10 seconds"))).code, 0)
           assert.isFalse(yield* probe(layout.socket))
-          const rows = yield* Effect.flatMap(Db, (db) => db.pendingInbox("b0050001")).pipe(
-            Effect.provide(SqliteStore.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))),
+          const rows = yield* Effect.flatMap(Storage, (db) => db.pendingInbox("b0050001")).pipe(
+            Effect.provide(SqliteStorage.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))),
           )
           assert.deepStrictEqual(rows, [pending])
         }).pipe(Effect.ensuring(Effect.ignore(stopRecorded(layout.daemonInfo))), TestClock.withLive, Effect.scoped)

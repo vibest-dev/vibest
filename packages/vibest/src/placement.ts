@@ -1,8 +1,8 @@
+import { PlacementPolicy } from "@vibest/core/placement"
 // vibest's terminal placement policy (core/placement.ts `PlacementPolicy`): a session's terminal opens beside the lead
 // that started it, else beside the project's main agent; the project's workspace is labelled with the project's name
 // and how many of its sessions are live.
-import { Db } from "@vibest/core/db"
-import { PlacementPolicy } from "@vibest/core/placement"
+import { Storage } from "@vibest/core/storage"
 import { Workspace } from "@vibest/core/workspace"
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
@@ -12,7 +12,7 @@ import { repositoryDirectoryName } from "./worktree.ts"
 export const layer = Layer.effect(
   PlacementPolicy,
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Storage
     const workspace = yield* Workspace
     const platform = yield* Effect.context<
       FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner

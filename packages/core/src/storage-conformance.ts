@@ -1,10 +1,10 @@
-// The storage port's contract (db.ts `DbShape`, docs/architecture.md, storage), as tests every implementation must
-// pass: the in-memory store (memory-store.test.ts) and vibest's SQLite store (apps/vibest/test/store-contract.test.ts).
-// Each case gets a fresh, empty store from `layer`.
+// The storage port's contract (storage.ts `StorageShape`, docs/architecture.md, storage), as tests every implementation must
+// pass: the in-memory backend (memory-storage.test.ts) and vibest's SQLite backend (apps/vibest/test/storage-conformance.test.ts).
+// Each case gets a fresh, empty backend from `layer`.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, type Layer } from "effect"
 
-import { Db, encodeAddress, type SessionRow } from "./db.ts"
+import { Storage, encodeAddress, type SessionRow } from "./storage.ts"
 
 const RUNTIME = "fake"
 
@@ -31,15 +31,15 @@ export const sessionRow = (id: string, patch: Partial<Omit<SessionRow, "scope">>
 
 const place = (id: string) => ({ runtime: RUNTIME, address: { machine: "local", id } })
 
-export const storeContract = (name: string, layer: Layer.Layer<Db, unknown>) =>
+export const storageConformance = (name: string, layer: Layer.Layer<Storage, unknown>) =>
   describe(`storage port contract: ${name}`, () => {
-    const test = (title: string, body: Effect.Effect<void, unknown, Db>) =>
+    const test = (title: string, body: Effect.Effect<void, unknown, Storage>) =>
       it.effect(title, () => body.pipe(Effect.provide(layer)))
 
     test(
       "sessions: inserted in a scope, read back, listed per scope; `max` refuses all or nothing; unknown ids are absent",
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         assert.isTrue(yield* db.insertSession(sessionRow("a1"), "s1", undefined, "/w/a", "do a"))
         assert.isTrue(yield* db.insertSession(sessionRow("b1"), "s2"))
         assert.isFalse(yield* db.insertSession(sessionRow("c1"), "s1", 2))
@@ -72,7 +72,7 @@ export const storeContract = (name: string, layer: Layer.Layer<Db, unknown>) =>
     test(
       "provenance and shared directories: descends follows parents upward; sharers are live sessions of one directory",
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         yield* db.insertSession(sessionRow("p1", { createdAt: 1 }), "s", undefined, "/w/1")
         yield* db.insertSession(sessionRow("c1", { createdAt: 2 }), "s", undefined, "/w/1", undefined, "p1")
         yield* db.insertSession(sessionRow("g1", { createdAt: 3 }), "s", undefined, "/w/2", undefined, "c1")
@@ -91,7 +91,7 @@ export const storeContract = (name: string, layer: Layer.Layer<Db, unknown>) =>
     test(
       "processes: one end per process; a restart keeps the open turn and its conversation; ended ones leave the live list",
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         yield* db.insertSession(sessionRow("a1", { harnessSessionId: "conv-1" }), "s")
         yield* db.updateSession("a1", { turnState: "open", turnPromptedAt: 5 })
         assert.strictEqual(yield* db.readyAt("a1"), undefined)
@@ -118,7 +118,7 @@ export const storeContract = (name: string, layer: Layer.Layer<Db, unknown>) =>
     test(
       "turns: a typed turn is taken; one end per turn; a result goes to the senders the turn consumed",
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         yield* db.insertSession(sessionRow("a1"), "s")
         yield* db.insertSession(sessionRow("b1"), "s")
         assert.isTrue(yield* db.beginUserTurn("a1", "hello", {}))
@@ -160,7 +160,7 @@ export const storeContract = (name: string, layer: Layer.Layer<Db, unknown>) =>
     test(
       "inbox: a claim is exclusive, even when many race for the same rows; a guarded move needs the status it names",
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         yield* db.insertSession(sessionRow("a1"), "s")
         const rows = yield* Effect.forEach(["one", "two", "three"], (m) => db.insertSend("a1", m))
         const ids = rows.map((r) => r!.id)
@@ -192,7 +192,7 @@ export const storeContract = (name: string, layer: Layer.Layer<Db, unknown>) =>
     test(
       "the user: a notice with no owner is the user's; userInbox reads a scope's, and marks them read",
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         yield* db.insertSession(sessionRow("a1"), "s")
         yield* db.insertSession(sessionRow("b1"), "other")
         assert.deepStrictEqual(yield* db.noticeTo("a1"), [null])
@@ -213,7 +213,7 @@ export const storeContract = (name: string, layer: Layer.Layer<Db, unknown>) =>
     test(
       "owners: a scope's owner gets its rows while it has a place, claims are guarded by that place, leases settle",
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const started = yield* db.startOwner("s", "pi", false, place("o1"), { directory: "/repo" })
         yield* db.insertSession(sessionRow("a1"), "s")
         const owner = (yield* db.ownerOf("s"))!
@@ -264,7 +264,7 @@ export const storeContract = (name: string, layer: Layer.Layer<Db, unknown>) =>
     test(
       "owners: the same harness continues its conversation; a fresh start replaces the owner, which stays readable",
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const first = yield* db.startOwner("s", "pi", false, place("o1"))
         yield* db.reportOwnerConversation(first.sessionId, "pi", "conv-1")
         yield* db.reportOwnerConversation(first.sessionId, "claude", "ignored")
@@ -290,7 +290,7 @@ export const storeContract = (name: string, layer: Layer.Layer<Db, unknown>) =>
     test(
       "after a restart: an owner's cut-off claims go back to pending when it polls, else fail; a session's stay",
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         yield* db.startOwner("s", "pi", false, place("o1"))
         yield* db.insertSession(sessionRow("a1"), "s")
         const [n] = yield* db.insertInbox({ sessionId: "a1", kind: "notice", message: "n", details: {} })
@@ -309,6 +309,26 @@ export const storeContract = (name: string, layer: Layer.Layer<Db, unknown>) =>
           [sent.id],
         )
         assert.strictEqual((yield* db.latestInbox("a1", "notice"))?.status, "failed")
+      }),
+    )
+
+    test(
+      "detached values: changing a row passed in or read back changes nothing stored",
+      Effect.gen(function* () {
+        const db = yield* Storage
+        const row = sessionRow("a1")
+        yield* db.insertSession(row, "s")
+        ;(row.address as { id: string }).id = "changed"
+        const read = (yield* db.getSession("a1"))!
+        assert.strictEqual(read.address.id, "t-a1")
+        ;(read.address as { id: string }).id = "changed"
+        assert.strictEqual((yield* db.getSession("a1"))!.address.id, "t-a1")
+        const details: Record<string, unknown> = {}
+        const [n] = yield* db.insertInbox({ sessionId: "a1", kind: "notice", message: "n", details })
+        const stored = structuredClone((yield* db.latestInbox("a1", "notice"))?.details)
+        details["note"] = "changed"
+        ;(n!.details as Record<string, unknown>)["note"] = "changed"
+        assert.deepStrictEqual((yield* db.latestInbox("a1", "notice"))?.details, stored)
       }),
     )
   })

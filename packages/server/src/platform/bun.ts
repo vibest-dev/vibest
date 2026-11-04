@@ -19,7 +19,7 @@ import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin, type ConfiguredRuntime } from "@vibest/runtime-herdr/choice"
 import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
 import type { Host } from "@vibest/server/daemon"
-import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/vibest/sqlite-store"
+import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/vibest/sqlite-storage"
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
@@ -105,10 +105,10 @@ const inspectFile = (filename: string) =>
   )
 
 /**
- * The SqlClient `Db` runs on (bun:sqlite). An existing file is judged by `inspectSchema` on a read-only connection,
+ * The SqlClient `Storage` runs on (bun:sqlite). An existing file is judged by `inspectSchema` on a read-only connection,
  * which can see committed WAL frames and does not checkpoint. A mismatch fails before any writable open, so the
  * database and WAL are not rewritten. The WAL index (-shm) may still change; that is not a byte guarantee. A missing
- * file is created mode 0600 and then opened writable. WAL mode stays off until `Db` accepts the file.
+ * file is created mode 0600 and then opened writable. WAL mode stays off until `Storage` accepts the file.
  */
 export const sqlite = (filename: string) =>
   Layer.unwrap(

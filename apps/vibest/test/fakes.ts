@@ -1,10 +1,10 @@
 import fs from "node:fs/promises"
 
 import { readPing } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harness, Harnesses, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
 import { BUILTIN } from "@vibest/core/harnesses"
+import { Storage } from "@vibest/core/storage"
 
 const HARNESS_IDS = Object.keys(BUILTIN)
 import { Actions } from "@vibest/core/actions"
@@ -29,7 +29,7 @@ import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import * as ProductPlacement from "@vibest/vibest/placement"
-import * as SqliteStore from "@vibest/vibest/sqlite-store"
+import * as SqliteStorage from "@vibest/vibest/sqlite-storage"
 import * as ProductPrompt from "@vibest/vibest/system-prompt"
 import * as GitWorkspace from "@vibest/vibest/workspace"
 import { git } from "@vibest/vibest/worktree"
@@ -184,7 +184,7 @@ export const runHookOutput = (
 /** The harness conversation saved on coordinator session `sessionId`. */
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Storage
     const scope = yield* db.scopeOf(sessionId)
     if (scope === undefined) return null
     const main = yield* db.ownerOf(scope)
@@ -192,12 +192,12 @@ export const savedSession = (sessionId: string) =>
   })
 
 /** vibest's project id for scope `key` (what VIBEST_PROJECT_ID names). */
-export const projectNumber = (key: string) => Effect.flatMap(SqliteStore.Projects, (p) => p.projectId(key))
+export const projectNumber = (key: string) => Effect.flatMap(SqliteStorage.ProjectStore, (p) => p.projectId(key))
 
-/** `Db.startOwner` as vibest's main agent start: with its scope and project id. */
-export const launchMain = (key: string, ...rest: Tail<Parameters<Db["Service"]["startOwner"]>>) =>
+/** `Storage.startOwner` as vibest's main agent start: with its scope and project id. */
+export const launchMain = (key: string, ...rest: Tail<Parameters<Storage["Service"]["startOwner"]>>) =>
   Effect.gen(function* () {
-    const saved = yield* (yield* Db).startOwner(key, ...rest)
+    const saved = yield* (yield* Storage).startOwner(key, ...rest)
     return { ...saved, scope: key, projectId: yield* projectNumber(key) }
   })
 type Tail<T extends ReadonlyArray<unknown>> = T extends readonly [unknown, ...infer R] ? R : never
@@ -437,8 +437,8 @@ export interface TestOptions extends FakeRuntimeOptions {
     | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
   >
   readonly pluginTimeout?: Duration.Input
-  /** Wraps the Db that Sessions, Inbox and the test all see, to stop a call at a chosen point. */
-  readonly db?: (db: Db["Service"]) => Db["Service"]
+  /** Wraps the Storage that Sessions, Inbox and the test all see, to stop a call at a chosen point. */
+  readonly db?: (db: Storage["Service"]) => Storage["Service"]
   /** false: a polling harness's integration never asks for its rows (they stay pending, or their lease runs out). */
   readonly integrationPolls?: boolean
 }
@@ -513,7 +513,7 @@ const over = (options: TestOptions) => {
   const integration = Layer.effectDiscard(
     Effect.gen(function* () {
       const fake = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       let pid = 50_000
       yield* Ref.set(fake.onStarted, (session) =>
         Clock.currentTimeMillis.pipe(Effect.flatMap((at) => db.patchLive(session, { ready: at, pid: ++pid }))),
@@ -541,7 +541,7 @@ const over = (options: TestOptions) => {
       // agent_settled), received just after.
       const turnEnds = yield* TurnEnds
       const harnessesOf = yield* Harnesses
-      const rows = yield* Db
+      const rows = yield* Storage
       yield* Ref.set(fake.onStopped, (session) =>
         Effect.gen(function* () {
           const row = yield* rows.getSession(session)
@@ -557,7 +557,7 @@ const over = (options: TestOptions) => {
       // goes into its terminal (recorded as a `send`, as the fake shows a prompt) and is reported taken. Off with
       // `integrationPolls: false` (an integration that never asks).
       if (options.integrationPolls === false) return
-      const db = yield* Db
+      const db = yield* Storage
       const harnesses = yield* Harnesses
       yield* Effect.gen(function* () {
         for (const row of yield* db.listSessions()) {
@@ -592,13 +592,13 @@ const over = (options: TestOptions) => {
         Layer.provideMerge(
           (options.db
             ? Layer.merge(
-                Layer.effect(Db, Effect.map(Db, options.db)),
+                Layer.effect(Storage, Effect.map(Storage, options.db)),
                 Layer.effect(
-                  SqliteStore.Projects,
-                  Effect.map(SqliteStore.Projects, (p) => p),
+                  SqliteStorage.ProjectStore,
+                  Effect.map(SqliteStorage.ProjectStore, (p) => p),
                 ),
-              ).pipe(Layer.provide(SqliteStore.layer))
-            : SqliteStore.layer
+              ).pipe(Layer.provide(SqliteStorage.layer))
+            : SqliteStorage.layer
           ).pipe(Layer.provideMerge(Platform.sqlite(":memory:"))),
         ),
         Layer.provideMerge(runtime),

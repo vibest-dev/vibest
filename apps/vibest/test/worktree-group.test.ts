@@ -1,10 +1,10 @@
 // New worktrees are worktrees/<repository name>/<4 hex>, recorded as the session's directory. The name is reserved by
 // creating its directory, so whatever already sits at a path (a directory, a file, a dangling link) takes that name.
 import { assert, describe, it } from "@effect/vitest"
-import { Db, type SessionRow } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage, type SessionRow } from "@vibest/core/storage"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { allocationNameSource } from "@vibest/vibest/workspace"
 import { repositoryDirectoryName, repositoryKey } from "@vibest/vibest/worktree"
@@ -54,7 +54,8 @@ const marker = (dir: string) =>
     yield* fs.writeFileString(path.join(dir, "keep"), "keep\n")
   })
 
-const directoryOf = (id: string) => Effect.flatMap(Db, (db) => db.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
+const directoryOf = (id: string) =>
+  Effect.flatMap(Storage, (db) => db.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
 
 describe("repository-grouped worktrees", () => {
   test(
@@ -64,7 +65,7 @@ describe("repository-grouped worktrees", () => {
       const path = yield* Path.Path
       const layout = yield* Layout
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
       yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
@@ -90,7 +91,7 @@ describe("repository-grouped worktrees", () => {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const layout = yield* Layout
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       allocationNameSource.leaves = ["ab01", "ab02"]
@@ -133,7 +134,7 @@ describe("repository-grouped worktrees", () => {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const layout = yield* Layout
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       allocationNameSource.leaves = ["ab01", "ab02"]
@@ -158,7 +159,7 @@ describe("repository-grouped worktrees", () => {
       const path = yield* Path.Path
       const herdr = yield* FakeRuntime
       const layout = yield* Layout
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       // Both leaves scripted: the live session takes the first, a plain file sits at the second, so the draw
@@ -189,7 +190,7 @@ describe("repository-grouped worktrees", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const db = yield* Db
+      const db = yield* Storage
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const held = yield* herdr.hold("open")
@@ -210,7 +211,7 @@ describe("repository-grouped worktrees", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const layout = yield* Layout
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       const id = "d4e5f6a7"
@@ -233,7 +234,7 @@ describe("repository-grouped worktrees", () => {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const layout = yield* Layout
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       const key = yield* repositoryKey(repo)
@@ -259,7 +260,7 @@ describe("repository-grouped worktrees", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const sessions = yield* Sessions
-      const db = yield* Db
+      const db = yield* Storage
       const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
@@ -292,7 +293,7 @@ describe("repository-grouped worktrees", () => {
   test(
     "exhausting the bounded name list inserts no row",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const layout = yield* Layout
       const repo = yield* makeRepository

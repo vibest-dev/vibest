@@ -9,7 +9,7 @@ import {
 } from "@vibest/schema/session"
 // The engine's storage port: the operations on sessions, inbox rows and events the engine needs, each with its
 // contract (docs/architecture.md, Storage). The engine holds no SQL and no schema; a product implements the port (vibest:
-// @vibest/vibest/sqlite-store, its SQLite file) and passes the shared contract suite.
+// @vibest/vibest/sqlite-storage, its SQLite file) and passes the shared contract suite.
 //
 // The session row callers read (`SessionRow`) is a read model: its process, turn and live fields come from the
 // append-only events, and every change to them appends an event.
@@ -154,8 +154,14 @@ export type Place = { readonly runtime: string; readonly address: RuntimeAddress
  * interleave their changes. Events are append-only and ordered by id; every session read is derived from them, so a
  * write is an event append plus the few session columns (name, directory, ended). Unknown ids read as absent and
  * write nothing. Times are milliseconds from the engine's Clock.
+ *
+ * A backend enforces atomicity, the exclusive claim, one `process.end` per process and one `turn.end` per turn, and
+ * returns values detached from what it keeps (changing a returned row changes nothing stored). It trusts the engine for
+ * what the values mean: ids, harnesses, places and texts arrive already checked. Schema, versions and the file format
+ * are the backend's own and never cross the port. A failure of the backend is a defect: it retries its own transient
+ * failures, and an operation's error channel carries only the outcomes its type names.
  */
-export interface DbShape {
+export interface StorageShape {
   // Sessions.
 
   /**
@@ -370,4 +376,4 @@ export interface DbShape {
   readonly latestInbox: (sessionId: string, kind: InboxKind) => Effect.Effect<InboxRow | undefined>
 }
 
-export class Db extends Context.Service<Db, DbShape>()("vibest/Db") {}
+export class Storage extends Context.Service<Storage, StorageShape>()("vibest/Storage") {}

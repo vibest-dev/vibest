@@ -3,7 +3,6 @@ import url from "node:url"
 
 // Pure pieces (SPEC §15 Unit tests): sqlite, HarnessAdapter argv, result files and reports, git state.
 import { assert, describe, it, layer } from "@effect/vitest"
-import { Db, encodeAddress, type SessionRow } from "@vibest/core/db"
 import {
   type CoordinatorInput,
   Harness,
@@ -20,14 +19,15 @@ import { piModels } from "@vibest/core/harnesses/pi"
 import { listAllModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
 import { envelope, isUsageLimitError, outcome, parseReport } from "@vibest/core/results"
+import { Storage, encodeAddress, type SessionRow } from "@vibest/core/storage"
 import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { turnEndFrom, turnEndOf } from "@vibest/core/turn-ends"
 import { COORDINATOR } from "@vibest/plugin-coordinator"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Launch from "@vibest/vibest/launch"
-import * as SqliteStore from "@vibest/vibest/sqlite-store"
-import { APPLICATION_ID, SCHEMA_VERSION } from "@vibest/vibest/sqlite-store"
+import * as SqliteStorage from "@vibest/vibest/sqlite-storage"
+import { APPLICATION_ID, SCHEMA_VERSION } from "@vibest/vibest/sqlite-storage"
 import { entrySystemPrompt } from "@vibest/vibest/system-prompt"
 import {
   copyIncluded,
@@ -46,7 +46,7 @@ import * as Platform from "#platform"
 
 import { makeRepository, sh, tempDirectory, TURNS } from "./fakes.ts"
 
-const database = (filename: string) => SqliteStore.layer.pipe(Layer.provide(Platform.sqlite(filename)))
+const database = (filename: string) => SqliteStorage.layer.pipe(Layer.provide(Platform.sqlite(filename)))
 
 const session = (id: string, patch: Partial<Omit<SessionRow, "scope">> = {}): Omit<SessionRow, "scope"> => ({
   id,
@@ -177,18 +177,18 @@ describe("envelope", () => {
   })
 })
 
-describe("Db", () => {
+describe("Storage", () => {
   /** Each test gets its own in-memory database. */
-  const fresh = <A, E>(program: Effect.Effect<A, E, Db>) => program.pipe(Effect.provide(database(":memory:")))
+  const fresh = <A, E>(program: Effect.Effect<A, E, Storage>) => program.pipe(Effect.provide(database(":memory:")))
 
   it.effect("an empty file gets the schema; a foreign file is refused", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path
       const file = path.join(yield* tempDirectory("vibest-db-"), "vibest.db")
-      const withDb = <A, E>(e: Effect.Effect<A, E, Db>) => e.pipe(Effect.provide(database(file)))
+      const withDb = <A, E>(e: Effect.Effect<A, E, Storage>) => e.pipe(Effect.provide(database(file)))
       yield* withDb(
         Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Storage
           yield* db.insertSession(session("aaaaaaaa"), "r")
           const coord = yield* db.startOwner("r", "pi", false, place)
           yield* db.insertInbox({ sessionId: "aaaaaaaa", kind: "notice", message: "m", details: {} })
@@ -199,7 +199,7 @@ describe("Db", () => {
       assert.lengthOf(
         yield* withDb(
           Effect.gen(function* () {
-            return yield* (yield* Db).ownerPending("r")
+            return yield* (yield* Storage).ownerPending("r")
           }),
         ),
         1,
@@ -220,7 +220,7 @@ describe("Db", () => {
     "one coordinator row per project; a harness switch clears the conversation; reports match id and harness",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const first = yield* db.startOwner("r", "pi", false, place)
         assert.isNull(first.harnessSessionId)
         yield* db.reportOwnerConversation(first.sessionId, "pi", "s1")
@@ -256,18 +256,18 @@ describe("Db", () => {
         assert.deepStrictEqual(yield* db.listSessions(), [])
         const deleted = yield* Effect.exit(sql`DELETE FROM project WHERE key = 'r'`)
         assert.isTrue(Exit.isFailure(deleted))
-      }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+      }).pipe(Effect.provide(SqliteStorage.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
 
-  const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
-    program.pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))))
+  const memory = <A, E>(program: Effect.Effect<A, E, Storage | SqlClient.SqlClient>) =>
+    program.pipe(Effect.provide(SqliteStorage.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))))
 
   it.effect(
     "rescheduleSource: the open round's input, the trailing delivered user or parent run, and the parent id",
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Storage
           const sql = yield* SqlClient.SqlClient
           const parent = yield* db.startOwner("r", "pi", false, place)
           yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it", parent.sessionId)
@@ -305,7 +305,7 @@ describe("Db", () => {
   it.effect("rescheduleSource: an empty open round resends the trailing same-sender batch, not an earlier turn", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const sql = yield* SqlClient.SqlClient
         const parent = yield* db.startOwner("r", "pi", false, place)
         yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it", parent.sessionId)
@@ -339,7 +339,7 @@ describe("Db", () => {
   it.effect("coordinatorLaunch fresh starts a new main session and ends the old one; without fresh the id stays", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const sql = yield* SqlClient.SqlClient
         const first = yield* db.startOwner("r", "pi", false, place)
         assert.strictEqual((yield* db.startOwner("r", "claude", false, place)).sessionId, first.sessionId)
@@ -374,7 +374,7 @@ describe("Db", () => {
   it.effect("insertSession stores parent_session_id", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const sql = yield* SqlClient.SqlClient
         const parent = yield* db.startOwner("r", "pi", false, place)
         assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", undefined, parent.sessionId))
@@ -391,7 +391,7 @@ describe("Db", () => {
     () =>
       memory(
         Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Storage
           const sql = yield* SqlClient.SqlClient
           const round = (id: string) =>
             sql<{
@@ -441,7 +441,7 @@ describe("Db", () => {
   it.effect("beginUserTurn is false when a round is already working and leaves that input", () =>
     memory(
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const sql = yield* SqlClient.SqlClient
         yield* db.insertSession(session("aaaaaaaa"), "r")
         assert.isTrue(yield* db.beginUserTurn("aaaaaaaa", "kept", { turnPromptedAt: 1 }))
@@ -457,7 +457,7 @@ describe("Db", () => {
   it.effect("the limit counts non-stopped rows", () =>
     fresh(
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), "r", 1))
         assert.isFalse(yield* db.insertSession(session("bbbbbbbb"), "r", 1))
         yield* db.updateSession("aaaaaaaa", { status: "unknown", startedAt: 1, exitedAt: 1 })
@@ -474,7 +474,7 @@ describe("Db", () => {
     "the task is the first inbox row; the open turn is the message row with no ended_at; status is memory only",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const sql = yield* SqlClient.SqlClient
         yield* db.insertSession(session("aaaaaaaa"), "r", undefined, "/w", "do it")
         assert.deepStrictEqual(
@@ -523,12 +523,12 @@ describe("Db", () => {
         yield* db.closeTurn("aaaaaaaa", "interrupted", {})
         assert.strictEqual((yield* db.getSession("aaaaaaaa"))!.turnState, "completed")
         assert.notProperty((yield* sql`SELECT * FROM session WHERE id = 'aaaaaaaa'`)[0], "status")
-      }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+      }).pipe(Effect.provide(SqliteStorage.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
 
   it.effect("a result goes to the parent while it has not ended, then to the project's current main session", () =>
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const sql = yield* SqlClient.SqlClient
       yield* db.insertSession(session("bbbbbbbb"), "r")
       yield* db.insertSession(session("cccccccc"), "r")
@@ -557,12 +557,12 @@ describe("Db", () => {
       yield* sql`UPDATE session SET ended_at = 1 WHERE id = 'bbbbbbbb'`
       yield* round("two")
       assert.strictEqual(yield* recipient, "cccccccc")
-    }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+    }).pipe(Effect.provide(SqliteStorage.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
 
   it.effect("sessionBriefs: the task is the session's task row; latest is its newest turn", () =>
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const sql = yield* SqlClient.SqlClient
       /** A turn of `id` from `at`; with `end`, its `turn.end` and the result row that reports it. */
       const turn = (id: string, at: number, end?: { at: number; status: string; output?: string; result?: string }) =>
@@ -614,12 +614,12 @@ describe("Db", () => {
       })
       assert.isUndefined(briefs.get("00000000"))
       assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
-    }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+    }).pipe(Effect.provide(SqliteStorage.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
   )
   it.effect("a result with no coordinator is dropped; a claim takes a pending row once", () =>
     fresh(
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         yield* db.insertSession(session("aaaaaaaa", { turnState: "open" }), "r")
         const [dropped] = yield* db.finishTurn(
           "aaaaaaaa",
@@ -678,9 +678,9 @@ describe("Db", () => {
       return Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
     })
 
-  /** Real `Db` init, but the last schema statement never runs. */
+  /** Real `Storage` init, but the last schema statement never runs. */
   const brokenInstall = (file: string, how: "fail" | "interrupt") =>
-    SqliteStore.layer.pipe(
+    SqliteStorage.layer.pipe(
       Layer.provide(
         Layer.effect(
           SqlClient.SqlClient,
@@ -706,7 +706,7 @@ describe("Db", () => {
     Effect.gen(function* () {
       const file = yield* fileAt(yield* tempDirectory("vibest-schema-"), "vibest.db")
       const opened = yield* Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const sql = yield* SqlClient.SqlClient
         assert.strictEqual((yield* sql<{ journalMode: string }>`PRAGMA journal_mode`)[0]?.journalMode, "wal")
         assert.strictEqual(
@@ -717,10 +717,10 @@ describe("Db", () => {
         const first = yield* db.startOwner("r", "pi", false, place)
         assert.strictEqual((yield* db.startOwner("r", "pi", false, place)).sessionId, first.sessionId)
         return first.sessionId
-      }).pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provideMerge(Platform.sqlite(file)))))
+      }).pipe(Effect.provide(SqliteStorage.layer.pipe(Layer.provideMerge(Platform.sqlite(file)))))
       assert.strictEqual(
         yield* Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Storage
           assert.strictEqual((yield* db.getSession("aaaaaaaa"))?.id, "aaaaaaaa")
           return (yield* db.ownerOf("r"))?.id
         }).pipe(Effect.provide(database(file))),
@@ -740,7 +740,7 @@ describe("Db", () => {
         )
         assert.deepStrictEqual(yield* header(file), { applicationId: 0, userVersion: 0, objects: 0 })
         yield* Effect.gen(function* () {
-          const db = yield* Db
+          const db = yield* Storage
           assert.isTrue(yield* db.insertSession(session("aaaaaaaa"), "r"))
           assert.strictEqual((yield* db.startOwner("r", "pi", false, place)).sessionId.length, 8)
         }).pipe(Effect.provide(database(file)))
@@ -894,15 +894,15 @@ describe("Db", () => {
       const dir = yield* tempDirectory("vibest-schema-race-")
       const file = yield* fileAt(dir, "vibest.db")
       const script = yield* fileAt(dir, "open.ts")
-      const storeModule = url.fileURLToPath(new URL("../../../packages/vibest/src/sqlite-store.ts", import.meta.url))
+      const storeModule = url.fileURLToPath(new URL("../../../packages/vibest/src/sqlite-storage.ts", import.meta.url))
       const platformModule = url.fileURLToPath(new URL("../../../packages/server/src/platform/bun.ts", import.meta.url))
       yield* fs.writeFileString(
         script,
         [
           'import { Effect, Layer } from "effect"',
-          `import * as SqliteStore from ${JSON.stringify(storeModule)}`,
+          `import * as SqliteStorage from ${JSON.stringify(storeModule)}`,
           `import * as Platform from ${JSON.stringify(platformModule)}`,
-          "await Effect.runPromise(Effect.void.pipe(Effect.provide(SqliteStore.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!))))))",
+          "await Effect.runPromise(Effect.void.pipe(Effect.provide(SqliteStorage.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!))))))",
           "",
         ].join("\n"),
       )

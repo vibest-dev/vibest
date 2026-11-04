@@ -1,10 +1,10 @@
 // vibestd's HTTP API (packages/server/src/http.ts) and the poll / ack delivery under it (core/inbox.ts), over the fake
 // runtime. The handler is called directly; one test serves it on a real unix socket.
 import { assert, describe, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
 import { AWAY, Inbox, LEASE, line, LINE_MAX } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { MISMATCH_ACTION, PROTOCOL, sessionHeaders, type SessionIdentity } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -80,7 +80,7 @@ describe("the line a delivery shows", () => {
 
 /** A Claude main agent idle at test/coord, and a worker of its project. */
 const project = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Storage
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const key = yield* repositoryKey(repo)
@@ -112,7 +112,7 @@ const project = Effect.gen(function* () {
   return { db, herdr, main: main.sessionId, worker, projectId, scope, call, inbox: yield* Inbox }
 })
 
-const statusOf = (db: Db["Service"], worker: string) =>
+const statusOf = (db: Storage["Service"], worker: string) =>
   db.latestInbox(worker, "report").pipe(Effect.map((r) => r?.status))
 
 describe("vibestd's HTTP API", () => {
@@ -385,7 +385,7 @@ describe("vibestd's HTTP API", () => {
   test(
     "a shell-hook CLI's raw hook is decoded by its adapter: Cursor's turn end is a result, its pre-tool hook a guard answer",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const layout = yield* Layout
       const repo = yield* makeRepository

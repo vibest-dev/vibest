@@ -18,9 +18,9 @@ import {
   projectNumber,
 } from "@vibest/cli/test/fakes"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
+import { Storage } from "@vibest/core/storage"
 import { TurnEnds } from "@vibest/core/turn-ends"
 import * as Http from "@vibest/server/http"
 import * as Platform from "@vibest/server/platform/bun"
@@ -134,7 +134,7 @@ describe("pi-vibest", () => {
     "Coordinator: while no vibestd answers it waits without starting one, then polls the next vibestd",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const layout = yield* Layout
         const fs = yield* FileSystem.FileSystem
         const runtime = yield* FakeRuntime
@@ -204,7 +204,7 @@ describe("pi-vibest", () => {
     "Coordinator: a vibestd that stops answers no poll; the next vibestd's rows still arrive, until the session shuts down",
     () =>
       Effect.gen(function* () {
-        const db = yield* Db
+        const db = yield* Storage
         const inbox = yield* Inbox
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
@@ -359,7 +359,7 @@ describe("pi-vibest", () => {
     Effect.gen(function* () {
       const runtime = yield* FakeRuntime
       const inbox = yield* Inbox
-      const db = yield* Db
+      const db = yield* Storage
       yield* runtime.addPane("w1:p7", "ws", "/")
       const row = {
         agent: "general",
@@ -462,7 +462,7 @@ describe("pi-vibest", () => {
     "Session: guard on tool calls (its scratchpad is the one project directory it may use); vibestd writes the settled turn's reply to the result file",
     Effect.gen(function* () {
       const layout = yield* Layout
-      yield* (yield* Db).insertSession(
+      yield* (yield* Storage).insertSession(
         {
           id: "abcd1234",
           agent: "general",
@@ -530,7 +530,7 @@ describe("pi-vibest", () => {
   test(
     "a subagent input event records what the user typed; an extension delivery and the coordinator do not",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const sql = yield* SqlClient.SqlClient
       const row = {
         agent: "general",
@@ -601,7 +601,7 @@ describe("pi-vibest", () => {
   test(
     "Coordinator: a TUI startup turn reports its session id once; /new, /resume and /fork report before the next turn",
     Effect.gen(function* () {
-      const db = yield* Db
+      const db = yield* Storage
       const c = yield* cli
       // Over the wire: no session to reopen yet (null), and this launch's id for VIBEST_SESSION_ID.
       const launched = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })

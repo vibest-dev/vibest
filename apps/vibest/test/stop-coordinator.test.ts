@@ -4,11 +4,11 @@
 // termination signal or a non-positive pid throws.
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db, encodeAddress } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Processes } from "@vibest/core/processes"
 import { Restarting } from "@vibest/core/restarting"
+import { Storage, encodeAddress } from "@vibest/core/storage"
 import * as Server from "@vibest/server/server"
 import { Project } from "@vibest/vibest/project"
 import { repositoryKey } from "@vibest/vibest/worktree"
@@ -75,7 +75,7 @@ const HARNESS = 4242
  */
 const launched = Effect.gen(function* () {
   yield* refuseTerminationSignals
-  const db = yield* Db
+  const db = yield* Storage
   const herdr = yield* FakeRuntime
   const processes = yield* FakeProcesses
   const repo = yield* makeRepository

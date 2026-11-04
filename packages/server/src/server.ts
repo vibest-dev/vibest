@@ -2,7 +2,6 @@ import { spawnDaemon } from "@vibest/client/client"
 import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
 import { mayManage } from "@vibest/core/capabilities"
-import { Db, encodeAddress, type OwnerRow, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Groups } from "@vibest/core/groups"
 import { harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
@@ -23,6 +22,7 @@ import {
   type Terminal,
 } from "@vibest/core/runtimes"
 import { NoSuchSession, runtimeEnv, type SessionView, Sessions } from "@vibest/core/sessions"
+import { Storage, encodeAddress, type OwnerRow, type RuntimeAddress, type SessionBrief } from "@vibest/core/storage"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { ActionRefused } from "@vibest/plugin"
 import {
@@ -62,7 +62,7 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 import * as Launch from "@vibest/vibest/launch"
 import { Project } from "@vibest/vibest/project"
 import { projectRoot } from "@vibest/vibest/project-create"
-import { Projects } from "@vibest/vibest/sqlite-store"
+import { ProjectStore } from "@vibest/vibest/sqlite-storage"
 import { entrySystemPrompt, projectText } from "@vibest/vibest/system-prompt"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
@@ -252,7 +252,7 @@ const header = (headers: Headers.Headers, name: string) => Headers.get(headers, 
  * The harness's conversation id from a session's request, latest wins (a /clear changes it); only from the session's own
  * harness, so an old process of another harness under this id changes nothing.
  */
-const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id: string; harness: string }) =>
+const noteConversation = (db: Storage["Service"], headers: Headers.Headers, row: { id: string; harness: string }) =>
   Effect.gen(function* () {
     const conversation = Option.getOrUndefined(header(headers, HARNESS_SESSION_HEADER))
     if (!conversation || Option.getOrUndefined(header(headers, HARNESS_HEADER)) !== row.harness) return
@@ -262,8 +262,8 @@ const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id
 
 /** Missing, mixed, or malformed caller headers. Never becomes cli. */
 const resolveCaller = (
-  db: Db["Service"],
-  projects: Projects["Service"],
+  db: Storage["Service"],
+  projects: ProjectStore["Service"],
   agents: Agents["Service"],
   headers: Headers.Headers,
   method: string,
@@ -321,7 +321,10 @@ const resolveCaller = (
  * on its row whether or not the protocol matches: `vibest update` restarts the agents whose integration is not its own.
  * Requests without a plugin version (the vibest CLI an agent runs) record nothing.
  */
-export const noteIntegration = (db: Db["Service"], read: (name: string) => string | undefined): Effect.Effect<void> =>
+export const noteIntegration = (
+  db: Storage["Service"],
+  read: (name: string) => string | undefined,
+): Effect.Effect<void> =>
   Effect.gen(function* () {
     const sessionId = read(SESSION_HEADER)
     const version = read(PLUGIN_VERSION_HEADER)
@@ -341,7 +344,7 @@ export const noteIntegration = (db: Db["Service"], read: (name: string) => strin
 export const ProtocolGateLive = Layer.effect(
   ProtocolGate,
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Storage
     return ProtocolGate.of((effect, { headers, rpc }) =>
       Effect.gen(function* () {
         yield* noteIntegration(db, (name) => Option.getOrUndefined(header(headers, name)))
@@ -368,8 +371,8 @@ export const ProtocolGateLive = Layer.effect(
 export const CallerGateLive = Layer.effect(
   CallerGate,
   Effect.gen(function* () {
-    const db = yield* Db
-    const projects = yield* Projects
+    const db = yield* Storage
+    const projects = yield* ProjectStore
     const agents = yield* Agents
     return CallerGate.of((effect, { headers, rpc }) =>
       resolveCaller(db, projects, agents, headers, rpc._tag).pipe(
@@ -383,8 +386,8 @@ export const handlers = VibestRpcs.toLayer(
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const inbox = yield* Inbox
-    const db = yield* Db
-    const projects = yield* Projects
+    const db = yield* Storage
+    const projects = yield* ProjectStore
     const groups = yield* Groups
     const restarting = yield* Restarting
     const runtimes = yield* Runtimes

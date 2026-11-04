@@ -2,11 +2,11 @@
 // vibestd's own operations block it (core/drain.ts); agents keep running and queued Messages stay for the next vibestd.
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
-import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import * as Http from "@vibest/server/http"
 import * as Server from "@vibest/server/server"
@@ -93,7 +93,7 @@ const settled = <A, E>(stopping: Fiber.Fiber<A, E>) =>
 /** A main agent of `harness` registered at terminal wC:p1 (idle), its session client, and a working worker in its project. */
 const receiver = (repo: string, harness: "pi" | "claude") =>
   Effect.gen(function* () {
-    const db = yield* Db
+    const db = yield* Storage
     const herdr = yield* FakeRuntime
     yield* herdr.seedAgent("wC:p1")
     const raw = yield* client
@@ -169,7 +169,7 @@ describe("Daemon.Stop", () => {
     "a spawn still opening its terminal blocks until the drain times out; reopening does not cancel it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const repo = yield* makeRepository
       const user = yield* cli(repo)
       const held = yield* herdr.hold("open")
@@ -205,7 +205,7 @@ describe("Daemon.Stop", () => {
       yield* draining
       // A typed harness's turn start and end, as its integration sends them to /events.
       const handle = yield* Http.make
-      const projectId = String(yield* projectNumber((yield* (yield* Db).sessionIdentity(id))!.scope))
+      const projectId = String(yield* projectNumber((yield* (yield* Storage).sessionIdentity(id))!.scope))
       const hook = (event: object) =>
         Effect.forkScoped(
           handle({
@@ -295,7 +295,7 @@ describe("Daemon.Stop", () => {
     "an archive running inside vibestd is counted past its terminal's close; a refusal leaves it running",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const db = yield* Db
+      const db = yield* Storage
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       const { id } = yield* (yield* cli(repo)).Spawn({ harness: "pi", prompt: "work" })

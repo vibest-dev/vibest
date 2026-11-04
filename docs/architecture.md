@@ -11,11 +11,11 @@ vibest is an agent engine with a product on it, hosted by one daemon (vibestd) a
 - **Contracts.** `@vibest/schema` (shared types and the on-disk layout), `@vibest/plugin` (the plugin API: agent
   definitions, hooks, session actions, the harness adapter and runtime contracts), `@vibest/protocol` (the RPC
   between clients and vibestd).
-- **Engine.** `@vibest/core`: sessions, inbox, reply routing, delivery, turn tracking, the storage port with its read
-  model, an in-memory store and the contract suite every store passes, the guard, capabilities of agent definitions,
+- **Engine.** `@vibest/core`: sessions, inbox, reply routing, delivery, turn tracking, the `Storage` port with its read
+  model, an in-memory backend and the conformance suite every backend passes, the guard, capabilities of agent definitions,
   the harness adapters claude, pi and cursor, and the plugin host. Core holds no SQL and no database schema.
-- **Product.** `@vibest/vibest`: the SQLite store (`sqlite-store.ts`: the schema, its checks, the SQL, and the
-  project rows a scope maps to), the workspace (git checkouts and the detached worktrees sessions work in), terminal
+- **Product.** `@vibest/vibest`: the SQLite backend of `Storage` (`sqlite-storage.ts`: the schema, its checks, the SQL, and the
+  project rows a scope maps to, read through its `ProjectStore` service), the workspace (git checkouts and the detached worktrees sessions work in), terminal
   placement policy, the system prompt text and the project files it reads, project lookup, and the main agent's
   start (`launch.ts`).
 - **Default plugins.** `@vibest/plugin-coordinator` (the coordinator and worker definitions, archive on completion),
@@ -43,9 +43,9 @@ Who imports whom (package.json dependencies, `@vibest/` packages only):
 `apps/vibest/test/layering.test.ts` enforces: the command line's sources import only the client, the contracts,
 effect, the server entry and `#platform`; core runs no git, imports no worktree or project code and nothing of
 `@vibest/vibest`, and does not list it as a dependency; core imports nothing whose name contains `sql`, uses no
-`SqlClient`, and its package.json names no SQL package, while the schema lives in vibest's store; core's sources
+`SqlClient`, and its package.json names no SQL package, while the schema lives in vibest's backend; core's sources
 contain none of the product notions moved out (the worktrees root and leaf names, `instructions.md`, the session
-system prompt text, VIBEST_SCRATCH and the projects directory); its storage port, store, read model and inbox name
+system prompt text, VIBEST_SCRATCH and the projects directory); its storage port, memory backend, read model and inbox name
 no project id or coordinator operation; its placement, removal, system prompt and workspace modules name no entry
 agent; and the engine-only product test imports nothing but core, the contracts and effect. `apps/vibest/test/boundaries.test.ts` keeps herdr out of every
 runtime-neutral package but the host.
@@ -55,9 +55,9 @@ runtime-neutral package but the host.
 Core defines these services; `@vibest/vibest` provides the vibest implementations, and
 `apps/vibest/test/engine-only.test.ts` provides a second, minimal set.
 
-- **Db, the storage port** (`core/db.ts` `DbShape`; see "Storage model" for its contracts). Operations on sessions,
-  owners, processes, turns and inbox rows, never table access. vibest's implementation is its SQLite store; core's
-  own is `core/memory-store.ts`.
+- **Storage** (`core/storage.ts` `StorageShape`; see "Storage model" for its contracts). Operations on sessions,
+  owners, processes, turns and inbox rows, never table access. vibest's backend is SQLite; core's own is
+  `core/memory-storage.ts`.
 
 - **Workspace** (`core/workspace.ts`). Where a session works. `project(directory)` gives the grouping root and key;
   `repositories`, `mainCheckout`, `state`, `repositoryStates` read it; `reserve(root)` names and makes a new
@@ -120,7 +120,7 @@ Hooks (`packages/plugin/src/index.ts` `Hooks`), run one after another in plugin 
 ## Session, inbox and turn lifecycle
 
 A session is created by `Sessions.spawn` in a scope (the grouping the product gives it; vibest: the project's key):
-plugins choose harness and runtime, the workspace reserves its directory, and the store inserts it with its first
+plugins choose harness and runtime, the workspace reserves its directory, and `Storage` inserts it with its first
 prompt (`insertSession`). `placement.ts` prepares the workspace, writes
 the system prompt, and opens the session's terminal running the adapter's argv. A session's process starts and ends
 as `process.start` / `process.end` events; archiving closes its terminal and releases its workspace
@@ -141,7 +141,7 @@ events.
 
 ## Reply routing
 
-The store's `replyTo` (contract in `core/db.ts`, the same in both stores) decides where a finished turn's result goes,
+`Storage.replyTo` (contract in `core/storage.ts`, the same in both backends) decides where a finished turn's result goes,
 then `agent.result` may rewrite it:
 
 1. the sessions whose `task` or `send` rows the turn consumed;
@@ -166,12 +166,12 @@ integration (`/inbox/poll`), which acks what it took (`/inbox/ack`). A poll answ
 
 ## Storage model
 
-Storage is a port. `core/db.ts` defines `Db` (`DbShape`): the operations the engine needs, grouped by an opaque
-**scope** string the engine only compares, and each scope's **owner**. What the store keeps are facts: sessions (a
+Storage is a port. `core/storage.ts` defines the `Storage` service (`StorageShape`): the operations the engine needs, grouped by an opaque
+**scope** string the engine only compares, and each scope's **owner**. What a backend keeps are facts: sessions (a
 scope, parent, report-to, role, name, machine, directory, created and ended), inbox rows, and append-only events
 (`process.start`, `process.ready`, `process.conversation`, `process.end`, `turn.start`, `turn.end`, `inbox.queued`,
 `inbox.status`). Every row the port returns is derived from them by the shared read model (`core/read-model.ts`),
-so a session's process, turn, ready and pid are what its latest events say. The contract every store keeps:
+so a session's process, turn, ready and pid are what its latest events say. The contract every backend keeps:
 
 - **Atomic operations.** Each operation sees and leaves a consistent state; two never interleave their changes
   (SQLite: one connection and transactions; memory: one lock around every operation).
@@ -187,29 +187,70 @@ so a session's process, turn, ready and pid are what its latest events say. The 
   `clearOwnerAt`, or it moves: `detachOwner`), rows to it are dropped, except a moving owner's, which wait.
 - **Reads.** Unknown ids read as absent and write nothing; an owner whose process lives is not listed among its scope's sessions;
   `listSessions` lists live processes unless `stopped`.
+- **Detached values.** Changing a row passed in or read back changes nothing stored.
+- **What a backend trusts.** The engine checks what values mean (ids, harnesses, places, texts) before it calls; a
+  backend checks only the rules above.
+- **Failures.** A backend failure is a defect (SQLite: `orDie`); a backend retries its own transient failures, and an
+  operation's error channel carries only the outcomes its type names.
 - **Memory only.** The runtime status, the integration a session's requests carry until its next ready report, the
-  hand-over time of an open turn and a moving owner are kept in the store's memory; leases, restarting marks and
+  hand-over time of an open turn and a moving owner are kept in the backend's memory; leases, restarting marks and
   groups in vibestd's. `--env` values are never stored.
 
-`core/store-contract.ts` is the shared suite; the in-memory store (`core/memory-store.test.ts`) and vibest's SQLite
-store (`apps/vibest/test/store-contract.test.ts`) both pass it.
+`core/storage-conformance.ts` is the shared conformance suite, `storageConformance(name, layer)`, which gives every
+case a fresh, empty backend; the in-memory backend (`core/memory-storage.test.ts`) and vibest's SQLite backend
+(`apps/vibest/test/storage-conformance.test.ts`) both register it. What only one backend has (the SQLite file's
+schema check, two processes opening one empty file) is tested beside that backend.
 
-vibest's store (`packages/vibest/src/sqlite-store.ts`) is one SQLite file (`~/.vibest/vibest.db`, schema version 2,
+vibest's backend (`packages/vibest/src/sqlite-storage.ts`) is one SQLite file (`~/.vibest/vibest.db`, schema version 2,
 application id `vibe`): tables `project`, `session`, `inbox`, `event`, with a trigger refusing event updates. A scope
-is a project's key: the store maps it to `session.project_id`, and the owner to `project.entry_session_id`; vibest's
+is a project's key: the backend maps it to `session.project_id`, and the owner to `project.entry_session_id`; vibest's
 own reads of its project rows (the numeric project id the command line and VIBEST_PROJECT_ID show) are its
-`Projects` service. The file is accepted only when its version pragmas and objects match; vibest never migrates it by
+`ProjectStore` service. The file is accepted only when its version pragmas and objects match; vibest never migrates it by
 itself. JSON on a row is written once; state that changes has its own column.
+
+### What the port took from pi-durable
+
+pi-durable (`packages/durable` of earendil-works/pi, with the third-party backend j-koester/pi-durable-postgres and
+the Durable Object example earendil-works/pi-durable-cloudflare) has the same split: one `Storage` interface in the
+kernel, backends outside it, one conformance suite. Taken:
+
+- the name: a `Storage` service in core, and backends (memory in core, SQLite in the product);
+- one statement at the top of the interface of what a backend enforces (atomicity, exclusive claims, one end per
+  process and turn, detached values) and what it trusts the engine for (what the values mean);
+- the failure rule: a backend error is final for the caller and the backend retries its own transient failures;
+  unknown ids read as absent with no effect;
+- the conformance suite as a function every backend registers with a fresh backend per case
+  (`registerStorageConformance` there, `storageConformance` here), with backend-only behaviour tested beside the
+  backend;
+- the memory backend as the reference semantics, copying what it keeps and what it returns;
+- schema, versions and file checks inside the backend: pi's SQLite and Postgres backends keep their migrations and
+  version table to themselves and refuse a newer schema, as vibest's backend keeps `application_id`, `user_version`
+  and its object check;
+- no lease or lock in the port: pi serializes commits in its Session and the Postgres backend holds one advisory lock
+  per schema; vibest serializes inside each backend (vibestd and the command line both open the file) and keeps
+  inbox leases in vibestd's memory.
+
+Not taken:
+
+- **A thin port.** pi's `Storage` is one `commit(batches of typed record writes)` plus keyed lookups and cursor scans,
+  and every rule lives once in the kernel. vibest's port is about fifty engine operations (`claim`, `replyTo`,
+  `startOwner`, …) whose rules each backend implements, held equal by the conformance suite. Moving to a thin port
+  needs no schema change, but moves the routing, claim and owner rules into core and rewrites both backends: a
+  separate step.
+- **Automatic migrations.** pi applies pending migrations at open; vibest refuses a file whose schema differs and
+  never migrates it by itself, because the owner approves every database shape change.
+- Cursor paging, commit sequence numbers and receipts, group commit, document bases and deltas, and a JSONL backend:
+  vibest's data is small, one vibestd writes it, and nothing reads history by commit.
 
 ## Engine mechanism and product policy
 
 Mechanism in core: the delivery state machine, reply routing, turn tracking and reconciliation, the guard's checks,
 the capability model of agent definitions, the settled-archive check, the system prompt file, the plugin host, the
-storage port's contract and its in-memory store. Policy outside core: which harness and runtime a start gets (plugin-harness-choice, the runtime plugin),
+storage port's contract and its in-memory backend. Policy outside core: which harness and runtime a start gets (plugin-harness-choice, the runtime plugin),
 the coordinator and worker definitions and archive on completion (plugin-coordinator), where a session works and
 when its directory may go (vibest's workspace), where its terminal opens and what its project shows (vibest's
 placement policy), its system prompt text (vibest's SessionPrompt), and how sessions are kept on disk and what a
-scope is (vibest's SQLite store: a project).
+scope is (vibest's SQLite backend: a project).
 
 ## Known limits
 

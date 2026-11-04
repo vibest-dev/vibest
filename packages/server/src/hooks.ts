@@ -1,9 +1,9 @@
+import type { Inbox } from "@vibest/core/inbox"
+import type { Sessions } from "@vibest/core/sessions"
 // A harness integration's neutral events (HTTP `/events`, or a shell-hook CLI's raw hook decoded by its adapter at
 // `/hook`): vibestd keeps turn starts and ends in memory (TurnEnds, through Sessions), which writes them as events. No
 // file. One code path for every harness, built-in or a plugin's.
-import type { Db } from "@vibest/core/db"
-import type { Inbox } from "@vibest/core/inbox"
-import type { Sessions } from "@vibest/core/sessions"
+import type { Storage } from "@vibest/core/storage"
 import { turnEndOf } from "@vibest/core/turn-ends"
 import type { IntegrationEvent } from "@vibest/protocol/protocol"
 import { Clock, Effect, Schema } from "effect"
@@ -62,7 +62,7 @@ export const ToolCallSchema = Schema.Struct({
  * results); a typed turn start opens a round for any other session (the user typed into its pane).
  */
 export const apply = (
-  db: Db["Service"],
+  db: Storage["Service"],
   sessions: Sessions["Service"],
   inbox: Inbox["Service"],
   who: HookCaller,

@@ -11,13 +11,12 @@ import { assert, describe, it } from "@effect/vitest"
 import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
 import { mayManage } from "@vibest/core/capabilities"
-import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Groups } from "@vibest/core/groups"
 import { Harness, Harnesses } from "@vibest/core/harness"
 import * as BuiltinHarnesses from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
-import * as MemoryStore from "@vibest/core/memory-store"
+import * as MemoryStorage from "@vibest/core/memory-storage"
 import { Layout } from "@vibest/core/paths"
 import { PlacementPolicy } from "@vibest/core/placement"
 import { Plugins } from "@vibest/core/plugins"
@@ -25,6 +24,7 @@ import { Processes } from "@vibest/core/processes"
 import { Restarting } from "@vibest/core/restarting"
 import { Runtimes, registry } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { SessionPrompt } from "@vibest/core/system-prompt"
 import { TurnEnds } from "@vibest/core/turn-ends"
@@ -149,7 +149,7 @@ const engine = Layer.unwrap(
     const integration = Layer.effectDiscard(
       Effect.gen(function* () {
         const fake = yield* FakeRuntime
-        const db = yield* Db
+        const db = yield* Storage
         const sessions = yield* Sessions
         yield* Ref.set(fake.onStarted, (id) =>
           Clock.currentTimeMillis.pipe(Effect.flatMap((at) => db.patchLive(id, { ready: at, pid: 4242 }))),
@@ -191,7 +191,7 @@ const engine = Layer.unwrap(
       ),
       Layer.provideMerge(Inbox.layer),
       Layer.provideMerge(ports(base)),
-      Layer.provideMerge(MemoryStore.layer),
+      Layer.provideMerge(MemoryStorage.layer),
       Layer.provideMerge(runtime),
       Layer.provideMerge(
         Layer.succeed(Harness, {
@@ -226,7 +226,7 @@ const engine = Layer.unwrap(
 
 const test = <E>(
   name: string,
-  program: Effect.Effect<void, E, Sessions | Db | FakeRuntime | Harnesses | Scope.Scope>,
+  program: Effect.Effect<void, E, Sessions | Storage | FakeRuntime | Harnesses | Scope.Scope>,
 ) => it.effect(name, () => program.pipe(Effect.provide(engine)), 30_000)
 
 /** `read` until `ok` holds, a real 10 ms between tries (the engine's own clock is the test clock). */
@@ -261,7 +261,7 @@ const opened = (id: string, typedBefore = 0) =>
   Effect.gen(function* () {
     yield* until(typed(id), (texts) => texts.length > typedBefore)
     yield* (yield* Sessions).activity(id, "working")
-    yield* until((yield* Db).getSession(id), (s) => s?.turnState === "open")
+    yield* until((yield* Storage).getSession(id), (s) => s?.turnState === "open")
   })
 
 /** The fake harness answers `text`: its integration reports the turn end, the runtime shows it idle. */
@@ -277,12 +277,12 @@ const answer = (id: string, text: string) =>
     })
     yield* (yield* FakeRuntime).endTurn(id)
     yield* sessions.check(id)
-    yield* until((yield* Db).getSession(id), (s) => s?.turnState !== "open")
+    yield* until((yield* Storage).getSession(id), (s) => s?.turnState !== "open")
   })
 
 /** The results of `about` waiting for the user (the rows with no session to go to), through the storage port. */
 const toUser = (about: string) =>
-  Effect.flatMap(Db, (db) => db.userInbox(SCOPE, false)).pipe(
+  Effect.flatMap(Storage, (db) => db.userInbox(SCOPE, false)).pipe(
     Effect.map((rows) => rows.filter((r) => r.kind === "result" && r.sessionId === about).map((r) => r.message)),
   )
 
@@ -339,7 +339,7 @@ describe("an engine-only product", () => {
       yield* answer(w1, "one is done")
       yield* answer(w2, "two is done")
       // A worker's own result reaches no one: kept as its own, dropped (the gather sends the lead one message).
-      assert.strictEqual((yield* (yield* Db).latestInbox(w1, "result"))?.status, "dropped")
+      assert.strictEqual((yield* (yield* Storage).latestInbox(w1, "result"))?.status, "dropped")
       assert.deepStrictEqual(yield* toUser(w1), [])
       yield* opened(lead, before)
       const last = (yield* typed(lead)).at(-1)!

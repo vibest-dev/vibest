@@ -1,29 +1,3 @@
-// vibest's store for the engine (the storage port, @vibest/core/db): one SQLite file (docs/design/schema.md, version 2:
-// project, session, inbox, event). One schema, no migrations: an empty database gets it in one transaction; any other
-// file is accepted only when its version pragmas and required objects already match, and a version 1 file is refused,
-// naming the one-time migration script given with the release. `inspectSchema` only reads; the driver must run it on a
-// read-only connection before opening an existing file writable. One SQLite connection through effect/sql (the driver
-// comes from #platform); rows are decoded with Schema; multi-row changes run in `sql.withTransaction`.
-import {
-  type AgentStatus,
-  Db,
-  type DbShape,
-  encodeAddress,
-  type EndReason,
-  failureOf,
-  type InboxKind,
-  InboxRow,
-  type InboxStatus,
-  type Integration,
-  type MessageStatusName,
-  type NewInboxRow,
-  OwnerRow,
-  type SessionBrief,
-  type SessionPatch,
-  SessionRow,
-  type TurnEnd,
-  type TurnState,
-} from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import {
   type Current,
@@ -40,6 +14,32 @@ import {
   summaryIn,
   toInbox,
 } from "@vibest/core/read-model"
+// vibest's backend of the engine's Storage port (@vibest/core/storage): one SQLite file (docs/design/schema.md, version 2:
+// project, session, inbox, event). One schema, no migrations: an empty database gets it in one transaction; any other
+// file is accepted only when its version pragmas and required objects already match, and a version 1 file is refused,
+// naming the one-time migration script given with the release. `inspectSchema` only reads; the driver must run it on a
+// read-only connection before opening an existing file writable. One SQLite connection through effect/sql (the driver
+// comes from #platform); rows are decoded with Schema; multi-row changes run in `sql.withTransaction`.
+import {
+  type AgentStatus,
+  Storage,
+  type StorageShape,
+  encodeAddress,
+  type EndReason,
+  failureOf,
+  type InboxKind,
+  InboxRow,
+  type InboxStatus,
+  type Integration,
+  type MessageStatusName,
+  type NewInboxRow,
+  OwnerRow,
+  type SessionBrief,
+  type SessionPatch,
+  SessionRow,
+  type TurnEnd,
+  type TurnState,
+} from "@vibest/core/storage"
 import { RuntimeAddress } from "@vibest/schema/session"
 import { Clock, Context, Effect, Layer, Schema, String as Str } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
@@ -820,7 +820,7 @@ const make = Effect.gen(function* () {
       })),
     )
 
-  const engine: DbShape = {
+  const engine: StorageShape = {
     /** Where the session works: its worktree, or the one `vibest run --peer` shares. */
     sessionDirectory: (id: string) =>
       sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${id}`.pipe(
@@ -1614,7 +1614,7 @@ const make = Effect.gen(function* () {
   }
 
   /** vibest's own reads of its project rows: a scope is a project's key. */
-  const projects: ProjectsShape = {
+  const projects: ProjectStoreShape = {
     projectId: (key: string) => projectId(key).pipe(Effect.orDie),
 
     /** The project id for `key`, if one exists. Does not create a row. */
@@ -1634,19 +1634,19 @@ const make = Effect.gen(function* () {
 })
 
 /** vibest's project rows behind the engine's scopes (a scope is a project's key; `project.id` is what vibest shows). */
-export interface ProjectsShape {
+export interface ProjectStoreShape {
   /** The project id for `key`, created on first use. */
   readonly projectId: (key: string) => Effect.Effect<number>
   /** The project id for `key`, if one exists. Does not create a row. */
   readonly projectByKey: (key: string) => Effect.Effect<number | undefined>
   readonly projectKey: (id: number) => Effect.Effect<string | undefined>
 }
-export class Projects extends Context.Service<Projects, ProjectsShape>()("vibest/Projects") {}
+export class ProjectStore extends Context.Service<ProjectStore, ProjectStoreShape>()("vibest/ProjectStore") {}
 
 /** Name transforms the SQLite client must be built with: columns are the snake_case of the row fields. */
 export const SQL_NAMES = { transformQueryNames: Str.camelToSnake, transformResultNames: Str.snakeToCamel } as const
 
-/** The opened database over the provided SqlClient (a SQLite client built with `SQL_NAMES`), as the engine's `Db`. */
+/** The opened database over the provided SqlClient (a SQLite client built with `SQL_NAMES`), as the engine's `Storage`. */
 export const layer = Layer.effectContext(
   SqlClient.SqlClient.pipe(
     Effect.flatMap((sql) => sql.unsafe("PRAGMA foreign_keys = ON")),
@@ -1658,6 +1658,6 @@ export const layer = Layer.effectContext(
     // The open's one write, which two processes opening an empty database at once need (unit.test "two empty opens").
     Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE project SET key = key WHERE id < 0`))),
     Effect.andThen(make),
-    Effect.map(({ engine, projects }) => Context.make(Db, engine).pipe(Context.add(Projects, projects))),
+    Effect.map(({ engine, projects }) => Context.make(Storage, engine).pipe(Context.add(ProjectStore, projects))),
   ),
 )

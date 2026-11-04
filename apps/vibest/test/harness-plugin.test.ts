@@ -1,9 +1,9 @@
 // A harness a plugin registers with `context.harness.register` runs like a built-in: `vibest run <id>` starts it.
 import { assert, it } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
+import { Storage } from "@vibest/core/storage"
 import { Plugin } from "@vibest/plugin"
 import type { Harness } from "@vibest/plugin"
 import { sessionHeaders } from "@vibest/protocol/protocol"
@@ -36,7 +36,7 @@ const plugin = Plugin.define({ id: "harness-fakecli", effect: (ctx) => ctx.harne
 it.effect("a plugin harness is spawned by its id", () =>
   Effect.gen(function* () {
     const repo = yield* makeRepository
-    const db = yield* Db
+    const db = yield* Storage
     const key = yield* repositoryKey(repo)
     yield* launchMain(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
     const { id } = yield* (yield* Sessions).spawn({
@@ -62,7 +62,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const db = yield* Db
+      const db = yield* Storage
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const layout = yield* Layout

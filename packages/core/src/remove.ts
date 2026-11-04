@@ -6,9 +6,9 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 // destructive step is asked right before that step, never reused from earlier.
 import { Clock, Duration, Effect, FileSystem, Option, Schedule } from "effect"
 
-import { Db, type SessionRow } from "./db.ts"
 import { Processes, validPid } from "./processes.ts"
 import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
+import { Storage, type SessionRow } from "./storage.ts"
 import { removeSystemPrompt } from "./system-prompt.ts"
 import { TurnEnds } from "./turn-ends.ts"
 import { Workspace } from "./workspace.ts"
@@ -91,7 +91,7 @@ export interface ReleaseInput {
 }
 
 export const make = Effect.gen(function* () {
-  const db = yield* Db
+  const db = yield* Storage
   const turnEnds = yield* TurnEnds
   const processes = yield* Processes
   const workspace = yield* Workspace
