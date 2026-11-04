@@ -1,6 +1,7 @@
 import { spawnDaemon } from "@vibest/client/client"
 import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
+import { mayManage } from "@vibest/core/capabilities"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Groups } from "@vibest/core/groups"
@@ -441,17 +442,21 @@ export const handlers = VibestRpcs.toLayer(
         const c = yield* Caller
         const session = yield* db.getSession(id)
         if (!session) return yield* new NoSuchSession({ id, message: `no session ${id}` })
-        if (c._tag === "Cli") return
-        const other = new Forbidden({
+        const verdict = yield* mayManage(
+          c._tag === "Cli"
+            ? { _tag: "User" }
+            : c._tag === "Coordinator"
+              ? { _tag: "GroupOwner", group: c.projectId }
+              : { _tag: "Session", sessionId: c.sessionId, group: c.projectId, message: c.can.message },
+          { id, group: session.projectId },
+          { descends: db.descends, shared: groups.shared },
+        )
+        if (verdict === "allowed") return
+        if (verdict === "reportOnly" && c._tag === "Session") return yield* refused(method, c.sessionId)
+        return yield* new Forbidden({
           method,
           message: `${id} is not yours to manage; only whoever started it, its project's main agent or the user may`,
         })
-        if (session.projectId !== c.projectId) return yield* other
-        if (c._tag === "Coordinator") return
-        if (c.can.message === "project") return
-        if (c.can.message === "children" && (yield* db.descends(id, c.sessionId))) return
-        if (c.can.message === "group" && (yield* groups.shared(id, c.sessionId))) return
-        return yield* c.can.message === "report-only" ? refused(method, c.sessionId) : other
       })
 
     /** Root and key of a directory. A platform failure is a defect; not being a project is `NotInRepository`. */

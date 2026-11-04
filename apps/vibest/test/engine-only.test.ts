@@ -11,6 +11,7 @@ import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { assert, describe, it } from "@effect/vitest"
 import { Actions } from "@vibest/core/actions"
 import { Agents } from "@vibest/core/agents"
+import { mayManage } from "@vibest/core/capabilities"
 import { Db, SQL_NAMES } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Groups } from "@vibest/core/groups"
@@ -50,6 +51,9 @@ const bot: H.HarnessAdapter = {
   models: { args: () => [], answer: () => [] },
 }
 
+/** The product plugin's own send, for the tests to act through. */
+let sendAs: (as: string, to: string, message: string) => Effect.Effect<unknown, ActionRefused> = () => Effect.void
+
 /** This product's whole policy, as one plugin: its harness, a peer role, and a gather of a lead's workers. */
 const product = Plugin.define({
   id: "tiny-product",
@@ -64,6 +68,8 @@ const product = Plugin.define({
         }),
       )
       yield* context.agent.define({ name: "peer", tools: "full", can: { spawn: false, message: "project" } })
+      yield* context.agent.define({ name: "solo", tools: "full", can: { spawn: false, message: "report-only" } })
+      sendAs = (as, to, message) => context.session.send({ as, to, message })
       /** worker id -> its gather: the lead and the outputs so far. */
       const gathers = new Map<
         string,
@@ -149,10 +155,25 @@ const engine = Layer.unwrap(
         yield* Ref.set(fake.onActivity, (id, status) =>
           sessions.activity(id, status === "working" ? "working" : { blocked: "permission" }),
         )
-        // The product's actions: a plugin's send goes straight to the engine (no caller rights in this product).
+        // The product's actions: a plugin's send is checked with the engine's capability rule (`mayManage`), then sent.
         const refused = (e: { readonly message: string }) => new ActionRefused({ reason: e.message })
+        const agents = yield* Agents
+        const groups = yield* Groups
         yield* (yield* Actions).install({
-          send: ({ as, to, message }) => sessions.send(to, message, as ?? undefined).pipe(Effect.mapError(refused)),
+          send: ({ as, to, message }) =>
+            Effect.gen(function* () {
+              const from = yield* db.getSession(as)
+              const target = yield* db.getSession(to)
+              if (!from || !target) return yield* new ActionRefused({ reason: "no such session" })
+              const verdict = yield* mayManage(
+                { _tag: "Session", sessionId: as, group: from.projectId, message: agents.of(from.agent).can.message },
+                { id: to, group: target.projectId },
+                { descends: db.descends, shared: groups.shared },
+              )
+              if (verdict !== "allowed")
+                return yield* new ActionRefused({ reason: `${as} may not message ${to}: ${verdict}` })
+              yield* sessions.send(to, message, as).pipe(Effect.mapError(refused))
+            }),
           spawn: () => Effect.fail(new ActionRefused({ reason: "this product starts sessions itself" })),
           archive: ({ id }) => sessions.archiveSettled(id).pipe(Effect.mapError(refused)),
           notice: ({ about, kind, text, to }) => sessions.notice(about, kind, text, to).pipe(Effect.mapError(refused)),
@@ -297,13 +318,27 @@ describe("an engine-only product", () => {
         (yield* resultsOf(b)).map((r) => r.recipient),
         [null, a],
       )
+
+      // B's answer is A's to take: A's turn on it opens, and answers no one.
+      yield* opened(a, 1)
+      yield* answer(a, "noted")
+
+      // Through the plugin API, checked by the engine's capability rule: a peer may message, a report-only role not.
+      const solo = yield* start("work alone", "solo")
+      yield* answer(solo, "alone")
+      const refusal = yield* Effect.flip(sendAs(solo, a, "hello"))
+      assert.include(refusal.reason, "reportOnly")
+      const beforeA = (yield* typed(a)).length
+      yield* sendAs(b, a, "thanks for asking")
+      yield* opened(a, beforeA)
+      assert.include((yield* typed(a)).at(-1), "thanks for asking")
     }),
   )
 
   test(
     "a gather: two workers' results reach the lead as one message, sent by the product's plugin",
     Effect.gen(function* () {
-      const lead = yield* start("lead the work")
+      const lead = yield* start("lead the work", "peer")
       const w1 = yield* start("part one")
       const w2 = yield* start("part two")
       yield* answer(lead, `gather: ${w1} ${w2} into ${lead}`)

@@ -89,8 +89,9 @@ A plugin (`Plugin.define({ id, effect })`) gets a context with:
   tier), `can.spawn`, `can.message` (`report-only`, `children`, `group`, `project`), `rules`, `entry` and `skills`.
 - `context.agent.hook(name, callback)` for the hooks below.
 - `context.session` (`SessionActions`): `send`, `spawn`, `archive` and `notice`, each acting as one session (`as`)
-  and checked as that session's own command would be (`archive` and `notice` also as the user). The server installs
-  the checked implementations (`packages/server/src/server.ts`, `Actions.install`).
+  and checked as that session's own command would be (`archive` and `notice` also as the user). The product installs
+  the implementations (`Actions.install`): vibest's server checks them with its RPC rights, which use the engine's
+  `mayManage`.
 - `context.group` (`SessionGroups`): `join`, `leave`, `members`; groups live in vibestd's memory (`core/groups.ts`).
 - `context.harness.register(adapter)` and `context.runtime` (the runtime registry).
 
@@ -176,6 +177,8 @@ placement policy), and its system prompt text (vibest's SessionPrompt).
   refusal texts speak of the coordinator, the project directory and the scratchpad (harness-visible texts that E2E
   checks read). `LaunchInput.scratch` in the harness contract keeps its name (it carries the workspace's `files`
   directory).
-- **Caller rights live in the server.** Who may send to, spawn or archive whom (`managed`, the `can` checks) is in
-  `packages/server/src/server.ts`; a product composed from core alone (the engine-only test) brings its own.
+- **Caller identity lives in the server.** The capability rule (who may manage a session: `mayManage` in
+  `core/capabilities.ts`, from the manager's `can.message`, provenance and groups) is the engine's; mapping a request
+  to a manager (the command line is the user, the entry agent owns its project, a session is itself) and the other
+  method rights are in `packages/server/src/server.ts`. The engine-only test maps its plugin's actions itself.
 - **Groups are in memory.** A restart of vibestd forgets them; a plugin joins its members again.
