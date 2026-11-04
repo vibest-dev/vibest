@@ -30,6 +30,7 @@ describe("projectText", () => {
       yield* write("memories/skip.txt", "not markdown\n")
       // Frontmatter with no description falls back to the first line after it.
       yield* write("memories/named.md", "---\nname: only\n---\n# After the block\n")
+      yield* write("memories/blank.md", "#\n")
 
       const text = yield* projectText(dir)
       assert.strictEqual(text.preferences, "Prefer short diffs.")
@@ -38,6 +39,10 @@ describe("projectText", () => {
       assert.include(text.memories, "- memories/nested/plain.md — Plain title")
       assert.notInclude(text.memories, "body that stays in the file")
       assert.include(text.memories, "- memories/named.md — After the block")
+      assert.strictEqual(
+        text.memories.split("\n").find((line) => line.includes("blank.md")),
+        "- memories/blank.md",
+      )
       assert.include(text.memories, `- memories/long.md — ${"x".repeat(150)}`)
       assert.notInclude(text.memories, "x".repeat(151))
       assert.notInclude(text.memories, "skip.txt")
@@ -79,6 +84,8 @@ describe("projectText", () => {
       yield* fs.makeDirectory(memories)
       for (let i = 0; i < 201; i++)
         yield* fs.writeFileString(path.join(memories, `${String(i).padStart(3, "0")}.md`), `lesson ${i}\n`)
+      // Unreadable, and past the cap: the left-out count comes from the listing, without reading it.
+      yield* fs.chmod(path.join(memories, "200.md"), 0o000)
       const text = yield* projectText(dir)
       assert.strictEqual(text.preferences, "")
       const lines = text.memories.split("\n").filter((line) => line.startsWith("- memories/"))

@@ -117,14 +117,15 @@ const memorySummary = (text: string) => {
   return clip((line ?? "").trim().replace(/^#+\s*/, ""))
 }
 
-const memoryIndex = (entries: ReadonlyArray<readonly [string, string]>) => {
+const memoryIndex = (entries: ReadonlyArray<readonly [string, string]>, left: number) => {
   if (entries.length === 0) return ""
-  const shown = entries.slice(0, INDEX_LIMIT)
   const lines = [
     "Each line is a file in the project folder; read it with your file tools when its line is relevant to the work.",
-    ...shown.map(([rel, body]) => `- memories/${rel} — ${memorySummary(body)}`),
+    ...entries.map(([rel, body]) => {
+      const summary = memorySummary(body)
+      return summary === "" ? `- memories/${rel}` : `- memories/${rel} — ${summary}`
+    }),
   ]
-  const left = entries.length - shown.length
   if (left > 0) lines.push(`${left} ${left === 1 ? "entry" : "entries"} left out; the folder holds them all.`)
   return lines.join("\n")
 }
@@ -145,14 +146,15 @@ export const projectText = Effect.fn("projectText")(function* (projectDir: strin
     .filter((f) => f.endsWith(".md"))
     .map((f) => ({ file: f, rel: f.split(path.sep).join("/") }))
     .sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
+  const shown = names.slice(0, INDEX_LIMIT)
   const entries: Array<readonly [string, string]> = []
-  for (const name of names) {
+  for (const name of shown) {
     const body = yield* fs.readFileString(path.join(memoriesDir, name.file)).pipe(Effect.orElseSucceed(() => undefined))
     if (body !== undefined) entries.push([name.rel, body])
   }
   return {
     preferences: truncate(preferences, "preferences"),
-    memories: memoryIndex(entries),
+    memories: memoryIndex(entries, names.length - shown.length),
   }
 })
 
