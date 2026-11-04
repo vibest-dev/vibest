@@ -272,7 +272,7 @@ export const shellBlock = (
  * Where an absolute path really leads: segment by segment, following each symlink that exists before applying a later
  * `..` (as the system does), so neither `artifacts/link/x` nor `<project>/../<other project>` hides where it goes.
  * A dangling symlink as the last segment has no real path, but a write creates its target, so that location is what
- * counts. None when that target cannot be read: the call is refused.
+ * counts. None only when that segment is a link whose target cannot be read, or the link refers to itself.
  */
 const physical = (
   p: string,
@@ -306,11 +306,13 @@ const physical = (
       }
       const link = yield* fs.readLink(joined).pipe(
         Effect.map((target): { readonly target: string } | undefined => ({ target })),
-        Effect.catchTag("PlatformError", (e) =>
-          e.reason._tag === "NotFound" || (e.reason.cause as { code?: unknown } | undefined)?.code === "EINVAL"
+        Effect.catchTag("PlatformError", (e) => {
+          // Not a link, or not a path a link can be read from: judge the path as written.
+          const code = (e.reason.cause as { code?: unknown } | undefined)?.code
+          return e.reason._tag === "NotFound" || code === "EINVAL" || code === "ENOTDIR" || code === "ENAMETOOLONG"
             ? Effect.succeed(undefined)
-            : Effect.succeed("refuse" as const),
-        ),
+            : Effect.succeed("refuse" as const)
+        }),
       )
       if (link === "refuse" || link?.target === "") return Option.none<string>()
       if (link !== undefined) {
@@ -357,18 +359,29 @@ const projectDir = Effect.gen(function* () {
   return own ? Option.getOrUndefined(yield* physical(own)) : undefined
 })
 
+/** A symlink that refers to itself, or whose target cannot be read. Not a bad file URL. */
+const UNRESOLVED_LINK = "The path is a symlink that refers to itself or whose target cannot be read; refused."
+
 /**
  * Where `raw` leads from `cwd` (`~` and file URLs expanded), both as the system follows it (symlinks before a later
- * `..`) and as a tool that normalizes the path first (Cursor's do); undefined for a file URL that does not parse, or a
- * symlink whose target cannot be resolved (the call is refused).
+ * `..`) and as a tool that normalizes the path first (Cursor's do). Undefined for a file URL that does not parse.
+ * `UNRESOLVED_LINK` when a symlink's target cannot be read.
  */
-const targetsOf = (raw: string, cwd: string) =>
+const targetsOf = (
+  raw: string,
+  cwd: string,
+): Effect.Effect<
+  ReadonlyArray<string> | typeof UNRESOLVED_LINK | undefined,
+  Config.ConfigError,
+  Path.Path | FileSystem.FileSystem
+> =>
   Effect.gen(function* () {
     const path = yield* Path.Path
     const p = yield* toolPath(raw, cwd, yield* Config.String("HOME"))
     if (p === undefined) return undefined
     const [followed, normalized] = yield* Effect.all([physical(p), physical(path.normalize(p))])
-    return Option.isSome(followed) && Option.isSome(normalized) ? [followed.value, normalized.value] : undefined
+    if (Option.isNone(followed) || Option.isNone(normalized)) return UNRESOLVED_LINK
+    return [followed.value, normalized.value]
   })
 
 /** The path arguments of a file tool call. */
@@ -394,6 +407,7 @@ export const coordinator: Rules = (call) =>
     const sep = (yield* Path.Path).sep
     for (const raw of raws) {
       const targets = yield* targetsOf(raw, call.cwd)
+      if (targets === UNRESOLVED_LINK) return UNRESOLVED_LINK
       if (targets === undefined || !targets.every((t) => inside(t, own, sep))) return COORDINATOR_EDITS
     }
     return undefined
@@ -443,6 +457,7 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
       // Globs and variables around vibest's home could expand to anything in it.
       if (word.includes(".vibest") && /[*?[{$]/.test(word)) return OFF_LIMITS
       const targets = yield* resolve(word)
+      if (targets === UNRESOLVED_LINK) return UNRESOLVED_LINK
       if (targets === undefined) return BAD_URL
       // vibest's home itself: a later relative path (after cd) would be inside the Project.
       if (targets.some((t) => t === vibestHome || blocked(t, search))) return OFF_LIMITS
@@ -457,6 +472,7 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   const pattern = tool === "glob" ? str(call.input.pattern)?.split(/[*?[{]/)[0] : undefined
   for (const raw of [...pathArgs(call.input), ...(pattern ? [pattern] : [])]) {
     const targets = yield* resolve(raw)
+    if (targets === UNRESOLVED_LINK) return UNRESOLVED_LINK
     if (targets === undefined) return BAD_URL
     if (targets.some((t) => blocked(t, search))) return OFF_LIMITS
   }

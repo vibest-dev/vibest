@@ -271,12 +271,49 @@ layer(Platform.services)("role rules", (it) => {
         "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session."
       const offLimits =
         "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
+      const unresolved = "The path is a symlink that refers to itself or whose target cannot be read; refused."
       assert.strictEqual(yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "leak") }, home), edits)
       assert.isUndefined(yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "alias") }, home))
-      assert.isString(yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "loop") }, home))
+      assert.strictEqual(
+        yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "loop") }, home),
+        unresolved,
+      )
       assert.strictEqual(yield* asSession("Write", { file_path: path.join(work, "leak") }, work), offLimits)
       assert.isUndefined(yield* asSession("Write", { file_path: path.join(own, "artifacts", "alias") }, work))
-      assert.isString(yield* asSession("Write", { file_path: path.join(own, "artifacts", "loop") }, work))
+      assert.strictEqual(
+        yield* asSession("Write", { file_path: path.join(own, "artifacts", "loop") }, work),
+        unresolved,
+      )
+    }),
+  )
+
+  it.effect("a path through a file (ENOTDIR) is judged as written, not as an unreadable link", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* tempDirectory("vibest-guard-")
+      const vibestHome = path.join(home, ".vibest")
+      const own = path.join(vibestHome, "projects", "own")
+      const work = path.join(vibestHome, "worktrees", "abcd1234-abcd-4abc-8abc-abcd1234abcd")
+      yield* fs.makeDirectory(path.join(own, "artifacts"), { recursive: true })
+      yield* fs.makeDirectory(work, { recursive: true })
+      yield* fs.writeFileString(path.join(work, "file.txt"), "x")
+      yield* fs.writeFileString(path.join(own, "artifacts", "file.txt"), "x")
+      const asSession = (tool: string, input: Record<string, unknown>) =>
+        session({ tool, input, cwd: work }).pipe(
+          Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_PROJECT_DIR: own }))),
+        )
+      // cat file.txt/x: readLink is ENOTDIR. The lexical path is outside the projects directory, so it is allowed.
+      assert.isUndefined(yield* asSession("Bash", { command: `cat ${path.join(work, "file.txt")}/x` }))
+      const asCoordinator = (input: Record<string, unknown>) =>
+        coordinator({ tool: "Write", input, cwd: work }).pipe(
+          Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_PROJECT_DIR: own }))),
+        )
+      assert.isUndefined(
+        yield* asCoordinator({ file_path: path.join(own, "artifacts", "file.txt", "x"), content: "y" }),
+      )
     }),
   )
 
