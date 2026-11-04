@@ -113,7 +113,7 @@ subagents. Everything else in this list is planned; each item says what runs tod
 - **Provenance by parent.** `parent_session_id` records who spawned whom. It decides management rights (ancestors)
   and where a new terminal opens (beside its spawner), never routing. Today the parent also decides routing: a
   result goes to the parent, else to the main agent.
-- **An optional entry session** (`project.entry_session_id`, `main_session_id` before schema version 2): the session a
+- **An optional entry session** (`project.entry_session_id`, `main_session_id` before the schema baseline): the session a
   bare `vibest` reopens, and the fallback when a recipient has ended. It is not identity. "One main agent per
   project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.
 - **Harnesses registered by plugins** (planned): `context.harness.register(adapter)`, scoped like

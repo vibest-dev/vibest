@@ -10,9 +10,10 @@ import {
   RuntimeAddress,
   TurnState,
 } from "@vibest/schema/session"
-// The only place with SQL (docs/design/schema.md, version 2: project, session, inbox, event). One schema, no
-// migrations: an empty database gets it in one transaction; any other file is accepted only when its version pragmas
-// and required objects already match, and a version 1 file is refused, naming the one-time migration script given with the release.
+// The only place with SQL (docs/design/schema.md, version 1: project, project_repository, session, inbox, event). One
+// schema, no migrations: an empty database gets it in one transaction; any other file is accepted only when its
+// version pragmas and required objects already match. A file of the shape from before this baseline (it also says
+// version 1, but has no event table) is refused, naming the one-time migration script given with the release.
 // `inspectSchema` only reads; the driver must run it on a read-only connection before opening an existing file
 // writable. One SQLite connection through effect/sql (the driver comes from #platform); rows are decoded with Schema;
 // multi-row changes run in `sql.withTransaction`.
@@ -123,7 +124,7 @@ export type RepositoryRow = { readonly path: string; readonly remote: string | u
 
 /** "vibe", as a 32-bit application id. */
 export const APPLICATION_ID = 0x76696265
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 1
 
 export const SCHEMA = [
   `PRAGMA application_id = ${APPLICATION_ID}`,
@@ -195,13 +196,15 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
   version: Schema.Number,
   applicationId: Schema.Number,
   detail: Schema.optional(Schema.String),
+  /** vibest's own file in the shape from before this baseline (no event table). */
+  older: Schema.optional(Schema.Boolean),
   /** The database file, set by the driver that opened it. */
   file: Schema.optional(Schema.String),
 }) {
   override get message() {
     const file = this.file ?? "vibest.db"
-    if (this.applicationId === APPLICATION_ID && this.version === 1)
-      return `${file} is from an older vibest (database version 1); this vibest reads version 2 and never migrates by itself. Stop vibestd, then migrate it once with the migration script given with this release (it backs the file up first), or move it aside to start empty`
+    if (this.older)
+      return `${file} is from an older vibest (its tables are the shape from before this release); this vibest never migrates by itself. Stop vibestd, then migrate it once with the migration script given with this release (it backs the file up first), or move it aside to start empty`
     const id = `0x${(this.applicationId >>> 0).toString(16)}`
     const extra = this.detail === undefined ? "" : `, ${this.detail}`
     return `${file} is not this vibest's schema (application_id ${id}, v${this.version}${extra}); stop vibestd and move it aside to start empty`
@@ -225,6 +228,13 @@ export const inspectSchema = Effect.gen(function* () {
   const applicationId = (yield* sql<{ applicationId: number }>`PRAGMA application_id`)[0]?.applicationId ?? 0
   const userVersion = (yield* sql<{ userVersion: number }>`PRAGMA user_version`)[0]?.userVersion ?? 0
   const missing = REQUIRED.find((object) => !rows.some((row) => row.type === object.type && row.name === object.name))
+  // The shape before this baseline carries the same pragmas; it is told apart by its tables.
+  if (
+    applicationId === APPLICATION_ID &&
+    userVersion === SCHEMA_VERSION &&
+    !rows.some((row) => row.type === "table" && row.name === "event")
+  )
+    return yield* new SchemaMismatch({ version: userVersion, applicationId, older: true })
   if (applicationId !== APPLICATION_ID || userVersion !== SCHEMA_VERSION || missing !== undefined) {
     return yield* mismatch(
       userVersion,

@@ -910,7 +910,7 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("an incomplete v2 is rejected and left byte-identical", () =>
+  it.effect("an incomplete file is rejected and left byte-identical", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const dir = yield* tempDirectory("vibest-schema-partial-")
@@ -920,9 +920,10 @@ describe("Db", () => {
         "CREATE TABLE project_repository (project_id TEXT, path TEXT) STRICT",
         "CREATE TABLE session (id TEXT PRIMARY KEY, project_id INTEGER, parent_session_id TEXT, machine TEXT, directory TEXT) STRICT",
         "CREATE TABLE inbox (id INTEGER PRIMARY KEY) STRICT",
+        "CREATE TABLE event (id INTEGER PRIMARY KEY) STRICT",
       ]
       const cases = [
-        ["missing-table.db", [...pragma, tables[0]!], "missing project_repository"],
+        ["missing-table.db", [...pragma, tables[0]!, tables[4]!], "missing project_repository"],
         [
           "missing-index.db",
           [
@@ -951,7 +952,7 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("a v2 file from before project_repository is refused and left byte-identical", () =>
+  it.effect("a file without project_repository is refused and left byte-identical", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const file = yield* fileAt(yield* tempDirectory("vibest-schema-old-v2-"), "vibest.db")
@@ -963,23 +964,28 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("a version 1 vibest database is refused, naming its path and the release's migration script", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const file = yield* fileAt(yield* tempDirectory("vibest-schema-v1-"), "vibest.db")
-      yield* writeSql(file, [
-        `PRAGMA application_id = ${APPLICATION_ID}`,
-        "PRAGMA user_version = 1",
-        "CREATE TABLE project (id INTEGER)",
-      ])
-      const before = yield* fs.readFile(file)
-      const pretty = yield* refusal(file)
-      assert.include(pretty, `${file} is from an older vibest`)
-      assert.include(pretty, "migration script given with this release")
-      assert.include(pretty, "move it aside to start empty")
-      assert.notInclude(pretty, "scripts/migrate")
-      assert.deepStrictEqual(yield* fs.readFile(file), before)
-    }).pipe(Effect.provide(Platform.services)),
+  it.effect(
+    "a file of the shape before this baseline (version 1 too, no event table) is refused, naming its path and the release's migration script",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const file = yield* fileAt(yield* tempDirectory("vibest-schema-v1-"), "vibest.db")
+        yield* writeSql(file, [
+          `PRAGMA application_id = ${APPLICATION_ID}`,
+          "PRAGMA user_version = 1",
+          "CREATE TABLE project (id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, main_session_id TEXT)",
+          "CREATE TABLE session (id TEXT PRIMARY KEY, project_id INTEGER NOT NULL)",
+          "CREATE TABLE inbox (id INTEGER PRIMARY KEY)",
+        ])
+        assert.strictEqual(SCHEMA_VERSION, 1)
+        const before = yield* fs.readFile(file)
+        const pretty = yield* refusal(file)
+        assert.include(pretty, `${file} is from an older vibest`)
+        assert.include(pretty, "migration script given with this release")
+        assert.include(pretty, "move it aside to start empty")
+        assert.notInclude(pretty, "scripts/migrate")
+        assert.deepStrictEqual(yield* fs.readFile(file), before)
+      }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect("a foreign database with user_version 1 is refused without changing its bytes", () =>

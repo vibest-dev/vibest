@@ -91,6 +91,7 @@ const inspectFile = (filename: string) =>
             version: e.version,
             applicationId: e.applicationId,
             ...(e.detail === undefined ? {} : { detail: e.detail }),
+            ...(e.older === undefined ? {} : { older: e.older }),
             file: filename,
           })
         : e,
