@@ -7,12 +7,11 @@ import { Groups } from "@vibest/core/groups"
 import { harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
-import { Layout, shellQuote, writeAtomic } from "@vibest/core/paths"
+import { Layout, shellQuote } from "@vibest/core/paths"
 import { describeSpawn, Plugins } from "@vibest/core/plugins"
 import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
 import { Restarting } from "@vibest/core/restarting"
 import { envelope } from "@vibest/core/results"
-import { entryRules, projectText } from "@vibest/core/rules"
 import {
   agentState,
   type Machine,
@@ -24,6 +23,7 @@ import {
 } from "@vibest/core/runtimes"
 import { NoSuchSession, runtimeEnv, type SessionView, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { entrySystemPrompt, projectText } from "@vibest/core/system-prompt"
 import { ActionRefused } from "@vibest/plugin"
 import {
   AGENT_HEADER,
@@ -403,9 +403,11 @@ export const handlers = VibestRpcs.toLayer(
             method,
             message: "no plugin defines the entry agent (an agent with entry: true)",
           })
-        const rules = entryRules({ rules: definition.rules ?? "", ...(yield* projectText(layout.project(key))) })
-        yield* writeAtomic(layout.coordinatorRules(key), rules).pipe(Effect.orDie)
-        return { agent: definition.name, skills: definition.skills ?? [] }
+        const systemPrompt = entrySystemPrompt({
+          rules: definition.rules ?? "",
+          ...(yield* projectText(layout.project(key))),
+        })
+        return { agent: definition.name, skills: definition.skills ?? [], systemPrompt }
       }).pipe(Effect.provideContext(platform))
 
     const refused = (method: string, sessionId: string) =>

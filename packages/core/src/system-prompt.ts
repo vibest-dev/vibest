@@ -1,7 +1,85 @@
-// Session rules (SPEC §11.5). Written once per session to ~/.vibest/rules/<id>.md.
-import { Effect, FileSystem, Path } from "effect"
+// The system prompt vibest gives each harness. Generated again from the database row and the project files on every
+// harness start (new, resume, restart, move) into `$TMPDIR/vibest/<session id>/system-prompt.md`, never read back.
+import { Config, Context, Data, Effect, FileSystem, Option, Path } from "effect"
 
-import { shellQuote } from "./paths.ts"
+import { shellQuote, writeAtomic } from "./paths.ts"
+
+/** The per-user temporary directory cannot be used safely: the start fails with this. */
+export class SystemPromptDirUnsafe extends Data.TaggedError("SystemPromptDirUnsafe")<{ readonly message: string }> {}
+
+/** What `lstat` says of a path: the link itself, never what it points to. */
+export interface LinkInfo {
+  readonly symlink: boolean
+  readonly directory: boolean
+  readonly uid: number
+  readonly mode: number
+}
+
+/** From the platform (src/platform): this user's numeric id and `lstat`. Only the fallback without TMPDIR needs them. */
+export const UserPlatform = Context.Reference<{
+  readonly uid: number | undefined
+  readonly lstat: (path: string) => Promise<LinkInfo>
+}>("vibest/UserPlatform", {
+  defaultValue: () => ({ uid: undefined, lstat: () => Promise.reject(new Error("no lstat on this platform")) }),
+})
+
+/**
+ * The parent of every session's system prompt directory: `<tmpdir>/vibest`, or `<fallbackParent>/vibest-<uid>` when
+ * tmpdir is empty. The fallback sits in a shared directory, so it must be a real directory (no symlink) owned by this
+ * user with mode 0700, else it is refused.
+ */
+export const privateTmp = Effect.fn("privateTmp")(function* (tmpdir: string, fallbackParent: string) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const unsafe = (message: string) => new SystemPromptDirUnsafe({ message })
+  if (tmpdir !== "") {
+    const dir = path.join(tmpdir, "vibest")
+    yield* fs.makeDirectory(dir, { recursive: true, mode: 0o700 }).pipe(Effect.mapError((e) => unsafe(e.message)))
+    return dir
+  }
+  const user = yield* UserPlatform
+  if (user.uid === undefined) return yield* unsafe("TMPDIR is not set and this platform has no user id")
+  const dir = path.join(fallbackParent, `vibest-${user.uid}`)
+  yield* fs
+    .makeDirectory(dir, { mode: 0o700 })
+    .pipe(
+      Effect.catchTag("PlatformError", (e) =>
+        e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(unsafe(e.message)),
+      ),
+    )
+  // One lstat, which does not follow a link: nothing can be swapped between two checks. Another user cannot replace
+  // a directory of ours in a sticky /tmp afterwards.
+  const st = yield* Effect.tryPromise({ try: () => user.lstat(dir), catch: (e) => unsafe(`${dir}: ${String(e)}`) })
+  if (st.symlink || !st.directory || st.uid !== user.uid || (st.mode & 0o777) !== 0o700)
+    return yield* unsafe(
+      `${dir} is not a private directory of this user (it must be a directory, not a symlink, owned by uid ${user.uid} with mode 0700); remove it or set TMPDIR`,
+    )
+  return dir
+})
+
+/** `privateTmp` for this process: TMPDIR, else `/tmp`. */
+export const systemPromptRoot = Effect.gen(function* () {
+  return yield* privateTmp(
+    Option.getOrElse(yield* Config.option(Config.String("TMPDIR")), () => ""),
+    "/tmp",
+  )
+})
+
+/** Writes session `id`'s system prompt; its path, for the harness flag. */
+export const writeSystemPrompt = Effect.fn("writeSystemPrompt")(function* (id: string, text: string) {
+  const path = yield* Path.Path
+  const file = path.join(yield* systemPromptRoot, id, "system-prompt.md")
+  yield* writeAtomic(file, text)
+  return file
+})
+
+/** Session `id`'s temporary directory goes, best effort (archive). */
+export const removeSystemPrompt = (id: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    yield* fs.remove(path.join(yield* systemPromptRoot, id), { recursive: true, force: true })
+  }).pipe(Effect.ignore)
 
 export const INJECT_LIMIT = 16000
 
@@ -35,31 +113,31 @@ export const projectText = Effect.fn("projectText")(function* (projectDir: strin
   }
 })
 
-export interface RulesInput {
+export interface SystemPromptInput {
   readonly id: string
   readonly scratch: string
   /** argv that runs vibest (`VibestCommand`). */
   readonly vibest: ReadonlyArray<string>
   readonly instructions: string
   readonly memory: string
-  /** `vibest run --peer`: the session whose worktree this one shares. Only whether it is set reaches the rules. */
+  /** `vibest run --peer`: the session whose worktree this one shares. Only whether it is set reaches the system prompt. */
   readonly peer?: string | undefined
   /** Its agent definition: whether it may start sessions, and the rules it adds. */
   readonly agent?: { readonly spawn: boolean; readonly rules?: string | undefined } | undefined
 }
 
-const spawnRule = (r: RulesInput) =>
+const spawnRule = (r: SystemPromptInput) =>
   r.agent?.spawn
     ? `
 - You may start sessions of your own for parts of your task with \`${invocation(r.vibest)} run '<prompt>'\` (\`${invocation(r.vibest)} ls\`, \`result\`, \`send\`, \`interrupt\` for the ones you started). Their results arrive in this pane as messages; gather them before you report.`
     : ""
 
-const gitRule = (r: RulesInput) =>
+const gitRule = (r: SystemPromptInput) =>
   r.peer
     ? `- Git: others may be making changes in this worktree too. Never run \`git switch\`, \`git checkout\` (including \`-b\`), \`git switch -c\`, \`git commit\`, \`git reset\`, \`git stash\` or anything else that moves HEAD, a branch or the index.`
     : `- Git: you start on a detached HEAD. When the task is complete and you changed files, create one branch named after the task (<type>/<short-description>, for example fix/add-overflow; add -2 if the name exists) with \`git switch -c <branch>\` and commit there with a clear, descriptive message. Only stage files you actually changed — never use \`git add .\` or \`git add -A\`. If a remote named origin exists, run \`git push -u origin <branch>\`; if the push fails, say so in your report, do not retry and never force-push.`
 
-export function sessionRules(r: RulesInput) {
+export function sessionSystemPrompt(r: SystemPromptInput) {
   return `You are agent ${r.id}, executing a task assigned by the coordinator. Messages arrive directly as ordinary text, from the coordinator or from the user talking to you in this pane.
 
 Complete exactly what was asked. Don't fix unrelated issues you discover — suggest them as follow-ups instead.
@@ -108,9 +186,13 @@ ${r.agent?.rules ? `\n${r.agent.rules}\n` : ""}${r.instructions ? `\n# Project i
 }
 
 /**
- * The entry agent's rules (`vibest`): its definition's own, then the project's instructions and memory. How to run agents
+ * The entry agent's system prompt (`vibest`): its definition's own, then the project's instructions and memory. How to run agents
  * is the skills its definition names, not this prompt.
  */
-export function entryRules(r: { readonly rules: string; readonly instructions: string; readonly memory: string }) {
+export function entrySystemPrompt(r: {
+  readonly rules: string
+  readonly instructions: string
+  readonly memory: string
+}) {
   return `${r.rules}${r.instructions ? `\n# Project instructions\n\n${r.instructions}\n` : ""}${r.memory ? `\n# Project memory\n\n${r.memory}\n` : ""}`
 }

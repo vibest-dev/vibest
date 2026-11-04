@@ -12,13 +12,16 @@ import { LaunchFailed } from "@vibest/core/sessions"
 // `vibest` (architecture.md D4): the main agent. The Coordinator always runs at the main checkout's root; the CLI
 // execs the harness when it already is in such a terminal, and otherwise has a terminal at the root run `vibest`
 // again (runtime-port.md §3 `open`: the runtime decides which workspace the terminal lands in).
-import { Config, Effect, FileSystem, Option } from "effect"
+import { SystemPromptDirUnsafe, systemPromptRoot, writeSystemPrompt } from "@vibest/core/system-prompt"
+import { Config, Effect, Option } from "effect"
 
-import { projectKey } from "./project-create.ts"
+/** An unusable temporary directory is the user's to fix and fails the start; any other error there is a defect. */
+const unsafeOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.catch((e) => (e instanceof SystemPromptDirUnsafe ? Effect.fail(e) : Effect.die(e))))
 
 /**
- * The harness, its arguments and extra env to exec as a Coordinator at `root`, with the rules file vibestd wrote for it
- * (its entry agent definition's rules and the project's). `session` runs only
+ * The harness, its arguments and extra env to exec as a Coordinator at `root`; writes its system prompt file (the one
+ * vibestd made from its entry agent definition's rules and the project's). `session` runs only
  * after every check that can refuse the launch, since it supersedes the running Coordinator's launch; exec can still fail.
  */
 export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, R>(input: {
@@ -38,6 +41,8 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
       /** The entry agent definition's name (VIBEST_AGENT) and skills (VIBEST_SKILLS). */
       readonly agent: string
       readonly skills: ReadonlyArray<string>
+      /** Its system prompt text (`entrySystemPrompt`), written here on every start. */
+      readonly systemPrompt: string
     },
     E,
     R
@@ -55,8 +60,8 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   // The plugin's pre-tool hook keeps a Coordinator from editing files and from what else it refuses (guard.ts).
   const base = yield* harness.plugin(input.harness)
-  const key = yield* projectKey(input.root).pipe(Effect.orDie)
-  const rulesFile = layout.coordinatorRules(key)
+  // The temporary directory is checked before `session`, which supersedes the running Coordinator's launch.
+  yield* unsafeOnly(systemPromptRoot)
   const env: Record<string, string> = {
     VIBEST_HARNESS: input.harness,
     VIBEST_HOME: layout.home,
@@ -69,7 +74,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   }
   const saved = yield* input.session
   const pluginDir = yield* sessionPlugin(adapter, base, saved.sessionId, saved.skills).pipe(Effect.orDie)
-  const rules = yield* (yield* FileSystem.FileSystem).readFileString(rulesFile).pipe(Effect.orDie)
+  const systemPromptFile = yield* unsafeOnly(writeSystemPrompt(saved.sessionId, saved.systemPrompt))
   let harnessSessionId = saved.harnessSessionId
   if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
     harnessSessionId = null
@@ -85,8 +90,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     file: adapter.binary,
     args: adapter.coordinatorArgs({
       root: input.root,
-      rules,
-      rulesFile,
+      systemPromptFile,
       provider: input.provider,
       model: input.model,
       sessionId: harnessSessionId,

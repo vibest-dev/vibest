@@ -67,7 +67,7 @@ export const pi: HarnessAdapter = {
   id: "pi",
   binary: "pi",
   conversation: "assigned",
-  rulesInPrompt: false,
+  systemPromptInPrompt: false,
   interruptKey: "esc",
   delivery: "poll",
   reportsState: true,
@@ -76,17 +76,17 @@ export const pi: HarnessAdapter = {
     "--session-id",
     i.sessionId!,
     "--append-system-prompt",
-    i.rulesFile,
+    i.systemPromptFile,
     "-e",
     extension(i.pluginDir),
     // Exact allowlist, as coordinatorArgs does: no write or edit tool. bash stays; the guard refuses commands that write.
     ...providerModel(i.provider, i.model),
   ],
-  // The rules replace Pi's coding-assistant preamble; Pi still adds context files (AGENTS.md), skills and cwd after them.
+  // The coordinator's system prompt replaces Pi's coding-assistant preamble; Pi still adds context files (AGENTS.md), skills and cwd after them.
   coordinatorArgs: (i) => [
     ...opt("--session-id", i.sessionId),
     "--system-prompt",
-    i.rulesFile,
+    i.systemPromptFile,
     // An exact allowlist, not +/- entries on the defaults: those keep every extension's tools, and a user's delegation
     // extension (pi-subagents' `subagent`) then wins over `vibest run`. Extensions still load; only their tools are off.
     "--tools",

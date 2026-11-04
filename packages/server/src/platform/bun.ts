@@ -13,6 +13,7 @@ import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
 import { CLAUDE_CREDENTIALS, claudeCredentialsFile, type KeychainPlatform, securityArgs } from "@vibest/core/keychain"
 import { type Candidate, type PluginLoader } from "@vibest/core/plugins"
 import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibest/core/processes"
+import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import { coordinatorPlugin } from "@vibest/plugin-coordinator"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
@@ -47,12 +48,22 @@ const stdio = Layer.effect(
   ),
 ).pipe(Layer.provide(BunServices.layer))
 
-/** FileSystem, Path, Crypto, ChildProcessSpawner, Stdio, Terminal, and the socket connectors (vibest's and herdr's). */
+/** This user's id and an lstat that does not follow a link: the system prompt's temporary directory without TMPDIR. */
+const user = Layer.succeed(UserPlatform, {
+  uid: process.getuid?.(),
+  lstat: async (file) => {
+    const st = await fsPromises.lstat(file)
+    return { symlink: st.isSymbolicLink(), directory: st.isDirectory(), uid: st.uid, mode: st.mode }
+  },
+})
+
+/** FileSystem, Path, Crypto, ChildProcessSpawner, Stdio, Terminal, the socket connectors (vibest's and herdr's), the user. */
 export const services = Layer.mergeAll(
   BunServices.layer,
   stdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector, (endpoint) => BunSocket.makeNet({ path: endpoint })),
+  user,
 )
 
 /** The Bun SQLite driver (sql-sqlite-bun): a writable transaction is BEGIN IMMEDIATE and busy_timeout is 5000. */

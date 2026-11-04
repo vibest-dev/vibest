@@ -840,6 +840,7 @@ const integrationStart = (exec: Exec) =>
           runtime: got.runtime,
           agent: got.agent,
           skills: got.skills,
+          systemPrompt: got.systemPrompt,
         }),
       }).pipe(LocalHarnesses.local)
       return yield* Effect.sync(() => exec(main.file, main.args, { ...got.env, ...main.env }))

@@ -64,9 +64,9 @@ export interface LaunchInput {
   readonly worktree: string
   /** The session's scratch directory: where a plugin harness puts per-session config it loads its integration from. */
   readonly scratch: string
-  /** The rules text, for a harness with no system-prompt flag (its first prompt carries them). */
-  readonly rules: string
-  readonly rulesFile: string
+  /** The session's system prompt, regenerated on every start ($TMPDIR/vibest/<id>/system-prompt.md); a harness with no
+   * system-prompt flag gets its text in the first prompt instead. */
+  readonly systemPromptFile: string
   readonly provider: string | null
   readonly model: string | null
   /** The conversation to continue (resume), or the one vibest chose up front (`conversation: "assigned"`). */
@@ -84,8 +84,7 @@ export interface LaunchInput {
 export interface CoordinatorInput {
   /** Repository root, its working directory. */
   readonly root: string
-  readonly rules: string
-  readonly rulesFile: string
+  readonly systemPromptFile: string
   readonly provider: string | null
   readonly model: string | null
   /** The conversation to reopen, or null: the harness starts a new one. */
@@ -110,8 +109,8 @@ export interface HarnessAdapter {
   readonly binary: string
   /** `assigned`: vibest picks the conversation id up front; `reported`: the integration reports it after launch. */
   readonly conversation: "assigned" | "reported"
-  /** No system-prompt flag: rules go in front of the first prompt. */
-  readonly rulesInPrompt: boolean
+  /** No system-prompt flag: the system prompt goes in front of the first prompt. */
+  readonly systemPromptInPrompt: boolean
   readonly interruptKey: string
   /** Harness-specific startup handling while vibestd waits for ready (Claude: its trust / bypass menus). */
   readonly startup?: Startup

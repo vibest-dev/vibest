@@ -51,7 +51,7 @@ export const hookcli: Harness.HarnessAdapter = {
   // It reports its conversation id in its `session` hook.
   conversation: "reported",
   // No system-prompt flag: the rules go in front of the first prompt.
-  rulesInPrompt: true,
+  systemPromptInPrompt: true,
   interruptKey: "esc",
   // Hooks only: it cannot take rows itself, so vibest types them; it cannot report ready or blocked, so the runtime's
   // agent state stands for them.

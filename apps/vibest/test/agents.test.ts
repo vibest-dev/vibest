@@ -19,6 +19,7 @@ import {
   FakeRuntime,
   makeRepository,
   testLayer,
+  systemPromptFile,
   type TestOptions,
   type TestServices,
   until,
@@ -73,14 +74,12 @@ describe("agent definitions", () => {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
       const repo = yield* makeRepository
       const user = authed(yield* client, cliHeaders(repo))
       const launched = yield* user["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
-      // The entry agent is a definition (@vibest/plugin-coordinator's): its name, skills and rules, written by vibestd.
+      // The entry agent is a definition (@vibest/plugin-coordinator's): its name, skills and system prompt, from vibestd.
       assert.deepInclude(launched, { agent: "coordinator", skills: ["delegate", "pipeline"] })
-      const key = yield* (yield* Db).projectKey(launched.projectId!)
-      assert.include(yield* fs.readFileString(layout.coordinatorRules(key!)), "You are a **coordinator**")
+      assert.include(launched.systemPrompt, "You are a **coordinator**")
       const main = yield* asSession(launched.sessionId)
 
       const { id: lead } = yield* main.Spawn({ harness: "pi", agent: "lead", prompt: "lead the parser work" })
@@ -90,7 +89,7 @@ describe("agent definitions", () => {
       assert.isUndefined(
         (yield* herdr.callsTo("open")).find((c) => c.env.VIBEST_SESSION_ID === lead)?.env.VIBEST_SKILLS,
       )
-      const rules = yield* fs.readFileString(layout.rulesFile(lead))
+      const rules = yield* fs.readFileString(yield* systemPromptFile(lead))
       assert.include(rules, "You may start sessions of your own")
       assert.include(rules, "You lead a part of the work")
 

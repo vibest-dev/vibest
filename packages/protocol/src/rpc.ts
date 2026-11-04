@@ -161,10 +161,14 @@ export class DaemonStopping extends Schema.TaggedError<DaemonStopping>()("Daemon
 }
 
 /** A daemon operation or unsettled delivery that has not drained, and why. */
-/** What a main agent's start is told by its entry agent definition: the name it runs as (VIBEST_AGENT) and its skills. */
+/**
+ * What a main agent's start is told by its entry agent definition: the name it runs as (VIBEST_AGENT), its skills, and
+ * its system prompt (the definition's rules and the project's), which the starting `vibest` writes to its own $TMPDIR.
+ */
 const EntryStart = {
   agent: Schema.String,
   skills: Schema.Array(Schema.String),
+  systemPrompt: Schema.String,
 } as const
 
 export const Blocker = Schema.Struct({ id: Schema.String, reason: Schema.String })

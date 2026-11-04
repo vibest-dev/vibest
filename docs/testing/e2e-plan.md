@@ -58,7 +58,7 @@ every script check on that install, a skip failing the run (tools/verify/README.
 | 9   | Self-heal                                                                         | kill the daemon mid-turn, restart: turn ends `lost` or resumes; no blind replay                                           |
 | 10  | Startup failure                                                                   | bad model: a failed result with the error, no screen text; `vibest peek <id>` shows the pane                              |
 | 11  | Limits                                                                            | `VIBEST_MAX_SESSIONS=1`: the second `run` gets `LimitReached`                                                             |
-| 12  | Coordinator                                                                       | `vibest` in the parent workspace, resume after its pane closes, rules file written                                        |
+| 12  | Coordinator                                                                       | `vibest` in the parent workspace, resume after its pane closes, system prompt file written                                |
 
 The pattern-level stories that combine these rows are in [e2e-user-stories.md](e2e-user-stories.md).
 

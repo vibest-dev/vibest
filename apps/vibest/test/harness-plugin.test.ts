@@ -21,13 +21,13 @@ const fake: Harness.HarnessAdapter = {
   id: "fakecli",
   binary: "fakecli",
   conversation: "assigned",
-  rulesInPrompt: false,
+  systemPromptInPrompt: false,
   interruptKey: "esc",
   delivery: "type",
   reportsState: false,
   checkProvider: () => undefined,
   // A per-session config directory under scratch: how a plugin harness loads its own integration for one session.
-  launchArgs: (i) => ["--session", i.sessionId!, "--config", `${i.scratch}/fakecli`, "--rules", i.rulesFile],
+  launchArgs: (i) => ["--session", i.sessionId!, "--config", `${i.scratch}/fakecli`, "--rules", i.systemPromptFile],
   models: { args: () => ["models"], answer: () => [{ model: "m", default: true }] },
 }
 

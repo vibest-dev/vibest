@@ -17,9 +17,6 @@ export class Layout extends Context.Service<
     readonly config: string
     /** Plugins found by directory listing. */
     readonly plugins: string
-    readonly rulesFile: (id: string) => string
-    /** The Coordinator's rules for one repository, rewritten on every `vibest`. */
-    readonly coordinatorRules: (key: string) => string
     /** `worktrees/<repository>/<name>`. `name` is the recorded 4-hex leaf, not the session id. */
     readonly allocationWorktree: (repository: string, name: string) => string
     readonly project: (key: string) => string
@@ -39,8 +36,6 @@ export class Layout extends Context.Service<
         projects: path.join(home, "projects"),
         config: path.join(home, "vibest.json"),
         plugins: path.join(home, "plugins"),
-        rulesFile: (id) => path.join(home, "rules", `${id}.md`),
-        coordinatorRules: (key) => path.join(home, "coordinator", `${key}.md`),
         allocationWorktree: (repository, name) => path.join(home, "worktrees", repository, name),
         project: (key) => path.join(home, "projects", key),
         scratch: (key) => path.join(home, "projects", key, "scratch"),

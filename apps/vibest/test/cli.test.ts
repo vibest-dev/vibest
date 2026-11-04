@@ -25,6 +25,7 @@ import {
   until,
   writeResult,
   resultText,
+  systemPromptFile,
 } from "./fakes.ts"
 
 const served = Server.layer.pipe(
@@ -350,11 +351,11 @@ describe("vibest CLI", () => {
       assert.include(before.result.message, "kept finding")
       // Written into the result row, the turn end is no longer kept in memory.
       assert.strictEqual(yield* resultText(id), "")
-      assert.isTrue(yield* fs.exists(layout.rulesFile(id)))
+      assert.isTrue(yield* fs.exists(yield* systemPromptFile(id)))
 
       const archived = yield* run(["archive", id])
       assert.strictEqual(archived.code, 0, archived.stderr)
-      assert.isFalse(yield* fs.exists(layout.rulesFile(id)))
+      assert.isFalse(yield* fs.exists(yield* systemPromptFile(id)))
 
       const after = decodeJson((yield* run(["result", id])).stdout) as { id: string; result: object }
       assert.strictEqual(after.id, id)

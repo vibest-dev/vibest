@@ -1,5 +1,5 @@
-// Cursor (cursor-agent): vibest's plugin @vibest/cursor, loaded with `--plugin-dir` into each Cursor vibest starts; rules
-// in the first prompt; models from `cursor-agent models`. Not a Coordinator.
+// Cursor (cursor-agent): vibest's plugin @vibest/cursor, loaded with `--plugin-dir` into each Cursor vibest starts; the system
+// prompt in the first prompt; models from `cursor-agent models`. Not a Coordinator.
 import type { IntegrationEvent } from "@vibest/protocol/protocol"
 import { toolCallOf } from "@vibest/protocol/tools"
 
@@ -67,7 +67,7 @@ export const cursor: HarnessAdapter = {
   id: "cursor",
   binary: "cursor-agent",
   conversation: "reported",
-  rulesInPrompt: true,
+  systemPromptInPrompt: true,
   interruptKey: "ctrl+c",
   delivery: "type",
   reportsState: false,
