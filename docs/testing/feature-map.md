@@ -130,3 +130,4 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S25 | herdr hands over to a new server: the reset reconcile runs; a later close is seen within 2 s; send works          | exits: `tools/e2e` S25                                          |
 | S26 | latency of 10 send rounds and 10 pane closes: turn end to delivery p95 ≤ 1500 ms, close to exit ≤ 1000 ms         | inbox: `tools/e2e` S26                                          |
 | S27 | archive with a process working in the worktree: one look within 3 s, worktree kept, the reason names it           | exits: `tools/e2e` S27                                          |
+| S28 | vibestd killed before a spawn opened its terminal: `launch_failed`, one notice, worktree removed (or kept, named) | exits: `tools/e2e` S28                                          |

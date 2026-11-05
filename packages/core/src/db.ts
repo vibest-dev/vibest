@@ -1186,6 +1186,14 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
+    /** Whether session `id` ever had a terminal (a `process.start` with one): false for a spawn cut off before it opened. */
+    hadTerminal: (id: string) =>
+      sql<{ one: number }>`SELECT 1 AS one FROM event WHERE session_id = ${id} AND type = 'process.start'
+        AND json_extract(data, '$.terminal') != '' LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
+
     /**
      * The other sessions still live (not archived) that work in session `id`'s directory on the same machine: while
      * there is one, that directory stays.

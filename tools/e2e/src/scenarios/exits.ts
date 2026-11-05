@@ -1,4 +1,4 @@
-// What vibestd learns with no poll (feature-map S21 to S25): an exit the runtime pushes, a stop of vibestd itself in the
+// What vibestd learns with no poll (feature-map S21 to S28): an exit the runtime pushes, a stop of vibestd itself in the
 // middle of a turn or of a delivery, and a herdr server that hands over to a new one. Pi subagents and a Pi main agent
 // on the fake model of inbox.ts; vibestd, herdr and Pi are the real ones.
 import fs from "node:fs/promises"
@@ -294,6 +294,58 @@ const checks: ReadonlyArray<Check> = [
         const message = ask("after")
         await p.vibestSend(kept, message)
         await until("the send delivered", () => p.sendRow(kept, message)?.status === "delivered", 30_000)
+      } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S28",
+    title:
+      "vibestd killed (kill -9) while a subagent's start has no terminal yet: the next vibestd ends it launch_failed with one notice; its worktree is removed, or kept with the reason when the harness's tab survived",
+    run: async (w) => {
+      const p = await piProject(w, "s28")
+      try {
+        const daemon = await w.daemonPid()
+        expect(daemon !== undefined, "no vibestd pid")
+        const sub = await p.runSub("cut")
+        // `vibest run` answers once the row is stored; the start then makes the worktree and opens the terminal.
+        const startTerminal = () =>
+          row<{ t: string; ended: number }>(
+            w,
+            `SELECT json_extract(e.data, '$.terminal') AS t,
+              EXISTS (SELECT 1 FROM event x WHERE x.process_id = e.id AND x.type = 'process.end') AS ended
+            FROM event e WHERE e.session_id = ? AND e.type = 'process.start' ORDER BY e.id DESC LIMIT 1`,
+            sub,
+          )
+        const now = startTerminal()
+        expect(now?.t === "" && now.ended === 0, `the start already has a terminal: ${JSON.stringify(now)}`)
+        process.kill(daemon!, "SIGKILL")
+        await until("vibestd gone", () => !alive(daemon!), 10_000)
+        const worktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", sub)?.d ?? ""
+        expect(worktree !== "", `no worktree recorded for ${sub}`)
+        await p.startDaemon()
+        await until("the cut-off start's notice", () => p.notices(sub, "never finished starting") === 1, 30_000)
+        const end = row<{ reason: string }>(
+          w,
+          "SELECT json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ? AND type = 'process.end'",
+          sub,
+        )
+        expect(end?.reason === "launch_failed", `its process ended ${end?.reason}`)
+        const text =
+          row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", sub)
+            ?.c ?? ""
+        const kept = await fs.stat(worktree).then(
+          () => true,
+          () => false,
+        )
+        expect(
+          kept ? text.includes("has its working directory in it") : text.includes("its worktree was removed"),
+          `worktree ${kept ? "kept" : "removed"}, notice: ${text}`,
+        )
+        // Nothing more comes for it.
+        await Bun.sleep(2_000)
+        expect(p.notices(sub, "never finished starting") === 1, "more than one notice")
       } finally {
         await p.close()
       }

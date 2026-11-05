@@ -941,6 +941,30 @@ export class Sessions extends Context.Service<
         return { id, harness: harnessId, provider, model, runtime: runtimeKind, ...routing }
       }, Effect.provideContext(platform))
 
+      /**
+       * A start cut off before its terminal was recorded, its process already ended `launch_failed`. A spawn (no terminal
+       * ever) is undone as a failed launch is: its worktree goes when nothing can be lost (Remove.release), and its
+       * reserved directory when still empty. A resume or move only falls back to its previous start. One notice says so.
+       */
+      const undoCutOffStart = (h: Runtime, session: SessionRow) =>
+        Effect.gen(function* () {
+          const what = `${session.id} never finished starting (vibestd stopped while it started)`
+          if (yield* db.hadTerminal(session.id)) return yield* notice(session, `${what}.`)
+          const ended = yield* getRow(session.id)
+          const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(session.id)) ?? ""))(
+            removal.release({ h, session: ended, terminal: undefined, keepWorktree: false, reasons: [] }),
+          )
+          let kept = out.worktree === "kept" ? out.reasons.join("; ") : undefined
+          if (
+            kept !== undefined &&
+            (yield* fs.readDirectory(out.path).pipe(Effect.orElseSucceed(() => ["?"]))).length === 0
+          ) {
+            yield* fs.remove(out.path, { recursive: true }).pipe(Effect.ignore)
+            kept = undefined
+          }
+          yield* notice(session, kept === undefined ? `${what}; its worktree was removed.` : `${what}; ${kept}.`)
+        })
+
       const check = Effect.fn("Sessions.check")(function* (id: string) {
         const session = yield* db.getSession(id)
         if (!session) return
@@ -968,16 +992,20 @@ export class Sessions extends Context.Service<
         if (state === "working" || state === "blocked") yield* Ref.set(r.sawWorking, true)
         if ((yield* collectResult(h, session)) !== "none") return
         if (seen === "absent" || (state === undefined && !(yield* alive(h, terminal)))) {
-          if (session.startedAt === null) {
-            // vibestd died mid-spawn (SPEC §5.5 spawn).
-            yield* notice(session, `${id} never finished starting (vibestd restarted during spawn).`)
-          } else if (open)
+          // A start vibestd stopped in before its terminal was recorded ends as a failed start does (SPEC §5.5 spawn).
+          const cutOff = session.startedAt === null
+          if (open && !cutOff)
             yield* finish(session, "failed", "", "the session exited (its terminal is gone or its process with it)")
           // The runtime has no agent for it any more: its status is unknown, and the project workspace's live count no longer includes it.
           if (session.exitedAt === null) {
-            yield* db.updateSession(id, { status: "unknown", exitedAt: yield* Clock.currentTimeMillis })
+            yield* db.updateSession(id, {
+              status: "unknown",
+              exitedAt: yield* Clock.currentTimeMillis,
+              ...(cutOff ? { end: "launch_failed" as const } : {}),
+            })
             yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
           }
+          if (cutOff) yield* undoCutOffStart(h, session)
           yield* dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
           return
         }

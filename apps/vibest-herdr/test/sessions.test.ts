@@ -48,6 +48,7 @@ import {
   resultText,
   systemPromptFile,
   projectOf,
+  processEnds,
 } from "./fakes.ts"
 
 /** Which harness an `open` argv starts: its binary, first. */
@@ -4119,5 +4120,119 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       assert.isFalse(yield* archived(w.db, w.id))
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
+  )
+})
+
+/** The next vibestd over the same database, its reconcile done: what a stop left behind is found once. */
+const nextVibestd = (done: Effect.Effect<boolean, never, TestServices>) =>
+  Effect.gen(function* () {
+    const next = yield* Sessions.make({ maxSessions: undefined })
+    yield* until(done, (yes) => yes)
+    yield* until(next.inMemory, (m) => m.locks === 0)
+  })
+
+/**
+ * The stopped vibestd's start, held at `open` while `body` runs: its `process.start` has no terminal yet. Released
+ * (failing) afterwards, so its launch, which nothing can interrupt, ends before the test's layer closes.
+ */
+const heldAtOpen = <A, E, R, R2>(
+  target: string | undefined,
+  start: Effect.Effect<unknown, never, R2>,
+  body: Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const held = yield* (yield* FakeRuntime).hold("open", target)
+    yield* start
+    yield* held.reached
+    return yield* body.pipe(Effect.ensuring(held.release("unreachable")))
+  })
+
+describe.concurrent("after a vibestd stop", () => {
+  /** A spawn held at `open` (its worktree made) while `body` runs with its id. */
+  const cutOffSpawn = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      const repo = yield* makeRepository
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
+      const spawned = yield* Deferred.make<string>()
+      return yield* heldAtOpen(
+        undefined,
+        Effect.flatMap(Sessions, (sessions) =>
+          spawnInput(repo).pipe(
+            Effect.flatMap(sessions.spawn),
+            Effect.flatMap(({ id }) => Deferred.succeed(spawned, id)),
+            Effect.orDie,
+          ),
+        ),
+        Effect.flatMap(Deferred.await(spawned), body),
+      )
+    })
+
+  test(
+    "a spawn cut off before its terminal ends launch_failed, its worktree removed, with one notice",
+    cutOffSpawn((id) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const db = yield* Db
+        const worktree = yield* sessionWorktree(id)
+        assert.isTrue(yield* fs.exists(worktree))
+        yield* nextVibestd(Effect.map(sqlNotices(id), (n) => n.length > 0))
+        assert.deepStrictEqual(yield* processEnds(id), ["launch_failed"])
+        assert.isFalse(yield* fs.exists(worktree))
+        assert.deepStrictEqual(yield* sqlNotices(id), [
+          `${id} never finished starting (vibestd stopped while it started); its worktree was removed.`,
+        ])
+        assert.deepInclude(yield* db.getSession(id), { startedAt: null, status: "unknown" })
+      }),
+    ),
+  )
+
+  test(
+    "a spawn cut off before its terminal keeps its worktree while a process works in it, and names it",
+    cutOffSpawn((id) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        yield* (yield* FakeProcesses).setCwdUsers([4242])
+        yield* nextVibestd(Effect.map(sqlNotices(id), (n) => n.length > 0))
+        assert.deepStrictEqual(yield* processEnds(id), ["launch_failed"])
+        assert.isTrue(yield* fs.exists(yield* sessionWorktree(id)))
+        const [text] = yield* sqlNotices(id)
+        assert.include(text!, "never finished starting (vibestd stopped while it started)")
+        assert.include(text!, "process 4242 has its working directory in it")
+      }),
+    ),
+  )
+
+  test(
+    "a resume cut off before its terminal falls back to its previous start and keeps its worktree",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* idleSession(yield* makeRepository)
+      const before = (yield* db.getSession(id))!
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      yield* heldAtOpen(
+        id,
+        sessions.send(id, "next").pipe(Effect.orDie),
+        Effect.gen(function* () {
+          assert.isNull((yield* db.getSession(id))!.startedAt)
+          const cutOff = (texts: ReadonlyArray<string>) => texts.find((t) => t.includes("never finished starting"))
+          yield* nextVibestd(Effect.map(sqlNotices(id), (n) => cutOff(n) !== undefined))
+          assert.deepStrictEqual(yield* processEnds(id), ["exited", "launch_failed"])
+          const after = (yield* db.getSession(id))!
+          assert.deepStrictEqual([after.address, after.startedAt], [before.address, before.startedAt])
+          assert.isTrue(yield* fs.exists(yield* sessionWorktree(id)))
+          assert.strictEqual(
+            cutOff(yield* sqlNotices(id)),
+            `${id} never finished starting (vibestd stopped while it started).`,
+          )
+        }),
+      )
+    }),
+    { hooked: ["pi"] },
   )
 })
