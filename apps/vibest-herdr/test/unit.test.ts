@@ -2035,10 +2035,25 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
 })
 
 describe("pure", () => {
-  it("vibest below the root runs again at the root, forwarding --in-parent only when it had it", () => {
-    const argv = ["/bin/vibest", "--harness", "pi"]
-    assert.deepStrictEqual(Launch.again(argv, "/r", true), ["/bin/vibest", "--harness", "pi", "--in-parent", "/r"])
-    assert.deepStrictEqual(Launch.again(argv, "/r", false), argv)
+  it("the first harness exec applies --env over a shell rc, and does not pass VIBEST_MAIN_ENV on", () => {
+    const secret = "from-flag"
+    const child = Launch.harnessChildEnv(
+      { MAIN_PROBE: "from-rc", VIBEST_MAIN_ENV: JSON.stringify({ MAIN_PROBE: secret }), PATH: "/bin" },
+      {},
+      { VIBEST_SESSION_ID: "s" },
+    )
+    assert.strictEqual(child.MAIN_PROBE, secret)
+    assert.strictEqual(child.PATH, "/bin")
+    assert.strictEqual(child.VIBEST_SESSION_ID, "s")
+    assert.strictEqual(child.VIBEST_MAIN_ENV, undefined)
+    // An explicit --env on this command wins over the pane variable.
+    const flagged = Launch.harnessChildEnv(
+      { VIBEST_MAIN_ENV: JSON.stringify({ MAIN_PROBE: "from-pane" }) },
+      { MAIN_PROBE: "from-flag" },
+      {},
+    )
+    assert.strictEqual(flagged.MAIN_PROBE, "from-flag")
+    assert.strictEqual(flagged.VIBEST_MAIN_ENV, undefined)
   })
 
   it.effect("~/.vibest layout: VIBEST_HOME, else $HOME/.vibest; the old product's OMO_HOME is not read", () =>

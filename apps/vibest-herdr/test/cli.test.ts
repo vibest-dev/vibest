@@ -413,7 +413,8 @@ describe("vibest CLI", () => {
       assert.notInclude(open.argv.join(" "), secret)
       assert.notInclude(typed, secret)
       assert.notInclude(typed, "--env")
-      assert.strictEqual(open.env.MAIN_PROBE, secret)
+      assert.strictEqual(open.env.MAIN_PROBE, undefined)
+      assert.deepStrictEqual(JSON.parse(open.env.VIBEST_MAIN_ENV!), { MAIN_PROBE: secret })
       assert.strictEqual(open.env.VIBEST_HOME, layout.home)
     }),
   )

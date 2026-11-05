@@ -417,6 +417,8 @@ const startMain =
         )
         if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`main agent: ${describeSpawn(chosen)}`)
         // Only the start that execs asks vibestd for the session, so `--new` replaces it once.
+        // Flags, or the pane's VIBEST_MAIN_ENV when this command was typed without --env.
+        const passed = Object.keys(env).length > 0 ? env : Launch.mainEnvPairs(process.env[Launch.MAIN_ENV])
         const session = withVibest(claim, (client) =>
           Effect.gen(function* () {
             return yield* soleMainAgent(
@@ -434,7 +436,7 @@ const startMain =
                 // This process execs the harness: its PID is the harness's, which a move to another terminal signals.
                 pid: process.pid,
                 // Held in vibestd's memory only, for this harness's restart in place (vibest update).
-                ...(Object.keys(env).length > 0 ? { env } : {}),
+                ...(Object.keys(passed).length > 0 ? { env: passed } : {}),
               }),
             )
           }),
@@ -447,7 +449,9 @@ const startMain =
           passEnv: CALLER_ENV,
           session,
         }).pipe(Effect.provide(Harness.layer))
-        return yield* Effect.sync(() => exec(main.file, main.args, { ...env, ...main.env }))
+        const child = Launch.harnessChildEnv(process.env, env, main.env)
+        delete process.env[Launch.MAIN_ENV]
+        return yield* Effect.sync(() => exec(main.file, main.args, child))
       }
       // Elsewhere: a terminal in the parent workspace whose shell runs this command again. Inside herdr that terminal is
       // the runtime's to focus; outside, attach to it (like `cao launch`).
@@ -878,7 +882,9 @@ const integrationStart = (exec: Exec) =>
           runtime: got.runtime,
         }),
       }).pipe(Effect.provide(Harness.layer))
-      return yield* Effect.sync(() => exec(main.file, main.args, { ...got.env, ...main.env }))
+      const child = Launch.harnessChildEnv(process.env, got.env ?? {}, main.env)
+      delete process.env[Launch.MAIN_ENV]
+      return yield* Effect.sync(() => exec(main.file, main.args, child))
     }),
   ).pipe(Command.withDescription("Internal: the main agent's harness started again in its shell, on its conversation"))
 

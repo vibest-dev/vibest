@@ -627,37 +627,17 @@ describe("vibest.sock", () => {
       assert.notInclude(open.argv.join(" "), secret)
       assert.notInclude(typed, secret)
       assert.notInclude(typed, "--env")
-      assert.strictEqual(open.env.MAIN_PROBE, secret)
+      assert.strictEqual(open.env.MAIN_PROBE, undefined)
+      assert.deepStrictEqual(JSON.parse(open.env.VIBEST_MAIN_ENV!), { MAIN_PROBE: secret })
       assert.strictEqual(open.env.VIBEST_HOME, layout.home)
-      // The vibest in that pane reports the runtime's terminal id and is the only start that receives the pairs.
+      // Nothing is parked: a start that does not itself pass --env does not receive the pairs.
       const started = yield* c["Project.CoordinatorSession"]({
         harness: "pi",
         fresh: false,
         terminal: opened.terminal,
       })
       const again = yield* c["Session.Start"]({ id: started.sessionId })
-      assert.strictEqual(again.env?.MAIN_PROBE, secret)
-    }),
-  )
-
-  test(
-    "another pane's main-agent start does not take the --env parked for the pane Launch opened",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const raw = yield* client
-      const c = asCli(raw, repo)
-      const secret = "probe-value-9f3c"
-      yield* c.Launch({
-        argv: ["/bin/vibest", "--env", "MAIN_PROBE=" + secret],
-        focus: false,
-      })
-      const other = yield* c["Project.CoordinatorSession"]({
-        harness: "pi",
-        fresh: false,
-        terminal: "not-the-pane",
-      })
-      const started = yield* c["Session.Start"]({ id: other.sessionId })
-      assert.isUndefined(started.env?.MAIN_PROBE)
+      assert.isUndefined(again.env?.MAIN_PROBE)
     }),
   )
 

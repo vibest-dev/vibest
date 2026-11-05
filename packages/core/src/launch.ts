@@ -111,9 +111,38 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
 /** `argv` (a `vibest`) marked as run in `root`'s parent workspace, by construction: the hidden `--in-parent <root>`. */
 export const inParent = (argv: ReadonlyArray<string>, root: string) => [...argv, "--in-parent", root]
 
-/** `argv` to run again at `root` from below it: still marked when this run was, so the runtime is not asked again. */
-export const again = (argv: ReadonlyArray<string>, root: string, marked: boolean) =>
-  marked ? inParent(argv, root) : argv
+/** Pane environment for a main agent's `--env`. One name, so a shell rc cannot override the pairs. */
+export const MAIN_ENV = "VIBEST_MAIN_ENV"
+
+/** `VIBEST_MAIN_ENV` as `--env` pairs. Anything that is not a JSON object of strings is ignored. */
+export const mainEnvPairs = (raw: string | undefined): Record<string, string> => {
+  if (raw === undefined || raw === "") return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {}
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed)) if (key !== "" && typeof value === "string") out[key] = value
+  return out
+}
+
+/**
+ * The harness process environment: the current environment, then `--env` (the flags, or else `VIBEST_MAIN_ENV`),
+ * then the harness's own variables. `VIBEST_MAIN_ENV` is not passed on.
+ */
+export const harnessChildEnv = (
+  processEnv: Readonly<Record<string, string | undefined>>,
+  fromFlags: Readonly<Record<string, string>>,
+  harness: Readonly<Record<string, string>>,
+): Record<string, string> => {
+  const chosen = Object.keys(fromFlags).length > 0 ? fromFlags : mainEnvPairs(processEnv[MAIN_ENV])
+  const child: Record<string, string> = {}
+  for (const [key, value] of Object.entries(processEnv)) if (value !== undefined && key !== MAIN_ENV) child[key] = value
+  return { ...child, ...chosen, ...harness }
+}
 
 /**
  * A shell at `root` (in the project's workspace there, which the runtime keeps: a tab beside the main agent's other
