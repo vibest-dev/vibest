@@ -362,6 +362,9 @@ const checks: ReadonlyArray<Check> = [
               VIBEST_SESSION_ID: id,
               VIBEST_PROJECT_ID: String(project),
               VIBEST_HARNESS: "cursor",
+              // cursor-agent's hook shell rebuilds PATH, so the wrapper is not the first vibest. The hook runs
+              // VIBEST_COMMAND, which is how an agent vibest starts names its own binary.
+              VIBEST_COMMAND: JSON.stringify([path.join(bin, "vibest")]),
               PATH: `${bin}:${w.env().PATH}`,
             },
             timeoutMs: 300_000,
