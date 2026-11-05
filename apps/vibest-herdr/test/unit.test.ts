@@ -1606,6 +1606,57 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       }).pipe(Effect.provide(Platform.services)),
   )
 
+  it.effect(
+    "a move cut off before it is recorded leaves vibest's worktrees repaired and the project where it was; the next answer moves it",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* tempDirectory("vibest-move-")
+        yield* Effect.gen(function* () {
+          const db = yield* Db
+          const layout = yield* Layout
+          const resolve = (directory: string, move?: boolean, through = db) =>
+            Effect.flatMap(locateProject(directory), (located) => resolveProject(through, located, move))
+          const repo = path.join(dir, "a", "repo")
+          yield* fs.makeDirectory(repo, { recursive: true })
+          yield* sh(repo, "init", "-q", "-b", "main")
+          yield* sh(
+            repo,
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "i",
+          )
+          yield* sh(repo, "remote", "add", "origin", "git@github.com:O/R.git")
+          const first = yield* resolve(repo)
+          const ours = layout.allocationWorktree("repo", "ab12")
+          yield* fs.makeDirectory(path.dirname(ours), { recursive: true })
+          yield* sh(repo, "worktree", "add", "-q", "--detach", ours)
+          const moved = path.join(dir, "b", "repo")
+          yield* fs.makeDirectory(path.dirname(moved))
+          yield* fs.rename(repo, moved)
+          // vibestd stops while it records the move.
+          const stopped = { ...db, moveProject: () => Effect.die("vibestd stopped") }
+          assert.isTrue(Exit.isFailure(yield* Effect.exit(resolve(moved, true, stopped))))
+          assert.strictEqual(yield* sh(ours, "rev-parse", "--show-toplevel"), yield* fs.realPath(ours))
+          assert.strictEqual(yield* db.projectDirectory(first.id), repo)
+          assert.strictEqual((yield* Effect.flip(resolve(moved)))._tag, "ProjectMoved")
+          const done = yield* resolve(moved, true)
+          assert.deepStrictEqual("moved" in done && done.moved, { from: repo, repaired: [], manual: [] })
+          assert.deepStrictEqual(yield* db.projectAt(moved), { id: first.id, directory: moved })
+        }).pipe(
+          Effect.provide(database(path.join(dir, "vibest.db"))),
+          Effect.provide(Layer.effect(Layout, Layout.make(path.join(dir, "home")))),
+        )
+      }).pipe(Effect.provide(Platform.services)),
+  )
+
   it.effect("repository directory name is the remote's own name, or the main checkout's, not the key", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

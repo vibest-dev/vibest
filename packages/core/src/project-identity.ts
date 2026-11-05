@@ -87,8 +87,10 @@ export const resolveProject = Effect.fn("resolveProject")(function* (
   const [only] = candidates
   if (candidates.length === 1 && only !== undefined && move !== false) {
     if (move !== true) return yield* new ProjectMoved({ projectId: only.id, from: only.directory, to: located.root })
-    const from = yield* db.moveProject(only.id, located.root, located.repositories)
+    // Repaired before the move is recorded: a stop in between leaves the project where it was, so the next `vibest`
+    // asks again and repairs again (nothing left to do) before it records the move.
     const fixed = yield* repairWorktrees(located.repositories.map((r) => r.path))
+    const from = yield* db.moveProject(only.id, located.root, located.repositories)
     return { id: only.id, directory: located.root, moved: { from, ...fixed } satisfies Moved }
   }
   const id = yield* db.createProject(located.root, located.repositories)
