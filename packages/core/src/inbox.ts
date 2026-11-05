@@ -209,11 +209,6 @@ export class Inbox extends Context.Service<
             return ifMain(event.sessionId, deliver)
           case "inbox.status":
             return event.data.to === "pending" ? ifMain(event.sessionId, deliver) : Effect.void
-          // The main agent's process ended and no other took its place (not moving either): what waits for it is dropped.
-          case "process.end":
-            return ifMain(event.sessionId, (projectId) =>
-              withLock(`drop project ${projectId}`, projectId, db.dropWaiting(projectId, "absent")),
-            )
           case "live.state":
             return db
               .coordinatorAt(event.runtime, event.terminal)
