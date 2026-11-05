@@ -1955,11 +1955,6 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows[0]?.project),
         Effect.orDie,
       ),
-
-    /** The one write path for an event row. Dies outside `tx`. */
-    append,
-    /** One transaction; publishes its appended rows after commit. */
-    tx,
   }
 })
 

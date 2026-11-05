@@ -1,9 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Bus, type EngineEvent } from "@vibest/core/bus"
+import { Bus, type EngineEvent, type StoredEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Runtimes } from "@vibest/core/runtimes"
 import type { Runtime } from "@vibest/plugin"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, PubSub } from "effect"
+import { Cause, Effect, Exit, Layer, PubSub } from "effect"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
@@ -33,8 +33,7 @@ const session = {
   lastActive: 1,
 }
 
-const isStored = (event: EngineEvent): event is EngineEvent & { id: number; data: Readonly<Record<string, unknown>> } =>
-  "id" in event
+const isStored = (event: EngineEvent): event is StoredEvent => "id" in event
 
 describe("bus", () => {
   it.effect("a commit publishes in id order", () =>
@@ -44,31 +43,14 @@ describe("bus", () => {
         const bus = yield* Bus
         yield* db.insertSession(session, yield* projectOf("r"))
         const sub = yield* bus.subscribe
-        const ids = yield* db.tx(
-          Effect.gen(function* () {
-            const first = yield* db.append({
-              sessionId: session.id,
-              type: "process.conversation",
-              data: { n: 1 },
-            })
-            const second = yield* db.append({
-              sessionId: session.id,
-              type: "process.conversation",
-              data: { n: 2 },
-            })
-            assert.deepStrictEqual(yield* PubSub.takeUpTo(sub, 10), [])
-            return [first, second]
-          }),
-        )
-        const published = yield* PubSub.takeUpTo(sub, 10)
+        // One transaction: the old process ends, the next one starts.
+        yield* db.restartProcess(session.id)
+        const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
         assert.deepStrictEqual(
-          published.map((event) => (isStored(event) ? event.id : 0)),
-          ids,
+          published.map((event) => event.type),
+          ["process.end", "process.start"],
         )
-        assert.deepStrictEqual(
-          published.map((event) => (isStored(event) ? event.data.n : 0)),
-          [1, 2],
-        )
+        assert.isBelow(published[0]!.id, published[1]!.id)
       }),
     ).pipe(Effect.provide(dbLayer)),
   )
@@ -80,99 +62,41 @@ describe("bus", () => {
         const bus = yield* Bus
         const sql = yield* SqlClient.SqlClient
         yield* db.insertSession(session, yield* projectOf("r"))
+        const before = yield* sql<{ n: number }>`SELECT count(*) AS n FROM event`
+        // The restart's process.end is appended, then its process.start fails: the whole transaction rolls back.
+        yield* sql.unsafe(`CREATE TEMP TRIGGER refuse BEFORE INSERT ON event WHEN NEW.type = 'process.start'
+          BEGIN SELECT RAISE(ABORT, 'refused'); END`)
         const sub = yield* bus.subscribe
-        const exit = yield* db
-          .tx(
-            Effect.gen(function* () {
-              yield* db.append({ sessionId: session.id, type: "process.conversation", data: { n: "no" } })
-              return yield* Effect.fail("rollback")
-            }),
-          )
-          .pipe(Effect.exit)
-        assert.isTrue(Exit.isFailure(exit))
+        const exit = yield* db.restartProcess(session.id).pipe(Effect.exit)
+        assert.isTrue(Exit.isFailure(exit) && Cause.hasDies(exit.cause))
         assert.deepStrictEqual(yield* PubSub.takeUpTo(sub, 10), [])
-        const left = yield* sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE json_extract(data, '$.n') = 'no'`
-        assert.strictEqual(left[0]?.n, 0)
+        assert.deepStrictEqual(yield* sql<{ n: number }>`SELECT count(*) AS n FROM event`, before)
       }),
     ).pipe(Effect.provide(dbLayer)),
   )
 
-  it.effect("a nested tx publishes once", () =>
+  it.effect("a nested tx publishes once, after the outer commit", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const db = yield* Db
         const bus = yield* Bus
-        yield* db.insertSession(session, yield* projectOf("r"))
+        const project = yield* projectOf("r")
+        yield* db.coordinatorLaunch(project, "pi", false, {
+          runtime: "bench",
+          address: { machine: "bench", id: "main" },
+        })
+        yield* db.insertSession(session, project)
+        const notice = (text: string) =>
+          db.insertInbox({ sessionId: session.id, kind: "notice", message: text, details: {} })
+        const rows = [yield* notice("one"), yield* notice("two")]
+        yield* db.claim(rows.map((row) => row.id))
         const sub = yield* bus.subscribe
-        yield* db.tx(
-          Effect.gen(function* () {
-            yield* db.append({ sessionId: session.id, type: "process.conversation", data: { n: 1 } })
-            yield* db.tx(
-              db.append({ sessionId: session.id, type: "process.conversation", data: { n: 2 } }).pipe(Effect.asVoid),
-            )
-            assert.deepStrictEqual(yield* PubSub.takeUpTo(sub, 10), [])
-          }),
-        )
-        assert.strictEqual((yield* PubSub.takeUpTo(sub, 10)).length, 2)
-      }),
-    ).pipe(Effect.provide(dbLayer)),
-  )
-
-  it.effect("append outside tx dies", () =>
-    Effect.gen(function* () {
-      const db = yield* Db
-      const exit = yield* db.append({ sessionId: session.id, type: "process.conversation", data: {} }).pipe(Effect.exit)
-      assert.isTrue(Exit.isFailure(exit) && Cause.hasDies(exit.cause))
-    }).pipe(Effect.provide(dbLayer)),
-  )
-
-  it.effect("append from a fiber forked inside tx dies", () =>
-    Effect.gen(function* () {
-      const db = yield* Db
-      yield* db.insertSession(session, yield* projectOf("r"))
-      const exit = yield* db.tx(
-        Effect.gen(function* () {
-          const child = yield* db
-            .append({ sessionId: session.id, type: "process.conversation", data: { n: "fork" } })
-            .pipe(Effect.forkChild)
-          return yield* Fiber.join(child).pipe(Effect.exit)
-        }),
-      )
-      assert.match(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "", /append from the transaction fiber/)
-    }).pipe(Effect.provide(dbLayer)),
-  )
-
-  it.effect("append after commit through a kept reference dies", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const db = yield* Db
-        const bus = yield* Bus
-        yield* db.insertSession(session, yield* projectOf("r"))
-        const sub = yield* bus.subscribe
-        const scope = yield* Effect.scope
-        const gate = yield* Deferred.make<void>()
-        const done = yield* Deferred.make<string>()
-        yield* db.tx(
-          Effect.gen(function* () {
-            yield* db.append({ sessionId: session.id, type: "process.conversation", data: { n: 1 } })
-            yield* Effect.forkIn(
-              Effect.gen(function* () {
-                yield* Deferred.await(gate)
-                const exit = yield* db
-                  .append({ sessionId: session.id, type: "process.conversation", data: { n: 2 } })
-                  .pipe(Effect.exit)
-                yield* Deferred.succeed(done, Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "")
-              }),
-              scope,
-            )
-          }),
-        )
-        const published = yield* PubSub.takeUpTo(sub, 10)
-        yield* Deferred.succeed(gate, void 0)
-        assert.match(yield* Deferred.await(done), /append from the transaction fiber/)
+        // recoverSending is one transaction around two inner ones (moveInbox), each publishing nothing itself.
+        yield* db.recoverSending([])
+        const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
         assert.deepStrictEqual(
-          published.map((event) => (isStored(event) ? event.data.n : 0)),
-          [1],
+          published.map((event) => [event.type, event.inboxId, event.data.to]),
+          rows.map((row) => ["inbox.status", row.id, "failed"]),
         )
       }),
     ).pipe(Effect.provide(dbLayer)),
