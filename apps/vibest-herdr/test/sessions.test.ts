@@ -46,7 +46,6 @@ import {
   untilVirtual,
   writeResult,
   resultText,
-  dropResult,
   systemPromptFile,
   projectOf,
 } from "./fakes.ts"
@@ -951,8 +950,6 @@ describe.concurrent("Sessions", () => {
           Effect.orDie,
         )
 
-      // No result file of an earlier turn to stand in for this one's.
-      yield* dropResult(id)
       // herdr takes the first message's prompt and then refuses it; the second message is accepted meanwhile.
       const held = yield* herdr.hold("send", id)
       yield* sessions.send(id, "first")
@@ -995,7 +992,6 @@ describe.concurrent("Sessions", () => {
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      yield* dropResult(id)
       const notices = sqlNotices(id)
 
       const held = yield* herdr.hold("send", id)
@@ -1933,7 +1929,6 @@ describe.concurrent("Sessions", () => {
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      yield* dropResult(id)
       yield* sessions.userPrompt(id, "typed follow-up")
       yield* writeResult(id, "pi", { error: "rate_limit" })
       yield* herdr.endTurn(id)
@@ -1952,7 +1947,6 @@ describe.concurrent("Sessions", () => {
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      yield* dropResult(id)
       yield* sessions.send(id, "add tests")
       yield* until(herdr.callsTo("send"), (calls) => calls.at(-1)?.text === "add tests")
       yield* writeResult(id, "pi", { error: "rate_limit" })
@@ -1972,7 +1966,6 @@ describe.concurrent("Sessions", () => {
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      yield* dropResult(id)
       const held = yield* herdr.hold("state", id)
       yield* sessions.send(id, "add tests")
       yield* held.reached

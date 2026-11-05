@@ -1769,10 +1769,12 @@ const make = Effect.gen(function* () {
       ).pipe(Effect.orDie),
 
     /**
-     * Session `id`'s latest `turn.reported`, if it came after the fence: `ready`, the current process's latest
+     * Session `id`'s latest `turn.reported`, if it came after the fence: `ready`, the current process's first
      * `process.ready` its integration wrote (none yet: no report counts); `start`, the current `process.start` (a
-     * harness whose ready comes from the runtime). A harness ends a turn only after it is ready, so a report at or
-     * before the fence is an earlier harness's (a restart's or a move's). Ids, not times: a ready's `at` can be backfilled.
+     * harness whose ready comes from the runtime). A harness ends a turn only after it is first ready, so a report at or
+     * before the fence is an earlier harness's (a restart's or a move's). The first, not the latest: the same harness
+     * reports ready again on a plugin reload or a new conversation, and its unconsumed report still counts. Ids, not
+     * times: a ready's `at` can be backfilled.
      * Undefined too when a `turn.end` already consumed it: a report is one turn's end, taken once.
      */
     latestReport: (id: string, fence: "ready" | "start") =>
@@ -1782,7 +1784,7 @@ const make = Effect.gen(function* () {
         FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' AND r.id > ${
           fence === "start"
             ? currentStart(sql`${id}`)
-            : sql`(SELECT max(e.id) FROM event e WHERE e.process_id = ${currentStart(sql`${id}`)}
+            : sql`(SELECT min(e.id) FROM event e WHERE e.process_id = ${currentStart(sql`${id}`)}
                 AND e.type = 'process.ready' AND json_extract(e.data, '$.pidOnly') IS NULL)`
         }
         ORDER BY r.id DESC LIMIT 1`.pipe(

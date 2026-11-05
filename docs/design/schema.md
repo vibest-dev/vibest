@@ -190,8 +190,10 @@ rendered result (the result row's content). Rows written before `report` keep th
 A `turn.reported`'s `process_id` is the session's current process when vibestd received the hook, not the harness
 that sent it: in a restart's window the new `process.start` is already written while the old harness still reports,
 so that report carries the new process. What keeps it out is a fence on event ids: a report counts only when its id
-is above the current process's latest `process.ready` its integration wrote (a harness ends a turn only after it is
-ready), or above the current `process.start` for a harness whose ready comes from the runtime (Cursor).
+is above the current process's first `process.ready` its integration wrote (a harness ends a turn only after it is
+ready), or above the current `process.start` for a harness whose ready comes from the runtime (Cursor). The first,
+not the latest: the same harness reports ready again (a plugin reload, a new conversation), and a report written
+before that and not yet consumed still counts. A report a `turn.end` consumed is not taken again.
 
 ## Hot paths
 

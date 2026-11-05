@@ -4,7 +4,7 @@ import { Db } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { Sessions } from "@vibest/core/sessions"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Effect, type Scope } from "effect"
+import { Clock, Effect, type Scope } from "effect"
 
 import {
   eventsOf,
@@ -63,6 +63,21 @@ describe("turn.reported", () => {
       assert.notInclude(message, "summary: first")
       yield* sessions.check(id)
       assert.strictEqual(yield* resultCount(id), 1)
+    }),
+  )
+
+  test(
+    "a report written before the same harness reports ready again still counts",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      yield* writeResult(id, "pi", { text: "status: completed\nsummary: before the reload" })
+      // A plugin reload (or a new conversation) in the same harness: a second ready, after the report.
+      yield* db.patchLive(id, { ready: yield* Clock.currentTimeMillis })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "summary: before the reload")
     }),
   )
 

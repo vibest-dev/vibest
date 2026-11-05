@@ -110,15 +110,6 @@ export const startedSince = (id: string, at: number) =>
     return yield* (yield* TurnEnds).startedSince(id, at)
   })
 
-/**
- * Put every report so far out of reach: the harness reports ready again, so only a later report counts (the fence in
- * `Db.latestReport`). Tests need this because the clock is frozen and a report's time can sit after the next prompt.
- */
-export const dropResult = (id: string) =>
-  Effect.gen(function* () {
-    yield* (yield* Db).patchLive(id, { ready: yield* Clock.currentTimeMillis })
-  })
-
 /** git in tests: a failure is a bug in the test. */
 export const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
 
