@@ -1773,19 +1773,22 @@ const make = Effect.gen(function* () {
      * `process.ready` its integration wrote (none yet: no report counts); `start`, the current `process.start` (a
      * harness whose ready comes from the runtime). A harness ends a turn only after it is ready, so a report at or
      * before the fence is an earlier harness's (a restart's or a move's). Ids, not times: a ready's `at` can be backfilled.
+     * Undefined too when a `turn.end` already consumed it: a report is one turn's end, taken once.
      */
     latestReport: (id: string, fence: "ready" | "start") =>
-      sql<{ id: number; at: number; data: string }>`SELECT id, at, data FROM event
-        WHERE session_id = ${id} AND type = 'turn.reported' AND id > ${
+      sql<{ id: number; at: number; data: string; consumed: number }>`SELECT r.id, r.at, r.data,
+        EXISTS (SELECT 1 FROM event te WHERE te.session_id = ${id} AND te.type = 'turn.end'
+          AND json_extract(te.data, '$.report') = r.id) AS consumed
+        FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' AND r.id > ${
           fence === "start"
             ? currentStart(sql`${id}`)
             : sql`(SELECT max(e.id) FROM event e WHERE e.process_id = ${currentStart(sql`${id}`)}
                 AND e.type = 'process.ready' AND json_extract(e.data, '$.pidOnly') IS NULL)`
         }
-        ORDER BY id DESC LIMIT 1`.pipe(
+        ORDER BY r.id DESC LIMIT 1`.pipe(
         Effect.map((rows) => {
           const row = rows[0]
-          if (row === undefined) return undefined
+          if (row === undefined || row.consumed) return undefined
           const data = JSON.parse(row.data) as {
             harness?: unknown
             text?: unknown

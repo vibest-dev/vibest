@@ -80,4 +80,21 @@ describe("turn.reported", () => {
       assert.isUndefined(yield* db.latestInbox(id, "result"))
     }),
   )
+
+  test(
+    "a consumed report is not the next turn's, even when that turn was prompted before the report's time",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      // Received 1 s after the frozen now: the next prompt, stamped now, is earlier than the report.
+      yield* writeResult(id, "pi", { text: "status: completed\nsummary: first" })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      assert.strictEqual(yield* resultCount(id), 1)
+      yield* db.updateSession(id, { turnState: "open", turnPromptedAt: 0 })
+      yield* sessions.check(id)
+      assert.strictEqual(yield* resultCount(id), 1)
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+    }),
+  )
 })
