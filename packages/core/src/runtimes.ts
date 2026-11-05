@@ -5,6 +5,8 @@ import { NoRuntime } from "@vibest/schema/session"
 // checking it is loaded and online; which runtime a start uses is the choice plugin's decision (§4).
 import { Cause, Context, Effect, FileSystem, Layer, PubSub, type Scope, Stream } from "effect"
 
+import { Bus, type LiveEvent } from "./bus.ts"
+
 export { NoRuntime }
 
 export type Runtime = VibestPlugin.Runtime.Runtime
@@ -37,8 +39,20 @@ export interface RuntimesShape {
   readonly online: (runtime: Runtime, machine: Machine) => Effect.Effect<void, NoRuntime>
 }
 
-const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape, never, Scope.Scope> =>
+const live = (kind: string, event: RuntimeEvent): LiveEvent => {
+  switch (event.type) {
+    case "state":
+      return { type: "live.state", runtime: kind, terminal: event.terminal, state: event.state }
+    case "exited":
+      return { type: "live.exited", runtime: kind, terminal: event.terminal }
+    case "reset":
+      return { type: "live.reset", runtime: kind, machine: event.machine }
+  }
+}
+
+const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape, never, Bus | Scope.Scope> =>
   Effect.gen(function* () {
+    const bus = yield* Bus
     // The plugin host registers and unregisters sequentially (one supervisor consumer), so one slot is enough.
     let registered: ReadonlyArray<Runtime> = initial
     const events = yield* PubSub.unbounded<RuntimeEvent>()
@@ -47,7 +61,9 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
       runtime.events === undefined
         ? Effect.void
         : runtime.events.pipe(
-            Stream.runForEach((event) => PubSub.publish(events, event)),
+            Stream.runForEach((event) =>
+              PubSub.publish(events, event).pipe(Effect.andThen(bus.observe(live(runtime.kind, event)))),
+            ),
             Effect.catchCause(() => Effect.void),
             Effect.forkIn(scope),
           )
@@ -69,6 +85,8 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
               registered = registered.filter((loaded) => loaded !== runtime)
             }),
           )
+          // This phase has one machine. A later runtime with several publishes one reset per machine.
+          yield* bus.observe({ type: "live.reset", runtime: runtime.kind, machine: "local" })
         }),
       all: Effect.sync(() => registered),
       route: (kind) =>

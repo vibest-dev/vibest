@@ -1,4 +1,5 @@
 import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
+import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harness } from "@vibest/core/harness"
@@ -117,6 +118,8 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provide(Drain.layer),
     Layer.provide(Restarting.layer),
     Layer.provide(TurnEnds.layer),
+    // Below Db, Runtimes and Drain: one bus, so a commit is visible to whoever subscribed first.
+    Layer.provide(Bus.layer),
   )
 
 /**

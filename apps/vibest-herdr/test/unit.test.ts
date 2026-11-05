@@ -3,6 +3,7 @@ import url from "node:url"
 
 // Pure pieces (SPEC §15 Unit tests): sqlite, HarnessAdapter argv, result files and reports, git state.
 import { assert, describe, it, layer } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
 import { APPLICATION_ID, Db, encodeAddress, SCHEMA_VERSION, type SessionRow } from "@vibest/core/db"
 import {
   type CoordinatorInput,
@@ -38,7 +39,7 @@ import * as Platform from "#platform"
 
 import { makeRepository, sh, tempDirectory, TURNS, projectOf } from "./fakes.ts"
 
-const database = (filename: string) => Db.layer.pipe(Layer.provide(Platform.sqlite(filename)))
+const database = (filename: string) => Db.layer.pipe(Layer.provide(Platform.sqlite(filename)), Layer.provide(Bus.layer))
 
 const session = (id: string, patch: Partial<Omit<SessionRow, "projectId">> = {}): Omit<SessionRow, "projectId"> => ({
   id,
@@ -287,11 +288,13 @@ describe("Db", () => {
         assert.deepStrictEqual(yield* db.listSessions(), [])
         const deleted = yield* Effect.exit(sql`DELETE FROM project WHERE key = 'r'`)
         assert.isTrue(Exit.isFailure(deleted))
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
 
   const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
-    program.pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")))))
+    program.pipe(
+      Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer))),
+    )
 
   it.effect(
     "rescheduleSource: the open round's input, the trailing delivered user or parent run, and the parent id",
@@ -627,7 +630,7 @@ describe("Db", () => {
           (yield* sql`SELECT * FROM session WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`)[0],
           "status",
         )
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
 
   it.effect("a result goes to the parent while it has not ended, then to the project's current main session", () =>
@@ -666,7 +669,7 @@ describe("Db", () => {
       yield* sql`UPDATE session SET ended_at = 1 WHERE id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'`
       yield* round("two")
       assert.strictEqual(yield* recipient, "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
-    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
 
   it.effect("sessionBriefs: the task is the session's task row; latest is its newest turn", () =>
@@ -752,7 +755,7 @@ describe("Db", () => {
       })
       assert.isUndefined(briefs.get("00000000-0000-4000-8000-000000000000"))
       assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
-    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:"))))),
+    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
   it.effect("a result with no coordinator is dropped; a claim takes a pending row once", () =>
     fresh(
@@ -854,6 +857,7 @@ describe("Db", () => {
           }),
         ).pipe(Layer.provide(Platform.sqlite(file))),
       ),
+      Layer.provide(Bus.layer),
     )
 
   it.effect("an empty file initializes atomically, reopens, and allows one coordinator per project", () =>
@@ -874,7 +878,7 @@ describe("Db", () => {
           first.sessionId,
         )
         return first.sessionId
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(file)))))
+      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(file)), Layer.provide(Bus.layer))))
       assert.strictEqual(
         yield* Effect.gen(function* () {
           const db = yield* Db
@@ -1075,14 +1079,16 @@ describe("Db", () => {
       const file = yield* fileAt(dir, "vibest.db")
       const script = yield* fileAt(dir, "open.ts")
       const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/db.ts", import.meta.url))
+      const busModule = url.fileURLToPath(new URL("../../../packages/core/src/bus.ts", import.meta.url))
       const platformModule = url.fileURLToPath(new URL("../src/platform/bun.ts", import.meta.url))
       yield* fs.writeFileString(
         script,
         [
           'import { Effect, Layer } from "effect"',
+          `import { Bus } from ${JSON.stringify(busModule)}`,
           `import { Db } from ${JSON.stringify(dbModule)}`,
           `import * as Platform from ${JSON.stringify(platformModule)}`,
-          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!))))))",
+          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!)), Layer.provide(Bus.layer)))))",
           "",
         ].join("\n"),
       )

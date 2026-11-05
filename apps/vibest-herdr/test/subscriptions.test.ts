@@ -1,5 +1,6 @@
 // Subscription polls and `vibest subscriptions`. CLIs, the keychain and HTTP are fakes: nothing here touches the network.
 import { assert, describe, it } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
 import { Harness, HarnessUnavailable } from "@vibest/core/harness"
 import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Keychain, securityArgs } from "@vibest/core/keychain"
 import { Layout } from "@vibest/core/paths"
@@ -399,7 +400,12 @@ describe("subscriptions", () => {
           harnesses: [{ harness: "pi", available: true }],
         })
         return { seen, list: yield* subs.list }
-      }).pipe(Effect.provide(Subscriptions.layer), Effect.provide(Runtimes.layer), Effect.scoped)
+      }).pipe(
+        Effect.provide(Subscriptions.layer),
+        Effect.provide(Runtimes.layer),
+        Effect.provide(Bus.layer),
+        Effect.scoped,
+      )
       assert.deepStrictEqual(listed.seen, listed.list)
       assert.deepStrictEqual(listed.list[0]?.limits, limits)
       assert.strictEqual(listed.list[0]?.provider, "example-proxy")

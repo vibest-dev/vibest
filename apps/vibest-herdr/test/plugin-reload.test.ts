@@ -3,6 +3,7 @@ import module from "node:module"
 // Plugins phase 2 (plugins.md §6 P16–P19): reloading keeps the unchanged prefix, falls back to the last working
 // revision, coalesces bursts of saves, and never makes a spawn wait more than ACTIVATION_WAIT.
 import { assert, describe, it } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, type Candidate, makeHost, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
@@ -67,7 +68,13 @@ const ids = (host: Effect.Success<ReturnType<typeof makeHost>>) =>
 const takeEvents = Effect.sync(() => events.splice(0))
 
 const host = <A, E>(f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Effect.Effect<A, E>) =>
-  makeHost().pipe(Effect.flatMap(f), Effect.scoped, Effect.provide(Subscriptions.layer), Effect.provide(Runtimes.layer))
+  makeHost().pipe(
+    Effect.flatMap(f),
+    Effect.scoped,
+    Effect.provide(Subscriptions.layer),
+    Effect.provide(Runtimes.layer),
+    Effect.provide(Bus.layer),
+  )
 
 describe("plugins: activation", () => {
   it.effect(
@@ -395,6 +402,7 @@ const supervise = (dir: string) =>
     Layer.provide(Subscriptions.layer),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(Runtimes.layer),
+    Layer.provide(Bus.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),
     Effect.map((plugins) => ({

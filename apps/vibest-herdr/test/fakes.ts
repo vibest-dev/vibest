@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 
 import { readPing } from "@vibest/client/client"
+import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harness, Harnesses, HARNESS_IDS, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
@@ -524,6 +525,7 @@ const over = (options: TestOptions) => {
       Layer.provideMerge(Restarting.layer),
       Layer.provideMerge(TurnEnds.layer),
       Layer.provideMerge(Platform.services),
+      Layer.provideMerge(Bus.layer),
     ),
   )
 }

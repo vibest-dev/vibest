@@ -5,6 +5,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import { SqliteClient } from "@effect/sql-sqlite-bun"
+import { Bus } from "@vibest/core/bus"
 import { Db, SQL_NAMES } from "@vibest/core/db"
 import { Effect, Layer } from "effect"
 
@@ -115,7 +116,10 @@ const seed = (file: string, directory: string, n: number) =>
     }
   }).pipe(
     Effect.provide(
-      Db.layer.pipe(Layer.provide(SqliteClient.layer({ filename: file, disableWAL: true, ...SQL_NAMES }))),
+      Db.layer.pipe(
+        Layer.provide(SqliteClient.layer({ filename: file, disableWAL: true, ...SQL_NAMES })),
+        Layer.provide(Bus.layer),
+      ),
     ),
     Effect.scoped,
   )

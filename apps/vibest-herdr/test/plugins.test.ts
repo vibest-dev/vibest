@@ -1,5 +1,6 @@
 // Plugins (plugins.md §6): finding and loading from VIBEST_HOME, and the spawn hook's rules through Sessions.spawn.
 import { assert, describe, it } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { AgentRefused, Builtins, pluginEntries, PluginLoader, Plugins } from "@vibest/core/plugins"
@@ -390,7 +391,12 @@ describe("plugins: spawn hook", () => {
           ["ok", "active", undefined],
         ],
       )
-    }).pipe(Effect.scoped, Effect.provide(Subscriptions.layer), Effect.provide(Runtimes.layer)),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Subscriptions.layer),
+      Effect.provide(Runtimes.layer),
+      Effect.provide(Bus.layer),
+    ),
   )
 })
 
@@ -419,6 +425,7 @@ const loaded = (dir: string) =>
     Layer.provide(Subscriptions.layer),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(Runtimes.layer),
+    Layer.provide(Bus.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),
   )
