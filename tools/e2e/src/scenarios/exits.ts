@@ -1,4 +1,4 @@
-// What vibestd learns with no poll (feature-map S21 to S30): an exit the runtime pushes, a stop of vibestd itself in the
+// What vibestd learns with no poll (feature-map S21 to S31): an exit the runtime pushes, a stop of vibestd itself in the
 // middle of a turn or of a delivery, and a herdr server that hands over to a new one. Pi subagents and a Pi main agent
 // on the fake model of inbox.ts; vibestd, herdr and Pi are the real ones.
 import { Database } from "bun:sqlite"
@@ -33,10 +33,10 @@ const piProject = async (w: World, name: string) => {
     timeoutMs: 90_000,
   })
   const q = <A>(sql: string, ...args: Array<string | number>) => row<A>(w, sql, ...args)
-  const runSub = async (task: string) =>
+  const runSub = async (task: string, ...flags: Array<string>) =>
     (
       JSON.parse(
-        await w.ok(["run", "pi", "--session", session, "--env", pi, "--", ask(task)], {
+        await w.ok(["run", "pi", "--session", session, "--env", pi, ...flags, "--", ask(task)], {
           cwd: repo,
           env,
           timeoutMs: 90_000,
@@ -461,6 +461,53 @@ const checks: ReadonlyArray<Check> = [
         expect(p.notices(sub, "") === 0, "a notice for a clean finish")
         await w.ok(["archive", sub], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
         expect(!(await exists()), `vibest archive kept the worktree ${worktree}`)
+      } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S31",
+    title:
+      "vibest run --archive-on-completion, vibestd killed (kill -9) after the completed result was delivered and before the archive: the next vibestd archives it once, with no notice",
+    run: async (w) => {
+      const p = await piProject(w, "s31")
+      try {
+        const state = (id: string) =>
+          row<{ status: string | null; ended: number | null }>(
+            w,
+            `SELECT (SELECT status FROM inbox WHERE sender_session_id = s.id AND kind = 'result' ORDER BY id DESC LIMIT 1)
+              AS status, s.ended_at AS ended FROM session s WHERE s.id = ?`,
+            id,
+          )
+        // The window is from the result's delivery to the archive's mark: a try that misses it (archived before the
+        // kill) is not this case, so the next subagent tries again.
+        let sub = ""
+        for (let attempt = 1; sub === "" && attempt <= 5; attempt++) {
+          const daemon = await w.daemonPid()
+          expect(daemon !== undefined, "no vibestd pid")
+          const id = await p.runSub(`a${attempt}`, "--archive-on-completion")
+          await until(`${id} held`, () => p.model.held() > 0, 60_000)
+          p.model.releaseOne()
+          for (const deadline = Date.now() + 60_000; state(id)?.status !== "delivered"; await Bun.sleep(1))
+            expect(Date.now() < deadline, `${id}: its result was never delivered`)
+          process.kill(daemon!, "SIGKILL")
+          await until("vibestd gone", () => !alive(daemon!), 10_000)
+          if (state(id)?.ended === null) sub = id
+          await p.startDaemon()
+        }
+        expect(sub !== "", "every try archived the session before vibestd was killed")
+        await until("archived", () => state(sub)?.ended !== null, 30_000)
+        const ends = () =>
+          row<{ n: number; reason: string }>(
+            w,
+            "SELECT count(*) AS n, json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ? AND type = 'process.end'",
+            sub,
+          )
+        await until("its process ended", () => ends()?.n === 1, 30_000)
+        await Bun.sleep(2_000)
+        expect(ends()?.n === 1 && ends()?.reason === "archived", `its process ends: ${JSON.stringify(ends())}`)
+        expect(p.notices(sub, "") === 0, "a notice for a clean archive")
       } finally {
         await p.close()
       }

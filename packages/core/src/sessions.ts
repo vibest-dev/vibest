@@ -1529,6 +1529,21 @@ export class Sessions extends Context.Service<
             `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,
           )
           yield* Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: 8, discard: true })
+          // `--archive-on-completion` whose delivered result's archive a stop cut off: its latest result looked at once
+          // (archiveDelivered re-reads every condition under the session's lock). A runtime not registered yet is
+          // looked at by the reconcile its registration runs.
+          yield* Effect.forEach(
+            rows.filter((row) => row.metadata.archive),
+            (row) =>
+              Effect.all([db.latestInbox(row.id, "result"), live(row).pipe(Effect.option)]).pipe(
+                Effect.flatMap(([latest, routed]) =>
+                  latest === undefined || Option.isNone(routed) ? Effect.void : archiveDelivered(latest),
+                ),
+                logged(`archive ${row.id}`),
+                Effect.provideContext(platform),
+              ),
+            { concurrency: 8, discard: true },
+          )
           for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
         })
 

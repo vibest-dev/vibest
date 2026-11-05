@@ -4346,4 +4346,41 @@ describe.concurrent("after a vibestd stop", () => {
     }),
     { hooked: ["pi"] },
   )
+
+  /** An idle `--archive-on-completion` session whose completed result was delivered, its archive cut off by a stop. */
+  const deliveredNotArchived = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const w = yield* idleSession(yield* makeRepository)
+    yield* sql`UPDATE session SET archive_on_completion = 1 WHERE id = ${w.id}`.pipe(Effect.orDie)
+    const result = (yield* w.db.latestInbox(w.id, "result"))!
+    assert.strictEqual(result.details.status, "completed")
+    yield* w.db.setInboxStatus([result.id], "delivered")
+    return w
+  })
+
+  test(
+    "a session whose completed result was delivered before its archive is archived by the next vibestd, with no notice",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const { id, db } = yield* deliveredNotArchived
+      const worktree = yield* sessionWorktree(id)
+      yield* nextVibestd(Effect.map(db.getSession(id), (w) => !!w?.metadata.archived && w.exitedAt !== null))
+      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
+      assert.isFalse(yield* fs.exists(worktree))
+      assert.deepStrictEqual(yield* sqlNotices(id), [])
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "a session with archive-on-completion that has a message pending is left to it by the next vibestd",
+    Effect.gen(function* () {
+      const { id, db } = yield* deliveredNotArchived
+      const sent = (yield* db.insertSend(id, "more"))!
+      yield* nextVibestd(Effect.map(db.inboxWithStatus(id, "pending"), (rows) => !rows.some((r) => r.id === sent.id)))
+      yield* settled
+      assert.isUndefined((yield* db.getSession(id))!.metadata.archived)
+    }),
+    { hooked: ["pi"] },
+  )
 })
