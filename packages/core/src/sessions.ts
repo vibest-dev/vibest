@@ -618,7 +618,6 @@ export class Sessions extends Context.Service<
       const rounds = sessionRounds({
         db,
         inbox,
-        turnEnds,
         harnesses,
         track,
         lock: locks.withLock,
@@ -1423,7 +1422,6 @@ export class Sessions extends Context.Service<
         harnesses,
         processes,
         restarting,
-        turnEnds,
         inbox,
         scope,
         locked: (id) => locked(id),

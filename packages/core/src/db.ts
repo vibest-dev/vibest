@@ -1763,10 +1763,21 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /** The latest `turn.reported` for session `id`. Undefined when it never reported one. */
-    latestReport: (id: string) =>
+    /**
+     * Session `id`'s latest `turn.reported`, if it came after the fence: `ready`, the current process's latest
+     * `process.ready` its integration wrote (none yet: no report counts); `start`, the current `process.start` (a
+     * harness whose ready comes from the runtime). A harness ends a turn only after it is ready, so a report at or
+     * before the fence is an earlier harness's (a restart's or a move's). Ids, not times: a ready's `at` can be backfilled.
+     */
+    latestReport: (id: string, fence: "ready" | "start") =>
       sql<{ id: number; at: number; data: string }>`SELECT id, at, data FROM event
-        WHERE session_id = ${id} AND type = 'turn.reported' ORDER BY id DESC LIMIT 1`.pipe(
+        WHERE session_id = ${id} AND type = 'turn.reported' AND id > ${
+          fence === "start"
+            ? currentStart(sql`${id}`)
+            : sql`(SELECT max(e.id) FROM event e WHERE e.process_id = ${currentStart(sql`${id}`)}
+                AND e.type = 'process.ready' AND json_extract(e.data, '$.pidOnly') IS NULL)`
+        }
+        ORDER BY id DESC LIMIT 1`.pipe(
         Effect.map((rows) => {
           const row = rows[0]
           if (row === undefined) return undefined

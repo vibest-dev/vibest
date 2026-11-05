@@ -530,7 +530,7 @@ describe("pi-vibest", () => {
         messages: [{ role: "user" }, { role: "assistant", content: [{ type: "text", text: "status: completed" }] }],
       })
       yield* s.emit("agent_settled", { aborted: false }, { isIdle: () => true })
-      const reported = yield* (yield* Db).latestReport("abcd1234-abcd-4abc-8abc-abcd1234abcd")
+      const reported = yield* (yield* Db).latestReport("abcd1234-abcd-4abc-8abc-abcd1234abcd", "start")
       assert.strictEqual(reported?.harness, "pi")
       assert.strictEqual(reported?.text, "status: completed")
       assert.strictEqual(reported?.error, undefined)

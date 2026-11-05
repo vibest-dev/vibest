@@ -1,6 +1,5 @@
 // Turn starts the harness integrations hand vibestd (hooks.ts), kept in memory until the poll's sweep finds the
-// session no longer live. A turn end is a `turn.reported` event (db.ts), not memory. `through` is the last report a
-// restart already settled: the new `process.start` is written before the old harness stops reporting.
+// session no longer live. A turn end is a `turn.reported` event (db.ts), not memory.
 import { Context, Effect, Layer } from "effect"
 
 import type { HarnessAdapter, HarnessId } from "./harness.ts"
@@ -57,8 +56,6 @@ export const turnEndFrom = (
 const make = Effect.sync(() => {
   /** Each session's latest turn start (the user's prompt reached the harness): the pickup proof a send compares. */
   const starts = new Map<string, number>()
-  /** Reports with `id` at or below this were the previous process's (a restart). */
-  const through = new Map<string, number>()
   return {
     started: (id: string, at: number) =>
       Effect.sync(() => {
@@ -66,24 +63,16 @@ const make = Effect.sync(() => {
       }),
     /** Whether a turn started at or after `at`. */
     startedSince: (id: string, at: number) => Effect.sync(() => (starts.get(id) ?? -1) >= at),
-    /** Ignore session `id`'s reports up to and including event `reportId` (restart.ts settle). */
-    cut: (id: string, reportId: number) =>
-      Effect.sync(() => {
-        if (reportId > (through.get(id) ?? 0)) through.set(id, reportId)
-      }),
-    /** The last report id `cut` settled for session `id` (0: none). */
-    through: (id: string) => Effect.sync(() => through.get(id) ?? 0),
     /** Forget every session `keep` rejects (the sweep: no longer live). */
     sweep: (keep: (id: string) => boolean) =>
       Effect.sync(() => {
         for (const id of starts.keys()) if (!keep(id)) starts.delete(id)
-        for (const id of through.keys()) if (!keep(id)) through.delete(id)
       }),
     size: Effect.sync(() => ({ starts: starts.size })),
   }
 })
 
-/** One per vibestd, shared by Sessions and its restart. */
+/** One per vibestd, used by Sessions. */
 export class TurnEnds extends Context.Service<TurnEnds, Effect.Success<typeof make>>()("vibest/TurnEnds") {
   static readonly layer = Layer.effect(TurnEnds, make)
 }

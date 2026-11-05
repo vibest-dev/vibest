@@ -111,13 +111,12 @@ export const startedSince = (id: string, at: number) =>
   })
 
 /**
- * Ignore the latest report, as the old in-memory drop did. A later report still counts. Tests need this because the
- * clock is frozen and a report's time can sit after the next turn's prompt.
+ * Put every report so far out of reach: the harness reports ready again, so only a later report counts (the fence in
+ * `Db.latestReport`). Tests need this because the clock is frozen and a report's time can sit after the next prompt.
  */
 export const dropResult = (id: string) =>
   Effect.gen(function* () {
-    const found = yield* (yield* Db).latestReport(id)
-    if (found) yield* (yield* TurnEnds).cut(id, found.id)
+    yield* (yield* Db).patchLive(id, { ready: yield* Clock.currentTimeMillis })
   })
 
 /** git in tests: a failure is a bug in the test. */

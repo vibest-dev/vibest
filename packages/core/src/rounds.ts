@@ -43,16 +43,12 @@ export const sessionRounds = (deps: {
       from?: InboxStatus,
     ) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly latestRoundAt: (sessionId: string) => Effect.Effect<number | undefined>
-    readonly latestReport: (sessionId: string) => Effect.Effect<TurnReport | undefined>
+    readonly latestReport: (sessionId: string, fence: "ready" | "start") => Effect.Effect<TurnReport | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly beginUserTurn: (id: string, text: string, patch: SessionPatch) => Effect.Effect<boolean>
   }
   readonly inbox: { readonly announce: (row: InboxRow) => Effect.Effect<void> }
-  /** Reports a restart already settled (turn-ends.ts): a later one is this process's. */
-  readonly turnEnds: {
-    readonly through: (id: string) => Effect.Effect<number>
-  }
   readonly harnesses: {
     readonly all: ReadonlyArray<HarnessAdapter>
     readonly get: (id: SessionRow["harnessId"]) => HarnessAdapter
@@ -80,7 +76,7 @@ export const sessionRounds = (deps: {
   /** The usage-limit move (move.ts), wired in after the rounds exist. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
-  const { db, inbox, turnEnds, harnesses } = deps
+  const { db, inbox, harnesses } = deps
 
   const finish = Effect.fn("Sessions.finish")(function* (
     session: SessionRow,
@@ -217,9 +213,10 @@ export const sessionRounds = (deps: {
   })
 
   /**
-   * Ends the turn if a `turn.reported` is eligible: the current harness, received after this process started and after
-   * the open round's prompt (or after the last round, when none is open). The `turn.end` stamp is no earlier than the
-   * report, so the same report is not taken twice. `delivered`: the round went to the parent.
+   * Ends the turn if a `turn.reported` is eligible: the current harness, stored after the current process's ready
+   * (`Db.latestReport`'s fence, which also holds across a vibestd restart), and received after the open round's prompt
+   * (or after the last round, when none is open). The `turn.end` stamp is no earlier than the report, so the same
+   * report is not taken twice. `delivered`: the round went to the parent.
    */
   const collectResult = Effect.fn("Sessions.collectResult")(function* (
     /** Undefined: the session has no runtime vibestd can reach; its turn end is still written, a limit move is not made. */
@@ -227,13 +224,13 @@ export const sessionRounds = (deps: {
     session: SessionRow,
   ) {
     const terminal = session.address
-    const found = yield* db.latestReport(session.id)
+    const found = yield* db.latestReport(
+      session.id,
+      harnesses.get(session.harnessId).ready === "integration" ? "ready" : "start",
+    )
     if (found === undefined) return "none" as const
     // A late end from the harness this session just left is not this round. Leave it: the new harness's end replaces it.
     if (found.harness !== session.harnessId) return "none" as const
-    if (session.startedAt === null || found.at <= session.startedAt) return "none" as const
-    // A restart writes the new process.start before the old harness stops reporting (turn-ends.ts `through`).
-    if (found.id <= (yield* turnEnds.through(session.id))) return "none" as const
     if (session.turnState === "open") {
       if (found.at <= session.turnPromptedAt) return "none" as const
     } else {

@@ -3,7 +3,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 // The restart in place (`vibest update`, .agents/rules/update-restart.md 6 and 7): only the harness ends; its terminal's
 // shell runs it again through the runtime's `run`, on the same session and conversation. Subagents first, then main
 // agents, whose continue notice names the subagents restarted with them.
-import { Clock, Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope } from "effect"
+import { Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope } from "effect"
 
 import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
 import type { HarnessAdapter, HarnessId } from "./harness.ts"
@@ -20,7 +20,6 @@ import {
   stateOf,
   type Terminal,
 } from "./runtimes.ts"
-import type { TurnEnds } from "./turn-ends.ts"
 
 /** An agent `vibest update` finds on an old integration. `blocked`: why it cannot be restarted in place (null: it can). */
 export interface Outdated {
@@ -122,8 +121,6 @@ interface Target {
   readonly liveNow: LiveNow
   /** The session's lock (a subagent), or none (a main agent). */
   readonly locked: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
-  /** Under `locked`, once it is back or not: tidy what the old harness left since `at`. */
-  readonly settle: (at: number) => Effect.Effect<void>
   /** Appended to a failure: where to look. */
   readonly hint: string
   /** Under `locked`, once it is back: the continue for an interrupted turn, and the outcome. */
@@ -136,7 +133,6 @@ export const sessionRestart = (deps: {
   readonly harnesses: { readonly get: (id: HarnessId) => HarnessAdapter }
   readonly processes: Processes["Service"]
   readonly restarting: Restarting["Service"]
-  readonly turnEnds: TurnEnds["Service"]
   readonly inbox: Inbox["Service"]
   /** vibestd's own scope: `restartLater` runs there. */
   readonly scope: Scope.Scope
@@ -188,7 +184,6 @@ export const sessionRestart = (deps: {
       const h = t.h!
       const pid = t.pid!
       const argv = yield* t.argv
-      const at = yield* Clock.currentTimeMillis
       const signalled = yield* t.locked(
         Effect.gen(function* () {
           yield* deps.restarting.mark(id)
@@ -209,7 +204,6 @@ export const sessionRestart = (deps: {
         Option.isSome(yield* deps.awaitReady(h, t.terminal, t.adapter, id).pipe(Effect.option))
       return yield* t.locked(
         Effect.gen(function* () {
-          yield* t.settle(at)
           yield* deps.restarting.clear(id)
           if (!back)
             return failed(
@@ -258,12 +252,6 @@ export const sessionRestart = (deps: {
         argv: againArgv(session),
         liveNow: db.getSession(id).pipe(Effect.map((row) => row?.metadata)),
         locked: deps.locked(id),
-        // The new process.start is written before the old harness stops reporting, so its process.start.at does not
-        // cover a report that lands on the new process. Ignore every report that already exists.
-        settle: (_at) =>
-          deps.db
-            .latestReport(id)
-            .pipe(Effect.flatMap((found) => (found === undefined ? Effect.void : deps.turnEnds.cut(id, found.id)))),
         hint: `; ${peekHint(id)}`,
         onBack: (h) =>
           Effect.gen(function* () {
@@ -319,7 +307,6 @@ export const sessionRestart = (deps: {
           return row?.id === id ? { ...row, ready: yield* db.readyAt(id) } : undefined
         }),
         locked: (effect) => effect,
-        settle: () => Effect.void,
         hint: "",
         onBack: () =>
           Effect.gen(function* () {
