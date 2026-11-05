@@ -299,6 +299,46 @@ const checks: ReadonlyArray<Check> = [
       }
     },
   },
+  {
+    id: "S27",
+    title:
+      "archive with a process working in the worktree: one look, within 3 s; the worktree is kept and the reason names the process",
+    run: async (w) => {
+      const p = await piProject(w, "s27")
+      let holder: ReturnType<typeof Bun.spawn> | undefined
+      try {
+        p.model.release()
+        const sub = await p.runSub("archive")
+        await until("the subagent idle", () => p.idle(sub), 90_000)
+        const worktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", sub)?.d ?? ""
+        expect(worktree !== "", `no worktree recorded for ${sub}`)
+        // A process outside the pane with its working directory in the worktree: closing the pane does not end it.
+        holder = Bun.spawn(["sleep", "600"], { cwd: worktree, stdio: ["ignore", "ignore", "ignore"] })
+        const t0 = Date.now()
+        const out = await w.vibest(["archive", sub], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
+        const ms = Date.now() - t0
+        const said = `${out.stdout}${out.stderr}`
+        expect(ms <= 3_000, `archive took ${ms} ms (at most 3000): ${said}`)
+        expect(said.includes(String(holder.pid)), `archive does not name process ${holder.pid}: ${said}`)
+        expect(
+          await fs.stat(worktree).then(
+            () => true,
+            () => false,
+          ),
+          `the worktree ${worktree} was removed while process ${holder.pid} used it`,
+        )
+        // Archived all the same: it takes no more messages.
+        const send = await w.vibest(["send", sub, "--", "more"], { cwd: p.repo, env: p.env })
+        expect(
+          send.code !== 0 && `${send.stdout}${send.stderr}`.includes("archived"),
+          `send after archive: ${send.stdout}${send.stderr}`,
+        )
+      } finally {
+        holder?.kill()
+        await p.close()
+      }
+    },
+  },
 ]
 
 export default checks

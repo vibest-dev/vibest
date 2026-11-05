@@ -8,7 +8,6 @@ import { CWD_WAIT } from "@vibest/core/remove"
 import { Sessions } from "@vibest/core/sessions"
 import { Clock, Duration, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -223,7 +222,7 @@ describe.concurrent("vibest rm: process proof", () => {
       yield* fake.setCwdUsers([4242])
       const out = (yield* removeWaiting(sessions, id))!
       assert.deepInclude(out, { processes: "alive", pane: "closed", worktree: "kept" })
-      assert.include(out.reasons.join("\n"), "process 4242 still had its working directory in it after 10s")
+      assert.include(out.reasons.join("\n"), "process 4242 has its working directory in it")
       assert.isNull((yield* db.getSession(id))!.exitedAt)
       assert.isTrue(yield* fs.exists(worktree))
       assert.isTrue(yield* fs.exists(rules))
@@ -243,22 +242,22 @@ describe.concurrent("vibest rm: process proof", () => {
   )
 
   test(
-    "someone working in the worktree, or no cwd listing: the worktree is kept",
+    "someone working in the worktree, or no cwd listing: the worktree is kept after one listing, the reason naming the process",
     Effect.gen(function* () {
       const fake = yield* FakeProcesses
       const b = yield* idleSession
       yield* fake.setCwdUsers([4242])
+      const before = yield* fake.cwdListings
       const [out, took] = yield* removeTimingCwd(b.sessions, b.id)
       assert.deepInclude(out!, {
         processes: "alive",
         worktree: "kept",
-        reasons: ["worktree kept: process 4242 still had its working directory in it after 10s"],
+        reasons: ["worktree kept: process 4242 has its working directory in it"],
       })
-      // Asked again every 500 ms until 10 s have passed, then kept (the test moves time in 500 ms steps; the real
-      // git calls after the wait each cost the fiber a step, so the clock drifts past the deadline by a few steps).
-      assert.isAtLeast(took, Duration.toMillis(CWD_WAIT))
-      assert.isAtMost(took, 20_000)
-      // An unclear listing keeps it at once: no waiting (virtual time does not move here).
+      // One listing, no waiting for the process to leave (the test moves virtual time in steps while git runs).
+      assert.strictEqual((yield* fake.cwdListings) - before, 1)
+      assert.isBelow(took, Duration.toMillis(CWD_WAIT))
+      // An unclear listing keeps it too.
       yield* fake.setCwdUsers(undefined)
       assert.deepInclude(yield* b.sessions.remove(b.id), {
         worktree: "kept",
@@ -272,21 +271,21 @@ describe.concurrent("vibest rm: process proof", () => {
   )
 
   test(
-    "slow listings (lsof taking 3 s each) count toward the 10 s: kept once 10 s have passed, not after 10 listings",
+    "a slow listing (lsof taking 3 s) is still one listing: kept after it, naming the process",
     Effect.gen(function* () {
       const fake = yield* FakeProcesses
       const { id, sessions } = yield* idleSession
       yield* fake.setCwdUsers([4242])
       yield* fake.setCwdDelay("3 seconds")
+      const before = yield* fake.cwdListings
       const [out, took] = yield* removeTimingCwd(sessions, id)
       assert.deepInclude(out!, {
         processes: "alive",
         worktree: "kept",
-        reasons: ["worktree kept: process 4242 still had its working directory in it after 10s"],
+        reasons: ["worktree kept: process 4242 has its working directory in it"],
       })
-      assert.isAtLeast(took, Duration.toMillis(CWD_WAIT))
-      // Ten listings at 3 s each would be 30 s: the deadline, not the listing count, ends it.
-      assert.isAtMost(took, 20_000)
+      assert.strictEqual((yield* fake.cwdListings) - before, 1)
+      assert.isBelow(took, Duration.toMillis(CWD_WAIT))
     }),
   )
 
@@ -314,28 +313,6 @@ describe.concurrent("vibest rm: process proof", () => {
       const started = yield* Clock.currentTimeMillis
       assert.deepInclude(yield* sessions.remove(id), { processes: "exited", worktree: "removed", reasons: [] })
       assert.strictEqual((yield* Clock.currentTimeMillis) - started, 0)
-    }),
-  )
-
-  test(
-    "a process still working in the worktree that exits within the wait (a detached helper shutting down): the worktree is removed",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const fake = yield* FakeProcesses
-      const { id, sessions, worktree } = yield* idleSession
-      yield* fake.setCwdUsers([4242])
-      const held = yield* fake.holdCwd()
-      const removing = yield* Effect.forkChild(sessions.remove(id))
-      yield* held.reached
-      yield* held.release()
-      yield* TestClock.adjust("1 second")
-      yield* fake.setCwdUsers([])
-      yield* untilVirtual(
-        Effect.sync(() => removing.pollUnsafe()),
-        (exit) => exit !== undefined,
-      )
-      assert.deepInclude(yield* Fiber.join(removing), { processes: "exited", worktree: "removed", reasons: [] })
-      assert.isFalse(yield* fs.exists(worktree))
     }),
   )
 

@@ -325,6 +325,8 @@ export class FakeProcesses extends Context.Service<
     }>
     /** How long each cwd listing takes (virtual time), like lsof under a high open-file limit. */
     readonly setCwdDelay: (delay: Duration.Input) => Effect.Effect<void>
+    /** How many cwd listings were asked for. */
+    readonly cwdListings: Effect.Effect<number>
     readonly processes: Processes["Service"]
   }
 >()("test/FakeProcesses") {
@@ -334,6 +336,7 @@ export class FakeProcesses extends Context.Service<
       const states = yield* Ref.make(HashMap.empty<number, Liveness>())
       const users = yield* Ref.make<ReadonlyArray<number> | undefined>([])
       const cwdDelay = yield* Ref.make<Duration.Input>(0)
+      const listings = yield* Ref.make(0)
       const probed = yield* Ref.make<ReadonlyArray<number>>([])
       const signaled = yield* Ref.make<ReadonlyArray<number>>([])
       const denied = yield* Ref.make(false)
@@ -357,6 +360,7 @@ export class FakeProcesses extends Context.Service<
       return FakeProcesses.of({
         set: (pid, liveness) => Ref.update(states, HashMap.set(pid, liveness)),
         setCwdUsers: (u) => Ref.set(users, u),
+        cwdListings: Ref.get(listings),
         probed: Ref.get(probed),
         signaled: Ref.get(signaled),
         setSignalDenied: (d) => Ref.set(denied, d),
@@ -395,6 +399,7 @@ export class FakeProcesses extends Context.Service<
             }),
           cwdUsers: () =>
             Effect.gen(function* () {
+              yield* Ref.update(listings, (n) => n + 1)
               const gate = yield* Ref.modify(
                 cwdGate,
                 (g) =>
