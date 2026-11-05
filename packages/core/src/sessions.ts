@@ -1482,21 +1482,49 @@ export class Sessions extends Context.Service<
       }
 
       /**
+       * Finish an archive a vibestd stop cut off after its mark (`vibest archive` §8.6a): close its terminal and end its
+       * process. Its worktree stays (whether `--keep-worktree` was asked is not stored); `vibest archive` again removes
+       * it. A notice only when its processes are not proven gone.
+       */
+      const finishArchive = (id: string) =>
+        locked(id)(
+          Effect.gen(function* () {
+            const session = yield* getRow(id)
+            if (!(session.metadata.archived || session.metadata.removed) || session.exitedAt !== null) return
+            const h = yield* live(session)
+            const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(id)) ?? ""))(
+              removal.release({ h, session, terminal: session.address, keepWorktree: true, reasons: [] }),
+            )
+            yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
+            if (out.processes !== "exited")
+              yield* notice(
+                session,
+                `${id} was being archived when vibestd stopped: its terminal was ${out.pane === "kept" ? "not closed" : "closed"}, but its processes are ${out.processes === "alive" ? "still working in its worktree" : "not confirmed gone"}; run vibest archive ${id} again to check.`,
+              )
+          }),
+        ).pipe(logged(`archive ${id}`), Effect.provideContext(platform))
+
+      /**
        * One check of each live session in `where` (all, or one runtime's), then one delivery try for each project with
        * main-agent rows waiting. Only at start, when a runtime registers, and when one comes back (`live.reset`): what
        * no event reported in between (an exit while vibestd was down, a runtime registered late) is found here once.
        */
       const reconcile = (where: "all" | { readonly runtime: string; readonly machine?: string }) =>
         Effect.gen(function* () {
-          const rows = (yield* db.listSessions()).filter(
+          const here = (yield* db.listSessions()).filter(
             (row) =>
-              !row.metadata.archived &&
-              !row.metadata.removed &&
-              (row.exitedAt === null || row.turnState === "open") &&
-              (where === "all" ||
-                (row.runtime === where.runtime &&
-                  (where.machine === undefined || row.address.machine === where.machine))),
+              where === "all" ||
+              (row.runtime === where.runtime && (where.machine === undefined || row.address.machine === where.machine)),
           )
+          const rows = here.filter(
+            (row) =>
+              !row.metadata.archived && !row.metadata.removed && (row.exitedAt === null || row.turnState === "open"),
+          )
+          // Archived, its process still running in its terminal: an archive a stop cut off after its mark.
+          const archiving = here.filter(
+            (row) => (row.metadata.archived || row.metadata.removed) && row.exitedAt === null && row.address.id !== "",
+          )
+          yield* Effect.forEach(archiving, (row) => finishArchive(row.id), { concurrency: 8, discard: true })
           yield* Effect.log(
             `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,
           )

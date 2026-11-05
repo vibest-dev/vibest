@@ -1,6 +1,7 @@
 // Session state machine against a fake herdr (SPEC §15: "State machine response to event sequences").
 // `it.effect` runs on TestClock: time stands still unless a test moves it, so polls and timeouts only fire on purpose.
 import { assert, describe, it } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import type { HarnessId } from "@vibest/core/harness"
@@ -4320,6 +4321,29 @@ describe.concurrent("after a vibestd stop", () => {
         assert.strictEqual((yield* turnInputs(id)).length, 1)
       }),
     ),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "an archive cut off after its mark: the next vibestd closes its terminal and ends its process, once; the worktree stays",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const herdr = yield* FakeRuntime
+      const { id, row, db } = yield* idleSession(yield* makeRepository)
+      // `vibest archive` marked it, then vibestd stopped before its terminal closed.
+      yield* db.updateSession(id, { metadata: { ...row.metadata, archived: true, removed: true } })
+      const closes = Effect.map(herdr.callsTo("close"), (calls) => calls.filter((c) => c.terminal === row.address.id))
+      yield* nextVibestd(Effect.map(processEnds(id), (ends) => ends.length > 0))
+      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
+      assert.strictEqual((yield* closes).length, 1)
+      assert.isTrue(yield* fs.exists(yield* sessionWorktree(id)))
+      assert.deepStrictEqual(yield* sqlNotices(id), [])
+      // A later reconcile finds nothing left to finish.
+      yield* (yield* Bus).observe({ type: "live.reset", runtime: RUNTIME, machine: "local" })
+      yield* settled
+      assert.strictEqual((yield* closes).length, 1)
+      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
+    }),
     { hooked: ["pi"] },
   )
 })

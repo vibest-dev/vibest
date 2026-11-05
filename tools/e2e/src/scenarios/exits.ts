@@ -1,6 +1,7 @@
-// What vibestd learns with no poll (feature-map S21 to S29): an exit the runtime pushes, a stop of vibestd itself in the
+// What vibestd learns with no poll (feature-map S21 to S30): an exit the runtime pushes, a stop of vibestd itself in the
 // middle of a turn or of a delivery, and a herdr server that hands over to a new one. Pi subagents and a Pi main agent
 // on the fake model of inbox.ts; vibestd, herdr and Pi are the real ones.
+import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -411,6 +412,55 @@ const checks: ReadonlyArray<Check> = [
           sub,
         )?.n
         expect(input === 1, `the task is the input of ${input} turns`)
+      } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S30",
+    title:
+      "an archive cut off after its mark (vibestd killed with the session's ended_at set, its tab still open): the next vibestd closes the tab and ends the process archived, keeping the worktree; vibest archive then removes it",
+    run: async (w) => {
+      const p = await piProject(w, "s30")
+      try {
+        p.model.release()
+        const sub = await p.runSub("archived")
+        await until("the subagent idle", () => p.idle(sub), 90_000)
+        const pane = p.pane(sub)
+        const worktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", sub)?.d ?? ""
+        expect(pane !== "" && worktree !== "", `no pane or worktree recorded for ${sub}`)
+        const daemon = await w.daemonPid()
+        expect(daemon !== undefined, "no vibestd pid")
+        process.kill(daemon!, "SIGKILL")
+        await until("vibestd gone", () => !alive(daemon!), 10_000)
+        // What `vibest archive` stores first (its mark), before it closes anything.
+        const db = new Database(path.join(w.vibestHome, "vibest.db"))
+        try {
+          db.query("UPDATE session SET ended_at = ? WHERE id = ?").run(Date.now(), sub)
+        } finally {
+          db.close()
+        }
+        await p.startDaemon()
+        const ended = () =>
+          row<{ reason: string }>(
+            w,
+            "SELECT json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ? AND type = 'process.end'",
+            sub,
+          )?.reason
+        await until("its process ended", () => ended() !== undefined, 30_000)
+        expect(ended() === "archived", `its process ended ${ended()}`)
+        const panes = (await herdr(p.socket, "pane.list", {})).panes as Array<{ pane_id: string }>
+        expect(!panes.some((x) => x.pane_id === pane), `pane ${pane} is still open`)
+        const exists = () =>
+          fs.stat(worktree).then(
+            () => true,
+            () => false,
+          )
+        expect(await exists(), `the worktree ${worktree} was removed`)
+        expect(p.notices(sub, "") === 0, "a notice for a clean finish")
+        await w.ok(["archive", sub], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
+        expect(!(await exists()), `vibest archive kept the worktree ${worktree}`)
       } finally {
         await p.close()
       }
