@@ -1738,11 +1738,17 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /** Session `id`'s task when it was never handed over (no `inbox.status`) and no turn of it has ended yet. */
+    /**
+     * Session `id`'s task when it was never handed over (no `inbox.status`) and no turn of it that took an input (typed,
+     * or rows delivered into it) has ended. A turn that ended before its handover (vibestd stopped in `awaitReady`)
+     * took nothing.
+     */
     untakenTask: (id: string) =>
       sql<{ content: string }>`SELECT i.content FROM inbox i WHERE i.recipient_session_id = ${id} AND i.kind = 'task'
           AND NOT EXISTS (SELECT 1 FROM event e WHERE e.inbox_id = i.id AND e.type = 'inbox.status')
-          AND NOT EXISTS (SELECT 1 FROM event e WHERE e.session_id = ${id} AND e.type = 'turn.end')
+          AND NOT EXISTS (SELECT 1 FROM event te JOIN event t ON t.id = te.turn_id
+            WHERE te.session_id = ${id} AND te.type = 'turn.end' AND (json_extract(t.data, '$.typed') IS NOT NULL
+              OR EXISTS (SELECT 1 FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status')))
         LIMIT 1`.pipe(
         Effect.map((rows) => rows[0]?.content),
         Effect.orDie,

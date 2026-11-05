@@ -4337,6 +4337,25 @@ describe.concurrent("after a vibestd stop", () => {
   )
 
   test(
+    "a first turn ended before its handover (vibestd stopped in its ready wait) leaves the task for the next vibestd",
+    waitingForReady((id) =>
+      Effect.gen(function* () {
+        const db = yield* Db
+        // What a SIGTERM during awaitReady writes: the turn ends not_started, the task unlinked.
+        yield* db.updateSession(id, { turnState: "not_started" })
+        assert.strictEqual(yield* db.untakenTask(id), "do it")
+        yield* nextVibestd(Effect.map(typed("do it"), (n) => n === 1))
+        assert.deepStrictEqual(yield* turnInputs(id), [
+          { input: "", status: "not_started" },
+          { input: "do it", status: "working" },
+        ])
+        assert.isUndefined(yield* db.untakenTask(id))
+      }),
+    ),
+    { hooked: ["pi"] },
+  )
+
+  test(
     "a task handed over at reconcile that does not start ends the turn not_started and is not handed over again",
     waitingForReady((id) =>
       Effect.gen(function* () {
