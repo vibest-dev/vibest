@@ -27,9 +27,10 @@ Five SQLite tables, one purpose each:
   opens. An in-place restart or a harness change in the same pane keeps them (the pane's shell has them); a new
   terminal does not (a subagent resumed in a new terminal starts without them), and the user passes `--env` again. A
   main agent's `vibest --env` values go to the harness it execs. Outside herdr they are the new pane's environment,
-  not on the command herdr types there; vibestd keeps them in its memory for a restart in place (`vibest update`); a
-  handoff passes them to the next vibestd in that process's environment. A vibestd that stops without a handoff forgets
-  them.
+  not on the command herdr types there, and vibestd remembers them for that pane until the vibest there binds them.
+  Inside herdr below the root, that same process continues at the root and types nothing. vibestd keeps a bound set in
+  its memory for a restart in place (`vibest update`); a handoff passes it to the next vibestd in that process's
+  environment. A vibestd that stops without a handoff forgets it.
 - No peer relation and no worktree table. A session records its machine and directory. A directory under the vibest
   worktrees root is one vibest made; a name is reserved by an atomic `mkdir`. It can be removed when no other live
   session uses the same (machine, directory), then after the lsof and git checks.

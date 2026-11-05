@@ -25,7 +25,7 @@ import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
 // That is a claim any same-user process can make, so vibestd's checks stop mistakes, not attackers (SPEC §13).
 // Agent commands print one JSON document on stdout; errors are one `Tag: message` line on stderr and exit 1.
 // Nothing waits for a session: results reach the coordinator by themselves, `vibest result` shows the latest one.
-import { CALLER_ENV, ambientHerdr, callerMachine, callerTerminal, runAtRoot } from "@vibest/runtime-herdr/caller"
+import { CALLER_ENV, ambientHerdr, callerMachine, callerTerminal } from "@vibest/runtime-herdr/caller"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
@@ -402,20 +402,13 @@ const startMain =
           return yield* new LaunchFailed({
             message: `--session ${o.session.value} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
           })
+        // Below the root, continue in this process. Typing `cd && vibest --env` would put the values in the shell history.
+        if ((yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
         const terminal = yield* callerTerminal
         if (terminal === undefined)
           return yield* new LaunchFailed({
             message: "this pane's herdr session could not be named; run vibest outside herdr",
           })
-        // git prints the physical path; compare like with like. Below the root: this pane's shell runs it again from there.
-        if ((yield* fs.realPath(cwd)) !== root) {
-          const live = here ?? (yield* ambientHerdr)
-          if (live === undefined)
-            return yield* new LaunchFailed({
-              message: `this pane is marked as the main agent's, but herdr could not be reached to run it at ${root}`,
-            })
-          return yield* runAtRoot(live.h, live.paneId, root, Launch.again(again, root, marked))
-        }
         // The main agent's own `vibest` commands never start vibestd (they may run in its harness's sandbox): start it here.
         if (!(yield* probe((yield* Layout).socket))) yield* startDaemon
         const claim = (yield* caller).claim

@@ -244,6 +244,9 @@ const envOffArgv = (argv: ReadonlyArray<string>) => {
   return { command, env }
 }
 
+/** Parked `--env` for one pane: machine id and the terminal id the runtime reported. */
+const parkKey = (machine: string, terminal: string) => `${machine}\0${terminal}`
+
 /** A bounded wait for daemon operations to drain, never for agents to finish their tasks. */
 export const DRAIN_TIMEOUT = Duration.seconds(5)
 
@@ -414,6 +417,8 @@ export const handlers = VibestRpcs.toLayer(
     const identity = yield* Identity
     const shutdown = yield* Shutdown
     const mainEnv = yield* MainEnv
+    /** `--env` for a pane Launch opened, until the vibest in that pane binds it. Not keyed by project. */
+    const parked = new Map<string, Readonly<Record<string, string>>>()
     const drain = yield* Drain
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const harnesses = yield* Harnesses
@@ -704,20 +709,30 @@ export const handlers = VibestRpcs.toLayer(
           }
           const rt = yield* runtimes.route(decision.runtime)
           yield* runtimes.online(rt, { id: decision.machine.id })
-          // sessionId "" until CoordinatorSession binds the row. Set before open: the typed vibest starts while it runs.
-          if (passed !== undefined) mainEnv.set(id, { sessionId: "", env: passed })
           const terminal = yield* Launch.openInParentWorkspace(rt, at, {
             root,
-            argv: command,
             label: "vibest",
             home: layout.home,
             focus,
             ...(passed !== undefined ? { env: passed } : {}),
-          }).pipe(
-            Effect.onError(() =>
-              Effect.sync(() => {
-                if (mainEnv.get(id)?.sessionId === "") mainEnv.delete(id)
-              }),
+          })
+          const run = rt.run
+          if (run === undefined) {
+            yield* rt.close(terminal).pipe(Effect.ignore)
+            return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
+          }
+          // After the pane exists, before anything is typed into it: only this terminal's vibest can bind the pairs.
+          const key = parkKey(at.id, terminal.id)
+          if (passed !== undefined) parked.set(key, passed)
+          yield* run(terminal, Launch.inParent(command, root)).pipe(
+            Effect.catch((error) =>
+              rt
+                .close(terminal)
+                .pipe(
+                  Effect.ignore,
+                  Effect.andThen(Effect.sync(() => parked.delete(key))),
+                  Effect.andThen(Effect.fail(new LaunchFailed({ message: error.message }))),
+                ),
             ),
           )
           return {
@@ -936,10 +951,11 @@ export const handlers = VibestRpcs.toLayer(
                 { provider, model, routing, pid, projectDirectory: directory },
               )
               const passed = env !== undefined && Object.keys(env).length > 0 ? env : undefined
-              // Launch parked this project's --env before the session existed (sessionId ""). Bind it; the harness
-              // inherits the pairs from the pane, so this call does not send them back.
-              const parked = mainEnv.get(projectId)
-              const kept = passed ?? (parked?.sessionId === "" ? parked.env : undefined)
+              // Only the vibest in the pane Launch opened sends that pane's terminal id, so only it binds the pairs.
+              const key = parkKey(machineOf(machine).id, terminal)
+              const fromPane = parked.get(key)
+              if (fromPane !== undefined) parked.delete(key)
+              const kept = passed ?? fromPane
               if (kept !== undefined) mainEnv.set(projectId, { sessionId: saved.sessionId, env: kept })
               else mainEnv.delete(projectId)
               return { ...saved, runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }) }

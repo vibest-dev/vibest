@@ -409,8 +409,10 @@ describe("vibest CLI", () => {
       assert.notInclude(started.stdout, secret)
       assert.notInclude(started.stderr, secret)
       const open = (yield* herdr.callsTo("open"))[0]!
+      const typed = ((yield* herdr.callsTo("run"))[0]!.argv as ReadonlyArray<string>).join(" ")
       assert.notInclude(open.argv.join(" "), secret)
-      assert.notInclude(open.argv, "--env")
+      assert.notInclude(typed, secret)
+      assert.notInclude(typed, "--env")
       assert.strictEqual(open.env.MAIN_PROBE, secret)
       assert.strictEqual(open.env.VIBEST_HOME, layout.home)
     }),

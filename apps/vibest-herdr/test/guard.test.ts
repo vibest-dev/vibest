@@ -765,4 +765,49 @@ describe("vibest --session inside herdr", () => {
       }),
     15_000,
   )
+
+  it.effect("below the root continues in this process and types no --env", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const repo = yield* makeRepository
+      const sub = repo + "/sub"
+      yield* fs.makeDirectory(sub)
+      const back = process.cwd()
+      process.chdir(sub)
+      const secret = "probe-value-9f3c"
+      const herdr: Array<string> = []
+      let cwdAfter = ""
+      const host = new Proxy({} as Host, {
+        get: () => () => Effect.die("host"),
+      })
+      const exit = yield* Command.runWith(
+        Cli.command(host, () => {}),
+        { version: "0.0.0-test" },
+      )(["--in-parent", repo, "--harness", "pi", "--env", "MAIN_PROBE=" + secret]).pipe(
+        Effect.provideService(SocketConnector, () => {
+          herdr.push("connect")
+          return Effect.die("herdr")
+        }),
+        Effect.provideService(VibestSocketConnector, () => Effect.die("socket")),
+        Effect.provide(builtinHarnesses),
+        Effect.provide(Platform.services),
+        Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
+        Effect.provide(Path.layer),
+        Effect.provideService(VibestCommand, ["/bin/vibest"]),
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
+        Effect.exit,
+        Effect.ensuring(
+          Effect.sync(() => {
+            cwdAfter = process.cwd()
+            process.chdir(back)
+          }),
+        ),
+      )
+      assert.strictEqual(cwdAfter, repo)
+      assert.deepStrictEqual(herdr, [])
+      const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "started"
+      assert.notInclude(message, secret)
+      assert.match(message, /could not be named/)
+    }).pipe(Effect.provide(Platform.services)),
+  )
 })
