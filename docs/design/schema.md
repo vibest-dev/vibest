@@ -187,6 +187,12 @@ rendered result (the result row's content). Rows written before `report` keep th
 `coalesce(text, output)`. `Db.finishTurn` takes the whole `turn.end` data. An end the harness never reported
 (`lost`, `not_started`, an exit, an interrupt) has no `report`.
 
+A `turn.reported`'s `process_id` is the session's current process when vibestd received the hook, not the harness
+that sent it: in a restart's window the new `process.start` is already written while the old harness still reports,
+so that report carries the new process. What keeps it out is a fence on event ids: a report counts only when its id
+is above the current process's latest `process.ready` its integration wrote (a harness ends a turn only after it is
+ready), or above the current `process.start` for a harness whose ready comes from the runtime (Cursor).
+
 ## Hot paths
 
 - Pending scan every few seconds: inbox `WHERE status = 'pending' AND recipient_session_id IS NOT NULL` through
