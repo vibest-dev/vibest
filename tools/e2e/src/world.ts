@@ -108,7 +108,9 @@ export class World {
   env(extra: Record<string, string | undefined> = {}): Record<string, string> {
     const env: Record<string, string | undefined> = {}
     for (const [k, v] of Object.entries(process.env))
-      if (!k.startsWith("VIBEST_") && !k.startsWith("HERDR_")) env[k] = v
+      // PI_PACKAGE_DIR is this process's Pi install. A pix update deletes that directory while the session still
+      // exports it, and every child pi then reads version 0.0.0 and refuses extensions that want Pi >= 1.4.0.
+      if (!k.startsWith("VIBEST_") && !k.startsWith("HERDR_") && k !== "PI_PACKAGE_DIR") env[k] = v
     Object.assign(
       env,
       {
