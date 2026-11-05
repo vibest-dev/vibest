@@ -6,9 +6,8 @@ import { shortId } from "@vibest/schema/id"
 // A coordinator whose harness adapter has `inbox: "subscribe"` or `"poll"` takes its rows itself: the Pi extension over
 // vibest.sock (`stream`), the Claude plugin by polling vibestd's HTTP socket (`poll` / `ack`). Every other idle
 // coordinator gets them typed in through the runtime's prompt. Nobody there: the row is `dropped`.
-import { Cause, Context, Duration, Effect, Exit, Layer, Option, PubSub, Queue, Stream } from "effect"
+import { Cause, Context, Duration, Effect, Exit, Layer, Option, Queue, Stream } from "effect"
 
-import { Bus, type EngineEvent } from "./bus.ts"
 import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
 import { Drain } from "./drain.ts"
 import * as Engine from "./engine.ts"
@@ -120,7 +119,6 @@ export class Inbox extends Context.Service<
       const restarting = yield* Restarting
       /** How the coordinator of harness `id` (as recorded or as the runtime names it) takes its rows. */
       const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.inbox
-      const bus = yield* Bus
       // Made before any delivery runs, so none is missed.
       const delivered = yield* Queue.unbounded<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>()
       // Counted from before publication until the taker's completion work (archive) is done.
@@ -202,13 +200,22 @@ export class Inbox extends Context.Service<
       // The rows a polling main agent (recipient: its project) or one subscription (its own key) took and did not settle.
       const leases = yield* Leases.make
       let subscriptions = 0
+      // The open Pi streams, by the main session they serve. Each one's signal holds at most one wake, so a stream that
+      // is not pulled keeps nothing but that.
+      const waiting = new Map<string, Set<Queue.Queue<void>>>()
+      const wake = (id: string) =>
+        Effect.sync(() => {
+          for (const signal of waiting.get(id) ?? []) Queue.offerUnsafe(signal, undefined)
+        })
       yield* engine.on((event) => {
         switch (event.type) {
           // A row for the main agent was queued, or put back.
           case "inbox.queued":
-            return ifMain(event.sessionId, deliver)
+            return wake(event.sessionId).pipe(Effect.andThen(ifMain(event.sessionId, deliver)))
           case "inbox.status":
-            return event.data.to === "pending" ? ifMain(event.sessionId, deliver) : Effect.void
+            return event.data.to === "pending"
+              ? wake(event.sessionId).pipe(Effect.andThen(ifMain(event.sessionId, deliver)))
+              : Effect.void
           case "live.state":
             return db
               .coordinatorAt(event.runtime, event.terminal)
@@ -219,12 +226,6 @@ export class Inbox extends Context.Service<
             return Effect.void
         }
       })
-
-      /** A main agent's stream looks again when a row for it is queued or put back to pending. */
-      const wakes = (main: string | undefined, event: EngineEvent) =>
-        "id" in event &&
-        event.sessionId === main &&
-        (event.type === "inbox.queued" || (event.type === "inbox.status" && event.data.to === "pending"))
 
       /**
        * Claim the coordinator's next batch, under the project's lock. Only for a coordinator whose harness takes its rows
@@ -281,8 +282,19 @@ export class Inbox extends Context.Service<
                     harnessId: subscribed.harnessId,
                   }
                 : undefined
-            // Taken before the first claim: a row queued or put back for this main agent in between still wakes it.
-            const arrivals = yield* bus.subscribe
+            // Registered before the first claim: a row queued or put back for this main agent in between still wakes it.
+            const signal = yield* Queue.sliding<void>(1)
+            const main = subscribed?.id
+            if (main !== undefined)
+              yield* Effect.acquireRelease(
+                Effect.sync(() => waiting.set(main, (waiting.get(main) ?? new Set()).add(signal))),
+                () =>
+                  Effect.sync(() => {
+                    const open = waiting.get(main)
+                    open?.delete(signal)
+                    if (open?.size === 0) waiting.delete(main)
+                  }),
+              )
             // The batch this pull emits is held until the next pull (delivered) or the close (failed). Held in the same
             // uninterruptible region as the claim, so a close cannot lose the ids.
             const recipient = `${projectId} subscription ${++subscriptions}`
@@ -301,7 +313,7 @@ export class Inbox extends Context.Service<
                 while (true) {
                   const batch = yield* claimOne()
                   if (batch !== undefined) return [batch, 0] as const
-                  while (!wakes(subscribed?.id, yield* PubSub.take(arrivals))) {}
+                  yield* Queue.take(signal)
                 }
               }),
             ).pipe(Stream.ensuring(leases.expireAll(recipient)))
