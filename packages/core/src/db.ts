@@ -410,16 +410,8 @@ export type TurnEnd = {
   readonly failure?: { readonly message: string }
 }
 
-/** A `turn.reported` row, the harness's turn end as received. */
-export type TurnReport = {
-  readonly id: number
-  readonly at: number
-  readonly harness: string
-  readonly text: string
-  readonly error?: string
-  readonly conversationId?: string
-  readonly interrupted: boolean
-}
+/** A `turn.reported` row: the harness's turn end as received, and its event id. */
+export type TurnReport = TurnEnded & { readonly id: number }
 
 /** A harness error as `turn.end` failure; none for an empty error. */
 export const failureOf = (error: string | undefined): TurnEnd["failure"] =>
@@ -1789,10 +1781,10 @@ const make = Effect.gen(function* () {
           return {
             id: row.id,
             at: row.at,
-            harness: data.harness,
+            harness: data.harness as HarnessId,
             text: typeof data.text === "string" ? data.text : "",
-            ...(typeof data.error === "string" && data.error !== "" ? { error: data.error } : {}),
-            ...(typeof data.conversation === "string" ? { conversationId: data.conversation } : {}),
+            error: typeof data.error === "string" && data.error !== "" ? data.error : undefined,
+            conversationId: typeof data.conversation === "string" ? data.conversation : undefined,
             interrupted: data.interrupted === true,
           } satisfies TurnReport
         }),
