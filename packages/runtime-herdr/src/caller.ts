@@ -1,9 +1,8 @@
-import { shellQuote } from "@vibest/schema/layout"
-import { Config, Duration, Effect, Option, Schema } from "effect"
+import { Config, Effect, Option, Schema } from "effect"
 // What the vibest CLI and the herdr plugin command need to say where they are: the caller's herdr location as
-// `Machine.target` (runtime-port.md §2, §4) and the terminal id of the pane it runs in, plus the two pane operations
-// `vibest` does in place. Everything herdr-specific about *being* a caller lives here.
-import { Herdr, type HerdrShape } from "effect-herdr-sdk"
+// `Machine.target` (runtime-port.md §2, §4) and the terminal id of the pane it runs in. Everything herdr-specific
+// about *being* a caller lives here.
+import { Herdr } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { encodeTarget } from "./terminal-runtime.ts"
@@ -47,27 +46,6 @@ export const callerTerminal = Effect.gen(function* () {
   const session = list.sessions.find((s) => s.socket_path === socketPath)
   return session === undefined ? undefined : `${session.name}/${paneId}`
 })
-
-/** How long a shell may take to draw its prompt before the command is typed. */
-const SHELL_TIMEOUT = Duration.seconds(10)
-
-/**
- * Have the shell in `paneId` run `argv` at `root`: once it has drawn something (its prompt; input typed earlier can be
- * dropped), type `cd <root> && <argv>` and Enter. A process cannot move its own shell, so this is also how `vibest`
- * below the root gets its own pane's shell there.
- */
-export const runAtRoot = (h: HerdrShape, paneId: string, root: string, argv: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    yield* h.call("pane.wait_for_output", {
-      pane_id: paneId,
-      source: "visible",
-      match: { type: "regex", value: "\\S" },
-      timeout_ms: Duration.toMillis(SHELL_TIMEOUT),
-    })
-    const text = `cd ${shellQuote(root)} && ${argv.map(shellQuote).join(" ")}`
-    yield* h.call("pane.send_text", { pane_id: paneId, text })
-    yield* h.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] })
-  })
 
 /** A herdr client on the ambient socket, for the in-place path (verified once; the pane's own server). */
 export const ambientHerdr = Effect.gen(function* () {

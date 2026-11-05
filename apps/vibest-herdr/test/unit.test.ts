@@ -2035,10 +2035,20 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
 })
 
 describe("pure", () => {
-  it("vibest below the root runs again at the root, forwarding --in-parent only when it had it", () => {
-    const argv = ["/bin/vibest", "--harness", "pi"]
-    assert.deepStrictEqual(Launch.again(argv, "/r", true), ["/bin/vibest", "--harness", "pi", "--in-parent", "/r"])
-    assert.deepStrictEqual(Launch.again(argv, "/r", false), argv)
+  it("an unmarked command ignores VIBEST_MAIN_ENV; the command Launch typed uses it, over a shell rc", () => {
+    const carried = JSON.stringify({ MAIN_PROBE: "from-flag" })
+    assert.deepStrictEqual(Launch.commandEnv({}, false, carried), {})
+    assert.deepStrictEqual(Launch.commandEnv({}, true, carried), { MAIN_PROBE: "from-flag" })
+    assert.deepStrictEqual(Launch.commandEnv({ MAIN_PROBE: "from-flag" }, true, carried), { MAIN_PROBE: "from-flag" })
+    // bun exec merges process.env under the pairs, so an rc value of the same name loses.
+    const rc: Record<string, string> = { MAIN_PROBE: "from-rc", PATH: "/bin" }
+    const pairs: Record<string, string> = { MAIN_PROBE: "from-flag" }
+    const harness: Record<string, string> = { VIBEST_SESSION_ID: "s" }
+    const child: Record<string, string> = { ...rc, ...pairs, ...harness }
+    assert.strictEqual(child.MAIN_PROBE, "from-flag")
+    assert.strictEqual(child.PATH, "/bin")
+    assert.strictEqual(child.VIBEST_SESSION_ID, "s")
+    assert.strictEqual("VIBEST_MAIN_ENV" in child, false)
   })
 
   it.effect("~/.vibest layout: VIBEST_HOME, else $HOME/.vibest; the old product's OMO_HOME is not read", () =>
