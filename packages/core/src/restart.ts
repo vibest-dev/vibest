@@ -3,8 +3,9 @@ import { VERSION } from "@vibest/protocol/rpc"
 // The restart in place (`vibest update`, .agents/rules/update-restart.md 6 and 7): only the harness ends; its terminal's
 // shell runs it again through the runtime's `run`, on the same session and conversation. Subagents first, then main
 // agents, whose continue notice names the subagents restarted with them.
-import { Clock, Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope } from "effect"
+import { Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope } from "effect"
 
+import { awaitEvent, Bus } from "./bus.ts"
 import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
 import type { HarnessAdapter, HarnessId } from "./harness.ts"
 import type { Inbox } from "./inbox.ts"
@@ -20,7 +21,6 @@ import {
   stateOf,
   type Terminal,
 } from "./runtimes.ts"
-import type { TurnEnds } from "./turn-ends.ts"
 
 /** An agent `vibest update` finds on an old integration. `blocked`: why it cannot be restarted in place (null: it can). */
 export interface Outdated {
@@ -93,6 +93,7 @@ export const blockedOf = (
           ? "its conversation id is not known, so a restart would start a new conversation"
           : undefined
 
+/** Only `restartLater` polls: the pid it waits on is the `vibest update` CLI, whose exit no runtime reports. */
 const TICK = Schedule.spaced("500 millis")
 
 /** What the pid, ready report and integration of an agent being restarted read now. */
@@ -122,26 +123,28 @@ interface Target {
   readonly liveNow: LiveNow
   /** The session's lock (a subagent), or none (a main agent). */
   readonly locked: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
-  /** Under `locked`, once it is back or not: tidy what the old harness left since `at`. */
-  readonly settle: (at: number) => Effect.Effect<void>
   /** Appended to a failure: where to look. */
   readonly hint: string
   /** Under `locked`, once it is back: the continue for an interrupted turn, and the outcome. */
   readonly onBack: (h: Runtime) => Effect.Effect<Restarted, unknown>
+  /** Once the mark is cleared, however it ended: the one look its checks skipped while it was set. Returns at once. */
+  readonly reconcile: Effect.Effect<void>
 }
 
 export const sessionRestart = (deps: {
   readonly db: Db["Service"]
+  readonly bus: Bus["Service"]
   readonly runtimes: Runtimes["Service"]
   readonly harnesses: { readonly get: (id: HarnessId) => HarnessAdapter }
   readonly processes: Processes["Service"]
   readonly restarting: Restarting["Service"]
-  readonly turnEnds: TurnEnds["Service"]
   readonly inbox: Inbox["Service"]
   /** vibestd's own scope: `restartLater` runs there. */
   readonly scope: Scope.Scope
   /** The session's lock, as every session change takes it. */
   readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
+  /** Check subagent `id` once, in vibestd's scope (returns at once). */
+  readonly checkLater: (id: string) => Effect.Effect<void>
   /** The harness argv that starts the session (resume: on its conversation). */
   readonly launchArgv: (session: SessionRow, resume: boolean) => Effect.Effect<ReadonlyArray<string>, unknown>
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, unknown>
@@ -171,12 +174,19 @@ export const sessionRestart = (deps: {
    * Wait for the harness `run` started to report its pid (the restart cleared the old one) and, on this vibest's
    * integration, that it is ready; false when RESTART_TIMEOUT passes. The caller then waits as any start does.
    */
-  const startedAgain = (liveNow: LiveNow) =>
-    liveNow.pipe(
+  const startedAgain = (id: string, liveNow: LiveNow) => {
+    const again = liveNow.pipe(
       Effect.map((live) => live?.pid !== undefined && live.ready !== undefined && current(live.integration)),
-      Effect.repeat({ until: (again) => again, schedule: TICK }),
-      Effect.timeoutOrElse({ duration: RESTART_TIMEOUT, orElse: () => Effect.succeed(false) }),
     )
+    const look = Effect.map(again, (yes) => (yes ? Option.some(true) : Option.none()))
+    // The pid and ready report arrive as the session's `process.ready`: each one is a reason to look again.
+    return awaitEvent(
+      look,
+      (event) => (event.type === "process.ready" && event.sessionId === id ? look : Effect.succeed(Option.none())),
+      RESTART_TIMEOUT,
+      again,
+    ).pipe(Effect.provideService(Bus, deps.bus))
+  }
 
   /** Mark, SIGTERM to its harness pid only, `run` in the same terminal, then wait for it; written once for both kinds. */
   const inPlace = (t: Target): Effect.Effect<Restarted> => {
@@ -188,7 +198,6 @@ export const sessionRestart = (deps: {
       const h = t.h!
       const pid = t.pid!
       const argv = yield* t.argv
-      const at = yield* Clock.currentTimeMillis
       const signalled = yield* t.locked(
         Effect.gen(function* () {
           yield* deps.restarting.mark(id)
@@ -205,11 +214,10 @@ export const sessionRestart = (deps: {
       const ran = yield* h.run!(t.terminal, argv).pipe(Effect.exit)
       const back =
         Exit.isSuccess(ran) &&
-        (yield* startedAgain(t.liveNow)) &&
+        (yield* startedAgain(id, t.liveNow)) &&
         Option.isSome(yield* deps.awaitReady(h, t.terminal, t.adapter, id).pipe(Effect.option))
       return yield* t.locked(
         Effect.gen(function* () {
-          yield* t.settle(at)
           yield* deps.restarting.clear(id)
           if (!back)
             return failed(
@@ -221,8 +229,9 @@ export const sessionRestart = (deps: {
         }),
       )
     }).pipe(
-      // However it ends (back, failed, or vibestd stopping part way): the mark must not keep the session from its checks.
-      Effect.ensuring(deps.restarting.clear(id)),
+      // However it ends (back, failed, or vibestd stopping part way): the mark must not keep the session from its checks,
+      // and what it skipped meanwhile is looked at once.
+      Effect.ensuring(deps.restarting.clear(id).pipe(Effect.andThen(t.reconcile))),
       Effect.catchCause((cause) => Effect.succeed(failed(`not restarted: ${errorMessage(cause)}`))),
     )
   }
@@ -258,8 +267,7 @@ export const sessionRestart = (deps: {
         argv: againArgv(session),
         liveNow: db.getSession(id).pipe(Effect.map((row) => row?.metadata)),
         locked: deps.locked(id),
-        // A turn end the old harness reported while it stopped is not the round's result.
-        settle: (at) => deps.turnEnds.drop(id, at),
+        reconcile: deps.checkLater(id),
         hint: `; ${peekHint(id)}`,
         onBack: (h) =>
           Effect.gen(function* () {
@@ -315,7 +323,7 @@ export const sessionRestart = (deps: {
           return row?.id === id ? { ...row, ready: yield* db.readyAt(id) } : undefined
         }),
         locked: (effect) => effect,
-        settle: () => Effect.void,
+        reconcile: Effect.forkIn(inbox.deliver(projectId), deps.scope).pipe(Effect.asVoid),
         hint: "",
         onBack: () =>
           Effect.gen(function* () {

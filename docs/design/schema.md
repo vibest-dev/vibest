@@ -170,7 +170,8 @@ An inbox row is text for one recipient: a session, or the user (`recipient_sessi
 | process.conversation | process_id          | conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                                         |
 | process.end          | process_id          | reason: exited, limited, restart, move, archived (also for vibest --new), launch_failed                                                                                                  |
 | turn.start           | process_id          | typed? (the text typed into the pane; none for a turn a delivery opened)                                                                                                                 |
-| turn.end             | process_id, turn_id | status: completed, failed, interrupted, lost, not_started; output?, failure? {message} (the harness error)                                                                               |
+| turn.reported        | process_id          | harness, text; error?, conversation?, interrupted? (only when present). The turn end as the hook reported it, before a check consumes it                                                 |
+| turn.end             | process_id, turn_id | status: completed, failed, interrupted, lost, not_started; report? (the turn.reported it consumed), failure? {message}; output? only on rows written before report                       |
 | inbox.queued         | inbox_id            | none (the queue time is `at`)                                                                                                                                                            |
 | inbox.status         | inbox_id, turn_id?  | to; on to = delivered, turn_id is the turn that consumed it                                                                                                                              |
 
@@ -183,13 +184,24 @@ terminal). The start with the terminal follows it and copies what the process re
 `process.ready` and `process.conversation`); the one with no terminal is never ended. One whose terminal never
 opened ends `launch_failed`, and the session's current process is then the start before it, if any.
 
-`turn.end` `output` is the harness's answer text (not the rendered result, which is the result row's content); the
-migration takes it out of an old-shape result. `Db.finishTurn` takes the whole `turn.end` data.
+A `turn.end` points at the `turn.reported` it consumed (`report`). That row's `text` is the harness's answer, not the
+rendered result (the result row's content). Rows written before `report` keep the answer in `output`. `ls` reads
+`coalesce(text, output)`. `Db.finishTurn` takes the whole `turn.end` data. An end the harness never reported
+(`lost`, `not_started`, an exit, an interrupt) has no `report`.
+
+A `turn.reported`'s `process_id` is the session's current process when vibestd received the hook, not the harness
+that sent it: in a restart's window the new `process.start` is already written while the old harness still reports,
+so that report carries the new process. What keeps it out is a fence on event ids: a report counts only when its id
+is above the current process's first `process.ready` its integration wrote (a harness ends a turn only after it is
+ready), or above the current `process.start` for a harness whose ready comes from the runtime (Cursor). The first,
+not the latest: the same harness reports ready again (a plugin reload, a new conversation), and a report written
+before that and not yet consumed still counts. A report a `turn.end` consumed is not taken again.
 
 ## Hot paths
 
-- Pending scan every few seconds: inbox `WHERE status = 'pending' AND recipient_session_id IS NOT NULL` through
-  `inbox_status`; the cost does not grow with history.
+- Pending rows: read when an event for their recipient arrives, and once in a reconcile (at start, when a runtime
+  registers or comes back): inbox `WHERE status = 'pending' AND recipient_session_id IS NOT NULL` through
+  `inbox_status`; the cost does not grow with history. Nothing scans on an interval.
 - Open turn of a session: the latest `turn.start` (`event_session`, `ORDER BY id DESC LIMIT 1`), then check it has
   no `turn.end` (`event_turn`). Never an outer `NOT EXISTS` over all starts: it scans the whole history.
 - Live process and pid: the same shape with `process.start`, then the latest `process.ready` of that process.
@@ -206,21 +218,24 @@ migration takes it out of an old-shape result. `Db.finishTurn` takes the whole `
 
 ## Memory
 
+- One-shot timers (engine): a session's turn-end grace and missed-turn check, a polling main agent's away timer, and
+  one lease timer per row a poll handed out. Lost with the process; the start-up reconcile and `recoverDelivering`
+  stand in for them.
 - Live status: from the integration's events (working between `turn.start` and `turn.end`, plus `blocked`), and
   from the runtime only for a harness with no integration.
-- Poll leases: on start, `recoverSending` moves `delivering` rows of polling sessions back to `pending` and the
-  others to `failed`, each with an `inbox.status`; the plugin acks by row id and skips rows it
-  showed. A session may see one message twice after a vibestd restart.
+- Poll leases: on start, `recoverDelivering` (one transaction) moves `delivering` rows of polling main agents back
+  to `pending` and the other main-agent rows to `failed`, each with an `inbox.status`; the plugin acks by row id and
+  skips rows it showed. A session may see one message twice after a vibestd restart. A subagent's `delivering` rows
+  fail with one notice ("may or may not have arrived") and are not delivered again.
 - Restarting mark: the end events are written after SIGTERM, so a crash before it leaves the old process running,
   and a crash after it leaves an open `process.start` with no harness in the pane, which reconciliation ends.
 - Skipped options within one harness change, per-session locks, paste and ack waits: lost with the process; an
   open turn stays open, and the harness's turn end or reconciliation (idle, no result: lost) ends it.
 - When an open turn's text was last handed over (after a resume or a move to the next harness): a turn end
   reported before it is not this turn's. Lost with the process; the turn's own start time stands then.
-- The turn starts and turn ends the integrations reported (TurnEnds): an end until a check writes it as `turn.end`
-  and its result row (that check is a settlement, so it still runs while vibestd drains), a start until the poll's
-  sweep finds the session no longer live. Lost with the process: an end not yet written is lost, and reconciliation
-  ends the turn lost.
+- A turn start an integration reports is published (`live.turn_start`), never stored: it marks the open turn as
+  worked in the session's flags, which `forget` clears on its `process.end` or its archive. A turn end is a
+  `turn.reported` event, written as the hook is admitted (a settlement, so it still lands while vibestd drains) and kept across a restart. The check that writes it as `turn.end` is a settlement too.
   After a restart the stored proof that a turn was taken up is its typed text or an inbox row delivered into it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.

@@ -4,6 +4,7 @@ import path from "node:path"
 // What `vibest` fixes for the user on an interactive terminal: a vibestd to replace (`vibest daemon restart`, `vibest update`). A temporary HOME and VIBEST_HOME throughout, never the user's.
 import { assert, layer } from "@effect/vitest"
 import { cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
+import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
@@ -277,7 +278,9 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
             message: "queued",
             details: {},
           })
-        }).pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))))
+        }).pipe(
+          Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)), Layer.provide(Bus.layer))),
+        )
         const env = { HOME: layout.home, VIBEST_HOME: layout.home, PATH: "/usr/bin:/bin" }
         const daemon = yield* Effect.forkScoped(runVibest(layout.home, env, ["daemon", "--foreground"]))
         yield* Effect.gen(function* () {
@@ -308,7 +311,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))("self-healing", (it) 
           assert.strictEqual((yield* Fiber.join(daemon).pipe(Effect.timeout("10 seconds"))).code, 0)
           assert.isFalse(yield* probe(layout.socket))
           const rows = yield* Effect.flatMap(Db, (db) => db.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005")).pipe(
-            Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)))),
+            Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)), Layer.provide(Bus.layer))),
           )
           assert.deepStrictEqual(rows, [pending])
         }).pipe(Effect.ensuring(Effect.ignore(stopRecorded(layout.daemonInfo))), TestClock.withLive, Effect.scoped)

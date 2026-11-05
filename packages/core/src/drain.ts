@@ -2,16 +2,18 @@
 // Messages stay in sqlite for the next vibestd. Work deferred while draining wakes once a refused Stop reopens.
 import { Context, Deferred, Effect, Layer } from "effect"
 
+import { Bus } from "./bus.ts"
+
 const make = Effect.gen(function* () {
+  const bus = yield* Bus
   let phase: "open" | "draining" | "accepted" = "open"
   let reopened = yield* Deferred.make<void>()
   const active = new Map<object, string>()
   const track = (label: string) => {
     const token = {}
     active.set(token, label)
-    return Effect.sync(() => {
-      active.delete(token)
-    })
+    // Each release is published, so a Stop waiting for the set to empty looks again (`live.drain`).
+    return Effect.suspend(() => (active.delete(token) ? bus.observe({ type: "live.drain" }) : Effect.void))
   }
   const enter = (label: string, settlement: boolean): Effect.Effect<Effect.Effect<void>> =>
     Effect.suspend(() =>

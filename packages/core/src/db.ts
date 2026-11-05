@@ -16,15 +16,17 @@ import {
 // version 1, but has no event table) is refused, naming the one-time migration script given with the release.
 // `inspectSchema` only reads; the driver must run it on a read-only connection before opening an existing file
 // writable. One SQLite connection through effect/sql (the driver comes from #platform); rows are decoded with Schema;
-// multi-row changes run in `sql.withTransaction`.
+// multi-row changes run in `tx`: one transaction, and the events it appended are published after the commit.
 //
 // The session row callers read (`SessionRow`) is a read model: its process, turn and live fields come from the
 // append-only `event` table, and every change to them appends an event (schema.md, Event types).
 import { Clock, Context, Effect, Layer, Schema, String as Str } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
+import { Bus, type StoredEvent, type StoredType } from "./bus.ts"
 import { HARNESS_IDS, type HarnessId } from "./harness.ts"
 import { Routing } from "./plugins.ts"
+import type { TurnEnded } from "./results.ts"
 export { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
@@ -400,11 +402,16 @@ const ROUND_STATUS = ["completed", "failed", "interrupted", "lost", "not_started
 /** `turn.end` data (schema.md), written once. */
 export type TurnEnd = {
   readonly status: (typeof ROUND_STATUS)[number]
-  /** The harness's last answer text. */
+  /** The harness's last answer text. Rows written before `report`; new ends leave it out. */
   readonly output?: string
+  /** The `turn.reported` event this end consumed. */
+  readonly report?: number
   /** The harness's error. */
   readonly failure?: { readonly message: string }
 }
+
+/** A `turn.reported` row: the harness's turn end as received, and its event id. */
+export type TurnReport = TurnEnded & { readonly id: number }
 
 /** A harness error as `turn.end` failure; none for an empty error. */
 export const failureOf = (error: string | undefined): TurnEnd["failure"] =>
@@ -459,6 +466,8 @@ type BriefRow = {
   readonly endData: string | null
   readonly endedAt: number | null
   readonly resultContent: string | null
+  /** Answer text: the consumed `turn.reported`, else an old `turn.end`'s `output`. */
+  readonly answer: string | null
 }
 
 const roundStatus = (status: unknown): TurnEnd["status"] =>
@@ -469,8 +478,17 @@ const roundStatus = (status: unknown): TurnEnd["status"] =>
 /** Rows a session's own sends and tasks are: never main-agent-bound. */
 const TO_SESSION = `('task', 'send')`
 
+/**
+ * Rows appended by the fiber that opened the transaction. `closed` once that transaction ends: a forked fiber inherits
+ * this reference (and the sql transaction) and must not append into a buffer nobody publishes.
+ */
+const TxBuffer = Context.Reference<
+  { readonly events: Array<StoredEvent>; readonly fiberId: number; closed: boolean } | undefined
+>("vibest/TxBuffer", { defaultValue: () => undefined })
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+  const bus = yield* Bus
   /**
    * The `process.start` that is the session's current process: its latest, passing over a start that never got its
    * terminal (`launch_failed`) when an earlier one exists, so a failed move leaves the harness that last ran.
@@ -500,9 +518,9 @@ const make = Effect.gen(function* () {
     else statuses.set(row.id, row.status)
   }
 
-  const appendEvent = (event: {
+  const append = (event: {
     readonly sessionId: string
-    readonly type: string
+    readonly type: StoredType
     readonly processId?: number | undefined
     readonly turnId?: number | undefined
     readonly inboxId?: number | undefined
@@ -510,16 +528,54 @@ const make = Effect.gen(function* () {
     readonly at?: number
   }) =>
     Effect.gen(function* () {
+      const buffer = yield* TxBuffer
+      if (buffer === undefined) return yield* Effect.die(new Error("append outside a transaction"))
+      if (buffer.closed || (yield* Effect.fiberId) !== buffer.fiberId)
+        return yield* Effect.die(new Error("append not from the transaction fiber"))
+      const at = event.at ?? (yield* now)
+      const data = JSON.parse(JSON.stringify(event.data ?? {})) as Readonly<Record<string, unknown>>
       const [row] = yield* sql<{ id: number }>`INSERT INTO event ${sql.insert({
-        at: event.at ?? (yield* now),
+        at,
         sessionId: event.sessionId,
         type: event.type,
         ...(event.processId === undefined ? {} : { processId: event.processId }),
         ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
         ...(event.inboxId === undefined ? {} : { inboxId: event.inboxId }),
-        data: JSON.stringify(event.data ?? {}),
+        data: JSON.stringify(data),
       })} RETURNING id`
-      return row!.id
+      const id = row!.id
+      const stored: StoredEvent = {
+        id,
+        at,
+        sessionId: event.sessionId,
+        type: event.type,
+        data,
+        ...(event.processId === undefined ? {} : { processId: event.processId }),
+        ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+        ...(event.inboxId === undefined ? {} : { inboxId: event.inboxId }),
+      }
+      buffer.events.push(stored)
+      return id
+    })
+
+  /**
+   * Run `body` in one transaction. After it commits, publish the rows it appended, in id order. A nested call shares
+   * this buffer, so only the outermost commit publishes. A rollback publishes nothing. Only `body` is interruptible:
+   * an interrupt that comes once it has finished waits until the commit's rows are published, so none is dropped.
+   */
+  const tx = <A, E, R>(body: Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      if ((yield* TxBuffer) !== undefined) return yield* body
+      return yield* Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const buffer = { events: [] as Array<StoredEvent>, fiberId: yield* Effect.fiberId, closed: false }
+          const result = yield* sql
+            .withTransaction(restore(Effect.provideService(body, TxBuffer, buffer)))
+            .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
+          yield* bus.published(buffer.events)
+          return result
+        }),
+      )
     })
 
   /** Some project id already starts with `short`. */
@@ -665,7 +721,7 @@ const make = Effect.gen(function* () {
    * delivered names the turn its recipient has open (the turn that consumed it), if any.
    */
   const moveInbox = (where: Statement.Fragment, to: string) =>
-    sql.withTransaction(
+    tx(
       Effect.gen(function* () {
         const rows = yield* sql<{
           id: number
@@ -683,7 +739,7 @@ const make = Effect.gen(function* () {
         for (const r of moved) {
           const sessionId = r.recipient ?? r.sender!
           const turnId = to === "delivered" && r.recipient !== null ? yield* openTurn(r.recipient) : undefined
-          yield* appendEvent({
+          yield* append({
             sessionId,
             type: "inbox.status",
             inboxId: r.id,
@@ -716,10 +772,10 @@ const make = Effect.gen(function* () {
       const id = inserted!.id
       const at = yield* now
       const sessionId = row.recipient ?? row.sender!
-      yield* appendEvent({ sessionId, type: "inbox.queued", inboxId: id, at, data: {} })
+      yield* append({ sessionId, type: "inbox.queued", inboxId: id, at, data: {} })
       // A task's delivery is the first turn that takes it (`linkTask`).
       if (row.status !== "pending" && row.kind !== "task")
-        yield* appendEvent({
+        yield* append({
           sessionId,
           type: "inbox.status",
           inboxId: id,
@@ -736,7 +792,7 @@ const make = Effect.gen(function* () {
         AND i.kind = 'task' AND i.status = 'delivered'
         AND NOT EXISTS (SELECT 1 FROM event e WHERE e.inbox_id = i.id AND e.type = 'inbox.status')`
       if (task !== undefined)
-        yield* appendEvent({
+        yield* append({
           sessionId,
           type: "inbox.status",
           inboxId: task.id,
@@ -752,7 +808,7 @@ const make = Effect.gen(function* () {
       const found = yield* anySession(id)
       const current = found?.current
       if (current === undefined || current.ended !== null) return false
-      yield* appendEvent({
+      yield* append({
         sessionId: id,
         type: "process.end",
         processId: current.id,
@@ -783,17 +839,19 @@ const make = Effect.gen(function* () {
         ...(start.resume ? { resume: start.resume } : {}),
         ...(start.pid === undefined ? {} : { pid: start.pid }),
       }
-      const processId = yield* appendEvent({
+      const processId = yield* append({
         sessionId: id,
         type: "process.start",
         data,
         ...(at === undefined ? {} : { at }),
       })
-      if (opening)
-        yield* sql`INSERT INTO event (at, session_id, type, process_id, data)
-          SELECT at, session_id, type, ${processId}, data FROM event
+      if (opening) {
+        const copied = yield* sql<{ at: number; type: "process.ready" | "process.conversation"; data: string }>`
+          SELECT at, type, data FROM event
           WHERE process_id = ${before.id} AND type IN ('process.ready', 'process.conversation') ORDER BY id`
-      else integrations.delete(id)
+        for (const row of copied)
+          yield* append({ sessionId: id, type: row.type, processId, at: row.at, data: JSON.parse(row.data) })
+      } else integrations.delete(id)
       return processId
     })
 
@@ -804,7 +862,7 @@ const make = Effect.gen(function* () {
       const t = at ?? (yield* now)
       let turnId = yield* openTurn(id)
       if (turnId === undefined)
-        turnId = yield* appendEvent({
+        turnId = yield* append({
           sessionId: id,
           type: "turn.start",
           processId: found?.current?.id,
@@ -812,7 +870,7 @@ const make = Effect.gen(function* () {
           data: {},
         })
       prompted.delete(turnId)
-      return yield* appendEvent({
+      return yield* append({
         sessionId: id,
         type: "turn.end",
         processId: found?.current?.id,
@@ -821,6 +879,7 @@ const make = Effect.gen(function* () {
         data: {
           status: end.status,
           ...(end.output === undefined ? {} : { output: end.output }),
+          ...(end.report === undefined ? {} : { report: end.report }),
           ...(end.failure === undefined ? {} : { failure: end.failure }),
         },
       })
@@ -938,7 +997,7 @@ const make = Effect.gen(function* () {
         patch.harnessSessionId !== null &&
         patch.harnessSessionId !== current.harnessSessionId
       ) {
-        yield* appendEvent({
+        yield* append({
           sessionId: id,
           type: "process.conversation",
           processId: p.id,
@@ -954,7 +1013,7 @@ const make = Effect.gen(function* () {
         if (open !== undefined) {
           if (patch.turnPromptedAt !== undefined) prompted.set(open, at)
         } else {
-          const turnId = yield* appendEvent({
+          const turnId = yield* append({
             sessionId: id,
             type: "turn.start",
             processId: (yield* anySession(id))!.current?.id,
@@ -967,7 +1026,7 @@ const make = Effect.gen(function* () {
         const open = yield* openTurn(id)
         if (open !== undefined) prompted.delete(open)
         if (open !== undefined)
-          yield* appendEvent({
+          yield* append({
             sessionId: id,
             type: "turn.end",
             processId: (yield* anySession(id))!.current?.id,
@@ -1058,22 +1117,20 @@ const make = Effect.gen(function* () {
 
     /** A new project at `directory` (a realpath) with its repositories; its id. One already there is that project. */
     createProject: (directory: string, repositories: ReadonlyArray<RepositoryRow>) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const id = yield* newId(projectPrefixTaken)
-            // Two first requests can both miss projectAt; the second must not die on directory UNIQUE.
-            yield* sql`INSERT INTO project ${sql.insert({ id, directory })} ON CONFLICT (directory) DO NOTHING`
-            const [row] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
-            yield* putRepositories(row!.id, repositories)
-            return row!.id
-          }),
-        )
-        .pipe(Effect.orDie),
+      tx(
+        Effect.gen(function* () {
+          const id = yield* newId(projectPrefixTaken)
+          // Two first requests can both miss projectAt; the second must not die on directory UNIQUE.
+          yield* sql`INSERT INTO project ${sql.insert({ id, directory })} ON CONFLICT (directory) DO NOTHING`
+          const [row] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
+          yield* putRepositories(row!.id, repositories)
+          return row!.id
+        }),
+      ).pipe(Effect.orDie),
 
     /** Project `id`'s repositories as they are now: origins refreshed, newly present ones added. */
     refreshRepositories: (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
-      sql.withTransaction(putRepositories(id, repositories)).pipe(Effect.orDie),
+      tx(putRepositories(id, repositories)).pipe(Effect.orDie),
 
     /**
      * Projects with a directory whose repositories have exactly the origins `remotes` (non-null ones, as a set): where
@@ -1102,20 +1159,18 @@ const make = Effect.gen(function* () {
      * directory under its old directory move with it. Returns the old directory.
      */
     moveProject: (id: string, to: string, repositories: ReadonlyArray<RepositoryRow>) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const [row] = yield* sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${id}`
-            const from = row!.directory
-            yield* sql`UPDATE project SET directory = ${to} WHERE id = ${id}`
-            yield* sql`DELETE FROM project_repository WHERE project_id = ${id}`
-            yield* putRepositories(id, repositories)
-            yield* sql`UPDATE session SET directory = ${to} || substr(directory, ${from.length + 1})
+      tx(
+        Effect.gen(function* () {
+          const [row] = yield* sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${id}`
+          const from = row!.directory
+          yield* sql`UPDATE project SET directory = ${to} WHERE id = ${id}`
+          yield* sql`DELETE FROM project_repository WHERE project_id = ${id}`
+          yield* putRepositories(id, repositories)
+          yield* sql`UPDATE session SET directory = ${to} || substr(directory, ${from.length + 1})
               WHERE project_id = ${id} AND (directory = ${from} OR substr(directory, 1, ${from.length + 1}) = ${`${from}/`})`
-            return from
-          }),
-        )
-        .pipe(Effect.orDie),
+          return from
+        }),
+      ).pipe(Effect.orDie),
 
     /** Where project `id` is; undefined for a project with no directory (migrated without one). */
     projectDirectory: (id: string) =>
@@ -1170,97 +1225,95 @@ const make = Effect.gen(function* () {
       task?: string,
       parentSessionId?: string,
     ) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            if (max !== undefined) {
-              const n = (yield* selectRaw([notMain, sql`a.ended_at IS NULL`], running)).length
-              if (n >= max) return false
-            }
-            const [entry] = yield* sql<{
-              id: string | null
-            }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
-            const reportTo = parentSessionId ?? (row.agent === "main" ? undefined : (entry?.id ?? undefined))
-            const stopped = row.metadata.archived || row.metadata.removed
-            yield* sql`INSERT INTO session ${sql.insert({
-              id: row.id,
-              projectId: project,
-              ...(parentSessionId === undefined ? {} : { parentSessionId }),
-              ...(reportTo === undefined ? {} : { reportToSessionId: reportTo }),
-              role: row.agent,
-              name: row.name,
+      tx(
+        Effect.gen(function* () {
+          if (max !== undefined) {
+            const n = (yield* selectRaw([notMain, sql`a.ended_at IS NULL`], running)).length
+            if (n >= max) return false
+          }
+          const [entry] = yield* sql<{
+            id: string | null
+          }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
+          const reportTo = parentSessionId ?? (row.agent === "main" ? undefined : (entry?.id ?? undefined))
+          const stopped = row.metadata.archived || row.metadata.removed
+          yield* sql`INSERT INTO session ${sql.insert({
+            id: row.id,
+            projectId: project,
+            ...(parentSessionId === undefined ? {} : { parentSessionId }),
+            ...(reportTo === undefined ? {} : { reportToSessionId: reportTo }),
+            role: row.agent,
+            name: row.name,
+            machine: row.address.machine,
+            directory: cwd,
+            archiveOnCompletion: row.metadata.archive ? 1 : 0,
+            createdAt: row.createdAt,
+            ...(stopped ? { endedAt: row.lastActive } : {}),
+          })}`
+          const processAt = row.startedAt ?? row.createdAt
+          const processId = yield* startProcess(
+            row.id,
+            {
+              harness: row.harnessId,
+              ...(row.provider ? { provider: row.provider } : {}),
+              ...(row.model ? { model: row.model } : {}),
+              ...(row.metadata.routing === undefined ? {} : { routing: row.metadata.routing }),
+              runtime: row.runtime,
               machine: row.address.machine,
-              directory: cwd,
-              archiveOnCompletion: row.metadata.archive ? 1 : 0,
-              createdAt: row.createdAt,
-              ...(stopped ? { endedAt: row.lastActive } : {}),
-            })}`
-            const processAt = row.startedAt ?? row.createdAt
-            const processId = yield* startProcess(
-              row.id,
-              {
-                harness: row.harnessId,
-                ...(row.provider ? { provider: row.provider } : {}),
-                ...(row.model ? { model: row.model } : {}),
-                ...(row.metadata.routing === undefined ? {} : { routing: row.metadata.routing }),
-                runtime: row.runtime,
-                machine: row.address.machine,
-                terminal: row.address.id,
-                ...(row.harnessSessionId ? { resume: row.harnessSessionId } : {}),
+              terminal: row.address.id,
+              ...(row.harnessSessionId ? { resume: row.harnessSessionId } : {}),
+            },
+            processAt,
+          )
+          if (row.metadata.pid !== undefined || row.metadata.integration !== undefined)
+            yield* append({
+              sessionId: row.id,
+              type: "process.ready",
+              processId,
+              at: row.metadata.ready ?? processAt,
+              data: {
+                ...(row.metadata.pid === undefined ? {} : { pid: row.metadata.pid }),
+                ...(row.metadata.integration === undefined ? {} : { integration: row.metadata.integration }),
               },
-              processAt,
-            )
-            if (row.metadata.pid !== undefined || row.metadata.integration !== undefined)
-              yield* appendEvent({
+            })
+          if (row.exitedAt !== null)
+            yield* append({
+              sessionId: row.id,
+              type: "process.end",
+              processId,
+              at: row.exitedAt,
+              data: { reason: "exited" },
+            })
+          if (task !== undefined)
+            yield* insertInboxSql({
+              recipient: row.id,
+              kind: "task",
+              sender: parentSessionId ?? null,
+              content: task,
+              status: "delivered",
+            })
+          if (row.turnState !== "none") {
+            const turnId = yield* append({
+              sessionId: row.id,
+              type: "turn.start",
+              processId,
+              at: row.turnPromptedAt,
+              data: {},
+            })
+            yield* linkTask(row.id, turnId, row.turnPromptedAt)
+            if (row.turnState !== "open")
+              yield* append({
                 sessionId: row.id,
-                type: "process.ready",
+                type: "turn.end",
                 processId,
-                at: row.metadata.ready ?? processAt,
-                data: {
-                  ...(row.metadata.pid === undefined ? {} : { pid: row.metadata.pid }),
-                  ...(row.metadata.integration === undefined ? {} : { integration: row.metadata.integration }),
-                },
-              })
-            if (row.exitedAt !== null)
-              yield* appendEvent({
-                sessionId: row.id,
-                type: "process.end",
-                processId,
-                at: row.exitedAt,
-                data: { reason: "exited" },
-              })
-            if (task !== undefined)
-              yield* insertInboxSql({
-                recipient: row.id,
-                kind: "task",
-                sender: parentSessionId ?? null,
-                content: task,
-                status: "delivered",
-              })
-            if (row.turnState !== "none") {
-              const turnId = yield* appendEvent({
-                sessionId: row.id,
-                type: "turn.start",
-                processId,
+                turnId,
                 at: row.turnPromptedAt,
-                data: {},
+                data: { status: row.turnState },
               })
-              yield* linkTask(row.id, turnId, row.turnPromptedAt)
-              if (row.turnState !== "open")
-                yield* appendEvent({
-                  sessionId: row.id,
-                  type: "turn.end",
-                  processId,
-                  turnId,
-                  at: row.turnPromptedAt,
-                  data: { status: row.turnState },
-                })
-            }
-            remember(row)
-            return true
-          }),
-        )
-        .pipe(Effect.orDie),
+          }
+          remember(row)
+          return true
+        }),
+      ).pipe(Effect.orDie),
 
     /**
      * The session `input` names: its full id, or a prefix of at least 8 characters that exactly one session's id
@@ -1302,8 +1355,7 @@ const make = Effect.gen(function* () {
     /** How many sessions have a live status in memory (tests check it shrinks back once sessions end). */
     liveStatuses: Effect.sync(() => statuses.size),
 
-    updateSession: (id: string, patch: SessionPatch) =>
-      sql.withTransaction(updateSession(id, patch)).pipe(Effect.orDie),
+    updateSession: (id: string, patch: SessionPatch) => tx(updateSession(id, patch)).pipe(Effect.orDie),
 
     /** `projectId` limits to one project; `stopped` includes subagents whose process is gone and ended main conversations. */
     listSessions: (filter: { projectId?: string; stopped?: boolean } = {}) =>
@@ -1325,10 +1377,12 @@ const make = Effect.gen(function* () {
             t.id AS turn_id,
             te.data AS end_data,
             te.at AS ended_at,
-            (SELECT i.content FROM inbox i WHERE i.result_event_id = te.id ORDER BY i.id LIMIT 1) AS result_content
+            (SELECT i.content FROM inbox i WHERE i.result_event_id = te.id ORDER BY i.id LIMIT 1) AS result_content,
+            coalesce(json_extract(tr.data, '$.text'), json_extract(te.data, '$.output')) AS answer
           FROM session a
           LEFT JOIN event t ON t.id = (SELECT max(id) FROM event WHERE session_id = a.id AND type = 'turn.start')
           LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end'
+          LEFT JOIN event tr ON tr.id = json_extract(te.data, '$.report') AND tr.type = 'turn.reported'
           WHERE ${sql.in("a.id", ids)}`
       ).pipe(
         Effect.map((rows) => {
@@ -1339,7 +1393,7 @@ const make = Effect.gen(function* () {
             const status = raw !== undefined && MESSAGE_STATUSES.has(raw) ? (raw as MessageStatusName) : undefined
             const summary =
               (row.resultContent === null ? undefined : summaryIn(row.resultContent)) ??
-              end?.output?.split("\n")[0] ??
+              (row.answer === null ? undefined : row.answer.split("\n")[0]) ??
               ""
             briefs.set(row.id, {
               task: row.task ?? null,
@@ -1390,7 +1444,7 @@ const make = Effect.gen(function* () {
     ) =>
       Effect.gen(function* () {
         const id = yield* unusedId
-        return yield* sql.withTransaction(
+        return yield* tx(
           Effect.gen(function* () {
             yield* clearMainAt(location.runtime, location.address, project)
             const movingHere = moving.has(project)
@@ -1446,21 +1500,19 @@ const make = Effect.gen(function* () {
 
     /** The harness's own conversation id (latest wins: a /clear changes it), written only when it changed; true when it did. */
     noteHarnessSession: (id: string, harnessSessionId: string) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const { current, conversation } = yield* conversationOf(id)
-            if (current === undefined || conversation === harnessSessionId) return false
-            yield* appendEvent({
-              sessionId: id,
-              type: "process.conversation",
-              processId: current.id,
-              data: { conversation: harnessSessionId },
-            })
-            return true
-          }),
-        )
-        .pipe(Effect.orDie),
+      tx(
+        Effect.gen(function* () {
+          const { current, conversation } = yield* conversationOf(id)
+          if (current === undefined || conversation === harnessSessionId) return false
+          yield* append({
+            sessionId: id,
+            type: "process.conversation",
+            processId: current.id,
+            data: { conversation: harnessSessionId },
+          })
+          return true
+        }),
+      ).pipe(Effect.orDie),
 
     /**
      * The integration version and protocol session `id` (main agent or not) sent; true when they changed. Recorded
@@ -1489,25 +1541,27 @@ const make = Effect.gen(function* () {
         readonly ready?: number | null
       },
     ) =>
-      Effect.gen(function* () {
-        const ready = typeof patch.ready === "number"
-        if (!ready && typeof patch.pid !== "number") return
-        const found = yield* anySession(id)
-        const current = found?.current
-        if (current === undefined) return
-        const integration = integrations.get(id)
-        yield* appendEvent({
-          sessionId: id,
-          type: "process.ready",
-          processId: current.id,
-          ...(ready ? { at: patch.ready as number } : {}),
-          data: {
-            ...(typeof patch.pid === "number" ? { pid: patch.pid } : {}),
-            ...(ready ? {} : { pidOnly: true }),
-            ...(!ready || integration === undefined ? {} : { integration }),
-          },
-        })
-      }).pipe(Effect.orDie),
+      tx(
+        Effect.gen(function* () {
+          const ready = typeof patch.ready === "number"
+          if (!ready && typeof patch.pid !== "number") return
+          const found = yield* anySession(id)
+          const current = found?.current
+          if (current === undefined) return
+          const integration = integrations.get(id)
+          yield* append({
+            sessionId: id,
+            type: "process.ready",
+            processId: current.id,
+            ...(ready ? { at: patch.ready as number } : {}),
+            data: {
+              ...(typeof patch.pid === "number" ? { pid: patch.pid } : {}),
+              ...(ready ? {} : { pidOnly: true }),
+              ...(!ready || integration === undefined ? {} : { integration }),
+            },
+          })
+        }),
+      ).pipe(Effect.orDie),
 
     /** When session `id`'s integration last reported ready (main agent or not); undefined when it has not since its start. */
     readyAt: (id: string) =>
@@ -1521,42 +1575,38 @@ const make = Effect.gen(function* () {
      * same conversation (`process.end` restart, then the same `process.start`). The open turn stays open.
      */
     restartProcess: (id: string) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const { current, conversation } = yield* conversationOf(id)
-            if (current === undefined) return
-            yield* endProcess(id, "restart")
-            const { resume: _, pid: __, ...start } = current.start
-            yield* startProcess(id, { ...start, ...(conversation ? { resume: conversation } : {}) })
-          }),
-        )
-        .pipe(Effect.orDie),
+      tx(
+        Effect.gen(function* () {
+          const { current, conversation } = yield* conversationOf(id)
+          if (current === undefined) return
+          yield* endProcess(id, "restart")
+          const { resume: _, pid: __, ...start } = current.start
+          yield* startProcess(id, { ...start, ...(conversation ? { resume: conversation } : {}) })
+        }),
+      ).pipe(Effect.orDie),
 
     /** End session `id`'s current process (`process.end` with `reason`); false when it had already ended. */
-    endProcess: (id: string, reason: EndReason) => sql.withTransaction(endProcess(id, reason)).pipe(Effect.orDie),
+    endProcess: (id: string, reason: EndReason) => tx(endProcess(id, reason)).pipe(Effect.orDie),
 
     /** The last report wins. Another harness, or an id that is not a main agent, changes nothing. */
     reportCoordinatorSession: (sessionId: string, harness: HarnessId, harnessSessionId: string) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const [main] = yield* sql<{
-              id: string
-            }>`SELECT entry_session_id AS id FROM project WHERE entry_session_id = ${sessionId}`
-            const { current, conversation } = yield* conversationOf(sessionId)
-            if (main === undefined || current === undefined || current.start.harness !== harness)
-              return yield* Effect.logDebug(`main agent session report ignored for ${sessionId}`)
-            if (conversation === harnessSessionId) return
-            yield* appendEvent({
-              sessionId,
-              type: "process.conversation",
-              processId: current.id,
-              data: { conversation: harnessSessionId },
-            })
-          }),
-        )
-        .pipe(Effect.orDie),
+      tx(
+        Effect.gen(function* () {
+          const [main] = yield* sql<{
+            id: string
+          }>`SELECT entry_session_id AS id FROM project WHERE entry_session_id = ${sessionId}`
+          const { current, conversation } = yield* conversationOf(sessionId)
+          if (main === undefined || current === undefined || current.start.harness !== harness)
+            return yield* Effect.logDebug(`main agent session report ignored for ${sessionId}`)
+          if (conversation === harnessSessionId) return
+          yield* append({
+            sessionId,
+            type: "process.conversation",
+            processId: current.id,
+            data: { conversation: harnessSessionId },
+          })
+        }),
+      ).pipe(Effect.orDie),
 
     /**
      * The main agent leaves its place to move to another terminal (Project.StopCoordinator), before its harness is
@@ -1578,37 +1628,33 @@ const make = Effect.gen(function* () {
 
     /** The runtime's `pane_closed` of a main agent's pane: it is gone, and what was waiting for it is dropped. */
     clearCoordinator: (runtime: string, address: RuntimeAddress) =>
-      sql.withTransaction(clearMainAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
+      tx(clearMainAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
-    insertInbox: (row: NewInboxRow) => sql.withTransaction(insertInboxRow(row)).pipe(Effect.orDie),
+    insertInbox: (row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie),
 
     /** A Message to the subagent, unless it is archived (undefined then). One transaction, so `archiveIfNoPending` sees it or it sees the tombstone. */
     insertSend: (sessionId: string, message: string) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const s = yield* findSession(sessionId)
-            if (s === undefined || s.metadata.archived || s.metadata.removed) return undefined
-            return yield* insertInboxRow({ sessionId, kind: "send", message, details: {} })
-          }),
-        )
-        .pipe(Effect.orDie),
+      tx(
+        Effect.gen(function* () {
+          const s = yield* findSession(sessionId)
+          if (s === undefined || s.metadata.archived || s.metadata.removed) return undefined
+          return yield* insertInboxRow({ sessionId, kind: "send", message, details: {} })
+        }),
+      ).pipe(Effect.orDie),
 
     /** End the subagent (`stopped`) unless a Message to it is pending; false then. One transaction with `insertSend`'s. */
     archiveIfNoPending: (id: string) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const s = yield* findSession(id)
-            if (s === undefined || (yield* findSend(id, "pending")).length > 0) return false
-            yield* updateSession(id, { metadata: { ...s.metadata, archived: true, removed: true } })
-            return true
-          }),
-        )
-        .pipe(Effect.orDie),
+      tx(
+        Effect.gen(function* () {
+          const s = yield* findSession(id)
+          if (s === undefined || (yield* findSend(id, "pending")).length > 0) return false
+          yield* updateSession(id, { metadata: { ...s.metadata, archived: true, removed: true } })
+          return true
+        }),
+      ).pipe(Effect.orDie),
 
     closeTurn: (id: string, end: TurnState, patch: SessionPatch) =>
-      sql.withTransaction(updateSession(id, { turnState: end, ...patch })).pipe(Effect.orDie),
+      tx(updateSession(id, { turnState: end, ...patch })).pipe(Effect.orDie),
 
     /**
      * Whether session `id`'s open turn was taken up, from what is stored (so after a vibestd restart too): it was typed,
@@ -1681,41 +1727,105 @@ const make = Effect.gen(function* () {
 
     /** Open a user-typed turn. False when a turn is already open. One transaction with the session row. */
     beginUserTurn: (id: string, text: string, patch: SessionPatch) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            if ((yield* openTurn(id)) !== undefined) return false
-            const at = patch.turnPromptedAt ?? (yield* now)
-            const { turnState: _s, turnPromptedAt: _a, ...rest } = patch
-            yield* appendEvent({
-              sessionId: id,
-              type: "turn.start",
-              processId: (yield* anySession(id))?.current?.id,
-              at,
-              data: { typed: text },
-            })
-            yield* updateSession(id, rest)
-            return true
-          }),
-        )
-        .pipe(Effect.orDie),
+      tx(
+        Effect.gen(function* () {
+          if ((yield* openTurn(id)) !== undefined) return false
+          const at = patch.turnPromptedAt ?? (yield* now)
+          const { turnState: _s, turnPromptedAt: _a, ...rest } = patch
+          yield* append({
+            sessionId: id,
+            type: "turn.start",
+            processId: (yield* anySession(id))?.current?.id,
+            at,
+            data: { typed: text },
+          })
+          yield* updateSession(id, rest)
+          return true
+        }),
+      ).pipe(Effect.orDie),
+
+    /**
+     * The harness's turn end, as received: one `turn.reported`, linked to the current process. No session lock. A check
+     * later writes the `turn.end` that points at it.
+     */
+    reportTurn: (id: string, end: TurnEnded) =>
+      tx(
+        Effect.gen(function* () {
+          const processId = (yield* anySession(id))?.current?.id
+          yield* append({
+            sessionId: id,
+            type: "turn.reported",
+            ...(processId === undefined ? {} : { processId }),
+            at: end.at,
+            data: {
+              harness: end.harness,
+              text: end.text,
+              ...(end.error ? { error: end.error } : {}),
+              ...(end.conversationId ? { conversation: end.conversationId } : {}),
+              ...(end.interrupted ? { interrupted: true } : {}),
+            },
+          })
+        }),
+      ).pipe(Effect.orDie),
+
+    /**
+     * Session `id`'s latest `turn.reported`, if it came after the fence: `ready`, the current process's first
+     * `process.ready` its integration wrote (none yet: no report counts); `start`, the current `process.start` (a
+     * harness whose ready comes from the runtime). A harness ends a turn only after it is first ready, so a report at or
+     * before the fence is an earlier harness's (a restart's or a move's). The first, not the latest: the same harness
+     * reports ready again on a plugin reload or a new conversation, and its unconsumed report still counts. Ids, not
+     * times: a ready's `at` can be backfilled.
+     * Undefined too when a `turn.end` already consumed it: a report is one turn's end, taken once.
+     */
+    latestReport: (id: string, fence: "ready" | "start") =>
+      sql<{ id: number; at: number; data: string; consumed: number }>`SELECT r.id, r.at, r.data,
+        EXISTS (SELECT 1 FROM event te WHERE te.session_id = ${id} AND te.type = 'turn.end'
+          AND json_extract(te.data, '$.report') = r.id) AS consumed
+        FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' AND r.id > ${
+          fence === "start"
+            ? currentStart(sql`${id}`)
+            : sql`(SELECT min(e.id) FROM event e WHERE e.process_id = ${currentStart(sql`${id}`)}
+                AND e.type = 'process.ready' AND json_extract(e.data, '$.pidOnly') IS NULL)`
+        }
+        ORDER BY r.id DESC LIMIT 1`.pipe(
+        Effect.map((rows) => {
+          const row = rows[0]
+          if (row === undefined || row.consumed) return undefined
+          const data = JSON.parse(row.data) as {
+            harness?: unknown
+            text?: unknown
+            error?: unknown
+            conversation?: unknown
+            interrupted?: unknown
+          }
+          if (typeof data.harness !== "string") return undefined
+          return {
+            id: row.id,
+            at: row.at,
+            harness: data.harness as HarnessId,
+            text: typeof data.text === "string" ? data.text : "",
+            error: typeof data.error === "string" && data.error !== "" ? data.error : undefined,
+            conversationId: typeof data.conversation === "string" ? data.conversation : undefined,
+            interrupted: data.interrupted === true,
+          } satisfies TurnReport
+        }),
+        Effect.orDie,
+      ),
 
     /**
      * Close the open turn with `end` (its whole `turn.end` data) and point the result at it, in one transaction with the
      * session row. `at`: no earlier than this (the reported turn end's time), so that end is not taken again.
      */
     finishTurn: (id: string, end: TurnEnd, patch: SessionPatch, row: NewInboxRow, at?: number) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const stamp = at === undefined ? undefined : Math.max(at, yield* now)
-            const inserted = yield* insertInboxRow(row, row.kind === "result" ? end : undefined, stamp)
-            const { turnState: _, ...rest } = patch
-            yield* updateSession(id, row.kind === "result" ? rest : patch)
-            return inserted
-          }),
-        )
-        .pipe(Effect.orDie),
+      tx(
+        Effect.gen(function* () {
+          const stamp = at === undefined ? undefined : Math.max(at, yield* now)
+          const inserted = yield* insertInboxRow(row, row.kind === "result" ? end : undefined, stamp)
+          const { turnState: _, ...rest } = patch
+          yield* updateSession(id, row.kind === "result" ? rest : patch)
+          return inserted
+        }),
+      ).pipe(Effect.orDie),
 
     pendingInbox: (sessionId: string) => findSend(sessionId, "pending").pipe(Effect.orDie),
 
@@ -1743,46 +1853,69 @@ const make = Effect.gen(function* () {
      * `pending`. Returns the rows now delivered.
      */
     settleLeased: (projectIdValue: string, ids: ReadonlyArray<number>, release: ReadonlyArray<number>) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const main = entryOf(projectIdValue)
-            if (release.length > 0)
-              yield* moveInbox(
-                sql`${sql.in("id", release)} AND status = 'delivering' AND recipient_session_id = ${main}`,
-                "pending",
-              )
-            if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
-            const done = yield* moveInbox(
-              sql`${sql.in("id", ids)} AND status IN ('delivering', 'pending') AND kind NOT IN ${sql.literal(TO_SESSION)}
-                AND recipient_session_id = ${main}`,
-              "delivered",
+      tx(
+        Effect.gen(function* () {
+          const main = entryOf(projectIdValue)
+          if (release.length > 0)
+            yield* moveInbox(
+              sql`${sql.in("id", release)} AND status = 'delivering' AND recipient_session_id = ${main}`,
+              "pending",
             )
-            return done.length === 0 ? [] : yield* inboxIn(done)
-          }),
-        )
-        .pipe(Effect.orDie),
+          if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
+          const done = yield* moveInbox(
+            sql`${sql.in("id", ids)} AND status IN ('delivering', 'pending') AND kind NOT IN ${sql.literal(TO_SESSION)}
+                AND recipient_session_id = ${main}`,
+            "delivered",
+          )
+          return done.length === 0 ? [] : yield* inboxIn(done)
+        }),
+      ).pipe(Effect.orDie),
 
     /**
-     * After a restart: a claimed main-agent-bound row whose delivery was cut off may or may not have arrived, so it
-     * failed; one bound to a main agent whose harness polls (`pollHarnesses`, the adapters with inbox `poll`) is back to
-     * pending, because that integration acks by row id and skips a row it already showed. Subagent-bound
-     * `delivering` rows stay for `check`. (Leases are memory only: none outlives the vibestd that granted it.)
+     * Once at start, one transaction (decision 2): a claimed row whose delivery a stop cut off may or may not have
+     * arrived. Bound to a main agent whose harness polls (`pollHarnesses`, the adapters with inbox `poll`): pending
+     * again, because that integration acks by row id and skips a row it already showed. Any other main-agent row:
+     * failed. A subagent's rows: failed, with one notice per subagent (`notice` words it; its `inbox.queued` offers it);
+     * nothing is delivered again. (Leases are memory only: none outlives the vibestd that granted it.)
      */
-    recoverSending: (pollHarnesses: ReadonlyArray<string>) =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            const polling = sql`recipient_session_id IN (SELECT s.id FROM session s
+    recoverDelivering: (
+      pollHarnesses: ReadonlyArray<string>,
+      notice: (sessionId: string, messages: ReadonlyArray<string>) => string,
+    ) =>
+      tx(
+        Effect.gen(function* () {
+          const polling = sql`recipient_session_id IN (SELECT s.id FROM session s
               JOIN project q ON q.entry_session_id = s.id
               JOIN event p ON p.id = ${currentStart(sql`s.id`)}
               WHERE ${pollHarnesses.length === 0 ? sql`0` : sql`json_extract(p.data, '$.harness') IN ${sql.in(pollHarnesses)}`})`
-            const claimed = sql`status = 'delivering' AND kind NOT IN ${sql.literal(TO_SESSION)}`
-            yield* moveInbox(sql`${claimed} AND ${polling}`, "pending")
-            yield* moveInbox(claimed, "failed")
-          }),
-        )
-        .pipe(Effect.asVoid, Effect.orDie),
+          const claimed = sql`status = 'delivering' AND kind NOT IN ${sql.literal(TO_SESSION)}`
+          yield* moveInbox(sql`${claimed} AND ${polling}`, "pending")
+          yield* moveInbox(claimed, "failed")
+          const cut = yield* sql<{ id: number; recipient: string; content: string }>`SELECT id,
+              recipient_session_id AS recipient, content FROM inbox
+            WHERE status = 'delivering' AND kind IN ${sql.literal(TO_SESSION)} ORDER BY id`
+          const bySession = new Map<string, Array<{ id: number; content: string }>>()
+          for (const row of cut) bySession.set(row.recipient, [...(bySession.get(row.recipient) ?? []), row])
+          for (const [sessionId, rows] of bySession) {
+            yield* moveInbox(
+              sql.in(
+                "id",
+                rows.map((r) => r.id),
+              ),
+              "failed",
+            )
+            yield* insertInboxRow({
+              sessionId,
+              kind: "notice",
+              message: notice(
+                sessionId,
+                rows.map((r) => r.content),
+              ),
+              details: {},
+            })
+          }
+        }),
+      ).pipe(Effect.orDie),
 
     /** Claimed deliveries must settle before a planned shutdown; pending Messages wait for the next vibestd. */
     sendingInbox: inbox(sql`m.status = 'delivering'`).pipe(
@@ -1800,7 +1933,7 @@ const make = Effect.gen(function* () {
     ),
 
     dropWaiting: (projectIdValue: string, guard?: { readonly runtime: string; readonly address: string } | "absent") =>
-      sql.withTransaction(dropWaiting(projectIdValue, guard)).pipe(Effect.asVoid, Effect.orDie),
+      tx(dropWaiting(projectIdValue, guard)).pipe(Effect.asVoid, Effect.orDie),
 
     /**
      * Claim `pending` Messages. Main-Agent-bound claims also require the main agent still at the place the caller read.

@@ -3,6 +3,7 @@ import fs from "node:fs/promises"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 // What vibest relies on from SQLite and @effect/sql-sqlite-bun: file mode, WAL synchronous, the write lock.
 import { assert, describe, it } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
 import { Db, SQL_NAMES } from "@vibest/core/db"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { SqlClient } from "effect/sql"
@@ -11,7 +12,8 @@ import * as Platform from "#platform"
 
 import { projectOf, tempDirectory } from "./fakes.ts"
 
-const database = (filename: string) => Db.layer.pipe(Layer.provideMerge(Platform.sqlite(filename)))
+const database = (filename: string) =>
+  Db.layer.pipe(Layer.provideMerge(Platform.sqlite(filename)), Layer.provide(Bus.layer))
 
 const modeOf = (path: string) => Effect.promise(async () => (await fs.stat(path)).mode & 0o777)
 
@@ -176,7 +178,7 @@ describe("a vibestd restart", () => {
       }).pipe(Effect.provide(database(file)))
       const statuses = yield* Effect.gen(function* () {
         // Inbox.layer runs this at start with the harnesses whose adapter polls.
-        yield* (yield* Db).recoverSending(["claude"])
+        yield* (yield* Db).recoverDelivering(["claude"], () => "")
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox ORDER BY id`
       }).pipe(Effect.provide(database(file)))

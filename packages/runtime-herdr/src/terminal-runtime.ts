@@ -139,7 +139,7 @@ export interface PoolDeps {
 /**
  * The herdr Runtime: `open` is `tab.create` (the only place env can be set) plus `agent.start` for a harness argv
  * (typed into the pane's shell for anything else), `send` reaches the agent in a pane when herdr knows one, and
- * `state` is herdr's detected status. Optional members: `state`, `events`, `present`, `attach` (runtime-port.md §3);
+ * `state` is herdr's detected status, `events` its pushes. Optional members: `state`, `present`, `attach` (runtime-port.md §3);
  * herdr has no `exec`.
  */
 export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
@@ -188,13 +188,15 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             // `pane.agent_detected` has no pane filter (a workspace-wide subscription), so this pane's frames are picked below.
             h.subscribe([{ type: "pane.agent_status_changed", pane_id: paneId }, { type: "pane.agent_detected" }]).pipe(
               Stream.runForEach((frame: PushFrame) => {
+                // A workspace event (`pane_agent_detected`) carries `type`; a subscription frame does not.
                 const data = frame.data as {
-                  readonly type: string
+                  readonly type?: string
                   readonly pane_id?: string
                   readonly agent_status?: results.AgentStatus | null
                   readonly agent?: string | null
                 }
-                if (data.type === "pane_agent_status_changed" && data.agent_status)
+                // A subscription frame names its kind in `event`; its data has no `type`.
+                if (frame.event === "pane.agent_status_changed" && data.agent_status)
                   return PubSub.publish(events, {
                     type: "state",
                     terminal: terminalOf(session, paneId, names.get(key)),
@@ -234,7 +236,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.forkIn(scope),
     )
     // A herdr server that came back: every per-pane subscription died with it. Their keys were dropped by each
-    // stream's `ensuring`, so the next `state` installs a fresh one (core polls `state` every 5 s).
+    // stream's `ensuring`; on this `reset` core reads each of its terminals' `state` once, which installs fresh ones.
     yield* pool.restarts.pipe(
       Stream.runForEach((_session) => PubSub.publish(events, { type: "reset", machine: "local" })),
       Effect.catchCause(() => Effect.void),

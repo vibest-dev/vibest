@@ -1,7 +1,7 @@
-// The session report format, a harness's turn input and the terminal status escape (runtime-port.md §5).
+// The session report format, a harness's turn input and turn end, and the terminal status escape (runtime-port.md §5).
 import { Effect, FileSystem } from "effect"
 
-import { type HarnessAdapter } from "./harness.ts"
+import { type HarnessAdapter, type HarnessId } from "./harness.ts"
 
 export const jsonObject = (raw: string): Record<string, unknown> | undefined => {
   try {
@@ -86,3 +86,51 @@ export const envelope = (
 /** vibest's one-line outcome of a turn, from any error; used as the summary when the final message is empty or the turn failed. */
 export const outcome = (name: string, error: string | undefined) =>
   error ? `Agent "${name}" failed: ${error}` : `Agent "${name}" finished`
+
+/** A harness's turn end, as its integration reported it. */
+export type TurnEnded = {
+  readonly harness: HarnessId
+  /** When vibestd received it. */
+  readonly at: number
+  /** The harness's answer text. */
+  readonly text: string
+  readonly error: string | undefined
+  /** Cursor's `conversation_id` (in every hook's input), the id `--resume` takes; only a plain id, never one that reads as a flag. */
+  readonly conversationId: string | undefined
+  /** A turn stopped in its terminal (`aborted: true`, Claude's and Pi's): a result only for an open round. */
+  readonly interrupted: boolean
+}
+
+/** The adapter's `turnEnd` reading of a hook's `raw` input, received at `at`; undefined when it is no turn end. */
+export const turnEndOf = (adapter: HarnessAdapter, agent: string, raw: string, at: number): TurnEnded | undefined => {
+  const event = jsonObject(raw)
+  const payload = event && adapter.turnEnd?.(event, agent === "coordinator")?.result
+  return payload ? turnEndFrom(adapter, payload, at) : undefined
+}
+
+/** A turn end from the adapter's result `payload` (the harness's hook input, verbatim), received at `at`. */
+export const turnEndFrom = (
+  adapter: HarnessAdapter,
+  payload: Readonly<Record<string, unknown>>,
+  at: number,
+): TurnEnded => {
+  const text = payload[adapter.resultField]
+  const error = payload.error
+  // `error` names what ended the turn (Claude's `interrupted`, `refusal`, `error`), `error_details` the text.
+  const details = payload.error_details
+  const conversation = payload.conversation_id
+  return {
+    harness: adapter.id,
+    at,
+    text: typeof text === "string" ? text : "",
+    error:
+      typeof error === "string" && error
+        ? typeof details === "string" && details
+          ? `${error}: ${details}`
+          : error
+        : undefined,
+    conversationId:
+      typeof conversation === "string" && /^\w[\w.:-]{0,127}$/.test(conversation) ? conversation : undefined,
+    interrupted: payload.aborted === true,
+  }
+}

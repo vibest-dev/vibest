@@ -14,7 +14,7 @@ import {
 // different sessions proceed in parallel. A session is addressed by its row's terminal — `runtime { kind }` routes the
 // call to the registered Runtime (runtime-port.md §3), `address { machine, id }` names the terminal in it. Core follows
 // each Agent with the runtime's `state` and `events` when they exist, else by polling (§5), and a turn ends when the
-// agent goes idle after working or its process exits; the result is the integration's turn end (TurnEnds).
+// agent goes idle after working or its process exits; the result is the integration's turn end (a stored `turn.reported`).
 import {
   Cause,
   Clock,
@@ -32,17 +32,19 @@ import {
   Path,
   PlatformError,
   Predicate,
+  PubSub,
   Ref,
   Schedule,
-  Stream,
   SynchronizedRef,
 } from "effect"
 import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 import { ChildProcessSpawner } from "effect/process"
 
+import { awaitEvent, awaitOn, Bus, type EngineEvent } from "./bus.ts"
 import { Db, type InboxRow, type SessionRow } from "./db.ts"
 import { Drain } from "./drain.ts"
+import * as Engine from "./engine.ts"
 import {
   encodeCommand,
   harnessOptions,
@@ -77,14 +79,12 @@ import {
   Runtimes,
   RuntimeError,
   type Runtime,
-  type RuntimeEvent,
   stateOf,
   type Terminal,
   type AgentSeen,
 } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
-import { type TurnEnded, TurnEnds } from "./turn-ends.ts"
 import { allocationParentBlocked, gitState, type GitState, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 /**
  * VIBEST_RUNTIME (and the vibest-runtime header): where an agent runs, `{runtime, machine, terminal}` as vibestd recorded
@@ -118,8 +118,8 @@ export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
 export const HOOK_GRACE = Duration.seconds(10)
 export const TAIL_LINES = 30
-export const POLL = Duration.seconds(5)
 export const STOP_WAIT = Duration.seconds(10)
+/** Only `awaitReady` polls: a drawn startup dialog has no event. */
 const TICK = Schedule.spaced("500 millis")
 
 type Platform = FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner
@@ -211,10 +211,6 @@ export class Sessions extends Context.Service<
     readonly list: (filter?: { projectId?: string; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
     /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
     readonly check: (id: string) => Effect.Effect<void>
-    /** A turn end an integration reported (RPC `TurnEnd`, or the HTTP hook): kept, then a check is scheduled; returns at once (SPEC §7, §9). */
-    readonly turnEnded: (id: string, end: TurnEnded) => Effect.Effect<void>
-    /** Schedule a check of session `id` and return at once (what `turnEnded` does after keeping the end). */
-    readonly resultReady: (id: string) => Effect.Effect<void>
     /** RPC `Prompt`: the user typed into a subagent's terminal; with no round open, that opens one. */
     readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void, never, FileSystem.FileSystem>
     /** Terminal and workspace labels again, after the runtime dropped them. How many terminals were labelled. */
@@ -223,8 +219,6 @@ export class Sessions extends Context.Service<
     readonly inMemory: Effect.Effect<{
       readonly tracked: number
       readonly locks: number
-      readonly turnEnds: number
-      readonly turnStarts: number
     }>
     /** The live agents (main agents too) whose recorded integration is not this vibestd's (`vibest update`). */
     readonly outdated: Effect.Effect<ReadonlyArray<Outdated>>
@@ -255,9 +249,10 @@ export class Sessions extends Context.Service<
       const removal = yield* Remove.make
       const processes = yield* Processes
       const restarting = yield* Restarting
-      const turnEnds = yield* TurnEnds
+      const bus = yield* Bus
       const platform = yield* Effect.context<Platform>()
       const scope = yield* Effect.scope
+      const engine = yield* Engine.make
 
       const tracked = yield* SynchronizedRef.make(HashMap.empty<string, Tracked>())
       const track = (id: string) =>
@@ -268,7 +263,7 @@ export class Sessions extends Context.Service<
           }),
         )
       const locks = keyedLock<string>()
-      /** Set the session's `stopping` flag in the same step as the lookup, so `sweep` cannot drop the flags in between. Whether it was set already. */
+      /** Set the session's `stopping` flag in the same step as the lookup, so `forget` cannot drop the flags in between. Whether it was set already. */
       const stop = (id: string) =>
         SynchronizedRef.modifyEffect(tracked, (map) =>
           Effect.gen(function* () {
@@ -278,28 +273,26 @@ export class Sessions extends Context.Service<
           }),
         )
       /**
-       * Once per poll (vibestd-state.md 5): drop the flags of every session that is no longer live (exited, archived, gone)
-       * while nobody holds or waits on its lock and nothing is in flight on them. A live row keeps its flags; what they
-       * guard starts afresh at the next prompt, as after a restart. The rows are read under the map's lock: a resume that
-       * clears `exitedAt` after the read holds the session's lock (busy) or waits here in `track`.
+       * Drop session `id`'s flags and one-shot timers once it is no longer live (exited, archived, gone) and nothing is
+       * in flight on them (vibestd-state.md 5); a live row keeps them. What they guard starts afresh at the next prompt,
+       * as after a restart. Under the session's lock, taken here once its current holder is done: a resume that clears
+       * `exitedAt` holds it too. Runs on the session's `process.end` and after an archive.
        */
-      const sweep = SynchronizedRef.updateEffect(tracked, (map) =>
-        Effect.gen(function* () {
-          const live = new Set(
-            (yield* db.listSessions())
-              .filter((row) => !row.metadata.archived && !row.metadata.removed)
-              .map((row) => row.id),
-          )
-          yield* turnEnds.sweep((id) => live.has(id) || locks.busy(id))
-          let next = map
-          for (const [id, r] of map) {
-            if (live.has(id) || locks.busy(id)) continue
-            const inFlight = (yield* Ref.get(r.stopping)) || (yield* Ref.get(r.prompting))
-            if (!inFlight) next = HashMap.remove(next, id)
-          }
-          return next
-        }),
-      )
+      const forget = (id: string) =>
+        locks.withLock(id)(
+          SynchronizedRef.updateEffect(tracked, (map) =>
+            Effect.gen(function* () {
+              const row = yield* db.getSession(id)
+              if (row !== undefined && row.exitedAt === null && !row.metadata.archived && !row.metadata.removed)
+                return map
+              const r = Option.getOrUndefined(HashMap.get(map, id))
+              if (r !== undefined && ((yield* Ref.get(r.stopping)) || (yield* Ref.get(r.prompting)))) return map
+              yield* engine.cancel(`grace:${id}`)
+              yield* engine.cancel(`miss:${id}`)
+              return HashMap.remove(map, id)
+            }),
+          ),
+        )
       const locked =
         (id: string, settlement = false) =>
         <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -472,30 +465,52 @@ export class Sessions extends Context.Service<
         ]
       })
 
-      /** One look (§5): the runtime reports it working or blocked, or the integration reported a turn start of this round. */
-      const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal) =>
+      const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
+      /** A turn start of the session's current round was reported: it worked. */
+      const sawTurnStart = (id: string) => Effect.flatMap(track(id), (r) => Ref.set(r.sawWorking, true))
+
+      /** Seen working or blocked: noted, with its status. */
+      const pickedUp = (session: SessionRow, state: "working" | "blocked") =>
         Effect.gen(function* () {
-          const r = yield* track(session.id)
-          const seen = yield* agentState(h, terminal)
-          const state = stateOf(seen)
-          if (state === "working" || state === "blocked") {
-            yield* Ref.set(r.sawWorking, true)
-            yield* db.updateSession(session.id, { status: state })
-            return true
-          }
-          // A turn start the integration reported for this round (the Ref alone misses one that came and went between looks).
-          if (yield* turnEnds.startedSince(session.id, session.turnPromptedAt)) {
-            yield* Ref.set(r.sawWorking, true)
-            return true
-          }
-          return false
+          yield* Ref.set((yield* track(session.id)).sawWorking, true)
+          yield* db.updateSession(session.id, { status: state })
+          return true
         })
 
-      /** The turn was picked up (§5), polled until CONFIRM_TIMEOUT. */
-      const confirmed = (h: Runtime, session: SessionRow, terminal: Terminal) =>
-        pickupNow(h, session, terminal).pipe(
-          Effect.repeat({ until: (picked) => picked, schedule: TICK }),
-          Effect.timeoutOrElse({ duration: CONFIRM_TIMEOUT, orElse: () => Effect.succeed(false) }),
+      /**
+       * One look (§5): the runtime reports it working or blocked, or a turn start of this round was seen (the
+       * `live.turn_start` handler sets `sawWorking`; this round's prompt cleared it).
+       */
+      const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal) =>
+        Effect.gen(function* () {
+          const state = stateOf(yield* agentState(h, terminal))
+          if (state === "working" || state === "blocked") return yield* pickedUp(session, state)
+          return yield* Ref.get((yield* track(session.id)).sawWorking)
+        })
+
+      /**
+       * The turn was picked up (§5): one look, then a turn start of this round or a working / blocked state of its
+       * terminal on `subscription` (taken before the text was handed over), until CONFIRM_TIMEOUT; then one last look.
+       */
+      const confirmed = (
+        h: Runtime,
+        session: SessionRow,
+        terminal: Terminal,
+        subscription: PubSub.Subscription<EngineEvent>,
+      ) =>
+        awaitOn(
+          subscription,
+          pickupNow(h, session, terminal).pipe(Effect.map((picked) => (picked ? Option.some(true) : Option.none()))),
+          (event) =>
+            event.type === "live.turn_start" && event.sessionId === session.id && event.at >= session.turnPromptedAt
+              ? Effect.as(sawTurnStart(session.id), Option.some(true))
+              : event.type === "live.state" &&
+                  sameTerminal(event.terminal, terminal) &&
+                  (event.state === "working" || event.state === "blocked")
+                ? Effect.map(pickedUp(session, event.state), Option.some)
+                : Effect.succeed(Option.none()),
+          CONFIRM_TIMEOUT,
+          pickupNow(h, session, terminal),
         )
 
       /** A state that must not be pasted into (SPEC §8.4). */
@@ -505,20 +520,37 @@ export class Sessions extends Context.Service<
         return state !== undefined && busy(state)
       }
 
-      /** Interrupt key, then wait for the agent to settle (core polls its state; false when it did not within STOP_WAIT). Caller holds the lock. */
-      const settleAfterInterrupt = (h: Runtime, terminal: Terminal) =>
-        agentState(h, terminal).pipe(
+      /**
+       * Wait for the agent to settle: neither working nor blocked, or a turn end reported for it; false when it did not
+       * within STOP_WAIT. Caller holds the lock.
+       */
+      const settleAfterInterrupt = (h: Runtime, session: SessionRow, terminal: Terminal) => {
+        const settledNow = agentState(h, terminal).pipe(
           Effect.map((seen) => {
             const state = stateOf(seen)
             return state !== undefined && state !== "working" && state !== "blocked"
           }),
-          Effect.repeat({ until: (idle) => idle, schedule: TICK }),
-          Effect.timeoutOrElse({ duration: STOP_WAIT, orElse: () => Effect.succeed(false) }),
         )
+        return awaitEvent(
+          settledNow.pipe(Effect.map((idle) => (idle ? Option.some(true) : Option.none()))),
+          (event) =>
+            Effect.succeed(
+              (event.type === "live.state" &&
+                sameTerminal(event.terminal, terminal) &&
+                event.state !== "working" &&
+                event.state !== "blocked") ||
+                (event.type === "turn.reported" && event.sessionId === session.id)
+                ? Option.some(true)
+                : Option.none(),
+            ),
+          STOP_WAIT,
+          settledNow,
+        ).pipe(Effect.provideService(Bus, bus))
+      }
       const interruptAgent = (h: Runtime, session: SessionRow, terminal: Terminal) =>
         Effect.gen(function* () {
           yield* h.send(terminal, { keys: [harnesses.get(session.harnessId).interruptKey] }).pipe(Effect.ignore)
-          return yield* settleAfterInterrupt(h, terminal)
+          return yield* settleAfterInterrupt(h, session, terminal)
         })
 
       type Collected = "none" | "delivered"
@@ -582,6 +614,8 @@ export class Sessions extends Context.Service<
         const missed = options?.keepRound
           ? Effect.void
           : db.updateSession(session.id, { turnState: "not_started", lastActive: yield* Clock.currentTimeMillis })
+        // Before the text is handed over: a turn start or state it causes cannot come before the wait on it.
+        const subscription = yield* bus.subscribe
         // The runtime refused the text. A result the integration wrote anyway is the turn; otherwise the round opened above is undone.
         const delivered = yield* send.pipe(
           Effect.as(false),
@@ -600,26 +634,24 @@ export class Sessions extends Context.Service<
         // Only a start of this round is pickup: the row the caller read carries the previous round's prompt time, and
         // that round's start would confirm a text whose Enter was swallowed.
         const round = { ...session, turnPromptedAt: now }
-        if (yield* confirmed(h, round, terminal)) return undefined
+        if (yield* confirmed(h, round, terminal, subscription)) return undefined
         yield* h.send(terminal, { keys: ["enter"] }).pipe(Effect.ignore)
-        if (yield* confirmed(h, round, terminal)) return undefined
+        if (yield* confirmed(h, round, terminal, subscription)) return undefined
         // Re-paste once only, so a task never runs twice.
         yield* send.pipe(Effect.ignore)
-        if (yield* confirmed(h, round, terminal)) return undefined
+        if (yield* confirmed(h, round, terminal, subscription)) return undefined
         if ((yield* collectResult(h, session).pipe(Effect.provideContext(platform), Effect.orDie)) !== "none")
           return undefined
         yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
         yield* missed
         return `task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`
-      })
+      }, Effect.scoped)
 
       // ---- turn end (rounds.ts): the round lifecycle on this service's helpers ----
       // The usage-limit move is late-wired: rounds and placement ask for it before it exists (it needs `finish`).
       const limit = limitMoveBox()
       const rounds = sessionRounds({
         db,
-        inbox,
-        turnEnds,
         harnesses,
         track,
         lock: locks.withLock,
@@ -676,7 +708,6 @@ export class Sessions extends Context.Service<
         locate,
         finish,
         launchArgv,
-        turnEnds,
         systemPromptOf,
         uuid: newId(),
         terminate: processes.terminate,
@@ -918,14 +949,6 @@ export class Sessions extends Context.Service<
         if ((!open && session.exitedAt !== null) || session.metadata.archived || session.metadata.removed) return
         // vibestd is restarting its harness: no result, exit or queue is decided until the new one is ready (restartAgent).
         if (restarting.has(id)) return
-        // A delivery cut off by vibestd stopping (no delivery runs while the lock is held): it may or may not have arrived.
-        const cutOff = yield* db.inboxWithStatus(id, "sending")
-        if (cutOff.length > 0)
-          yield* undelivered(
-            session,
-            cutOff,
-            "vibestd stopped while handing it to the session; it may or may not have arrived",
-          )
         const routed = yield* live(session).pipe(Effect.option)
         // No runtime routes it (none recorded, or not registered): its reported turn end is still its result.
         if (Option.isNone(routed)) {
@@ -936,7 +959,7 @@ export class Sessions extends Context.Service<
         const terminal = session.address
         const r = yield* track(id)
         const maybe = yield* agentState(h, terminal).pipe(Effect.option)
-        // Unreachable is no answer: this check tries again on the next poll, the row untouched.
+        // Unreachable is no answer, the row untouched: the runtime's reset when it is back checks again.
         if (Option.isNone(maybe)) return
         const seen = maybe.value
         // Status is the runtime's, as it reports it now. `unknown` is no answer: the process fallback decides (§5).
@@ -984,16 +1007,14 @@ export class Sessions extends Context.Service<
         yield* Ref.set(r.blockedNotified, false)
         // Worked: seen working in this process, a turn start reported for this round, or the stored proof that survives a
         // vibestd restart (the turn was typed, or a message was delivered into it), so a lost turn is lost, not "not started" (§5).
-        const worked =
-          (yield* Ref.get(r.sawWorking)) ||
-          (yield* turnEnds.startedSince(id, session.turnPromptedAt)) ||
-          (yield* db.turnTaken(id))
+        const worked = (yield* Ref.get(r.sawWorking)) || (yield* db.turnTaken(id))
         const idle = s === "idle"
         const ended = idle && worked
         const now = yield* Clock.currentTimeMillis
         // A prompt that failed part way (the runtime refused it, the connection broke, vibestd stopped): the session sat idle and
         // never moved. Its messages already failed with their notices; close the turn so the queue moves again.
-        if (idle && !ended && now - session.turnPromptedAt > Duration.toMillis(CONFIRM_TIMEOUT)) {
+        const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - session.turnPromptedAt)
+        if (idle && !ended && unconfirmed <= 0) {
           yield* db.updateSession(id, { turnState: "not_started", lastActive: now })
           yield* notice(
             session,
@@ -1001,9 +1022,13 @@ export class Sessions extends Context.Service<
           )
           return yield* deliverQueued(h, { ...session, turnState: "not_started" }, terminal)
         }
+        // Idle and never seen working: look again when CONFIRM_TIMEOUT is up (a later event or check may settle it first).
+        if (idle && !ended) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkLocked(id))
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
-        if (now - endedAt! <= Duration.toMillis(HOOK_GRACE)) return
+        const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
+        // Idle after working with no report yet: the turn is lost if none comes within HOOK_GRACE.
+        if (grace > 0) return yield* engine.arm(`grace:${id}`, Duration.millis(grace), checkLocked(id))
         yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
         yield* finish(
           session,
@@ -1013,7 +1038,7 @@ export class Sessions extends Context.Service<
         )
       })
 
-      const checkLocked = (id: string) =>
+      const checkLocked = (id: string): Effect.Effect<void> =>
         locked(id)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform))
 
       // ---- send / interrupt / remove ----
@@ -1064,12 +1089,7 @@ export class Sessions extends Context.Service<
         yield* deliverQueued(h, fresh, fresh.address)
       })
 
-      /**
-       * Queue the message and deliver it in vibestd's scope, so the caller may go away once the row is written. When this
-       * delivery fails for good, this message (if nothing handled it meanwhile) is failed and the session's owner told;
-       * other queued messages are left to their own deliveries. Runtime unreachable, or vibestd stopping: it stays pending for
-       * the poll's next check.
-       */
+      /** Queue the message; its stored `inbox.queued` starts the delivery (`delivered`), so the caller may go away. */
       const send = (id: string, message: string) =>
         Effect.gen(function* () {
           const session = yield* getRow(id)
@@ -1079,7 +1099,18 @@ export class Sessions extends Context.Service<
           // Archived since the read above (vibest run --archive-on-completion decides under the session's lock, not this one): refused, never accepted.
           const row = yield* db.insertSend(id, message)
           if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-          // Under the session's lock, like every other change to its rows.
+        })
+
+      /**
+       * A queued message: deliver it under the session's lock. When this delivery fails for good, this message (if
+       * nothing handled it meanwhile) is failed and the session's owner told; other queued messages are left to their own
+       * deliveries. Runtime unreachable, or vibestd stopping: it stays pending for the poll's next check.
+       */
+      const queued = (id: string, inboxId: number | undefined) =>
+        Effect.gen(function* () {
+          // Only a pending Message to a session (not a task, result or notice; not one already taken).
+          const row = (yield* db.pendingInbox(id)).find((r) => r.id === inboxId)
+          if (row === undefined) return
           const failed = (cause: Cause.Cause<unknown>) =>
             Effect.gen(function* () {
               // Only what a retry can fix keeps the message queued (§3 `RuntimeError` codes); a refused start is final.
@@ -1096,16 +1127,17 @@ export class Sessions extends Context.Service<
                 !(yield* db.pendingInbox(id)).some((r) => r.id === row.id)
               )
                 return
-              yield* undelivered(session, [row], errorMessage(cause))
+              const session = yield* db.getSession(id)
+              if (session !== undefined) yield* undelivered(session, [row], errorMessage(cause))
             })
-          yield* Effect.forkIn(
-            locked(id)(deliver(id).pipe(Effect.catchCause(failed))).pipe(
-              logged(`send ${id}`),
-              Effect.provideContext(platform),
-            ),
-            scope,
-          )
-        })
+          yield* locked(id)(deliver(id).pipe(Effect.catchCause(failed)))
+        }).pipe(logged(`send ${id}`), Effect.provideContext(platform))
+
+      /** A turn ended: what was queued meanwhile goes now, not at the next look (`deliver` skips a busy session). */
+      const deliverNext = (id: string) =>
+        locked(id)(
+          db.pendingInbox(id).pipe(Effect.flatMap((pending) => (pending.length === 0 ? Effect.void : deliver(id)))),
+        ).pipe(logged(`deliver ${id}`), Effect.provideContext(platform))
 
       const interrupt = (id: string) =>
         getRow(id).pipe(
@@ -1220,7 +1252,9 @@ export class Sessions extends Context.Service<
           yield* getRow(id)
           const { r, already } = yield* stop(id)
           if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
-          const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(Ref.set(r.stopping, false))))!
+          const out = (yield* locked(id)(removeLocked(id, options)).pipe(
+            Effect.ensuring(Ref.set(r.stopping, false).pipe(Effect.andThen(Effect.forkIn(forget(id), scope)))),
+          ))!
           return out
         }).pipe(
           Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
@@ -1271,7 +1305,7 @@ export class Sessions extends Context.Service<
                     `its harness already exited, so vibest cannot prove its processes are gone; run vibest archive ${id} when you are done with it`,
                   )
                 // The runtime can still read `working` right after the turn-end hook.
-                const settled = yield* settleAfterInterrupt(h, terminal)
+                const settled = yield* settleAfterInterrupt(h, session, terminal)
                 if (!settled)
                   return yield* skip(
                     `it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`,
@@ -1301,7 +1335,7 @@ export class Sessions extends Context.Service<
                       ),
                 ),
                 // Cleared before the lock is let go, so the next result's turn never finds it still set.
-                Effect.ensuring(Ref.set(r.stopping, false)),
+                Effect.ensuring(Ref.set(r.stopping, false).pipe(Effect.andThen(Effect.forkIn(forget(id), scope)))),
               )
             }),
           )
@@ -1359,35 +1393,73 @@ export class Sessions extends Context.Service<
 
       // ---- background: events, poll, recovery (SPEC §8.8, §9) ----
 
-      /** One event of any registered runtime (§5): re-evaluate the session that owns the terminal it names. */
-      const onTerminalEvent = (event: RuntimeEvent) =>
+      /** A runtime's event (§5): re-evaluate the session that owns the terminal it names. */
+      const onTerminal = (terminal: Terminal, working: boolean) =>
         Effect.gen(function* () {
-          if (event.type === "reset") {
-            yield* republish()
-            return
-          }
-          const id = yield* sessionAt(event.terminal)
+          const id = yield* sessionAt(terminal)
           if (id === undefined) return
-          if (event.type === "state" && event.state === "working") yield* Ref.set((yield* track(id)).sawWorking, true)
+          if (working) yield* Ref.set((yield* track(id)).sawWorking, true)
           yield* checkLocked(id)
         })
 
-      // The registry merges every registered runtime's events (each share ends with its plugin): one follower here.
-      yield* Effect.forkIn(
-        runtimes.events.pipe(Stream.runForEach((event) => onTerminalEvent(event).pipe(logged(`runtime event`)))),
-        scope,
-      )
+      /** A turn start of the open round (not an earlier one's, handled late) means it worked. No lock: a hook never waits on it. */
+      const turnStarted = (id: string, at: number) =>
+        Effect.gen(function* () {
+          const session = yield* db.getSession(id)
+          if (session?.turnState === "open" && at >= session.turnPromptedAt) yield* sawTurnStart(id)
+        })
 
-      const checkAll = db.listSessions().pipe(
-        Effect.flatMap((rows) =>
-          Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: "unbounded", discard: true }),
-        ),
-        Effect.andThen(sweep),
-      )
+      // Each handler runs in its own fiber and takes the session's lock itself (engine.ts).
+      const handle = (event: EngineEvent): Effect.Effect<void> => {
+        switch (event.type) {
+          case "turn.reported":
+            // The check a hook's turn end always scheduled, now from the stored report.
+            return resultReady(event.sessionId)
+          case "turn.end":
+            return deliverNext(event.sessionId)
+          case "inbox.queued":
+            return queued(event.sessionId, event.inboxId)
+          case "live.state":
+            return onTerminal(event.terminal, event.state === "working")
+          case "live.exited":
+            return onTerminal(event.terminal, false)
+          case "process.end":
+            return forget(event.sessionId)
+          case "live.reset":
+            // A runtime that came back (or was registered): its terminals are read again once each.
+            return republish().pipe(
+              Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine })),
+              Effect.provideContext(platform),
+            )
+          case "live.turn_start":
+            return turnStarted(event.sessionId, event.at)
+          default:
+            return Effect.void
+        }
+      }
 
-      // Recovery: put the labels back (the runtime does not keep them), then the poll evaluates every row.
-      yield* republish()
-      yield* Effect.forkIn(checkAll.pipe(Effect.repeat(Schedule.spaced(POLL))), scope)
+      /**
+       * One check of each live session in `where` (all, or one runtime's), then one delivery try for each project with
+       * main-agent rows waiting. Only at start, when a runtime registers, and when one comes back (`live.reset`): what
+       * no event reported in between (an exit while vibestd was down, a runtime registered late) is found here once.
+       */
+      const reconcile = (where: "all" | { readonly runtime: string; readonly machine?: string }) =>
+        Effect.gen(function* () {
+          const rows = (yield* db.listSessions()).filter(
+            (row) =>
+              !row.metadata.archived &&
+              !row.metadata.removed &&
+              (row.exitedAt === null || row.turnState === "open") &&
+              (where === "all" ||
+                (row.runtime === where.runtime &&
+                  (where.machine === undefined || row.address.machine === where.machine))),
+          )
+          yield* Effect.log(
+            `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,
+          )
+          yield* Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: 8, discard: true })
+          for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
+        })
 
       yield* Effect.forkIn(
         inbox.delivered.pipe(
@@ -1412,24 +1484,19 @@ export class Sessions extends Context.Service<
           locked(id, true)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform)),
           scope,
         ).pipe(Effect.asVoid)
-      const turnEnded = (id: string, end: TurnEnded) =>
-        turnEnds.ended(id, end).pipe(
-          // One line per reported end (no text): what vibestd.log shows of a turn end that writes no result.
-          Effect.andThen(Effect.log(`turn end ${id} (${end.harness}${end.interrupted ? ", interrupted" : ""})`)),
-          Effect.andThen(resultReady(id)),
-        )
 
       // ---- restart in place (`vibest update`): restart.ts ----
       const { outdated, restart, restartLater } = sessionRestart({
         db,
+        bus,
         runtimes,
         harnesses,
         processes,
         restarting,
-        turnEnds,
         inbox,
         scope,
         locked: (id) => locked(id),
+        checkLater: (id) => Effect.forkIn(checkLocked(id), scope).pipe(Effect.asVoid),
         launchArgv: (session, resume) => launchArgv(session, resume).pipe(Effect.provideContext(platform)),
         worktreeOf,
         withPlatform: (effect) => effect.pipe(Effect.provideContext(platform)),
@@ -1437,6 +1504,20 @@ export class Sessions extends Context.Service<
         prompt: (h, session, terminal, text) =>
           prompt(h, session, terminal, text).pipe(Effect.provideContext(platform)),
       })
+
+      // Subscribed once every handler is defined, before this service writes anything (the recovery below) and before
+      // Sessions is returned: nothing committed from here on is missed.
+      yield* engine.on(handle)
+
+      // Recovery: a delivery a stop cut off may or may not have arrived (decision 2), then the labels back (the runtime
+      // does not keep them), then one look at every live session. Inbox offers the recovery's notices from their events.
+      yield* db.recoverDelivering(
+        harnesses.all.filter((h) => h.inbox === "poll").map((h) => h.id),
+        (sessionId, messages) =>
+          `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
+      )
+      yield* republish()
+      yield* Effect.forkIn(reconcile("all").pipe(logged("reconcile")), scope)
 
       return Sessions.of({
         spawn,
@@ -1447,20 +1528,17 @@ export class Sessions extends Context.Service<
         get,
         list,
         check: checkLocked,
-        turnEnded,
-        resultReady,
-        // The start is noted before the round waits for the lock: a send still confirming sees it (pickup proof).
+        // The start is published before the round waits for the lock: a send still confirming sees it (pickup proof).
         userPrompt: (id: string, text: string, at?: number) =>
           Effect.gen(function* () {
             const now = at ?? (yield* Clock.currentTimeMillis)
-            yield* turnEnds.started(id, now)
+            yield* bus.observe({ type: "live.turn_start", sessionId: id, at: now })
             yield* userPrompt(id, text, now)
           }),
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: Effect.gen(function* () {
           const map = yield* SynchronizedRef.get(tracked)
-          const { ends, starts } = yield* turnEnds.size
-          return { tracked: HashMap.size(map), locks: locks.size(), turnEnds: ends, turnStarts: starts }
+          return { tracked: HashMap.size(map), locks: locks.size() }
         }),
         outdated,
         restart,

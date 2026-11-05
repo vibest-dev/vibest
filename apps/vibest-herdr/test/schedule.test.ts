@@ -1,6 +1,7 @@
 // Plugin host semantics (architecture.md §8, plugins.md §5): one event mutated in place in plugin order, refusals
 // and failures that always surface, and the trace of who changed what.
 import { assert, describe, it } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
 import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -60,6 +61,7 @@ const run = <A, E, R>(plugins: ReadonlyArray<Candidate>, f: (p: Plugins["Service
     Effect.scoped,
     Effect.provide(Subscriptions.layer),
     Effect.provide(Runtimes.layer),
+    Effect.provide(Bus.layer),
   )
 
 describe("plugin host", () => {

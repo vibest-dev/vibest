@@ -5,6 +5,7 @@ import path from "node:path"
 
 import type { Check } from "./check.ts"
 import daemon from "./scenarios/daemon.ts"
+import exits from "./scenarios/exits.ts"
 import guard from "./scenarios/guard.ts"
 import harness from "./scenarios/harness.ts"
 import inbox from "./scenarios/inbox.ts"
@@ -27,6 +28,7 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   update,
   start,
   inbox,
+  exits,
   restart,
 }
 const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check })))

@@ -10,7 +10,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
-import { Clock, Effect, Fiber, Layer, type Scope } from "effect"
+import { Clock, Duration, Effect, Fiber, Layer, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
 
@@ -19,11 +19,13 @@ import * as Platform from "#platform"
 import {
   FakeRuntime,
   makeRepository,
+  settled,
   testLayer,
   type TestServices,
   until,
   resultText,
-  startedSince,
+  busEvents,
+  nextTurnStart,
   projectOf,
 } from "./fakes.ts"
 
@@ -287,12 +289,12 @@ describe("vibestd's HTTP API", () => {
       const { db, inbox, worker, projectId } = yield* project
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "hello", details: {} })
       const { ids } = yield* inbox.poll(projectId)
-      yield* db.recoverSending(["claude"])
+      yield* db.recoverDelivering(["claude"], () => "")
       assert.strictEqual(yield* statusOf(db, worker), "pending")
       // The next poll hands the row out again at once.
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, ids)
       // A harness that does not poll: a cut-off delivery may have arrived, so it failed.
-      yield* db.recoverSending([])
+      yield* db.recoverDelivering([], () => "")
       assert.strictEqual(yield* statusOf(db, worker), "failed")
     }),
   )
@@ -318,6 +320,22 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
+    "each poll re-arms the away timer: the lease ends AWAY after the last poll, not the first",
+    Effect.gen(function* () {
+      const { db, inbox, worker, projectId } = yield* project
+      yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "hello", details: {} })
+      yield* inbox.poll(projectId)
+      yield* TestClock.adjust(Duration.subtract(AWAY, Duration.seconds(1)))
+      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
+      yield* TestClock.adjust("2 seconds")
+      yield* settled
+      assert.strictEqual(yield* statusOf(db, worker), "sending")
+      yield* TestClock.adjust(AWAY)
+      yield* until(statusOf(db, worker), (s) => s === "pending")
+    }),
+  )
+
+  test(
     "the prompt hook notes its turn start at once, while the session's lock is held, with the round's stamp",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
@@ -330,6 +348,7 @@ describe("vibestd's HTTP API", () => {
       yield* held.reached
       yield* TestClock.adjust("3 seconds")
       const stamp = yield* Clock.currentTimeMillis
+      const events = yield* busEvents
       const hook = yield* Effect.forkChild(
         call(
           "/hooks/claude/prompt",
@@ -337,7 +356,7 @@ describe("vibestd's HTTP API", () => {
           JSON.stringify({ hook_event_name: "PromptSubmit", text: "do it", origin: "composer" }),
         ),
       )
-      yield* until(startedSince(worker, stamp), (seen) => seen)
+      assert.strictEqual(yield* nextTurnStart(events, worker), stamp)
       yield* held.release()
       yield* Fiber.join(checking)
       assert.strictEqual((yield* Fiber.join(hook)).status, 204)
@@ -349,13 +368,14 @@ describe("vibestd's HTTP API", () => {
     Effect.gen(function* () {
       const { call, db, worker, main } = yield* project
       const layout = yield* Layout
+      const events = yield* busEvents
       const prompt = yield* call(
         "/hooks/claude/prompt",
         { sessionId: worker },
         JSON.stringify({ hook_event_name: "PromptSubmit", text: "next step", origin: "composer" }),
       )
       assert.strictEqual(prompt.status, 204)
-      assert.isTrue(yield* startedSince(worker, 0))
+      yield* nextTurnStart(events, worker)
       const end = yield* call(
         "/hooks/claude/turn-end",
         { sessionId: worker },

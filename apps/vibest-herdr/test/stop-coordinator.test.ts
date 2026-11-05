@@ -4,14 +4,17 @@
 // termination signal or a non-positive pid throws.
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
+import { Bus } from "@vibest/core/bus"
 import { Db, encodeAddress } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
+import { HARNESS_EXIT_WAIT } from "@vibest/core/remove"
 import { Restarting } from "@vibest/core/restarting"
 import * as Server from "@vibest/server/server"
 import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -24,6 +27,7 @@ import {
   testLayer,
   type TestOptions,
   type TestServices,
+  until,
   untilVirtual,
   projectOf,
 } from "./fakes.ts"
@@ -250,6 +254,36 @@ describe("Project.StopCoordinator", () => {
       const refused = yield* Effect.exit(s.startAt("test/p2"))
       assert.isTrue(Exit.isFailure(refused))
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
+    }),
+  )
+
+  test(
+    "stopped as soon as the runtime reports the harness's exit, with no clock advance",
+    Effect.gen(function* () {
+      const s = yield* launched
+      // The pid still reads alive (the signal is only recorded): the runtime's exit event is what ends the wait.
+      yield* s.processes.setSignalIgnored(true)
+      const stopping = yield* Effect.forkChild(s.stop)
+      yield* until(s.processes.signaled, (pids) => pids.length === 1)
+      yield* (yield* Bus).observe({
+        type: "live.exited",
+        runtime: s.origin.runtime,
+        terminal: { machine: "local", id: s.paneId },
+      })
+      assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "stopped" })
+    }),
+  )
+
+  test(
+    "a harness that exits without an event is stopped at the deadline's last look",
+    Effect.gen(function* () {
+      const s = yield* launched
+      yield* s.processes.setSignalIgnored(true)
+      const stopping = yield* Effect.forkChild(s.stop)
+      yield* until(s.processes.signaled, (pids) => pids.length === 1)
+      yield* s.processes.set(HARNESS, "exited")
+      yield* TestClock.adjust(HARNESS_EXIT_WAIT)
+      assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "stopped" })
     }),
   )
 

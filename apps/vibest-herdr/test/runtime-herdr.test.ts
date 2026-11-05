@@ -11,9 +11,9 @@ import { callerLocation } from "@vibest/runtime-herdr/caller"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
-import { ConfigProvider, Effect, Exit, Fiber, Layer, Option, Ref, Stream } from "effect"
+import { ConfigProvider, Deferred, Effect, Exit, Fiber, Layer, Option, Ref, Stream } from "effect"
 import { FileSystem } from "effect"
-import { HerdrError, type HerdrShape } from "effect-herdr-sdk"
+import { HerdrError, type HerdrShape, type PushFrame } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
@@ -145,12 +145,12 @@ const withRuntime = <A, E, R>(use: (runtime: TerminalRuntime.Runtime) => Effect.
 type Scripted = (method: string, params: Record<string, unknown>) => Effect.Effect<unknown, HerdrError>
 
 /** The terminal runtime over a scripted herdr client (no server). Every call is recorded with its params. */
-const scriptedRuntime = (answer: Scripted) =>
+const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = Stream.empty) =>
   Effect.gen(function* () {
     const calls: Array<{ readonly method: string; readonly params: Record<string, unknown> }> = []
     const client: HerdrShape = {
       socketPath: "/nowhere",
-      subscribe: () => Stream.empty,
+      subscribe: () => pushed,
       // Lazy, as the real client's: a retry sends the request again.
       call: ((method: string, params: Record<string, unknown>) =>
         Effect.suspend(() => {
@@ -243,6 +243,31 @@ describe("send to an agent herdr started", () => {
       assert.strictEqual(calls.at(-1), "pane.send_input")
       assert.notInclude(calls, "pane.send_text")
     }),
+  )
+})
+
+describe("pane events", () => {
+  it.effect("a pane.agent_status_changed subscription frame (its data has no type) is a state event", () =>
+    Effect.gen(function* () {
+      const go = yield* Deferred.make<void>()
+      // A frame as herdr pushes it on a per-pane subscription: the kind is the frame's `event`, not a field of its data.
+      const frame = {
+        event: "pane.agent_status_changed",
+        data: { pane_id: "w1:p2", workspace_id: "w1", agent: "pi", agent_status: "done" },
+      } as PushFrame
+      const { runtime } = yield* scriptedRuntime(
+        () => Effect.succeed({}),
+        Stream.fromEffect(Deferred.await(go)).pipe(Stream.as(frame)),
+      )
+      const first = yield* runtime.events!.pipe(Stream.take(1), Stream.runCollect, Effect.forkChild)
+      // A `state` read installs the pane's subscription (its own answer does not matter here).
+      yield* runtime.state!(TerminalRuntime.terminalOf("s", "w1:p2")).pipe(Effect.ignore)
+      for (let i = 0; i < 10; i++) yield* Effect.yieldNow
+      yield* Deferred.succeed(go, undefined)
+      assert.deepStrictEqual(yield* Fiber.join(first), [
+        { type: "state", terminal: TerminalRuntime.terminalOf("s", "w1:p2"), state: "idle" },
+      ])
+    }).pipe(Effect.provide(Platform.services)),
   )
 })
 

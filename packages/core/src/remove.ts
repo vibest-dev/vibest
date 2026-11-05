@@ -4,22 +4,21 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 // runtime's own close, which sees its processes off (runtime-port.md §3) — then remove its worktree only when nothing
 // can be lost. Sessions.remove holds the session's lock and does everything before. Every fact that guards a
 // destructive step is asked right before that step, never reused from earlier.
-import { Clock, Duration, Effect, FileSystem, Option, Schedule } from "effect"
+import { Clock, Duration, Effect, FileSystem, Option } from "effect"
 
+import { awaitOn, Bus } from "./bus.ts"
 import { Db, type SessionRow } from "./db.ts"
 import { Layout } from "./paths.ts"
 import { Processes, validPid } from "./processes.ts"
 import { listProjectRepositories, workspaceGit } from "./project-create.ts"
 import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
 import { removeSystemPrompt } from "./system-prompt.ts"
-import { TurnEnds } from "./turn-ends.ts"
 import { git, gitState, mainCheckout } from "./worktree.ts"
 export { RemoveOutcome } from "@vibest/schema/remove"
 
 type ProcessState = RemoveOutcome["processes"]
 
-/** Once the terminal closed: how long between cwd listings while one still names a process, and how long in all. */
-export const CWD_POLL = Duration.millis(500)
+/** Once the terminal closed: how long the one listing of processes working in the worktree may take. */
 export const CWD_WAIT = Duration.seconds(10)
 
 /** How long a stopped main agent's harness has to exit after SIGTERM. */
@@ -63,21 +62,35 @@ export const stopAgent = (
     // From detach to the answer, uninterruptible (at most `wait`): an interrupt in between (the CLI's Ctrl-C ends its
     // request) would leave the row detached while the harness still runs, and another terminal could start a second one.
     return yield* Effect.uninterruptible(
-      Effect.gen(function* () {
-        if ((yield* detached).result === "moved") return { result: "moved" as const }
-        const exited =
-          (yield* processes.terminate(pid)) === "sent" &&
-          (yield* processes
-            .liveness(pid)
-            .pipe(
-              Effect.repeat({ until: (l) => l === "exited", schedule: Schedule.spaced("200 millis") }),
-              Effect.as(true),
-              Effect.timeoutOrElse({ duration: input.wait, orElse: () => Effect.succeed(false) }),
+      Effect.scoped(
+        Effect.gen(function* () {
+          if ((yield* detached).result === "moved") return { result: "moved" as const }
+          // Gone once its pid exited or the runtime reports its terminal's program exited; at `wait`, one last look at
+          // the pid (a harness the runtime never saw as an agent exits without an event).
+          const gone = processes.liveness(pid).pipe(Effect.map((l) => l === "exited"))
+          // Subscribed before the signal, so an exit it causes cannot come before the wait.
+          const subscription = yield* (yield* Bus).subscribe
+          const exited =
+            (yield* processes.terminate(pid)) === "sent" &&
+            (yield* awaitOn(
+              subscription,
+              gone.pipe(Effect.map((yes) => (yes ? Option.some(true) : Option.none()))),
+              (event) =>
+                Effect.succeed(
+                  event.type === "live.exited" &&
+                    event.terminal.machine === terminal.machine &&
+                    event.terminal.id === terminal.id
+                    ? Option.some(true)
+                    : Option.none(),
+                ),
+              input.wait,
+              gone,
             ))
-        if (exited) return { result: "stopped" as const }
-        yield* input.reattach
-        return { result: "running" as const }
-      }),
+          if (exited) return { result: "stopped" as const }
+          yield* input.reattach
+          return { result: "running" as const }
+        }),
+      ),
     )
   })
 
@@ -95,7 +108,6 @@ export interface ReleaseInput {
 export const make = Effect.gen(function* () {
   const db = yield* Db
   const layout = yield* Layout
-  const turnEnds = yield* TurnEnds
   const processes = yield* Processes
 
   /**
@@ -159,35 +171,19 @@ export const make = Effect.gen(function* () {
         })
 
       /**
-       * Whether the worktree's processes are gone, once the terminal closed: no process of this user still has its
-       * working directory in it. A detached helper (an MCP server's telemetry watchdog) may still be shutting down, so
-       * a holder is asked about again for a while. CWD_WAIT bounds the listings themselves too (lsof can take a second
-       * each); one cut off there has its lsof ended and reaped before this goes on, and never counts as an empty listing.
+       * Whether the worktree's processes are gone, once the terminal closed: no process of this user has its working
+       * directory in it. One listing, bounded by CWD_WAIT (lsof can take a second); one cut off there is ended and
+       * reaped and never counts as an empty listing. A holder found keeps the worktree, and the reason names it.
        */
       const confirmExited = Effect.gen(function* () {
-        let last: ReadonlyArray<number> | undefined
-        // The wait bounds the listings themselves too (lsof can take a second each): one cut off at the deadline is
-        // interrupted and reaped, never read as an answer.
-        const asked = yield* processes.cwdUsers([real, worktree]).pipe(
-          Effect.tap((u) => Effect.sync(() => (last = u))),
-          Effect.repeat({ while: (u) => u !== undefined && u.length > 0, schedule: Schedule.spaced(CWD_POLL) }),
-          Effect.timeoutOption(CWD_WAIT),
-        )
-        if (Option.isNone(asked))
-          return last && last.length > 0
-            ? {
-                state: "alive" as const,
-                why: `process ${last.join(", ")} still had its working directory in it after ${Duration.format(CWD_WAIT)}`,
-              }
-            : {
-                state: "unknown" as const,
-                why: `vibest could not finish listing this user's processes working in it within ${Duration.format(CWD_WAIT)}`,
-              }
-        const users = asked.value
+        const asked = yield* processes.cwdUsers([real, worktree]).pipe(Effect.timeoutOption(CWD_WAIT))
+        const users = Option.getOrUndefined(asked)
         if (users === undefined)
           return {
             state: "unknown" as const,
-            why: "vibest could not get a complete list of this user's processes working in it (lsof missing, failed, warned or timed out)",
+            why: Option.isNone(asked)
+              ? `vibest could not finish listing this user's processes working in it within ${Duration.format(CWD_WAIT)}`
+              : "vibest could not get a complete list of this user's processes working in it (lsof missing, failed, warned or timed out)",
           }
         if (users.length > 0)
           return { state: "alive" as const, why: `process ${users.join(", ")} has its working directory in it` }
@@ -294,7 +290,6 @@ export const make = Effect.gen(function* () {
       // Processes that may still be running may still read its system prompt or report a turn end. Its files are its
       // own even though a directory another session works in stays.
       if ((tree !== "kept" || shared) && processState === "exited") {
-        yield* turnEnds.forget(id)
         yield* removeSystemPrompt(id)
       }
       const branch = multiGit

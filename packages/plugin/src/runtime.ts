@@ -88,6 +88,11 @@ export interface Runtime {
     terminal: Terminal,
   ) => Effect.Effect<{ readonly running: boolean; readonly exitCode?: number }, RuntimeError>
   readonly close: (terminal: Terminal) => Effect.Effect<void, RuntimeError>
+  /**
+   * Pushed changes, every machine: at least `exited` for each terminal whose program ended or that closed, and `reset`
+   * when the runtime lost track (core then reads each of its terminals again once). Core never polls.
+   */
+  readonly events: Stream.Stream<RuntimeEvent>
 
   // Optional. Missing → core's fallback in brackets.
   /** What the runtime sees of the agent; `not_found` when it names no agent in that terminal (core reads "absent"). [vibest's harness integration only] */
@@ -100,8 +105,6 @@ export interface Runtime {
    * place: `vibest update` and a usage-limit move leave such a terminal's agent for the user to restart]
    */
   readonly run?: (terminal: Terminal, argv: ReadonlyArray<string>) => Effect.Effect<void, RuntimeError>
-  /** Pushed changes, every machine. [poll `process`] */
-  readonly events?: Stream.Stream<RuntimeEvent>
   /** One-off command on a machine. [run it in a hidden terminal: `open`, wait for exit, `read`] */
   readonly exec?: (
     machine: Machine,

@@ -3,7 +3,9 @@ import { NoRuntime } from "@vibest/schema/session"
 // The runtime registry (runtime-port.md §1–§4): what runtime plugins register through `context.runtime.register`, and
 // how core routes every call by the runtime kind stored on a row. Core never branches on a runtime's `kind` beyond
 // checking it is loaded and online; which runtime a start uses is the choice plugin's decision (§4).
-import { Cause, Context, Effect, FileSystem, Layer, PubSub, type Scope, Stream } from "effect"
+import { Cause, Context, Effect, FileSystem, Layer, type Scope, Stream } from "effect"
+
+import { Bus, type LiveEvent } from "./bus.ts"
 
 export { NoRuntime }
 
@@ -24,8 +26,6 @@ export interface RuntimesShape {
   readonly all: Effect.Effect<ReadonlyArray<Runtime>>
   /** The runtime for `kind`, refusing with `NoRuntime` when no loaded plugin registered it. */
   readonly route: (kind: string) => Effect.Effect<Runtime, NoRuntime>
-  /** Every registered runtime's `events`, merged; each registration's share ends when it unloads. */
-  readonly events: Stream.Stream<RuntimeEvent>
   /**
    * Every runtime's status on `machine`, in registration order: what `agent.start.before` reports as `machines[]`
    * (§7) and what the choice plugin decides on.
@@ -37,20 +37,29 @@ export interface RuntimesShape {
   readonly online: (runtime: Runtime, machine: Machine) => Effect.Effect<void, NoRuntime>
 }
 
-const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape, never, Scope.Scope> =>
+const live = (kind: string, event: RuntimeEvent): LiveEvent => {
+  switch (event.type) {
+    case "state":
+      return { type: "live.state", runtime: kind, terminal: event.terminal, state: event.state }
+    case "exited":
+      return { type: "live.exited", runtime: kind, terminal: event.terminal }
+    case "reset":
+      return { type: "live.reset", runtime: kind, machine: event.machine }
+  }
+}
+
+const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape, never, Bus | Scope.Scope> =>
   Effect.gen(function* () {
+    const bus = yield* Bus
     // The plugin host registers and unregisters sequentially (one supervisor consumer), so one slot is enough.
     let registered: ReadonlyArray<Runtime> = initial
-    const events = yield* PubSub.unbounded<RuntimeEvent>()
-    /** A runtime's events into the merged stream, for this registry's lifetime (a registration's ends with its scope). */
+    /** A runtime's events onto the Bus, for this registry's lifetime (a registration's ends with its scope). */
     const merge = (runtime: Runtime, scope: Scope.Scope) =>
-      runtime.events === undefined
-        ? Effect.void
-        : runtime.events.pipe(
-            Stream.runForEach((event) => PubSub.publish(events, event)),
-            Effect.catchCause(() => Effect.void),
-            Effect.forkIn(scope),
-          )
+      runtime.events.pipe(
+        Stream.runForEach((event) => bus.observe(live(runtime.kind, event))),
+        Effect.catchCause(() => Effect.void),
+        Effect.forkIn(scope),
+      )
     // Runtimes seeded at make (a test's fake, registered up front) merge for the registry's own scope.
     const own = yield* Effect.scope
     for (const runtime of initial) yield* merge(runtime, own)
@@ -69,6 +78,8 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
               registered = registered.filter((loaded) => loaded !== runtime)
             }),
           )
+          // This phase has one machine. A later runtime with several publishes one reset per machine.
+          yield* bus.observe({ type: "live.reset", runtime: runtime.kind, machine: "local" })
         }),
       all: Effect.sync(() => registered),
       route: (kind) =>
@@ -82,7 +93,6 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
               )
             : Effect.succeed(found)
         }),
-      events: Stream.fromPubSub(events),
       statuses: (machine) =>
         Effect.forEach(
           registered,

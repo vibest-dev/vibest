@@ -6,16 +6,17 @@ import { shortId } from "@vibest/schema/id"
 // A coordinator whose harness adapter has `inbox: "subscribe"` or `"poll"` takes its rows itself: the Pi extension over
 // vibest.sock (`stream`), the Claude plugin by polling vibestd's HTTP socket (`poll` / `ack`). Every other idle
 // coordinator gets them typed in through the runtime's prompt. Nobody there: the row is `dropped`.
-import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, PubSub, Queue, Schedule, Stream } from "effect"
+import { Cause, Context, Duration, Effect, Exit, Layer, Option, Queue, Stream } from "effect"
 
 import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
 import { Drain } from "./drain.ts"
+import * as Engine from "./engine.ts"
 import { Harnesses } from "./harness.ts"
 import { keyedLock } from "./keyed-lock.ts"
+import * as Leases from "./leases.ts"
 import { Restarting } from "./restarting.ts"
 import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runtimes.ts"
 
-export const RECONCILE = Duration.seconds(10)
 /** A row a poll handed out and nobody acked goes back to pending after this (each row its own lease). */
 export const LEASE = Duration.seconds(30)
 /** A coordinator that polled and then stopped for this long is gone: its leased rows go back to pending at once. */
@@ -84,8 +85,6 @@ export class Inbox extends Context.Service<
   Inbox,
   {
     readonly enqueue: (row: NewInboxRow) => Effect.Effect<InboxRow>
-    /** For rows inserted inside another transaction (Db.finishTurn). */
-    readonly announce: (row: InboxRow) => Effect.Effect<void>
     /** Try to hand a project's coordinator its next batch now. */
     readonly deliver: (projectId: string) => Effect.Effect<void>
     /** The coordinator's rows from now on, one string per claimed batch, instead of `agent.prompt`. */
@@ -120,9 +119,6 @@ export class Inbox extends Context.Service<
       const restarting = yield* Restarting
       /** How the coordinator of harness `id` (as recorded or as the runtime names it) takes its rows. */
       const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.inbox
-      yield* db.recoverSending(harnesses.all.filter((h) => h.inbox === "poll").map((h) => h.id))
-      const scope = yield* Effect.scope
-      const pubsub = yield* PubSub.unbounded<InboxRow>()
       // Made before any delivery runs, so none is missed.
       const delivered = yield* Queue.unbounded<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>()
       // Counted from before publication until the taker's completion work (archive) is done.
@@ -190,66 +186,46 @@ export class Inbox extends Context.Service<
           ),
         )
 
-      const announce = (row: InboxRow) =>
-        row.kind === "send" || row.status !== "pending"
-          ? Effect.void
-          : db
-              .projectOfSession(row.sessionId)
-              .pipe(
-                Effect.flatMap((projectId) =>
-                  projectId === undefined
-                    ? Effect.void
-                    : PubSub.publish(pubsub, row).pipe(
-                        Effect.andThen(Effect.forkIn(deliver(projectId), scope)),
-                        Effect.asVoid,
-                      ),
-                ),
-              )
-
-      /** The project whose coordinator runs at `terminal`, in any registered runtime. */
-      const at = (terminal: RuntimeAddress) =>
+      /** The project whose main agent is session `id`, if it is one. */
+      const mainOf = (id: string) =>
         Effect.gen(function* () {
-          const all = yield* runtimes.all
-          for (const h of all) {
-            const project = yield* db.coordinatorAt(h.kind, terminal).pipe(Effect.option)
-            if (Option.isSome(project)) return project.value
-          }
-          return undefined
+          const projectId = yield* db.projectOfSession(id)
+          return projectId !== undefined && (yield* db.coordinatorOf(projectId))?.id === id ? projectId : undefined
         })
+      const ifMain = (id: string, then: (projectId: string) => Effect.Effect<void>) =>
+        mainOf(id).pipe(Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : then(projectId))))
 
-      // Triggers: a coordinator terminal's state changes (or its exit), and the reconcile tick. The registry's merged
-      // `events` stream carries every registered runtime's (each registration's share ends when it unloads); a runtime
-      // without `events` of its own is the poll's to cover (§5).
-      yield* Effect.forkIn(
-        runtimes.events.pipe(
-          Stream.runForEach((event) => {
-            if (event.type === "exited")
-              // The merged stream does not say which runtime it came from; each kind's row matches on its own address.
-              return drain.work(
-                "main agent exited",
-                runtimes.all.pipe(
-                  Effect.flatMap((all) =>
-                    Effect.forEach(all, (h) => db.clearCoordinator(h.kind, event.terminal), { discard: true }),
-                  ),
-                  Effect.ignore,
-                ),
-              )
-            if (event.type === "state")
-              return at(event.terminal).pipe(
-                Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : deliver(projectId))),
-              )
+      // Each handler runs in its own fiber (engine.ts); `deliver` re-reads everything under the project's lock.
+      const engine = yield* Engine.make
+      // The rows a polling main agent (recipient: its project) or one subscription (its own key) took and did not settle.
+      const leases = yield* Leases.make
+      let subscriptions = 0
+      // The open Pi streams, by the main session they serve. Each one's signal holds at most one wake, so a stream that
+      // is not pulled keeps nothing but that.
+      const waiting = new Map<string, Set<Queue.Queue<void>>>()
+      const wake = (id: string) =>
+        Effect.sync(() => {
+          for (const signal of waiting.get(id) ?? []) Queue.offerUnsafe(signal, undefined)
+        })
+      yield* engine.on((event) => {
+        switch (event.type) {
+          // A row for the main agent was queued, or put back.
+          case "inbox.queued":
+            return wake(event.sessionId).pipe(Effect.andThen(ifMain(event.sessionId, deliver)))
+          case "inbox.status":
+            return event.data.to === "pending"
+              ? wake(event.sessionId).pipe(Effect.andThen(ifMain(event.sessionId, deliver)))
+              : Effect.void
+          case "live.state":
+            return db
+              .coordinatorAt(event.runtime, event.terminal)
+              .pipe(Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : deliver(projectId))))
+          case "live.exited":
+            return drain.work("main agent exited", db.clearCoordinator(event.runtime, event.terminal))
+          default:
             return Effect.void
-          }),
-        ),
-        scope,
-      )
-      yield* Effect.forkIn(
-        db.pendingProjects.pipe(
-          Effect.flatMap((projects) => Effect.forEach(projects, deliver, { discard: true })),
-          Effect.repeat(Schedule.spaced(RECONCILE)),
-        ),
-        scope,
-      )
+        }
+      })
 
       /**
        * Claim the coordinator's next batch, under the project's lock. Only for a coordinator whose harness takes its rows
@@ -306,88 +282,59 @@ export class Inbox extends Context.Service<
                     harnessId: subscribed.harnessId,
                   }
                 : undefined
-            const arrivals = yield* PubSub.subscribe(pubsub)
-            // Claimed for the batch this pull emits. Set in the same uninterruptible region as the claim, so a close cannot lose the ids.
-            let unconfirmed: ReadonlyArray<number> = []
+            // Registered before the first claim: a row queued or put back for this main agent in between still wakes it.
+            const signal = yield* Queue.sliding<void>(1)
+            const main = subscribed?.id
+            if (main !== undefined)
+              yield* Effect.acquireRelease(
+                Effect.sync(() => waiting.set(main, (waiting.get(main) ?? new Set()).add(signal))),
+                () =>
+                  Effect.sync(() => {
+                    const open = waiting.get(main)
+                    open?.delete(signal)
+                    if (open?.size === 0) waiting.delete(main)
+                  }),
+              )
+            // The batch this pull emits is held until the next pull (delivered) or the close (failed). Held in the same
+            // uninterruptible region as the claim, so a close cannot lose the ids.
+            const recipient = `${projectId} subscription ${++subscriptions}`
             const claimOne = () =>
               origin === undefined
                 ? Effect.succeed(undefined)
                 : claimNext(projectId, "subscribe", origin, (ids) =>
-                    Effect.sync(() => {
-                      unconfirmed = ids
-                    }),
+                    leases.hold(recipient, ids, undefined, (ended) => db.setInboxStatus(ended, "failed", "sending")),
                   ).pipe(Effect.map((rows) => (rows === undefined ? undefined : text(rows))))
             // One batch per pull, no buffer: the socket server starts this pull only after the previous chunk's Ack.
             return Stream.unfold(0, () =>
               Effect.gen(function* () {
-                if (unconfirmed.length > 0) {
-                  yield* Effect.uninterruptible(
-                    Effect.gen(function* () {
-                      const ids = unconfirmed.slice()
-                      yield* markDelivered(ids)
-                      unconfirmed = []
-                    }),
-                  )
-                }
+                const ids = leases.held(recipient)
+                if (ids.length > 0)
+                  yield* Effect.uninterruptible(markDelivered(ids).pipe(Effect.andThen(leases.settle(ids))))
                 while (true) {
                   const batch = yield* claimOne()
                   if (batch !== undefined) return [batch, 0] as const
-                  const row = yield* PubSub.take(arrivals)
-                  if (row.kind === "send") continue
+                  yield* Queue.take(signal)
                 }
               }),
-            ).pipe(
-              Stream.ensuring(
-                Effect.suspend(() => {
-                  const ids = unconfirmed.slice()
-                  unconfirmed = []
-                  return ids.length === 0 ? Effect.void : db.setInboxStatus(ids, "failed", "sending")
-                }),
-              ),
-            )
+            ).pipe(Stream.ensuring(leases.expireAll(recipient)))
           }),
         )
 
-      // The Claude plugin's leases are memory only: per project, each leased (`sending`) row of its main agent and when
-      // its lease ends; changed under the project's lock. Also the last poll per project, for the away check; its entry
-      // goes when the project is away. A vibestd that starts has no leases: Db.recoverSending puts `sending` rows of a
-      // polling main agent back to pending.
-      const leases = new Map<string, Map<number, number>>()
-      const lastPoll = new Map<string, number>()
-      const forget = (projectId: string, ids: ReadonlyArray<number>) => {
-        const held = leases.get(projectId)
-        if (held === undefined) return
-        for (const id of ids) held.delete(id)
-        if (held.size === 0) leases.delete(projectId)
-      }
-      /** Ends the leases that ran out by `now` (every one when `now` is undefined): their rows still `sending` go back to pending. */
-      const endLeases = (projectId: string, now: number | undefined) =>
-        withLock(
-          `end leases project ${projectId}`,
-          projectId,
-          Effect.suspend(() => {
-            const ended = [...(leases.get(projectId) ?? [])]
-              .filter(([, until]) => now === undefined || until <= now)
-              .map(([id]) => id)
-            return Effect.tap(db.releaseLeased(projectId, ended), () => Effect.sync(() => forget(projectId, ended)))
-          }),
-          true,
+      /** A polling main agent's lease that ended: its rows still `sending` go back to pending. */
+      const released = (projectId: string) => (ids: ReadonlyArray<number>) =>
+        withLock(`end leases project ${projectId}`, projectId, db.releaseLeased(projectId, ids), true).pipe(
+          Effect.asVoid,
         )
 
       const poll = (projectId: string) =>
         Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis
-          lastPoll.set(projectId, now)
+          // A plugin that went away sends no poll: AWAY after its last one, its leases end at once.
+          yield* engine.arm(`away:${projectId}`, AWAY, leases.expireAll(projectId))
           const empty: Polled = { ids: [], line: "", text: "" }
           // Stopping: nothing new goes out; leases already out still settle (ack is a settlement).
           if ((yield* drain.phase) !== "open") return empty
-          yield* endLeases(projectId, now)
           const rows = yield* claimNext(projectId, "poll", undefined, (ids) =>
-            Effect.sync(() => {
-              const held = leases.get(projectId) ?? new Map<number, number>()
-              for (const id of ids) held.set(id, now + Duration.toMillis(LEASE))
-              leases.set(projectId, held)
-            }),
+            leases.hold(projectId, ids, LEASE, released(projectId)),
           )
           if (rows === undefined) return empty
           const last = rows.at(-1)!
@@ -404,8 +351,9 @@ export class Inbox extends Context.Service<
           `ack inbox ${ids.join(",")}`,
           projectId,
           Effect.uninterruptible(
-            Effect.map(db.settleLeased(projectId, ids, release), (rows) => {
-              forget(projectId, [...ids, ...release])
+            Effect.gen(function* () {
+              const rows = yield* db.settleLeased(projectId, ids, release)
+              yield* leases.settle([...ids, ...release])
               publishDelivered(rows)
               return rows.map((r) => r.id)
             }),
@@ -413,22 +361,8 @@ export class Inbox extends Context.Service<
           true,
         )
 
-      // A plugin that went away sends no poll, so this check runs on its own clock, not in poll or on RECONCILE.
-      yield* Effect.forkIn(
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis
-          for (const [projectId, at] of lastPoll) {
-            if (now - at <= Duration.toMillis(AWAY)) continue
-            lastPoll.delete(projectId)
-            yield* endLeases(projectId, undefined)
-          }
-        }).pipe(Effect.repeat(Schedule.spaced("1 second"))),
-        scope,
-      )
-
       return Inbox.of({
-        enqueue: (row) => db.insertInbox(row).pipe(Effect.tap(announce)),
-        announce,
+        enqueue: db.insertInbox,
         deliver,
         stream,
         delivered: Queue.take(delivered),

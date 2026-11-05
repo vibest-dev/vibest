@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 
 import { readPing } from "@vibest/client/client"
+import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harness, Harnesses, HARNESS_IDS, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
@@ -11,11 +12,11 @@ import { Layout } from "@vibest/core/paths"
 import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { type Liveness, Processes } from "@vibest/core/processes"
 import { Restarting } from "@vibest/core/restarting"
+import { turnEndFrom } from "@vibest/core/results"
 import { Runtimes, registry } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
-import { TurnEnds, turnEndFrom } from "@vibest/core/turn-ends"
 import { git } from "@vibest/core/worktree"
 import type * as VibestPlugin from "@vibest/plugin"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
@@ -35,6 +36,7 @@ import {
   Option,
   Path,
   type Predicate,
+  PubSub,
   Ref,
   Schema,
   Stream,
@@ -87,26 +89,36 @@ export const writeResult = (id: string, harness: string, payload: object, offset
   Effect.gen(function* () {
     const adapter = (yield* Harnesses).get(harness as HarnessId)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
-    yield* (yield* TurnEnds).ended(id, turnEndFrom(adapter, payload as Record<string, unknown>, at))
+    yield* (yield* Db).reportTurn(id, turnEndFrom(adapter, payload as Record<string, unknown>, at))
   })
 
-/** The latest reported turn end's text for session `id` ("" with none): what a result file held before. */
+/** The latest unconsumed turn report's text for session `id` ("" when none, or a `turn.end` already points at it). */
 export const resultText = (id: string) =>
   Effect.gen(function* () {
-    return (yield* (yield* TurnEnds).latest(id))?.text ?? ""
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ text: string | null }>`SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM event te WHERE te.type = 'turn.end' AND json_extract(te.data, '$.report') = r.id)
+      THEN NULL ELSE json_extract(r.data, '$.text') END AS text
+      FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' ORDER BY r.id DESC LIMIT 1`.pipe(
+      Effect.orDie,
+    )
+    return row?.text ?? ""
   })
 
-/** Whether a turn start was reported for session `id` at or after `at`. */
-export const startedSince = (id: string, at: number) =>
-  Effect.gen(function* () {
-    return yield* (yield* TurnEnds).startedSince(id, at)
-  })
+/** Every bus event from now on, in this test's scope: subscribe before the action whose event the test waits for. */
+export const busEvents = Effect.gen(function* () {
+  return yield* (yield* Bus).subscribe
+})
 
-/** Forget session `id`'s reported turn end, as if none had come. */
-export const dropResult = (id: string) =>
-  Effect.gen(function* () {
-    yield* (yield* TurnEnds).drop(id)
-  })
+/** The next `live.turn_start` of session `id` on `subscription`: its time. */
+export const nextTurnStart = (subscription: PubSub.Subscription<EngineEvent>, id: string): Effect.Effect<number> =>
+  PubSub.take(subscription).pipe(
+    Effect.flatMap((event) =>
+      event.type === "live.turn_start" && event.sessionId === id
+        ? Effect.succeed(event.at)
+        : nextTurnStart(subscription, id),
+    ),
+  )
 
 /** git in tests: a failure is a bug in the test. */
 export const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
@@ -313,6 +325,8 @@ export class FakeProcesses extends Context.Service<
     }>
     /** How long each cwd listing takes (virtual time), like lsof under a high open-file limit. */
     readonly setCwdDelay: (delay: Duration.Input) => Effect.Effect<void>
+    /** How many cwd listings were asked for. */
+    readonly cwdListings: Effect.Effect<number>
     readonly processes: Processes["Service"]
   }
 >()("test/FakeProcesses") {
@@ -322,6 +336,7 @@ export class FakeProcesses extends Context.Service<
       const states = yield* Ref.make(HashMap.empty<number, Liveness>())
       const users = yield* Ref.make<ReadonlyArray<number> | undefined>([])
       const cwdDelay = yield* Ref.make<Duration.Input>(0)
+      const listings = yield* Ref.make(0)
       const probed = yield* Ref.make<ReadonlyArray<number>>([])
       const signaled = yield* Ref.make<ReadonlyArray<number>>([])
       const denied = yield* Ref.make(false)
@@ -345,6 +360,7 @@ export class FakeProcesses extends Context.Service<
       return FakeProcesses.of({
         set: (pid, liveness) => Ref.update(states, HashMap.set(pid, liveness)),
         setCwdUsers: (u) => Ref.set(users, u),
+        cwdListings: Ref.get(listings),
         probed: Ref.get(probed),
         signaled: Ref.get(signaled),
         setSignalDenied: (d) => Ref.set(denied, d),
@@ -383,6 +399,7 @@ export class FakeProcesses extends Context.Service<
             }),
           cwdUsers: () =>
             Effect.gen(function* () {
+              yield* Ref.update(listings, (n) => n + 1)
               const gate = yield* Ref.modify(
                 cwdGate,
                 (g) =>
@@ -522,8 +539,8 @@ const over = (options: TestOptions) => {
       Layer.provideMerge(tmp),
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
-      Layer.provideMerge(TurnEnds.layer),
       Layer.provideMerge(Platform.services),
+      Layer.provideMerge(Bus.layer),
     ),
   )
 }
@@ -573,6 +590,16 @@ export function until<A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predic
 export function until<A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) {
   return poll(f, done, yieldToIo, 2000, "until")
 }
+
+/**
+ * Let the bus handlers a test's last steps started (a turn end, a runtime event, a queued message) run to the end:
+ * until no session lock is held or waited on. Virtual time stays where it is.
+ */
+export const settled = Effect.gen(function* () {
+  const sessions = yield* Sessions
+  yield* yieldToIo
+  yield* until(sessions.inMemory, (m) => m.locks === 0)
+})
 
 /** Advance virtual time in 500 ms steps, letting real I/O run between them, until `done` holds (timeouts, retries). */
 export const untilVirtual = <A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) =>

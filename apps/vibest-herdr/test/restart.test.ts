@@ -14,6 +14,7 @@ import { TestClock } from "effect/testing"
 
 import { daemonPlan } from "../src/cli.ts"
 import {
+  eventsOf,
   FakeProcesses,
   FakeRuntime,
   makeRepository,
@@ -122,7 +123,9 @@ describe("restart in place", () => {
         (yield* herdr.callsTo("send")).map((s) => s.text),
         continueText(VERSION),
       )
-      // The continued turn ends: one result for the round.
+      // The continued turn ends: one result for the round. The Pi main agent is idle in its pane: it takes its rows
+      // itself, so the result stays pending here.
+      yield* herdr.seedAgent("test/coord")
       yield* writeResult(id, "pi", { text: "done\nstatus: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -248,6 +251,34 @@ describe("restart in place", () => {
       assert.lengthOf(notices, 1)
       assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
       assert.include(notices[0]!.message, `Restarted: ${sub}, ${main}.`)
+    }),
+  )
+
+  test(
+    "the old harness's report after the new process.start is not its result, even for a fresh Sessions",
+    Effect.gen(function* () {
+      const { db, sessions, id, pid } = yield* started
+      const herdr = yield* FakeRuntime
+      yield* db.noteHarnessSession(id, "conv-1")
+      const held = yield* herdr.hold("run", id)
+      const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
+      yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((rows) => Ref.set(outcomes, rows))))
+      yield* held.reached
+      // The new process.start is written; the old harness, stopping, still reports its turn end.
+      const [restarted] = (yield* eventsOf(id, "process.start")).slice(-1)
+      yield* writeResult(id, "pi", { text: "status: completed\nsummary: old harness" })
+      assert.isAbove((yield* eventsOf(id, "turn.reported")).at(-1)!.id, restarted!.id)
+      yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* held.release()
+      const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (rows) => rows !== undefined))!
+      assert.strictEqual(outcome?.ok, true, outcome?.message)
+      assert.notStrictEqual((yield* db.getSession(id))!.metadata.pid, pid)
+      yield* sessions.check(id)
+      // A new vibestd: nothing in memory, only what is stored.
+      const fresh = yield* Sessions.make({ maxSessions: undefined })
+      yield* fresh.check(id)
+      assert.strictEqual((yield* eventsOf(id, "turn.end")).length, 0)
+      assert.isUndefined(yield* db.latestInbox(id, "result"))
     }),
   )
 })

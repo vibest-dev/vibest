@@ -14,6 +14,7 @@ export default defineConfig({
       "packages/core/src/**/*.test.ts",
       "packages/plugin-harness-choice/test/**/*.test.ts",
       "tools/oxlint/**/*.test.mjs",
+      "tools/check/**/*.test.ts",
     ],
     // Within a file, concurrent tests share one worker. 5s is too tight once several git or bun tests overlap.
     fileParallelism: true,
