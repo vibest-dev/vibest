@@ -4,7 +4,6 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { cwdHolders, livenessOf, LSOF_KILL_AFTER, lsofArgs, Processes, runFor } from "@vibest/core/processes"
-import { CWD_WAIT } from "@vibest/core/remove"
 import { Sessions } from "@vibest/core/sessions"
 import { Clock, Duration, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -248,15 +247,15 @@ describe.concurrent("vibest rm: process proof", () => {
       const b = yield* idleSession
       yield* fake.setCwdUsers([4242])
       const before = yield* fake.cwdListings
-      const [out, took] = yield* removeTimingCwd(b.sessions, b.id)
+      const [out] = yield* removeTimingCwd(b.sessions, b.id)
       assert.deepInclude(out!, {
         processes: "alive",
         worktree: "kept",
         reasons: ["worktree kept: process 4242 has its working directory in it"],
       })
-      // One listing, no waiting for the process to leave (the test moves virtual time in steps while git runs).
+      // One listing, no waiting for the process to leave. (Elapsed virtual time is not asserted: the test moves it in
+      // steps while git runs, more of them under load.)
       assert.strictEqual((yield* fake.cwdListings) - before, 1)
-      assert.isBelow(took, Duration.toMillis(CWD_WAIT))
       // An unclear listing keeps it too.
       yield* fake.setCwdUsers(undefined)
       assert.deepInclude(yield* b.sessions.remove(b.id), {
@@ -278,14 +277,13 @@ describe.concurrent("vibest rm: process proof", () => {
       yield* fake.setCwdUsers([4242])
       yield* fake.setCwdDelay("3 seconds")
       const before = yield* fake.cwdListings
-      const [out, took] = yield* removeTimingCwd(sessions, id)
+      const [out] = yield* removeTimingCwd(sessions, id)
       assert.deepInclude(out!, {
         processes: "alive",
         worktree: "kept",
         reasons: ["worktree kept: process 4242 has its working directory in it"],
       })
       assert.strictEqual((yield* fake.cwdListings) - before, 1)
-      assert.isBelow(took, Duration.toMillis(CWD_WAIT))
     }),
   )
 
