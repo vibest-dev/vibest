@@ -4,5 +4,6 @@ import type { World } from "./world.ts"
 export interface Check {
   readonly id: string
   readonly title: string
-  readonly run: (w: World) => Promise<void>
+  /** `evidence` is this run's directory, `tools/e2e/evidence/<run>/`. */
+  readonly run: (w: World, evidence: string) => Promise<void>
 }

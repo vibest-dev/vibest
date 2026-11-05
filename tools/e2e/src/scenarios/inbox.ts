@@ -129,6 +129,10 @@ const heldModel = () => {
   })
   return {
     held: () => held.length,
+    /** Answer one held turn and keep holding the next. `release` answers every held turn and stops holding. */
+    releaseOne: () => {
+      held.shift()?.()
+    },
     release: () => {
       released = true
       for (const go of held.splice(0)) go()
@@ -757,6 +761,199 @@ const checks: ReadonlyArray<Check> = [
           stop.code === 0 && stop.stdout.includes("interrupted"),
           `vibest interrupt exited ${stop.code}: ${stop.stderr}${stop.stdout}\nvibestd.log:\n${await log()}`,
         )
+      } finally {
+        model.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "S26",
+    title:
+      "latency: 10 rounds of a busy Pi subagent, a queued send, then release, and 10 pane closes of idle subagents; records the times and does not assert them",
+    run: async (w, evidence) => {
+      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = heldModel()
+      const session = `${w.herdrSession}-s26`
+      const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+      const zdot = path.join(w.root, "zdotdir-s26")
+      await fs.mkdir(zdot, { recursive: true })
+      const env = { ZDOTDIR: zdot }
+      const logFile = path.join(w.vibestHome, "vibestd.log")
+      const pct = (xs: Array<number>, p: number) => {
+        const s = [...xs].sort((a, b) => a - b)
+        const rank = (p / 100) * (s.length - 1)
+        const lo = Math.floor(rank)
+        const hi = Math.ceil(rank)
+        return s[lo]! * (1 - (rank - lo)) + s[hi]! * (rank - lo)
+      }
+      const stats = (xs: Array<number>) => ({
+        n: xs.length,
+        p50: Math.round(pct(xs, 50)),
+        p95: Math.round(pct(xs, 95)),
+        max: Math.round(Math.max(...xs)),
+      })
+      const q = <A>(sql: string, ...args: Array<string | number>) => row<A>(w, sql, ...args)
+      try {
+        const repo = await project(w, "s26")
+        const pi = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-s26", model.url)}`
+        await w.stopDaemon()
+        await w.ok(["daemon"], { env })
+        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", pi], {
+          cwd: repo,
+          env,
+          timeoutMs: 90_000,
+        })
+        const runSub = async (task: string) =>
+          (
+            JSON.parse(
+              await w.ok(["run", "pi", "--session", session, "--env", pi, "--", ask(task)], {
+                cwd: repo,
+                env,
+                timeoutMs: 90_000,
+              }),
+            ) as { id: string }
+          ).id
+        const sub = await runSub("busy")
+        await until("the subagent's turn held", () => model.held() > 0, 60_000)
+        const hook: Array<number> = []
+        const delivery: Array<number> = []
+        for (let i = 0; i < 10; i++) {
+          const beforeEnd =
+            q<{ id: number }>(
+              "SELECT id FROM event WHERE session_id = ? AND type = 'turn.end' ORDER BY id DESC LIMIT 1",
+              sub,
+            )?.id ?? 0
+          const beforeResult =
+            q<{ id: number }>(
+              `SELECT e.id AS id FROM event e JOIN inbox i ON i.id = e.inbox_id
+                WHERE i.sender_session_id = ? AND i.kind = 'result' AND e.type = 'inbox.queued'
+                ORDER BY e.id DESC LIMIT 1`,
+              sub,
+            )?.id ?? 0
+          const message = ask(`r${i}`)
+          await w.ok(["send", sub, "--", message], { cwd: repo, env })
+          await until(
+            `round ${i} queued`,
+            () =>
+              q<{ status: string }>(
+                "SELECT status FROM inbox WHERE recipient_session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
+                sub,
+                message,
+              )?.status === "pending",
+            15_000,
+          )
+          const sent = q<{ id: number }>(
+            "SELECT id FROM inbox WHERE recipient_session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
+            sub,
+            message,
+          )
+          expect(sent !== undefined, `round ${i}: the queued send is not in the database`)
+          const logAt = (await fs.readFile(logFile, "utf8").catch(() => "")).length
+          // Pi can open more than one stream for one turn. Release the ones held now, before the next turn exists.
+          const open = model.held()
+          expect(open >= 1, `round ${i}: no held turn`)
+          for (let k = 0; k < open; k++) model.releaseOne()
+          let receipt = 0
+          let hookMs = 0
+          let deliveryMs = 0
+          await until(
+            `round ${i} settled`,
+            async () => {
+              if (receipt === 0) {
+                const fresh = (await fs.readFile(logFile, "utf8").catch(() => "")).slice(logAt)
+                const line = fresh.split("\n").find((l) => l.includes(`turn end ${sub}`))
+                const ts = line === undefined ? undefined : /timestamp=(\S+)/.exec(line)?.[1]
+                const parsed = ts === undefined ? Number.NaN : Date.parse(ts)
+                // A line with no timestamp (not logfmt): the poll time, a few milliseconds late.
+                if (Number.isFinite(parsed)) receipt = parsed
+                else if (line !== undefined) receipt = Date.now()
+              }
+              const end = q<{ at: number }>(
+                "SELECT at FROM event WHERE session_id = ? AND type = 'turn.end' AND id > ? ORDER BY id LIMIT 1",
+                sub,
+                beforeEnd,
+              )
+              const result = q<{ at: number }>(
+                `SELECT e.at AS at FROM event e JOIN inbox i ON i.id = e.inbox_id
+                WHERE i.sender_session_id = ? AND i.kind = 'result' AND e.type = 'inbox.queued' AND e.id > ?
+                ORDER BY e.id LIMIT 1`,
+                sub,
+                beforeResult,
+              )
+              const delivered = q<{ at: number }>(
+                "SELECT at FROM event WHERE inbox_id = ? AND type = 'inbox.status' AND json_extract(data, '$.to') = 'delivering' ORDER BY id LIMIT 1",
+                sent!.id,
+              )
+              if (
+                !Number.isFinite(receipt) ||
+                receipt === 0 ||
+                end === undefined ||
+                result === undefined ||
+                delivered === undefined
+              )
+                return false
+              hookMs = result.at - receipt
+              deliveryMs = delivered.at - end.at
+              return true
+            },
+            20_000,
+          )
+          hook.push(hookMs)
+          delivery.push(deliveryMs)
+          await until("the next turn held", () => model.held() > 0, 30_000)
+        }
+        model.release()
+        const closes: Array<number> = []
+        for (let i = 0; i < 10; i++) {
+          const id = await runSub(`c${i}`)
+          await until(
+            `subagent ${i} idle`,
+            () => {
+              const open = q<{ id: number }>(
+                `SELECT t.id AS id FROM event t WHERE t.session_id = ? AND t.type = 'turn.start'
+                  AND NOT EXISTS (SELECT 1 FROM event e WHERE e.turn_id = t.id AND e.type = 'turn.end')`,
+                id,
+              )
+              const ended = q<{ id: number }>(
+                "SELECT id FROM event WHERE session_id = ? AND type = 'turn.end' LIMIT 1",
+                id,
+              )
+              return open === undefined && ended !== undefined
+            },
+            90_000,
+          )
+          const runtime = q<{ runtime: string | null }>(
+            `SELECT runtime AS runtime FROM ${SESSIONS} s WHERE id = ?`,
+            id,
+          )?.runtime
+          const pane = ((JSON.parse(runtime ?? "{}") as { id?: string }).id ?? "").split("/")[1]
+          expect(pane !== undefined && pane !== "", `no pane for ${id} (${runtime})`)
+          const t0 = Date.now()
+          await herdr(socket, "pane.close", { pane_id: pane })
+          let at = 0
+          await until(
+            `process.end ${i}`,
+            () => {
+              const ended = q<{ at: number }>(
+                "SELECT at FROM event WHERE session_id = ? AND type = 'process.end' ORDER BY id DESC LIMIT 1",
+                id,
+              )
+              if (ended === undefined) return false
+              at = ended.at
+              return true
+            },
+            20_000,
+          )
+          closes.push(at - t0)
+        }
+        const out = {
+          hookReceiptToResultMs: stats(hook),
+          turnEndToDeliveringMs: stats(delivery),
+          paneCloseToProcessEndMs: stats(closes),
+        }
+        await fs.writeFile(path.join(evidence, "latency.json"), `${JSON.stringify(out, null, 2)}\n`)
+        console.log(`S26 ${JSON.stringify(out)}`)
       } finally {
         model.stop()
         await dropHerdrSession(w, session)

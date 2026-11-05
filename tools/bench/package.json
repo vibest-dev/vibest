@@ -1,0 +1,11 @@
+{
+  "name": "@vibest/bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@effect/sql-sqlite-bun": "catalog:",
+    "@vibest/core": "workspace:*",
+    "effect": "catalog:"
+  }
+}

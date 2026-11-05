@@ -420,6 +420,18 @@ importers:
         specifier: 4.0.2
         version: 4.0.2
 
+  tools/bench:
+    dependencies:
+      '@effect/sql-sqlite-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
+      '@vibest/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+
   tools/tsconfig: {}
 
   tools/verify:
