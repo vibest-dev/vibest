@@ -26,8 +26,9 @@ Five SQLite tables, one purpose each:
 - `--env` values are never stored: not in the database, logs or telemetry. They reach the terminal only when it
   opens. An in-place restart or a harness change in the same pane keeps them (the pane's shell has them); a new
   terminal does not (a subagent resumed in a new terminal starts without them), and the user passes `--env` again. A
-  main agent's `vibest --env` values go to the harness it execs, not to the user's shell, so vibestd keeps them in its
-  memory for a restart in place (`vibest update`); a handoff passes them to the next vibestd in that process's
+  main agent's `vibest --env` values go to the harness it execs, never onto a command typed into a shell. Outside the
+  parent workspace they are the new pane's environment (the shell keeps no copy in its history); vibestd keeps them in
+  its memory for a restart in place (`vibest update`); a handoff passes them to the next vibestd in that process's
   environment. A vibestd that stops without a handoff forgets them.
 - No peer relation and no worktree table. A session records its machine and directory. A directory under the vibest
   worktrees root is one vibest made; a name is reserved by an atomic `mkdir`. It can be removed when no other live

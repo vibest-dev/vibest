@@ -394,6 +394,8 @@ export const handlers = VibestRpcs.toLayer(
     const identity = yield* Identity
     const shutdown = yield* Shutdown
     const mainEnv = yield* MainEnv
+    /** `Launch`'s `--env`, until the vibest typed into that pane asks for it. Memory only, like `mainEnv`. */
+    const pendingMainEnv = new Map<string, Readonly<Record<string, string>>>()
     const drain = yield* Drain
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const harnesses = yield* Harnesses
@@ -651,9 +653,10 @@ export const handlers = VibestRpcs.toLayer(
 
       Republish: () => sessions.republish,
 
-      Launch: ({ argv, focus, machine, runtime }) =>
+      Launch: ({ argv, focus, machine, runtime, env }) =>
         Effect.gen(function* () {
           const { id, directory: root } = yield* scope("Launch")
+          const passed = env !== undefined && Object.keys(env).length > 0 ? env : undefined
           const at = machineOf(machine)
           // The runtime is chosen as a start chooses one (§4): the choice chain — the caller's `vibest --runtime` stands,
           // else the running coordinator's, else the configured one — never a silent pick. The harness that same chain
@@ -682,13 +685,22 @@ export const handlers = VibestRpcs.toLayer(
           }
           const rt = yield* runtimes.route(decision.runtime)
           yield* runtimes.online(rt, { id: decision.machine.id })
+          // Before the pane's shell runs: that vibest can ask for these while `open` is still typing the command.
+          if (passed !== undefined) pendingMainEnv.set(id, passed)
           const terminal = yield* Launch.openInParentWorkspace(rt, at, {
             root,
             argv,
             label: "vibest",
             home: layout.home,
             focus,
-          })
+            ...(passed !== undefined ? { env: passed } : {}),
+          }).pipe(
+            Effect.onError(() =>
+              Effect.sync(() => {
+                if (passed !== undefined) pendingMainEnv.delete(id)
+              }),
+            ),
+          )
           return {
             runtime: rt.kind,
             terminal: terminal.id,
@@ -878,6 +890,7 @@ export const handlers = VibestRpcs.toLayer(
         routing,
         pid,
         env,
+        fromPane,
       }) =>
         Effect.gen(function* () {
           const { id: projectId, directory } = yield* scope("Project.CoordinatorSession")
@@ -891,6 +904,11 @@ export const handlers = VibestRpcs.toLayer(
           // launch hold the project's lock, as a stop does, so two starts at once cannot both pass.
           return yield* projectLocked.withLock(projectId)(
             Effect.gen(function* () {
+              const passed = env !== undefined && Object.keys(env).length > 0 ? env : undefined
+              // Only the vibest typed into the pane Launch opened may take that pane's --env. Another start must not.
+              // Taken even when this start is refused: the attempt is over, and the pairs must not wait around.
+              const fromLaunch = fromPane === true ? pendingMainEnv.get(projectId) : undefined
+              if (fromPane === true) pendingMainEnv.delete(projectId)
               const running = yield* runningCoordinator(projectId, terminal)
               if (running)
                 return yield* new Forbidden({
@@ -904,9 +922,14 @@ export const handlers = VibestRpcs.toLayer(
                 { runtime: kind, address: { machine: machineOf(machine).id, id: terminal } },
                 { provider, model, routing, pid, projectDirectory: directory },
               )
-              if (env && Object.keys(env).length > 0) mainEnv.set(projectId, { sessionId: saved.sessionId, env })
+              const kept = passed ?? fromLaunch
+              if (kept !== undefined) mainEnv.set(projectId, { sessionId: saved.sessionId, env: kept })
               else mainEnv.delete(projectId)
-              return { ...saved, runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }) }
+              return {
+                ...saved,
+                runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }),
+                ...(fromLaunch !== undefined ? { env: fromLaunch } : {}),
+              }
             }),
           )
         }),

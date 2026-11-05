@@ -333,6 +333,8 @@ export class VibestRpcs extends RpcGroup.make(
           machine: Schema.optional(RuntimeMachine),
           /** The runtime the main agent's terminal opens in (`vibest --runtime`); else the choice chain's pick (the configured one included). */
           runtime: Schema.optional(Schema.String),
+          /** `vibest --env` for the new pane. Never part of the typed command, and never stored. */
+          env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
         },
         success: Schema.Struct({
           runtime: Schema.String,
@@ -463,6 +465,8 @@ export class VibestRpcs extends RpcGroup.make(
           pid: Schema.optional(Schema.Number),
           /** `vibest --env`: held in vibestd's memory only (never stored), so a restart in place runs the harness with it again. */
           env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+          /** The vibest typed into a pane `Launch` just opened: its `--env` is that pane's environment, not on this command line. */
+          fromPane: Schema.optional(Schema.Boolean),
         },
         success: Schema.Struct({
           sessionId: Schema.String,
@@ -470,6 +474,8 @@ export class VibestRpcs extends RpcGroup.make(
           /** VIBEST_PROJECT_ID and VIBEST_RUNTIME for the main agent's environment. */
           projectId: Schema.String,
           runtime: Schema.optional(Schema.String),
+          /** `vibest --env` held for the pane this command was typed into, when `fromPane` asked for it. Exec these; they were not on the command line. */
+          env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
         }),
         error: Schema.Union([
           InvalidCaller,

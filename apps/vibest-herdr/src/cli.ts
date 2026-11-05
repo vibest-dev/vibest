@@ -380,16 +380,17 @@ const startMain =
       const model = Option.getOrUndefined(o.model)
       const runtimeKind = Option.getOrUndefined(o.runtime)
       const env = Option.getOrElse(o.env, (): Record<string, string> => ({}))
-      /** This command again, run at the root. */
+      /** This command again, run at the root. No `--env`: a new pane gets those pairs as its environment. */
       const again = [
         ...(yield* VibestCommand),
         ...(harness ? ["--harness", harness] : []),
         ...(provider ? ["--provider", provider] : []),
         ...(model ? ["--model", model] : []),
         ...(runtimeKind ? ["--runtime", runtimeKind] : []),
-        ...Object.entries(env).flatMap(([k, v]) => ["--env", `${k}=${v}`]),
         ...(o.fresh ? ["--new"] : []),
       ]
+      // Below the root the pane already exists, so the pairs cannot be set as its environment; they stay on that typed line.
+      const atRoot = [...again, ...Object.entries(env).flatMap(([k, v]) => ["--env", `${k}=${v}`])]
       // The command Launch typed says which repository's parent workspace it is in; the flag spares herdr the question.
       const marked = Option.contains(o.inParent, root)
       const here = marked ? undefined : yield* ambientHerdr
@@ -414,7 +415,7 @@ const startMain =
             return yield* new LaunchFailed({
               message: `this pane is marked as the main agent's, but herdr could not be reached to run it at ${root}`,
             })
-          return yield* runAtRoot(live.h, live.paneId, root, Launch.again(again, root, marked))
+          return yield* runAtRoot(live.h, live.paneId, root, Launch.again(atRoot, root, marked))
         }
         // The main agent's own `vibest` commands never start vibestd (they may run in its harness's sandbox): start it here.
         if (!(yield* probe((yield* Layout).socket))) yield* startDaemon
@@ -424,9 +425,11 @@ const startMain =
         )
         if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`main agent: ${describeSpawn(chosen)}`)
         // Only the start that execs asks vibestd for the session, so `--new` replaces it once.
+        // `fromPane`: this is the vibest typed into a pane Launch opened, whose --env is the pane's environment.
+        let fromPane: Readonly<Record<string, string>> | undefined
         const session = withVibest(claim, (client) =>
           Effect.gen(function* () {
-            return yield* soleMainAgent(
+            const saved = yield* soleMainAgent(
               client,
               terminal,
               client["Project.CoordinatorSession"]({
@@ -442,8 +445,11 @@ const startMain =
                 pid: process.pid,
                 // Held in vibestd's memory only, for this harness's restart in place (vibest update).
                 ...(Object.keys(env).length > 0 ? { env } : {}),
+                ...(marked && Object.keys(env).length === 0 ? { fromPane: true } : {}),
               }),
             )
+            fromPane = saved.env
+            return saved
           }),
         )
         const main = yield* Launch.coordinatorCommand({
@@ -454,7 +460,7 @@ const startMain =
           passEnv: CALLER_ENV,
           session,
         }).pipe(Effect.provide(Harness.layer))
-        return yield* Effect.sync(() => exec(main.file, main.args, { ...env, ...main.env }))
+        return yield* Effect.sync(() => exec(main.file, main.args, { ...env, ...fromPane, ...main.env }))
       }
       // Elsewhere: a terminal in the parent workspace whose shell runs this command again. Inside herdr that terminal is
       // the runtime's to focus; outside, attach to it (like `cao launch`).
@@ -465,6 +471,7 @@ const startMain =
           focus: inHerdr || !o.headless,
           machine,
           ...(runtimeKind !== undefined ? { runtime: runtimeKind } : {}),
+          ...(Object.keys(env).length > 0 ? { env } : {}),
         }),
       )
       yield* Console.log(`the main agent is starting in ${opened.place}`)

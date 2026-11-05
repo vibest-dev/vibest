@@ -128,6 +128,8 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
     readonly argv: ReadonlyArray<string>
     readonly label: string
     readonly home: string
+    /** `vibest --env`: the pane's environment, never the typed command (the shell would keep it in its history). */
+    readonly env?: Readonly<Record<string, string>> | undefined
     /** The user is waiting to see the terminal (the runtime focuses it when it can). */
     readonly focus?: boolean | undefined
   },
@@ -141,7 +143,8 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
       project: input.root,
       cwd: input.root,
       argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh", ...inParent(input.argv, input.root)],
-      env: { VIBEST_HOME: input.home },
+      // VIBEST_HOME last, so a caller's `--env` cannot point this shell at another vibestd.
+      env: { ...input.env, VIBEST_HOME: input.home },
       label: input.label,
       ...(input.focus === true ? { focus: true } : {}),
     })

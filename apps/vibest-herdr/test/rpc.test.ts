@@ -617,6 +617,31 @@ describe("vibest.sock", () => {
   )
 
   test(
+    "Launch gives vibest --env to the pane's environment, never the typed command, and hands it to the vibest typed there",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const layout = yield* Layout
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const secret = "probe-value-9f3c"
+      yield* c.Launch({ argv: ["/bin/vibest", "--harness", "pi"], focus: false, env: { MAIN_PROBE: secret } })
+      const open = (yield* herdr.callsTo("open"))[0]!
+      assert.notInclude(open.argv.join(" "), secret)
+      assert.notInclude(open.argv, "--env")
+      assert.strictEqual(open.env.MAIN_PROBE, secret)
+      assert.strictEqual(open.env.VIBEST_HOME, layout.home)
+      // The command typed into that pane has no --env. It asks for the pairs and execs the harness with them.
+      const started = yield* c["Project.CoordinatorSession"]({
+        harness: "pi",
+        fresh: false,
+        terminal: "test/from-pane",
+        fromPane: true,
+      })
+      assert.strictEqual(started.env?.MAIN_PROBE, secret)
+    }),
+  )
+
+  test(
     "Launch from a linked worktree opens at the repository's root, not a second parent",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
