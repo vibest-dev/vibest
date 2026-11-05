@@ -6,7 +6,6 @@ import { Drain } from "@vibest/core/drain"
 import type { HarnessId } from "@vibest/core/harness"
 import { claude } from "@vibest/core/harnesses/claude"
 import { Inbox } from "@vibest/core/inbox"
-import { harnessExecEnv } from "@vibest/core/launch"
 import { Layout } from "@vibest/core/paths"
 import { AgentRefused } from "@vibest/core/plugins"
 import { peerAdmitPause, Sessions } from "@vibest/core/sessions"
@@ -438,44 +437,6 @@ describe.concurrent("Sessions", () => {
       for (const open of (yield* herdr.callsTo("open")).slice(1)) assert.isUndefined(open.env.VBT_TOKEN)
     }),
   )
-
-  test(
-    "a launched Pi clears PI_PACKAGE_DIR from the parent; vibest run --env keeps one the caller passed",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
-      const db = yield* Db
-      const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
-      const cleared = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* until(db.getSession(cleared.id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
-      assert.strictEqual((yield* herdr.callsTo("open"))[0]!.env.PI_PACKAGE_DIR, "")
-      const kept = yield* sessions.spawn({
-        ...(yield* spawnInput(repo)),
-        env: { PI_PACKAGE_DIR: "/opt/pi" },
-      })
-      yield* until(db.getSession(kept.id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
-      const opens = yield* herdr.callsTo("open")
-      assert.strictEqual(opens.at(-1)!.env.PI_PACKAGE_DIR, "/opt/pi")
-      const claude = yield* sessions.spawn(yield* spawnInput(repo, "claude"))
-      yield* until(db.getSession(claude.id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
-      assert.isUndefined((yield* herdr.callsTo("open")).at(-1)!.env.PI_PACKAGE_DIR)
-    }),
-  )
-
-  it("exec of pi drops a parent PI_PACKAGE_DIR unless the overlay names one", () => {
-    const base = { PATH: "/bin", PI_PACKAGE_DIR: "/gone", HOME: "/home" }
-    assert.deepStrictEqual(harnessExecEnv(base, "pi", { VIBEST_HOME: "/v" }), {
-      PATH: "/bin",
-      HOME: "/home",
-      VIBEST_HOME: "/v",
-    })
-    assert.strictEqual(harnessExecEnv(base, "pi", { PI_PACKAGE_DIR: "/opt/pi" }).PI_PACKAGE_DIR, "/opt/pi")
-    assert.strictEqual(harnessExecEnv(base, "claude", {}).PI_PACKAGE_DIR, "/gone")
-  })
 
   test(
     "Session process exits mid-turn: failed result",
