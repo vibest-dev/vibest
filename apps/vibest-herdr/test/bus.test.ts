@@ -102,6 +102,27 @@ describe("bus", () => {
     ).pipe(Effect.provide(dbLayer)),
   )
 
+  it.effect("a start that opens the terminal publishes the ready reports it carries over", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const db = yield* Db
+        const bus = yield* Bus
+        yield* db.insertSession({ ...session, address: { machine: "bench", id: "" } }, yield* projectOf("r"))
+        yield* db.patchLive(session.id, { ready: 5, pid: 4242 })
+        const sub = yield* bus.subscribe
+        yield* db.updateSession(session.id, { address: { machine: "bench", id: "b0" }, startedAt: 10 })
+        const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
+        assert.deepStrictEqual(
+          published.map((event) => event.type),
+          ["process.start", "process.ready"],
+        )
+        assert.strictEqual(published[1]!.processId, published[0]!.id)
+        assert.deepInclude(published[1]!.data, { pid: 4242 })
+        assert.strictEqual((yield* db.getSession(session.id))!.metadata.pid, 4242)
+      }),
+    ).pipe(Effect.provide(dbLayer)),
+  )
+
   it.effect("register publishes live.reset", () =>
     Effect.scoped(
       Effect.gen(function* () {

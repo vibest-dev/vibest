@@ -848,11 +848,13 @@ const make = Effect.gen(function* () {
         data,
         ...(at === undefined ? {} : { at }),
       })
-      if (opening)
-        yield* sql`INSERT INTO event (at, session_id, type, process_id, data)
-          SELECT at, session_id, type, ${processId}, data FROM event
+      if (opening) {
+        const copied = yield* sql<{ at: number; type: "process.ready" | "process.conversation"; data: string }>`
+          SELECT at, type, data FROM event
           WHERE process_id = ${before.id} AND type IN ('process.ready', 'process.conversation') ORDER BY id`
-      else integrations.delete(id)
+        for (const row of copied)
+          yield* append({ sessionId: id, type: row.type, processId, at: row.at, data: JSON.parse(row.data) })
+      } else integrations.delete(id)
       return processId
     })
 
