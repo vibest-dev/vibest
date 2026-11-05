@@ -1461,16 +1461,6 @@ export class Sessions extends Context.Service<
           for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
         })
 
-      // Recovery: a delivery a stop cut off may or may not have arrived (decision 2), then the labels back (the runtime
-      // does not keep them), then one look at every live session. Inbox offers the recovery's notices from their events.
-      yield* db.recoverDelivering(
-        harnesses.all.filter((h) => h.inbox === "poll").map((h) => h.id),
-        (sessionId, messages) =>
-          `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
-      )
-      yield* republish()
-      yield* Effect.forkIn(reconcile("all").pipe(logged("reconcile")), scope)
-
       yield* Effect.forkIn(
         inbox.delivered.pipe(
           Effect.flatMap(({ row, done }) =>
@@ -1515,8 +1505,19 @@ export class Sessions extends Context.Service<
           prompt(h, session, terminal, text).pipe(Effect.provideContext(platform)),
       })
 
-      // Subscribed once every handler is defined and before Sessions is returned: nothing its callers commit is missed.
+      // Subscribed once every handler is defined, before this service writes anything (the recovery below) and before
+      // Sessions is returned: nothing committed from here on is missed.
       yield* engine.on(handle)
+
+      // Recovery: a delivery a stop cut off may or may not have arrived (decision 2), then the labels back (the runtime
+      // does not keep them), then one look at every live session. Inbox offers the recovery's notices from their events.
+      yield* db.recoverDelivering(
+        harnesses.all.filter((h) => h.inbox === "poll").map((h) => h.id),
+        (sessionId, messages) =>
+          `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
+      )
+      yield* republish()
+      yield* Effect.forkIn(reconcile("all").pipe(logged("reconcile")), scope)
 
       return Sessions.of({
         spawn,
