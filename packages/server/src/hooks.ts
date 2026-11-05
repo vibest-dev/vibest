@@ -1,5 +1,5 @@
 // A harness plugin's turn events, wherever they arrive (the RPC `TurnEnd` / `Prompt`, or the HTTP hook routes): a turn
-// end is one `turn.reported` event (no session lock; a settlement while draining), then Sessions checks it. No file.
+// end is one `turn.reported` event (no session lock; a settlement while draining); Sessions checks it on that event.
 import type { Db } from "@vibest/core/db"
 import type { HarnessAdapter } from "@vibest/core/harness"
 import { promptOf } from "@vibest/core/results"
@@ -10,19 +10,14 @@ import { Clock, Effect } from "effect"
 /** The calling session, already checked: its id and its agent (`coordinator` for a main agent). */
 export type HookCaller = { readonly id: string; readonly agent: string }
 
-/** The adapter's `turnEnd` reads `raw`; the report is stored, then Sessions schedules a check. */
-export const turnEnd = (
-  db: Db["Service"],
-  sessions: Sessions["Service"],
-  adapter: HarnessAdapter,
-  who: HookCaller,
-  raw: string,
-) =>
+/** The adapter's `turnEnd` reads `raw`; the report is stored, and its event makes Sessions check the session. */
+export const turnEnd = (db: Db["Service"], adapter: HarnessAdapter, who: HookCaller, raw: string) =>
   Effect.gen(function* () {
     const end = turnEndOf(adapter, who.agent, raw, yield* Clock.currentTimeMillis)
     if (!end) return
     yield* db.reportTurn(who.id, end)
-    yield* sessions.turnEnded(who.id, end)
+    // One line per reported end (no text): what vibestd.log shows of a turn end that writes no result.
+    yield* Effect.log(`turn end ${who.id} (${end.harness}${end.interrupted ? ", interrupted" : ""})`)
   })
 
 /**

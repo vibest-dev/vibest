@@ -84,7 +84,7 @@ import {
 } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
-import { type TurnEnded, TurnEnds } from "./turn-ends.ts"
+import { TurnEnds } from "./turn-ends.ts"
 import { allocationParentBlocked, gitState, type GitState, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 /**
  * VIBEST_RUNTIME (and the vibest-runtime header): where an agent runs, `{runtime, machine, terminal}` as vibestd recorded
@@ -211,10 +211,6 @@ export class Sessions extends Context.Service<
     readonly list: (filter?: { projectId?: string; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
     /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
     readonly check: (id: string) => Effect.Effect<void>
-    /** A turn end an integration reported (RPC `TurnEnd`, or the HTTP hook), already stored: its log line (SPEC §7, §9). */
-    readonly turnEnded: (id: string, end: TurnEnded) => Effect.Effect<void>
-    /** Schedule a check of session `id` as a settlement and return at once (what a stored `turn.reported` triggers). */
-    readonly resultReady: (id: string) => Effect.Effect<void>
     /** RPC `Prompt`: the user typed into a subagent's terminal; with no round open, that opens one. */
     readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void, never, FileSystem.FileSystem>
     /** Terminal and workspace labels again, after the runtime dropped them. How many terminals were labelled. */
@@ -1433,9 +1429,6 @@ export class Sessions extends Context.Service<
           locked(id, true)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform)),
           scope,
         ).pipe(Effect.asVoid)
-      // One line per reported end (no text): what vibestd.log shows of a turn end that writes no result.
-      const turnEnded = (id: string, end: TurnEnded) =>
-        Effect.log(`turn end ${id} (${end.harness}${end.interrupted ? ", interrupted" : ""})`)
 
       // ---- restart in place (`vibest update`): restart.ts ----
       const { outdated, restart, restartLater } = sessionRestart({
@@ -1467,8 +1460,6 @@ export class Sessions extends Context.Service<
         get,
         list,
         check: checkLocked,
-        turnEnded,
-        resultReady,
         // The start is noted before the round waits for the lock: a send still confirming sees it (pickup proof).
         userPrompt: (id: string, text: string, at?: number) =>
           Effect.gen(function* () {

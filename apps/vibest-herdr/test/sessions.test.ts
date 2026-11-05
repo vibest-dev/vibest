@@ -208,11 +208,10 @@ describe.concurrent("Sessions", () => {
   test(
     "a turn end reported while vibestd drains (update, daemon restart) is still written: its check is a settlement",
     Effect.gen(function* () {
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const { id, db } = yield* spawnWorking(yield* makeRepository)
       const drain = yield* Drain
       assert.isTrue(yield* drain.begin)
       yield* writeResult(id, "pi", { text: "done while draining" })
-      yield* sessions.resultReady(id)
       const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
       assert.strictEqual(w.turnState, "completed")
       assert.include((yield* db.latestInbox(id, "result"))!.message, "done while draining")
@@ -223,9 +222,8 @@ describe.concurrent("Sessions", () => {
   test(
     "hook result + TurnEnd ends the turn and becomes a result row for the owner",
     Effect.gen(function* () {
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const { id, db } = yield* spawnWorking(yield* makeRepository)
       yield* writeResult(id, "pi", { text: "\nDone it.\nstatus: failed\n\n## Remember\nuse bun" })
-      yield* sessions.resultReady(id)
       const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
       assert.strictEqual(w.turnState, "completed")
       const row = yield* db.latestInbox(id, "result")
@@ -267,13 +265,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "TurnEnd for an unknown session is ignored",
-    Effect.gen(function* () {
-      yield* (yield* Sessions).resultReady("ffffffff-ffff-4fff-8fff-ffffffffffff")
-    }),
-  )
-
-  test(
     "a typed round ends like any round: one result to the parent; typing during an open round records nothing",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -304,7 +295,6 @@ describe.concurrent("Sessions", () => {
         [["do it", true]],
       )
       yield* writeResult(id, "pi", { text: "status: completed\nsummary: done it" })
-      yield* sessions.resultReady(id)
       yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
 
       const input = "a".repeat(2001)
@@ -317,7 +307,6 @@ describe.concurrent("Sessions", () => {
         WHERE session_id = ${id} AND status = 'working'`
       assert.deepStrictEqual(open, [{ input, inbox: null, status: "working" }])
       yield* writeResult(id, "pi", { text: "status: completed\nsummary: typed" })
-      yield* sessions.resultReady(id)
       const done = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
       assert.strictEqual(done.turnState, "completed")
       const rows = yield* results()

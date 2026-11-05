@@ -145,7 +145,7 @@ export const make = Effect.gen(function* () {
         return yield* admitted(
           "hook turn-end",
           true,
-          Hooks.turnEnd(db, sessions, adapter, who, request.body).pipe(Effect.as(ok())),
+          Hooks.turnEnd(db, adapter, who, request.body).pipe(Effect.as(ok())),
         )
       if (hook.hook === "prompt")
         return yield* admitted(
