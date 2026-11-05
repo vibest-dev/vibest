@@ -194,7 +194,8 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                   readonly agent_status?: results.AgentStatus | null
                   readonly agent?: string | null
                 }
-                if (data.type === "pane_agent_status_changed" && data.agent_status)
+                // A subscription frame names its kind in `event`; its data has no `type`.
+                if (frame.event === "pane.agent_status_changed" && data.agent_status)
                   return PubSub.publish(events, {
                     type: "state",
                     terminal: terminalOf(session, paneId, names.get(key)),
