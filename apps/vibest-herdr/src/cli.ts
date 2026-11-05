@@ -451,7 +451,7 @@ const startMain =
           passEnv: CALLER_ENV,
           session,
         }).pipe(Effect.provide(Harness.layer))
-        return yield* Effect.sync(() => exec(main.file, main.args, Launch.harnessChildEnv(passed, main.env)))
+        return yield* Effect.sync(() => exec(main.file, main.args, { ...passed, ...main.env }))
       }
       // Elsewhere: a terminal in the parent workspace whose shell runs this command again. Inside herdr that terminal is
       // the runtime's to focus; outside, attach to it (like `cao launch`).
@@ -883,7 +883,7 @@ const integrationStart = (exec: Exec) =>
         }),
       }).pipe(Effect.provide(Harness.layer))
       delete process.env[Launch.MAIN_ENV]
-      return yield* Effect.sync(() => exec(main.file, main.args, Launch.harnessChildEnv(got.env ?? {}, main.env)))
+      return yield* Effect.sync(() => exec(main.file, main.args, { ...got.env, ...main.env }))
     }),
   ).pipe(Command.withDescription("Internal: the main agent's harness started again in its shell, on its conversation"))
 

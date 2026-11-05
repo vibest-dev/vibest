@@ -2042,10 +2042,9 @@ describe("pure", () => {
     assert.deepStrictEqual(Launch.commandEnv({ MAIN_PROBE: "from-flag" }, true, carried), { MAIN_PROBE: "from-flag" })
     // bun exec merges process.env under the pairs, so an rc value of the same name loses.
     const rc: Record<string, string> = { MAIN_PROBE: "from-rc", PATH: "/bin" }
-    const child: Record<string, string> = {
-      ...rc,
-      ...Launch.harnessChildEnv({ MAIN_PROBE: "from-flag" }, { VIBEST_SESSION_ID: "s" }),
-    }
+    const pairs: Record<string, string> = { MAIN_PROBE: "from-flag" }
+    const harness: Record<string, string> = { VIBEST_SESSION_ID: "s" }
+    const child: Record<string, string> = { ...rc, ...pairs, ...harness }
     assert.strictEqual(child.MAIN_PROBE, "from-flag")
     assert.strictEqual(child.PATH, "/bin")
     assert.strictEqual(child.VIBEST_SESSION_ID, "s")

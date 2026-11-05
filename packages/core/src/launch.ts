@@ -139,12 +139,6 @@ export const commandEnv = (
   carried: string | undefined,
 ): Record<string, string> => (Object.keys(flags).length > 0 ? flags : marked ? mainEnvPairs(carried) : {})
 
-/** What the harness exec adds. The process environment is merged by the exec itself; `--env` wins over it. */
-export const harnessChildEnv = (
-  fromFlags: Readonly<Record<string, string>>,
-  harness: Readonly<Record<string, string>>,
-): Record<string, string> => ({ ...fromFlags, ...harness })
-
 /**
  * A shell at `root` (in the project's workspace there, which the runtime keeps: a tab beside the main agent's other
  * terminals); its address. The caller types the command once it has this address. `focus` asks the runtime to focus
