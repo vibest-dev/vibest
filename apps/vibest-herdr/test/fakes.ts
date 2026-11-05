@@ -586,6 +586,16 @@ export function until<A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predic
   return poll(f, done, yieldToIo, 2000, "until")
 }
 
+/**
+ * Let the bus handlers a test's last steps started (a turn end, a runtime event, a queued message) run to the end:
+ * until no session lock is held or waited on. Virtual time stays where it is.
+ */
+export const settled = Effect.gen(function* () {
+  const sessions = yield* Sessions
+  yield* yieldToIo
+  yield* until(sessions.inMemory, (m) => m.locks === 0)
+})
+
 /** Advance virtual time in 500 ms steps, letting real I/O run between them, until `done` holds (timeouts, retries). */
 export const untilVirtual = <A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) =>
   poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust("500 millis"))), 200, "untilVirtual")

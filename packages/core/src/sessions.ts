@@ -34,15 +34,16 @@ import {
   Predicate,
   Ref,
   Schedule,
-  Stream,
   SynchronizedRef,
 } from "effect"
 import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 import { ChildProcessSpawner } from "effect/process"
 
+import type { EngineEvent } from "./bus.ts"
 import { Db, type InboxRow, type SessionRow } from "./db.ts"
 import { Drain } from "./drain.ts"
+import * as Engine from "./engine.ts"
 import {
   encodeCommand,
   harnessOptions,
@@ -77,7 +78,6 @@ import {
   Runtimes,
   RuntimeError,
   type Runtime,
-  type RuntimeEvent,
   stateOf,
   type Terminal,
   type AgentSeen,
@@ -211,9 +211,9 @@ export class Sessions extends Context.Service<
     readonly list: (filter?: { projectId?: string; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
     /** One evaluation of SPEC §8.5 for a session; also what events and the poll trigger. */
     readonly check: (id: string) => Effect.Effect<void>
-    /** A turn end an integration reported (RPC `TurnEnd`, or the HTTP hook): kept, then a check is scheduled; returns at once (SPEC §7, §9). */
+    /** A turn end an integration reported (RPC `TurnEnd`, or the HTTP hook), already stored: its log line (SPEC §7, §9). */
     readonly turnEnded: (id: string, end: TurnEnded) => Effect.Effect<void>
-    /** Schedule a check of session `id` and return at once (what `turnEnded` does after keeping the end). */
+    /** Schedule a check of session `id` as a settlement and return at once (what a stored `turn.reported` triggers). */
     readonly resultReady: (id: string) => Effect.Effect<void>
     /** RPC `Prompt`: the user typed into a subagent's terminal; with no round open, that opens one. */
     readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void, never, FileSystem.FileSystem>
@@ -257,6 +257,7 @@ export class Sessions extends Context.Service<
       const turnEnds = yield* TurnEnds
       const platform = yield* Effect.context<Platform>()
       const scope = yield* Effect.scope
+      const engine = yield* Engine.make
 
       const tracked = yield* SynchronizedRef.make(HashMap.empty<string, Tracked>())
       const track = (id: string) =>
@@ -990,7 +991,8 @@ export class Sessions extends Context.Service<
         const now = yield* Clock.currentTimeMillis
         // A prompt that failed part way (the runtime refused it, the connection broke, vibestd stopped): the session sat idle and
         // never moved. Its messages already failed with their notices; close the turn so the queue moves again.
-        if (idle && !ended && now - session.turnPromptedAt > Duration.toMillis(CONFIRM_TIMEOUT)) {
+        const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - session.turnPromptedAt)
+        if (idle && !ended && unconfirmed <= 0) {
           yield* db.updateSession(id, { turnState: "not_started", lastActive: now })
           yield* notice(
             session,
@@ -998,9 +1000,13 @@ export class Sessions extends Context.Service<
           )
           return yield* deliverQueued(h, { ...session, turnState: "not_started" }, terminal)
         }
+        // Idle and never seen working: look again when CONFIRM_TIMEOUT is up (a later event or check may settle it first).
+        if (idle && !ended) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkLocked(id))
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
-        if (now - endedAt! <= Duration.toMillis(HOOK_GRACE)) return
+        const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
+        // Idle after working with no report yet: the turn is lost if none comes within HOOK_GRACE.
+        if (grace > 0) return yield* engine.arm(`grace:${id}`, Duration.millis(grace), checkLocked(id))
         yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
         yield* finish(
           session,
@@ -1010,7 +1016,7 @@ export class Sessions extends Context.Service<
         )
       })
 
-      const checkLocked = (id: string) =>
+      const checkLocked = (id: string): Effect.Effect<void> =>
         locked(id)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform))
 
       // ---- send / interrupt / remove ----
@@ -1061,12 +1067,7 @@ export class Sessions extends Context.Service<
         yield* deliverQueued(h, fresh, fresh.address)
       })
 
-      /**
-       * Queue the message and deliver it in vibestd's scope, so the caller may go away once the row is written. When this
-       * delivery fails for good, this message (if nothing handled it meanwhile) is failed and the session's owner told;
-       * other queued messages are left to their own deliveries. Runtime unreachable, or vibestd stopping: it stays pending for
-       * the poll's next check.
-       */
+      /** Queue the message; its stored `inbox.queued` starts the delivery (`delivered`), so the caller may go away. */
       const send = (id: string, message: string) =>
         Effect.gen(function* () {
           const session = yield* getRow(id)
@@ -1076,7 +1077,18 @@ export class Sessions extends Context.Service<
           // Archived since the read above (vibest run --archive-on-completion decides under the session's lock, not this one): refused, never accepted.
           const row = yield* db.insertSend(id, message)
           if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-          // Under the session's lock, like every other change to its rows.
+        })
+
+      /**
+       * A queued message: deliver it under the session's lock. When this delivery fails for good, this message (if
+       * nothing handled it meanwhile) is failed and the session's owner told; other queued messages are left to their own
+       * deliveries. Runtime unreachable, or vibestd stopping: it stays pending for the poll's next check.
+       */
+      const queued = (id: string, inboxId: number | undefined) =>
+        Effect.gen(function* () {
+          // Only a pending Message to a session (not a task, result or notice; not one already taken).
+          const row = (yield* db.pendingInbox(id)).find((r) => r.id === inboxId)
+          if (row === undefined) return
           const failed = (cause: Cause.Cause<unknown>) =>
             Effect.gen(function* () {
               // Only what a retry can fix keeps the message queued (§3 `RuntimeError` codes); a refused start is final.
@@ -1093,16 +1105,17 @@ export class Sessions extends Context.Service<
                 !(yield* db.pendingInbox(id)).some((r) => r.id === row.id)
               )
                 return
-              yield* undelivered(session, [row], errorMessage(cause))
+              const session = yield* db.getSession(id)
+              if (session !== undefined) yield* undelivered(session, [row], errorMessage(cause))
             })
-          yield* Effect.forkIn(
-            locked(id)(deliver(id).pipe(Effect.catchCause(failed))).pipe(
-              logged(`send ${id}`),
-              Effect.provideContext(platform),
-            ),
-            scope,
-          )
-        })
+          yield* locked(id)(deliver(id).pipe(Effect.catchCause(failed)))
+        }).pipe(logged(`send ${id}`), Effect.provideContext(platform))
+
+      /** A turn ended: what was queued meanwhile goes now, not at the next look (`deliver` skips a busy session). */
+      const deliverNext = (id: string) =>
+        locked(id)(
+          db.pendingInbox(id).pipe(Effect.flatMap((pending) => (pending.length === 0 ? Effect.void : deliver(id)))),
+        ).pipe(logged(`deliver ${id}`), Effect.provideContext(platform))
 
       const interrupt = (id: string) =>
         getRow(id).pipe(
@@ -1356,24 +1369,35 @@ export class Sessions extends Context.Service<
 
       // ---- background: events, poll, recovery (SPEC §8.8, §9) ----
 
-      /** One event of any registered runtime (§5): re-evaluate the session that owns the terminal it names. */
-      const onTerminalEvent = (event: RuntimeEvent) =>
+      /** A runtime's event (§5): re-evaluate the session that owns the terminal it names. */
+      const onTerminal = (terminal: Terminal, working: boolean) =>
         Effect.gen(function* () {
-          if (event.type === "reset") {
-            yield* republish()
-            return
-          }
-          const id = yield* sessionAt(event.terminal)
+          const id = yield* sessionAt(terminal)
           if (id === undefined) return
-          if (event.type === "state" && event.state === "working") yield* Ref.set((yield* track(id)).sawWorking, true)
+          if (working) yield* Ref.set((yield* track(id)).sawWorking, true)
           yield* checkLocked(id)
         })
 
-      // The registry merges every registered runtime's events (each share ends with its plugin): one follower here.
-      yield* Effect.forkIn(
-        runtimes.events.pipe(Stream.runForEach((event) => onTerminalEvent(event).pipe(logged(`runtime event`)))),
-        scope,
-      )
+      // Each handler runs in its own fiber and takes the session's lock itself (engine.ts).
+      const handle = (event: EngineEvent): Effect.Effect<void> => {
+        switch (event.type) {
+          case "turn.reported":
+            // The check a hook's turn end always scheduled, now from the stored report.
+            return resultReady(event.sessionId)
+          case "turn.end":
+            return deliverNext(event.sessionId)
+          case "inbox.queued":
+            return queued(event.sessionId, event.inboxId)
+          case "live.state":
+            return onTerminal(event.terminal, event.state === "working")
+          case "live.exited":
+            return onTerminal(event.terminal, false)
+          case "live.reset":
+            return republish().pipe(Effect.asVoid, Effect.provideContext(platform))
+          default:
+            return Effect.void
+        }
+      }
 
       const checkAll = db.listSessions().pipe(
         Effect.flatMap((rows) =>
@@ -1409,11 +1433,9 @@ export class Sessions extends Context.Service<
           locked(id, true)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform)),
           scope,
         ).pipe(Effect.asVoid)
+      // One line per reported end (no text): what vibestd.log shows of a turn end that writes no result.
       const turnEnded = (id: string, end: TurnEnded) =>
-        // One line per reported end (no text): what vibestd.log shows of a turn end that writes no result.
-        Effect.log(`turn end ${id} (${end.harness}${end.interrupted ? ", interrupted" : ""})`).pipe(
-          Effect.andThen(resultReady(id)),
-        )
+        Effect.log(`turn end ${id} (${end.harness}${end.interrupted ? ", interrupted" : ""})`)
 
       // ---- restart in place (`vibest update`): restart.ts ----
       const { outdated, restart, restartLater } = sessionRestart({
@@ -1432,6 +1454,9 @@ export class Sessions extends Context.Service<
         prompt: (h, session, terminal, text) =>
           prompt(h, session, terminal, text).pipe(Effect.provideContext(platform)),
       })
+
+      // Subscribed once every handler is defined and before Sessions is returned: nothing its callers commit is missed.
+      yield* engine.on(handle)
 
       return Sessions.of({
         spawn,

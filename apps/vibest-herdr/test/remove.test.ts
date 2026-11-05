@@ -13,10 +13,12 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import {
+  eventsOf,
   FakeRuntime,
   FakeProcesses,
   makeRepository,
   processEnds,
+  settled,
   tempDirectory,
   testLayer,
   type TestOptions,
@@ -24,7 +26,6 @@ import {
   until,
   untilVirtual,
   writeResult,
-  resultText,
   systemPromptFile,
   projectOf,
 } from "./fakes.ts"
@@ -190,20 +191,25 @@ describe.concurrent("vibest rm: process proof", () => {
           yield* fs.writeFileString(w.rules, `rules of ${w.id}`)
         })
 
-      // Its terminal closed by hand: the close contract already proved its processes gone, so the rules file goes.
-      // The reported turn end is an event now, not a file, so archive does not drop it.
+      // Its terminal closed by hand: the close contract already proved its processes gone, so the rules file goes. The
+      // report's own check has already seen the exit, so there is no terminal left to close.
+      // The reported turn end is an event, not a file, so archive does not drop it.
+      const reported = (id: string) => eventsOf(id, "turn.reported").pipe(Effect.map((rows) => rows.at(-1)?.data.text))
       const a = yield* idleSession
       yield* a.herdr.runtime.close({ machine: "local", id: a.pane })
       yield* seeded(a)
-      assert.deepInclude(yield* a.sessions.remove(a.id), { processes: "exited", pane: "closed", worktree: "gone" })
-      assert.strictEqual(yield* resultText(a.id), `result of ${a.id}`)
+      yield* until(a.db.getSession(a.id), (row) => row?.exitedAt !== null)
+      yield* settled
+      assert.deepInclude(yield* a.sessions.remove(a.id), { processes: "exited", pane: "none", worktree: "gone" })
+      assert.strictEqual(yield* reported(a.id), `result of ${a.id}`)
       assert.isFalse(yield* fs.exists(a.rules))
 
       // Its terminal closed by vibest rm and no process in it: the rules file goes as well.
       const b = yield* idleSession
       yield* seeded(b)
+      yield* settled
       assert.deepInclude(yield* b.sessions.remove(b.id), { processes: "exited", pane: "closed", worktree: "gone" })
-      assert.strictEqual(yield* resultText(b.id), `result of ${b.id}`)
+      assert.strictEqual(yield* reported(b.id), `result of ${b.id}`)
       assert.isFalse(yield* fs.exists(b.rules))
     }),
   )

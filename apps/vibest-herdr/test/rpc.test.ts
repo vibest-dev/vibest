@@ -189,8 +189,6 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(listed.get(id)!.latest, open)
       for (const row of listed.values()) assert.include(["idle", "working", "blocked", "done", "unknown"], row.status)
       assert.strictEqual((yield* c.Get({ id })).task, prompt)
-      yield* c.Send({ id, message: "follow up" })
-      assert.strictEqual((yield* c.List({})).find((w) => w.id === id)!.task, cut)
       yield* writeResult(id, "pi", { text: "\nfixed it\nand more" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -198,6 +196,9 @@ describe("vibest.sock", () => {
       assert.strictEqual(after?.status, "completed")
       assert.strictEqual(after?.summary, "fixed it")
       assert.isNumber(after?.endedAt)
+      // A follow-up (delivered at once: the turn is over) is not the task.
+      yield* c.Send({ id, message: "follow up" })
+      assert.strictEqual((yield* c.List({})).find((w) => w.id === id)!.task, cut)
       assert.strictEqual((yield* c.Get({ id })).task, prompt)
     }),
   )
