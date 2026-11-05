@@ -130,19 +130,20 @@ export const mainEnvPairs = (raw: string | undefined): Record<string, string> =>
 }
 
 /**
- * The harness process environment: the current environment, then `--env` (the flags, or else `VIBEST_MAIN_ENV`),
- * then the harness's own variables. `VIBEST_MAIN_ENV` is not passed on.
+ * `--env` for this command. The flags win. `VIBEST_MAIN_ENV` counts only for the command Launch typed (`marked`);
+ * any later `vibest` in that pane ignores it.
  */
+export const commandEnv = (
+  flags: Readonly<Record<string, string>>,
+  marked: boolean,
+  carried: string | undefined,
+): Record<string, string> => (Object.keys(flags).length > 0 ? flags : marked ? mainEnvPairs(carried) : {})
+
+/** What the harness exec adds. The process environment is merged by the exec itself; `--env` wins over it. */
 export const harnessChildEnv = (
-  processEnv: Readonly<Record<string, string | undefined>>,
   fromFlags: Readonly<Record<string, string>>,
   harness: Readonly<Record<string, string>>,
-): Record<string, string> => {
-  const chosen = Object.keys(fromFlags).length > 0 ? fromFlags : mainEnvPairs(processEnv[MAIN_ENV])
-  const child: Record<string, string> = {}
-  for (const [key, value] of Object.entries(processEnv)) if (value !== undefined && key !== MAIN_ENV) child[key] = value
-  return { ...child, ...chosen, ...harness }
-}
+): Record<string, string> => ({ ...fromFlags, ...harness })
 
 /**
  * A shell at `root` (in the project's workspace there, which the runtime keeps: a tab beside the main agent's other

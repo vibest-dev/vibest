@@ -642,6 +642,26 @@ describe("vibest.sock", () => {
   )
 
   test(
+    "the vibest Launch typed passes the pane's VIBEST_MAIN_ENV on, and a restart reads it back",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const herdr = yield* FakeRuntime
+      const secret = "probe-value-9f3c"
+      yield* c.Launch({ argv: ["/bin/vibest", "--env", "MAIN_PROBE=" + secret], focus: false })
+      const pane = JSON.parse((yield* herdr.callsTo("open"))[0]!.env.VIBEST_MAIN_ENV!) as Record<string, string>
+      const started = yield* c["Project.CoordinatorSession"]({
+        harness: "pi",
+        fresh: false,
+        terminal: "pane-a",
+        env: pane,
+      })
+      const again = yield* c["Session.Start"]({ id: started.sessionId })
+      assert.strictEqual(again.env?.MAIN_PROBE, secret)
+    }),
+  )
+
+  test(
     "Launch from a linked worktree opens at the repository's root, not a second parent",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

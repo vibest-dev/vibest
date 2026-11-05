@@ -2035,25 +2035,21 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
 })
 
 describe("pure", () => {
-  it("the first harness exec applies --env over a shell rc, and does not pass VIBEST_MAIN_ENV on", () => {
-    const secret = "from-flag"
-    const child = Launch.harnessChildEnv(
-      { MAIN_PROBE: "from-rc", VIBEST_MAIN_ENV: JSON.stringify({ MAIN_PROBE: secret }), PATH: "/bin" },
-      {},
-      { VIBEST_SESSION_ID: "s" },
-    )
-    assert.strictEqual(child.MAIN_PROBE, secret)
+  it("an unmarked command ignores VIBEST_MAIN_ENV; the command Launch typed uses it, over a shell rc", () => {
+    const carried = JSON.stringify({ MAIN_PROBE: "from-flag" })
+    assert.deepStrictEqual(Launch.commandEnv({}, false, carried), {})
+    assert.deepStrictEqual(Launch.commandEnv({}, true, carried), { MAIN_PROBE: "from-flag" })
+    assert.deepStrictEqual(Launch.commandEnv({ MAIN_PROBE: "from-flag" }, true, carried), { MAIN_PROBE: "from-flag" })
+    // bun exec merges process.env under the pairs, so an rc value of the same name loses.
+    const rc: Record<string, string> = { MAIN_PROBE: "from-rc", PATH: "/bin" }
+    const child: Record<string, string> = {
+      ...rc,
+      ...Launch.harnessChildEnv({ MAIN_PROBE: "from-flag" }, { VIBEST_SESSION_ID: "s" }),
+    }
+    assert.strictEqual(child.MAIN_PROBE, "from-flag")
     assert.strictEqual(child.PATH, "/bin")
     assert.strictEqual(child.VIBEST_SESSION_ID, "s")
-    assert.strictEqual(child.VIBEST_MAIN_ENV, undefined)
-    // An explicit --env on this command wins over the pane variable.
-    const flagged = Launch.harnessChildEnv(
-      { VIBEST_MAIN_ENV: JSON.stringify({ MAIN_PROBE: "from-pane" }) },
-      { MAIN_PROBE: "from-flag" },
-      {},
-    )
-    assert.strictEqual(flagged.MAIN_PROBE, "from-flag")
-    assert.strictEqual(flagged.VIBEST_MAIN_ENV, undefined)
+    assert.strictEqual("VIBEST_MAIN_ENV" in child, false)
   })
 
   it.effect("~/.vibest layout: VIBEST_HOME, else $HOME/.vibest; the old product's OMO_HOME is not read", () =>
