@@ -560,17 +560,22 @@ const make = Effect.gen(function* () {
 
   /**
    * Run `body` in one transaction. After it commits, publish the rows it appended, in id order. A nested call shares
-   * this buffer, so only the outermost commit publishes. A rollback publishes nothing.
+   * this buffer, so only the outermost commit publishes. A rollback publishes nothing. Only `body` is interruptible:
+   * an interrupt that comes once it has finished waits until the commit's rows are published, so none is dropped.
    */
   const tx = <A, E, R>(body: Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
       if ((yield* TxBuffer) !== undefined) return yield* body
-      const buffer = { events: [] as Array<StoredEvent>, fiberId: yield* Effect.fiberId, closed: false }
-      const result = yield* sql
-        .withTransaction(Effect.provideService(body, TxBuffer, buffer))
-        .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
-      yield* bus.published(buffer.events)
-      return result
+      return yield* Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const buffer = { events: [] as Array<StoredEvent>, fiberId: yield* Effect.fiberId, closed: false }
+          const result = yield* sql
+            .withTransaction(restore(Effect.provideService(body, TxBuffer, buffer)))
+            .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
+          yield* bus.published(buffer.events)
+          return result
+        }),
+      )
     })
 
   /** Some project id already starts with `short`. */
