@@ -2025,6 +2025,12 @@ describe.concurrent("Sessions", () => {
       yield* until(herdr.callsTo("send"), (calls) => calls.length > 0)
       assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "do it")
       assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
+      // The move handed the task over: it is the open turn's input.
+      const sql = yield* SqlClient.SqlClient
+      const [round] = yield* sql<{
+        input: string
+      }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(Effect.orDie)
+      assert.strictEqual(round!.input, "do it")
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude"],
@@ -4233,6 +4239,87 @@ describe.concurrent("after a vibestd stop", () => {
         }),
       )
     }),
+    { hooked: ["pi"] },
+  )
+
+  /**
+   * A spawn the stopped vibestd left waiting for its harness to be ready (its first look at the terminal held): its
+   * first turn is open, the task not handed over. `body` runs with its id; afterwards that look fails, so the stopped
+   * vibestd's launch ends before the test's layer closes.
+   */
+  const waitingForReady = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db
+      const repo = yield* makeRepository
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
+      const opening = yield* herdr.hold("open")
+      const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
+      yield* opening.reached
+      const looking = yield* herdr.hold("state", id)
+      yield* opening.release()
+      yield* looking.reached
+      return yield* body(id).pipe(Effect.ensuring(looking.release("unreachable")))
+    })
+
+  const turnInputs = (id: string) =>
+    Effect.flatMap(SqlClient.SqlClient, (sql) =>
+      sql<{ input: string; status: string }>`SELECT input, status FROM ${sql.literal(TURNS)} m
+        WHERE session_id = ${id} ORDER BY id`.pipe(Effect.orDie),
+    )
+  const typed = (text: string) =>
+    Effect.map(
+      Effect.flatMap(FakeRuntime, (herdr) => herdr.callsTo("send")),
+      (calls) => calls.filter((c) => c.text === text).length,
+    )
+
+  test(
+    "a first turn waiting for its harness to be ready has not taken its task",
+    waitingForReady((id) =>
+      Effect.gen(function* () {
+        const db = yield* Db
+        assert.isFalse(yield* db.turnTaken(id))
+        assert.strictEqual(yield* db.untakenTask(id), "do it")
+        assert.deepStrictEqual(yield* turnInputs(id), [{ input: "", status: "working" }])
+        assert.strictEqual(yield* typed("do it"), 0)
+      }),
+    ),
+  )
+
+  test(
+    "a task never handed over is handed over once by the next vibestd, as its open turn's input",
+    waitingForReady((id) =>
+      Effect.gen(function* () {
+        const db = yield* Db
+        yield* nextVibestd(Effect.map(typed("do it"), (n) => n === 1))
+        assert.deepStrictEqual(yield* turnInputs(id), [{ input: "do it", status: "working" }])
+        assert.isUndefined(yield* db.untakenTask(id))
+        assert.isTrue(yield* db.turnTaken(id))
+      }),
+    ),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "a task handed over at reconcile that does not start ends the turn not_started and is not handed over again",
+    waitingForReady((id) =>
+      Effect.gen(function* () {
+        const herdr = yield* FakeRuntime
+        // The paste and its one re-paste are taken without the agent moving.
+        yield* Ref.set(herdr.skipPromptUpdates, 2)
+        const next = yield* Sessions.make({ maxSessions: undefined })
+        yield* untilVirtual(turnInputs(id), (turns) => turns[0]?.status === "not_started")
+        assert.strictEqual(yield* typed("do it"), 2)
+        assert.isTrue((yield* sqlNotices(id)).some((t) => t.startsWith("task_not_started")))
+        yield* next.check(id)
+        yield* until(next.inMemory, (m) => m.locks === 0)
+        assert.strictEqual(yield* typed("do it"), 2)
+        assert.strictEqual((yield* turnInputs(id)).length, 1)
+      }),
+    ),
     { hooked: ["pi"] },
   )
 })

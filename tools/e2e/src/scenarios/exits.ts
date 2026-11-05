@@ -1,4 +1,4 @@
-// What vibestd learns with no poll (feature-map S21 to S28): an exit the runtime pushes, a stop of vibestd itself in the
+// What vibestd learns with no poll (feature-map S21 to S29): an exit the runtime pushes, a stop of vibestd itself in the
 // middle of a turn or of a delivery, and a herdr server that hands over to a new one. Pi subagents and a Pi main agent
 // on the fake model of inbox.ts; vibestd, herdr and Pi are the real ones.
 import fs from "node:fs/promises"
@@ -141,6 +141,15 @@ const killedMidTurn = async (
     throw e
   }
 }
+
+/** Session `id`'s task was never handed over: no `inbox.status` for it. */
+const untaken = (w: World, id: string) =>
+  row<{ n: number }>(
+    w,
+    `SELECT count(*) AS n FROM inbox i WHERE i.recipient_session_id = ? AND i.kind = 'task'
+      AND NOT EXISTS (SELECT 1 FROM event e WHERE e.inbox_id = i.id AND e.type = 'inbox.status')`,
+    id,
+  )?.n === 1
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -346,6 +355,62 @@ const checks: ReadonlyArray<Check> = [
         // Nothing more comes for it.
         await Bun.sleep(2_000)
         expect(p.notices(sub, "never finished starting") === 1, "more than one notice")
+      } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S29",
+    title:
+      "vibestd killed (kill -9) while a subagent's first turn waits for its harness to be ready (the task not handed over): the next vibestd types the task once, as that turn's input, and one completed result reaches the main agent",
+    run: async (w) => {
+      const p = await piProject(w, "s29")
+      try {
+        p.model.release()
+        // The window is the first look for the harness's ready report: a try that misses it (the task linked before
+        // the kill) is not this case, so the next subagent tries again.
+        let sub = ""
+        for (let attempt = 1; sub === "" && attempt <= 5; attempt++) {
+          const daemon = await w.daemonPid()
+          expect(daemon !== undefined, "no vibestd pid")
+          const id = await p.runSub(`t${attempt}`)
+          const opened = () =>
+            row<{ n: number }>(w, "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'turn.start'", id)
+              ?.n === 1
+          for (const deadline = Date.now() + 60_000; !opened(); await Bun.sleep(1))
+            expect(Date.now() < deadline, `${id}: its first turn never opened`)
+          process.kill(daemon!, "SIGKILL")
+          await until("vibestd gone", () => !alive(daemon!), 10_000)
+          if (untaken(w, id)) sub = id
+          await p.startDaemon()
+          if (sub === "") await until(`${id} idle`, () => p.idle(id), 60_000)
+        }
+        expect(sub !== "", "every try handed the task over before vibestd was killed")
+        const task = `t${row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE recipient_session_id = ? AND kind = 'task'", sub)?.c.match(/done-t(\d+)/)?.[1]}`
+        await until(
+          "one completed result",
+          () => p.results(sub) === 1 && p.lastEnd(sub)?.status === "completed",
+          60_000,
+        )
+        await until(
+          "the result delivered to the main agent",
+          () =>
+            row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE sender_session_id = ? AND kind = 'result'", sub)
+              ?.s === "delivered",
+          30_000,
+        )
+        // Nothing more comes for it.
+        await Bun.sleep(3_000)
+        expect(p.model.asked(task) === 1, `the task was asked ${p.model.asked(task)} times`)
+        expect(p.results(sub) === 1, `${p.results(sub)} results`)
+        const input = row<{ n: number }>(
+          w,
+          `SELECT count(*) AS n FROM event e JOIN inbox i ON i.id = e.inbox_id
+            WHERE e.session_id = ? AND e.type = 'inbox.status' AND i.kind = 'task' AND e.turn_id IS NOT NULL`,
+          sub,
+        )?.n
+        expect(input === 1, `the task is the input of ${input} turns`)
       } finally {
         await p.close()
       }

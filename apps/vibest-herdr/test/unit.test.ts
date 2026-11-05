@@ -468,6 +468,9 @@ describe("Db", () => {
             "do it",
           )
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 5 })
+          // Opening the turn does not hand the task over; its handover does.
+          assert.strictEqual((yield* round("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))[0]!.inboxId, null)
+          yield* db.linkTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           const [task] = yield* sql<{
             id: number
           }>`SELECT id FROM inbox WHERE recipient_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
@@ -579,6 +582,11 @@ describe("Db", () => {
           turnState: "open",
           turnPromptedAt: 5,
         })
+        // An open turn whose task was not handed over yet (waiting for the harness to be ready) did not take it.
+        assert.isFalse(yield* db.turnTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+        assert.strictEqual(yield* db.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), "do it")
+        yield* db.linkTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        assert.isUndefined(yield* db.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
         // The task delivered into the open turn is the stored proof it was taken up (after a vibestd restart too).
         assert.isTrue(yield* db.turnTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
         assert.strictEqual(

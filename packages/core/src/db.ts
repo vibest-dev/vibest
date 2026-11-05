@@ -773,7 +773,7 @@ const make = Effect.gen(function* () {
       const at = yield* now
       const sessionId = row.recipient ?? row.sender!
       yield* append({ sessionId, type: "inbox.queued", inboxId: id, at, data: {} })
-      // A task's delivery is the first turn that takes it (`linkTask`).
+      // A task's delivery is the turn it is handed into (`linkTask`).
       if (row.status !== "pending" && row.kind !== "task")
         yield* append({
           sessionId,
@@ -785,7 +785,7 @@ const make = Effect.gen(function* () {
       return id
     })
 
-  /** A delivered task no turn took yet becomes the input of `turnId`, the turn that just started on it. */
+  /** A delivered task no turn took yet becomes the input of `turnId`, the turn it is handed into. */
   const linkTask = (sessionId: string, turnId: number, at: number) =>
     Effect.gen(function* () {
       const [task] = yield* sql<{ id: number }>`SELECT i.id FROM inbox i WHERE i.recipient_session_id = ${sessionId}
@@ -1013,14 +1013,13 @@ const make = Effect.gen(function* () {
         if (open !== undefined) {
           if (patch.turnPromptedAt !== undefined) prompted.set(open, at)
         } else {
-          const turnId = yield* append({
+          yield* append({
             sessionId: id,
             type: "turn.start",
             processId: (yield* anySession(id))!.current?.id,
             at,
             data: {},
           })
-          yield* linkTask(id, turnId, at)
         }
       } else if (patch.turnState !== undefined && patch.turnState !== "none" && current.turnState === "open") {
         const open = yield* openTurn(id)
@@ -1663,6 +1662,28 @@ const make = Effect.gen(function* () {
 
     closeTurn: (id: string, end: TurnState, patch: SessionPatch) =>
       tx(updateSession(id, { turnState: end, ...patch })).pipe(Effect.orDie),
+
+    /**
+     * Session `id`'s task becomes the input of its open turn: called right before its text is handed over, so a task
+     * with no `inbox.status` was certainly never typed. Nothing once it is linked, or with no open turn.
+     */
+    linkTask: (id: string) =>
+      tx(
+        Effect.gen(function* () {
+          const turn = yield* openTurn(id)
+          if (turn !== undefined) yield* linkTask(id, turn, yield* now)
+        }),
+      ).pipe(Effect.orDie),
+
+    /** Session `id`'s task when it was never handed over (no `inbox.status`) and no turn of it has ended yet. */
+    untakenTask: (id: string) =>
+      sql<{ content: string }>`SELECT i.content FROM inbox i WHERE i.recipient_session_id = ${id} AND i.kind = 'task'
+          AND NOT EXISTS (SELECT 1 FROM event e WHERE e.inbox_id = i.id AND e.type = 'inbox.status')
+          AND NOT EXISTS (SELECT 1 FROM event e WHERE e.session_id = ${id} AND e.type = 'turn.end')
+        LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]?.content),
+        Effect.orDie,
+      ),
 
     /**
      * Whether session `id`'s open turn was taken up, from what is stored (so after a vibestd restart too): it was typed,

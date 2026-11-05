@@ -90,6 +90,8 @@ const fakeModel = (sub: string) => {
  */
 export const heldModel = () => {
   const held: Array<() => void> = []
+  /** How many model requests each task (`done-<task>`) was asked in. */
+  const asks = new Map<string, number>()
   let released = false
   const chunk = (o: object) =>
     `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
@@ -110,6 +112,7 @@ export const heldModel = () => {
       const headers = { "content-type": "text/event-stream" }
       const task = last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
       if (!task) return new Response(reply("ok"), { headers })
+      asks.set(task[1]!, (asks.get(task[1]!) ?? 0) + 1)
       const answer = reply(`done-${task[1]}\nstatus: completed`)
       if (released) return new Response(answer, { headers })
       return new Response(
@@ -130,6 +133,7 @@ export const heldModel = () => {
   })
   return {
     held: () => held.length,
+    asked: (task: string) => asks.get(task) ?? 0,
     /** Answer one held turn and keep holding the next. `release` answers every held turn and stops holding. */
     releaseOne: () => {
       held.shift()?.()

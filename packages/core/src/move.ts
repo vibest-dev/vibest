@@ -45,7 +45,7 @@ export const limitMoveBox = (): {
 } => ({ move: { rerun: () => Effect.die("limit move not wired") as Effect.Effect<boolean> } })
 
 export const sessionMove = (deps: {
-  readonly db: Pick<Db["Service"], "getSession" | "updateSession" | "rescheduleSource" | "endProcess">
+  readonly db: Pick<Db["Service"], "getSession" | "updateSession" | "rescheduleSource" | "endProcess" | "linkTask">
   readonly plugins: Plugins["Service"]
   readonly subscriptions: Subscriptions["Service"]
   readonly harness: Harness["Service"]
@@ -385,7 +385,9 @@ export const sessionMove = (deps: {
       const text = harnesses.get(row.harnessId).systemPromptInPrompt
         ? `${yield* deps.systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
         : next.prompt
-      const prompted = yield* deps.prompt(h, row, terminal, text, Effect.void, { keepRound: true }).pipe(Effect.exit)
+      const prompted = yield* deps
+        .prompt(h, row, terminal, text, db.linkTask(row.id), { keepRound: true })
+        .pipe(Effect.exit)
       // A reason is the runtime taking the text and the turn never starting. Same as a failed prompt: try the next one.
       // The round stays working; the next harness prompts it again.
       if (Exit.isFailure(prompted) || prompted.value !== undefined) {

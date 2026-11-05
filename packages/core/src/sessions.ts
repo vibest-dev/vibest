@@ -666,16 +666,25 @@ export class Sessions extends Context.Service<
 
       // ---- spawn ----
 
-      /** The first turn, once the terminal exists: the system prompt in front where the harness has no flag for it, else the text alone. */
+      /**
+       * Hand the session its task as its first turn: the system prompt in front where the harness has no flag for it,
+       * else the text alone. The task is linked to the turn right before its text goes (`linkTask`).
+       */
+      const handTask = (h: Runtime, session: SessionRow, terminal: Terminal, task: string) =>
+        Effect.gen(function* () {
+          const first = harnesses.get(session.harnessId).systemPromptInPrompt
+            ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${task}`
+            : task
+          const notStarted = yield* prompt(h, session, terminal, first, db.linkTask(session.id))
+          if (notStarted) yield* notice(session, notStarted)
+        })
+
+      /** The first turn, once the terminal exists. */
       const afterOpen = (h: Runtime, session: SessionRow, terminal: Terminal, root: string, firstPrompt: string) =>
         Effect.gen(function* () {
           // Labelled as soon as it is live (§3 `present`), the same way `resume` and `recount` relabel it.
           yield* show(h, session, terminal, root)
-          const first = harnesses.get(session.harnessId).systemPromptInPrompt
-            ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${firstPrompt}`
-            : firstPrompt
-          const notStarted = yield* prompt(h, session, terminal, first)
-          if (notStarted) yield* notice(session, notStarted)
+          yield* handTask(h, session, terminal, firstPrompt)
         })
 
       const { launch, resume, republish, recount, openTerminal, show, locate } = sessionPlacement({
@@ -1017,6 +1026,12 @@ export class Sessions extends Context.Service<
         }
 
         const s = state ?? "unknown"
+        // A task never handed over (vibestd stopped between its terminal and its text): handed over now, once. A miss
+        // ends the turn not_started, so it is not tried again.
+        if (s !== "working" && s !== "blocked" && session.startedAt !== null) {
+          const task = yield* db.untakenTask(id)
+          if (task !== undefined) return yield* handTask(h, session, terminal, task)
+        }
         if (!open) {
           if (s !== "working" && s !== "blocked") yield* deliverQueued(h, session, terminal)
           return
