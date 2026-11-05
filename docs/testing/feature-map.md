@@ -123,4 +123,4 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S18 | a subagent whose first turn outlasts herdr's agent.start window keeps its terminal (no false exit)                | inbox: `tools/e2e` S18                                          |
 | S19 | a Pi subagent under herdr's Pi hook gets its first prompt within seconds; restart and interrupt work              | inbox: `tools/e2e` S19                                          |
 | S20 | ids: `run` answers a UUID, herdr agent `s-<30 hex>`, `result <8>`, `peek <12>`, system prompt file                | inbox: `tools/e2e` S20                                          |
-| S26 | latency: 10 busy send-release rounds and 10 idle pane closes; records numbers, asserts nothing                    | inbox: `tools/e2e` S26                                          |
+| S26 | latency: 10 busy send-release rounds and 10 idle pane closes; records numbers; turn end to delivery p95 ≤ 1500 ms | inbox: `tools/e2e` S26                                          |

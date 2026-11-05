@@ -770,7 +770,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S26",
     title:
-      "latency: 10 rounds of a busy Pi subagent, a queued send, then release, and 10 pane closes of idle subagents; records the times and does not assert them",
+      "latency: 10 rounds of a busy Pi subagent, a queued send, then release, and 10 pane closes of idle subagents; records the times, and the queued send goes out within 1500 ms (p95) of the turn end (the 5 s poll took about 5 s)",
     run: async (w, evidence) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = heldModel()
@@ -954,6 +954,11 @@ const checks: ReadonlyArray<Check> = [
         }
         await fs.writeFile(path.join(evidence, "latency.json"), `${JSON.stringify(out, null, 2)}\n`)
         console.log(`S26 ${JSON.stringify(out)}`)
+        // A turn end delivers what was queued (the bus's turn.end handler), not the next 5 s poll.
+        expect(
+          out.turnEndToDeliveringMs.p95 <= 1500,
+          `turn end to next delivering p95 is ${out.turnEndToDeliveringMs.p95} ms (at most 1500)`,
+        )
       } finally {
         model.stop()
         await dropHerdrSession(w, session)
