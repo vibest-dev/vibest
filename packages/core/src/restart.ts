@@ -5,6 +5,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 // agents, whose continue notice names the subagents restarted with them.
 import { Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope } from "effect"
 
+import { awaitEvent, Bus } from "./bus.ts"
 import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
 import type { HarnessAdapter, HarnessId } from "./harness.ts"
 import type { Inbox } from "./inbox.ts"
@@ -92,6 +93,7 @@ export const blockedOf = (
           ? "its conversation id is not known, so a restart would start a new conversation"
           : undefined
 
+/** Only `restartLater` polls: the pid it waits on is the `vibest update` CLI, whose exit no runtime reports. */
 const TICK = Schedule.spaced("500 millis")
 
 /** What the pid, ready report and integration of an agent being restarted read now. */
@@ -129,6 +131,7 @@ interface Target {
 
 export const sessionRestart = (deps: {
   readonly db: Db["Service"]
+  readonly bus: Bus["Service"]
   readonly runtimes: Runtimes["Service"]
   readonly harnesses: { readonly get: (id: HarnessId) => HarnessAdapter }
   readonly processes: Processes["Service"]
@@ -167,12 +170,19 @@ export const sessionRestart = (deps: {
    * Wait for the harness `run` started to report its pid (the restart cleared the old one) and, on this vibest's
    * integration, that it is ready; false when RESTART_TIMEOUT passes. The caller then waits as any start does.
    */
-  const startedAgain = (liveNow: LiveNow) =>
-    liveNow.pipe(
+  const startedAgain = (id: string, liveNow: LiveNow) => {
+    const again = liveNow.pipe(
       Effect.map((live) => live?.pid !== undefined && live.ready !== undefined && current(live.integration)),
-      Effect.repeat({ until: (again) => again, schedule: TICK }),
-      Effect.timeoutOrElse({ duration: RESTART_TIMEOUT, orElse: () => Effect.succeed(false) }),
     )
+    const look = Effect.map(again, (yes) => (yes ? Option.some(true) : Option.none()))
+    // The pid and ready report arrive as the session's `process.ready`: each one is a reason to look again.
+    return awaitEvent(
+      look,
+      (event) => (event.type === "process.ready" && event.sessionId === id ? look : Effect.succeed(Option.none())),
+      RESTART_TIMEOUT,
+      again,
+    ).pipe(Effect.provideService(Bus, deps.bus))
+  }
 
   /** Mark, SIGTERM to its harness pid only, `run` in the same terminal, then wait for it; written once for both kinds. */
   const inPlace = (t: Target): Effect.Effect<Restarted> => {
@@ -200,7 +210,7 @@ export const sessionRestart = (deps: {
       const ran = yield* h.run!(t.terminal, argv).pipe(Effect.exit)
       const back =
         Exit.isSuccess(ran) &&
-        (yield* startedAgain(t.liveNow)) &&
+        (yield* startedAgain(id, t.liveNow)) &&
         Option.isSome(yield* deps.awaitReady(h, t.terminal, t.adapter, id).pipe(Effect.option))
       return yield* t.locked(
         Effect.gen(function* () {

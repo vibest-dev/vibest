@@ -26,7 +26,7 @@ import { SqlClient, type Statement } from "effect/sql"
 import { Bus, type StoredEvent, type StoredType } from "./bus.ts"
 import { HARNESS_IDS, type HarnessId } from "./harness.ts"
 import { Routing } from "./plugins.ts"
-import type { TurnEnded } from "./turn-ends.ts"
+import type { TurnEnded } from "./results.ts"
 export { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)

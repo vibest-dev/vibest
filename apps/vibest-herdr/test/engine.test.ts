@@ -129,4 +129,40 @@ describe("session handlers", () => {
       assert.isNull((yield* db.getSession(id))!.exitedAt)
     }),
   )
+
+  it.effect(
+    "a turn start reported while the text is still being handed over confirms the launch, with no clock advance",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const db = yield* Db
+        const herdr = yield* FakeRuntime
+        const repo = yield* makeRepository
+        const projectId = yield* projectOf(repo)
+        yield* db.coordinatorLaunch(projectId, "pi", false, {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        })
+        // The runtime never shows the turn working: the hook's turn start is the only pickup proof, and it comes while
+        // the runtime's send has not returned yet.
+        const held = yield* herdr.hold("send")
+        const { id } = yield* sessions.spawn({
+          machine: { id: "local" },
+          root: repo,
+          projectId,
+          name: "task",
+          prompt: "do it",
+          harness: "pi",
+        })
+        yield* held.reached
+        yield* sessions.userPrompt(id, "do it")
+        yield* held.release()
+        yield* settled
+        assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+        assert.isFalse(
+          (yield* herdr.callsTo("send")).some((call) => call.keys !== undefined),
+          "no Enter resent",
+        )
+      }).pipe(Effect.provide(testLayer({ hooked: ["pi"], promptsIgnored: true }))),
+  )
 })

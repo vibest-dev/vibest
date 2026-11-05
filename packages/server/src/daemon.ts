@@ -13,7 +13,6 @@ import { Restarting } from "@vibest/core/restarting"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { TurnEnds } from "@vibest/core/turn-ends"
 import { VERSION } from "@vibest/protocol/rpc"
 // vibestd (SPEC §14): one per machine, one socket. Start: take the flock on vibestd.pid (retrying while busy; exit once an vibestd that
 // holds it answers); then if something still answers on vibest.sock, leave it and fail; else unlink it, open the
@@ -117,7 +116,6 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provideMerge(Runtimes.layer),
     Layer.provide(Drain.layer),
     Layer.provide(Restarting.layer),
-    Layer.provide(TurnEnds.layer),
     // Below Db and Runtimes: one bus, so a commit is visible to whoever subscribed first.
     Layer.provide(Bus.layer),
   )

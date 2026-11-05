@@ -23,7 +23,8 @@ import {
   type TestServices,
   until,
   resultText,
-  startedSince,
+  busEvents,
+  nextTurnStart,
   projectOf,
 } from "./fakes.ts"
 
@@ -330,6 +331,7 @@ describe("vibestd's HTTP API", () => {
       yield* held.reached
       yield* TestClock.adjust("3 seconds")
       const stamp = yield* Clock.currentTimeMillis
+      const events = yield* busEvents
       const hook = yield* Effect.forkChild(
         call(
           "/hooks/claude/prompt",
@@ -337,7 +339,7 @@ describe("vibestd's HTTP API", () => {
           JSON.stringify({ hook_event_name: "PromptSubmit", text: "do it", origin: "composer" }),
         ),
       )
-      yield* until(startedSince(worker, stamp), (seen) => seen)
+      assert.strictEqual(yield* nextTurnStart(events, worker), stamp)
       yield* held.release()
       yield* Fiber.join(checking)
       assert.strictEqual((yield* Fiber.join(hook)).status, 204)
@@ -349,13 +351,14 @@ describe("vibestd's HTTP API", () => {
     Effect.gen(function* () {
       const { call, db, worker, main } = yield* project
       const layout = yield* Layout
+      const events = yield* busEvents
       const prompt = yield* call(
         "/hooks/claude/prompt",
         { sessionId: worker },
         JSON.stringify({ hook_event_name: "PromptSubmit", text: "next step", origin: "composer" }),
       )
       assert.strictEqual(prompt.status, 204)
-      assert.isTrue(yield* startedSince(worker, 0))
+      yield* nextTurnStart(events, worker)
       const end = yield* call(
         "/hooks/claude/turn-end",
         { sessionId: worker },

@@ -1,4 +1,5 @@
 import { spawnDaemon } from "@vibest/client/client"
+import { awaitEvent, Bus } from "@vibest/core/bus"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
@@ -61,7 +62,7 @@ import { RuntimeUnreachable } from "@vibest/schema/session"
 // vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
 // (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
 // handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
-import { Clock, Context, Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Schedule, Stream } from "effect"
+import { Clock, Context, Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
@@ -395,6 +396,7 @@ export const handlers = VibestRpcs.toLayer(
     const shutdown = yield* Shutdown
     const mainEnv = yield* MainEnv
     const drain = yield* Drain
+    const bus = yield* Bus
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const harnesses = yield* Harnesses
     const files = yield* Effect.context<FileSystem.FileSystem | Path.Path | Layout>()
@@ -535,11 +537,18 @@ export const handlers = VibestRpcs.toLayer(
           return last
         })
         return yield* Effect.gen(function* () {
-          const idle = yield* blockers.pipe(
-            Effect.repeat({ until: (pending) => pending.length === 0, schedule: Schedule.spaced("20 millis") }),
-            Effect.timeoutOption(DRAIN_TIMEOUT),
+          // Looked at again when an admitted operation leaves (`live.drain`) or a delivery settles (`inbox.status`).
+          const none = blockers.pipe(
+            Effect.map((pending) => (pending.length === 0 ? Option.some(true) : Option.none())),
           )
-          if (Option.isNone(idle)) return yield* new DaemonBusy({ blockers: last })
+          const idle = yield* awaitEvent(
+            none,
+            (event) =>
+              event.type === "live.drain" || event.type === "inbox.status" ? none : Effect.succeed(Option.none()),
+            DRAIN_TIMEOUT,
+            Effect.map(none, Option.isSome),
+          ).pipe(Effect.provideService(Bus, bus))
+          if (!idle) return yield* new DaemonBusy({ blockers: last })
           yield* before
           yield* Effect.uninterruptible(
             Effect.gen(function* () {
@@ -939,7 +948,7 @@ export const handlers = VibestRpcs.toLayer(
                 detach: db.detachCoordinator(projectId, runtime, place),
                 reattach: db.reattachCoordinator(projectId, runtime, place),
                 wait: HARNESS_EXIT_WAIT,
-              })
+              }).pipe(Effect.provideService(Bus, bus))
             }),
           )
         }),

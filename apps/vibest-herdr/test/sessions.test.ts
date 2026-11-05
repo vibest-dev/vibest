@@ -483,7 +483,6 @@ describe.concurrent("Sessions", () => {
       yield* sessions.remove(id)
       assert.strictEqual(yield* db.liveStatuses, 0)
       yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
-      assert.deepInclude(yield* sessions.inMemory, { turnStarts: 0 })
       // Results reached the coordinator through the project's lock, which is gone too.
       assert.strictEqual(yield* (yield* Inbox).locks, 0)
     }),

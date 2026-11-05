@@ -2,9 +2,8 @@
 // end is one `turn.reported` event (no session lock; a settlement while draining); Sessions checks it on that event.
 import type { Db } from "@vibest/core/db"
 import type { HarnessAdapter } from "@vibest/core/harness"
-import { promptOf } from "@vibest/core/results"
+import { promptOf, turnEndOf } from "@vibest/core/results"
 import type { Sessions } from "@vibest/core/sessions"
-import { turnEndOf } from "@vibest/core/turn-ends"
 import { Clock, Effect } from "effect"
 
 /** The calling session, already checked: its id and its agent (`coordinator` for a main agent). */

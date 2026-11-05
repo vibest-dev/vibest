@@ -202,6 +202,22 @@ describe("Daemon.Stop", () => {
   )
 
   test(
+    "a Stop is accepted as the last operation leaves, with no clock advance",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      // A spawn parked inside the runtime: an admitted operation the Stop waits for.
+      const held = yield* herdr.hold("open")
+      yield* (yield* cli(repo)).Spawn({ harness: "pi", prompt: "work" })
+      yield* held.reached
+      const stopping = yield* Effect.forkScoped(stop(repo))
+      yield* draining
+      yield* held.release()
+      assert.strictEqual(yield* Fiber.join(stopping), "accepted")
+    }),
+  )
+
+  test(
     "a spawn's turn start and end from its harness hook settle while draining: the launch confirms and the Stop is accepted",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -219,11 +235,13 @@ describe("Daemon.Stop", () => {
             raw[call]({ sessionId: id, harness: "pi", event: JSON.stringify(event) }, { headers: protocolHeaders() }),
           ),
         )
-      const prompted = yield* hook("Prompt", { type: "input", text: "work", source: "interactive" })
+      // The end first: the launch, still unconfirmed, keeps the drain open for it. The Stop looks again as soon as the
+      // launch leaves, so a hook after the start's confirm could find it already accepted.
       const ended = yield* hook("TurnEnd", { type: "agent_settled", text: "done", error: "", aborted: false })
+      assert.strictEqual(tagOf(yield* Fiber.join(ended)), "success")
+      const prompted = yield* hook("Prompt", { type: "input", text: "work", source: "interactive" })
       assert.strictEqual(yield* settled(stopping), "accepted")
       assert.strictEqual(tagOf(yield* Fiber.join(prompted)), "success")
-      assert.strictEqual(tagOf(yield* Fiber.join(ended)), "success")
       assert.include(yield* resultText(id), "done")
     }),
     { promptsIgnored: true },

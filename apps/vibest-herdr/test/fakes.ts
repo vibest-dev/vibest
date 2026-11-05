@@ -1,7 +1,7 @@
 import fs from "node:fs/promises"
 
 import { readPing } from "@vibest/client/client"
-import { Bus } from "@vibest/core/bus"
+import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harness, Harnesses, HARNESS_IDS, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
@@ -12,11 +12,11 @@ import { Layout } from "@vibest/core/paths"
 import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { type Liveness, Processes } from "@vibest/core/processes"
 import { Restarting } from "@vibest/core/restarting"
+import { turnEndFrom } from "@vibest/core/results"
 import { Runtimes, registry } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
-import { TurnEnds, turnEndFrom } from "@vibest/core/turn-ends"
 import { git } from "@vibest/core/worktree"
 import type * as VibestPlugin from "@vibest/plugin"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
@@ -36,6 +36,7 @@ import {
   Option,
   Path,
   type Predicate,
+  PubSub,
   Ref,
   Schema,
   Stream,
@@ -104,11 +105,20 @@ export const resultText = (id: string) =>
     return row?.text ?? ""
   })
 
-/** Whether a turn start was reported for session `id` at or after `at`. */
-export const startedSince = (id: string, at: number) =>
-  Effect.gen(function* () {
-    return yield* (yield* TurnEnds).startedSince(id, at)
-  })
+/** Every bus event from now on, in this test's scope: subscribe before the action whose event the test waits for. */
+export const busEvents = Effect.gen(function* () {
+  return yield* (yield* Bus).subscribe
+})
+
+/** The next `live.turn_start` of session `id` on `subscription`: its time. */
+export const nextTurnStart = (subscription: PubSub.Subscription<EngineEvent>, id: string): Effect.Effect<number> =>
+  PubSub.take(subscription).pipe(
+    Effect.flatMap((event) =>
+      event.type === "live.turn_start" && event.sessionId === id
+        ? Effect.succeed(event.at)
+        : nextTurnStart(subscription, id),
+    ),
+  )
 
 /** git in tests: a failure is a bug in the test. */
 export const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
@@ -524,7 +534,6 @@ const over = (options: TestOptions) => {
       Layer.provideMerge(tmp),
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
-      Layer.provideMerge(TurnEnds.layer),
       Layer.provideMerge(Platform.services),
       Layer.provideMerge(Bus.layer),
     ),
