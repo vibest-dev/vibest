@@ -228,8 +228,8 @@ before that and not yet consumed still counts. A report a `turn.end` consumed is
 - When an open turn's text was last handed over (after a resume or a move to the next harness): a turn end
   reported before it is not this turn's. Lost with the process; the turn's own start time stands then.
 - A turn start an integration reports is published (`live.turn_start`), never stored: it marks the open turn as
-  worked in the session's flags, which the poll's sweep drops once the session is no longer live. A turn end is a `turn.reported` event, written as the hook is admitted (a settlement, so it still lands while
-  vibestd drains) and kept across a restart. The check that writes it as `turn.end` is a settlement too.
+  worked in the session's flags, which `forget` clears on its `process.end` or its archive. A turn end is a
+  `turn.reported` event, written as the hook is admitted (a settlement, so it still lands while vibestd drains) and kept across a restart. The check that writes it as `turn.end` is a settlement too.
   After a restart the stored proof that a turn was taken up is its typed text or an inbox row delivered into it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.
