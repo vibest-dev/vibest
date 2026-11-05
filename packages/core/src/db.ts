@@ -486,10 +486,13 @@ const roundStatus = (status: unknown): TurnEnd["status"] =>
 /** Rows a session's own sends and tasks are: never main-agent-bound. */
 const TO_SESSION = `('task', 'send')`
 
-/** The events appended inside the current transaction. Undefined outside one: `append` dies. */
-const TxBuffer = Context.Reference<Array<StoredEvent> | undefined>("vibest/TxBuffer", {
-  defaultValue: () => undefined,
-})
+/**
+ * Rows appended by the fiber that opened the transaction. `closed` once that transaction ends: a forked fiber inherits
+ * this reference (and the sql transaction) and must not append into a buffer nobody publishes.
+ */
+const TxBuffer = Context.Reference<
+  { readonly events: Array<StoredEvent>; readonly fiberId: number; closed: boolean } | undefined
+>("vibest/TxBuffer", { defaultValue: () => undefined })
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -535,6 +538,8 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const buffer = yield* TxBuffer
       if (buffer === undefined) return yield* Effect.die(new Error("append outside a transaction"))
+      if (buffer.closed || (yield* Effect.fiberId) !== buffer.fiberId)
+        return yield* Effect.die(new Error("append from the transaction fiber"))
       const at = event.at ?? (yield* now)
       const data = JSON.parse(JSON.stringify(event.data ?? {})) as Readonly<Record<string, unknown>>
       const [row] = yield* sql<{ id: number }>`INSERT INTO event ${sql.insert({
@@ -557,7 +562,7 @@ const make = Effect.gen(function* () {
         ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
         ...(event.inboxId === undefined ? {} : { inboxId: event.inboxId }),
       }
-      buffer.push(stored)
+      buffer.events.push(stored)
       return id
     })
 
@@ -568,9 +573,11 @@ const make = Effect.gen(function* () {
   const tx = <A, E, R>(body: Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
       if ((yield* TxBuffer) !== undefined) return yield* body
-      const buffer: Array<StoredEvent> = []
-      const result = yield* sql.withTransaction(Effect.provideService(body, TxBuffer, buffer))
-      yield* bus.published(buffer)
+      const buffer = { events: [] as Array<StoredEvent>, fiberId: yield* Effect.fiberId, closed: false }
+      const result = yield* sql
+        .withTransaction(Effect.provideService(body, TxBuffer, buffer))
+        .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
+      yield* bus.published(buffer.events)
       return result
     })
 

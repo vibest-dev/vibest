@@ -4,7 +4,7 @@ import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Runtimes } from "@vibest/core/runtimes"
 import type { Runtime } from "@vibest/plugin"
-import { Cause, Duration, Effect, Exit, Fiber, Layer, Option, PubSub } from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, PubSub } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -126,6 +126,58 @@ describe("bus", () => {
       const exit = yield* db.append({ sessionId: session.id, type: "process.conversation", data: {} }).pipe(Effect.exit)
       assert.isTrue(Exit.isFailure(exit) && Cause.hasDies(exit.cause))
     }).pipe(Effect.provide(dbLayer)),
+  )
+
+  it.effect("append from a fiber forked inside tx dies", () =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      yield* db.insertSession(session, yield* projectOf("r"))
+      const exit = yield* db.tx(
+        Effect.gen(function* () {
+          const child = yield* db
+            .append({ sessionId: session.id, type: "process.conversation", data: { n: "fork" } })
+            .pipe(Effect.forkChild)
+          return yield* Fiber.join(child).pipe(Effect.exit)
+        }),
+      )
+      assert.match(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "", /append from the transaction fiber/)
+    }).pipe(Effect.provide(dbLayer)),
+  )
+
+  it.effect("append after commit through a kept reference dies", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const db = yield* Db
+        const bus = yield* Bus
+        yield* db.insertSession(session, yield* projectOf("r"))
+        const sub = yield* bus.subscribe
+        const scope = yield* Effect.scope
+        const gate = yield* Deferred.make<void>()
+        const done = yield* Deferred.make<string>()
+        yield* db.tx(
+          Effect.gen(function* () {
+            yield* db.append({ sessionId: session.id, type: "process.conversation", data: { n: 1 } })
+            yield* Effect.forkIn(
+              Effect.gen(function* () {
+                yield* Deferred.await(gate)
+                const exit = yield* db
+                  .append({ sessionId: session.id, type: "process.conversation", data: { n: 2 } })
+                  .pipe(Effect.exit)
+                yield* Deferred.succeed(done, Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "")
+              }),
+              scope,
+            )
+          }),
+        )
+        const published = yield* PubSub.takeUpTo(sub, 10)
+        yield* Deferred.succeed(gate, void 0)
+        assert.match(yield* Deferred.await(done), /append from the transaction fiber/)
+        assert.deepStrictEqual(
+          published.map((event) => (isStored(event) ? event.data.n : 0)),
+          [1],
+        )
+      }),
+    ).pipe(Effect.provide(dbLayer)),
   )
 
   it.effect("register publishes live.reset", () =>

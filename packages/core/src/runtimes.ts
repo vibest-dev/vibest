@@ -55,6 +55,7 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
     const bus = yield* Bus
     // The plugin host registers and unregisters sequentially (one supervisor consumer), so one slot is enough.
     let registered: ReadonlyArray<Runtime> = initial
+    // Kept only until its consumers move to the Bus (plan step 5). Both streams carry these events until then: a transition, not the design.
     const events = yield* PubSub.unbounded<RuntimeEvent>()
     /** A runtime's events into the merged stream, for this registry's lifetime (a registration's ends with its scope). */
     const merge = (runtime: Runtime, scope: Scope.Scope) =>

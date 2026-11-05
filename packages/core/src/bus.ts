@@ -1,5 +1,5 @@
 import type { Runtime } from "@vibest/plugin"
-import { Context, Duration, Effect, Layer, Option, PubSub, type Scope } from "effect"
+import { Context, Duration, Effect, Layer, Option, PubSub } from "effect"
 
 /** One row of the `event` table, as committed. */
 export interface StoredEvent<T extends StoredType = StoredType> {
@@ -34,7 +34,6 @@ export type LiveEvent =
     }
   | { readonly type: "live.exited"; readonly runtime: string; readonly terminal: Runtime.Terminal }
   | { readonly type: "live.reset"; readonly runtime: string; readonly machine: string }
-  | { readonly type: "live.turn_start"; readonly sessionId: string; readonly at: number }
   | { readonly type: "live.drain" }
 
 export type EngineEvent = StoredEvent | LiveEvent
@@ -87,5 +86,3 @@ export const awaitEvent = <A, E, R>(
       )
     }),
   )
-
-void (null as unknown as Scope.Scope)
