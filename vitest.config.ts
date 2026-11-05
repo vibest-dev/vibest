@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config"
 export default defineConfig({
   ssr: { resolve: { conditions: ["bun", "import", "default"] } },
   test: {
+    setupFiles: ["./vitest.setup.ts"],
     include: [
       "apps/vibest-herdr/test/**/*.test.ts",
       "packages/integration/claude/test/**/*.test.ts",

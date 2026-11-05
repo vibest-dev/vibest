@@ -592,19 +592,7 @@ describe("vibest.sock", () => {
         {
           project: root,
           cwd: root,
-          argv: [
-            "sh",
-            "-c",
-            '"$@"; exec "${SHELL:-/bin/sh}"',
-            "sh",
-            "/bin/vibest",
-            "--harness",
-            "pi",
-            "--model",
-            "it's",
-            "--in-parent",
-            root,
-          ],
+          argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh"],
           env: { VIBEST_HOME: layout.home },
           label: "vibest",
           near: undefined,
@@ -612,9 +600,66 @@ describe("vibest.sock", () => {
           focus: true,
         },
       ])
-      // The runtime's terminal runs the command itself: vibestd never types into it.
+      // The shell is open first; the runtime then types the command. vibestd never sends text itself.
+      assert.deepStrictEqual(yield* herdr.callsTo("run"), [
+        {
+          terminal: opened.terminal,
+          argv: ["/bin/vibest", "--harness", "pi", "--model", "it's", "--in-parent", root],
+        },
+      ])
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
       assert.deepStrictEqual(yield* c.List({}), [])
+    }),
+  )
+
+  test(
+    "Launch keeps vibest --env off the typed command and on the pane's environment",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const layout = yield* Layout
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const secret = "probe-value-9f3c"
+      const opened = yield* c.Launch({
+        argv: ["/bin/vibest", "--harness", "pi", "--env", "MAIN_PROBE=" + secret],
+        focus: false,
+      })
+      const open = (yield* herdr.callsTo("open"))[0]!
+      const typed = ((yield* herdr.callsTo("run"))[0]!.argv as ReadonlyArray<string>).join(" ")
+      assert.notInclude(open.argv.join(" "), secret)
+      assert.notInclude(typed, secret)
+      assert.notInclude(typed, "--env")
+      assert.strictEqual(open.env.MAIN_PROBE, undefined)
+      assert.deepStrictEqual(JSON.parse(open.env.VIBEST_MAIN_ENV!), { MAIN_PROBE: secret })
+      assert.strictEqual(open.env.VIBEST_HOME, layout.home)
+      // Nothing is parked: a start that does not itself pass --env does not receive the pairs.
+      const started = yield* c["Project.CoordinatorSession"]({
+        harness: "pi",
+        fresh: false,
+        terminal: opened.terminal,
+      })
+      const again = yield* c["Session.Start"]({ id: started.sessionId })
+      assert.isUndefined(again.env?.MAIN_PROBE)
+    }),
+  )
+
+  test(
+    "the vibest Launch typed passes the pane's VIBEST_MAIN_ENV on, and a restart reads it back",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const herdr = yield* FakeRuntime
+      const secret = "probe-value-9f3c"
+      yield* c.Launch({ argv: ["/bin/vibest", "--env", "MAIN_PROBE=" + secret], focus: false })
+      const pane = JSON.parse((yield* herdr.callsTo("open"))[0]!.env.VIBEST_MAIN_ENV!) as Record<string, string>
+      const started = yield* c["Project.CoordinatorSession"]({
+        harness: "pi",
+        fresh: false,
+        terminal: "pane-a",
+        env: pane,
+      })
+      const again = yield* c["Session.Start"]({ id: started.sessionId })
+      assert.strictEqual(again.env?.MAIN_PROBE, secret)
     }),
   )
 

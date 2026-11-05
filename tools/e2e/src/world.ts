@@ -108,7 +108,9 @@ export class World {
   env(extra: Record<string, string | undefined> = {}): Record<string, string> {
     const env: Record<string, string | undefined> = {}
     for (const [k, v] of Object.entries(process.env))
-      if (!k.startsWith("VIBEST_") && !k.startsWith("HERDR_")) env[k] = v
+      // A Pi install directory the parent exported may be gone by the time a child starts. Pi then
+      // reports version 0.0.0 and refuses extensions that want a newer Pi.
+      if (!k.startsWith("VIBEST_") && !k.startsWith("HERDR_") && k !== "PI_PACKAGE_DIR") env[k] = v
     Object.assign(
       env,
       {

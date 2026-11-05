@@ -169,15 +169,20 @@ const move = (harness: "claude" | "pi"): Check => ({
       await herdr(socket, "agent.prompt", { target: a, text: prompt })
       let conversation: string | undefined
       const projects = path.join(w.home, ".claude", "projects")
+      // macOS realpath: the db stores /private/tmp, w.repository is /tmp. Another check's main session is also a
+      // project entry; row() returns the first, and that conversation stays null.
+      const repo = await fs.realpath(w.repository)
       await until(
         "A's conversation written",
         async () => {
           if (harness === "pi") return await piWrote(w.repository)
-          // The plugin reports Claude's own conversation id; vibestd keeps it in the main session's row.
+          // The plugin reports Claude's own conversation id; vibestd keeps it on this repository's main session.
           conversation =
             row<{ c: string | null }>(
               w,
-              `SELECT s.harness_session_id AS c FROM ${SESSIONS} s JOIN project p ON p.entry_session_id = s.id`,
+              `SELECT s.harness_session_id AS c FROM ${SESSIONS} s
+               WHERE s.agent_type = 'main' AND s.directory = ? AND s.ended_at IS NULL`,
+              repo,
             )?.c ?? undefined
           if (conversation === undefined) return false
           for (const dir of await fs.readdir(projects).catch(() => [] as Array<string>))

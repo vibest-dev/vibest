@@ -225,6 +225,26 @@ export type MainEnv = Map<string, { readonly sessionId: string; readonly env: Re
 export const MainEnv = Context.Reference<MainEnv>("vibest/MainEnv", { defaultValue: () => new Map() })
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
+/** `--env KEY=VALUE` taken off a command that is about to be typed. The pairs belong on the pane, not in its history. */
+const envOffArgv = (argv: ReadonlyArray<string>) => {
+  const command: Array<string> = []
+  const env: Record<string, string> = {}
+  for (let i = 0; i < argv.length; i++) {
+    const next = argv[i + 1]
+    if (argv[i] === "--env" && next !== undefined && next.includes("=")) {
+      const eq = next.indexOf("=")
+      const key = next.slice(0, eq)
+      if (key !== "") {
+        env[key] = next.slice(eq + 1)
+        i++
+        continue
+      }
+    }
+    command.push(argv[i]!)
+  }
+  return { command, env }
+}
+
 /** A bounded wait for daemon operations to drain, never for agents to finish their tasks. */
 export const DRAIN_TIMEOUT = Duration.seconds(5)
 
@@ -663,6 +683,8 @@ export const handlers = VibestRpcs.toLayer(
       Launch: ({ argv, focus, machine, runtime }) =>
         Effect.gen(function* () {
           const { id, directory: root } = yield* scope("Launch")
+          const { command, env } = envOffArgv(argv)
+          const passed = Object.keys(env).length > 0 ? env : undefined
           const at = machineOf(machine)
           // The runtime is chosen as a start chooses one (§4): the choice chain — the caller's `vibest --runtime` stands,
           // else the running coordinator's, else the configured one — never a silent pick. The harness that same chain
@@ -693,11 +715,24 @@ export const handlers = VibestRpcs.toLayer(
           yield* runtimes.online(rt, { id: decision.machine.id })
           const terminal = yield* Launch.openInParentWorkspace(rt, at, {
             root,
-            argv,
             label: "vibest",
             home: layout.home,
             focus,
+            // One variable a shell rc does not set, not the names themselves: rc can export those and would win.
+            ...(passed !== undefined ? { env: { [Launch.MAIN_ENV]: JSON.stringify(passed) } } : {}),
           })
+          const run = rt.run
+          if (run === undefined) {
+            yield* rt.close(terminal).pipe(Effect.ignore)
+            return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
+          }
+          yield* run(terminal, Launch.inParent(command, root)).pipe(
+            Effect.catch((error) =>
+              rt
+                .close(terminal)
+                .pipe(Effect.ignore, Effect.andThen(Effect.fail(new LaunchFailed({ message: error.message })))),
+            ),
+          )
           return {
             runtime: rt.kind,
             terminal: terminal.id,

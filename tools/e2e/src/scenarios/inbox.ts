@@ -59,7 +59,8 @@ const fakeModel = (sub: string) => {
   const answer = (last: Message | undefined) => {
     const body = text(last)
     if (last?.role === "tool") {
-      const id = /"id":\s*\\?"(\w+)\\?"/.exec(body)?.[1]
+      // Session ids are UUIDs; \w stops at the first hyphen, and send then has no id.
+      const id = /"id":\s*\\?"([\w-]+)\\?"/.exec(body)?.[1]
       if (id && !sessionId) sessionId = id
       return reply("ok")
     }

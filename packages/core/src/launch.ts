@@ -111,37 +111,61 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
 /** `argv` (a `vibest`) marked as run in `root`'s parent workspace, by construction: the hidden `--in-parent <root>`. */
 export const inParent = (argv: ReadonlyArray<string>, root: string) => [...argv, "--in-parent", root]
 
-/** `argv` to run again at `root` from below it: still marked when this run was, so the runtime is not asked again. */
-export const again = (argv: ReadonlyArray<string>, root: string, marked: boolean) =>
-  marked ? inParent(argv, root) : argv
+/** Pane environment for a main agent's `--env`. One name, so a shell rc cannot override the pairs. */
+export const MAIN_ENV = "VIBEST_MAIN_ENV"
+
+/** `VIBEST_MAIN_ENV` as `--env` pairs. Anything that is not a JSON object of strings is ignored. */
+export const mainEnvPairs = (raw: string | undefined): Record<string, string> => {
+  if (raw === undefined || raw === "") return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {}
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed)) if (key !== "" && typeof value === "string") out[key] = value
+  return out
+}
 
 /**
- * A terminal at `root` (in the project's workspace there, which the runtime keeps: a tab beside the main agent's other
- * terminals) whose shell runs `argv`; its address. `focus` asks the runtime to focus it — the terminal the user is
- * waiting to see (§3: `open` keeps the terminal with the project's others either way).
+ * `--env` for this command. The flags win. `VIBEST_MAIN_ENV` counts only for the command Launch typed (`marked`);
+ * any later `vibest` in that pane ignores it.
+ */
+export const commandEnv = (
+  flags: Readonly<Record<string, string>>,
+  marked: boolean,
+  carried: string | undefined,
+): Record<string, string> => (Object.keys(flags).length > 0 ? flags : marked ? mainEnvPairs(carried) : {})
+
+/**
+ * A shell at `root` (in the project's workspace there, which the runtime keeps: a tab beside the main agent's other
+ * terminals); its address. The caller types the command once it has this address. `focus` asks the runtime to focus
+ * it — the terminal the user is waiting to see (§3: `open` keeps the terminal with the project's others either way).
  */
 export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(function* (
   h: Runtime,
   machine: Machine,
   input: {
     readonly root: string
-    readonly argv: ReadonlyArray<string>
     readonly label: string
     readonly home: string
+    /** `vibest --env`: the pane's environment, never the typed command (the shell would keep it in its history). */
+    readonly env?: Readonly<Record<string, string>> | undefined
     /** The user is waiting to see the terminal (the runtime focuses it when it can). */
     readonly focus?: boolean | undefined
   },
 ) {
-  // VIBEST_HOME so the `vibest` in that shell talks to this vibestd. `--in-parent` so the vibest that runs there
-  // knows it is in place without asking the runtime, which does not report a just-made workspace as the parent.
-  // The shell stays after the command: a start that fails (or a main agent the user quits) shows its error in the
-  // pane and leaves a shell, not a closing terminal — and a pane that stays is one the last-pane guard still covers.
+  // VIBEST_HOME so the `vibest` typed into that shell talks to this vibestd. The shell stays: a start that fails
+  // (or a main agent the user quits) shows its error in the pane and leaves a shell, not a closing terminal.
   const terminal = yield* h
     .open(machine, {
       project: input.root,
       cwd: input.root,
-      argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh", ...inParent(input.argv, input.root)],
-      env: { VIBEST_HOME: input.home },
+      argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh"],
+      // VIBEST_HOME last, so a caller's `--env` cannot point this shell at another vibestd.
+      env: { ...input.env, VIBEST_HOME: input.home },
       label: input.label,
       ...(input.focus === true ? { focus: true } : {}),
     })
