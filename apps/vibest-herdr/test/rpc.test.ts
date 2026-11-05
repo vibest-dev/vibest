@@ -30,6 +30,7 @@ import {
   FakeRuntime,
   makeRepository,
   savedSession,
+  settled,
   sh,
   tempDirectory,
   testLayer,
@@ -815,11 +816,20 @@ describe("vibest.sock", () => {
         address: { machine: "local", id: "w1:p9" },
       })
       yield* herdr.seedAgent("w1:p9")
+      // Busy while the rows arrive (each queued row is offered at once), then idle.
+      yield* herdr.updateAgent("w1:p9", (a) => ({ ...a, status: "working" }))
       const project = (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.projectId
       const row = (sessionId: string, message: string) => ({ sessionId, kind: "result" as const, message, details: {} })
       yield* inbox.enqueue(row("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "one"))
       yield* inbox.enqueue(row("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "two"))
       yield* inbox.enqueue(row("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "three"))
+      yield* settled
+      assert.deepStrictEqual(
+        (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p9"),
+        [],
+      )
+      yield* herdr.endTurn("w1:p9")
+      yield* inbox.deliver(project)
       yield* until(db.coordinatorPending(project), (rows) => rows.length === 1)
       const prompts = (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p9")
       assert.deepStrictEqual(
@@ -891,6 +901,57 @@ describe("vibest.sock", () => {
         (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p8"),
         [],
       )
+    }),
+  )
+
+  test(
+    "a Pi subscription wakes when a row for its main agent goes back to pending (a released lease)",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const inbox = yield* Inbox
+      const db = yield* Db
+      yield* db.insertSession(
+        {
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          agent: "general",
+          name: "n",
+          harnessId: "pi",
+          provider: null,
+          model: null,
+          harnessSessionId: null,
+          runtime: "herdr",
+          address: { machine: "local", id: "test/p0" },
+          status: "idle",
+          startedAt: 1,
+          exitedAt: null,
+          turnState: "none",
+          turnPromptedAt: 0,
+          metadata: {},
+          createdAt: 1,
+          lastActive: 1,
+        },
+        yield* projectOf("r"),
+      )
+      yield* herdr.seedAgent("w1:p8")
+      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "w1:p8" },
+      })
+      const project = yield* projectOf("r")
+      const row = yield* inbox.enqueue({
+        sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        kind: "result",
+        message: "back",
+        details: {},
+      })
+      // Handed out elsewhere before the subscription opens: nothing pending for it.
+      assert.deepStrictEqual(yield* db.claim([row.id]), [row.id])
+      const c = yield* asSession(yield* client, coord.sessionId)
+      const received = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.take(1), Stream.runCollect, Effect.forkChild)
+      yield* settled
+      assert.isUndefined(received.pollUnsafe())
+      yield* db.releaseLeased(project, [row.id])
+      assert.deepStrictEqual(Array.from(yield* Fiber.join(received)), ["back"])
     }),
   )
 

@@ -6,16 +6,17 @@ import { shortId } from "@vibest/schema/id"
 // A coordinator whose harness adapter has `inbox: "subscribe"` or `"poll"` takes its rows itself: the Pi extension over
 // vibest.sock (`stream`), the Claude plugin by polling vibestd's HTTP socket (`poll` / `ack`). Every other idle
 // coordinator gets them typed in through the runtime's prompt. Nobody there: the row is `dropped`.
-import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, PubSub, Queue, Schedule, Stream } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, PubSub, Queue, Stream } from "effect"
 
+import { Bus, type EngineEvent } from "./bus.ts"
 import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
 import { Drain } from "./drain.ts"
+import * as Engine from "./engine.ts"
 import { Harnesses } from "./harness.ts"
 import { keyedLock } from "./keyed-lock.ts"
 import { Restarting } from "./restarting.ts"
 import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runtimes.ts"
 
-export const RECONCILE = Duration.seconds(10)
 /** A row a poll handed out and nobody acked goes back to pending after this (each row its own lease). */
 export const LEASE = Duration.seconds(30)
 /** A coordinator that polled and then stopped for this long is gone: its leased rows go back to pending at once. */
@@ -84,8 +85,6 @@ export class Inbox extends Context.Service<
   Inbox,
   {
     readonly enqueue: (row: NewInboxRow) => Effect.Effect<InboxRow>
-    /** For rows inserted inside another transaction (Db.finishTurn). */
-    readonly announce: (row: InboxRow) => Effect.Effect<void>
     /** Try to hand a project's coordinator its next batch now. */
     readonly deliver: (projectId: string) => Effect.Effect<void>
     /** The coordinator's rows from now on, one string per claimed batch, instead of `agent.prompt`. */
@@ -120,8 +119,7 @@ export class Inbox extends Context.Service<
       const restarting = yield* Restarting
       /** How the coordinator of harness `id` (as recorded or as the runtime names it) takes its rows. */
       const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.inbox
-      const scope = yield* Effect.scope
-      const pubsub = yield* PubSub.unbounded<InboxRow>()
+      const bus = yield* Bus
       // Made before any delivery runs, so none is missed.
       const delivered = yield* Queue.unbounded<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>()
       // Counted from before publication until the taker's completion work (archive) is done.
@@ -189,66 +187,45 @@ export class Inbox extends Context.Service<
           ),
         )
 
-      const announce = (row: InboxRow) =>
-        row.kind === "send" || row.status !== "pending"
-          ? Effect.void
-          : db
-              .projectOfSession(row.sessionId)
-              .pipe(
-                Effect.flatMap((projectId) =>
-                  projectId === undefined
-                    ? Effect.void
-                    : PubSub.publish(pubsub, row).pipe(
-                        Effect.andThen(Effect.forkIn(deliver(projectId), scope)),
-                        Effect.asVoid,
-                      ),
-                ),
-              )
-
-      /** The project whose coordinator runs at `terminal`, in any registered runtime. */
-      const at = (terminal: RuntimeAddress) =>
+      /** The project whose main agent is session `id`, if it is one. */
+      const mainOf = (id: string) =>
         Effect.gen(function* () {
-          const all = yield* runtimes.all
-          for (const h of all) {
-            const project = yield* db.coordinatorAt(h.kind, terminal).pipe(Effect.option)
-            if (Option.isSome(project)) return project.value
-          }
-          return undefined
+          const projectId = yield* db.projectOfSession(id)
+          return projectId !== undefined && (yield* db.coordinatorOf(projectId))?.id === id ? projectId : undefined
         })
+      const ifMain = (id: string, then: (projectId: string) => Effect.Effect<void>) =>
+        mainOf(id).pipe(Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : then(projectId))))
 
-      // Triggers: a coordinator terminal's state changes (or its exit), and the reconcile tick. The registry's merged
-      // `events` stream carries every registered runtime's (each registration's share ends when it unloads); a runtime
-      // without `events` of its own is the poll's to cover (§5).
-      yield* Effect.forkIn(
-        runtimes.events.pipe(
-          Stream.runForEach((event) => {
-            if (event.type === "exited")
-              // The merged stream does not say which runtime it came from; each kind's row matches on its own address.
-              return drain.work(
-                "main agent exited",
-                runtimes.all.pipe(
-                  Effect.flatMap((all) =>
-                    Effect.forEach(all, (h) => db.clearCoordinator(h.kind, event.terminal), { discard: true }),
-                  ),
-                  Effect.ignore,
-                ),
-              )
-            if (event.type === "state")
-              return at(event.terminal).pipe(
-                Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : deliver(projectId))),
-              )
+      // Each handler runs in its own fiber (engine.ts); `deliver` re-reads everything under the project's lock.
+      const engine = yield* Engine.make
+      yield* engine.on((event) => {
+        switch (event.type) {
+          // A row for the main agent was queued, or put back.
+          case "inbox.queued":
+            return ifMain(event.sessionId, deliver)
+          case "inbox.status":
+            return event.data.to === "pending" ? ifMain(event.sessionId, deliver) : Effect.void
+          // The main agent's process ended and no other took its place (not moving either): what waits for it is dropped.
+          case "process.end":
+            return ifMain(event.sessionId, (projectId) =>
+              withLock(`drop project ${projectId}`, projectId, db.dropWaiting(projectId, "absent")),
+            )
+          case "live.state":
+            return db
+              .coordinatorAt(event.runtime, event.terminal)
+              .pipe(Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : deliver(projectId))))
+          case "live.exited":
+            return drain.work("main agent exited", db.clearCoordinator(event.runtime, event.terminal))
+          default:
             return Effect.void
-          }),
-        ),
-        scope,
-      )
-      yield* Effect.forkIn(
-        db.pendingProjects.pipe(
-          Effect.flatMap((projects) => Effect.forEach(projects, deliver, { discard: true })),
-          Effect.repeat(Schedule.spaced(RECONCILE)),
-        ),
-        scope,
-      )
+        }
+      })
+
+      /** A main agent's stream looks again when a row for it is queued or put back to pending. */
+      const wakes = (main: string | undefined, event: EngineEvent) =>
+        "id" in event &&
+        event.sessionId === main &&
+        (event.type === "inbox.queued" || (event.type === "inbox.status" && event.data.to === "pending"))
 
       /**
        * Claim the coordinator's next batch, under the project's lock. Only for a coordinator whose harness takes its rows
@@ -305,7 +282,8 @@ export class Inbox extends Context.Service<
                     harnessId: subscribed.harnessId,
                   }
                 : undefined
-            const arrivals = yield* PubSub.subscribe(pubsub)
+            // Taken before the first claim: a row queued or put back for this main agent in between still wakes it.
+            const arrivals = yield* bus.subscribe
             // Claimed for the batch this pull emits. Set in the same uninterruptible region as the claim, so a close cannot lose the ids.
             let unconfirmed: ReadonlyArray<number> = []
             const claimOne = () =>
@@ -331,8 +309,7 @@ export class Inbox extends Context.Service<
                 while (true) {
                   const batch = yield* claimOne()
                   if (batch !== undefined) return [batch, 0] as const
-                  const row = yield* PubSub.take(arrivals)
-                  if (row.kind === "send") continue
+                  while (!wakes(subscribed?.id, yield* PubSub.take(arrivals))) {}
                 }
               }),
             ).pipe(
@@ -348,11 +325,9 @@ export class Inbox extends Context.Service<
         )
 
       // The Claude plugin's leases are memory only: per project, each leased (`sending`) row of its main agent and when
-      // its lease ends; changed under the project's lock. Also the last poll per project, for the away check; its entry
-      // goes when the project is away. A vibestd that starts has no leases: Db.recoverDelivering puts `sending` rows of a
-      // polling main agent back to pending.
+      // its lease ends; changed under the project's lock. A vibestd that starts has no leases: Db.recoverDelivering puts
+      // `sending` rows of a polling main agent back to pending.
       const leases = new Map<string, Map<number, number>>()
-      const lastPoll = new Map<string, number>()
       const forget = (projectId: string, ids: ReadonlyArray<number>) => {
         const held = leases.get(projectId)
         if (held === undefined) return
@@ -376,7 +351,8 @@ export class Inbox extends Context.Service<
       const poll = (projectId: string) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
-          lastPoll.set(projectId, now)
+          // A plugin that went away sends no poll: AWAY after its last one, its leases end at once.
+          yield* engine.arm(`away:${projectId}`, AWAY, endLeases(projectId, undefined))
           const empty: Polled = { ids: [], line: "", text: "" }
           // Stopping: nothing new goes out; leases already out still settle (ack is a settlement).
           if ((yield* drain.phase) !== "open") return empty
@@ -412,22 +388,8 @@ export class Inbox extends Context.Service<
           true,
         )
 
-      // A plugin that went away sends no poll, so this check runs on its own clock, not in poll or on RECONCILE.
-      yield* Effect.forkIn(
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis
-          for (const [projectId, at] of lastPoll) {
-            if (now - at <= Duration.toMillis(AWAY)) continue
-            lastPoll.delete(projectId)
-            yield* endLeases(projectId, undefined)
-          }
-        }).pipe(Effect.repeat(Schedule.spaced("1 second"))),
-        scope,
-      )
-
       return Inbox.of({
-        enqueue: (row) => db.insertInbox(row).pipe(Effect.tap(announce)),
-        announce,
+        enqueue: db.insertInbox,
         deliver,
         stream,
         delivered: Queue.take(delivered),

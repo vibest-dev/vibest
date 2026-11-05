@@ -3,7 +3,7 @@ import { NoRuntime } from "@vibest/schema/session"
 // The runtime registry (runtime-port.md §1–§4): what runtime plugins register through `context.runtime.register`, and
 // how core routes every call by the runtime kind stored on a row. Core never branches on a runtime's `kind` beyond
 // checking it is loaded and online; which runtime a start uses is the choice plugin's decision (§4).
-import { Cause, Context, Effect, FileSystem, Layer, PubSub, type Scope, Stream } from "effect"
+import { Cause, Context, Effect, FileSystem, Layer, type Scope, Stream } from "effect"
 
 import { Bus, type LiveEvent } from "./bus.ts"
 
@@ -26,8 +26,6 @@ export interface RuntimesShape {
   readonly all: Effect.Effect<ReadonlyArray<Runtime>>
   /** The runtime for `kind`, refusing with `NoRuntime` when no loaded plugin registered it. */
   readonly route: (kind: string) => Effect.Effect<Runtime, NoRuntime>
-  /** Every registered runtime's `events`, merged; each registration's share ends when it unloads. */
-  readonly events: Stream.Stream<RuntimeEvent>
   /**
    * Every runtime's status on `machine`, in registration order: what `agent.start.before` reports as `machines[]`
    * (§7) and what the choice plugin decides on.
@@ -55,14 +53,10 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
     const bus = yield* Bus
     // The plugin host registers and unregisters sequentially (one supervisor consumer), so one slot is enough.
     let registered: ReadonlyArray<Runtime> = initial
-    // Kept only until its consumers move to the Bus (plan step 5). Both streams carry these events until then: a transition, not the design.
-    const events = yield* PubSub.unbounded<RuntimeEvent>()
-    /** A runtime's events into the merged stream, for this registry's lifetime (a registration's ends with its scope). */
+    /** A runtime's events onto the Bus, for this registry's lifetime (a registration's ends with its scope). */
     const merge = (runtime: Runtime, scope: Scope.Scope) =>
       runtime.events.pipe(
-        Stream.runForEach((event) =>
-          PubSub.publish(events, event).pipe(Effect.andThen(bus.observe(live(runtime.kind, event)))),
-        ),
+        Stream.runForEach((event) => bus.observe(live(runtime.kind, event))),
         Effect.catchCause(() => Effect.void),
         Effect.forkIn(scope),
       )
@@ -99,7 +93,6 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
               )
             : Effect.succeed(found)
         }),
-      events: Stream.fromPubSub(events),
       statuses: (machine) =>
         Effect.forEach(
           registered,

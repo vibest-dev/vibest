@@ -123,7 +123,9 @@ describe("restart in place", () => {
         (yield* herdr.callsTo("send")).map((s) => s.text),
         continueText(VERSION),
       )
-      // The continued turn ends: one result for the round.
+      // The continued turn ends: one result for the round. The Pi main agent is idle in its pane: it takes its rows
+      // itself, so the result stays pending here.
+      yield* herdr.seedAgent("test/coord")
       yield* writeResult(id, "pi", { text: "done\nstatus: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)

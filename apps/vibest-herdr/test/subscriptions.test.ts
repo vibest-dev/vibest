@@ -10,7 +10,7 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin"
 import * as Server from "@vibest/server/server"
-import { ConfigProvider, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
+import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
 import { Sink } from "effect"
 import { Headers, HttpClient, HttpClientResponse } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
@@ -340,26 +340,45 @@ describe("subscriptions", () => {
     }),
   )
 
-  it.effect("while vibestd runs, an installed harness is polled at most once a minute", () =>
+  const loggedOut = (dir: string) =>
+    world({
+      installed: ["claude"],
+      home: dir,
+      commands: { "claude auth status --json": JSON.stringify({ loggedIn: false }) },
+    })
+
+  it.effect("while vibestd runs: one poll at start, then none over an idle hour", () =>
     Effect.gen(function* () {
-      const dir = yield* home
-      const fake = world({
-        installed: ["claude"],
-        home: dir,
-        commands: { "claude auth status --json": JSON.stringify({ loggedIn: false }) },
-      })
-      const polling = Subscriptions.live.pipe(Layer.provide(fake.layer))
+      const fake = loggedOut(yield* home)
       yield* fake.provide(
         Effect.gen(function* () {
-          yield* Layer.build(polling)
+          yield* Layer.build(Subscriptions.live.pipe(Layer.provide(fake.layer)))
+          yield* TestClock.adjust("1 second")
+          assert.strictEqual(fake.spawned.length, 1)
+          yield* TestClock.adjust("1 hour")
+          assert.strictEqual(fake.spawned.length, 1)
+        }),
+      )
+    }),
+  )
+
+  it.effect("a read a minute after the last poll refreshes once, shared by two readers at once", () =>
+    Effect.gen(function* () {
+      const fake = loggedOut(yield* home)
+      yield* fake.provide(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(Subscriptions.live.pipe(Layer.provide(fake.layer)))
+          const subs = Context.get(context, Subscriptions)
           yield* TestClock.adjust("59 seconds")
+          yield* subs.list
           assert.strictEqual(fake.spawned.length, 1)
           yield* TestClock.adjust("1 second")
+          const [one, two] = yield* Effect.all([subs.list, subs.list], { concurrency: "unbounded" })
           assert.strictEqual(fake.spawned.length, 2)
-          assert.deepStrictEqual(
-            fake.spawned.map((spawn) => spawn.command),
-            ["claude", "claude"],
-          )
+          assert.deepStrictEqual(one, two)
+          assert.strictEqual(one[0]?.account.kind, "none")
+          yield* subs.list
+          assert.strictEqual(fake.spawned.length, 2)
         }),
       )
     }),

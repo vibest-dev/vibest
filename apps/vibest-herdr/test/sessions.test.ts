@@ -83,6 +83,9 @@ const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
     yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
     // check takes the session's lock, so this waits for the launch (prompt + confirm) to finish.
     yield* sessions.check(id)
+    // Its Pi main agent idle in a pane of its own (seeded after the spawn, so the subagent's pane is not placed beside
+    // it): the main agent takes its rows itself, so what reaches it stays pending here.
+    yield* (yield* FakeRuntime).seedAgent("test/coord")
     yield* settled
     const row = (yield* db.getSession(id))!
     return { id, row, sessions, db }

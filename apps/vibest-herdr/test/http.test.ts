@@ -10,7 +10,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
-import { Clock, Effect, Fiber, Layer, type Scope } from "effect"
+import { Clock, Duration, Effect, Fiber, Layer, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
 
@@ -19,6 +19,7 @@ import * as Platform from "#platform"
 import {
   FakeRuntime,
   makeRepository,
+  settled,
   testLayer,
   type TestServices,
   until,
@@ -315,6 +316,22 @@ describe("vibestd's HTTP API", () => {
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "again", details: {} })
       const next = yield* inbox.poll(projectId)
       assert.deepStrictEqual(yield* inbox.ack(projectId + 1, next.ids), [])
+    }),
+  )
+
+  test(
+    "each poll re-arms the away timer: the lease ends AWAY after the last poll, not the first",
+    Effect.gen(function* () {
+      const { db, inbox, worker, projectId } = yield* project
+      yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "hello", details: {} })
+      yield* inbox.poll(projectId)
+      yield* TestClock.adjust(Duration.subtract(AWAY, Duration.seconds(1)))
+      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
+      yield* TestClock.adjust("2 seconds")
+      yield* settled
+      assert.strictEqual(yield* statusOf(db, worker), "sending")
+      yield* TestClock.adjust(AWAY)
+      yield* until(statusOf(db, worker), (s) => s === "pending")
     }),
   )
 

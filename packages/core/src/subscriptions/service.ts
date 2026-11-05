@@ -3,7 +3,22 @@ import { type Subscription, type SubscriptionLimit } from "@vibest/schema/subscr
 // Subscriptions (architecture D10): one in-memory row per (harness, provider, machine "local"). The poll reads each
 // installed harness's CLI and, for Claude and Cursor, the usage endpoint with the keychain token. A failed read keeps
 // the last row. Nothing here refreshes or writes a token, and a token is never logged.
-import { Clock, Config, Context, Effect, FileSystem, Layer, Option, Path, Redacted, Ref, Stream } from "effect"
+import {
+  Clock,
+  Config,
+  Context,
+  Duration,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Redacted,
+  Ref,
+  Semaphore,
+  Stream,
+} from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
@@ -157,7 +172,7 @@ export class Subscriptions extends Context.Service<
     readonly list: Effect.Effect<ReadonlyArray<Subscription>>
     /** Plugin push. Replaces limits for `(harness, provider)` until a poll actually reads usage. */
     readonly report: (input: SubscriptionReport) => Effect.Effect<void>
-    /** One pass. The daemon layer repeats it; tests call it with fakes. */
+    /** One pass. The daemon layer runs it at start and on a stale read; tests call it with fakes. */
     readonly poll: Effect.Effect<void, never, PollServices>
   }
 >()("vibest/Subscriptions") {
@@ -306,20 +321,40 @@ export class Subscriptions extends Context.Service<
 
   static readonly layer = Layer.effect(Subscriptions, Subscriptions.make)
 
-  /** The store, plus one poll as vibestd starts and then at most once a minute. Same instance the RPC reads. */
+  /**
+   * The store, plus one poll as vibestd starts. After that a `list` whose rows are a minute old or more polls first: one
+   * poll at a time, shared by every reader, and a reader waits at most CLI_TIMEOUT for it (the stored rows then). Nothing
+   * polls while nobody reads. Same instance the RPC reads.
+   */
   static readonly live = Layer.effect(
     Subscriptions,
     Effect.gen(function* () {
       const service = yield* Subscriptions.make
-      yield* Effect.forkScoped(
-        Effect.forever(
-          Effect.gen(function* () {
-            yield* service.poll
-            yield* Effect.sleep(MINUTE)
-          }),
-        ),
+      const context = yield* Effect.context<PollServices>()
+      const scope = yield* Effect.scope
+      const lock = yield* Semaphore.make(1)
+      let polledAt = Number.NEGATIVE_INFINITY
+      let running: Fiber.Fiber<void> | undefined
+      /** The poll in flight, or a new one when the last started a minute ago or more; undefined when the rows are fresh. */
+      const refresh = lock.withPermit(
+        Effect.gen(function* () {
+          if (running !== undefined && running.pollUnsafe() === undefined) return running
+          const now = yield* Clock.currentTimeMillis
+          if (now - polledAt < Duration.toMillis(MINUTE)) return undefined
+          polledAt = now
+          running = yield* Effect.forkIn(service.poll.pipe(Effect.provideContext(context)), scope)
+          return running
+        }),
       )
-      return service
+      yield* refresh
+      return Subscriptions.of({
+        ...service,
+        list: refresh.pipe(
+          Effect.flatMap((fiber) => (fiber === undefined ? Effect.void : Fiber.await(fiber))),
+          Effect.timeoutOption(CLI_TIMEOUT),
+          Effect.andThen(service.list),
+        ),
+      })
     }),
   )
 }

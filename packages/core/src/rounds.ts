@@ -48,7 +48,6 @@ export const sessionRounds = (deps: {
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly beginUserTurn: (id: string, text: string, patch: SessionPatch) => Effect.Effect<boolean>
   }
-  readonly inbox: { readonly announce: (row: InboxRow) => Effect.Effect<void> }
   readonly harnesses: {
     readonly all: ReadonlyArray<HarnessAdapter>
     readonly get: (id: SessionRow["harnessId"]) => HarnessAdapter
@@ -76,7 +75,7 @@ export const sessionRounds = (deps: {
   /** The usage-limit move (move.ts), wired in after the rounds exist. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
-  const { db, inbox, harnesses } = deps
+  const { db, harnesses } = deps
 
   const finish = Effect.fn("Sessions.finish")(function* (
     session: SessionRow,
@@ -122,7 +121,7 @@ export const sessionRounds = (deps: {
       ["result", body],
     )
     const failure = failureOf(error)
-    const row = yield* db.finishTurn(
+    yield* db.finishTurn(
       session.id,
       {
         status: end,
@@ -138,7 +137,6 @@ export const sessionRounds = (deps: {
       },
       at,
     )
-    yield* inbox.announce(row)
   })
 
   /**

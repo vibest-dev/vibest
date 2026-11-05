@@ -652,7 +652,6 @@ export class Sessions extends Context.Service<
       const limit = limitMoveBox()
       const rounds = sessionRounds({
         db,
-        inbox,
         harnesses,
         track,
         lock: locks.withLock,
@@ -1463,13 +1462,12 @@ export class Sessions extends Context.Service<
         })
 
       // Recovery: a delivery a stop cut off may or may not have arrived (decision 2), then the labels back (the runtime
-      // does not keep them), then one look at every live session.
-      for (const notice of yield* db.recoverDelivering(
+      // does not keep them), then one look at every live session. Inbox offers the recovery's notices from their events.
+      yield* db.recoverDelivering(
         harnesses.all.filter((h) => h.inbox === "poll").map((h) => h.id),
         (sessionId, messages) =>
           `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
-      ))
-        yield* inbox.announce(notice)
+      )
       yield* republish()
       yield* Effect.forkIn(reconcile("all").pipe(logged("reconcile")), scope)
 
