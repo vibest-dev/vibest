@@ -57,7 +57,7 @@ try {
     let outcome: "pass" | "fail" | "skip" = "pass"
     let detail: string | undefined
     try {
-      await check.run(world)
+      await check.run(world, evidence)
     } catch (e) {
       outcome = e instanceof Skip ? "skip" : "fail"
       detail = redact(e instanceof Error ? e.message : String(e))

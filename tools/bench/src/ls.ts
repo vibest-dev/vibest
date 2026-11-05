@@ -162,7 +162,6 @@ const one = async (n: number) => {
     const started = await run(directory, [binary, "daemon"], env)
     if (started.code !== 0) throw new Error(`vibest daemon exited ${started.code}: ${started.stderr || started.stdout}`)
     await Bun.sleep(idleMs)
-    // `vibest ls` already prints JSON. There is no --json flag (unrecognized, exit 2), so this one series is both.
     const ls = await time(directory, ["ls"], env, n)
     const pid = (JSON.parse(await fs.readFile(path.join(home, "vibestd.pid"), "utf8")) as { pid: number }).pid
     const before = cpuSeconds(pid)
@@ -172,9 +171,6 @@ const one = async (n: number) => {
       `n=${n}`,
       `ls_median_ms=${ls.median.toFixed(1)}`,
       `ls_p95_ms=${ls.p95.toFixed(1)}`,
-      `json_median_ms=${ls.median.toFixed(1)}`,
-      `json_p95_ms=${ls.p95.toFixed(1)}`,
-      `json_flag=absent`,
       `idle_cpu_s=${cpu.toFixed(3)}`,
     ].join(" ")
     console.log(line)

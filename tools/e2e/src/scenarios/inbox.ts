@@ -771,7 +771,7 @@ const checks: ReadonlyArray<Check> = [
     id: "S26",
     title:
       "latency: 10 rounds of a busy Pi subagent, a queued send, then release, and 10 pane closes of idle subagents; records the times and does not assert them",
-    run: async (w) => {
+    run: async (w, evidence) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = heldModel()
       const session = `${w.herdrSession}-s26`
@@ -952,9 +952,7 @@ const checks: ReadonlyArray<Check> = [
           turnEndToDeliveringMs: stats(delivery),
           paneCloseToProcessEndMs: stats(closes),
         }
-        const file = path.join(import.meta.dirname, "..", "..", "evidence", "s26-latency.json")
-        await fs.mkdir(path.dirname(file), { recursive: true })
-        await fs.writeFile(file, `${JSON.stringify(out, null, 2)}\n`)
+        await fs.writeFile(path.join(evidence, "latency.json"), `${JSON.stringify(out, null, 2)}\n`)
         console.log(`S26 ${JSON.stringify(out)}`)
       } finally {
         model.stop()
