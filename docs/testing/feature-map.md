@@ -123,4 +123,9 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S18 | a subagent whose first turn outlasts herdr's agent.start window keeps its terminal (no false exit)                | inbox: `tools/e2e` S18                                          |
 | S19 | a Pi subagent under herdr's Pi hook gets its first prompt within seconds; restart and interrupt work              | inbox: `tools/e2e` S19                                          |
 | S20 | ids: `run` answers a UUID, herdr agent `s-<30 hex>`, `result <8>`, `peek <12>`, system prompt file                | inbox: `tools/e2e` S20                                          |
-| S26 | latency: 10 busy send-release rounds and 10 idle pane closes; records numbers; turn end to delivery p95 ≤ 1500 ms | inbox: `tools/e2e` S26                                          |
+| S21 | pane killed mid-turn: within 2 s the turn fails, the queued send fails with its notice; one result                | exits: `tools/e2e` S21                                          |
+| S22 | harness killed (kill -9), its pane kept: as S21 within 2 s                                                        | exits: `tools/e2e` S22                                          |
+| S23 | vibestd restarted mid-turn, or killed after the turn end: exactly one result, its turn.end has `report`           | exits: `tools/e2e` S23                                          |
+| S24 | vibestd killed mid-delivery: the row fails once with the may-or-may-not notice; a later send is delivered         | exits: `tools/e2e` S24                                          |
+| S25 | herdr hands over to a new server: the reset reconcile runs; a later close is seen within 2 s; send works          | exits: `tools/e2e` S25                                          |
+| S26 | latency of 10 send rounds and 10 pane closes: turn end to delivery p95 ≤ 1500 ms, close to exit ≤ 1000 ms         | inbox: `tools/e2e` S26                                          |

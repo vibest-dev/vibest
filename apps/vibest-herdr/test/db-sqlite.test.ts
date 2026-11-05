@@ -178,7 +178,7 @@ describe("a vibestd restart", () => {
       }).pipe(Effect.provide(database(file)))
       const statuses = yield* Effect.gen(function* () {
         // Inbox.layer runs this at start with the harnesses whose adapter polls.
-        yield* (yield* Db).recoverSending(["claude"])
+        yield* (yield* Db).recoverDelivering(["claude"], () => "")
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox ORDER BY id`
       }).pipe(Effect.provide(database(file)))

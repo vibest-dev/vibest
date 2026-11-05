@@ -3,7 +3,7 @@ import { Bus, type EngineEvent, type StoredEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Runtimes } from "@vibest/core/runtimes"
 import type { Runtime } from "@vibest/plugin"
-import { Cause, Effect, Exit, Layer, PubSub } from "effect"
+import { Cause, Effect, Exit, Layer, PubSub, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
@@ -91,8 +91,8 @@ describe("bus", () => {
         const rows = [yield* notice("one"), yield* notice("two")]
         yield* db.claim(rows.map((row) => row.id))
         const sub = yield* bus.subscribe
-        // recoverSending is one transaction around two inner ones (moveInbox), each publishing nothing itself.
-        yield* db.recoverSending([])
+        // recoverDelivering is one transaction around inner ones (moveInbox), each publishing nothing itself.
+        yield* db.recoverDelivering([], () => "")
         const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
         assert.deepStrictEqual(
           published.map((event) => [event.type, event.inboxId, event.data.to]),
@@ -129,7 +129,9 @@ describe("bus", () => {
         const bus = yield* Bus
         const runtimes = yield* Runtimes
         const sub = yield* bus.subscribe
-        yield* runtimes.register({ kind: "bench" } as Runtime.Runtime).pipe(Effect.scoped)
+        yield* runtimes
+          .register({ kind: "bench", events: Stream.empty } as unknown as Runtime.Runtime)
+          .pipe(Effect.scoped)
         assert.deepStrictEqual(yield* PubSub.takeUpTo(sub, 5), [
           { type: "live.reset", runtime: "bench", machine: "local" },
         ])

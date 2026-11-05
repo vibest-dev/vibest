@@ -118,7 +118,6 @@ export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
 export const HOOK_GRACE = Duration.seconds(10)
 export const TAIL_LINES = 30
-export const POLL = Duration.seconds(5)
 export const STOP_WAIT = Duration.seconds(10)
 /** Only `awaitReady` polls: a drawn startup dialog has no event. */
 const TICK = Schedule.spaced("500 millis")
@@ -264,7 +263,7 @@ export class Sessions extends Context.Service<
           }),
         )
       const locks = keyedLock<string>()
-      /** Set the session's `stopping` flag in the same step as the lookup, so `sweep` cannot drop the flags in between. Whether it was set already. */
+      /** Set the session's `stopping` flag in the same step as the lookup, so `forget` cannot drop the flags in between. Whether it was set already. */
       const stop = (id: string) =>
         SynchronizedRef.modifyEffect(tracked, (map) =>
           Effect.gen(function* () {
@@ -274,27 +273,26 @@ export class Sessions extends Context.Service<
           }),
         )
       /**
-       * Once per poll (vibestd-state.md 5): drop the flags of every session that is no longer live (exited, archived, gone)
-       * while nobody holds or waits on its lock and nothing is in flight on them. A live row keeps its flags; what they
-       * guard starts afresh at the next prompt, as after a restart. The rows are read under the map's lock: a resume that
-       * clears `exitedAt` after the read holds the session's lock (busy) or waits here in `track`.
+       * Drop session `id`'s flags and one-shot timers once it is no longer live (exited, archived, gone) and nothing is
+       * in flight on them (vibestd-state.md 5); a live row keeps them. What they guard starts afresh at the next prompt,
+       * as after a restart. Under the session's lock, taken here once its current holder is done: a resume that clears
+       * `exitedAt` holds it too. Runs on the session's `process.end` and after an archive.
        */
-      const sweep = SynchronizedRef.updateEffect(tracked, (map) =>
-        Effect.gen(function* () {
-          const live = new Set(
-            (yield* db.listSessions())
-              .filter((row) => !row.metadata.archived && !row.metadata.removed)
-              .map((row) => row.id),
-          )
-          let next = map
-          for (const [id, r] of map) {
-            if (live.has(id) || locks.busy(id)) continue
-            const inFlight = (yield* Ref.get(r.stopping)) || (yield* Ref.get(r.prompting))
-            if (!inFlight) next = HashMap.remove(next, id)
-          }
-          return next
-        }),
-      )
+      const forget = (id: string) =>
+        locks.withLock(id)(
+          SynchronizedRef.updateEffect(tracked, (map) =>
+            Effect.gen(function* () {
+              const row = yield* db.getSession(id)
+              if (row !== undefined && row.exitedAt === null && !row.metadata.archived && !row.metadata.removed)
+                return map
+              const r = Option.getOrUndefined(HashMap.get(map, id))
+              if (r !== undefined && ((yield* Ref.get(r.stopping)) || (yield* Ref.get(r.prompting)))) return map
+              yield* engine.cancel(`grace:${id}`)
+              yield* engine.cancel(`miss:${id}`)
+              return HashMap.remove(map, id)
+            }),
+          ),
+        )
       const locked =
         (id: string, settlement = false) =>
         <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -952,14 +950,6 @@ export class Sessions extends Context.Service<
         if ((!open && session.exitedAt !== null) || session.metadata.archived || session.metadata.removed) return
         // vibestd is restarting its harness: no result, exit or queue is decided until the new one is ready (restartAgent).
         if (restarting.has(id)) return
-        // A delivery cut off by vibestd stopping (no delivery runs while the lock is held): it may or may not have arrived.
-        const cutOff = yield* db.inboxWithStatus(id, "sending")
-        if (cutOff.length > 0)
-          yield* undelivered(
-            session,
-            cutOff,
-            "vibestd stopped while handing it to the session; it may or may not have arrived",
-          )
         const routed = yield* live(session).pipe(Effect.option)
         // No runtime routes it (none recorded, or not registered): its reported turn end is still its result.
         if (Option.isNone(routed)) {
@@ -970,7 +960,7 @@ export class Sessions extends Context.Service<
         const terminal = session.address
         const r = yield* track(id)
         const maybe = yield* agentState(h, terminal).pipe(Effect.option)
-        // Unreachable is no answer: this check tries again on the next poll, the row untouched.
+        // Unreachable is no answer, the row untouched: the runtime's reset when it is back checks again.
         if (Option.isNone(maybe)) return
         const seen = maybe.value
         // Status is the runtime's, as it reports it now. `unknown` is no answer: the process fallback decides (§5).
@@ -1263,7 +1253,9 @@ export class Sessions extends Context.Service<
           yield* getRow(id)
           const { r, already } = yield* stop(id)
           if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
-          const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(Ref.set(r.stopping, false))))!
+          const out = (yield* locked(id)(removeLocked(id, options)).pipe(
+            Effect.ensuring(Ref.set(r.stopping, false).pipe(Effect.andThen(Effect.forkIn(forget(id), scope)))),
+          ))!
           return out
         }).pipe(
           Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
@@ -1344,7 +1336,7 @@ export class Sessions extends Context.Service<
                       ),
                 ),
                 // Cleared before the lock is let go, so the next result's turn never finds it still set.
-                Effect.ensuring(Ref.set(r.stopping, false)),
+                Effect.ensuring(Ref.set(r.stopping, false).pipe(Effect.andThen(Effect.forkIn(forget(id), scope)))),
               )
             }),
           )
@@ -1432,8 +1424,14 @@ export class Sessions extends Context.Service<
             return onTerminal(event.terminal, event.state === "working")
           case "live.exited":
             return onTerminal(event.terminal, false)
+          case "process.end":
+            return forget(event.sessionId)
           case "live.reset":
-            return republish().pipe(Effect.asVoid, Effect.provideContext(platform))
+            // A runtime that came back (or was registered): its terminals are read again once each.
+            return republish().pipe(
+              Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine })),
+              Effect.provideContext(platform),
+            )
           case "live.turn_start":
             return turnStarted(event.sessionId, event.at)
           default:
@@ -1441,16 +1439,39 @@ export class Sessions extends Context.Service<
         }
       }
 
-      const checkAll = db.listSessions().pipe(
-        Effect.flatMap((rows) =>
-          Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: "unbounded", discard: true }),
-        ),
-        Effect.andThen(sweep),
-      )
+      /**
+       * One check of each live session in `where` (all, or one runtime's), then one delivery try for each project with
+       * main-agent rows waiting. Only at start, when a runtime registers, and when one comes back (`live.reset`): what
+       * no event reported in between (an exit while vibestd was down, a runtime registered late) is found here once.
+       */
+      const reconcile = (where: "all" | { readonly runtime: string; readonly machine?: string }) =>
+        Effect.gen(function* () {
+          const rows = (yield* db.listSessions()).filter(
+            (row) =>
+              !row.metadata.archived &&
+              !row.metadata.removed &&
+              (row.exitedAt === null || row.turnState === "open") &&
+              (where === "all" ||
+                (row.runtime === where.runtime &&
+                  (where.machine === undefined || row.address.machine === where.machine))),
+          )
+          yield* Effect.log(
+            `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,
+          )
+          yield* Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: 8, discard: true })
+          for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
+        })
 
-      // Recovery: put the labels back (the runtime does not keep them), then the poll evaluates every row.
+      // Recovery: a delivery a stop cut off may or may not have arrived (decision 2), then the labels back (the runtime
+      // does not keep them), then one look at every live session.
+      for (const notice of yield* db.recoverDelivering(
+        harnesses.all.filter((h) => h.inbox === "poll").map((h) => h.id),
+        (sessionId, messages) =>
+          `A message to ${sessionId} was not delivered: vibestd stopped while handing it to the session; it may or may not have arrived\n\n${messages.join("\n\n")}`,
+      ))
+        yield* inbox.announce(notice)
       yield* republish()
-      yield* Effect.forkIn(checkAll.pipe(Effect.repeat(Schedule.spaced(POLL))), scope)
+      yield* Effect.forkIn(reconcile("all").pipe(logged("reconcile")), scope)
 
       yield* Effect.forkIn(
         inbox.delivered.pipe(
@@ -1487,6 +1508,7 @@ export class Sessions extends Context.Service<
         inbox,
         scope,
         locked: (id) => locked(id),
+        checkLater: (id) => Effect.forkIn(checkLocked(id), scope).pipe(Effect.asVoid),
         launchArgv: (session, resume) => launchArgv(session, resume).pipe(Effect.provideContext(platform)),
         worktreeOf,
         withPlatform: (effect) => effect.pipe(Effect.provideContext(platform)),

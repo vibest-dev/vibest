@@ -48,7 +48,7 @@ export interface ContractOptions {
  * Run the contract: `status`, `open` (argv exactly, env, label), `send` (text and keys), `read`, `process`, `close`,
  * then `state`, `session`, `exec` and `present` when the runtime has them. `prepare` and `attach` are checked as
  * members only: `prepare` changes a machine's setup and `attach` opens the runtime's own interface, so the contract
- * never runs them. `events`, when present, is proven by the `exited` event of the terminal the contract itself closes;
+ * never runs them. `events` is proven by the `exited` event of the terminal the contract itself closes;
  * `process` on the closed terminal by `not_found` once it is gone, and on a program that ended on its own by
  * `running: false` (its exit code when the runtime knows one). `run`, when present, runs a command in that terminal
  * once its program ended.
@@ -73,12 +73,11 @@ export const runtimeContract = (
 
     // The events follower runs from the start: the program that ends on its own must be seen without anyone closing it.
     const seen = yield* Ref.make<ReadonlyArray<Runtime.RuntimeEvent>>([])
-    if (runtime.events !== undefined)
-      yield* runtime.events.pipe(
-        Stream.runForEach((event) => Ref.update(seen, (events) => [...events, event])),
-        Effect.forkScoped,
-        Effect.catchCause(() => Effect.void),
-      )
+    yield* runtime.events.pipe(
+      Stream.runForEach((event) => Ref.update(seen, (events) => [...events, event])),
+      Effect.forkScoped,
+      Effect.catchCause(() => Effect.void),
+    )
 
     // An interactive shell, driven by `send`: the argv runs exactly, and the env it was given reaches what runs there.
     const terminal = yield* runtime.open(local, {
@@ -197,14 +196,13 @@ export const runtimeContract = (
     if (Exit.isSuccess(gone)) yield* runtime.close(ended)
 
     yield* runtime.close(terminal)
-    if (runtime.events !== undefined)
-      yield* until(
-        "events",
-        Ref.get(seen),
-        (events) => events.some((event) => event.type === "exited" && event.terminal.id === terminal.id),
-        `emitted no exited event for the closed terminal ${terminal.id}`,
-        timeout,
-      )
+    yield* until(
+      "events",
+      Ref.get(seen),
+      (events) => events.some((event) => event.type === "exited" && event.terminal.id === terminal.id),
+      `emitted no exited event for the closed terminal ${terminal.id}`,
+      timeout,
+    )
 
     yield* until(
       "process",

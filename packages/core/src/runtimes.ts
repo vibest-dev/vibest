@@ -59,15 +59,13 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
     const events = yield* PubSub.unbounded<RuntimeEvent>()
     /** A runtime's events into the merged stream, for this registry's lifetime (a registration's ends with its scope). */
     const merge = (runtime: Runtime, scope: Scope.Scope) =>
-      runtime.events === undefined
-        ? Effect.void
-        : runtime.events.pipe(
-            Stream.runForEach((event) =>
-              PubSub.publish(events, event).pipe(Effect.andThen(bus.observe(live(runtime.kind, event)))),
-            ),
-            Effect.catchCause(() => Effect.void),
-            Effect.forkIn(scope),
-          )
+      runtime.events.pipe(
+        Stream.runForEach((event) =>
+          PubSub.publish(events, event).pipe(Effect.andThen(bus.observe(live(runtime.kind, event)))),
+        ),
+        Effect.catchCause(() => Effect.void),
+        Effect.forkIn(scope),
+      )
     // Runtimes seeded at make (a test's fake, registered up front) merge for the registry's own scope.
     const own = yield* Effect.scope
     for (const runtime of initial) yield* merge(runtime, own)

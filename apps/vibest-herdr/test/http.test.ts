@@ -288,12 +288,12 @@ describe("vibestd's HTTP API", () => {
       const { db, inbox, worker, projectId } = yield* project
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "hello", details: {} })
       const { ids } = yield* inbox.poll(projectId)
-      yield* db.recoverSending(["claude"])
+      yield* db.recoverDelivering(["claude"], () => "")
       assert.strictEqual(yield* statusOf(db, worker), "pending")
       // The next poll hands the row out again at once.
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, ids)
       // A harness that does not poll: a cut-off delivery may have arrived, so it failed.
-      yield* db.recoverSending([])
+      yield* db.recoverDelivering([], () => "")
       assert.strictEqual(yield* statusOf(db, worker), "failed")
     }),
   )

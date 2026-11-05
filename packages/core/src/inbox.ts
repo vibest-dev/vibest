@@ -120,7 +120,6 @@ export class Inbox extends Context.Service<
       const restarting = yield* Restarting
       /** How the coordinator of harness `id` (as recorded or as the runtime names it) takes its rows. */
       const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.inbox
-      yield* db.recoverSending(harnesses.all.filter((h) => h.inbox === "poll").map((h) => h.id))
       const scope = yield* Effect.scope
       const pubsub = yield* PubSub.unbounded<InboxRow>()
       // Made before any delivery runs, so none is missed.
@@ -350,7 +349,7 @@ export class Inbox extends Context.Service<
 
       // The Claude plugin's leases are memory only: per project, each leased (`sending`) row of its main agent and when
       // its lease ends; changed under the project's lock. Also the last poll per project, for the away check; its entry
-      // goes when the project is away. A vibestd that starts has no leases: Db.recoverSending puts `sending` rows of a
+      // goes when the project is away. A vibestd that starts has no leases: Db.recoverDelivering puts `sending` rows of a
       // polling main agent back to pending.
       const leases = new Map<string, Map<number, number>>()
       const lastPoll = new Map<string, number>()

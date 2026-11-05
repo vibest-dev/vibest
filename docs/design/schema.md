@@ -217,9 +217,10 @@ before that and not yet consumed still counts. A report a `turn.end` consumed is
 
 - Live status: from the integration's events (working between `turn.start` and `turn.end`, plus `blocked`), and
   from the runtime only for a harness with no integration.
-- Poll leases: on start, `recoverSending` moves `delivering` rows of polling sessions back to `pending` and the
-  others to `failed`, each with an `inbox.status`; the plugin acks by row id and skips rows it
-  showed. A session may see one message twice after a vibestd restart.
+- Poll leases: on start, `recoverDelivering` (one transaction) moves `delivering` rows of polling main agents back
+  to `pending` and the other main-agent rows to `failed`, each with an `inbox.status`; the plugin acks by row id and
+  skips rows it showed. A session may see one message twice after a vibestd restart. A subagent's `delivering` rows
+  fail with one notice ("may or may not have arrived") and are not delivered again.
 - Restarting mark: the end events are written after SIGTERM, so a crash before it leaves the old process running,
   and a crash after it leaves an open `process.start` with no harness in the pane, which reconciliation ends.
 - Skipped options within one harness change, per-session locks, paste and ack waits: lost with the process; an

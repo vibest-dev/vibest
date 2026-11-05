@@ -127,6 +127,8 @@ interface Target {
   readonly hint: string
   /** Under `locked`, once it is back: the continue for an interrupted turn, and the outcome. */
   readonly onBack: (h: Runtime) => Effect.Effect<Restarted, unknown>
+  /** Once the mark is cleared, however it ended: the one look its checks skipped while it was set. Returns at once. */
+  readonly reconcile: Effect.Effect<void>
 }
 
 export const sessionRestart = (deps: {
@@ -141,6 +143,8 @@ export const sessionRestart = (deps: {
   readonly scope: Scope.Scope
   /** The session's lock, as every session change takes it. */
   readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
+  /** Check subagent `id` once, in vibestd's scope (returns at once). */
+  readonly checkLater: (id: string) => Effect.Effect<void>
   /** The harness argv that starts the session (resume: on its conversation). */
   readonly launchArgv: (session: SessionRow, resume: boolean) => Effect.Effect<ReadonlyArray<string>, unknown>
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, unknown>
@@ -225,8 +229,9 @@ export const sessionRestart = (deps: {
         }),
       )
     }).pipe(
-      // However it ends (back, failed, or vibestd stopping part way): the mark must not keep the session from its checks.
-      Effect.ensuring(deps.restarting.clear(id)),
+      // However it ends (back, failed, or vibestd stopping part way): the mark must not keep the session from its checks,
+      // and what it skipped meanwhile is looked at once.
+      Effect.ensuring(deps.restarting.clear(id).pipe(Effect.andThen(t.reconcile))),
       Effect.catchCause((cause) => Effect.succeed(failed(`not restarted: ${errorMessage(cause)}`))),
     )
   }
@@ -262,6 +267,7 @@ export const sessionRestart = (deps: {
         argv: againArgv(session),
         liveNow: db.getSession(id).pipe(Effect.map((row) => row?.metadata)),
         locked: deps.locked(id),
+        reconcile: deps.checkLater(id),
         hint: `; ${peekHint(id)}`,
         onBack: (h) =>
           Effect.gen(function* () {
@@ -317,6 +323,7 @@ export const sessionRestart = (deps: {
           return row?.id === id ? { ...row, ready: yield* db.readyAt(id) } : undefined
         }),
         locked: (effect) => effect,
+        reconcile: Effect.forkIn(inbox.deliver(projectId), deps.scope).pipe(Effect.asVoid),
         hint: "",
         onBack: () =>
           Effect.gen(function* () {

@@ -1872,12 +1872,16 @@ const make = Effect.gen(function* () {
       ).pipe(Effect.orDie),
 
     /**
-     * After a restart: a claimed main-agent-bound row whose delivery was cut off may or may not have arrived, so it
-     * failed; one bound to a main agent whose harness polls (`pollHarnesses`, the adapters with inbox `poll`) is back to
-     * pending, because that integration acks by row id and skips a row it already showed. Subagent-bound
-     * `delivering` rows stay for `check`. (Leases are memory only: none outlives the vibestd that granted it.)
+     * Once at start, one transaction (decision 2): a claimed row whose delivery a stop cut off may or may not have
+     * arrived. Bound to a main agent whose harness polls (`pollHarnesses`, the adapters with inbox `poll`): pending
+     * again, because that integration acks by row id and skips a row it already showed. Any other main-agent row:
+     * failed. A subagent's rows: failed, with one notice per subagent (`notice` words it); nothing is delivered again.
+     * Returns those notices, for the caller to offer. (Leases are memory only: none outlives the vibestd that granted it.)
      */
-    recoverSending: (pollHarnesses: ReadonlyArray<string>) =>
+    recoverDelivering: (
+      pollHarnesses: ReadonlyArray<string>,
+      notice: (sessionId: string, messages: ReadonlyArray<string>) => string,
+    ) =>
       tx(
         Effect.gen(function* () {
           const polling = sql`recipient_session_id IN (SELECT s.id FROM session s
@@ -1887,8 +1891,35 @@ const make = Effect.gen(function* () {
           const claimed = sql`status = 'delivering' AND kind NOT IN ${sql.literal(TO_SESSION)}`
           yield* moveInbox(sql`${claimed} AND ${polling}`, "pending")
           yield* moveInbox(claimed, "failed")
+          const cut = yield* sql<{ id: number; recipient: string; content: string }>`SELECT id,
+              recipient_session_id AS recipient, content FROM inbox
+            WHERE status = 'delivering' AND kind IN ${sql.literal(TO_SESSION)} ORDER BY id`
+          const bySession = new Map<string, Array<{ id: number; content: string }>>()
+          for (const row of cut) bySession.set(row.recipient, [...(bySession.get(row.recipient) ?? []), row])
+          const notices: Array<InboxRow> = []
+          for (const [sessionId, rows] of bySession) {
+            yield* moveInbox(
+              sql.in(
+                "id",
+                rows.map((r) => r.id),
+              ),
+              "failed",
+            )
+            notices.push(
+              yield* insertInboxRow({
+                sessionId,
+                kind: "notice",
+                message: notice(
+                  sessionId,
+                  rows.map((r) => r.content),
+                ),
+                details: {},
+              }),
+            )
+          }
+          return notices
         }),
-      ).pipe(Effect.asVoid, Effect.orDie),
+      ).pipe(Effect.orDie),
 
     /** Claimed deliveries must settle before a planned shutdown; pending Messages wait for the next vibestd. */
     sendingInbox: inbox(sql`m.status = 'delivering'`).pipe(

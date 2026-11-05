@@ -34,7 +34,7 @@ export const make = Effect.gen(function* () {
       }),
     /**
      * Run `effect` once, `delay` from now, in a handler fiber. Arming `key` again replaces its pending timer; an entry
-     * leaves when it fires.
+     * leaves when it fires or is cancelled.
      */
     arm: (key: string, delay: Duration.Duration, effect: Effect.Effect<void>) =>
       FiberMap.run(
@@ -42,5 +42,7 @@ export const make = Effect.gen(function* () {
         key,
         Effect.sleep(delay).pipe(Effect.andThen(FiberSet.run(handlers, guarded(key, effect)))),
       ).pipe(Effect.asVoid),
+    /** Drop `key`'s pending timer, if any. */
+    cancel: (key: string) => FiberMap.remove(timers, key),
   }
 })

@@ -87,7 +87,7 @@ const fakeModel = (sub: string) => {
  * A model that holds a task's turn open (S18): its stream starts and then waits for `release`, which answers the task's
  * two lines. Anything else (the main agent's turn on the result) gets "ok".
  */
-const heldModel = () => {
+export const heldModel = () => {
   const held: Array<() => void> = []
   let released = false
   const chunk = (o: object) =>
@@ -770,7 +770,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S26",
     title:
-      "latency: 10 rounds of a busy Pi subagent, a queued send, then release, and 10 pane closes of idle subagents; records the times, and the queued send goes out within 1500 ms (p95) of the turn end (the 5 s poll took about 5 s)",
+      "latency: 10 rounds of a busy Pi subagent, a queued send, then release, and 10 pane closes of idle subagents; records the times; the queued send goes out within 1500 ms (p95) of the turn end (the 5 s poll took about 5 s), and a closed pane's process ends within 1 s (p95)",
     run: async (w, evidence) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = heldModel()
@@ -958,6 +958,11 @@ const checks: ReadonlyArray<Check> = [
         expect(
           out.turnEndToDeliveringMs.p95 <= 1500,
           `turn end to next delivering p95 is ${out.turnEndToDeliveringMs.p95} ms (at most 1500)`,
+        )
+        // An exit is the runtime's push, not the next 5 s poll.
+        expect(
+          out.paneCloseToProcessEndMs.p95 <= 1000,
+          `pane close to process.end p95 is ${out.paneCloseToProcessEndMs.p95} ms (at most 1000)`,
         )
       } finally {
         model.stop()

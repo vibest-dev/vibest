@@ -461,10 +461,9 @@ describe.concurrent("Sessions", () => {
       // The failed turn's end delivers what is queued (nothing here) under the same lock.
       yield* settled
       assert.deepInclude(yield* db.getSession(id), { turnState: "failed" })
-      assert.deepInclude(yield* sessions.inMemory, { tracked: 1, locks: 0 })
       assert.strictEqual(yield* db.liveStatuses, 0)
-      // The next poll drops the flags of the session that is no longer live.
-      yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      // Its process.end drops the flags of the session that is no longer live, with no poll.
+      yield* until(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
       // Nothing of the dropped flags is missed: the next message resumes it and its turn is collected.
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
@@ -2366,7 +2365,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a delivery cut off by vibestd stopping is not sent again: it fails as possibly delivered",
+    "a delivery cut off by vibestd stopping is not sent again: the next start fails it as possibly delivered",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
@@ -2383,7 +2382,9 @@ describe.concurrent("Sessions", () => {
       yield* db.setInboxStatus([row.id], "sending")
       yield* held.release()
       yield* settled
-      yield* sessions.check(id)
+      // The next vibestd: its start recovers the row once, before any check.
+      yield* Sessions.make({ maxSessions: undefined })
+      yield* settled
       assert.lengthOf(yield* herdr.callsTo("send"), prompts)
       assert.deepStrictEqual(yield* db.inboxWithStatus(id, "failed"), [{ ...row, status: "failed" }])
       // The notice is recorded even when the coordinator's pane is already gone and delivery drops it.

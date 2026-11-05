@@ -139,7 +139,7 @@ export interface PoolDeps {
 /**
  * The herdr Runtime: `open` is `tab.create` (the only place env can be set) plus `agent.start` for a harness argv
  * (typed into the pane's shell for anything else), `send` reaches the agent in a pane when herdr knows one, and
- * `state` is herdr's detected status. Optional members: `state`, `events`, `present`, `attach` (runtime-port.md §3);
+ * `state` is herdr's detected status, `events` its pushes. Optional members: `state`, `present`, `attach` (runtime-port.md §3);
  * herdr has no `exec`.
  */
 export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
@@ -236,7 +236,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.forkIn(scope),
     )
     // A herdr server that came back: every per-pane subscription died with it. Their keys were dropped by each
-    // stream's `ensuring`, so the next `state` installs a fresh one (core polls `state` every 5 s).
+    // stream's `ensuring`; on this `reset` core reads each of its terminals' `state` once, which installs fresh ones.
     yield* pool.restarts.pipe(
       Stream.runForEach((_session) => PubSub.publish(events, { type: "reset", machine: "local" })),
       Effect.catchCause(() => Effect.void),
