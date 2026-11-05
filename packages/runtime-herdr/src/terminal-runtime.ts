@@ -188,8 +188,9 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             // `pane.agent_detected` has no pane filter (a workspace-wide subscription), so this pane's frames are picked below.
             h.subscribe([{ type: "pane.agent_status_changed", pane_id: paneId }, { type: "pane.agent_detected" }]).pipe(
               Stream.runForEach((frame: PushFrame) => {
+                // A workspace event (`pane_agent_detected`) carries `type`; a subscription frame does not.
                 const data = frame.data as {
-                  readonly type: string
+                  readonly type?: string
                   readonly pane_id?: string
                   readonly agent_status?: results.AgentStatus | null
                   readonly agent?: string | null
