@@ -1,5 +1,7 @@
 // The engine's event loop: one subscriber on the Bus, each handler in a fiber of its own, and one-shot timers by key.
 // Engine-level: it knows events, not sessions or projects. Its user (Sessions) brings the handlers and their locks.
+// Handlers run concurrently and do not depend on the order events arrive in: each re-derives what to do from storage,
+// under its session's lock, so a late or repeated event finds the work done or redoes it once.
 import { Cause, type Duration, Effect, FiberMap, FiberSet, Stream } from "effect"
 
 import { Bus, type EngineEvent } from "./bus.ts"

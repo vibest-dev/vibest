@@ -531,7 +531,7 @@ const make = Effect.gen(function* () {
       const buffer = yield* TxBuffer
       if (buffer === undefined) return yield* Effect.die(new Error("append outside a transaction"))
       if (buffer.closed || (yield* Effect.fiberId) !== buffer.fiberId)
-        return yield* Effect.die(new Error("append from the transaction fiber"))
+        return yield* Effect.die(new Error("append not from the transaction fiber"))
       const at = event.at ?? (yield* now)
       const data = JSON.parse(JSON.stringify(event.data ?? {})) as Readonly<Record<string, unknown>>
       const [row] = yield* sql<{ id: number }>`INSERT INTO event ${sql.insert({
