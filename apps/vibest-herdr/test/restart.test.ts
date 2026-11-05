@@ -14,6 +14,7 @@ import { TestClock } from "effect/testing"
 
 import { daemonPlan } from "../src/cli.ts"
 import {
+  eventsOf,
   FakeProcesses,
   FakeRuntime,
   makeRepository,
@@ -248,6 +249,25 @@ describe("restart in place", () => {
       assert.lengthOf(notices, 1)
       assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
       assert.include(notices[0]!.message, `Restarted: ${sub}, ${main}.`)
+    }),
+  )
+
+  test(
+    "a report from before a restart is not the new process's result",
+    Effect.gen(function* () {
+      const { db, sessions, id, pid } = yield* started
+      const processes = yield* FakeProcesses
+      yield* db.noteHarnessSession(id, "conv-1")
+      yield* writeResult(id, "pi", { text: "status: completed\nsummary: before restart" })
+      const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
+      yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((rows) => Ref.set(outcomes, rows))))
+      yield* until(processes.signaled, (sent) => sent.includes(pid))
+      yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      const [outcome] = (yield* untilVirtual(Ref.get(outcomes), (rows) => rows !== undefined))!
+      assert.strictEqual(outcome?.ok, true, outcome?.message)
+      yield* sessions.check(id)
+      assert.strictEqual((yield* eventsOf(id, "turn.end")).length, 0)
+      assert.isUndefined(yield* db.latestInbox(id, "result"))
     }),
   )
 })

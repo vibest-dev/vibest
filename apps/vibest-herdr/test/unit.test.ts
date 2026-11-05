@@ -728,8 +728,19 @@ describe("Db", () => {
         result: "<summary></summary>",
       })
 
+      // The same first line, from a `turn.reported` a `turn.end` points at, as from an old `output`.
+      const reportedId = "22222222-2222-4222-8222-222222222222"
+      yield* db.insertSession(session(reportedId), yield* projectOf("r"))
+      const [reported] = yield* sql<{ id: number }>`INSERT INTO event (at, session_id, type, data)
+        VALUES (30, ${reportedId}, 'turn.reported', ${JSON.stringify({ harness: "pi", text: "new line\nmore" })}) RETURNING id`
+      const [start] = yield* sql<{ id: number }>`INSERT INTO event (at, session_id, type, data)
+        VALUES (29, ${reportedId}, 'turn.start', '{}') RETURNING id`
+      yield* sql`INSERT INTO event (at, session_id, type, turn_id, data)
+        VALUES (31, ${reportedId}, 'turn.end', ${start!.id}, ${JSON.stringify({ status: "failed", report: reported!.id })})`
+
       const briefs = yield* db.sessionBriefs([
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        reportedId,
         "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
         "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
         "ffffffff-ffff-4fff-8fff-ffffffffffff",
@@ -740,6 +751,7 @@ describe("Db", () => {
         task: "from parent",
         latest: { status: "failed", summary: "new line", endedAt: 20 },
       })
+      assert.deepStrictEqual(briefs.get(reportedId)?.latest, { status: "failed", summary: "new line", endedAt: 31 })
       assert.deepStrictEqual(briefs.get("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), { task: "do it", latest: null })
       assert.deepStrictEqual(briefs.get("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"), {
         task: null,

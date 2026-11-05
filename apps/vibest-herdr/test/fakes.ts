@@ -88,13 +88,20 @@ export const writeResult = (id: string, harness: string, payload: object, offset
   Effect.gen(function* () {
     const adapter = (yield* Harnesses).get(harness as HarnessId)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
-    yield* (yield* TurnEnds).ended(id, turnEndFrom(adapter, payload as Record<string, unknown>, at))
+    yield* (yield* Db).reportTurn(id, turnEndFrom(adapter, payload as Record<string, unknown>, at))
   })
 
-/** The latest reported turn end's text for session `id` ("" with none): what a result file held before. */
+/** The latest unconsumed turn report's text for session `id` ("" when none, or a `turn.end` already points at it). */
 export const resultText = (id: string) =>
   Effect.gen(function* () {
-    return (yield* (yield* TurnEnds).latest(id))?.text ?? ""
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ text: string | null }>`SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM event te WHERE te.type = 'turn.end' AND json_extract(te.data, '$.report') = r.id)
+      THEN NULL ELSE json_extract(r.data, '$.text') END AS text
+      FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' ORDER BY r.id DESC LIMIT 1`.pipe(
+      Effect.orDie,
+    )
+    return row?.text ?? ""
   })
 
 /** Whether a turn start was reported for session `id` at or after `at`. */
@@ -103,10 +110,14 @@ export const startedSince = (id: string, at: number) =>
     return yield* (yield* TurnEnds).startedSince(id, at)
   })
 
-/** Forget session `id`'s reported turn end, as if none had come. */
+/**
+ * Ignore the latest report, as the old in-memory drop did. A later report still counts. Tests need this because the
+ * clock is frozen and a report's time can sit after the next turn's prompt.
+ */
 export const dropResult = (id: string) =>
   Effect.gen(function* () {
-    yield* (yield* TurnEnds).drop(id)
+    const found = yield* (yield* Db).latestReport(id)
+    if (found) yield* (yield* TurnEnds).cut(id, found.id)
   })
 
 /** git in tests: a failure is a bug in the test. */

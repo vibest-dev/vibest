@@ -94,8 +94,6 @@ export const sessionMove = (deps: {
     text: string,
     error: string | undefined,
   ) => Effect.Effect<unknown, unknown, MovePlatform>
-  /** The reported turn ends: the old harness's end is dropped (turn-ends.ts). */
-  readonly turnEnds: { readonly drop: (id: string) => Effect.Effect<void> }
   /** The session's system prompt, made now from its row and the project files (sessions.ts `systemPromptOf`). */
   readonly systemPromptOf: (session: SessionRow) => Effect.Effect<string, unknown, MovePlatform>
   readonly uuid: Effect.Effect<string>
@@ -305,7 +303,6 @@ export const sessionMove = (deps: {
       // agent ever runs. In place only its harness ends; otherwise its terminal closes.
       if (inPlace) {
         if ((yield* endRunning) === "denied") {
-          yield* deps.turnEnds.drop(row.id)
           yield* deps.finish(
             row,
             "failed",
@@ -317,7 +314,6 @@ export const sessionMove = (deps: {
       } else if (terminal !== undefined) {
         const closed = yield* h.close(terminal).pipe(Effect.exit)
         if (Exit.isFailure(closed)) {
-          yield* deps.turnEnds.drop(row.id)
           yield* deps.finish(
             row,
             "failed",
@@ -386,7 +382,6 @@ export const sessionMove = (deps: {
         exitedAt: null,
       })
       row = (yield* db.getSession(row.id))!
-      yield* deps.turnEnds.drop(row.id)
       const text = harnesses.get(row.harnessId).systemPromptInPrompt
         ? `${yield* deps.systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
         : next.prompt

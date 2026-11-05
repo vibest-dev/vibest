@@ -1,6 +1,6 @@
-// The turn ends and turn starts the harness integrations hand vibestd (hooks.ts), kept in memory until the session's
-// next check settles them into `turn.end` events (rounds.ts collectResult). Memory only: a turn end vibestd had not
-// written when it stopped is lost, and reconciliation records its turn lost (docs/design/schema.md, Memory).
+// Turn starts the harness integrations hand vibestd (hooks.ts), kept in memory until the poll's sweep finds the
+// session no longer live. A turn end is a `turn.reported` event (db.ts), not memory. `through` is the last report a
+// restart already settled: the new `process.start` is written before the old harness stops reporting.
 import { Context, Effect, Layer } from "effect"
 
 import type { HarnessAdapter, HarnessId } from "./harness.ts"
@@ -55,49 +55,35 @@ export const turnEndFrom = (
 }
 
 const make = Effect.sync(() => {
-  /** Each session's latest turn end. */
-  const ends = new Map<string, TurnEnded>()
   /** Each session's latest turn start (the user's prompt reached the harness): the pickup proof a send compares. */
   const starts = new Map<string, number>()
+  /** Reports with `id` at or below this were the previous process's (a restart). */
+  const through = new Map<string, number>()
   return {
-    ended: (id: string, end: TurnEnded) =>
-      Effect.sync(() => {
-        ends.set(id, end)
-      }),
-    latest: (id: string) => Effect.sync(() => ends.get(id)),
-    /** The end `end` was written as session `id`'s result: drop it, unless a newer one replaced it meanwhile. */
-    written: (id: string, end: TurnEnded) =>
-      Effect.sync(() => {
-        if (ends.get(id) === end) ends.delete(id)
-      }),
-    /** A turn end reported at or after `at` is dropped (a restart's or a move's old harness); `0`: any. */
-    drop: (id: string, since = 0) =>
-      Effect.sync(() => {
-        if ((ends.get(id)?.at ?? -1) >= since) ends.delete(id)
-      }),
     started: (id: string, at: number) =>
       Effect.sync(() => {
         if (at > (starts.get(id) ?? -1)) starts.set(id, at)
       }),
     /** Whether a turn started at or after `at`. */
     startedSince: (id: string, at: number) => Effect.sync(() => (starts.get(id) ?? -1) >= at),
+    /** Ignore session `id`'s reports up to and including event `reportId` (restart.ts settle). */
+    cut: (id: string, reportId: number) =>
+      Effect.sync(() => {
+        if (reportId > (through.get(id) ?? 0)) through.set(id, reportId)
+      }),
+    /** The last report id `cut` settled for session `id` (0: none). */
+    through: (id: string) => Effect.sync(() => through.get(id) ?? 0),
     /** Forget every session `keep` rejects (the sweep: no longer live). */
     sweep: (keep: (id: string) => boolean) =>
       Effect.sync(() => {
-        for (const id of ends.keys()) if (!keep(id)) ends.delete(id)
         for (const id of starts.keys()) if (!keep(id)) starts.delete(id)
+        for (const id of through.keys()) if (!keep(id)) through.delete(id)
       }),
-    size: Effect.sync(() => ({ ends: ends.size, starts: starts.size })),
-    /** Forget session `id` (archived). */
-    forget: (id: string) =>
-      Effect.sync(() => {
-        ends.delete(id)
-        starts.delete(id)
-      }),
+    size: Effect.sync(() => ({ starts: starts.size })),
   }
 })
 
-/** One per vibestd, shared by the hooks, Sessions and its restart, move, placement and removal. */
+/** One per vibestd, shared by Sessions and its restart. */
 export class TurnEnds extends Context.Service<TurnEnds, Effect.Success<typeof make>>()("vibest/TurnEnds") {
   static readonly layer = Layer.effect(TurnEnds, make)
 }

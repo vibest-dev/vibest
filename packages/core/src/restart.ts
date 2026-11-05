@@ -258,8 +258,12 @@ export const sessionRestart = (deps: {
         argv: againArgv(session),
         liveNow: db.getSession(id).pipe(Effect.map((row) => row?.metadata)),
         locked: deps.locked(id),
-        // A turn end the old harness reported while it stopped is not the round's result.
-        settle: (at) => deps.turnEnds.drop(id, at),
+        // The new process.start is written before the old harness stops reporting, so its process.start.at does not
+        // cover a report that lands on the new process. Ignore every report that already exists.
+        settle: (_at) =>
+          deps.db
+            .latestReport(id)
+            .pipe(Effect.flatMap((found) => (found === undefined ? Effect.void : deps.turnEnds.cut(id, found.id)))),
         hint: `; ${peekHint(id)}`,
         onBack: (h) =>
           Effect.gen(function* () {

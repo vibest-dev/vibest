@@ -26,6 +26,7 @@ import { SqlClient, type Statement } from "effect/sql"
 import { Bus, type StoredEvent, type StoredType } from "./bus.ts"
 import { HARNESS_IDS, type HarnessId } from "./harness.ts"
 import { Routing } from "./plugins.ts"
+import type { TurnEnded } from "./turn-ends.ts"
 export { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
@@ -401,10 +402,23 @@ const ROUND_STATUS = ["completed", "failed", "interrupted", "lost", "not_started
 /** `turn.end` data (schema.md), written once. */
 export type TurnEnd = {
   readonly status: (typeof ROUND_STATUS)[number]
-  /** The harness's last answer text. */
+  /** The harness's last answer text. Rows written before `report`; new ends leave it out. */
   readonly output?: string
+  /** The `turn.reported` event this end consumed. */
+  readonly report?: number
   /** The harness's error. */
   readonly failure?: { readonly message: string }
+}
+
+/** A `turn.reported` row, the harness's turn end as received. */
+export type TurnReport = {
+  readonly id: number
+  readonly at: number
+  readonly harness: string
+  readonly text: string
+  readonly error?: string
+  readonly conversationId?: string
+  readonly interrupted: boolean
 }
 
 /** A harness error as `turn.end` failure; none for an empty error. */
@@ -460,6 +474,8 @@ type BriefRow = {
   readonly endData: string | null
   readonly endedAt: number | null
   readonly resultContent: string | null
+  /** Answer text: the consumed `turn.reported`, else an old `turn.end`'s `output`. */
+  readonly answer: string | null
 }
 
 const roundStatus = (status: unknown): TurnEnd["status"] =>
@@ -857,6 +873,7 @@ const make = Effect.gen(function* () {
         data: {
           status: end.status,
           ...(end.output === undefined ? {} : { output: end.output }),
+          ...(end.report === undefined ? {} : { report: end.report }),
           ...(end.failure === undefined ? {} : { failure: end.failure }),
         },
       })
@@ -1354,10 +1371,12 @@ const make = Effect.gen(function* () {
             t.id AS turn_id,
             te.data AS end_data,
             te.at AS ended_at,
-            (SELECT i.content FROM inbox i WHERE i.result_event_id = te.id ORDER BY i.id LIMIT 1) AS result_content
+            (SELECT i.content FROM inbox i WHERE i.result_event_id = te.id ORDER BY i.id LIMIT 1) AS result_content,
+            coalesce(json_extract(tr.data, '$.text'), json_extract(te.data, '$.output')) AS answer
           FROM session a
           LEFT JOIN event t ON t.id = (SELECT max(id) FROM event WHERE session_id = a.id AND type = 'turn.start')
           LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end'
+          LEFT JOIN event tr ON tr.id = json_extract(te.data, '$.report') AND tr.type = 'turn.reported'
           WHERE ${sql.in("a.id", ids)}`
       ).pipe(
         Effect.map((rows) => {
@@ -1368,7 +1387,7 @@ const make = Effect.gen(function* () {
             const status = raw !== undefined && MESSAGE_STATUSES.has(raw) ? (raw as MessageStatusName) : undefined
             const summary =
               (row.resultContent === null ? undefined : summaryIn(row.resultContent)) ??
-              end?.output?.split("\n")[0] ??
+              (row.answer === null ? undefined : row.answer.split("\n")[0]) ??
               ""
             briefs.set(row.id, {
               task: row.task ?? null,
@@ -1718,6 +1737,58 @@ const make = Effect.gen(function* () {
           return true
         }),
       ).pipe(Effect.orDie),
+
+    /**
+     * The harness's turn end, as received: one `turn.reported`, linked to the current process. No session lock. A check
+     * later writes the `turn.end` that points at it.
+     */
+    reportTurn: (id: string, end: TurnEnded) =>
+      tx(
+        Effect.gen(function* () {
+          const processId = (yield* anySession(id))?.current?.id
+          yield* append({
+            sessionId: id,
+            type: "turn.reported",
+            ...(processId === undefined ? {} : { processId }),
+            at: end.at,
+            data: {
+              harness: end.harness,
+              text: end.text,
+              ...(end.error ? { error: end.error } : {}),
+              ...(end.conversationId ? { conversation: end.conversationId } : {}),
+              ...(end.interrupted ? { interrupted: true } : {}),
+            },
+          })
+        }),
+      ).pipe(Effect.orDie),
+
+    /** The latest `turn.reported` for session `id`. Undefined when it never reported one. */
+    latestReport: (id: string) =>
+      sql<{ id: number; at: number; data: string }>`SELECT id, at, data FROM event
+        WHERE session_id = ${id} AND type = 'turn.reported' ORDER BY id DESC LIMIT 1`.pipe(
+        Effect.map((rows) => {
+          const row = rows[0]
+          if (row === undefined) return undefined
+          const data = JSON.parse(row.data) as {
+            harness?: unknown
+            text?: unknown
+            error?: unknown
+            conversation?: unknown
+            interrupted?: unknown
+          }
+          if (typeof data.harness !== "string") return undefined
+          return {
+            id: row.id,
+            at: row.at,
+            harness: data.harness,
+            text: typeof data.text === "string" ? data.text : "",
+            ...(typeof data.error === "string" && data.error !== "" ? { error: data.error } : {}),
+            ...(typeof data.conversation === "string" ? { conversationId: data.conversation } : {}),
+            interrupted: data.interrupted === true,
+          } satisfies TurnReport
+        }),
+        Effect.orDie,
+      ),
 
     /**
      * Close the open turn with `end` (its whole `turn.end` data) and point the result at it, in one transaction with the

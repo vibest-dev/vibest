@@ -14,6 +14,7 @@ import {
   type SessionPatch,
   type SessionRow,
   type TurnEnd,
+  type TurnReport,
   type TurnState,
   failureOf,
 } from "./db.ts"
@@ -23,7 +24,6 @@ import type { LimitMove } from "./move.ts"
 import { workspaceGit } from "./project-create.ts"
 import { envelope, isUsageLimitError, outcome, parseReport, type ResultStatus } from "./results.ts"
 import { type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
-import type { TurnEnded } from "./turn-ends.ts"
 import { gitState } from "./worktree.ts"
 
 export const sessionRounds = (deps: {
@@ -43,15 +43,15 @@ export const sessionRounds = (deps: {
       from?: InboxStatus,
     ) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly latestRoundAt: (sessionId: string) => Effect.Effect<number | undefined>
+    readonly latestReport: (sessionId: string) => Effect.Effect<TurnReport | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly beginUserTurn: (id: string, text: string, patch: SessionPatch) => Effect.Effect<boolean>
   }
   readonly inbox: { readonly announce: (row: InboxRow) => Effect.Effect<void> }
-  /** The turn ends the integrations reported (turn-ends.ts). */
+  /** Reports a restart already settled (turn-ends.ts): a later one is this process's. */
   readonly turnEnds: {
-    readonly latest: (id: string) => Effect.Effect<TurnEnded | undefined>
-    readonly written: (id: string, end: TurnEnded) => Effect.Effect<void>
+    readonly through: (id: string) => Effect.Effect<number>
   }
   readonly harnesses: {
     readonly all: ReadonlyArray<HarnessAdapter>
@@ -89,6 +89,8 @@ export const sessionRounds = (deps: {
     error: string | undefined,
     /** The reported turn end's time: the turn ends no earlier, so the same report is not taken again. */
     at?: number,
+    /** The `turn.reported` this end consumes. None: an end the harness never reported. */
+    reported?: number,
   ) {
     const report = parseReport(text)
     const status: ResultStatus = end === "completed" && !error ? "completed" : "failed"
@@ -126,7 +128,11 @@ export const sessionRounds = (deps: {
     const failure = failureOf(error)
     const row = yield* db.finishTurn(
       session.id,
-      { status: end, output: text, ...(failure === undefined ? {} : { failure }) },
+      {
+        status: end,
+        ...(reported === undefined ? {} : { report: reported }),
+        ...(failure === undefined ? {} : { failure }),
+      },
       { turnState: end, lastActive: yield* Clock.currentTimeMillis },
       {
         sessionId: session.id,
@@ -211,10 +217,9 @@ export const sessionRounds = (deps: {
   })
 
   /**
-   * Ends the turn if the integration already reported its end (TurnEnds). An open round takes an end newer than its
-   * prompt. No open round takes an end newer than the last round (closed or not); `closeRound` inserts that round with
-   * empty input, and the end's time is stamped on its `turn.end`, so the same end is not delivered twice.
-   * `delivered`: the round went to the parent.
+   * Ends the turn if a `turn.reported` is eligible: the current harness, received after this process started and after
+   * the open round's prompt (or after the last round, when none is open). The `turn.end` stamp is no earlier than the
+   * report, so the same report is not taken twice. `delivered`: the round went to the parent.
    */
   const collectResult = Effect.fn("Sessions.collectResult")(function* (
     /** Undefined: the session has no runtime vibestd can reach; its turn end is still written, a limit move is not made. */
@@ -222,8 +227,13 @@ export const sessionRounds = (deps: {
     session: SessionRow,
   ) {
     const terminal = session.address
-    const found = yield* turnEnds.latest(session.id)
+    const found = yield* db.latestReport(session.id)
     if (found === undefined) return "none" as const
+    // A late end from the harness this session just left is not this round. Leave it: the new harness's end replaces it.
+    if (found.harness !== session.harnessId) return "none" as const
+    if (session.startedAt === null || found.at <= session.startedAt) return "none" as const
+    // A restart writes the new process.start before the old harness stops reporting (turn-ends.ts `through`).
+    if (found.id <= (yield* turnEnds.through(session.id))) return "none" as const
     if (session.turnState === "open") {
       if (found.at <= session.turnPromptedAt) return "none" as const
     } else {
@@ -232,8 +242,6 @@ export const sessionRounds = (deps: {
       const last = yield* db.latestRoundAt(session.id)
       if (last !== undefined && found.at <= last) return "none" as const
     }
-    // A late end from the harness this session just left is not this round. Leave it: the new harness's end replaces it.
-    if (found.harness !== session.harnessId) return "none" as const
     // A usage limit moves the session to another harness (agent.fail); the open round stays the one that finishes.
     if (found.error && isUsageLimitError(found.error)) {
       if (h === undefined) return "none" as const
@@ -243,8 +251,7 @@ export const sessionRounds = (deps: {
     // The runtime reported no session id (Cursor): the hook's own conversation id lets the session be resumed.
     if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId && found.conversationId)
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
-    yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.at)
-    yield* turnEnds.written(session.id, found)
+    yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.at, found.id)
     return "delivered" as const
   })
 

@@ -179,7 +179,7 @@ describe.concurrent("vibest rm: process proof", () => {
   )
 
   test(
-    "worktree already gone: its result and rules files are removed once its processes are proven exited",
+    "worktree already gone: its rules file is removed once its processes are proven exited, and the report stays",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       /** The session's worktree deleted outside vibest, and its result and rules files with recognizable contents. */
@@ -190,19 +190,20 @@ describe.concurrent("vibest rm: process proof", () => {
           yield* fs.writeFileString(w.rules, `rules of ${w.id}`)
         })
 
-      // Its terminal closed by hand: the close contract already proved its processes gone, so both files go.
+      // Its terminal closed by hand: the close contract already proved its processes gone, so the rules file goes.
+      // The reported turn end is an event now, not a file, so archive does not drop it.
       const a = yield* idleSession
       yield* a.herdr.runtime.close({ machine: "local", id: a.pane })
       yield* seeded(a)
       assert.deepInclude(yield* a.sessions.remove(a.id), { processes: "exited", pane: "closed", worktree: "gone" })
-      assert.strictEqual(yield* resultText(a.id), "")
+      assert.strictEqual(yield* resultText(a.id), `result of ${a.id}`)
       assert.isFalse(yield* fs.exists(a.rules))
 
-      // Its terminal closed by vibest rm and no process in it: both go as well.
+      // Its terminal closed by vibest rm and no process in it: the rules file goes as well.
       const b = yield* idleSession
       yield* seeded(b)
       assert.deepInclude(yield* b.sessions.remove(b.id), { processes: "exited", pane: "closed", worktree: "gone" })
-      assert.strictEqual(yield* resultText(b.id), "")
+      assert.strictEqual(yield* resultText(b.id), `result of ${b.id}`)
       assert.isFalse(yield* fs.exists(b.rules))
     }),
   )

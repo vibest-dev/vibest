@@ -21,7 +21,6 @@ import { Db } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
-import { TurnEnds } from "@vibest/core/turn-ends"
 import * as Server from "@vibest/server/server"
 import { Clock, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
@@ -531,12 +530,11 @@ describe("pi-vibest", () => {
         messages: [{ role: "user" }, { role: "assistant", content: [{ type: "text", text: "status: completed" }] }],
       })
       yield* s.emit("agent_settled", { aborted: false }, { isIdle: () => true })
-      assert.deepInclude(yield* (yield* TurnEnds).latest("abcd1234-abcd-4abc-8abc-abcd1234abcd"), {
-        harness: "pi",
-        text: "status: completed",
-        error: undefined,
-        interrupted: false,
-      })
+      const reported = yield* (yield* Db).latestReport("abcd1234-abcd-4abc-8abc-abcd1234abcd")
+      assert.strictEqual(reported?.harness, "pi")
+      assert.strictEqual(reported?.text, "status: completed")
+      assert.strictEqual(reported?.error, undefined)
+      assert.strictEqual(reported?.interrupted, false)
     }),
   )
 

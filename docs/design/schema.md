@@ -168,7 +168,8 @@ An inbox row is text for one recipient: a session, or the user (`recipient_sessi
 | process.conversation | process_id          | conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                                         |
 | process.end          | process_id          | reason: exited, limited, restart, move, archived (also for vibest --new), launch_failed                                                                                                  |
 | turn.start           | process_id          | typed? (the text typed into the pane; none for a turn a delivery opened)                                                                                                                 |
-| turn.end             | process_id, turn_id | status: completed, failed, interrupted, lost, not_started; output?, failure? {message} (the harness error)                                                                               |
+| turn.reported        | process_id          | harness, text; error?, conversation?, interrupted? (only when present). The turn end as the hook reported it, before a check consumes it                                                 |
+| turn.end             | process_id, turn_id | status: completed, failed, interrupted, lost, not_started; report? (the turn.reported it consumed), failure? {message}; output? only on rows written before report                       |
 | inbox.queued         | inbox_id            | none (the queue time is `at`)                                                                                                                                                            |
 | inbox.status         | inbox_id, turn_id?  | to; on to = delivered, turn_id is the turn that consumed it                                                                                                                              |
 
@@ -181,8 +182,10 @@ terminal). The start with the terminal follows it and copies what the process re
 `process.ready` and `process.conversation`); the one with no terminal is never ended. One whose terminal never
 opened ends `launch_failed`, and the session's current process is then the start before it, if any.
 
-`turn.end` `output` is the harness's answer text (not the rendered result, which is the result row's content); the
-migration takes it out of an old-shape result. `Db.finishTurn` takes the whole `turn.end` data.
+A `turn.end` points at the `turn.reported` it consumed (`report`). That row's `text` is the harness's answer, not the
+rendered result (the result row's content). Rows written before `report` keep the answer in `output`. `ls` reads
+`coalesce(text, output)`. `Db.finishTurn` takes the whole `turn.end` data. An end the harness never reported
+(`lost`, `not_started`, an exit, an interrupt) has no `report`.
 
 ## Hot paths
 
@@ -215,10 +218,9 @@ migration takes it out of an old-shape result. `Db.finishTurn` takes the whole `
   open turn stays open, and the harness's turn end or reconciliation (idle, no result: lost) ends it.
 - When an open turn's text was last handed over (after a resume or a move to the next harness): a turn end
   reported before it is not this turn's. Lost with the process; the turn's own start time stands then.
-- The turn starts and turn ends the integrations reported (TurnEnds): an end until a check writes it as `turn.end`
-  and its result row (that check is a settlement, so it still runs while vibestd drains), a start until the poll's
-  sweep finds the session no longer live. Lost with the process: an end not yet written is lost, and reconciliation
-  ends the turn lost.
+- The turn starts the integrations reported (TurnEnds), until the poll's sweep finds the session no longer live.
+  A turn end is a `turn.reported` event, written as the hook is admitted (a settlement, so it still lands while
+  vibestd drains) and kept across a restart. The check that writes it as `turn.end` is a settlement too.
   After a restart the stored proof that a turn was taken up is its typed text or an inbox row delivered into it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.

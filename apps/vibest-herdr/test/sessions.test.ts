@@ -482,8 +482,6 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { turnState: "completed" })
       assert.include((yield* db.latestInbox(id, "result"))!.message, "done again")
-      // The written turn end is not kept (its text is in the result row now).
-      assert.deepInclude(yield* sessions.inMemory, { turnEnds: 0 })
       // A live session between turns keeps its flags, across polls too; archived, the next poll drops them, though it
       // no longer checks the row (archive set exitedAt).
       yield* TestClock.adjust("10 seconds")
@@ -492,7 +490,7 @@ describe.concurrent("Sessions", () => {
       yield* sessions.remove(id)
       assert.strictEqual(yield* db.liveStatuses, 0)
       yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
-      assert.deepInclude(yield* sessions.inMemory, { turnEnds: 0, turnStarts: 0 })
+      assert.deepInclude(yield* sessions.inMemory, { turnStarts: 0 })
       // Results reached the coordinator through the project's lock, which is gone too.
       assert.strictEqual(yield* (yield* Inbox).locks, 0)
     }),

@@ -223,7 +223,6 @@ export class Sessions extends Context.Service<
     readonly inMemory: Effect.Effect<{
       readonly tracked: number
       readonly locks: number
-      readonly turnEnds: number
       readonly turnStarts: number
     }>
     /** The live agents (main agents too) whose recorded integration is not this vibestd's (`vibest update`). */
@@ -676,7 +675,6 @@ export class Sessions extends Context.Service<
         locate,
         finish,
         launchArgv,
-        turnEnds,
         systemPromptOf,
         uuid: newId(),
         terminate: processes.terminate,
@@ -1413,9 +1411,8 @@ export class Sessions extends Context.Service<
           scope,
         ).pipe(Effect.asVoid)
       const turnEnded = (id: string, end: TurnEnded) =>
-        turnEnds.ended(id, end).pipe(
-          // One line per reported end (no text): what vibestd.log shows of a turn end that writes no result.
-          Effect.andThen(Effect.log(`turn end ${id} (${end.harness}${end.interrupted ? ", interrupted" : ""})`)),
+        // One line per reported end (no text): what vibestd.log shows of a turn end that writes no result.
+        Effect.log(`turn end ${id} (${end.harness}${end.interrupted ? ", interrupted" : ""})`).pipe(
           Effect.andThen(resultReady(id)),
         )
 
@@ -1459,8 +1456,8 @@ export class Sessions extends Context.Service<
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: Effect.gen(function* () {
           const map = yield* SynchronizedRef.get(tracked)
-          const { ends, starts } = yield* turnEnds.size
-          return { tracked: HashMap.size(map), locks: locks.size(), turnEnds: ends, turnStarts: starts }
+          const { starts } = yield* turnEnds.size
+          return { tracked: HashMap.size(map), locks: locks.size(), turnStarts: starts }
         }),
         outdated,
         restart,
