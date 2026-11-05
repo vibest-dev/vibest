@@ -174,7 +174,13 @@ export const sessionPlacement = (deps: {
         project: input.project,
         cwd: input.cwd,
         argv: input.argv,
-        env: { ...input.env, ...deps.vibestEnv(session) },
+        // The terminal inherits the server's environment. Pi reads PI_PACKAGE_DIR as its install; a directory
+        // the parent exported may be gone, and Pi then reports version 0.0.0. Empty clears it. `vibest run --env` keeps one.
+        env: {
+          ...(session.harnessId === "pi" && input.env?.PI_PACKAGE_DIR === undefined ? { PI_PACKAGE_DIR: "" } : {}),
+          ...input.env,
+          ...deps.vibestEnv(session),
+        },
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),

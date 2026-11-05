@@ -16,6 +16,22 @@ import {
   writeSystemPrompt,
 } from "./system-prompt.ts"
 
+/**
+ * Environment for replacing this process with a harness: `base` plus `overlay`.
+ * A launched Pi does not keep PI_PACKAGE_DIR from the parent. A directory the parent exported may be gone by the
+ * time the child starts, and Pi then reports version 0.0.0. A value in `overlay` (`vibest --env`) stays.
+ */
+export const harnessExecEnv = (
+  base: Readonly<Record<string, string | undefined>>,
+  file: string,
+  overlay: Readonly<Record<string, string>>,
+): Record<string, string> => {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(base)) if (value !== undefined) env[key] = value
+  if ((file === "pi" || file.endsWith("/pi")) && !Object.hasOwn(overlay, "PI_PACKAGE_DIR")) delete env.PI_PACKAGE_DIR
+  return { ...env, ...overlay }
+}
+
 /** An unusable temporary directory is the user's to fix and fails the start; any other error there is a defect. */
 const unsafeOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.catch((e) => (e instanceof SystemPromptDirUnsafe ? Effect.fail(e) : Effect.die(e))))

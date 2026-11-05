@@ -10,6 +10,7 @@ import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
 import { CLAUDE_CREDENTIALS, claudeCredentialsFile, type KeychainPlatform, securityArgs } from "@vibest/core/keychain"
+import { harnessExecEnv } from "@vibest/core/launch"
 import { type Candidate, type PluginLoader } from "@vibest/core/plugins"
 import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibest/core/processes"
 import { UserPlatform } from "@vibest/core/system-prompt"
@@ -298,5 +299,5 @@ export const selfCommand: ReadonlyArray<string> =
 
 /** Replace this process with `file` (looked up on PATH like a shell does), adding `env` to the current environment. */
 export const exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => {
-  process.execve!(Bun.which(file) ?? file, [file, ...args], { ...process.env, ...env })
+  process.execve!(Bun.which(file) ?? file, [file, ...args], harnessExecEnv(process.env, file, env))
 }
