@@ -6,7 +6,7 @@ import { shortId } from "@vibest/schema/id"
 // A coordinator whose harness adapter has `inbox: "subscribe"` or `"poll"` takes its rows itself: the Pi extension over
 // vibest.sock (`stream`), the Claude plugin by polling vibestd's HTTP socket (`poll` / `ack`). Every other idle
 // coordinator gets them typed in through the runtime's prompt. Nobody there: the row is `dropped`.
-import { Cause, Clock, Context, Duration, Effect, Exit, Layer, Option, PubSub, Queue, Stream } from "effect"
+import { Cause, Context, Duration, Effect, Exit, Layer, Option, PubSub, Queue, Stream } from "effect"
 
 import { Bus, type EngineEvent } from "./bus.ts"
 import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
@@ -14,6 +14,7 @@ import { Drain } from "./drain.ts"
 import * as Engine from "./engine.ts"
 import { Harnesses } from "./harness.ts"
 import { keyedLock } from "./keyed-lock.ts"
+import * as Leases from "./leases.ts"
 import { Restarting } from "./restarting.ts"
 import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runtimes.ts"
 
@@ -198,6 +199,9 @@ export class Inbox extends Context.Service<
 
       // Each handler runs in its own fiber (engine.ts); `deliver` re-reads everything under the project's lock.
       const engine = yield* Engine.make
+      // The rows a polling main agent (recipient: its project) or one subscription (its own key) took and did not settle.
+      const leases = yield* Leases.make
+      let subscriptions = 0
       yield* engine.on((event) => {
         switch (event.type) {
           // A row for the main agent was queued, or put back.
@@ -284,85 +288,46 @@ export class Inbox extends Context.Service<
                 : undefined
             // Taken before the first claim: a row queued or put back for this main agent in between still wakes it.
             const arrivals = yield* bus.subscribe
-            // Claimed for the batch this pull emits. Set in the same uninterruptible region as the claim, so a close cannot lose the ids.
-            let unconfirmed: ReadonlyArray<number> = []
+            // The batch this pull emits is held until the next pull (delivered) or the close (failed). Held in the same
+            // uninterruptible region as the claim, so a close cannot lose the ids.
+            const recipient = `${projectId} subscription ${++subscriptions}`
             const claimOne = () =>
               origin === undefined
                 ? Effect.succeed(undefined)
                 : claimNext(projectId, "subscribe", origin, (ids) =>
-                    Effect.sync(() => {
-                      unconfirmed = ids
-                    }),
+                    leases.hold(recipient, ids, undefined, (ended) => db.setInboxStatus(ended, "failed", "sending")),
                   ).pipe(Effect.map((rows) => (rows === undefined ? undefined : text(rows))))
             // One batch per pull, no buffer: the socket server starts this pull only after the previous chunk's Ack.
             return Stream.unfold(0, () =>
               Effect.gen(function* () {
-                if (unconfirmed.length > 0) {
-                  yield* Effect.uninterruptible(
-                    Effect.gen(function* () {
-                      const ids = unconfirmed.slice()
-                      yield* markDelivered(ids)
-                      unconfirmed = []
-                    }),
-                  )
-                }
+                const ids = leases.held(recipient)
+                if (ids.length > 0)
+                  yield* Effect.uninterruptible(markDelivered(ids).pipe(Effect.andThen(leases.settle(ids))))
                 while (true) {
                   const batch = yield* claimOne()
                   if (batch !== undefined) return [batch, 0] as const
                   while (!wakes(subscribed?.id, yield* PubSub.take(arrivals))) {}
                 }
               }),
-            ).pipe(
-              Stream.ensuring(
-                Effect.suspend(() => {
-                  const ids = unconfirmed.slice()
-                  unconfirmed = []
-                  return ids.length === 0 ? Effect.void : db.setInboxStatus(ids, "failed", "sending")
-                }),
-              ),
-            )
+            ).pipe(Stream.ensuring(leases.expireAll(recipient)))
           }),
         )
 
-      // The Claude plugin's leases are memory only: per project, each leased (`sending`) row of its main agent and when
-      // its lease ends; changed under the project's lock. A vibestd that starts has no leases: Db.recoverDelivering puts
-      // `sending` rows of a polling main agent back to pending.
-      const leases = new Map<string, Map<number, number>>()
-      const forget = (projectId: string, ids: ReadonlyArray<number>) => {
-        const held = leases.get(projectId)
-        if (held === undefined) return
-        for (const id of ids) held.delete(id)
-        if (held.size === 0) leases.delete(projectId)
-      }
-      /** Ends the leases that ran out by `now` (every one when `now` is undefined): their rows still `sending` go back to pending. */
-      const endLeases = (projectId: string, now: number | undefined) =>
-        withLock(
-          `end leases project ${projectId}`,
-          projectId,
-          Effect.suspend(() => {
-            const ended = [...(leases.get(projectId) ?? [])]
-              .filter(([, until]) => now === undefined || until <= now)
-              .map(([id]) => id)
-            return Effect.tap(db.releaseLeased(projectId, ended), () => Effect.sync(() => forget(projectId, ended)))
-          }),
-          true,
+      /** A polling main agent's lease that ended: its rows still `sending` go back to pending. */
+      const released = (projectId: string) => (ids: ReadonlyArray<number>) =>
+        withLock(`end leases project ${projectId}`, projectId, db.releaseLeased(projectId, ids), true).pipe(
+          Effect.asVoid,
         )
 
       const poll = (projectId: string) =>
         Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis
           // A plugin that went away sends no poll: AWAY after its last one, its leases end at once.
-          yield* engine.arm(`away:${projectId}`, AWAY, endLeases(projectId, undefined))
+          yield* engine.arm(`away:${projectId}`, AWAY, leases.expireAll(projectId))
           const empty: Polled = { ids: [], line: "", text: "" }
           // Stopping: nothing new goes out; leases already out still settle (ack is a settlement).
           if ((yield* drain.phase) !== "open") return empty
-          yield* endLeases(projectId, now)
           const rows = yield* claimNext(projectId, "poll", undefined, (ids) =>
-            Effect.sync(() => {
-              const held = leases.get(projectId) ?? new Map<number, number>()
-              for (const id of ids) held.set(id, now + Duration.toMillis(LEASE))
-              leases.set(projectId, held)
-            }),
+            leases.hold(projectId, ids, LEASE, released(projectId)),
           )
           if (rows === undefined) return empty
           const last = rows.at(-1)!
@@ -379,8 +344,9 @@ export class Inbox extends Context.Service<
           `ack inbox ${ids.join(",")}`,
           projectId,
           Effect.uninterruptible(
-            Effect.map(db.settleLeased(projectId, ids, release), (rows) => {
-              forget(projectId, [...ids, ...release])
+            Effect.gen(function* () {
+              const rows = yield* db.settleLeased(projectId, ids, release)
+              yield* leases.settle([...ids, ...release])
               publishDelivered(rows)
               return rows.map((r) => r.id)
             }),
