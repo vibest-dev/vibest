@@ -219,7 +219,6 @@ before that and not yet consumed still counts. A report a `turn.end` consumed is
 - One-shot timers (engine): a session's turn-end grace and missed-turn check, a polling main agent's away timer, and
   one lease timer per row a poll handed out. Lost with the process; the start-up reconcile and `recoverDelivering`
   stand in for them.
-
 - Live status: from the integration's events (working between `turn.start` and `turn.end`, plus `blocked`), and
   from the runtime only for a harness with no integration.
 - Poll leases: on start, `recoverDelivering` (one transaction) moves `delivering` rows of polling main agents back
