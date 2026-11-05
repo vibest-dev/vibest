@@ -2162,10 +2162,11 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a remembered limit is forgotten once the login's row was refreshed after it and reads fine",
+    "a login limited in this round is not tried again in it, even when its row reads free; a later round may use it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const subs = yield* Subscriptions
+      const sql = yield* SqlClient.SqlClient
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
@@ -2176,22 +2177,38 @@ describe.concurrent("Sessions", () => {
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), provider: "openai" })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
-      // pi/openai goes bad and the session moves to claude, remembering pi/openai limited.
+      const free = [{ window: "5h", percent: 5, status: "available" as const, resetTime: null }]
+      const limitedEnds = sql<{ harness: string; provider: string | null }>`SELECT
+          json_extract(ps.data, '$.harness') AS harness, json_extract(ps.data, '$.provider') AS provider
+        FROM event pe JOIN event ps ON ps.id = pe.process_id
+        WHERE pe.session_id = ${id} AND pe.type = 'process.end' AND json_extract(pe.data, '$.reason') = 'limited'
+        ORDER BY pe.id`.pipe(Effect.orDie)
+      // pi/openai hits its limit and the session moves to claude.
       yield* subs.report({ harness: "pi", provider: "openai", limits: [limited] })
       yield* TestClock.adjust("10 seconds")
       yield* writeResult(id, "pi", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
-      // The row is refreshed after the limit and no longer limited: claude's limit moves back to it, not to nothing.
+      // Its row is refreshed after the limit and reads free, yet it hit a limit in this round: claude's limit ends the
+      // round instead of going back to it.
       yield* TestClock.adjust("10 seconds")
-      yield* subs.report({
-        harness: "pi",
-        provider: "openai",
-        limits: [{ window: "5h", percent: 5, status: "available", resetTime: null }],
-      })
-      // A generic limit payload on a claude row: this tests the harness move. Claude's plugin reports no error kind
-      // (turn.complete has none), so a real Claude limit is a failed result, not this move.
+      yield* subs.report({ harness: "pi", provider: "openai", limits: free })
+      yield* writeResult(id, "claude", { error: "rate_limit" })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      assert.deepInclude(yield* db.getSession(id), { harnessId: "claude", turnState: "failed" })
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "no harness left")
+      assert.deepStrictEqual(
+        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
+        ["pi", "claude"],
+      )
+      assert.deepStrictEqual(yield* limitedEnds, [{ harness: "pi", provider: "openai" }])
+      // A later message is a new round: the free reading lets claude's next limit move back to pi/openai.
+      yield* TestClock.adjust("10 seconds")
+      yield* sessions.send(id, "next")
+      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      yield* TestClock.adjust("10 seconds")
       yield* writeResult(id, "claude", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -2200,11 +2217,26 @@ describe.concurrent("Sessions", () => {
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude", "pi"],
       )
-      const args = (yield* herdr.callsTo("open")).at(-1)!.argv
-      // Pi refuses --provider without --model: the login is recorded on the session, Pi starts on its default.
-      assert.notInclude(args, "--provider")
+      assert.deepStrictEqual(yield* limitedEnds, [
+        { harness: "pi", provider: "openai" },
+        { harness: "claude", provider: null },
+      ])
     }),
-    { noRun: true },
+    {
+      noRun: true,
+      plugins: [
+        Plugin.define({
+          id: "two-logins",
+          effect: (ctx) =>
+            ctx.agent.hook("fail", (e) =>
+              Effect.sync(() => {
+                // Trusts the usage rows: whichever of the two logins the session is not on.
+                e.move = e.harness === "pi" ? { harness: "claude" } : { harness: "pi", provider: "openai" }
+              }),
+            ),
+        }),
+      ],
+    },
   )
 
   test(

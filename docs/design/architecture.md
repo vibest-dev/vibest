@@ -694,9 +694,12 @@ started, so a start policy plugin governs a moved Agent exactly like a first sta
 the available harness with the most quota left that is neither limited nor already tried; nothing left ends the
 round failed, naming what ran out. The pairs that already hit a limit are remembered per (harness, provider) in
 `process.end` events with reason `limited` (joined to their `process.start`), so they survive moves and a vibestd
-restart; a preflight miss, or a start or prompt
-that fails, is not a limit — the next move may use that harness again. A login already limited before start is
-`agent.start.before`'s to avoid (the builtin does), never a move's.
+restart. Within one round (since its turn started; for a launch's own limit, since the last turn ended or the
+session began) vibest never moves to a pair that hit a limit in it, whatever that login's usage reading says now:
+a round that hit limits on every login it may use fails instead of cycling, and a later round may use such a login
+again once its reading is free. A preflight miss, or a start or prompt that fails, is not a limit — the next move
+may use that harness again. A login already limited before start is `agent.start.before`'s to avoid (the builtin
+does), never a move's.
 
 ## 10. Ports
 

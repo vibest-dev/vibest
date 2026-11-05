@@ -1771,6 +1771,15 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
+    /** The logins whose process ended on a usage limit at or after `at`, oldest first (repeats included). */
+    limitedSince: (sessionId: string, at: number) =>
+      sql<{ harness: string; provider: string | null }>`SELECT json_extract(ps.data, '$.harness') AS harness,
+          json_extract(ps.data, '$.provider') AS provider
+        FROM event pe JOIN event ps ON ps.id = pe.process_id
+        WHERE pe.session_id = ${sessionId} AND pe.type = 'process.end' AND json_extract(pe.data, '$.reason') = 'limited'
+          AND pe.at >= ${at}
+        ORDER BY pe.id`.pipe(Effect.orDie),
+
     /**
      * What a usage-limit move can resend for a session, and the parent that asked for it. `working` is the open
      * turn's input: its typed text, or the rows it consumed. `delivered`, used when that is empty, is the trailing run

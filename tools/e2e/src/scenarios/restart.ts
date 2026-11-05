@@ -5,7 +5,7 @@
 // same terminal's shell (a main agent through `vibest integration start <id>`), and a main agent that was working gets
 // the continue notice in its inbox. U2: a Pi main agent and Pi subagents on a fake OpenAI-compatible model served here,
 // the update run by the person. U4: a real Claude main agent (agentModel) that runs the update itself. U5: a usage-limit
-// move takes the same path. vibestd, herdr and the harnesses are the real ones. ZDOTDIR is empty, so a pane's shell does
+// move takes the same path; U8: it tries each login at most once per round. vibestd, herdr and the harnesses are the real ones. ZDOTDIR is empty, so a pane's shell does
 // not put another vibest first on PATH.
 import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
@@ -152,6 +152,127 @@ const dropHerdrSession = async (w: World, session: string) => {
   ) {
     await w.run(w.root, ["herdr", "session", "stop", session])
     await w.run(w.root, ["herdr", "session", "delete", session])
+  }
+}
+
+/**
+ * A Pi subagent on two fake logins of one OpenAI-compatible server (`first` at /v1, `second` at /v2), in a herdr session
+ * of its own, with `plugin` (a plugin module's source) loaded. A login whose path `limited` names answers every request
+ * with a usage-limit error inside the stream (Pi retries a failed request, so every one fails); the other answers. The
+ * subagent starts on `first` with a task, then `body` runs.
+ */
+const usageLimitMove = async (
+  w: World,
+  o: { readonly name: string; readonly limited: (path: string) => boolean; readonly plugin: string },
+  body: (m: {
+    readonly id: string
+    readonly seen: ReadonlyArray<string>
+    readonly row: () => { harness: string; provider: string | null; pid: number | null; conversation: string | null }
+    readonly status: () => ReadonlyArray<{ status: string }>
+    readonly listed: () => Promise<Agent | undefined>
+    readonly log: () => Promise<string>
+  }) => Promise<void>,
+) => {
+  for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+  const seen: Array<string> = []
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    idleTimeout: 0,
+    fetch: async (req) => {
+      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const last = text(messages.at(-1))
+      seen.push(`${new URL(req.url).pathname} ${last.slice(-80)}`)
+      if (o.limited(new URL(req.url).pathname))
+        // An error inside the stream: Pi reports its message as the turn's error, as a provider's limit text.
+        return new Response(
+          `data: ${JSON.stringify({ error: { message: "usage limit reached, try again later" } })}\n\n`,
+          {
+            headers: { "content-type": "text/event-stream" },
+          },
+        )
+      const chunk = (c: object) =>
+        `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...c })}\n\n`
+      const content = /done-limit/.test(last) ? "done-limit\nstatus: completed" : "ok"
+      return new Response(
+        chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) +
+          chunk({
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }) +
+          "data: [DONE]\n\n",
+        { headers: { "content-type": "text/event-stream" } },
+      )
+    },
+  })
+  const session = `${w.herdrSession}-${o.name}`
+  const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+  const plugin = path.join(w.vibestHome, "plugins", `${o.name}.ts`)
+  try {
+    const repo = await project(w, o.name)
+    const agentDir = path.join(w.root, `pi-${o.name}`)
+    await fs.mkdir(agentDir, { recursive: true })
+    const provider = (base: string) => ({
+      baseUrl: `http://127.0.0.1:${server.port}/${base}`,
+      apiKey: "fake",
+      api: "openai-completions",
+      models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
+    })
+    await fs.writeFile(
+      path.join(agentDir, "models.json"),
+      JSON.stringify({ providers: { first: provider("v1"), second: provider("v2") } }),
+    )
+    await fs.mkdir(path.dirname(plugin), { recursive: true })
+    await fs.writeFile(plugin, o.plugin)
+    // vibestd lists Pi's models with this agent dir, and the herdr server it starts hands it to the panes.
+    const env = { PI_CODING_AGENT_DIR: agentDir }
+    await w.stopDaemon()
+    await w.ok(["daemon"], { cwd: repo, env })
+    await until(
+      "the move plugin is active",
+      async () =>
+        (await w.json<Array<{ id: string; status: string }>>(["plugins"], { cwd: repo, env })).some(
+          (p) => p.id === "move-e2e" && p.status === "active",
+        ),
+      30_000,
+    )
+    const id = (
+      JSON.parse(
+        await w.ok(["run", "pi", "--provider", "first", "--model", "m", "--session", session, ask("limit")], {
+          cwd: repo,
+          env,
+          timeoutMs: 120_000,
+        }),
+      ) as { id: string }
+    ).id
+    const read = <A>(sql: string) => {
+      const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+      try {
+        return db.query<A, [string]>(sql).all(id)
+      } finally {
+        db.close()
+      }
+    }
+    await body({
+      id,
+      seen,
+      row: () =>
+        read<{ harness: string; provider: string | null; pid: number | null; conversation: string | null }>(
+          `SELECT harness, provider, pid, harness_session_id AS conversation FROM ${SESSIONS} s WHERE id = ?`,
+        )[0]!,
+      status: () => read<{ status: string }>(`SELECT status FROM ${TURNS} t WHERE session_id = ? ORDER BY id`),
+      // undefined until the subagent's herdr session is up.
+      listed: async () =>
+        ((await herdr(socket, "agent.list", {}).catch(() => ({ agents: [] }))).agents as Array<Agent>).find(
+          (a) => a.name === agentName(id),
+        ),
+      log: async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-4000),
+    })
+  } finally {
+    server.stop(true)
+    await fs.rm(plugin, { force: true })
+    await w.stopDaemon()
+    await dropHerdrSession(w, session)
   }
 }
 
@@ -648,162 +769,137 @@ const checks: ReadonlyArray<Check> = [
     id: "U5",
     title:
       "a usage-limit move in place: a Pi subagent whose turn hits a usage limit ends only its harness; the next login runs in the same pane (herdr lists it as s-<id> there) and finishes the round",
-    run: async (w) => {
-      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      // The first login (/v1) is on its usage limit (Pi retries a failed request, so every one fails); the second (/v2) answers.
-      const seen: Array<string> = []
-      const server = Bun.serve({
-        port: 0,
-        hostname: "127.0.0.1",
-        idleTimeout: 0,
-        fetch: async (req) => {
-          const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
-          const last = text(messages.at(-1))
-          seen.push(`${new URL(req.url).pathname} ${last.slice(-80)}`)
-          if (new URL(req.url).pathname.startsWith("/v1/"))
-            // An error inside the stream: Pi reports its message as the turn's error, as a provider's limit text.
-            return new Response(
-              `data: ${JSON.stringify({ error: { message: "usage limit reached, try again later" } })}\n\n`,
-              {
-                headers: { "content-type": "text/event-stream" },
-              },
-            )
-          const chunk = (o: object) =>
-            `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
-          const content = /done-limit/.test(last) ? "done-limit\nstatus: completed" : "ok"
-          return new Response(
-            chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) +
-              chunk({
-                choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-                usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-              }) +
-              "data: [DONE]\n\n",
-            { headers: { "content-type": "text/event-stream" } },
-          )
-        },
-      })
-      const session = `${w.herdrSession}-move`
-      const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-      const plugin = path.join(w.vibestHome, "plugins", "move.ts")
-      try {
-        const repo = await project(w, "move")
-        const agentDir = path.join(w.root, "pi-move")
-        await fs.mkdir(agentDir, { recursive: true })
-        const provider = (base: string) => ({
-          baseUrl: `http://127.0.0.1:${server.port}/${base}`,
-          apiKey: "fake",
-          api: "openai-completions",
-          models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
-        })
-        await fs.writeFile(
-          path.join(agentDir, "models.json"),
-          JSON.stringify({ providers: { first: provider("v1"), second: provider("v2") } }),
-        )
-        // The move's choice: the same harness on the other login.
-        await fs.mkdir(path.dirname(plugin), { recursive: true })
-        await fs.writeFile(
-          plugin,
-          `import { Plugin } from "@vibest/plugin"
+    run: (w) =>
+      usageLimitMove(
+        w,
+        {
+          name: "move",
+          // The first login is on its usage limit; the second answers.
+          limited: (p) => p.startsWith("/v1/"),
+          // The move's choice: the same harness on the other login.
+          plugin: `import { Plugin } from "@vibest/plugin"
 import { Effect } from "effect"
 export default Plugin.define({
   id: "move-e2e",
   effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => { e.move = { harness: "pi", provider: "second", model: "m" } })),
 })
 `,
-        )
-        // vibestd lists Pi's models with this agent dir, and the herdr server it starts hands it to the panes.
-        const env = { PI_CODING_AGENT_DIR: agentDir }
-        await w.stopDaemon()
-        await w.ok(["daemon"], { cwd: repo, env })
-        await until(
-          "the move plugin is active",
-          async () =>
-            (await w.json<Array<{ id: string; status: string }>>(["plugins"], { cwd: repo, env })).some(
-              (p) => p.id === "move-e2e" && p.status === "active",
-            ),
-          30_000,
-        )
-        const id = (
-          JSON.parse(
-            await w.ok(["run", "pi", "--provider", "first", "--model", "m", "--session", session, ask("limit")], {
-              cwd: repo,
-              env,
-              timeoutMs: 120_000,
-            }),
-          ) as { id: string }
-        ).id
-        type Moved = { harness: string; provider: string | null; pid: number | null; conversation: string | null }
-        const row = () => {
-          const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
-          try {
-            return db
-              .query<Moved, [string]>(
-                `SELECT harness, provider, pid, harness_session_id AS conversation FROM ${SESSIONS} s WHERE id = ?`,
-              )
-              .get(id)!
-          } finally {
-            db.close()
+        },
+        async ({ id, seen, row, status, listed, log }) => {
+          await until("herdr lists the subagent as s-<id>", async () => (await listed())?.agent === "pi", 60_000)
+          const pane = (await listed())!.pane_id
+          await until("the first login's harness reports its pid", () => row().pid !== null, 60_000)
+          const before = row()
+          await until(
+            "the move to the second login",
+            () => row().provider === "second" && row().pid !== null && row().pid !== before.pid,
+            120_000,
+          ).catch(async (e: Error) => {
+            throw new Error(
+              `${e.message}; row ${JSON.stringify(row())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
+            )
+          })
+          expect(!alive(before.pid!), `the limited harness ${before.pid} still runs`)
+          expect(alive(row().pid!), `the moved harness ${row().pid} does not run`)
+          expect(row().harness === "pi", `moved to ${row().harness}`)
+          await until(
+            "the round completes on the second login",
+            () => status().some((m) => m.status === "completed"),
+            120_000,
+          ).catch(async (e: Error) => {
+            throw new Error(
+              `${e.message}; rounds ${JSON.stringify(status())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
+            )
+          })
+          expect(status().length === 1, `one round: ${JSON.stringify(status())}`)
+          expect(
+            seen.some((s) => s.startsWith("/v2/")),
+            `the second login got no request: ${JSON.stringify(seen)}`,
+          )
+          const after = await listed()
+          expect(
+            after?.agent === "pi" && after.pane_id === pane,
+            `herdr lists ${agentName(id)} at ${after?.pane_id}, not ${pane}`,
+          )
+        },
+      ),
+  },
+  {
+    id: "U8",
+    title:
+      "a usage-limit move tries each login at most once per round: both Pi logins answer a usage limit while their usage rows read free; the round fails once with no harness left and no third start",
+    run: (w) =>
+      usageLimitMove(
+        w,
+        {
+          name: "move-twice",
+          limited: () => true,
+          // Both rows read free (refreshed every second, so after each limit), and the move goes to whichever login
+          // the session is not on: without a bound per round, first -> second -> first -> ...
+          plugin: `import { Plugin } from "@vibest/plugin"
+import { Effect, Schedule } from "effect"
+const free = [{ window: "5h", percent: 0, status: "available", resetTime: null }]
+export default Plugin.define({
+  id: "move-e2e",
+  effect: (ctx) =>
+    Effect.gen(function* () {
+      yield* Effect.forkScoped(
+        Effect.repeat(
+          Effect.all([
+            ctx.subscription.report({ harness: "pi", provider: "first", limits: free }),
+            ctx.subscription.report({ harness: "pi", provider: "second", limits: free }),
+          ]),
+          Schedule.spaced("1 second"),
+        ),
+      )
+      yield* ctx.agent.hook("fail", (e) =>
+        Effect.sync(() => {
+          e.move = { harness: "pi", provider: e.provider === "first" ? "second" : "first", model: "m" }
+        }),
+      )
+    }),
+})
+`,
+        },
+        async ({ id, seen, row, status, log }) => {
+          const results = () => {
+            const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+            try {
+              return db
+                .query<{ content: string }, [string]>(
+                  `SELECT content FROM inbox WHERE sender_session_id = ? AND kind = 'result' ORDER BY id`,
+                )
+                .all(id)
+                .map((r) => r.content)
+            } finally {
+              db.close()
+            }
           }
-        }
-        const status = () => {
-          const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
-          try {
-            return db
-              .query<{ status: string }, [string]>(`SELECT status FROM ${TURNS} t WHERE session_id = ? ORDER BY id`)
-              .all(id)
-          } finally {
-            db.close()
+          const fail = async (e: Error) => {
+            throw new Error(
+              `${e.message}; row ${JSON.stringify(row())}; rounds ${JSON.stringify(status())}; results ${JSON.stringify(results())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
+            )
           }
-        }
-        // undefined until the subagent's herdr session is up.
-        const listed = async () =>
-          ((await herdr(socket, "agent.list", {}).catch(() => ({ agents: [] }))).agents as Array<Agent>).find(
-            (a) => a.name === agentName(id),
+          await until("the move to the second login", () => row().provider === "second", 120_000).catch(fail)
+          await until("the round fails", () => status().some((m) => m.status === "failed"), 120_000).catch(fail)
+          const moved = row()
+          // Long enough for a third start: the plugin's free readings come every second.
+          await Bun.sleep(10_000)
+          expect(status().length === 1, `one round: ${JSON.stringify(status())}`)
+          expect(status()[0]!.status === "failed", `the round: ${JSON.stringify(status())}`)
+          const said = results()
+          expect(said.length === 1 && said[0]!.includes("no harness left"), `results: ${JSON.stringify(said)}`)
+          expect(
+            row().provider === "second" && row().pid === moved.pid,
+            `a third start: ${JSON.stringify(moved)} -> ${JSON.stringify(row())}`,
           )
-        const log = async () =>
-          (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-4000)
-        await until("herdr lists the subagent as s-<id>", async () => (await listed())?.agent === "pi", 60_000)
-        const pane = (await listed())!.pane_id
-        await until("the first login's harness reports its pid", () => row().pid !== null, 60_000)
-        const before = row()
-        await until(
-          "the move to the second login",
-          () => row().provider === "second" && row().pid !== null && row().pid !== before.pid,
-          120_000,
-        ).catch(async (e: Error) => {
-          throw new Error(
-            `${e.message}; row ${JSON.stringify(row())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
+          const firstAgain = seen.findIndex((s) => s.startsWith("/v2/"))
+          expect(
+            firstAgain !== -1 && !seen.slice(firstAgain).some((s) => s.startsWith("/v1/")),
+            `the first login got a request after the move: ${JSON.stringify(seen)}`,
           )
-        })
-        expect(!alive(before.pid!), `the limited harness ${before.pid} still runs`)
-        expect(alive(row().pid!), `the moved harness ${row().pid} does not run`)
-        expect(row().harness === "pi", `moved to ${row().harness}`)
-        await until(
-          "the round completes on the second login",
-          () => status().some((m) => m.status === "completed"),
-          120_000,
-        ).catch(async (e: Error) => {
-          throw new Error(
-            `${e.message}; rounds ${JSON.stringify(status())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
-          )
-        })
-        expect(status().length === 1, `one round: ${JSON.stringify(status())}`)
-        expect(
-          seen.some((s) => s.startsWith("/v2/")),
-          `the second login got no request: ${JSON.stringify(seen)}`,
-        )
-        const after = await listed()
-        expect(
-          after?.agent === "pi" && after.pane_id === pane,
-          `herdr lists ${agentName(id)} at ${after?.pane_id}, not ${pane}`,
-        )
-      } finally {
-        server.stop(true)
-        await fs.rm(plugin, { force: true })
-        await w.stopDaemon()
-        await dropHerdrSession(w, session)
-      }
-    },
+        },
+      ),
   },
 ]
 
