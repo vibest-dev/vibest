@@ -197,8 +197,9 @@ before that and not yet consumed still counts. A report a `turn.end` consumed is
 
 ## Hot paths
 
-- Pending scan every few seconds: inbox `WHERE status = 'pending' AND recipient_session_id IS NOT NULL` through
-  `inbox_status`; the cost does not grow with history.
+- Pending rows: read when an event for their recipient arrives, and once in a reconcile (at start, when a runtime
+  registers or comes back): inbox `WHERE status = 'pending' AND recipient_session_id IS NOT NULL` through
+  `inbox_status`; the cost does not grow with history. Nothing scans on an interval.
 - Open turn of a session: the latest `turn.start` (`event_session`, `ORDER BY id DESC LIMIT 1`), then check it has
   no `turn.end` (`event_turn`). Never an outer `NOT EXISTS` over all starts: it scans the whole history.
 - Live process and pid: the same shape with `process.start`, then the latest `process.ready` of that process.
@@ -214,6 +215,10 @@ before that and not yet consumed still counts. A report a `turn.end` consumed is
   for the user. `result`: the latest `turn.end` with its result row.
 
 ## Memory
+
+- One-shot timers (engine): a session's turn-end grace and missed-turn check, a polling main agent's away timer, and
+  one lease timer per row a poll handed out. Lost with the process; the start-up reconcile and `recoverDelivering`
+  stand in for them.
 
 - Live status: from the integration's events (working between `turn.start` and `turn.end`, plus `blocked`), and
   from the runtime only for a harness with no integration.
