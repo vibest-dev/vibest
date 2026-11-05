@@ -118,7 +118,7 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provide(Drain.layer),
     Layer.provide(Restarting.layer),
     Layer.provide(TurnEnds.layer),
-    // Below Db, Runtimes and Drain: one bus, so a commit is visible to whoever subscribed first.
+    // Below Db and Runtimes: one bus, so a commit is visible to whoever subscribed first.
     Layer.provide(Bus.layer),
   )
 
