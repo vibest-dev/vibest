@@ -172,7 +172,7 @@ An inbox row is text for one recipient: a session, or the user (`recipient_sessi
 | turn.start           | process_id          | typed? (the text typed into the pane; none for a turn a delivery opened)                                                                                                                 |
 | turn.reported        | process_id          | harness, text; error?, conversation?, interrupted? (only when present). The turn end as the hook reported it, before a check consumes it                                                 |
 | turn.end             | process_id, turn_id | status: completed, failed, interrupted, lost, not_started; report? (the turn.reported it consumed), failure? {message}; output? only on rows written before report                       |
-| inbox.queued         | inbox_id            | none (the queue time is `at`)                                                                                                                                                            |
+| inbox.queued         | inbox_id            | request? (the request id of the `vibest send` or `vibest run` that queued the row, when its caller sent one; a repeat with it finds the row); the queue time is `at`                     |
 | inbox.status         | inbox_id, turn_id?  | to; on to = delivered, turn_id is the turn that consumed it                                                                                                                              |
 
 A turn's input is its typed text, or the inbox rows with an `inbox.status` event `to = delivered` and `turn_id` =

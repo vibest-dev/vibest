@@ -7,6 +7,7 @@ import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
+import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import * as Server from "@vibest/server/server"
 import { Effect, FileSystem, Layer, Option, Path, type Scope, Schema } from "effect"
@@ -641,6 +642,96 @@ describe("vibest CLI without vibestd", () => {
         assert.notMatch(removed.stdout + removed.stderr, /vibestd is running|Stop the running vibestd/)
         assert.strictEqual(contacts, 0)
         assert.deepStrictEqual(yield* files, before)
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
+
+  /**
+   * A vibestd that answers Ping with `capabilities` and answers each Send with `answer(n)` for the n-th one: a result,
+   * an encoded failure, or undefined to drop the connection after reading it. The Sends it read, in order.
+   */
+  const fakeDaemon = (capabilities: Record<string, boolean>, answer: (n: number) => object | undefined) =>
+    Effect.gen(function* () {
+      const home = yield* tempDirectory("vibest-requests-")
+      const sends: Array<{ id: string; request?: string }> = []
+      const server = net.createServer((sock) => {
+        let buf = ""
+        sock.on("data", (chunk) => {
+          buf += chunk.toString()
+          for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
+            const req = JSON.parse(buf.slice(0, nl)) as { id?: string; method?: string; params?: never }
+            buf = buf.slice(nl + 1)
+            const reply = (body: object) => sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, ...body }) + "\n")
+            if (req.method === "Ping")
+              reply({ result: { protocol: PROTOCOL, version: VERSION, runtimes: [], capabilities } })
+            else if (req.method === "Send") {
+              sends.push(req.params!)
+              const out = answer(sends.length)
+              if (out === undefined) sock.destroy()
+              else reply(out)
+            }
+          }
+        })
+      })
+      yield* Effect.acquireRelease(
+        Effect.callback<void>((resume) => void server.listen(`${home}/vibest.sock`, () => resume(Effect.void))),
+        () => Effect.sync(() => server.close()),
+      )
+      const send = vibest(home, { HOME: home, VIBEST_HOME: home }, [
+        "send",
+        "abcd1234-abcd-4abc-8abc-abcd1234abcd",
+        "--",
+        "hi",
+      ])
+      return { sends, send }
+    })
+  const id = "abcd1234-abcd-4abc-8abc-abcd1234abcd"
+  const refused = {
+    error: {
+      _tag: "Cause",
+      code: 0,
+      message: "no session",
+      data: [{ _tag: "Fail", error: { _tag: "NoSuchSession", id, message: `no session ${id}` } }],
+    },
+  }
+
+  it.effect(
+    "send whose connection drops after the request: sent once more with the same request id, the output unchanged",
+    () =>
+      Effect.gen(function* () {
+        const d = yield* fakeDaemon({ requests: true }, (n) => (n === 1 ? undefined : { result: { id } }))
+        const r = yield* d.send
+        assert.strictEqual(r.code, 0, r.stderr)
+        assert.deepStrictEqual(decodeJson(r.stdout), { id, queued: true })
+        assert.lengthOf(d.sends, 2)
+        assert.match(d.sends[0]!.request!, /^[0-9a-f-]{36}$/)
+        assert.strictEqual(d.sends[1]!.request, d.sends[0]!.request)
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
+
+  it.effect(
+    "send that vibestd refused is not sent again",
+    () =>
+      Effect.gen(function* () {
+        const d = yield* fakeDaemon({ requests: true }, () => refused)
+        const r = yield* d.send
+        assert.strictEqual(r.code, 1, r.stdout)
+        assert.match(r.stderr, /^NoSuchSession/)
+        assert.lengthOf(d.sends, 1)
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
+
+  it.effect(
+    "send to a vibestd without request ids carries none and is not sent again when its connection drops",
+    () =>
+      Effect.gen(function* () {
+        const d = yield* fakeDaemon({ http: true, handoff: true }, (n) => (n === 1 ? undefined : { result: { id } }))
+        const r = yield* d.send
+        assert.strictEqual(r.code, 1, r.stdout)
+        assert.lengthOf(d.sends, 1)
+        assert.isUndefined(d.sends[0]!.request)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     TIMEOUT,
   )

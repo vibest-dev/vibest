@@ -1,4 +1,5 @@
 import {
+  awaitDaemon,
   type Claim,
   claimHeaders,
   cliHeaders,
@@ -47,7 +48,7 @@ import {
 import { Argument, CliError, Command, Flag } from "effect/cli"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { RpcClient } from "effect/rpc"
+import { RpcClient, RpcClientError as ClientError } from "effect/rpc"
 
 import { herdrCommands } from "./herdr-plugin.ts"
 import { type ReplaceFailed, replaceDaemon, compareVersions, versionOf } from "./replace.ts"
@@ -91,6 +92,40 @@ export const userOnly = (command: string) =>
 /** Run `f` on a connection as the caller. Herdr location is a payload on the methods that need it, not connection state. */
 const vibest = <A, E, R>(f: (client: VibestClient, agent: boolean) => Effect.Effect<A, E, R>) =>
   Effect.flatMap(caller, (c) => withVibest(c.claim, (client) => f(client, c.agent), { start: !c.agent }))
+
+/**
+ * A call whose answer can be lost after vibestd acted on it (`vibest send`, `vibest run`). It carries one request id per
+ * invocation; cut off on its connection (`RpcClientError`: dropped, vibestd killed or handing off) it is sent once more
+ * with the same id once vibestd answers Ping, and vibestd answers the repeat as it answered the first. Only while the
+ * vibestd it reaches knows request ids (Ping `requests`): an older one would act on a repeat twice. An answer vibestd
+ * gave, a refusal included, is never retried.
+ */
+const requested = <A, E, R>(
+  f: (client: VibestClient, request: string | undefined) => Effect.Effect<A, E | ClientError.RpcClientError, R>,
+) =>
+  Effect.gen(function* () {
+    const c = yield* caller
+    const socket = (yield* Layout).socket
+    const request = crypto.randomUUID()
+    let known = false
+    /** `lost`: the first try's error, failed again when the vibestd now answering does not know request ids. */
+    const call = (lost?: ClientError.RpcClientError) =>
+      withVibest(
+        c.claim,
+        (client, ping) => {
+          known = ping.capabilities?.requests === true
+          return lost !== undefined && !known ? Effect.fail(lost) : f(client, known ? request : undefined)
+        },
+        { start: !c.agent },
+      )
+    return yield* call().pipe(
+      Effect.catch((error) =>
+        known && error instanceof ClientError.RpcClientError
+          ? awaitDaemon(socket).pipe(Effect.andThen(call(error)))
+          : Effect.fail(error),
+      ),
+    )
+  })
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const json = (value: unknown) => Console.log(encodeJson(value))
@@ -219,8 +254,10 @@ const run = Command.make(
     Effect.gen(function* () {
       const prompt = yield* input(o.prompt, "prompt")
       const machine = yield* callerMachine(Option.getOrUndefined(o.session))
-      const spawned = yield* vibest((client) =>
+      const spawned = yield* requested((client, request) =>
         client.Spawn({
+          // Left out for a vibestd that does not know request ids.
+          ...(request === undefined ? {} : { request }),
           harness: o.harness === "auto" ? undefined : o.harness,
           prompt,
           name: Option.getOrUndefined(o.title),
@@ -476,7 +513,9 @@ const startMain =
 const send = Command.make("send", { id, message: text("message") }, (o) =>
   Effect.gen(function* () {
     const message = yield* input(o.message, "message")
-    const sent = yield* vibest((client) => client.Send({ id: o.id, message }))
+    const sent = yield* requested((client, request) =>
+      client.Send({ id: o.id, message, ...(request === undefined ? {} : { request }) }),
+    )
     yield* json({ id: sent.id, queued: true })
   }),
 ).pipe(

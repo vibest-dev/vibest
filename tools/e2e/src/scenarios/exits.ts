@@ -1,10 +1,12 @@
-// What vibestd learns with no poll (feature-map S21 to S31): an exit the runtime pushes, a stop of vibestd itself in the
+// What vibestd learns with no poll (feature-map S21 to S32): an exit the runtime pushes, a stop of vibestd itself in the
 // middle of a turn or of a delivery, and a herdr server that hands over to a new one. Pi subagents and a Pi main agent
 // on the fake model of inbox.ts; vibestd, herdr and Pi are the real ones.
 import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
+import net from "node:net"
 import path from "node:path"
 
+import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
 import type { Check } from "../check.ts"
 import { alive, expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, heldModel, piDir, project } from "./inbox.ts"
@@ -142,6 +144,25 @@ const killedMidTurn = async (
     throw e
   }
 }
+
+/** One JSON-RPC call on a unix socket, as the vibest client makes it: its result, or a thrown error. */
+const rpc = (socket: string, method: string, params: object, headers: ReadonlyArray<[string, string]>) =>
+  new Promise<unknown>((resolve, reject) => {
+    let buf = ""
+    const sock = net.createConnection(socket, () =>
+      sock.write(JSON.stringify({ jsonrpc: "2.0", id: "1", method, params, headers }) + "\n"),
+    )
+    sock.on("data", (chunk) => {
+      buf += chunk.toString()
+      const nl = buf.indexOf("\n")
+      if (nl < 0) return
+      const reply = JSON.parse(buf.slice(0, nl)) as { result?: unknown; error?: unknown }
+      sock.destroy()
+      if ("error" in reply) reject(new Error(`${method}: ${JSON.stringify(reply.error)}`))
+      else resolve(reply.result)
+    })
+    sock.on("error", reject)
+  })
 
 /** Session `id`'s task was never handed over: no `inbox.status` for it. */
 const untaken = (w: World, id: string) =>
@@ -508,6 +529,45 @@ const checks: ReadonlyArray<Check> = [
         await Bun.sleep(2_000)
         expect(ends()?.n === 1 && ends()?.reason === "archived", `its process ends: ${JSON.stringify(ends())}`)
         expect(p.notices(sub, "") === 0, "a notice for a clean archive")
+      } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S32",
+    title:
+      "Send repeated over vibest.sock with one request id (as vibest send retries a lost answer): the same answer, one row, one delivery, the task asked once and one result",
+    run: async (w) => {
+      const p = await piProject(w, "s32")
+      try {
+        p.model.release()
+        const sub = await p.runSub("first")
+        await until("idle", () => p.idle(sub), 60_000)
+        const message = ask("again")
+        const send = () =>
+          rpc(path.join(w.vibestHome, "vibest.sock"), "Send", { id: sub, message, request: "e2e-request-1" }, [
+            ["vibest-protocol", String(PROTOCOL)],
+            ["vibest-caller", "cli"],
+            ["vibest-repository", p.repo],
+          ])
+        const first = await send()
+        const second = await send()
+        expect(
+          JSON.stringify(first) === JSON.stringify(second) && JSON.stringify(first).includes(sub),
+          `answers ${JSON.stringify(first)} and ${JSON.stringify(second)}`,
+        )
+        await until("delivered", () => p.sendRow(sub, message)?.status === "delivered", 30_000)
+        await until("its result", () => p.results(sub) === 2 && p.idle(sub), 60_000)
+        await Bun.sleep(2_000)
+        const rows = row<{ n: number }>(
+          w,
+          "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND kind = 'send'",
+          sub,
+        )?.n
+        expect(rows === 1, `${rows} send rows`)
+        expect(p.model.asked("again") === 1, `the message was asked ${p.model.asked("again")} times`)
+        expect(p.results(sub) === 2, `${p.results(sub)} results for two turns`)
       } finally {
         await p.close()
       }

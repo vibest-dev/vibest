@@ -134,3 +134,4 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S29 | vibestd killed before the first task was handed over: the next vibestd types it once; one result                  | exits: `tools/e2e` S29                                          |
 | S30 | archive cut off after its mark: the next vibestd closes its tab, ends it `archived`, keeps the worktree           | exits: `tools/e2e` S30                                          |
 | S31 | vibestd killed between a delivered result and `--archive-on-completion`: archived once, no notice                 | exits: `tools/e2e` S31                                          |
+| S32 | Send repeated with one request id: the same answer, one row, one delivery, one result                             | exits: `tools/e2e` S32                                          |

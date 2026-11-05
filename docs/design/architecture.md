@@ -771,7 +771,9 @@ one JSON-RPC 2.0 object per line, transport-agnostic so a WebSocket or HTTP tran
 host. Every method but `Ping` needs the `vibest-protocol` header; each command Pings once first and stops with
 `IncompatibleDaemon` on a mismatch; the package version is informational. `PROTOCOL` is the only version, for RPC
 and the HTTP API alike (HTTP paths carry none); old versions are not served. An additive feature does not bump it:
-Ping's `capabilities` gets a boolean flag, and a client uses the feature only when the flag is there. A mismatch is
+Ping's `capabilities` gets a boolean flag, and a client uses the feature only when the flag is there. Flags: `http`,
+`handoff`, `requests` (`Send` and `Spawn` take an optional `request` id: `vibest send` and `vibest run` make one per
+invocation and send a call whose connection dropped once more with it, and vibestd answers a repeat as the first). A mismatch is
 answered with what vibestd speaks (protocol, package version), a message and the command to run (`protocol.ts`
 `protocolMismatch`, the command in `MISMATCH_ACTION`): both ways it is `vibest update`, which restarts the agents on
 the new version; an older caller is told vibest was updated, a newer one that vibestd is older. RPC fails with `ProtocolRejected`, HTTP answers 409. Scoped methods need caller headers

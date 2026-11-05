@@ -18,7 +18,7 @@ import { MISMATCH_ACTION, PROTOCOL, sessionHeaders } from "@vibest/protocol/prot
 import { VibestRpcs, VERSION } from "@vibest/protocol/rpc"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import * as Server from "@vibest/server/server"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Ref, type Scope, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Ref, type Scope, Stream } from "effect"
 import * as Socket from "effect/socket/Socket"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
@@ -78,7 +78,7 @@ describe("vibest.sock", () => {
       const ping = yield* raw.Ping()
       assert.strictEqual(ping.protocol, PROTOCOL)
       assert.strictEqual(ping.version, VERSION)
-      assert.deepStrictEqual(ping.capabilities, { http: true, handoff: true })
+      assert.deepStrictEqual(ping.capabilities, { http: true, handoff: true, requests: true })
       const rejected = yield* Effect.exit(raw.List({}))
       assert.strictEqual(failureTag(rejected), "ProtocolRejected")
       // Says what happened and what to run: a caller without the header predates it, so it is told to restart.
@@ -137,6 +137,46 @@ describe("vibest.sock", () => {
       assert.include(ambiguous.message, id)
       assert.include(ambiguous.message, twin)
       assert.strictEqual((yield* c.Get({ id: id.slice(0, 12) })).id, id)
+    }),
+  )
+
+  test(
+    "a Send or Spawn repeated with its request id queues nothing more and answers as the first; a Send repeat still answers once archived",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const sql = yield* SqlClient.SqlClient
+      const db = yield* Db
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const first = yield* c.Spawn({ harness: "pi", prompt: "do it", request: "spawn-1" })
+      assert.deepStrictEqual(yield* c.Spawn({ harness: "pi", prompt: "do it", request: "spawn-1" }), first)
+      assert.deepStrictEqual(
+        (yield* db.listSessions()).map((w) => w.id),
+        [first.id],
+      )
+      // The repeat's reserved worktree directory went again: one directory beside the session's.
+      const worktree = (yield* db.sessionDirectory(first.id))!
+      assert.deepStrictEqual(yield* fs.readDirectory(path.dirname(worktree)), [path.basename(worktree)])
+      yield* until(db.getSession(first.id), (w) => w?.turnState === "open")
+      const queued = (request: string) =>
+        sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'inbox.queued'
+          AND json_extract(data, '$.request') = ${request}`.pipe(Effect.map((rows) => rows[0]!.n))
+      const sends = sql<{ n: number }>`SELECT count(*) AS n FROM inbox WHERE kind = 'send'`.pipe(
+        Effect.map((rows) => rows[0]!.n),
+      )
+      assert.strictEqual(yield* queued("spawn-1"), 1)
+      const sent = yield* c.Send({ id: first.id, message: "more", request: "send-1" })
+      assert.deepStrictEqual(yield* c.Send({ id: first.id, message: "more", request: "send-1" }), sent)
+      assert.strictEqual(yield* sends, 1)
+      assert.strictEqual(yield* queued("send-1"), 1)
+      yield* c.Remove({ id: first.id })
+      assert.deepStrictEqual(yield* c.Send({ id: first.id, message: "more", request: "send-1" }), sent)
+      assert.strictEqual(yield* sends, 1)
+      assert.strictEqual(
+        (yield* Effect.flip(c.Send({ id: first.id, message: "more", request: "send-2" })))._tag,
+        "NoSuchSession",
+      )
     }),
   )
 

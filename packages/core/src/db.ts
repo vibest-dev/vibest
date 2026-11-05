@@ -121,6 +121,16 @@ export type CoordinatorRow = typeof CoordinatorRow.Type
 
 export type NewInboxRow = Omit<InboxRow, "id" | "status" | "createdAt">
 
+/** The session an earlier try of the same spawn request made, with its first process's choice. */
+export type SpawnedBefore = {
+  readonly id: string
+  readonly harness: string
+  readonly provider: string | undefined
+  readonly model: string | undefined
+  readonly runtime: string
+  readonly routing: typeof Routing.Type | undefined
+}
+
 /** A repository of a project as `project_repository` keeps it: its main checkout's realpath and raw origin. */
 export type RepositoryRow = { readonly path: string; readonly remote: string | undefined }
 
@@ -709,6 +719,33 @@ const make = Effect.gen(function* () {
     inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind = 'send' AND m.status = ${storedStatus(status)}`)
   const entryOf = (projectIdValue: string) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
 
+  /** The row request `request` queued for session `sessionId` (its `inbox.queued` data), if any. */
+  const queuedBy = (sessionId: string, request: string) =>
+    sql<{ id: number }>`SELECT inbox_id AS id FROM event WHERE session_id = ${sessionId} AND type = 'inbox.queued'
+        AND json_extract(data, '$.request') = ${request} LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
+
+  /** The session spawn request `request` made in project `project`, with its first process's choice. */
+  const spawnedBy = (project: string, request: string) =>
+    sql<{ id: string; data: string }>`SELECT s.id, p.data FROM session s
+        JOIN event q ON q.session_id = s.id AND q.type = 'inbox.queued'
+        JOIN inbox i ON i.id = q.inbox_id AND i.kind = 'task'
+        JOIN event p ON p.id = (SELECT min(id) FROM event WHERE session_id = s.id AND type = 'process.start')
+      WHERE s.project_id = ${project} AND json_extract(q.data, '$.request') = ${request} LIMIT 1`.pipe(
+      Effect.map((rows) => {
+        const found = rows[0]
+        if (found === undefined) return undefined
+        const start = JSON.parse(found.data) as ProcessStart
+        return {
+          id: found.id,
+          harness: start.harness,
+          provider: start.provider,
+          model: start.model,
+          runtime: start.runtime,
+          routing: start.routing as typeof Routing.Type | undefined,
+        }
+      }),
+    )
+
   /** The open turn of `sessionId`: its latest `turn.start` with no `turn.end`. */
   const openTurn = (sessionId: string) =>
     sql<{ id: number }>`SELECT t.id FROM event t WHERE t.id = (SELECT max(id) FROM event WHERE session_id = ${sessionId}
@@ -759,6 +796,8 @@ const make = Effect.gen(function* () {
     readonly content: string
     readonly resultEventId?: number
     readonly status: string
+    /** The caller's request id (`vibest send`, `vibest run`), kept in its `inbox.queued` so a repeat finds it. */
+    readonly request?: string | undefined
   }) =>
     Effect.gen(function* () {
       const [inserted] = yield* sql<{ id: number }>`INSERT INTO inbox ${sql.insert({
@@ -772,7 +811,13 @@ const make = Effect.gen(function* () {
       const id = inserted!.id
       const at = yield* now
       const sessionId = row.recipient ?? row.sender!
-      yield* append({ sessionId, type: "inbox.queued", inboxId: id, at, data: {} })
+      yield* append({
+        sessionId,
+        type: "inbox.queued",
+        inboxId: id,
+        at,
+        data: row.request === undefined ? {} : { request: row.request },
+      })
       // A task's delivery is the turn it is handed into (`linkTask`).
       if (row.status !== "pending" && row.kind !== "task")
         yield* append({
@@ -892,7 +937,7 @@ const make = Effect.gen(function* () {
    * them. A result row points at the `turn.end` it reports: `end` when the caller is closing the turn, else one made
    * from `details` (status, error).
    */
-  const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number) =>
+  const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number, request?: string) =>
     Effect.gen(function* () {
       if (row.kind === "send") {
         const id = yield* insertInboxSql({
@@ -901,6 +946,7 @@ const make = Effect.gen(function* () {
           sender: null,
           content: row.message,
           status: "pending",
+          request,
         })
         return (yield* inboxIn([id]))[0]!
       }
@@ -1231,9 +1277,15 @@ const make = Effect.gen(function* () {
       cwd = "",
       task?: string,
       parentSessionId?: string,
-    ) =>
+      request?: string,
+    ): Effect.Effect<boolean | SpawnedBefore> =>
       tx(
         Effect.gen(function* () {
+          // A repeat of a spawn that already made its session: that session, nothing inserted.
+          if (request !== undefined) {
+            const before = yield* spawnedBy(project, request)
+            if (before !== undefined) return before
+          }
           if (max !== undefined) {
             const n = (yield* selectRaw([notMain, sql`a.ended_at IS NULL`], running)).length
             if (n >= max) return false
@@ -1297,6 +1349,7 @@ const make = Effect.gen(function* () {
               sender: parentSessionId ?? null,
               content: task,
               status: "delivered",
+              request,
             })
           if (row.turnState !== "none") {
             const turnId = yield* append({
@@ -1640,14 +1693,24 @@ const make = Effect.gen(function* () {
     insertInbox: (row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie),
 
     /** A Message to the subagent, unless it is archived (undefined then). One transaction, so `archiveIfNoPending` sees it or it sees the tombstone. */
-    insertSend: (sessionId: string, message: string) =>
+    insertSend: (sessionId: string, message: string, request?: string) =>
       tx(
         Effect.gen(function* () {
+          // A repeat of a request that already queued its row: that row, before the archive check (it was accepted).
+          const before = request === undefined ? undefined : yield* queuedBy(sessionId, request)
+          if (before !== undefined) return (yield* inboxIn([before]))[0]
           const s = yield* findSession(sessionId)
           if (s === undefined || s.metadata.archived || s.metadata.removed) return undefined
-          return yield* insertInboxRow({ sessionId, kind: "send", message, details: {} })
+          return yield* insertInboxRow({ sessionId, kind: "send", message, details: {} }, undefined, undefined, request)
         }),
       ).pipe(Effect.orDie),
+
+    /** Whether request `request` already queued a row for session `sessionId`. */
+    queuedBy: (sessionId: string, request: string) =>
+      queuedBy(sessionId, request).pipe(
+        Effect.map((id) => id !== undefined),
+        Effect.orDie,
+      ),
 
     /** End the subagent (`stopped`) unless a Message to it is pending; false then. One transaction with `insertSend`'s. */
     archiveIfNoPending: (id: string) =>

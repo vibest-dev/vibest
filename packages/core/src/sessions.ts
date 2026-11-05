@@ -165,6 +165,8 @@ export interface SpawnInput {
   readonly archive?: boolean | undefined
   /** The session that asked for it (the main agent); undefined for the user's own `vibest run`. */
   readonly parentSessionId?: string | undefined
+  /** The caller's request id: a repeat of it answers the session the first try made. */
+  readonly request?: string | undefined
 }
 
 export interface Spawned extends Routing {
@@ -192,7 +194,7 @@ export class Sessions extends Context.Service<
       Scope.Scope
     >
     /** Queue a message; vibestd delivers it once the session is idle (SPEC §8.4). Returns once the message is stored. */
-    readonly send: (id: string, message: string) => Effect.Effect<void, NoSuchSession>
+    readonly send: (id: string, message: string, request?: string) => Effect.Effect<void, NoSuchSession>
     /** Interrupt the running turn and keep the session (terminal, worktree, conversation) for follow-ups (SPEC §8.6). */
     readonly interrupt: (
       id: string,
@@ -909,17 +911,25 @@ export class Sessions extends Context.Service<
               cwd,
               decision.prompt,
               input.parentSessionId,
+              input.request,
             )
-            if (!inserted) {
-              // The directory this spawn reserved goes again (still empty: nothing was started in it).
-              if (shared === undefined) yield* fs.remove(cwd, { recursive: true }).pipe(Effect.ignore)
+            // The directory this spawn reserved goes again (still empty: nothing was started in it).
+            const unreserve =
+              shared === undefined ? fs.remove(cwd, { recursive: true }).pipe(Effect.ignore) : Effect.void
+            if (inserted === false) {
+              yield* unreserve
               return yield* new LimitReached({ limit: options.maxSessions! })
             }
-            return (yield* db.getSession(id))!
+            // A repeat of a spawn whose first try made its session: that one is the answer.
+            if (inserted !== true) {
+              yield* unreserve
+              return { before: inserted }
+            }
+            return { row: (yield* db.getSession(id))! }
           })
         // `--peer`: under the directory's lock, which an archive holds while it decides whether that directory goes,
         // so no archive (of the named session or of any other session in it) removes what this one is about to share.
-        const row =
+        const admitted =
           input.peer === undefined
             ? yield* admit(undefined)
             : yield* locks.withLock(directoryLock((yield* db.sessionDirectory(input.peer)) ?? ""))(
@@ -929,6 +939,19 @@ export class Sessions extends Context.Service<
                   return yield* admit(shared)
                 }),
               )
+        if ("before" in admitted) {
+          const { before } = admitted
+          return {
+            id: before.id,
+            harness: before.harness as HarnessId,
+            provider: before.provider,
+            model: before.model,
+            runtime: before.runtime,
+            decidedBy: before.routing?.decidedBy ?? {},
+            trace: before.routing?.trace ?? [],
+          }
+        }
+        const row = admitted.row
         // The launch holds the lock before spawn returns, so no check sees the row as an abandoned `starting` one.
         const held = yield* Deferred.make<void>()
         yield* Effect.uninterruptible(
@@ -1133,14 +1156,16 @@ export class Sessions extends Context.Service<
       })
 
       /** Queue the message; its stored `inbox.queued` starts the delivery (`delivered`), so the caller may go away. */
-      const send = (id: string, message: string) =>
+      const send = (id: string, message: string, request?: string) =>
         Effect.gen(function* () {
           const session = yield* getRow(id)
+          // A repeat of a request that already queued its row was accepted, whatever became of the session since.
+          if (request !== undefined && (yield* db.queuedBy(id, request))) return
           const worktree = yield* worktreeOf(session)
           if (session.metadata.archived || session.metadata.removed || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
             return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
           // Archived since the read above (vibest run --archive-on-completion decides under the session's lock, not this one): refused, never accepted.
-          const row = yield* db.insertSend(id, message)
+          const row = yield* db.insertSend(id, message, request)
           if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
         })
 
