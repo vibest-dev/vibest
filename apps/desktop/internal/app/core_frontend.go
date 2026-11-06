@@ -42,6 +42,7 @@ type coreWindow struct {
 	coreFocusedFrame  bool
 	coreEditorClick   string
 	coreRetry         chan struct{}
+	coreMismatch      bool
 	coreFocusWake     chan struct{}
 	coreNotices       chan coreNotice
 	dialCore          func(context.Context, string) (*core.Client, error)
@@ -62,6 +63,9 @@ func (a *App) Run(ctx context.Context) {
 	go a.vibestRun(ctx)
 	backoff := 250 * time.Millisecond
 	for ctx.Err() == nil {
+		a.mu.Lock()
+		a.coreMismatch = false
+		a.mu.Unlock()
 		attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
 		c, err := a.dialCore(attempt, a.socket)
 		var s *core.Session
@@ -72,6 +76,19 @@ func (a *App) Run(ctx context.Context) {
 		if err != nil {
 			if c != nil {
 				c.Close()
+			}
+			var mismatch *core.Mismatch
+			if errors.As(err, &mismatch) {
+				a.mu.Lock()
+				a.coreMismatch = true
+				a.mu.Unlock()
+				a.fail(err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-a.coreRetry:
+				}
+				continue
 			}
 			a.fail(err)
 		} else {

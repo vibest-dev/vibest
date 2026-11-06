@@ -835,7 +835,10 @@ func (a *App) zoomPane(id string) {
 func (a *App) disconnectedCard(c *ui.Context) {
 	th := a.th
 	ui.Column(c).Grow(1).FillWidth().Center().Gap(chrome.Step8).Background(th.Container.Background).Label("disconnected").Children(func() {
-		title := "Not connected to herdr-core"
+		title, action := "Not connected to herdr-core", "Reconnect"
+		if a.coreMismatch {
+			title, action = "herdr-core version mismatch", "Retry"
+		}
 		if a.remote != nil {
 			title = "Not connected to " + a.label()
 		}
@@ -843,7 +846,7 @@ func (a *App) disconnectedCard(c *ui.Context) {
 		if a.err != "" {
 			ui.Text(c, a.err).FontSize(th.FontSizeSmall).TextColor(th.Secondary).MaxLines(3).MaxWidth(420)
 		}
-		if ui.PrimaryButton(c, "Reconnect").Margin(chrome.Step8, 0, 0, 0).Clicked() {
+		if ui.PrimaryButton(c, action).Margin(chrome.Step8, 0, 0, 0).Clicked() {
 			a.Reconnect()
 		}
 	})

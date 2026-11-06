@@ -44,7 +44,7 @@ These tests must not download or launch anything.
 
 ## Connection policy
 
-The Core request, result and terminal types in `internal/core/hc_generated.go` come from the pinned OpenRPC document `packages/effect-hc-sdk/schema/hc-openrpc.json` (and `hc-version.json`), the one vibestd uses: `go run ./scripts/hcgen` regenerates them, and `make vet` (`pnpm typecheck`) fails when they are stale. At connect the app refuses a Core whose hello generation or version differs from the pinned one, naming both. The event envelope is not in the document and stays hand-written.
+The Core request, result and terminal types in `internal/core/hc_generated.go` come from the pinned OpenRPC document `packages/effect-hc-sdk/schema/hc-openrpc.json` (and `hc-version.json`), the one vibestd uses: `go run ./scripts/hcgen` regenerates them, and `make vet` (`pnpm typecheck`) fails when they are stale. At connect the app refuses a Core whose hello generation or version differs from the pinned one, naming both, and stops reconnecting until Retry in the window is pressed. The event envelope is not in the document and stays hand-written.
 
 The executable accepts `-core-socket` and `-core-session`, or the official `HC_SOCKET` / `HC_SESSION` defaults. If Core's TOML config exists, specify the socket explicitly rather than silently ignoring configured routing.
 
