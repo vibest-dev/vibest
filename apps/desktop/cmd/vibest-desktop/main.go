@@ -18,17 +18,16 @@ import (
 func main() {
 	session := flag.String("core-session", "", "Core session (default: HC_SESSION or default)")
 	socket := flag.String("core-socket", "", "explicit Core Unix socket (default: HC_SOCKET or Core path rules)")
-	autostart := flag.Bool("autostart", false, "unsupported: start Core separately; false never starts a helper")
+	hc := flag.String("hc", "", "herdr-core binary to use (default: found like herdr-app finds it)")
 	flag.Parse()
 
-	if *autostart {
-		log.Fatal("automatic Core startup is not supported; start Core explicitly")
-	}
+	core.FillPathFromLoginShell()
 	endpoint, err := core.EndpointFromEnv(*session, *socket)
 	if err != nil {
 		log.Fatal(err)
 	}
 	client := app.NewApp(endpoint)
+	client.SetCoreDialer(core.HC{Finder: core.FinderFromEnv(*hc), Session: *session, Socket: *socket}.Dial)
 	client.SetLook(ghostty.Look())
 	config := chrome.ConfigDir()
 	client.LoadThemes(config)

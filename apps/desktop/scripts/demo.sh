@@ -66,12 +66,14 @@ start() {
 	git -C "$DIR/project" init -q -b main
 	git -C "$DIR/project" -c user.name=demo -c user.email=demo@invalid commit -q --allow-empty -m init
 
-	(run hc server start) >"$DIR/hc.log" 2>&1 || die "hc server start failed; see $DIR/hc.log"
-	printf '{"runtime":"hc"}\n' >"$DIR/vibest/vibest.json"
-	(run vibest daemon) >"$DIR/vibestd.out" 2>&1 || die "vibest daemon failed; see $DIR/vibestd.out"
-
 	run "$APP" -core-socket "$DIR/hc.sock" -core-session "$SESSION" >"$DIR/app.log" 2>&1 &
 	echo $! >"$DIR/app.pid"
+	i=0
+	while [ ! -S "$DIR/hc.sock" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+	[ -S "$DIR/hc.sock" ] || die "the app did not start herdr-core; see $DIR/app.log"
+
+	printf '{"runtime":"hc"}\n' >"$DIR/vibest/vibest.json"
+	(run vibest daemon) >"$DIR/vibestd.out" 2>&1 || die "vibest daemon failed; see $DIR/vibestd.out"
 
 	cat <<EOF
 Demo world: $DIR

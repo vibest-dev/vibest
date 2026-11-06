@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -51,9 +52,19 @@ type Mismatch struct {
 	Version    string
 	Generation uint32
 	Reason     string
+	Missing    []string
 }
 
+func (e *Mismatch) CoreTooOld() bool {
+	return e.Reason == "" && (len(e.Missing) > 0 || e.Generation < PinnedGeneration)
+}
+
+func (e *Mismatch) CoreTooNew() bool { return e.Reason == "" && e.Generation > PinnedGeneration }
+
 func (e *Mismatch) Error() string {
+	if len(e.Missing) > 0 {
+		return fmt.Sprintf("herdr-core %s cannot do everything this app needs (%s)", e.Version, strings.Join(e.Missing, ", "))
+	}
 	if e.Reason != "" {
 		return fmt.Sprintf("herdr-core refused protocol generation %d (%s); this app needs herdr-core %s", PinnedGeneration, e.Reason, PinnedVersion)
 	}
@@ -107,13 +118,17 @@ type Client struct {
 }
 
 func Connect(ctx context.Context, conn net.Conn) (*Client, error) {
+	return connect(ctx, conn, 5*time.Second)
+}
+
+func connect(ctx context.Context, conn net.Conn, helloWait time.Duration) (*Client, error) {
 	ok := false
 	defer func() {
 		if !ok {
 			conn.Close()
 		}
 	}()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(helloWait)
 	if d, has := ctx.Deadline(); has && d.Before(deadline) {
 		deadline = d
 	}
@@ -155,15 +170,19 @@ func Connect(ctx context.Context, conn net.Conn) (*Client, error) {
 	if !h.Framed || h.Core.ID == "" {
 		return nil, errors.New("core: hello did not switch to a framed connection with a core id")
 	}
+	var missing []string
 	for _, m := range requiredMethods {
 		if !slices.Contains(h.Methods, m) {
-			return nil, fmt.Errorf("core: missing method %s", m)
+			missing = append(missing, m)
 		}
 	}
 	for _, f := range requiredFeatures {
 		if !slices.Contains(h.Features, f) {
-			return nil, fmt.Errorf("core: missing feature %s", f)
+			missing = append(missing, f)
 		}
+	}
+	if len(missing) > 0 {
+		return nil, &Mismatch{Version: h.Version, Generation: h.Generation, Missing: missing}
 	}
 	if !stop() || ctx.Err() != nil {
 		return nil, ctx.Err()

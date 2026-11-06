@@ -832,19 +832,33 @@ func (a *App) zoomPane(id string) {
 	a.ZoomPaneMode(id, mode)
 }
 
+func coreProblem(missing bool, mismatch *core.Mismatch, err string) (title, body, foot, action string) {
+	switch {
+	case missing:
+		return "Vibest needs herdr-core", "herdr-core runs your terminals and agents, and keeps them alive when this window closes. Vibest couldn't find it on this computer.", "Install it, then Retry: " + core.CoreInstallCommand, "Retry"
+	case mismatch != nil && mismatch.CoreTooOld():
+		return "Vibest needs a newer herdr-core", mismatch.Error() + ". Updating keeps your terminals running.", "Update it, then Retry: hc update", "Retry"
+	case mismatch != nil && mismatch.CoreTooNew():
+		return "This Vibest is older than your herdr-core", mismatch.Error() + ". Update Vibest; your terminals keep running.", "", "Retry"
+	case mismatch != nil:
+		return "herdr-core version mismatch", err, "", "Retry"
+	}
+	return "Not connected to herdr-core", err, "", "Reconnect"
+}
+
 func (a *App) disconnectedCard(c *ui.Context) {
 	th := a.th
 	ui.Column(c).Grow(1).FillWidth().Center().Gap(chrome.Step8).Background(th.Container.Background).Label("disconnected").Children(func() {
-		title, action := "Not connected to herdr-core", "Reconnect"
-		if a.coreMismatch {
-			title, action = "herdr-core version mismatch", "Retry"
-		}
+		title, body, foot, action := coreProblem(a.coreMissing, a.coreMismatch, a.err)
 		if a.remote != nil {
 			title = "Not connected to " + a.label()
 		}
 		ui.Text(c, title).FontSize(th.FontSize).FontWeight(600).TextColor(th.Foreground)
-		if a.err != "" {
-			ui.Text(c, a.err).FontSize(th.FontSizeSmall).TextColor(th.Secondary).MaxLines(3).MaxWidth(420)
+		if body != "" {
+			ui.Text(c, body).FontSize(th.FontSizeSmall).TextColor(th.Secondary).MaxLines(4).MaxWidth(460)
+		}
+		if foot != "" {
+			ui.Text(c, foot).FontSize(th.FontSizeSmall).TextColor(th.Foreground).MaxLines(3).MaxWidth(460)
 		}
 		if ui.PrimaryButton(c, action).Margin(chrome.Step8, 0, 0, 0).Clicked() {
 			a.Reconnect()

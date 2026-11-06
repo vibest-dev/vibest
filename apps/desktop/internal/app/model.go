@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"vibest-desktop/internal/core"
@@ -327,6 +328,10 @@ func (a *App) ShowPane(id string) {
 	if a.coreNavigate(func(s *core.Selection, l *core.Layout) error { return s.SelectPane(l, id) }) {
 		a.acknowledgeCoreVisit(visit)
 	}
+}
+
+func (a *App) SetCoreDialer(dial func(context.Context, string) (*core.Client, error)) {
+	a.dialCore = dial
 }
 
 func (a *App) Reconnect() {

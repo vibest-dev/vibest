@@ -32,7 +32,7 @@ func TestCoreVersionMismatchWaitsForRetry(t *testing.T) {
 			}
 			time.Sleep(time.Millisecond)
 		}
-		awaitCoreApp(t, a, func() bool { return a.coreMismatch && strings.Contains(a.err, "0.2.0") })
+		awaitCoreApp(t, a, func() bool { return a.coreMismatch != nil && strings.Contains(a.err, "0.2.0") })
 	}
 	awaitDials(1)
 	time.Sleep(time.Second)
@@ -40,7 +40,7 @@ func TestCoreVersionMismatchWaitsForRetry(t *testing.T) {
 		t.Fatalf("a mismatch was retried %d times without Retry", n-1)
 	}
 	tt.Frame()
-	if _, ok := tt.Find("herdr-core version mismatch"); !ok {
+	if _, ok := tt.Find("This Vibest is older than your herdr-core"); !ok {
 		t.Fatalf("no mismatch title: %v", tt.Texts())
 	}
 	if err := tt.Click("Retry"); err != nil {
