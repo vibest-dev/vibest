@@ -137,8 +137,7 @@ func connect(ctx context.Context, conn net.Conn, helloWait time.Duration) (*Clie
 	}
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
-	generation := uint32(PinnedGeneration)
-	hello, _ := json.Marshal(message{JSONRPC: "2.0", ID: 1, Method: "hello", Params: HelloParams{Generation: &generation, Framed: true}})
+	hello, _ := json.Marshal(message{JSONRPC: "2.0", ID: 1, Method: "hello", Params: HelloParams{Framed: true}})
 	if err := writeAll(conn, append(hello, '\n')); err != nil {
 		return nil, err
 	}

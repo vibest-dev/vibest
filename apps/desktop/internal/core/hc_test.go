@@ -68,10 +68,13 @@ func fakeCore(t *testing.T, socket string, hello map[string]any) {
 					return
 				}
 				var q struct {
-					ID uint64 `json:"id"`
+					ID     uint64         `json:"id"`
+					Params map[string]any `json:"params"`
 				}
 				json.Unmarshal(line, &q)
-				out, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": q.ID, "result": hello})
+				reply := refuseOtherGeneration(q.Params, map[string]any{"result": hello})
+				reply["jsonrpc"], reply["id"] = "2.0", q.ID
+				out, _ := json.Marshal(reply)
 				conn.Write(append(out, '\n'))
 				r.WriteTo(&discard{})
 			}()
@@ -112,9 +115,35 @@ func TestFindingHerdrCoreSkipsWhatIsNotHC(t *testing.T) {
 	if got, err := (core.Finder{Configured: filepath.Join(dir, "hc"), Dirs: &empty}).Find(); err != nil || got != filepath.Join(dir, "hc") {
 		t.Fatalf("configured: %q %v", got, err)
 	}
+	if got, err := (core.Finder{Path: other, Home: empty, Usual: []string{other, dir}}).Find(); err != nil || got != filepath.Join(dir, "hc") {
+		t.Fatalf("usual places: %q %v", got, err)
+	}
 	login := func() string { return dir }
 	if got, err := (core.Finder{Path: other, Home: empty, LoginPath: login}).Find(); err != nil || got != filepath.Join(dir, "hc") {
 		t.Fatalf("login shell PATH: %q %v", got, err)
+	}
+}
+
+const holdsPipes = `#!/bin/sh
+sleep 5 &
+printf %s "$FAKE_OUT"
+`
+
+func TestAChildHoldingThePipesDoesNotHoldUpFindingHerdrCore(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "sh")
+	os.WriteFile(script, []byte(holdsPipes), 0o755)
+	t.Setenv("SHELL", script)
+	t.Setenv("FAKE_OUT", "/login/bin")
+	start := time.Now()
+	if got := core.LoginShellPath(); got != "/login/bin" || time.Since(start) > 2*time.Second {
+		t.Fatalf("login shell PATH %q after %v", got, time.Since(start))
+	}
+	os.WriteFile(filepath.Join(dir, "hc"), []byte(holdsPipes), 0o755)
+	t.Setenv("FAKE_OUT", "hc 0.1.18")
+	start = time.Now()
+	if got, err := (core.Finder{Dirs: &dir}).Find(); err != nil || got != filepath.Join(dir, "hc") || time.Since(start) > 2*time.Second {
+		t.Fatalf("hc --version: %q %v after %v", got, err, time.Since(start))
 	}
 }
 
@@ -180,6 +209,7 @@ func TestDialRefusesACoreOfAnotherGenerationOrMissingMethods(t *testing.T) {
 		hello  map[string]any
 		tooOld bool
 	}{
+		{"older generation", servingHello(core.PinnedGeneration - 1), true},
 		{"newer generation", servingHello(core.PinnedGeneration + 1), false},
 		{"missing methods", map[string]any{"generation": core.PinnedGeneration, "version": "0.1.9", "framed": true, "core": map[string]string{"id": "fake"}, "methods": []string{}, "features": []string{}}, true},
 	} {

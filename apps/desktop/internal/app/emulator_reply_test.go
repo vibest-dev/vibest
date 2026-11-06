@@ -35,3 +35,25 @@ func TestAnUnfocusedTerminalAnswersItsProgramsQuery(t *testing.T) {
 		}
 	}
 }
+
+func TestAFocusChangeKeepsQueuedRepliesToAProgram(t *testing.T) {
+	a, f, tt := coreShellFixture(t, 1280, 800, 1, false, "split")
+	readyCorePane(t, a, tt, "a")
+	f.mu.Lock()
+	channel := f.channels["a"]
+	f.mu.Unlock()
+	queries := 2 * cap(f.inputs)
+	coreOutput(t, a, f, tt, "a", strings.Repeat("\x1b[c", queries))
+	coreAppAct(a, func() { a.coreSelect(nil) })
+	answered := 0
+	for answered < queries {
+		select {
+		case p := <-f.inputs:
+			if p.channel == channel && strings.HasPrefix(string(p.body), "\x1b[?") {
+				answered++
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%d of %d queries answered after the focus change", answered, queries)
+		}
+	}
+}

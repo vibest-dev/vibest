@@ -28,12 +28,13 @@ type Finder struct {
 	Home       string
 	Path       string
 	Dirs       *string
+	Usual      []string
 	LoginPath  func() string
 }
 
 func FinderFromEnv(configured string) Finder {
 	home, _ := os.UserHomeDir()
-	f := Finder{Configured: configured, Home: home, Path: os.Getenv("PATH"), LoginPath: LoginShellPath}
+	f := Finder{Configured: configured, Home: home, Path: os.Getenv("PATH"), Usual: usualDirs(home), LoginPath: LoginShellPath}
 	if dirs, ok := os.LookupEnv("HERDR_CORE_DIRS"); ok {
 		f.Dirs = &dirs
 	}
@@ -60,7 +61,7 @@ func (f Finder) Find() (string, error) {
 		}
 		return "", ErrNoCore
 	}
-	if found := pick(names(append(filepath.SplitList(f.Path), usualDirs(f.Home)...))); found != "" {
+	if found := pick(names(append(filepath.SplitList(f.Path), f.Usual...))); found != "" {
 		return found, nil
 	}
 	if f.LoginPath != nil {
@@ -72,10 +73,20 @@ func (f Finder) Find() (string, error) {
 }
 
 func IsHC(bin string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	out, ok := output(5*time.Second, bin, "--version")
+	return ok && strings.HasPrefix(strings.TrimSpace(out), "hc ")
+}
+
+func output(timeout time.Duration, name string, args ...string) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "--version").Output()
-	return err == nil && strings.HasPrefix(strings.TrimSpace(string(out)), "hc ")
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = 500 * time.Millisecond
+	out, err := cmd.Output()
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
+		return "", false
+	}
+	return string(out), true
 }
 
 func expandHome(p, home string) string {
@@ -116,13 +127,8 @@ func LoginShellPath() string {
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, shell, "-lc", `printf %s "$PATH"`).Output()
-	if err != nil {
-		return ""
-	}
-	return string(out)
+	out, _ := output(3*time.Second, shell, "-lc", `printf %s "$PATH"`)
+	return out
 }
 
 func FillPathFromLoginShell() {
