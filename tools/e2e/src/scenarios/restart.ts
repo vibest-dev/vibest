@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -20,6 +19,7 @@ import {
   expect,
   harnesses,
   herdr,
+  readDb,
   SESSIONS,
   Skip,
   TURNS,
@@ -119,7 +119,7 @@ const usageLimitMove = async (
       ) as { id: string }
     ).id
     const read = <A>(sql: string) => {
-      const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+      const db = readDb(path.join(w.vibestHome, "vibest.db"))
       try {
         return db.query<A, [string]>(sql).all(id)
       } finally {
@@ -188,7 +188,7 @@ const checks: ReadonlyArray<Check> = [
           return r.stdout
         }
         const read = (where: string, arg: string) => {
-          const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+          const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
             return db
               .query<Row, [string]>(
@@ -370,7 +370,7 @@ const checks: ReadonlyArray<Check> = [
           return r.stdout
         }
         const row = (id: string) => {
-          const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+          const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
             return db
               .query<Row, [string]>(
@@ -478,7 +478,7 @@ const checks: ReadonlyArray<Check> = [
           version: string | null
         }
         const main = () => {
-          const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+          const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
             return (
               db
@@ -656,7 +656,7 @@ export default Plugin.define({
         },
         async ({ id, seen, row, status, log }) => {
           const results = () => {
-            const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+            const db = readDb(path.join(w.vibestHome, "vibest.db"))
             try {
               return db
                 .query<{ content: string }, [string]>(

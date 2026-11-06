@@ -184,7 +184,7 @@ export class World {
   foreignTerminals(): ReadonlyArray<string> {
     const file = path.join(this.vibestHome, "vibest.db")
     if (!fs.existsSync(file)) return []
-    const db = new Database(file, { readonly: true })
+    const db = readDb(file)
     try {
       const rows = db.query(`SELECT id, runtime FROM ${SESSIONS} s`).all() as Array<{
         id: string
@@ -298,8 +298,14 @@ export const SESSIONS = `(SELECT s.id, s.project_id, s.role AS agent_type, s.dir
 export const TURNS = `(SELECT t.id, t.session_id, coalesce(json_extract(te.data, '$.status'), 'working') AS status
   FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
 
+export const readDb = (file: string) => {
+  const db = new Database(file, { readonly: true })
+  db.run("PRAGMA busy_timeout = 5000")
+  return db
+}
+
 export const row = <A>(w: World, sql: string, ...args: Array<string | number>) => {
-  const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+  const db = readDb(path.join(w.vibestHome, "vibest.db"))
   try {
     return (db.query(sql).get(...args) ?? undefined) as A | undefined
   } finally {
