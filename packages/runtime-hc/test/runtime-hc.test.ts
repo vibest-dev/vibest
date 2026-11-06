@@ -79,6 +79,42 @@ describe.skipIf(!hcOnPath)("runtime-hc against an isolated herdr-core", () => {
   )
 
   it.live(
+    "readable names survive collisions without changing terminal identity",
+    () =>
+      withRuntime((runtime) =>
+        Effect.gen(function* () {
+          const cwd = fs.realpathSync(root)
+          const input = { project: "/work/My Project", cwd, argv: [], env: {}, label: "main" }
+          const opened = []
+          for (const request of [
+            input,
+            input,
+            ...Array.from({ length: 2 }, () => ({
+              ...input,
+              label: "a09e0000 修复登录",
+              env: { VIBEST_SESSION_ID: "a09e0000-0000-4000-8000-000000000000", VIBEST_HARNESS: "pi" },
+            })),
+          ])
+            opened.push(yield* runtime.open({ id: "local" }, request))
+          const names = ["my-project-main", "my-project-main-2", "pi-a09e", "pi-a09e-2"]
+          const listed = hcCli("ls", "--json")
+          assert.strictEqual(listed.status, 0, listed.stderr)
+          const records = JSON.parse(listed.stdout).terminals as Array<{ address: string; name: string }>
+          for (const [i, terminal] of opened.entries()) {
+            const { address, socket } = parseTerminalId(terminal.id, socketPath)
+            assert.strictEqual(socket, socketPath)
+            assert.strictEqual(records.find((t) => t.address === address)?.name, names[i])
+            const got = hcCli("get", address, "--json")
+            assert.strictEqual(got.status, 0, got.stderr)
+            assert.strictEqual(JSON.parse(got.stdout).name, names[i])
+            yield* runtime.close(terminal)
+          }
+        }),
+      ),
+    90_000,
+  )
+
+  it.live(
     "a text sent from vibestd reaches a subagent's program byte-identical, with no <hc> tag",
     () =>
       withRuntime((runtime, hc) =>
