@@ -222,7 +222,7 @@ export const make = (deps: {
         Effect.as({ status: "online" as const }),
         Effect.catch((e) =>
           Effect.succeed(
-            e._tag === "HcGenerationMismatch"
+            e._tag === "HcGenerationMismatch" || e._tag === "HcCoreTooOld" || e._tag === "HcMethodsMissing"
               ? { status: "blocked" as const, reason: e.message }
               : {
                   status: "offline" as const,
