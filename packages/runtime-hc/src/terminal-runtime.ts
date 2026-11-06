@@ -91,7 +91,6 @@ export const make = (deps: {
     const { connect, scope } = deps
     const events = yield* PubSub.unbounded<RuntimeEvent>()
     const cores = new Map<string, Core>()
-    const followed = new Set<string>()
     const home = connect(deps.socket)
 
     const wake = (core: Core, address: string) =>
@@ -116,8 +115,7 @@ export const make = (deps: {
           core.busy.clear()
           for (const t of notice.result.terminals) track(core, t)
           for (const t of notice.result.terminals) if (!core.busy.has(t.address)) yield* wake(core, t.address)
-          if (followed.has(socket)) yield* PubSub.publish(events, { type: "reset", machine: "local" })
-          followed.add(socket)
+          yield* PubSub.publish(events, { type: "reset", machine: "local" })
         })
       if (notice._tag === "Notification")
         return notice.method === "missed"

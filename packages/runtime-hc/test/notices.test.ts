@@ -124,19 +124,27 @@ const fakeCore = Effect.gen(function* () {
   const connector = yield* SocketConnector
   const connect = (at: string) => Effect.runSync(Hc.make(at).pipe(Effect.provideService(SocketConnector, connector)))
   const runtime = yield* make({ connect, socket: socketPath, scope: yield* Effect.scope })
+  const terminal = { machine: "local", id: terminalId(socketPath, "t1") }
   const seen = yield* Queue.unbounded<VibestPlugin.Runtime.RuntimeEvent>()
   yield* runtime.events.pipe(
     Stream.runForEach((e) => Queue.offer(seen, e)),
     Effect.forkScoped,
   )
   yield* Effect.sleep("50 millis")
+  const follow = Effect.gen(function* () {
+    yield* runtime.process(terminal)
+    const sub = yield* Queue.take(subscribers)
+    assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset", machine: "local" })
+    return sub
+  })
   return {
+    follow,
     runtime,
     foreground,
     calls,
     subscriber: Queue.take(subscribers),
     next: Queue.take(seen),
-    terminal: { machine: "local", id: terminalId(socketPath, "t1") },
+    terminal,
   }
 })
 
@@ -154,8 +162,7 @@ describe("runtime-hc against a fake core", () => {
     "the status a program reports over OSC 7501 is the agent's state: working, then idle when done",
     Effect.gen(function* () {
       const core = yield* fakeCore
-      yield* core.runtime.process(core.terminal)
-      const sub = yield* core.subscriber
+      const sub = yield* core.follow
       yield* sub.push(statusEvent(1, "working"))
       assert.deepStrictEqual(yield* core.next, { type: "state", terminal: core.terminal, state: "working" })
       yield* sub.push(statusEvent(2, "done"))
@@ -167,8 +174,7 @@ describe("runtime-hc against a fake core", () => {
     "a foreground change back to the shell after a program ran is the terminal's exit",
     Effect.gen(function* () {
       const core = yield* fakeCore
-      yield* core.runtime.process(core.terminal)
-      const sub = yield* core.subscriber
+      const sub = yield* core.follow
       yield* sub.push(foregroundEvent(1, sleeping))
       yield* sub.push(foregroundEvent(2, shell))
       assert.deepStrictEqual(yield* core.next, { type: "exited", terminal: core.terminal })
@@ -179,8 +185,7 @@ describe("runtime-hc against a fake core", () => {
     "missed events drop the subscription; the next snapshot publishes reset",
     Effect.gen(function* () {
       const core = yield* fakeCore
-      yield* core.runtime.process(core.terminal)
-      const first = yield* core.subscriber
+      const first = yield* core.follow
       yield* first.push(MISSED)
       yield* core.subscriber
       assert.deepStrictEqual(yield* core.next, { type: "reset", machine: "local" })
@@ -191,8 +196,7 @@ describe("runtime-hc against a fake core", () => {
     "a subscription the core closes is made again, and its snapshot publishes reset",
     Effect.gen(function* () {
       const core = yield* fakeCore
-      yield* core.runtime.process(core.terminal)
-      const first = yield* core.subscriber
+      const first = yield* core.follow
       yield* first.close
       yield* core.subscriber
       assert.deepStrictEqual(yield* core.next, { type: "reset", machine: "local" })
@@ -204,8 +208,7 @@ describe("runtime-hc against a fake core", () => {
     Effect.gen(function* () {
       const core = yield* fakeCore
       yield* Ref.set(core.foreground, sleeping)
-      yield* core.runtime.process(core.terminal)
-      const sub = yield* core.subscriber
+      const sub = yield* core.follow
       const running = yield* Effect.forkChild(core.runtime.run!(core.terminal, ["echo", "next"]))
       yield* Effect.sleep("300 millis")
       assert.strictEqual(yield* sentCount(core.calls), 0)
