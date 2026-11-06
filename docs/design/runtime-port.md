@@ -2,7 +2,8 @@
 
 The agent runtime is where Agents' terminals live: herdr, rex and tern today, other products later. vibest owns the
 flow (who runs, where, what came back); a runtime owns terminals and how to reach a machine. The API is
-[`runtime-api.ts`](runtime-api.ts). This replaces the herdr-shaped `RuntimeClient` (architecture §10) and answers open
+[`packages/plugin/src/runtime.ts`](../../packages/plugin/src/runtime.ts); `packages/runtime-herdr` is a runtime plugin
+built on it. This replaces the herdr-shaped `RuntimeClient` (architecture §10) and answers open
 question 3 (§12, §17).
 
 ## 1. Principles

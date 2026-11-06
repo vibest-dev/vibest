@@ -198,16 +198,16 @@ describe("plugins: activation", () => {
       host((h) =>
         Effect.gen(function* () {
           const bNextFailingSetup = candidate("b", "2", logged("b-next", "b2", Effect.die("setup boom")))
-          const earlierTakingBsOldId = candidate("t", "1", logged("b", "taker"))
+          const taker = candidate("t", "1", logged("b", "taker"))
           yield* h.activate([b1])
           yield* takeEvents
-          yield* h.activate([earlierTakingBsOldId, bNextFailingSetup])
+          yield* h.activate([taker, bNextFailingSetup])
           assert.deepStrictEqual(yield* takeEvents, ["close b1", "setup taker", "setup b2", "close b2"])
           const [, b] = yield* h.service.list
           assert.deepInclude(b, { status: "failed" })
           assert.include(b!.error, "setup boom")
           assert.include(b!.error, "revision 1 not restored: Duplicate plugin ID: b")
-          yield* h.activate([{ ...earlierTakingBsOldId, revision: "2" }, bNextFailingSetup])
+          yield* h.activate([{ ...taker, revision: "2" }, bNextFailingSetup])
           assert.deepStrictEqual(
             yield* takeEvents,
             ["close taker", "setup taker"],
@@ -276,11 +276,11 @@ describe("plugins: activation", () => {
   it.effect("a teardown that never finishes does not block the reload", () =>
     host((h) =>
       Effect.gen(function* () {
-        const finalizerHoldingItsScopeAnHour = Plugin.define({
+        const sticky = Plugin.define({
           id: "sticky",
           effect: () => Effect.addFinalizer(() => Effect.sleep("1 hour")),
         })
-        yield* h.activate([candidate("sticky", "1", finalizerHoldingItsScopeAnHour)])
+        yield* h.activate([candidate("sticky", "1", sticky)])
         const reloading = yield* Effect.forkChild(h.activate([a1]))
         for (let i = 0; i < 20; i++) yield* Effect.yieldNow
         yield* TestClock.adjust("5 seconds")
@@ -344,7 +344,7 @@ const dropEventsAfterWatchClose = { forMs: 0, until: 0, dropped: 0 }
 const watchGate: { hold: boolean; pending: Array<{ name: string; deliver: () => void }> } = { hold: false, pending: [] }
 const vibestJsonReads = { count: 0 }
 const nativeRequire = module.createRequire(import.meta.url)
-const evictThenRequireBypassingVitestModuleCache = async (entry: string, files: ReadonlyArray<string>) => {
+const freshRequire = async (entry: string, files: ReadonlyArray<string>) => {
   for (const file of files) delete nativeRequire.cache[file]
   return nativeRequire(entry)
 }
@@ -355,7 +355,7 @@ const loader: PluginLoader["Service"] = {
     vibestJsonReads.count++
     return Platform.plugins.parseJsonc(text)
   },
-  load: evictThenRequireBypassingVitestModuleCache,
+  load: freshRequire,
   watch: (directory, changed) => {
     const stop = Platform.plugins.watch(directory, (name) => {
       if (Date.now() < dropEventsAfterWatchClose.until) dropEventsAfterWatchClose.dropped++
@@ -371,7 +371,7 @@ const loader: PluginLoader["Service"] = {
   },
 }
 
-const homeInsideThePackageToResolveItsImports = Effect.gen(function* () {
+const packageHome = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const base = path.join(import.meta.dirname, ".tmp")
@@ -435,7 +435,7 @@ describe("plugins: supervisor", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const dir = yield* homeInsideThePackageToResolveItsImports
+      const dir = yield* packageHome
       yield* fs.makeDirectory(path.join(dir, "lib"))
       yield* fs.writeFileString(path.join(dir, "lib", "value.ts"), `export const value = "v1"\n`)
       yield* fs.writeFileString(
@@ -459,7 +459,7 @@ describe("plugins: supervisor", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const dir = yield* homeInsideThePackageToResolveItsImports
+      const dir = yield* packageHome
       const file = path.join(dir, "plugins", "p.ts")
       const other = path.join(dir, "plugins", "q.ts")
       yield* fs.writeFileString(file, pluginFile("p", "p", `"p0"`))
@@ -488,11 +488,15 @@ describe("plugins: supervisor", () => {
 
       yield* fs.writeFileString(other, pluginFile("q", "q", `"q1"`))
       yield* eventually(plugins.start(event), (s) => s.model === "q1", "q's new revision")
-      const sortsBeforePSoPIsRebuilt = path.join(dir, "plugins", "a.ts")
-      yield* fs.writeFileString(sortsBeforePSoPIsRebuilt, pluginFile("a", "a", "e.model"))
+      const firstFile = path.join(dir, "plugins", "a.ts")
+      yield* fs.writeFileString(firstFile, pluginFile("a", "a", "e.model"))
       yield* eventually(plugins.list, (l) => l.length === 3, "a new first plugin")
       yield* pastDebounce
-      assert.strictEqual(count("import:p"), brokenImports, "a broken revision is not imported again while unchanged")
+      assert.strictEqual(
+        count("import:p"),
+        brokenImports,
+        "a broken revision is not imported again while unchanged, though a.ts sorting before it rebuilt p",
+      )
 
       yield* fs.writeFileString(file, pluginFile("p", "p", `"fixed"`))
       const fixed = yield* eventually(
@@ -512,7 +516,7 @@ describe("plugins: supervisor", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const dir = yield* homeInsideThePackageToResolveItsImports
+      const dir = yield* packageHome
       const plugins = path.join(dir, "plugins")
       yield* fs.writeFileString(path.join(plugins, "a.ts"), pluginFile("a", "ra", `"a"`))
       yield* fs.makeDirectory(path.join(plugins, "d"))
@@ -538,7 +542,7 @@ describe("plugins: supervisor", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const dir = yield* homeInsideThePackageToResolveItsImports
+      const dir = yield* packageHome
       yield* fs.makeDirectory(path.join(dir, "x"))
       yield* fs.writeFileString(path.join(dir, "x", "index.ts"), pluginFile("x", "x", `"x"`))
       const config = path.join(dir, "vibest.json")
@@ -571,7 +575,7 @@ describe("plugins: supervisor", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const dir = yield* homeInsideThePackageToResolveItsImports
+      const dir = yield* packageHome
       yield* fs.writeFileString(path.join(dir, "plugins", "early.ts"), pluginFile("early", "early", `"early"`))
       const s = yield* (yield* supervise(dir)).start(event)
       assert.deepStrictEqual(
@@ -591,10 +595,10 @@ describe("plugins: supervisor", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
-        const dir = yield* homeInsideThePackageToResolveItsImports
+        const dir = yield* packageHome
         yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), pluginFile("a", "stuck-a", `"a"`))
-        const setupUninterruptibleForAVirtualMinute = `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "b", effect: () => Effect.uninterruptible(Effect.sleep("1 minute")) })\n`
-        yield* fs.writeFileString(path.join(dir, "plugins", "b.ts"), setupUninterruptibleForAVirtualMinute)
+        const stuckB = `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "b", effect: () => Effect.uninterruptible(Effect.sleep("1 minute")) })\n`
+        yield* fs.writeFileString(path.join(dir, "plugins", "b.ts"), stuckB)
         const plugins = yield* supervise(dir)
         yield* waitLive(
           () => count("setup:stuck-a") > 0,
@@ -617,8 +621,8 @@ describe("plugins: supervisor", () => {
             ["b", "failed", "setup timed out"],
           ],
         )
-        const pastBsMinuteSoItsScopeCloses = TestClock.adjust("1 minute")
-        yield* pastBsMinuteSoItsScopeCloses
+        const pastBsSetup = TestClock.adjust("1 minute")
+        yield* pastBsSetup
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
@@ -627,7 +631,7 @@ describe("plugins: supervisor", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const real = yield* homeInsideThePackageToResolveItsImports
+      const real = yield* packageHome
       const link = `${real}-link`
       yield* fs.symlink(real, link)
       yield* Effect.addFinalizer(() => fs.remove(link).pipe(Effect.ignore))
@@ -649,7 +653,7 @@ describe("plugins: supervisor", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const dir = yield* homeInsideThePackageToResolveItsImports
+      const dir = yield* packageHome
       const entryFile = (dep: string) => pluginFile("s", "m3", "value", `import { value } from "./${dep}"`)
       for (const [sub, value] of [
         ["one", "one-1"],
@@ -686,7 +690,7 @@ describe("plugins: supervisor", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const dir = yield* homeInsideThePackageToResolveItsImports
+      const dir = yield* packageHome
       yield* fs.writeFileString(path.join(dir, "vibest.json"), `{ "plugins": ["./later/x"] }`)
       const plugins = yield* supervise(dir)
       assert.deepStrictEqual(yield* plugins.list, [])
@@ -699,11 +703,11 @@ describe("plugins: supervisor", () => {
   )
 
   live(
-    "a change the watcher dropped right after a watch closed (as Bun sometimes does on macOS) is found by the one rescan, which then stops",
+    "a change the watcher dropped right after a watch closed (as Bun sometimes does on macOS) is found by the one rescan, which then stops (the test passes the first rescan by time, not by a read)",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const dir = yield* homeInsideThePackageToResolveItsImports
+      const dir = yield* packageHome
       const plugins = path.join(dir, "plugins")
       yield* fs.writeFileString(path.join(dir, "vibest.json"), `{}`)
       yield* fs.writeFileString(path.join(plugins, "a.ts"), pluginFile("a", "drop-a", `"a1"`))
@@ -711,8 +715,8 @@ describe("plugins: supervisor", () => {
       yield* fs.writeFileString(path.join(plugins, "d", "index.ts"), pluginFile("d", "drop-d", "e.model"))
       const service = yield* supervise(dir)
       yield* eventually(service.list, (l) => l.length === 2, "both plugins")
-      const pastFirstRescanByTimeNotByARead = Effect.sleep("1500 millis")
-      yield* pastFirstRescanByTimeNotByARead
+      const pastFirstRescan = Effect.sleep("1500 millis")
+      yield* pastFirstRescan
       dropEventsAfterWatchClose.forMs = 500
       dropEventsAfterWatchClose.dropped = 0
       try {
@@ -736,17 +740,17 @@ describe("plugins: supervisor", () => {
   )
 
   it.effect(
-    "P19: a change during a stuck activation keeps readiness closed until that change is active too",
+    "P19: a change during a stuck activation keeps readiness closed until that change is active too (z's duplicate events stay held while the debounce clock is frozen)",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
-        const dir = yield* homeInsideThePackageToResolveItsImports
+        const dir = yield* packageHome
         const entered = ((globalThis as { __vibestStuck?: { value: boolean } }).__vibestStuck = { value: false })
         watchGate.hold = true
         watchGate.pending = []
-        const firstHoldingSetupUninterruptibleSixVirtualSeconds = `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: () => Effect.sync(() => { globalThis.__vibestStuck.value = true }).pipe(Effect.andThen(Effect.uninterruptible(Effect.sleep("6 seconds")))) })\n`
-        yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), firstHoldingSetupUninterruptibleSixVirtualSeconds)
+        const stuckA = `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: () => Effect.sync(() => { globalThis.__vibestStuck.value = true }).pipe(Effect.andThen(Effect.uninterruptible(Effect.sleep("6 seconds")))) })\n`
+        yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), stuckA)
         yield* fs.writeFileString(path.join(dir, "plugins", "z.ts"), pluginFile("z", "pending-z", `"z1"`))
         const plugins = yield* supervise(dir)
         while (!entered.value) yield* TestClock.withLive(Effect.sleep("5 millis"))
@@ -755,10 +759,10 @@ describe("plugins: supervisor", () => {
           () => watchGate.pending.some((change) => change.name === "z.ts"),
           "the watcher to observe z.ts (a fixed sleep moves the frozen clock too soon or past the 10s budget)",
         )
-        const deliverZKeepingDuplicatesHeldForTheFrozenDebounce = () => {
+        const deliverZ = () => {
           for (const change of watchGate.pending.splice(0)) if (change.name === "z.ts") change.deliver()
         }
-        deliverZKeepingDuplicatesHeldForTheFrozenDebounce()
+        deliverZ()
         const spawning = yield* Effect.forkChild(plugins.start(event))
         yield* TestClock.adjust("6 seconds")
         assert.isUndefined(spawning.pollUnsafe(), "readiness opened on the pre-change activation")

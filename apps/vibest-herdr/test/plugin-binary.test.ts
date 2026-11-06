@@ -32,23 +32,20 @@ export default Plugin.define({ id: "bundled", effect: (ctx) => ("ownCopy" in E ?
   "broken.ts": "export default 42\n",
 }
 
-const userEnvWithoutAgentRolesOrHarnessesOnPath = (home: string) => {
+const userEnv = (home: string) => {
   const env: Record<string, string | undefined> = { ...process.env, VIBEST_HOME: home, PATH: "/usr/bin:/bin" }
   delete env.VIBEST_SESSION_ID
   delete env.VIBEST_AGENT
   return env
 }
 
-const withForegroundVibestdOverItsSocket = async (
-  home: string,
-  f: (list: () => Promise<ReadonlyArray<PluginInfo>>) => Promise<void>,
-) => {
+const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<PluginInfo>>) => Promise<void>) => {
   const socket = path.join(home, "vibest.sock")
   const log = path.join(home, "vibestd.log")
   const rpc = <A>(effect: Effect.Effect<A, unknown, Effect.Services<ReturnType<typeof probe>>>) =>
     Effect.runPromise(effect.pipe(Effect.provide(Platform.services)))
   const daemon = Bun.spawn([binary, "daemon", "--foreground"], {
-    env: userEnvWithoutAgentRolesOrHarnessesOnPath(home),
+    env: userEnv(home),
     stdout: "ignore",
     stderr: Bun.file(log),
   })
@@ -93,7 +90,7 @@ it(
       await fs.writeFile(path.join(home, "plugins", file), content)
     }
     try {
-      await withForegroundVibestdOverItsSocket(home, async (list) => {
+      await withVibestd(home, async (list) => {
         const status = Object.fromEntries((await list()).map((p) => [path.basename(p.id), [p.status, p.error]]))
         assert.deepStrictEqual(status["shared"], ["active", undefined])
         assert.deepStrictEqual(status["bundled"], ["active", undefined])
@@ -144,7 +141,7 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
     )
     const log = async () => (await fs.readFile(setups, "utf8")).trim().split("\n")
     try {
-      await withForegroundVibestdOverItsSocket(home, async (list) => {
+      await withVibestd(home, async (list) => {
         const first = byId(await listUntilAtMost15s(list, (l) => byId(l, "live")?.status === "active"), "live")!
         assert.deepStrictEqual(await log(), ["v1"])
 
@@ -235,7 +232,7 @@ export default Plugin.define({
 `,
     )
     try {
-      await withForegroundVibestdOverItsSocket(home, async (list) => {
+      await withVibestd(home, async (list) => {
         await listUntilAtMost15s(list, (l) => l[0]?.status === "active")
         await fs.writeFile(
           path.join(home, "plugins", "zz-other.ts"),

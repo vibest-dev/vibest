@@ -129,12 +129,12 @@ export const processChain = (dir: string, layers: ReadonlyArray<string>) =>
       const name = layer.replace(/^launch:/, "")
       const link = path.join(dir, name)
       if (!(yield* fs.exists(link))) yield* fs.symlink(process.execPath, link)
-      argv.push(link, "-e", RUN_NEXT, FILLER_BUN_AS_NODE_DROPS, layer === name ? "child" : "launch")
+      argv.push(link, "-e", RUN_NEXT, FILLER_ARG, layer === name ? "child" : "launch")
     }
     return argv
   }).pipe(Effect.orDie)
 
-const FILLER_BUN_AS_NODE_DROPS = "-"
+const FILLER_ARG = "-"
 
 const RUN_NEXT = `const [mode, command, ...args] = process.argv.slice(process.argv.findIndex((a) => a === "child" || a === "launch"))
 if (mode === "launch") process.env.VIBEST_LAUNCH_PID = String(process.pid)
@@ -206,14 +206,14 @@ export const tempDirectory = (prefix: string) =>
     return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix }))
   }).pipe(Effect.orDie)
 
-const STDIN_FROM_FILE_NOT_PIPE_SO_NO_EPIPE = 'f=$1; shift; exec "$@" <"$f"'
+const STDIN_FROM_FILE = 'f=$1; shift; exec "$@" <"$f"'
 
 export const withStdin = (input: string, command: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const file = `${yield* tempDirectory("vibest-stdin-")}/stdin`
     yield* fs.writeFileString(file, input).pipe(Effect.orDie)
-    return ["-c", STDIN_FROM_FILE_NOT_PIPE_SO_NO_EPIPE, "sh", file, command, ...args] as const
+    return ["-c", STDIN_FROM_FILE, "sh", file, command, ...args] as const
   })
 
 const mainTs = `${import.meta.dirname}/../src/main.ts`
@@ -431,7 +431,7 @@ const over = (options: TestOptions) => {
     Effect.flatMap(FakeRuntime, (fake) => registry([fake.runtime])),
   )
   const home = Layer.effect(Layout, tempDirectory("vibest-home-").pipe(Effect.flatMap(Layout.make)))
-  const ownTmpdirNotTheRealOne = Layer.unwrap(
+  const ownTmpdir = Layer.unwrap(
     tempDirectory("vibest-tmp-").pipe(
       Effect.map((dir) =>
         ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: { TMPDIR: dir } }), { asPrimary: true }),
@@ -485,7 +485,7 @@ const over = (options: TestOptions) => {
         ).pipe(Layer.provideMerge(FakeProcesses.layer)),
       ),
       Layer.provideMerge(home),
-      Layer.provideMerge(ownTmpdirNotTheRealOne),
+      Layer.provideMerge(ownTmpdir),
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
       Layer.provideMerge(Platform.services),
@@ -508,7 +508,7 @@ export class GaveUp extends Schema.TaggedError<GaveUp>()("GaveUp", { helper: Sch
 
 const yieldToIo = TestClock.withLive(Effect.sleep("10 millis"))
 
-const UNTIL_ATTEMPTS_ABOUT_20S_UNDER_THE_30S_TEST_TIMEOUT = 2000
+const UNTIL_ATTEMPTS = 2000
 
 const poll = <A, E, R, R2>(
   f: Effect.Effect<A, E, R>,
@@ -529,7 +529,7 @@ export function until<A, B extends A, E, R>(
 ): Effect.Effect<B, E | GaveUp, R>
 export function until<A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>): Effect.Effect<A, E | GaveUp, R>
 export function until<A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) {
-  return poll(f, done, yieldToIo, UNTIL_ATTEMPTS_ABOUT_20S_UNDER_THE_30S_TEST_TIMEOUT, "until")
+  return poll(f, done, yieldToIo, UNTIL_ATTEMPTS, "until")
 }
 
 export const settled = Effect.gen(function* () {

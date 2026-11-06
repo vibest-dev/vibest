@@ -50,15 +50,12 @@ describe("vibest update", () => {
       kind: "curl",
       share: "/home/u/.local/share/vibest",
     })
-    for (const buildOrSourceInstalledByNeither of [
+    for (const argv of [
       ["/repository/apps/vibest-herdr/dist/vibest"],
       ["/usr/bin/bun", "/repository/src/main.ts"],
       ["/s/versions/1/bin/vibest", "x"],
     ])
-      assert.isUndefined(
-        installMethod(buildOrSourceInstalledByNeither, undefined),
-        buildOrSourceInstalledByNeither.join(" "),
-      )
+      assert.isUndefined(installMethod(argv, undefined), argv.join(" "))
   })
 
   it("update and removal go to the package manager that owns the binary, from its real path", () => {
@@ -173,21 +170,18 @@ describe("vibest update", () => {
         )
         const port = (registry.address() as { port: number }).port
         yield* fs.makeDirectory(`${home}/bin`)
-        for (const stubThatOnlyLogsItsArguments of ["bun", "npm", "vibest"]) {
-          yield* fs.writeFileString(
-            `${home}/bin/${stubThatOnlyLogsItsArguments}`,
-            `#!/bin/sh\necho "${stubThatOnlyLogsItsArguments} $*" >> "${home}/pm.log"\n`,
-          )
-          yield* fs.chmod(`${home}/bin/${stubThatOnlyLogsItsArguments}`, 0o755)
+        for (const stub of ["bun", "npm", "vibest"]) {
+          yield* fs.writeFileString(`${home}/bin/${stub}`, `#!/bin/sh\necho "${stub} $*" >> "${home}/pm.log"\n`)
+          yield* fs.chmod(`${home}/bin/${stub}`, 0o755)
         }
-        const setByNpmsLauncherSoThisVibestCountsAsNpmInstalled = { VIBEST_HARNESSES: `${home}/harnesses` }
+        const npmLauncherEnv = { VIBEST_HARNESSES: `${home}/harnesses` }
         const run = (args: ReadonlyArray<string>, env: Record<string, string> = {}) =>
           runVibest(
             home,
             {
               HOME: home,
               VIBEST_HOME: `${home}/vibest`,
-              ...setByNpmsLauncherSoThisVibestCountsAsNpmInstalled,
+              ...npmLauncherEnv,
               PATH: `${home}/bin:/bin:/usr/bin`,
               npm_config_registry: `http://127.0.0.1:${port}`,
               ...env,
@@ -218,7 +212,7 @@ describe("vibest update", () => {
           "the harness plugins come with the package: nothing else runs",
         )
 
-        const askedOfStandInVibestdOfAnotherVersion: Array<string> = []
+        const askedMethods: Array<string> = []
         const socket = (yield* Layout.make(`${home}/vibest`)).socket
         yield* fs.makeDirectory(`${home}/vibest`, { recursive: true })
         yield* Effect.acquireRelease(
@@ -227,7 +221,7 @@ describe("vibest update", () => {
               sock.on("data", (chunk) => {
                 for (const line of chunk.toString().split("\n").filter(Boolean)) {
                   const req = JSON.parse(line) as { id?: unknown; method?: string }
-                  if (req.method) askedOfStandInVibestdOfAnotherVersion.push(req.method)
+                  if (req.method) askedMethods.push(req.method)
                   if (req.method === "Ping")
                     sock.write(
                       JSON.stringify({
@@ -269,7 +263,7 @@ describe("vibest update", () => {
           installedOnly.stderr,
           /\nUpdateError: vibest 999\.0\.0: vibestd not replaced: it still runs the vibest it was started with\n$/,
         )
-        assert.notInclude(askedOfStandInVibestdOfAnotherVersion, "Daemon.Stop", "without a terminal nothing is stopped")
+        assert.notInclude(askedMethods, "Daemon.Stop", "without a terminal nothing is stopped")
 
         yield* fs.writeFileString(`${home}/bin/bun`, `#!/bin/sh\necho "bun $*" >> "${home}/pm.log"\nexit 1\n`)
         yield* fs.writeFileString(`${home}/bin/npm`, `#!/bin/sh\necho "npm $*" >> "${home}/pm.log"\nexit 1\n`)
@@ -284,19 +278,16 @@ describe("vibest update", () => {
         assert.notInclude(pmFails.stderr, "not replaced")
         assert.notInclude(pmFails.stdout, "old version")
 
-        const fromSourceStillLooksAtVibestdAndAgents = yield* runVibest(
+        const fromSource = yield* runVibest(
           home,
           { HOME: home, VIBEST_HOME: `${home}/vibest`, PATH: `${home}/bin:/bin:/usr/bin` },
           ["update"],
         )
         assert.match(
-          fromSourceStillLooksAtVibestdAndAgents.stdout,
+          fromSource.stdout,
           /^this vibest \(.*\) was not installed by npm or install\.sh; nothing to install\.\n/,
         )
-        assert.include(
-          fromSourceStillLooksAtVibestdAndAgents.stdout,
-          "vibestd: restart. vibestd 0.0.0 cannot hand itself over",
-        )
+        assert.include(fromSource.stdout, "vibestd: restart. vibestd 0.0.0 cannot hand itself over")
 
         for (const [dir, v] of [
           ["a", "1.0.0"],

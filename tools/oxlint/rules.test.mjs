@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest"
 
 const root = url.fileURLToPath(new URL("../..", import.meta.url))
 
-const lineAndCodeFromRealOxlint = (source) => {
+const oxlintFindings = (source) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-oxlint-"))
   try {
     fs.writeFileSync(path.join(dir, "fixture.ts"), source)
@@ -28,7 +28,7 @@ const lineAndCodeFromRealOxlint = (source) => {
 describe("node-import-style", () => {
   it("accepts default imports under their canonical names, and type-only imports", () => {
     expect(
-      lineAndCodeFromRealOxlint(`import childProcess from "node:child_process"
+      oxlintFindings(`import childProcess from "node:child_process"
 import fs from "node:fs"
 import fsPromises from "node:fs/promises"
 import type { Stats } from "node:fs"
@@ -42,7 +42,7 @@ export const all = [childProcess, fs, fsPromises] as unknown as [Stats, Dirent]
 
   it("rejects named and namespace imports", () => {
     expect(
-      lineAndCodeFromRealOxlint(`import { readFileSync } from "node:fs"
+      oxlintFindings(`import { readFileSync } from "node:fs"
 import * as path from "node:path"
 export const all = [readFileSync, path]
 `),
@@ -51,7 +51,7 @@ export const all = [readFileSync, path]
 
   it("rejects ad-hoc names, and the short name for a subpath when its parent is imported too", () => {
     expect(
-      lineAndCodeFromRealOxlint(`import nodePath from "node:path"
+      oxlintFindings(`import nodePath from "node:path"
 import fs from "node:fs"
 import fsp from "node:fs/promises"
 export const all = [nodePath, fs, fsp]
@@ -61,7 +61,7 @@ export const all = [nodePath, fs, fsp]
 
   it("rejects re-exports from builtins", () => {
     expect(
-      lineAndCodeFromRealOxlint(`export { readFileSync } from "node:fs"
+      oxlintFindings(`export { readFileSync } from "node:fs"
 export * from "node:path"
 `),
     ).toEqual(["1 vibest(node-import-style)", "2 vibest(node-import-style)"])
@@ -76,7 +76,7 @@ describe("no-restricted-disable", () => {
     "eslint-plugin-unicorn/prefer-node-protocol",
   ])("refuses disabling %s", (rule) => {
     expect(
-      lineAndCodeFromRealOxlint(`// oxlint-disable-next-line ${rule}
+      oxlintFindings(`// oxlint-disable-next-line ${rule}
 import os from "os"
 export const cpus = os.cpus()
 `),
@@ -84,22 +84,20 @@ export const cpus = os.cpus()
   })
 
   it("refuses a blanket disable", () => {
-    expect(lineAndCodeFromRealOxlint(`// eslint-disable\nexport const one = 1\n`)).toEqual([
-      "1 vibest(no-restricted-disable)",
-    ])
+    expect(oxlintFindings(`// eslint-disable\nexport const one = 1\n`)).toEqual(["1 vibest(no-restricted-disable)"])
   })
 
   it("allows disabling other rules", () => {
-    expect(
-      lineAndCodeFromRealOxlint(`// oxlint-disable-next-line eslint/no-unused-vars -- fixture\nconst unused = 1\n`),
-    ).toEqual([])
+    expect(oxlintFindings(`// oxlint-disable-next-line eslint/no-unused-vars -- fixture\nconst unused = 1\n`)).toEqual(
+      [],
+    )
   })
 })
 
 describe("no-comments", () => {
   it("reports line, block and JSDoc comments", () => {
     expect(
-      lineAndCodeFromRealOxlint(`// a line comment
+      oxlintFindings(`// a line comment
 /* a block comment */
 /** a JSDoc comment */
 export const one = 1 // a trailing comment
@@ -109,7 +107,7 @@ export const one = 1 // a trailing comment
 
   it("allows a shebang, TypeScript directives, triple-slash references and lint directives", () => {
     expect(
-      lineAndCodeFromRealOxlint(`#!/usr/bin/env bun
+      oxlintFindings(`#!/usr/bin/env bun
 /// <reference types="node" />
 // @ts-expect-error the fixture assigns a number to a string
 export const name: string = 1
@@ -117,7 +115,31 @@ export const name: string = 1
 export const other: string = 2
 // oxlint-disable-next-line eslint/no-unused-vars -- fixture
 const unused = 1
+/* oxlint-disable-next-line eslint/no-unused-vars -- fixture */
+const unusedToo = 1
+/** @ts-expect-error the fixture assigns a number to a string */
+export const third: string = 3
 `),
     ).toEqual([])
+  })
+
+  it("allows oxlint-enable and eslint-enable directives, with or without rules", () => {
+    expect(
+      oxlintFindings(`/* oxlint-disable eslint/no-unused-vars */
+const unused = 1
+/* oxlint-enable eslint/no-unused-vars */
+// eslint-disable-next-line eslint/no-unused-vars -- fixture
+const unusedToo = 1
+// eslint-enable
+// oxlint-enable
+export const one = 1
+`),
+    ).toEqual([])
+  })
+
+  it("still reports a comment that only mentions a directive", () => {
+    expect(oxlintFindings(`// remember to oxlint-enable later\nexport const one = 1\n`)).toEqual([
+      "1 vibest(no-comments)",
+    ])
   })
 })

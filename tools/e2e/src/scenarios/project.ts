@@ -149,7 +149,7 @@ const fakeAnthropic = (step: ReturnType<typeof filesTurn>, dirs: Record<string, 
   return { url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
 }
 
-const autoModeOffSoNoFirstRunQuestionStopsThePane = {
+const autoModeOff = {
   disableAutoMode: "disable",
   permissions: { defaultMode: "default", disableAutoMode: "disable" },
 }
@@ -165,7 +165,7 @@ const claudeEnv = async (w: World, name: string, url: string) => {
       customApiKeyResponses: { approved: [key.slice(-20)], rejected: [] },
     }),
   )
-  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify(autoModeOffSoNoFirstRunQuestionStopsThePane))
+  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify(autoModeOff))
   return [`CLAUDE_CONFIG_DIR=${dir}`, `ANTHROPIC_BASE_URL=${url}`, `ANTHROPIC_API_KEY=${key}`].flatMap((pair) => [
     "--env",
     pair,
@@ -292,7 +292,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "P7",
     title:
-      "a moved checkout: other commands name both places; vibest asks [Y/n], y keeps the project id, its repository path and memories, and repairs vibest's worktree",
+      "a moved checkout: other commands name both places; vibest asks [Y/n], y keeps the project id, its repository path and memories, and repairs vibest's worktree (the answering vibest names a runtime that does not exist, so no harness starts)",
     run: async (w) => {
       const sh = async (cwd: string, ...argv: Array<string>) => {
         const r = await w.run(cwd, argv)
@@ -321,8 +321,8 @@ const checks: ReadonlyArray<Check> = [
         refused.code !== 0 && refused.stderr.includes(old) && refused.stderr.includes(moved),
         `project info in the moved checkout: ${refused.code} ${refused.stderr}${refused.stdout}`,
       )
-      const noSuchRuntimeSoNoHarnessRuns = "e2e-none"
-      const r = await w.tty(["--headless", "--runtime", noSuchRuntimeSoNoHarnessRuns], "y\n", {
+      const missingRuntime = "e2e-none"
+      const r = await w.tty(["--headless", "--runtime", missingRuntime], "y\n", {
         cwd: moved,
         timeoutMs: 60_000,
       })

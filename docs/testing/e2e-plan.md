@@ -114,6 +114,8 @@ What the checks that drive real herdr panes rely on:
   vibest first on `PATH`.
 - Claude asks whether to trust a new folder and loads hooks only once it is trusted. For a main agent the check answers
   as the person does (down to Yes, then enter); vibest answers it for subagents.
+- A Claude agent on a fake model gets `disableAutoMode` in its temp settings: with auto mode on, a first-run question
+  stops the pane.
 - An enter typed right behind text in Claude's input box is sometimes swallowed; a check waiting for that line presses
   enter again.
 - Claude refuses a standalone `sleep`: to keep a main agent busy, the check has its turn wait in a Bash call for a file
@@ -161,3 +163,16 @@ runtime is called. `vibest ls` prints JSON already; it has no `--json` flag.
 In `pnpm test`, `cli.test.ts` starts a fresh Bun process for each `vibest` (about 0.3 s, several seconds on a loaded
 machine), up to twenty per test, so its tests run one at a time: run together they share the CPU, and on a two-core CI
 runner they cost twice as much (23 s for the file against 12 s in turn).
+
+The unit fakes (`apps/vibest-herdr/test/fakes.ts`): `until` polls up to 2000 times 10 ms, about 20 s, under the 30 s test
+timeout. `withStdin` feeds a command from a file, not a pipe, so a command that exits without reading raises no EPIPE.
+Each node layer of a process chain gets a `-` filler argument, which Bun running as node drops. The test layer gives
+every test its own `TMPDIR`. Plugin-loading tests make their `VIBEST_HOME` under `apps/vibest-herdr/test/.tmp`, inside
+the package, so plugin files resolve `@vibest/plugin` and `effect`; the reload tests load plugins with Node's `require`
+after evicting its cache, bypassing Vitest's module cache.
+
+`pnpm test` runs Vitest under Bun, so `#platform` resolves through the `bun` condition (`vitest.config.ts`) to the Bun
+layers. Concurrent tests of one file share a worker, and Vitest's 5 s default is too tight once several git or Bun tests
+overlap, so the timeout is 30 s. `vitest.setup.ts` drops `PI_PACKAGE_DIR`: a Pi install directory the parent exported
+may be gone when a child starts, and a test that starts `pi` would then read version 0.0.0 and exit before herdr sees
+it; the install beside `pi` is the one to use.
