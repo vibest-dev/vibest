@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -124,10 +125,11 @@ func (s *Stream) Close() error {
 
 type Viewer struct {
 	*Stream
-	Terminal Terminal
-	observe  bool
-	remote   bool
-	ref      TerminalRef
+	Terminal  Terminal
+	observe   bool
+	remote    bool
+	automatic bool
+	ref       TerminalRef
 }
 
 func (c *Client) Attach(ctx context.Context, o TerminalAttachParams) (*Viewer, error) {
@@ -147,7 +149,8 @@ func (c *Client) Attach(ctx context.Context, o TerminalAttachParams) (*Viewer, e
 	remote := qualified && prefix != c.hello.Core.ID && prefix != c.hello.Core.Name
 	returned, _, qualified := strings.Cut(r.Terminal.Address, "/")
 	remote = remote || (qualified && returned != c.hello.Core.ID && returned != c.hello.Core.Name)
-	return &Viewer{Stream: s, Terminal: r.Terminal, observe: o.Observe, remote: remote}, nil
+	automatic := r.AutomaticInput && slices.Contains(c.hello.Features, "automatic_input")
+	return &Viewer{Stream: s, Terminal: r.Terminal, observe: o.Observe, remote: remote, automatic: automatic}, nil
 }
 
 func (v *Viewer) InputError() error {
@@ -195,11 +198,10 @@ func (v *Viewer) control(kind byte, b []byte) error {
 }
 
 type Keyboard struct {
-	mu                                sync.Mutex
-	viewer                            *Viewer
-	generation                        uint64
-	rendered                          bool
-	cols, rows, cellWidth, cellHeight int
+	mu         sync.Mutex
+	viewer     *Viewer
+	generation uint64
+	rendered   bool
 }
 type Input struct {
 	keyboard   *Keyboard
@@ -232,10 +234,6 @@ func (k *Keyboard) Rendered(owner Owner, cols, rows, cellWidth, cellHeight int) 
 		}
 		k.rendered = false
 		return false
-	}
-	if k.cols != cols || k.rows != rows || k.cellWidth != cellWidth || k.cellHeight != cellHeight {
-		k.generation++
-		k.cols, k.rows, k.cellWidth, k.cellHeight = cols, rows, cellWidth, cellHeight
 	}
 	k.rendered = true
 	return true
@@ -301,7 +299,16 @@ func (i Input) Valid() bool {
 	defer k.mu.Unlock()
 	return k.viewer == i.viewer && k.generation == i.generation && k.rendered && !i.viewer.remote && i.viewer.alive()
 }
-func (i Input) Write(b []byte) (int, error) {
+func (i Input) Write(b []byte) (int, error) { return i.write(data, b) }
+
+func (i Input) WriteAutomatic(b []byte) (int, error) {
+	if i.viewer != nil && i.viewer.automatic {
+		return i.write(automaticInput, b)
+	}
+	return i.write(data, b)
+}
+
+func (i Input) write(kind byte, b []byte) (int, error) {
 	if i.keyboard == nil {
 		return 0, ErrOwnership
 	}
@@ -314,7 +321,7 @@ func (i Input) Write(b []byte) (int, error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
-	err := i.viewer.client.send(context.Background(), i.viewer.channel, data, b, func() error {
+	err := i.viewer.client.send(context.Background(), i.viewer.channel, kind, b, func() error {
 		k := i.keyboard
 		k.mu.Lock()
 		defer k.mu.Unlock()

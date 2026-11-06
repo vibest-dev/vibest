@@ -177,14 +177,18 @@ type captured struct {
 	terminal *Terminal
 }
 
-func (c captured) Write(p []byte) (int, error) {
+func (c captured) Write(p []byte) (int, error) { return c.write(c.input.Write, p) }
+
+func (c captured) WriteAutomatic(p []byte) (int, error) { return c.write(c.input.WriteAutomatic, p) }
+
+func (c captured) write(send func([]byte) (int, error), p []byte) (int, error) {
 	if c.terminal.mode.Load() != 1 || !c.input.Valid() {
 		return 0, terminal.ErrInputCanceled
 	}
 	if len(p) == 0 {
 		return 0, nil
 	}
-	n, err := c.input.Write(p)
+	n, err := send(p)
 	if errors.Is(err, core.ErrBusy) {
 		return n, terminal.ErrInputFull
 	}

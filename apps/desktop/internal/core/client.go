@@ -15,17 +15,18 @@ import (
 )
 
 const (
-	maxPayload    = 16 << 20
-	streamWindow  = 256 << 10
-	maxQueued     = 1 << 20
-	MaxInputBytes = maxQueued - 9
-	maxChannels   = 128
-	data          = byte(0)
-	credit        = byte(1)
-	closeChannel  = byte(2)
-	resize        = byte(3)
-	focus         = byte(4)
-	facts         = byte(5)
+	maxPayload     = 16 << 20
+	streamWindow   = 256 << 10
+	maxQueued      = 1 << 20
+	MaxInputBytes  = maxQueued - 9
+	maxChannels    = 128
+	data           = byte(0)
+	credit         = byte(1)
+	closeChannel   = byte(2)
+	resize         = byte(3)
+	focus          = byte(4)
+	facts          = byte(5)
+	automaticInput = byte(6)
 )
 
 var (

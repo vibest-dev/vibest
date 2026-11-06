@@ -38,6 +38,10 @@ type fixture struct {
 func newFixture(t *testing.T) (*core.Client, *fixture) { return newFixtureWithConn(t, nil) }
 func newFixtureWithConn(t *testing.T, wrap func(net.Conn) net.Conn) (*core.Client, *fixture) {
 	t.Helper()
+	return newFixtureWithFeatures(t, wrap)
+}
+func newFixtureWithFeatures(t *testing.T, wrap func(net.Conn) net.Conn, extra ...string) (*core.Client, *fixture) {
+	t.Helper()
 	a, b := net.Pipe()
 	f := &fixture{t: t, conn: b, requests: make(chan request, 32), frames: make(chan packet, 256), done: make(chan struct{})}
 	go func() {
@@ -54,7 +58,7 @@ func newFixtureWithConn(t *testing.T, wrap func(net.Conn) net.Conn) (*core.Clien
 		f.sendJSON(0, map[string]any{"jsonrpc": "2.0", "id": h.ID, "result": map[string]any{
 			"generation": 1, "version": "0.1.13", "framed": true, "core": map[string]string{"id": "fixture-permanent-core", "name": "test"},
 			"methods":  []string{"terminal.run", "terminal.get", "terminal.attach", "terminal.kill", "events.subscribe", "doc.get", "doc.set", "machine.list"},
-			"features": []string{"framed", "attach", "events", "status", "shell"},
+			"features": append([]string{"framed", "attach", "events", "status", "shell"}, extra...),
 		}}, true)
 		for {
 			var header [9]byte

@@ -238,7 +238,7 @@ func TestAlreadyAdmittedInputIsTheUnrecallableBoundary(t *testing.T) {
 	}
 }
 
-func TestPaintProofRejectsOldSelectionAndGeometryLease(t *testing.T) {
+func TestPaintProofRejectsOldSelectionButKeepsOwnerAcrossResize(t *testing.T) {
 	c, _, _ := queuedClient(t)
 	v := queueViewer(t, c)
 	var k Keyboard
@@ -252,14 +252,9 @@ func TestPaintProofRejectsOldSelectionAndGeometryLease(t *testing.T) {
 	k.Rendered(k.OwnerKey(), 80, 24, 8, 16)
 	old, _ := k.CaptureFor(v)
 	k.Rendered(k.OwnerKey(), 100, 30, 8, 16)
-	k.Rendered(k.OwnerKey(), 80, 24, 8, 16)
-	if old.Valid() {
-		t.Fatal("old geometry lease revived when size returned")
-	}
-	current, _ := k.CaptureFor(v)
 	k.Rendered(k.OwnerKey(), 80, 24, 9, 18)
-	if current.Valid() {
-		t.Fatal("changed pixel cell size retained old geometry lease")
+	if !old.Valid() {
+		t.Fatal("a resize took the input owner away")
 	}
 }
 

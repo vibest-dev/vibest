@@ -36,26 +36,6 @@ func headersOnCards(t *testing.T, tt *ui.Tester, a *App, when string) map[string
 	}
 	return xs
 }
-func awaitCoreSize(t *testing.T, a *App, tt *ui.Tester, id string) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		a.mu.Lock()
-		v := a.coreViews[id]
-		view := vtView(t, v)
-		cols, rows := v.VT.Size()
-		asked := cols == int(view.FieldByName("cols").Int()) && rows == int(view.FieldByName("rows").Int())
-		a.mu.Unlock()
-		tt.Frame()
-		if asked {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("Core did not answer the resize of %s", id)
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
 func TestSidebarToggleKeepsHeadersOnTheirCards(t *testing.T) {
 	for _, tc := range []struct {
 		mode    string
@@ -86,7 +66,6 @@ func TestSidebarToggleKeepsHeadersOnTheirCards(t *testing.T) {
 					if a.coreViews["a"] != original {
 						t.Fatal("slide replaced terminal")
 					}
-					awaitCoreSize(t, a, tt, "a")
 					if !tt.TypeKeyNative(0, ui.KeyX, "x") {
 						t.Fatal("slide lost native input owner")
 					}
