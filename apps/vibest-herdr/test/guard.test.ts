@@ -1,4 +1,3 @@
-// `vibest integration guard` (guard.ts): everything runs but what a rule names, for the coordinator and for every other session, as every harness's hook sees them.
 import { assert, describe, it, layer } from "@effect/vitest"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
 import { coordinator, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
@@ -23,7 +22,6 @@ const both = (command: string) => [shellBlock(command, source, true), shellBlock
 describe("Shell denials", () => {
   it("run anything no rule names: unlisted programs, env prefixes, any shell syntax, quoted task data, any vibest command", () => {
     for (const command of [
-      // Programs and shapes the old read-only allowlist refused.
       "touch x",
       "echo hi > y",
       "jq . package.json",
@@ -53,7 +51,6 @@ describe("Shell denials", () => {
       "{ ls; }",
       "if true; then ls; fi",
       "",
-      // Quoted text is data, here-document bodies and comments too.
       "vibest run pi 'herdr pane list; vibest integration stop'",
       "git commit -m 'herdr pane list'",
       'rg "vibest integration stop" src',
@@ -61,7 +58,6 @@ describe("Shell denials", () => {
       "vibest run pi - <<'EOF'\nherdr pane list\nvibest integration stop\nEOF",
       "ls # herdr pane list",
       "echo 'claude -p x' && echo \"gh auth token\"",
-      // vibest decides who may run its commands (cli.ts userOnly, server.ts ACCESS), not the guard.
       "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "vibest send abcd1234-abcd-4abc-8abc-abcd1234abcd x",
       "vibest ls",
@@ -76,7 +72,6 @@ describe("Shell denials", () => {
       "/usr/bin/bun /src/main.ts interrupt abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "/usr/local/bin/vibest archive abcd1234-abcd-4abc-8abc-abcd1234abcd",
       "vibest send x -- integration stop",
-      // Reading the identity is not changing it.
       "echo $VIBEST_SESSION_ID",
       "printenv VIBEST_AGENT",
     ])
@@ -99,7 +94,6 @@ describe("Shell denials", () => {
       "cat <<EOF\nx\nEOF\nherdr pane list",
     ])
       for (const reason of both(command)) assert.match(reason ?? "", /^Agents must not control herdr/, command)
-    // A session runs no herdr at all (Claude's old `Bash(herdr:*)`); the coordinator's non-control herdr runs.
     for (const command of ["herdr --help", "herdr", "ls && herdr status", "env A=1 /opt/bin/herdr --version"])
       assert.deepStrictEqual(both(command), [undefined, "Sessions do not run herdr; vibest manages it."], command)
   })
@@ -231,7 +225,6 @@ layer(Platform.services)("role rules", (it) => {
         ["Write", {}],
       ] as const)
         assert.isString(yield* asCoordinator(tool, input), JSON.stringify(input))
-      // Without VIBEST_PROJECT_DIR: no edits at all.
       assert.isString(yield* asCoordinator("Write", { file_path: path.join(own, "artifacts", "plan.md") }, null))
     }),
   )
@@ -248,7 +241,6 @@ layer(Platform.services)("role rules", (it) => {
       yield* fs.makeDirectory(path.join(own, "artifacts"), { recursive: true })
       yield* fs.makeDirectory(path.join(other, "artifacts"), { recursive: true })
       yield* fs.makeDirectory(work, { recursive: true })
-      // The target does not exist yet: realPath fails, and a write would create it there.
       const outside = path.join(home, "outside.md")
       const stolen = path.join(other, "artifacts", "stolen.md")
       yield* fs.symlink(outside, path.join(own, "artifacts", "leak"))
@@ -304,7 +296,6 @@ layer(Platform.services)("role rules", (it) => {
           Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
           Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_PROJECT_DIR: own }))),
         )
-      // cat file.txt/x: readLink is ENOTDIR. The lexical path is outside the projects directory, so it is allowed.
       assert.isUndefined(yield* asSession("Bash", { command: `cat ${path.join(work, "file.txt")}/x` }))
       const asCoordinator = (input: Record<string, unknown>) =>
         coordinator({ tool: "Write", input, cwd: work }).pipe(
@@ -389,13 +380,11 @@ layer(Platform.services)("role rules", (it) => {
             ["Bash", { command: `cat ${file}` }],
             ["Bash", { command: `grep -r x ${dir}` }],
           ] as const
-        // Its own folder: read, write, search, in every subfolder.
         for (const dir of [own, ...["docs", "memories", "artifacts"].map((kind) => path.join(own, kind))])
           for (const [tool, input] of calls(dir, path.join(dir, "notes.md")))
             assert.isUndefined(yield* asSession(tool, input), `${tool} ${JSON.stringify(input)}`)
         for (const [tool, input] of calls(own, path.join(own, "preferences.md")))
           assert.isUndefined(yield* asSession(tool, input), `${tool} ${JSON.stringify(input)}`)
-        // Another project's folder, one whose name starts with its own, and the projects directory: refused.
         for (const [dir, file] of [
           [other, path.join(other, "preferences.md")],
           [path.join(other, "artifacts"), path.join(other, "artifacts", "a.md")],
@@ -405,17 +394,14 @@ layer(Platform.services)("role rules", (it) => {
         ] as const)
           for (const [tool, input] of calls(dir, file))
             assert.strictEqual(yield* asSession(tool, input), offLimits, `${tool} ${JSON.stringify(input)}`)
-        // A search over a directory holding the projects directory reaches into it.
         for (const [tool, input] of [
           ["Grep", { pattern: "x", path: vibestHome }],
           ["Glob", { pattern: `${vibestHome}/**/preferences.md` }],
           ["Bash", { command: `grep -r x ${vibestHome}` }],
         ] as const)
           assert.strictEqual(yield* asSession(tool, input), offLimits, `${tool} ${JSON.stringify(input)}`)
-        // No VIBEST_PROJECT_DIR: nothing under projects, its own folder included.
         for (const [tool, input] of calls(own, path.join(own, "notes.md")))
           assert.strictEqual(yield* asSession(tool, input, null), offLimits, `no VIBEST_PROJECT_DIR: ${tool}`)
-        // Outside projects it is unchanged, and no herdr at all.
         assert.isUndefined(yield* asSession("Read", { file_path: path.join(worktree, "src/a.ts") }, null))
         assert.isUndefined(yield* asSession("Grep", { pattern: "x" }))
         for (const command of ["herdr pane list", "herdr --help", "cd /tmp && herdr"])
@@ -536,32 +522,25 @@ layer(Platform.services)("role rules", (it) => {
         ] as const)
           assert.isUndefined(yield* asSession(tool, input), JSON.stringify(input))
         for (const [tool, input] of [
-          // `..` further on, not only right after its folder.
           ["Bash", { command: `cat ${work}/x/../../../../other/docs/secret.md` }],
           ["Read", { file_path: `${work}/x/../../../../other/docs/secret.md` }],
-          // A symlink in its folder to another project's (and `..` taken after the link, as the system does).
           ["Read", { file_path: `${work}/peer/a.md` }],
           ["Bash", { command: `cat ${work}/peer/a.md` }],
           ["Grep", { pattern: "x", path: `${work}/peer` }],
           ["Edit", { file_path: `${work}/deep/../a.md` }],
-          // Relative to the cwd, and through vibest's home.
           ["Read", { file_path: ".vibest/projects/other/docs/a.md" }],
           ["Bash", { command: "cd ~/.vibest && cat projects/other/docs/a.md" }],
           ["Bash", { command: "cat ~/.vibest/proj*/other/docs/a.md" }],
-          // After a `cd` the hook cannot follow: another project's path spelled out is enough.
           ["Bash", { command: "cd ~ && cat .vibest/projects/other/docs/a.md" }],
-          // A tree-walking program from above the project (the simple forms; a shell is not parsed in full).
           ["Bash", { command: "rg secret ~" }],
           ["Bash", { command: `grep -r secret ${vibestHome}` }],
           ["Bash", { command: "find ~/ -name '*.md'" }],
           ["Bash", { command: "cat --file=~/.vibest/projects/other/memories/a" }],
-          // Searches from above the project reach into it.
           ["Grep", { pattern: "x", path: "~" }],
           ["Grep", { pattern: "x", path: vibestHome }],
           ["Glob", { pattern: "~/.vibest/**/*.md" }],
           ["find", { path: home }],
           ["NotebookEdit", { notebook_path: path.join(other, "docs", "n.ipynb") }],
-          // Malformed: refused, not let through.
           ["Bash", {}],
           ["Bash", { command: 1 }],
         ] as const)
@@ -598,7 +577,6 @@ layer(Platform.services)("role rules", (it) => {
               assert.isString(yield* as(rules, tool, command), `${tool}: ${command}`)
           }
         }
-        // Not a shell call vibest can read: refused, not let through.
         for (const rules of [coordinator, session])
           assert.isString(
             yield* rules({ tool: "Bash", input: {}, cwd: "/" }).pipe(
@@ -625,7 +603,7 @@ layer(Platform.services)("role rules", (it) => {
 
 describe("wizard entry", () => {
   it.effect(
-    "a confirmed --wizard reaches the handler, and a session stops at userOnly before spawn, exec or the daemon host",
+    "a confirmed --wizard (Enter picks daemon, the first subcommand, then restart, its only child) reaches the handler, and a session stops at userOnly before spawn, exec or the daemon host",
     () =>
       Effect.gen(function* () {
         const touched = { spawn: false, exec: false, host: false, socket: false }
@@ -634,8 +612,8 @@ describe("wizard entry", () => {
           key: { name: "enter", ctrl: false, meta: false, shift: false },
         }
         const keys = yield* Queue.unbounded<Terminal.UserInput>()
-        // Root's first subcommand is daemon; its only child is restart; the run toggle defaults to yes.
-        yield* Queue.offerAll(keys, [enter, enter, enter])
+        const [pickDaemon, pickRestart, acceptRunDefaultYes] = [enter, enter, enter]
+        yield* Queue.offerAll(keys, [pickDaemon, pickRestart, acceptRunDefaultYes])
         const terminal = Terminal.make({
           columns: Effect.succeed(80),
           rows: Effect.succeed(24),
@@ -714,7 +692,6 @@ describe("vibest --session inside herdr", () => {
       Effect.gen(function* () {
         const touched = { exec: false, host: false, socket: false }
         const repo = yield* makeRepository.pipe(Effect.provide(Platform.services))
-        // `--in-parent <root>` marks this pane as the parent workspace's, so herdr is not asked which workspace it is in.
         const back = process.cwd()
         process.chdir(repo)
         const host = new Proxy({} as Host, {

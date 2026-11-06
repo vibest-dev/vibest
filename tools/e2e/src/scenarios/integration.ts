@@ -1,7 +1,3 @@
-// vibest's plugin for each harness ships with vibest (apps/vibest-herdr/harnesses, VIBEST_HARNESSES) and is loaded into each
-// harness vibest starts, for that session only: Pi `-e`, Claude and Cursor `--plugin-dir`. Nothing is installed, and the
-// user's own plugins and hooks keep loading beside it. Each check runs the real harness with the user's own login and
-// config (read, not written) and a temp VIBEST_HOME: an agent's herdr call is refused, and its reply lands as the result.
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -20,16 +16,12 @@ import {
   type World,
 } from "../world.ts"
 
-/**
- * The user's real harness files vibest could write: none of them may change during a run. `~/.cursor/cli-config.json`
- * is out: vibest never touches it, and cursor-agent rewrites that one itself while it runs.
- */
-const REAL = [".claude/settings.json", ".cursor/hooks.json", ".pi/agent/settings.json"].map((p) =>
+const userHarnessFiles = [".claude/settings.json", ".cursor/hooks.json", ".pi/agent/settings.json"].map((p) =>
   path.join(os.homedir(), p),
 )
 const stamp = () =>
   Promise.all(
-    REAL.map((p) =>
+    userHarnessFiles.map((p) =>
       fs.stat(p).then(
         (s) => `${p} ${s.mtimeMs}`,
         () => `${p} missing`,
@@ -44,24 +36,18 @@ const untilFile = path.join(import.meta.dirname, "../until-file.py")
 // oxlint-disable-next-line no-control-regex -- the escape character is the ANSI CSI lead; stripping harness output needs it
 const plain = (text: string) => text.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
 
-/** A working directory of its own for one harness's turn. */
 const workdir = async (w: World, name: string) => {
   const dir = path.join(w.root, name)
   await fs.mkdir(dir, { recursive: true })
   return dir
 }
 
-/** The session's result as `vibest result` shows it, once vibestd wrote it from the plugin's turn end. */
 const resultMessage = async (w: World, id: string) => {
   let message = ""
   await until(`${id}'s result`, async () => (message = (await latest(w, id))?.message ?? "") !== "", 30_000)
   return message
 }
 
-/**
- * `run(marker)`, with `marker` created once `vibest result` shows a result for session `id` (until-file.py stops the
- * harness when it appears).
- */
 const untilResult = async <A>(w: World, id: string, run: (marker: string) => Promise<A>) => {
   const marker = path.join(w.root, `${id}.result`)
   let done = false
@@ -79,7 +65,6 @@ const untilResult = async <A>(w: World, id: string, run: (marker: string) => Pro
   }
 }
 
-/** A session as `vibest ls` shows it. */
 const listed = async (w: World, id: string) =>
   (await w.json<Array<{ id: string; status: string; turnState: string; worktree: string }>>(["ls"])).find(
     (e) => e.id === id,
@@ -87,11 +72,9 @@ const listed = async (w: World, id: string) =>
 const status = async (w: World, id: string) => (await listed(w, id))?.status
 const turnState = async (w: World, id: string) => (await listed(w, id))?.turnState
 
-/** The latest result row `vibest result` shows for a session: its inbox id and message. */
 const latest = async (w: World, id: string) =>
   (await w.json<{ result?: { id: number; message: string } | null }>(["result", id])).result ?? undefined
 
-/** The turn ends vibestd received for a session, oldest first, as vibestd.log lists them. */
 const ends = async (w: World, id: string) =>
   (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).split("\n").flatMap((l) => {
     const found = new RegExp(`turn end ${id} \\((\\w+)(, interrupted)?\\)`).exec(l)
@@ -100,13 +83,6 @@ const ends = async (w: World, id: string) =>
 
 const STORY = "Do not use any tools. Write a very long story, at least 4000 words, about a lighthouse keeper."
 
-/**
- * One real Claude session (`vibest run claude`) on `task` (a long answer by default), in a herdr session of its own, with
- * the user's own Claude login: vibestd is started anew without CLAUDE_CONFIG_DIR, as S12 does, and the herdr session gets
- * its environment. An empty ZDOTDIR keeps a pane's zsh from reading the user's zshrc, which can put the user's own
- * installed `vibest` ahead of this build on PATH (the plugin's hooks run `vibest` from PATH). Archives the session and
- * stops that herdr session at the end.
- */
 const withClaudeSession = async (
   w: World,
   body: (s: { id: string; socket: string }) => Promise<void>,
@@ -175,7 +151,6 @@ const checks: ReadonlyArray<Check> = [
     title:
       "vibest finds its plugins: npm's launcher passes them, the bare binary looks beside its bin/; with none it refuses each harness, and says why",
     run: async (w) => {
-      // Installed: npm's launcher. Built: dist/vibest beside apps/vibest-herdr/harnesses, as bin/vibest in a release archive.
       const beside = await w.vibest(["doctor"], { env: { VIBEST_HARNESSES: undefined }, timeoutMs: 120_000 })
       for (const h of ["pi", "claude", "cursor"])
         expect(!new RegExp(`^  . ${h} .*plugin`, "m").test(beside.stdout), `${h}:\n${beside.stdout}`)
@@ -187,13 +162,13 @@ const checks: ReadonlyArray<Check> = [
         env: { VIBEST_HARNESSES: undefined },
         timeoutMs: 120_000,
       })
-      // The binary knows its own path resolved (/tmp is /private/tmp on macOS).
-      const root = await fs.realpath(path.join(w.root, "solo"))
+      const resolvedSolo = await fs.realpath(path.join(w.root, "solo"))
       for (const h of ["pi", "claude", "cursor"])
         expect(
-          new RegExp(`^  ✗ ${h} +vibest's ${h} plugin is missing: ${path.join(root, "harnesses", h)}$`, "m").test(
-            r.stdout,
-          ),
+          new RegExp(
+            `^  ✗ ${h} +vibest's ${h} plugin is missing: ${path.join(resolvedSolo, "harnesses", h)}$`,
+            "m",
+          ).test(r.stdout),
           `${h}:\n${r.stdout}`,
         )
     },
@@ -206,9 +181,7 @@ const checks: ReadonlyArray<Check> = [
       if (!Bun.which("pi")) throw new Skip("pi not on PATH")
       const cwd = await workdir(w, "pi-turn")
       const id = "e2e00003-e2e0-4e2e-8e2e-e2e00003e2e0"
-      // The extension sends its turn end to vibestd, which writes the result for a session it knows.
       const project = await knownSessions(w, { [id]: "general" }, cwd, "pi")
-      // The user's own Pi config (its login and extensions); --no-session keeps the conversation out of it.
       const r = await untilResult(w, id, (marker) =>
         w.run(
           cwd,
@@ -251,9 +224,7 @@ const checks: ReadonlyArray<Check> = [
       if (!Bun.which("claude")) throw new Skip("claude not on PATH")
       const cwd = await workdir(w, "claude-turn")
       const id = "e2e00004-e2e0-4e2e-8e2e-e2e00004e2e0"
-      // The plugin talks to vibestd over HTTP, which answers only a session it knows.
       const project = await knownSessions(w, { [id]: "general" }, cwd)
-      // The user's own Claude config (its login and plugins); --no-session-persistence keeps the conversation out of it.
       const r = await w.run(
         cwd,
         [
@@ -321,14 +292,15 @@ const checks: ReadonlyArray<Check> = [
       if (!/Logged in/.test(login.stdout + login.stderr))
         throw new Skip(`cursor-agent is not logged in: ${(login.stdout + login.stderr).trim()}`)
       const cwd = await workdir(w, "cursor-turn")
-      // The user's own hooks, as a project keeps them: they run beside vibest's.
-      const marker = path.join(w.root, "project-hook.log")
+      const projectHookLog = path.join(w.root, "project-hook.log")
       await fs.mkdir(path.join(cwd, ".cursor"), { recursive: true })
       await fs.writeFile(
         path.join(cwd, ".cursor/hooks.json"),
-        JSON.stringify({ version: 1, hooks: { sessionStart: [{ command: `echo ran >> '${marker}'; echo {}` }] } }),
+        JSON.stringify({
+          version: 1,
+          hooks: { sessionStart: [{ command: `echo ran >> '${projectHookLog}'; echo {}` }] },
+        }),
       )
-      // The hooks' `vibest`, recorded: what it was asked and what it answered.
       const bin = path.join(w.root, "bin")
       const calls = path.join(w.root, "vibest-calls.log")
       await fs.mkdir(bin, { recursive: true })
@@ -338,7 +310,6 @@ const checks: ReadonlyArray<Check> = [
         { mode: 0o755 },
       )
       const id = "e2e00005-e2e0-4e2e-8e2e-e2e00005e2e0"
-      // `vibest integration stop` sends the turn end to vibestd, which writes the result for a session it knows.
       const project = await knownSessions(w, { [id]: "general" }, cwd, "cursor")
       const r = await untilResult(w, id, (marker) =>
         w.run(
@@ -362,8 +333,6 @@ const checks: ReadonlyArray<Check> = [
               VIBEST_SESSION_ID: id,
               VIBEST_PROJECT_ID: String(project),
               VIBEST_HARNESS: "cursor",
-              // cursor-agent's hook shell rebuilds PATH, so the wrapper is not the first vibest. The hook runs
-              // VIBEST_COMMAND, which is how an agent vibest starts names its own binary.
               VIBEST_COMMAND: JSON.stringify([path.join(bin, "vibest")]),
               PATH: `${bin}:${w.env().PATH}`,
             },
@@ -380,7 +349,7 @@ const checks: ReadonlyArray<Check> = [
       expect(r.code === 0, `no result within 240s; vibest calls:\n${log}\nscreen:\n${plain(r.stderr)}`)
       const message = await resultMessage(w, id)
       expect(/<harness>cursor<\/harness>/.test(message) && /pong/.test(message), message)
-      expect(await Bun.file(marker).exists(), "the project's own sessionStart hook did not run")
+      expect(await Bun.file(projectHookLog).exists(), "the project's own sessionStart hook did not run")
     },
   },
   {
@@ -403,7 +372,6 @@ const checks: ReadonlyArray<Check> = [
           )
           const aborted = async () => (await ends(w, id)).filter((e) => e.interrupted).length
 
-          // The person presses Esc in the pane: one result, failed, that says the turn was interrupted.
           await w.ok(["send", id, STORY])
           await until("the story turn", settled("open"), 60_000)
           await Bun.sleep(10_000)
@@ -421,7 +389,6 @@ const checks: ReadonlyArray<Check> = [
           )
           expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
 
-          // vibest's own interrupt: the same aborted turn.complete reaches vibest, and is no result.
           await w.ok(["send", id, STORY])
           await until("the second story turn", settled("open"), 60_000)
           await Bun.sleep(10_000)
@@ -446,7 +413,6 @@ const checks: ReadonlyArray<Check> = [
         let screen = ""
         await until(
           "Claude's input box on the session's screen",
-          // The story may be in any language and scroll the prompt away; Claude's input box stays at the bottom.
           async () => /❯/.test((screen = await w.ok(["peek", id]))),
           60_000,
         ).catch((e: Error) => {
@@ -476,7 +442,6 @@ const checks: ReadonlyArray<Check> = [
         "this test checks, and vibest's guard refuses the call before anything runs, so make the call and report the",
         "refusal it gives;",
         `(2) the Read tool with file_path ${path.join(project, "preferences.md")};`,
-        // This Claude has no Glob or Grep tool (it finds and searches with Bash); guard.test covers those tools.
         `(3) the Bash tool with the command: find ${path.join(project, "memories")} -name '*.md';`,
         `(4) the Bash tool with the command: grep -r secret ${project}.`,
         "Then reply with `status: completed` and a `summary:` line naming the calls that were refused.",
@@ -494,10 +459,8 @@ const checks: ReadonlyArray<Check> = [
             async () => ["completed", "failed"].includes((await turnState(w, id)) ?? ""),
             180_000,
           )
-          // What each call returned is in Claude's own transcript (the user's ~/.claude, as CLAUDE_CONFIG_DIR is unset).
           const worktree = await fs.realpath((await listed(w, id))!.worktree)
           const dir = path.join(w.home, ".claude", "projects", worktree.replace(/[^a-zA-Z0-9]/g, "-"))
-          // Each tool call Claude made, by name, with what came back for it.
           const toolCalls = async () => {
             const calls = new Map<string, { name: string; input: string; result: string }>()
             for (const file of (await fs.readdir(dir)).filter((f) => f.endsWith(".jsonl")))
@@ -513,9 +476,8 @@ const checks: ReadonlyArray<Check> = [
               }
             return [...calls.values()]
           }
-          // The session's rules say sessions do not run herdr, and the model sometimes keeps to them instead of making
-          // the call this check needs: ask once more, for that call alone.
-          if (!(await toolCalls()).some((c) => c.name === "Bash" && c.input.includes("herdr "))) {
+          const keptNoHerdrRule = !(await toolCalls()).some((c) => c.name === "Bash" && c.input.includes("herdr "))
+          if (keptNoHerdrRule) {
             await w.ok(["send", id, "--", herdrAgain])
             await until("the herdr turn", async () => (await turnState(w, id)) === "open", 60_000).catch(
               () => undefined,

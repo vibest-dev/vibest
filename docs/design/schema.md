@@ -29,8 +29,9 @@ Five SQLite tables, one purpose each:
   main agent's `vibest --env` values go to the harness it execs. Outside herdr they travel as the pane's
   `VIBEST_MAIN_ENV`, not on the command herdr types and not as names a shell rc can override. Only the command
   Launch typed reads it; a later `vibest` in that pane ignores it. That command passes the pairs on as its own `--env`. Inside herdr below the root, that same process continues at the root and types
-  nothing. vibestd keeps them in its memory for a restart in place (`vibest update`); a handoff passes them to the next
-  vibestd in that process's environment. A vibestd that stops without a handoff forgets them.
+  nothing (typing `cd && vibest --env …` would leave the values in the shell history). vibestd keeps them in its
+  memory for a restart in place (`vibest update`); a handoff passes them to the next vibestd in that process's
+  environment, which the next one reads once and removes, so nothing it starts inherits them. A vibestd that stops without a handoff forgets them.
 - No peer relation and no worktree table. A session records its machine and directory. A directory under the vibest
   worktrees root is one vibest made; a name is reserved by an atomic `mkdir`. It can be removed when no other live
   session uses the same (machine, directory), then after the lsof and git checks.
@@ -60,6 +61,16 @@ directory no longer exists, is that project moved (`ProjectMoved`). `vibest` ask
 `git worktree repair`), no makes a new project. Several such projects: a new project, the candidates printed. Its
 folder is `projects/<project id>/` under `VIBEST_HOME` (preferences.md, docs/, memories/, artifacts/). `vibest ls` and the other
 read-only lookups never create one.
+
+vibest's own worktrees are repaired before the move is recorded: a stop in between leaves the project where it was, so
+the next `vibest` asks again and repairs again (nothing left to do) before it records the move. Only worktrees under
+vibest's worktrees root are repaired (their `.git` file pointed at the new place, as `git worktree repair` would);
+git's own repair would rewrite every worktree of the repository, the user's included.
+
+Agents read and write the project folder with their own file tools; vibestd only names its paths and searches its
+text. Search reads every file per query; an index is the next step once a project folder grows past a few hundred
+files. The system prompt indexes `memories/` by each file's frontmatter `description` (one `description:` line, not a
+folded YAML block), else its first non-empty line.
 
 ## DDL
 
@@ -197,6 +208,34 @@ is above the current process's first `process.ready` its integration wrote (a ha
 ready), or above the current `process.start` for a harness whose ready comes from the runtime (Cursor). The first,
 not the latest: the same harness reports ready again (a plugin reload, a new conversation), and a report written
 before that and not yet consumed still counts. A report a `turn.end` consumed is not taken again.
+
+## The Db service
+
+- All SQL is in `packages/core/src/db.ts`, over one SQLite connection; rows are decoded with Schema. The session row
+  callers read (`SessionRow`) is a read model: its process, turn and live fields come from the `event` table, and
+  every change to them appends an event.
+- Opening: `inspectSchema` only reads, on a read-only connection, before the file is opened writable; it checks
+  object names, not columns. An empty file gets the schema in one write transaction that checks again under the write
+  lock, so of two empty opens at once one installs and the other sees it. `journal_mode = WAL` writes the header, so
+  it is set only after the file is accepted: a refused file keeps its database and WAL bytes (its `-shm` may change).
+  `synchronous = NORMAL` cannot corrupt a WAL database; a power loss may drop only the last commits, and it saves an
+  fsync per commit.
+- `tx` runs one transaction and publishes the events it appended after the commit, in id order. A nested `tx`
+  shares the outer buffer, so only the outermost commit publishes; a rollback publishes nothing. Only the body is
+  interruptible: once it has finished, the commit's rows are published before an interrupt lands. The buffer closes
+  with its transaction, so a fiber forked inside one must not append.
+- `createProject` inserts with `ON CONFLICT (directory) DO NOTHING`: two first requests can both miss the lookup.
+- `insertSend` and `archiveIfNoPending` each run in one transaction: a Send accepted before an archive's tombstone
+  wins, one after it is refused. A repeat of a request id returns the row it queued, checked before the archive (it
+  was accepted).
+- A main agent moving to another terminal has no place, but its rows wait for it. Rows for an absent main agent are
+  dropped only while it still has no place, so a launch that landed in between keeps them.
+- A usage-limit move resends the open turn's input (its typed text or the rows it consumed); when that is empty, the
+  trailing run of delivered `task` and `send` rows from one sender that no turn consumed, oldest first, joined with a
+  blank line.
+- A task with no `inbox.status` was never handed over. A turn that ended before its handover (vibestd stopped while
+  waiting for ready) took nothing, so the task is still handed over.
+- An archived session is also marked `removed`, which older readers look for.
 
 ## Hot paths
 

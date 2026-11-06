@@ -1,14 +1,12 @@
 import fs from "node:fs"
 import path from "node:path"
 
-// D14: herdr is one Runtime implementation. The packages below reach it only through `@vibest/core/runtime`.
 import { assert, describe, it } from "@effect/vitest"
 
 const root = path.resolve(import.meta.dirname, "../../..")
 const PACKAGES = ["schema", "core", "server", "protocol", "client"]
 const HERDR = /["'](effect-herdr-sdk|@vibest\/runtime-herdr)(\/[^"']*)?["']/
 
-/** May import `effect-herdr-sdk`. Every other unit test uses FakeRuntime. */
 const HERDR_TESTS = new Set(["apps/vibest-herdr/test/guard.test.ts", "apps/vibest-herdr/test/runtime-herdr.test.ts"])
 
 describe("runtime boundary", () => {

@@ -1,8 +1,3 @@
-// `pnpm verify [area…]`: that vibest works as a user gets it. The repository's gates (build, typecheck, test); then each
-// way a user installs vibest, into a temp directory and with nothing from this checkout: install.sh from this platform's
-// release archive (served as file://), and npm from the packed @vibest/cli and this platform's binary package. For each,
-// the E2E checks (tools/e2e) drive that installed `vibest`, a skip counting as a failure. Stops at the first failure.
-// Last, it lists the feature-map checks no script can run (agent, runtime): an agent proves those by hand.
 import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
@@ -42,7 +37,6 @@ const e2e = (method: string, install: string) =>
     env: { ...process.env, VIBEST_E2E_METHOD: method, VIBEST_E2E_INSTALL: install },
   })
 
-// install.sh, as `curl … | sh` runs it, from a release made of this checkout; its link and versions go into the temp directory.
 const release = path.join(dir, "release")
 const curl = path.join(dir, "curl")
 step("build the release archive", ["bun", "scripts/build-archive.ts", target, release], {
@@ -58,7 +52,6 @@ step("install.sh", ["sh", "-c", 'curl -fsSL "$0" | sh', `file://${path.join(root
 })
 e2e("curl", curl)
 
-// npm, as `npm i -g @vibest/cli` installs it.
 const packs = path.join(dir, "packs")
 fs.mkdirSync(packs)
 for (const pkg of [path.join(root, "apps/vibest-herdr"), platform])
@@ -71,7 +64,6 @@ fs.rmSync(dir, { recursive: true, force: true })
 
 console.log("\nverify: passed.")
 if (only.length === 0) {
-  // What no script proves yet, under its feature-map section: an agent proves each with evidence.
   const manual: Array<string> = []
   let section = ""
   for (const line of fs.readFileSync(path.join(root, "docs/testing/feature-map.md"), "utf8").split("\n")) {

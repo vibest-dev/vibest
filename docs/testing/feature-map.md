@@ -88,7 +88,10 @@ user's own login and config, read only; the user's real config files keep their 
 
 ## Guard (harness adapters)
 
-`vibest integration guard --harness <h>` as a harness plugin runs it: the tool call on stdin, the agent's environment.
+The pre-tool guard as each harness plugin runs it. Cursor's: `vibest integration guard --harness cursor`, the tool call
+on stdin, the agent's environment. Claude's: `POST /hooks/claude/guard` on vibestd's HTTP socket, as a session vibestd
+knows. Both plugins ask only for a vibest agent; Claude's makes no request without one (its plugin test), so R4 runs
+Cursor's alone.
 
 | ID  | Capability                                                                                | Method  | Pass when                                                                        |
 | --- | ----------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------- |

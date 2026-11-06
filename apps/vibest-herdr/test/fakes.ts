@@ -45,7 +45,6 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-// Test doubles: an in-memory Runtime, a throwaway git repository, and waiting helpers.
 import * as Platform from "#platform"
 
 import { FakeRuntime, type FakeRuntimeOptions } from "./fake-runtime.ts"
@@ -54,10 +53,8 @@ export { FakeRuntime }
 
 export const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
-/** The runtime kind RPC tests use in place of a connection-scoped Hello. */
 export const TEST_HERDR = "herdr"
 
-/** Same socket, different headers: each call carries `headers` and, where the method needs it, TEST_HERDR. */
 export const authed = <C extends object>(client: C, headers: Record<string, string>): C =>
   new Proxy(client, {
     get(target, prop, receiver) {
@@ -84,7 +81,6 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
     },
   })
 
-/** What the integration does: report a turn end, received `offsetMs` from the (virtual) now. */
 export const writeResult = (id: string, harness: string, payload: object, offsetMs = 1000) =>
   Effect.gen(function* () {
     const adapter = (yield* Harnesses).get(harness as HarnessId)
@@ -92,7 +88,6 @@ export const writeResult = (id: string, harness: string, payload: object, offset
     yield* (yield* Db).reportTurn(id, turnEndFrom(adapter, payload as Record<string, unknown>, at))
   })
 
-/** The latest unconsumed turn report's text for session `id` ("" when none, or a `turn.end` already points at it). */
 export const resultText = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -105,12 +100,10 @@ export const resultText = (id: string) =>
     return row?.text ?? ""
   })
 
-/** Every bus event from now on, in this test's scope: subscribe before the action whose event the test waits for. */
 export const busEvents = Effect.gen(function* () {
   return yield* (yield* Bus).subscribe
 })
 
-/** The next `live.turn_start` of session `id` on `subscription`: its time. */
 export const nextTurnStart = (subscription: PubSub.Subscription<EngineEvent>, id: string): Effect.Effect<number> =>
   PubSub.take(subscription).pipe(
     Effect.flatMap((event) =>
@@ -120,15 +113,8 @@ export const nextTurnStart = (subscription: PubSub.Subscription<EngineEvent>, id
     ),
   )
 
-/** git in tests: a failure is a bug in the test. */
 export const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
 
-/**
- * argv that runs a command (appended after it) at the bottom of a chain of processes, the way a harness runs its hooks.
- * "sh" is a real shell; any other name is this test's executable under that name (a symlink in `dir`, so `ps` shows the
- * name), running the next layer as its child; "launch:<name>" is that process as the one `vibest launch` exec'd: it sets
- * VIBEST_LAUNCH_PID to its own pid.
- */
 export const processChain = (dir: string, layers: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
@@ -142,20 +128,17 @@ export const processChain = (dir: string, layers: ReadonlyArray<string>) =>
       const name = layer.replace(/^launch:/, "")
       const link = path.join(dir, name)
       if (!(yield* fs.exists(link))) yield* fs.symlink(process.execPath, link)
-      // Bun named "node" drops the first argument after the script: a filler.
-      argv.push(link, "-e", RUN_NEXT, "-", layer === name ? "child" : "launch")
+      argv.push(link, "-e", RUN_NEXT, FILLER_ARG, layer === name ? "child" : "launch")
     }
     return argv
   }).pipe(Effect.orDie)
+
+const FILLER_ARG = "-"
 
 const RUN_NEXT = `const [mode, command, ...args] = process.argv.slice(process.argv.findIndex((a) => a === "child" || a === "launch"))
 if (mode === "launch") process.env.VIBEST_LAUNCH_PID = String(process.pid)
 process.exitCode = require("node:child_process").spawnSync(command, args, { stdio: "inherit" }).status ?? 1`
 
-/**
- * Run a managed hook script's `action` with `input` on stdin and only the given environment: its stdout and exit code.
- * The test's process runs it, as a harness would, or the process `via` runs it.
- */
 export const runHookOutput = (
   file: string,
   input: string,
@@ -180,7 +163,6 @@ export const runHookOutput = (
     return { stdout, code }
   }).pipe(Effect.scoped)
 
-/** The harness conversation saved on coordinator session `sessionId`. */
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
@@ -190,7 +172,6 @@ export const savedSession = (sessionId: string) =>
     return main?.id === sessionId ? main.harnessSessionId : null
   })
 
-/** Session `sessionId`'s events of `type` (all when omitted), oldest first, with their data. */
 export const eventsOf = (sessionId: string, type?: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -199,15 +180,9 @@ export const eventsOf = (sessionId: string, type?: string) =>
     return rows.map((r) => ({ id: r.id, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
   }).pipe(Effect.orDie)
 
-/** Why each of session `sessionId`'s processes ended, oldest first (`process.end` reasons). */
 export const processEnds = (sessionId: string) =>
   eventsOf(sessionId, "process.end").pipe(Effect.map((rows) => rows.map((r) => r.data.reason)))
 
-/**
- * Each turn as one row, for test queries (`FROM ${sql.literal(TURNS)} m`): `input` is its typed text or the rows
- * delivered into it, `inbox_id` the last of those, `status` `working` while it is open, `end_id` its `turn.end`, and
- * `output` the result row that reports it.
- */
 export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS ended_at, te.id AS end_id,
     (SELECT max(e.inbox_id) FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
       AND json_extract(e.data, '$.to') = 'delivered') AS inbox_id,
@@ -218,8 +193,6 @@ export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS e
     (SELECT r.content FROM inbox r WHERE r.result_event_id = te.id) AS output
   FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
 
-/** A real-path temp directory, removed with the scope. */
-/** The project at `directory`, created on first use: the one vibestd resolves for a repository at that realpath. */
 export const projectOf = (directory: string) =>
   Effect.gen(function* () {
     const db = yield* Db
@@ -232,22 +205,18 @@ export const tempDirectory = (prefix: string) =>
     return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix }))
   }).pipe(Effect.orDie)
 
-/**
- * `command args` with `input` as stdin, redirected from a file by sh. A test writing to a pipe instead races the
- * process: one that exits without reading (a hook that is not for it, a command that takes no input) leaves the write
- * to fail with an uncaught EPIPE, reported by vitest as an unhandled error.
- */
+const STDIN_FROM_FILE = 'f=$1; shift; exec "$@" <"$f"'
+
 export const withStdin = (input: string, command: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const file = `${yield* tempDirectory("vibest-stdin-")}/stdin`
     yield* fs.writeFileString(file, input).pipe(Effect.orDie)
-    return ["-c", 'f=$1; shift; exec "$@" <"$f"', "sh", file, command, ...args] as const
+    return ["-c", STDIN_FROM_FILE, "sh", file, command, ...args] as const
   })
 
 const mainTs = `${import.meta.dirname}/../src/main.ts`
 
-/** `vibest ...args` in `cwd` with only the given environment (none of this test runner's VIBEST_* or HERDR_*). */
 export const runVibest = (cwd: string, env: Record<string, string>, args: ReadonlyArray<string>, stdin = "") =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -266,7 +235,6 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
     return { stdout, stderr, code }
   }).pipe(Effect.scoped, Effect.orDie)
 
-/** Built once per process; each test copies it. git init on every test was most of the suite. */
 let repositoryTemplate: Promise<string> | undefined
 const templateRepository = Effect.promise(() => {
   repositoryTemplate ??= Effect.runPromise(
@@ -290,7 +258,6 @@ const templateRepository = Effect.promise(() => {
   return repositoryTemplate
 })
 
-/** A repository with one commit and an untracked, not ignored CLAUDE.md (never copied into worktrees). */
 export const makeRepository = Effect.gen(function* () {
   const source = yield* templateRepository
   const root = yield* tempDirectory("vibest-repo-")
@@ -298,34 +265,24 @@ export const makeRepository = Effect.gen(function* () {
   return root
 }).pipe(Effect.orDie)
 
-/** Signal 0, the cwd listing, and SIGTERM, as the test sets them. A PID not set has exited. `terminate` records the PID and marks it exited (unless ignored); it never signals. */
 export class FakeProcesses extends Context.Service<
   FakeProcesses,
   {
     readonly set: (pid: number, liveness: Liveness) => Effect.Effect<void>
-    /** What the next cwd listings return: PIDs, or undefined (lsof failed). */
     readonly setCwdUsers: (users: ReadonlyArray<number> | undefined) => Effect.Effect<void>
-    /** Every PID signal 0 was asked about, in order. */
     readonly probed: Effect.Effect<ReadonlyArray<number>>
-    /** Every PID `terminate` was asked to SIGTERM, in order. Never a real signal. */
     readonly signaled: Effect.Effect<ReadonlyArray<number>>
-    /** `terminate` returns `denied` and records nothing. */
     readonly setSignalDenied: (denied: boolean) => Effect.Effect<void>
-    /** `terminate` is recorded, but the process ignores it: it stays as it was. */
     readonly setSignalIgnored: (ignored: boolean) => Effect.Effect<void>
-    /** Hold the next `terminate` until `release`. */
     readonly holdSignal: () => Effect.Effect<{
       readonly reached: Effect.Effect<void>
       readonly release: () => Effect.Effect<void>
     }>
-    /** Hold the next `cwdUsers`. Owner archive calls it after the borrower list and before git worktree remove. */
     readonly holdCwd: () => Effect.Effect<{
       readonly reached: Effect.Effect<void>
       readonly release: () => Effect.Effect<void>
     }>
-    /** How long each cwd listing takes (virtual time), like lsof under a high open-file limit. */
     readonly setCwdDelay: (delay: Duration.Input) => Effect.Effect<void>
-    /** How many cwd listings were asked for. */
     readonly cwdListings: Effect.Effect<number>
     readonly processes: Processes["Service"]
   }
@@ -425,19 +382,15 @@ export class FakeProcesses extends Context.Service<
 }
 
 export interface TestOptions extends FakeRuntimeOptions {
-  /** Harnesses whose vibest plugin is present; all by default. */
   readonly hooked?: ReadonlyArray<HarnessId>
-  /** Harnesses whose model listing fails (not logged in); none by default. Usable ones list `fake-model` (default), `fake-strong` and `models`. */
   readonly unusable?: ReadonlyArray<HarnessId>
   readonly models?: ReadonlyArray<string>
   readonly maxSessions?: number
-  /** Plugins set up in order, as if found in `~/.vibest/plugins/`. A `{ plugin, options }` entry is that plugin's `context.options`. */
   readonly plugins?: ReadonlyArray<
     | VibestPlugin.Plugin.Plugin
     | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
   >
   readonly pluginTimeout?: Duration.Input
-  /** Wraps the Db that Sessions, Inbox and the test all see, to stop a call at a chosen point. */
   readonly db?: (db: Db["Service"]) => Db["Service"]
 }
 
@@ -464,7 +417,6 @@ const harnessOf = (options: TestOptions) =>
           ),
   })
 
-/** The default harness choice as the product loads it (platform/bun.ts builtinPlugins): first, same source. */
 export const harnessChoice: Candidate = {
   source: "builtin:harness-choice",
   revision: "harness-choice",
@@ -472,15 +424,13 @@ export const harnessChoice: Candidate = {
   plugin: harnessChoicePlugin,
 }
 
-/** Sessions, inbox, db and plugins over the fake runtime, registered as the only one. TestClock freezes time, so polls fire only when a test moves it. */
 const over = (options: TestOptions) => {
   const runtime = Layer.effect(
     Runtimes,
     Effect.flatMap(FakeRuntime, (fake) => registry([fake.runtime])),
   )
   const home = Layer.effect(Layout, tempDirectory("vibest-home-").pipe(Effect.flatMap(Layout.make)))
-  // A TMPDIR of the test's own: system prompts go there, never into the real $TMPDIR/vibest.
-  const tmp = Layer.unwrap(
+  const ownTmpdir = Layer.unwrap(
     tempDirectory("vibest-tmp-").pipe(
       Effect.map((dir) =>
         ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: { TMPDIR: dir } }), { asPrimary: true }),
@@ -502,9 +452,7 @@ const over = (options: TestOptions) => {
       options.pluginTimeout ? { timeout: options.pluginTimeout } : {},
     ),
   ).pipe(Layer.provideMerge(Subscriptions.layer))
-  // The fake harness's integration: it reports ready, with its harness's pid, once `open` or `run` started it (rpc.ts
-  // Session.Ready).
-  const integration = Layer.effectDiscard(
+  const fakeIntegrationReportsReadyOnStart = Layer.effectDiscard(
     Effect.gen(function* () {
       const fake = yield* FakeRuntime
       const db = yield* Db
@@ -516,7 +464,7 @@ const over = (options: TestOptions) => {
   )
   return Layer.provideMerge(FakeRuntime.layer(options))(
     Layer.effect(Sessions, Sessions.make({ maxSessions: options.maxSessions })).pipe(
-      Layer.provideMerge(integration),
+      Layer.provideMerge(fakeIntegrationReportsReadyOnStart),
       Layer.provideMerge(plugins),
       Layer.provideMerge(Inbox.layer),
       Layer.provideMerge(
@@ -536,7 +484,7 @@ const over = (options: TestOptions) => {
         ).pipe(Layer.provideMerge(FakeProcesses.layer)),
       ),
       Layer.provideMerge(home),
-      Layer.provideMerge(tmp),
+      Layer.provideMerge(ownTmpdir),
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
       Layer.provideMerge(Platform.services),
@@ -545,25 +493,22 @@ const over = (options: TestOptions) => {
   )
 }
 
-/** Session `id`'s system prompt file, under the test's own TMPDIR (testLayer) as vibestd writes it. */
 export const systemPromptFile = (id: string) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
     return path.join(yield* systemPromptRoot, id, "system-prompt.md")
   })
 
-/** Product tests: the Runtime service is the in-memory fake, not herdr. */
 export const testLayer = (options: TestOptions = {}) => over(options)
 
 export type TestServices = Layer.Success<ReturnType<typeof testLayer>> | FakeRuntime
 
-/** A waiting helper ran out of attempts before its condition held. */
 export class GaveUp extends Schema.TaggedError<GaveUp>()("GaveUp", { helper: Schema.String }) {}
 
-/** Real wall-clock pause that leaves virtual time where it is (lets git, sqlite and forked fibers make progress). */
 const yieldToIo = TestClock.withLive(Effect.sleep("10 millis"))
 
-/** Run `f` until `done` holds, pausing with `step` in between; `GaveUp` after `attempts`. Returns the value that passed. */
+const UNTIL_ATTEMPTS = 2000
+
 const poll = <A, E, R, R2>(
   f: Effect.Effect<A, E, R>,
   done: Predicate.Predicate<A>,
@@ -577,35 +522,24 @@ const poll = <A, E, R, R2>(
     Effect.filterOrFail(done, () => new GaveUp({ helper })),
   )
 
-/**
- * Wait for background work (a forked launch, an event) until `done` holds, without advancing virtual time. About 20 s of
- * real time at most: git and sqlite under a loaded full-suite run need more than a few seconds, and the 30 s test
- * timeout still bounds a test that would never pass.
- */
 export function until<A, B extends A, E, R>(
   f: Effect.Effect<A, E, R>,
   done: Predicate.Refinement<A, B>,
 ): Effect.Effect<B, E | GaveUp, R>
 export function until<A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>): Effect.Effect<A, E | GaveUp, R>
 export function until<A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) {
-  return poll(f, done, yieldToIo, 2000, "until")
+  return poll(f, done, yieldToIo, UNTIL_ATTEMPTS, "until")
 }
 
-/**
- * Let the bus handlers a test's last steps started (a turn end, a runtime event, a queued message) run to the end:
- * until no session lock is held or waited on. Virtual time stays where it is.
- */
 export const settled = Effect.gen(function* () {
   const sessions = yield* Sessions
   yield* yieldToIo
   yield* until(sessions.inMemory, (m) => m.locks === 0)
 })
 
-/** Advance virtual time in 500 ms steps, letting real I/O run between them, until `done` holds (timeouts, retries). */
 export const untilVirtual = <A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) =>
   poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust("500 millis"))), 200, "untilVirtual")
 
-/** The daemon's Ping answer, retried: one Ping times out after 1 second, which a loaded machine can exceed. */
 export const pingOf = (socket: string) =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 40; attempt++) {
@@ -616,7 +550,6 @@ export const pingOf = (socket: string) =>
     return yield* Effect.die(new Error(`no Ping answer on ${socket}`))
   })
 
-/** vibestd.pid once it records the vibestd `instance`: vibestd writes it just after its socket answers Ping. */
 export const recordedInfo = (daemonInfo: string, instance: string | undefined) =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 200; attempt++) {
@@ -627,7 +560,6 @@ export const recordedInfo = (daemonInfo: string, instance: string | undefined) =
     return yield* Effect.die(new Error(`${daemonInfo} never recorded vibestd ${instance}`))
   })
 
-/** SIGTERM whatever vibestd `daemonInfo` (a vibestd.pid) names now, and wait for it to exit: a test's own cleanup. */
 export const stopRecorded = (daemonInfo: string) =>
   Effect.gen(function* () {
     const running = Option.getOrUndefined(yield* readDaemonInfo(daemonInfo))

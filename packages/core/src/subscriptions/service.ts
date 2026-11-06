@@ -1,8 +1,5 @@
 import type { SubscriptionReport } from "@vibest/plugin"
 import { type Subscription, type SubscriptionLimit } from "@vibest/schema/subscription"
-// Subscriptions (architecture D10): one in-memory row per (harness, provider, machine "local"). The poll reads each
-// installed harness's CLI and, for Claude and Cursor, the usage endpoint with the keychain token. A failed read keeps
-// the last row. Nothing here refreshes or writes a token, and a token is never logged.
 import {
   Clock,
   Config,
@@ -31,7 +28,6 @@ const CLI_TIMEOUT = "10 seconds"
 const MACHINE = "local" as const
 
 type Row = Subscription
-/** `limits`: this poll read usage (it replaces a plugin report). `error`: usage was skipped; limits stay as they were. */
 type Usage = { readonly limits: ReadonlyArray<SubscriptionLimit> } | { readonly error: string }
 
 const keyOf = (harness: string, provider: string) => `${harness}\0${provider}`
@@ -44,7 +40,6 @@ const isLimit = (limit: SubscriptionLimit) =>
   (limit.status === "available" || limit.status === "limited") &&
   (limit.resetTime === null || (typeof limit.resetTime === "number" && Number.isFinite(limit.resetTime)))
 
-/** Epoch ms. A number below 1e12 is seconds; Claude stores `expiresAt` in milliseconds. */
 const epochMs = (value: number) => (value < 1e12 ? value * 1000 : value)
 
 const claudeToken = (raw: string | undefined, now: number): { readonly token: string } | { readonly error: string } => {
@@ -63,7 +58,6 @@ const claudeToken = (raw: string | undefined, now: number): { readonly token: st
   return { token }
 }
 
-/** Cursor's keychain item is the access token. No expiry field: empty is unreadable, a rejected call keeps the last limits. */
 const cursorToken = (raw: string | undefined): { readonly token: string } | { readonly error: string } => {
   const token = raw?.trim()
   return token ? { token } : { error: "token unreadable" }
@@ -78,7 +72,6 @@ const parseJson = (text: string | undefined): unknown => {
   }
 }
 
-/** stdin closed, 10s, stderr discarded. Undefined when it does not finish or fails to start. */
 const runCli = (command: string, args: ReadonlyArray<string>, cwd: string) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -97,7 +90,6 @@ const runCli = (command: string, args: ReadonlyArray<string>, cwd: string) =>
 
 const homeDir = Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
 
-/** Status and JSON body on 200; the body is dropped otherwise. Undefined when the call does not finish. Never logs the request. */
 const endpoint = (request: HttpClientRequest.HttpClientRequest) =>
   Effect.gen(function* () {
     const response = yield* HttpClient.execute(request)
@@ -119,7 +111,6 @@ const keep = (prev: Row | undefined, now: number, error: string, harness: Harnes
     ? { ...prev, error }
     : { harness, provider, machine: MACHINE, account: { kind: "none" }, limits: [], updatedAt: now, error }
 
-/** No `usage` (Pi, or a poll that did not get that far) keeps whatever limits are already stored. */
 const wrote = (
   prev: Row | undefined,
   now: number,
@@ -138,7 +129,6 @@ const readJsonFile = (file: string) =>
     Effect.map(parseJson),
   )
 
-/** Names only. auth.json values are secrets and are not kept. */
 const piProviders = Effect.gen(function* () {
   const path = yield* Path.Path
   const home = yield* homeDir
@@ -170,9 +160,7 @@ export class Subscriptions extends Context.Service<
   Subscriptions,
   {
     readonly list: Effect.Effect<ReadonlyArray<Subscription>>
-    /** Plugin push. Replaces limits for `(harness, provider)` until a poll actually reads usage. */
     readonly report: (input: SubscriptionReport) => Effect.Effect<void>
-    /** One pass. The daemon layer runs it at start and on a stale read; tests call it with fakes. */
     readonly poll: Effect.Effect<void, never, PollServices>
   }
 >()("vibest/Subscriptions") {
@@ -308,7 +296,6 @@ export class Subscriptions extends Context.Service<
 
     const quiet = (id: HarnessId, effect: Effect.Effect<void, never, PollServices>) =>
       effect.pipe(Effect.catchCause(() => Effect.logWarning(`subscriptions: ${id} poll failed`)))
-    // A defect is not a failed read: the row stays, and the message carries no token.
     const poll = Effect.gen(function* () {
       const harness = yield* Harness
       if (yield* harness.available("claude")) yield* quiet("claude", pollClaude)
@@ -321,11 +308,6 @@ export class Subscriptions extends Context.Service<
 
   static readonly layer = Layer.effect(Subscriptions, Subscriptions.make)
 
-  /**
-   * The store, plus one poll as vibestd starts. After that a `list` whose rows are a minute old or more polls first: one
-   * poll at a time, shared by every reader, and a reader waits at most CLI_TIMEOUT for it (the stored rows then). Nothing
-   * polls while nobody reads. Same instance the RPC reads.
-   */
   static readonly live = Layer.effect(
     Subscriptions,
     Effect.gen(function* () {
@@ -335,7 +317,6 @@ export class Subscriptions extends Context.Service<
       const lock = yield* Semaphore.make(1)
       let polledAt = Number.NEGATIVE_INFINITY
       let running: Fiber.Fiber<void> | undefined
-      /** The poll in flight, or a new one when the last started a minute ago or more; undefined when the rows are fresh. */
       const refresh = lock.withPermit(
         Effect.gen(function* () {
           if (running !== undefined && running.pollUnsafe() === undefined) return running

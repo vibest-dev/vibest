@@ -1,7 +1,5 @@
 import net from "node:net"
 
-// The vibest CLI as an agent runs it (SPEC §12): a real `vibest` process against vibestd on a temp VIBEST_HOME over the fake
-// herdr. JSON on stdout, `Tag: message` on stderr with a nonzero exit, literal input, and the caller's role.
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
@@ -35,13 +33,13 @@ const served = Server.layer.pipe(
   Layer.provideMerge(testLayer()),
 )
 
-// Each `vibest` is a fresh Bun process (~0.3 s, several seconds on a loaded machine); a test runs up to twenty.
-// The tests run one at a time: run together they share the CPU, so each one's time is the whole file's, and on a
-// two-core CI runner the CLI processes fighting for it cost twice the CPU (23 s for this file, against 12 s in turn).
 const TIMEOUT = 30_000
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(served)), TIMEOUT)
+
+const coordinatorUpdate = (agent: string, args: ReadonlyArray<string>) =>
+  agent === "coordinator" && args[0] === "update"
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 describe("vibest CLI", () => {
@@ -57,7 +55,6 @@ describe("vibest CLI", () => {
       const old = yield* run(["run", "pi", "--archive", "--", "do it"])
       assert.strictEqual(old.code, 2, old.stderr)
       assert.match(old.stderr, /Unrecognized flag: --archive in command vibest run/)
-      // The usage it prints names only the new spelling.
       assert.match(old.stdout, /--archive-on-completion/)
       assert.notMatch(old.stdout, /--archive(?!-on-completion)/)
       assert.deepStrictEqual(yield* db.listSessions(), [])
@@ -90,11 +87,9 @@ describe("vibest CLI", () => {
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = decodeJson(spawned.stdout) as { id: string }
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
-      // The turn opens at receipt; the prompt text reaches the pane just after.
       yield* until(herdr.callsTo("send"), (calls) => calls.length > 0)
       assert.strictEqual((yield* herdr.callsTo("send"))[0]!.text, task)
 
-      // ls prints JSON without being asked: the task, the live status, and the open turn.
       const live = ["idle", "working", "blocked", "done", "unknown"]
       const listed = decodeJson((yield* run(["ls"])).stdout) as Array<{
         id: string
@@ -110,7 +105,6 @@ describe("vibest CLI", () => {
         latest: { status: "working", summary: "", endedAt: null },
       })
       assert.include(live, listed[0]!.status)
-      // result: the session with its latest result, null before the first. The task is not cut.
       assert.deepInclude(decodeJson((yield* run(["result", id])).stdout), { id, turnState: "open", task, result: null })
       yield* writeResult(id, "pi", { text: "kept finding\nstatus: completed" })
       yield* herdr.endTurn(id)
@@ -139,10 +133,8 @@ describe("vibest CLI", () => {
       assert.deepStrictEqual([missing.code, missing.stdout], [1, ""])
       assert.match(missing.stderr, /^NoSuchSession: /)
       assert.strictEqual((yield* run(["frobnicate"])).code, 2)
-      // status takes no session id any more.
       assert.strictEqual((yield* run(["status", id])).code, 2)
 
-      // An exited session is left out unless --all (or -a) asks for it.
       const { id: other } = decodeJson((yield* run(["run", "pi", "-"], "other")).stdout) as { id: string }
       yield* until(db.getSession(other), (w) => w?.turnState === "open")
       yield* db.updateSession(id, { status: "unknown", exitedAt: 1 })
@@ -152,7 +144,6 @@ describe("vibest CLI", () => {
       assert.deepStrictEqual(yield* ids(["ls", "--all"]), [id, other].sort())
       assert.deepStrictEqual(yield* ids(["ls", "-a"]), [id, other].sort())
 
-      // status: this client, the running vibestd (its pid from vibestd.pid) and the terminal runtimes it has.
       const system = decodeJson((yield* run(["status"])).stdout) as {
         client: { version: string }
         daemon: object
@@ -187,7 +178,6 @@ describe("vibest CLI", () => {
           ),
         )
 
-      // After --, text that looks like options is the message.
       for (const message of ["- fix the bug\n- then test", "--help", "--model x"])
         assert.deepStrictEqual(
           decodeJson((yield* asSession(id, ["report", "--", message])).stdout),
@@ -295,14 +285,12 @@ describe("vibest CLI", () => {
         const row = (yield* db.getSession(id))!
         assert.strictEqual(row.metadata.archived, true)
         assert.strictEqual(row.metadata.removed, true)
-        // The other name is the same command: nothing left, and it says so.
         const again = command === "archive" ? "rm" : "archive"
         assert.deepInclude(decodeJson((yield* asCoord([again, id])).stdout) as object, {
           worktree: "gone",
           reasons: [`${worktree} was already gone`],
         })
 
-        // A working session: archiving reaches vibestd and ends it.
         const busy = decodeJson((yield* asCoord(["run", "pi", "--", "more"])).stdout) as { id: string }
         yield* until(db.getSession(busy.id), (w) => w?.turnState === "open")
         const stopped = yield* asCoord([command, busy.id])
@@ -322,7 +310,6 @@ describe("vibest CLI", () => {
   test(
     "archive keeps the stored result and earlier inbox rows after the rules file is removed",
     Effect.gen(function* () {
-      // testLayer gives this run its own temp VIBEST_HOME; nothing here touches ~/.vibest.
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
@@ -353,7 +340,6 @@ describe("vibest CLI", () => {
       const before = decodeJson((yield* run(["result", id])).stdout) as { result: { kind: string; message: string } }
       assert.strictEqual(before.result.kind, "result")
       assert.include(before.result.message, "kept finding")
-      // Written into the result row, the turn end is no longer kept in memory.
       assert.strictEqual(yield* resultText(id), "")
       assert.isTrue(yield* fs.exists(yield* systemPromptFile(id)))
 
@@ -423,7 +409,7 @@ describe("vibest CLI", () => {
 
 describe("vibest CLI without vibestd", () => {
   it.effect(
-    "an agent's vibest does not start vibestd (it would run in the agent's sandbox); it says to ask the user",
+    "an agent's vibest does not start vibestd (it would run in the agent's sandbox); it says to ask the user; the main agent may still run update from its own shell",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -441,8 +427,6 @@ describe("vibest CLI without vibestd", () => {
           ["daemon", "--foreground"],
           ["daemon", "restart"],
           ["--harness", "pi"],
-          // The guard lets these through: vibest refuses them to an agent before it reads or writes the user's setup.
-          // `update` is the user's and the main agent's.
           ["update"],
         ]
         const runs = [
@@ -450,8 +434,7 @@ describe("vibest CLI without vibestd", () => {
           { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
         ]
           .flatMap((env) => commands.map((args) => ({ env, args })))
-          // The main agent may run vibest update from its own shell (its integration is the one an update replaces).
-          .filter(({ env, args }) => !(env.VIBEST_AGENT === "coordinator" && args[0] === "update"))
+          .filter(({ env, args }) => !coordinatorUpdate(env.VIBEST_AGENT, args))
         yield* Effect.forEach(
           runs,
           ({ env, args }) =>
@@ -478,7 +461,6 @@ describe("vibest CLI without vibestd", () => {
             ),
           { concurrency: 4, discard: true },
         )
-        // status reports vibestd as not running, and does not start it either.
         const status = yield* vibest(
           home,
           {
@@ -494,7 +476,6 @@ describe("vibest CLI without vibestd", () => {
           daemon: { status: "not running", socket: path.join(vibestHome, "vibest.sock") },
           runtimes: null,
         })
-        // Nothing was started: no VIBEST_HOME, so no socket, database or vibestd.log; no harness config was written in HOME either.
         assert.isFalse(yield* fs.exists(vibestHome))
         for (const dir of [".claude", ".cursor", ".pi"]) assert.isFalse(yield* fs.exists(path.join(home, dir)), dir)
       }).pipe(Effect.provide(Platform.services)),
@@ -507,7 +488,6 @@ describe("vibest CLI without vibestd", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const home = yield* tempDirectory("vibest-cli-")
-        // Only a fake cursor-agent on PATH (plus sh for the test runner): the other harnesses are unavailable.
         yield* fs.makeDirectory(`${home}/bin`)
         yield* fs.writeFileString(
           `${home}/bin/cursor-agent`,
@@ -579,8 +559,6 @@ describe("vibest CLI without vibestd", () => {
     TIMEOUT,
   )
 
-  // Help and version: the parser prints and exits before a command runs, even one that would start vibestd, restart it or
-  // write the user's config, and whoever the caller is.
   it.effect(
     "help and version only print: vibestd is not contacted or started and no file changes",
     () =>
@@ -589,7 +567,6 @@ describe("vibest CLI without vibestd", () => {
         const home = yield* tempDirectory("vibest-help-")
         const vibestHome = `${home}/vibest`
         yield* fs.makeDirectory(vibestHome)
-        // A command that talks to vibestd connects here first; one that found nothing would start vibestd, writing files.
         let contacts = 0
         const server = net.createServer((socket) => {
           contacts++
@@ -612,8 +589,6 @@ describe("vibest CLI without vibestd", () => {
         const env = { HOME: home, VIBEST_HOME: vibestHome, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }
         const coordinator = { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "c0ffee00-c0ff-4c0f-8c0f-c0ffee00c0ff" }
         const general = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }
-        // One at a time, to add little load to the suite: each kind of command (starts vibestd, updates, writes config, unknown)
-        // as the user, help as a coordinator, help and version as a session. guard.test covers every path and alias.
         const runs = [
           [{}, ["daemon", "--foreground", "--help"]],
           [{}, ["update", "--help"]],
@@ -635,7 +610,6 @@ describe("vibest CLI without vibestd", () => {
         }
         assert.strictEqual(contacts, 0)
         assert.deepStrictEqual(yield* files, before)
-        // The old --restart flag is gone, with no alias: refused by the parser, before vibestd is contacted, started or replaced.
         const removed = yield* vibest(home, env, ["daemon", "--restart"])
         assert.strictEqual(removed.code, 2, removed.stderr)
         assert.match(removed.stderr, /--restart/)
@@ -646,10 +620,6 @@ describe("vibest CLI without vibestd", () => {
     TIMEOUT,
   )
 
-  /**
-   * A vibestd that answers Ping with `capabilities` and answers each Send with `answer(n)` for the n-th one: a result,
-   * an encoded failure, or undefined to drop the connection after reading it. The Sends it read, in order.
-   */
   const fakeDaemon = (capabilities: Record<string, boolean>, answer: (n: number) => object | undefined) =>
     Effect.gen(function* () {
       const home = yield* tempDirectory("vibest-requests-")

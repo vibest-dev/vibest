@@ -1,8 +1,6 @@
 import http from "node:http"
 import net from "node:net"
 
-// `vibest update` / `vibest upgrade` (SPEC §12.1): a real `vibest` process against a local registry, with a bun, an npm and a
-// new vibest on PATH that only log their arguments.
 import { assert, describe, it } from "@effect/vitest"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout } from "@vibest/core/paths"
@@ -52,13 +50,12 @@ describe("vibest update", () => {
       kind: "curl",
       share: "/home/u/.local/share/vibest",
     })
-    // A build, or vibest from source, was installed by neither.
-    for (const self of [
+    for (const argv of [
       ["/repository/apps/vibest-herdr/dist/vibest"],
       ["/usr/bin/bun", "/repository/src/main.ts"],
       ["/s/versions/1/bin/vibest", "x"],
     ])
-      assert.isUndefined(installMethod(self, undefined), self.join(" "))
+      assert.isUndefined(installMethod(argv, undefined), argv.join(" "))
   })
 
   it("update and removal go to the package manager that owns the binary, from its real path", () => {
@@ -80,13 +77,11 @@ describe("vibest update", () => {
       "/home/u/.local/state/fnm_multishells/1",
       "@vibest/cli@beta",
     ])
-    // Neither, as far as the path shows (a local npm install): the npm on PATH.
-    assert.deepStrictEqual(upgradeCommand("/x/node_modules/@vibest/cli-linux-x64/bin/vibest"), [
-      "npm",
-      "install",
-      "-g",
-      "@vibest/cli@beta",
-    ])
+    assert.deepStrictEqual(
+      upgradeCommand("/x/node_modules/@vibest/cli-linux-x64/bin/vibest"),
+      ["npm", "install", "-g", "@vibest/cli@beta"],
+      "a local npm install, neither as far as the path shows: the npm on PATH",
+    )
     assert.strictEqual(
       removeCommand("/home/u/.bun/bin/vibest", "/home/u/.bun/install/global/node_modules/@vibest/cli/bin/vibest.cjs"),
       "bun remove -g @vibest/cli",
@@ -136,22 +131,20 @@ describe("vibest update", () => {
           )
         const notice = `vibest 999.0.0 is available (this is ${VERSION}); update with: vibest update`
         assert.include((yield* run()).stderr, notice)
-        // Within the day the cached answer stands: the registry is not asked again.
         latest = VERSION
         assert.include((yield* run()).stderr, notice)
-        assert.strictEqual(hits, 1)
+        assert.strictEqual(hits, 1, "within the day the cached answer stands")
         assert.notInclude(
           (yield* run({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" })).stderr,
           "is available",
         )
         assert.notInclude((yield* run({ VIBEST_NO_UPDATE_CHECK: "1" })).stderr, "is available")
-        // A day later it asks again, and an up-to-date vibest says nothing.
         yield* fs.writeFileString(
           `${home}/vibest/update-check.json`,
           JSON.stringify({ checkedAt: 0, latest: "999.0.0" }),
         )
         assert.notInclude((yield* run()).stderr, "is available")
-        assert.strictEqual(hits, 2)
+        assert.strictEqual(hits, 2, "a day later it asks again, and an up-to-date vibest says nothing")
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(Platform.services, builtinHarnesses))),
     60_000,
   )
@@ -162,7 +155,6 @@ describe("vibest update", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const home = yield* tempDirectory("vibest-cli-")
-        // A registry whose beta tag names `latest`.
         let latest = VERSION
         const registry = yield* Effect.acquireRelease(
           Effect.callback<http.Server>((resume) => {
@@ -178,19 +170,18 @@ describe("vibest update", () => {
         )
         const port = (registry.address() as { port: number }).port
         yield* fs.makeDirectory(`${home}/bin`)
-        // The bun, npm and newly installed vibest only log their arguments.
-        for (const pm of ["bun", "npm", "vibest"]) {
-          yield* fs.writeFileString(`${home}/bin/${pm}`, `#!/bin/sh\necho "${pm} $*" >> "${home}/pm.log"\n`)
-          yield* fs.chmod(`${home}/bin/${pm}`, 0o755)
+        for (const stub of ["bun", "npm", "vibest"]) {
+          yield* fs.writeFileString(`${home}/bin/${stub}`, `#!/bin/sh\necho "${stub} $*" >> "${home}/pm.log"\n`)
+          yield* fs.chmod(`${home}/bin/${stub}`, 0o755)
         }
+        const npmLauncherEnv = { VIBEST_HARNESSES: `${home}/harnesses` }
         const run = (args: ReadonlyArray<string>, env: Record<string, string> = {}) =>
-          // VIBEST_HARNESSES: what npm's launcher sets, so this vibest counts as installed by npm.
           runVibest(
             home,
             {
               HOME: home,
               VIBEST_HOME: `${home}/vibest`,
-              VIBEST_HARNESSES: `${home}/harnesses`,
+              ...npmLauncherEnv,
               PATH: `${home}/bin:/bin:/usr/bin`,
               npm_config_registry: `http://127.0.0.1:${port}`,
               ...env,
@@ -201,10 +192,12 @@ describe("vibest update", () => {
         const upToDate = `vibest is already up to date (v${VERSION}).\n`
         const same = yield* run(["upgrade"])
         assert.deepStrictEqual([same.code, same.stdout], [0, upToDate], same.stderr)
-        // A registry behind this build (a local build ahead of the last release) is not an update either.
         latest = "0.0.0"
-        assert.strictEqual((yield* run(["update"])).stdout, upToDate)
-        // A registry answer that is not a semver version fails, and installs nothing.
+        assert.strictEqual(
+          (yield* run(["update"])).stdout,
+          upToDate,
+          "a registry behind this build (a local build ahead of the last release) is not an update either",
+        )
         latest = "garbage"
         const bad = yield* run(["update"])
         assert.strictEqual(bad.code, 1)
@@ -213,12 +206,13 @@ describe("vibest update", () => {
         const newer = yield* run(["update"])
         assert.strictEqual(newer.code, 0, newer.stderr)
         assert.include(newer.stdout, `vibest 999.0.0 is available (this is ${VERSION}).`)
-        // The harness plugins come with the package: nothing else runs.
-        assert.match(yield* fs.readFileString(`${home}/pm.log`), /^(bun add -g|npm install -g) @vibest\/cli@beta\n$/)
+        assert.match(
+          yield* fs.readFileString(`${home}/pm.log`),
+          /^(bun add -g|npm install -g) @vibest\/cli@beta\n$/,
+          "the harness plugins come with the package: nothing else runs",
+        )
 
-        // A running vibestd of another version (a stand-in that answers Ping and records what it is asked). Without a terminal
-        // nothing is stopped, and update fails, saying what it installed and that vibestd still runs.
-        const methods: Array<string> = []
+        const askedMethods: Array<string> = []
         const socket = (yield* Layout.make(`${home}/vibest`)).socket
         yield* fs.makeDirectory(`${home}/vibest`, { recursive: true })
         yield* Effect.acquireRelease(
@@ -227,7 +221,7 @@ describe("vibest update", () => {
               sock.on("data", (chunk) => {
                 for (const line of chunk.toString().split("\n").filter(Boolean)) {
                   const req = JSON.parse(line) as { id?: unknown; method?: string }
-                  if (req.method) methods.push(req.method)
+                  if (req.method) askedMethods.push(req.method)
                   if (req.method === "Ping")
                     sock.write(
                       JSON.stringify({
@@ -269,9 +263,8 @@ describe("vibest update", () => {
           installedOnly.stderr,
           /\nUpdateError: vibest 999\.0\.0: vibestd not replaced: it still runs the vibest it was started with\n$/,
         )
-        assert.notInclude(methods, "Daemon.Stop")
+        assert.notInclude(askedMethods, "Daemon.Stop", "without a terminal nothing is stopped")
 
-        // The package manager failing stops the update: vibestd is not replaced.
         yield* fs.writeFileString(`${home}/bin/bun`, `#!/bin/sh\necho "bun $*" >> "${home}/pm.log"\nexit 1\n`)
         yield* fs.writeFileString(`${home}/bin/npm`, `#!/bin/sh\necho "npm $*" >> "${home}/pm.log"\nexit 1\n`)
         yield* fs.remove(`${home}/pm.log`)
@@ -285,20 +278,17 @@ describe("vibest update", () => {
         assert.notInclude(pmFails.stderr, "not replaced")
         assert.notInclude(pmFails.stdout, "old version")
 
-        // vibest from source was installed by neither npm nor install.sh: nothing is installed; vibestd and the agents
-        // are still looked at (an upgrade made by hand).
-        const source = yield* runVibest(
+        const fromSource = yield* runVibest(
           home,
           { HOME: home, VIBEST_HOME: `${home}/vibest`, PATH: `${home}/bin:/bin:/usr/bin` },
           ["update"],
         )
         assert.match(
-          source.stdout,
+          fromSource.stdout,
           /^this vibest \(.*\) was not installed by npm or install\.sh; nothing to install\.\n/,
         )
-        assert.include(source.stdout, "vibestd: restart. vibestd 0.0.0 cannot hand itself over")
+        assert.include(fromSource.stdout, "vibestd: restart. vibestd 0.0.0 cannot hand itself over")
 
-        // Two vibest on PATH: which one runs, and how to remove the other.
         for (const [dir, v] of [
           ["a", "1.0.0"],
           ["b", "2.0.0"],
@@ -318,7 +308,6 @@ describe("vibest update", () => {
           `warning: ${home}/b/vibest 2.0.0 is also on PATH, behind the first; remove it with: rm ${home}/b/vibest\n`,
         )
 
-        // An agent may not update vibest.
         const agent = yield* runVibest(
           home,
           { HOME: home, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },

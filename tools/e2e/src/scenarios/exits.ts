@@ -1,6 +1,3 @@
-// What vibestd learns with no poll (feature-map S21 to S32): an exit the runtime pushes, a stop of vibestd itself in the
-// middle of a turn or of a delivery, and a herdr server that hands over to a new one. Pi subagents and a Pi main agent
-// on the fake model of inbox.ts; vibestd, herdr and Pi are the real ones.
 import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
 import net from "node:net"
@@ -14,13 +11,11 @@ import { dropHerdrSession, heldModel, piDir, project } from "./inbox.ts"
 const ask = (task: string) =>
   `Do not run any tool. Reply with exactly two lines: the first is "done-${task}", the second is "status: completed".`
 
-/** A Pi main agent in a herdr session of its own, for project `name`, its subagents on the held fake model. */
 const piProject = async (w: World, name: string) => {
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   const model = heldModel()
   const session = `${w.herdrSession}-${name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-  // vibestd and so the herdr server start with an empty ZDOTDIR: the pane shell keeps this build first on PATH.
   const zdot = path.join(w.root, `zdotdir-${name}`)
   await fs.mkdir(zdot, { recursive: true })
   const env = { ZDOTDIR: zdot }
@@ -77,7 +72,6 @@ const piProject = async (w: World, name: string) => {
       id,
       text,
     )?.n ?? 0
-  /** Idle between turns: its turns all ended. */
   const idle = (id: string) =>
     q<{ id: number }>(
       `SELECT t.id AS id FROM event t WHERE t.session_id = ? AND t.type = 'turn.start'
@@ -111,7 +105,6 @@ const piProject = async (w: World, name: string) => {
   }
 }
 
-/** A queued send, then `kill` ends the held subagent: within 2 s its turn fails, the send fails with its notice, and it exited. */
 const killedMidTurn = async (
   w: World,
   name: string,
@@ -145,7 +138,6 @@ const killedMidTurn = async (
   }
 }
 
-/** One JSON-RPC call on a unix socket, as the vibest client makes it: its result, or a thrown error. */
 const rpc = (socket: string, method: string, params: object, headers: ReadonlyArray<[string, string]>) =>
   new Promise<unknown>((resolve, reject) => {
     let buf = ""
@@ -164,7 +156,6 @@ const rpc = (socket: string, method: string, params: object, headers: ReadonlyAr
     sock.on("error", reject)
   })
 
-/** Session `id`'s task was never handed over: no `inbox.status` for it. */
 const untaken = (w: World, id: string) =>
   row<{ n: number }>(
     w,
@@ -172,6 +163,19 @@ const untaken = (w: World, id: string) =>
       AND NOT EXISTS (SELECT 1 FROM event e WHERE e.inbox_id = i.id AND e.type = 'inbox.status')`,
     id,
   )?.n === 1
+
+const nothingMoreComesWithin = (ms: number) => Bun.sleep(ms)
+
+const killWindowTries = 5
+
+const writeArchiveMark = (w: World, sub: string) => {
+  const db = new Database(path.join(w.vibestHome, "vibest.db"))
+  try {
+    db.query("UPDATE session SET ended_at = ? WHERE id = ?").run(Date.now(), sub)
+  } finally {
+    db.close()
+  }
+}
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -220,20 +224,17 @@ const checks: ReadonlyArray<Check> = [
             () => p.results(sub) === 1 && p.lastEnd(sub)?.status === "completed",
             60_000,
           )
-          // Nothing more comes for it.
-          await Bun.sleep(3_000)
+          await nothingMoreComesWithin(3_000)
           expect(p.results(sub) === 1, `${what}: ${p.results(sub)} results`)
           const end = p.lastEnd(sub)!
           expect(typeof end.report === "number" && end.output === undefined, `${what}: turn.end ${JSON.stringify(end)}`)
         }
-        // (a)
         const a = await p.runSub("a")
         await until("(a) held", () => p.model.held() > 0, 60_000)
         const restart = await w.tty(["daemon", "restart"], "y\n", { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
         expect(restart.code === 0, `vibest daemon restart exited ${restart.code}: ${restart.stderr}${restart.stdout}`)
         p.model.releaseOne()
         await one(a, "(a)")
-        // (b)
         const b = await p.runSub("b")
         await until("(b) held", () => p.model.held() > 0, 60_000)
         const from = (await p.log()).length
@@ -262,7 +263,6 @@ const checks: ReadonlyArray<Check> = [
         await until("idle", () => p.idle(sub), 60_000)
         const message = ask("cut")
         const sending = p.vibestSend(sub, message)
-        // The row is `delivering` from its claim until the session is seen to start the turn: kill vibestd in that window.
         const daemon = await w.daemonPid()
         expect(daemon !== undefined, "no vibestd pid")
         for (const deadline = Date.now() + 15_000; ; await Bun.sleep(1)) {
@@ -280,7 +280,6 @@ const checks: ReadonlyArray<Check> = [
           () => p.sendRow(sub, message)?.status === "failed" && p.notices(sub, "may or may not have arrived") === 1,
           20_000,
         )
-        // Whether or not the text reached Pi before the kill, it is not handed over a second time.
         await until("idle again", () => p.idle(sub), 60_000)
         expect(p.sendRow(sub, message)?.status === "failed", "the cut-off row moved again")
         expect(p.notices(sub, "may or may not have arrived") === 1, "more than one notice")
@@ -340,7 +339,6 @@ const checks: ReadonlyArray<Check> = [
         const daemon = await w.daemonPid()
         expect(daemon !== undefined, "no vibestd pid")
         const sub = await p.runSub("cut")
-        // `vibest run` answers once the row is stored; the start then makes the worktree and opens the terminal.
         const startTerminal = () =>
           row<{ t: string; ended: number }>(
             w,
@@ -374,8 +372,7 @@ const checks: ReadonlyArray<Check> = [
           kept ? text.includes("has its working directory in it") : text.includes("its worktree was removed"),
           `worktree ${kept ? "kept" : "removed"}, notice: ${text}`,
         )
-        // Nothing more comes for it.
-        await Bun.sleep(2_000)
+        await nothingMoreComesWithin(2_000)
         expect(p.notices(sub, "never finished starting") === 1, "more than one notice")
       } finally {
         await p.close()
@@ -390,10 +387,8 @@ const checks: ReadonlyArray<Check> = [
       const p = await piProject(w, "s29")
       try {
         p.model.release()
-        // The window is the first look for the harness's ready report: a try that misses it (the task linked before
-        // the kill) is not this case, so the next subagent tries again.
         let sub = ""
-        for (let attempt = 1; sub === "" && attempt <= 5; attempt++) {
+        for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
           expect(daemon !== undefined, "no vibestd pid")
           const id = await p.runSub(`t${attempt}`)
@@ -422,8 +417,7 @@ const checks: ReadonlyArray<Check> = [
               ?.s === "delivered",
           30_000,
         )
-        // Nothing more comes for it.
-        await Bun.sleep(3_000)
+        await nothingMoreComesWithin(3_000)
         expect(p.model.asked(task) === 1, `the task was asked ${p.model.asked(task)} times`)
         expect(p.results(sub) === 1, `${p.results(sub)} results`)
         const input = row<{ n: number }>(
@@ -455,13 +449,7 @@ const checks: ReadonlyArray<Check> = [
         expect(daemon !== undefined, "no vibestd pid")
         process.kill(daemon!, "SIGKILL")
         await until("vibestd gone", () => !alive(daemon!), 10_000)
-        // What `vibest archive` stores first (its mark), before it closes anything.
-        const db = new Database(path.join(w.vibestHome, "vibest.db"))
-        try {
-          db.query("UPDATE session SET ended_at = ? WHERE id = ?").run(Date.now(), sub)
-        } finally {
-          db.close()
-        }
+        writeArchiveMark(w, sub)
         await p.startDaemon()
         const ended = () =>
           row<{ reason: string }>(
@@ -501,10 +489,8 @@ const checks: ReadonlyArray<Check> = [
               AS status, s.ended_at AS ended FROM session s WHERE s.id = ?`,
             id,
           )
-        // The window is from the result's delivery to the archive's mark: a try that misses it (archived before the
-        // kill) is not this case, so the next subagent tries again.
         let sub = ""
-        for (let attempt = 1; sub === "" && attempt <= 5; attempt++) {
+        for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
           expect(daemon !== undefined, "no vibestd pid")
           const id = await p.runSub(`a${attempt}`, "--archive-on-completion")
@@ -579,36 +565,37 @@ const checks: ReadonlyArray<Check> = [
       "archive with a process working in the worktree: one look, within 3 s; the worktree is kept and the reason names the process",
     run: async (w) => {
       const p = await piProject(w, "s27")
-      let holder: ReturnType<typeof Bun.spawn> | undefined
+      let processOutsideThePane: ReturnType<typeof Bun.spawn> | undefined
       try {
         p.model.release()
         const sub = await p.runSub("archive")
         await until("the subagent idle", () => p.idle(sub), 90_000)
         const worktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", sub)?.d ?? ""
         expect(worktree !== "", `no worktree recorded for ${sub}`)
-        // A process outside the pane with its working directory in the worktree: closing the pane does not end it.
-        holder = Bun.spawn(["sleep", "600"], { cwd: worktree, stdio: ["ignore", "ignore", "ignore"] })
+        processOutsideThePane = Bun.spawn(["sleep", "600"], { cwd: worktree, stdio: ["ignore", "ignore", "ignore"] })
         const t0 = Date.now()
         const out = await w.vibest(["archive", sub], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
         const ms = Date.now() - t0
         const said = `${out.stdout}${out.stderr}`
         expect(ms <= 3_000, `archive took ${ms} ms (at most 3000): ${said}`)
-        expect(said.includes(String(holder.pid)), `archive does not name process ${holder.pid}: ${said}`)
+        expect(
+          said.includes(String(processOutsideThePane.pid)),
+          `archive does not name process ${processOutsideThePane.pid}: ${said}`,
+        )
         expect(
           await fs.stat(worktree).then(
             () => true,
             () => false,
           ),
-          `the worktree ${worktree} was removed while process ${holder.pid} used it`,
+          `the worktree ${worktree} was removed while process ${processOutsideThePane.pid} used it`,
         )
-        // Archived all the same: it takes no more messages.
         const send = await w.vibest(["send", sub, "--", "more"], { cwd: p.repo, env: p.env })
         expect(
           send.code !== 0 && `${send.stdout}${send.stderr}`.includes("archived"),
           `send after archive: ${send.stdout}${send.stderr}`,
         )
       } finally {
-        holder?.kill()
+        processOutsideThePane?.kill()
         await p.close()
       }
     },

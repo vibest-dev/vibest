@@ -1,6 +1,3 @@
-// `vibest project create <directory> --from <repository>…` (architecture D7, §3 Project and Workspace; plan phase 7):
-// copy each git repository into one new directory as a folder named after it, and one detached worktree per repository
-// for a writing subagent's isolated Workspace.
 import { Effect, Exit, FileSystem, Option, Path, Schema } from "effect"
 
 import { safeRepositoryDirectory, sameWorktreeBucket } from "./paths.ts"
@@ -19,17 +16,11 @@ export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>
 }) {}
 
 export interface ProjectFolder {
-  /** Folder name in the project directory: origin's repository name, else the source checkout's directory name. */
   readonly name: string
-  /** The source checkout's top level (absolute). */
   readonly source: string
-  /** The copy: `<directory>/<name>`. */
   readonly path: string
-  /** The source's current branch, checked out in the copy. */
   readonly branch: string
-  /** The source's `remote.origin.url`, now the copy's origin; undefined when the source has none (the copy has no remote). */
   readonly origin: string | undefined
-  /** `git status --porcelain` lines of the source: uncommitted changes that were not copied. */
   readonly uncommitted: ReadonlyArray<string>
 }
 
@@ -40,7 +31,6 @@ export interface CreatedProject {
 
 const optionalGit = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orElseSucceed(() => undefined))
 
-/** The source checkout and what is copied from it; reads only. */
 const inspect = (directory: string, given: string) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
@@ -62,7 +52,6 @@ const inspect = (directory: string, given: string) =>
     if (!safeRepositoryDirectory(name))
       return yield* refuse(`repository name ${JSON.stringify(name)} cannot be a folder name`)
     const origin = (yield* optionalGit(source, "config", "--get", "remote.origin.url")) || undefined
-    // `--branch` puts a `## …` line first, so git's trimmed output keeps the next line's leading status space.
     const status = yield* git(source, "status", "--porcelain", "--branch", "--untracked-files=all").pipe(
       Effect.mapError((e) => refuse(e.message)),
     )
@@ -70,16 +59,10 @@ const inspect = (directory: string, given: string) =>
     return { name, source, path: path.join(directory, name), branch, origin, uncommitted } satisfies ProjectFolder
   })
 
-/**
- * An independent copy of `folder.source` at `folder.path`: its own objects (`--no-hardlinks`, no alternates), the
- * source's branch checked out, and origin set to the source's origin with the source's `origin/*` refs and upstream.
- * The local path the clone came from is not kept as a remote.
- */
 const copy = (folder: ProjectFolder) =>
   Effect.gen(function* () {
     const { source, path: dest, branch, origin } = folder
     yield* git(source, "clone", "--quiet", "--no-hardlinks", "--branch", branch, "--", source, dest)
-    // Drops the clone's tracking refs and upstream config pointing at the local source.
     yield* git(dest, "remote", "remove", "origin")
     if (origin === undefined) return
     yield* git(dest, "remote", "add", "origin", origin)
@@ -107,11 +90,6 @@ const copy = (folder: ProjectFolder) =>
     ),
   )
 
-/**
- * Make `directory` (or use it when it is an empty directory) and copy each repository in `sources` into it. Everything
- * is checked before anything is written. On failure or interruption, only what this call created is removed: the
- * directory when it made it, otherwise the folders it made.
- */
 export const createProject = Effect.fn("createProject")(function* (directory: string, sources: ReadonlyArray<string>) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -133,7 +111,6 @@ export const createProject = Effect.fn("createProject")(function* (directory: st
     (yield* fs.readDirectory(target).pipe(Effect.mapError((e) => refuse(e.message)))).length > 0
   )
     return yield* refuse(`${target} exists and is not empty`)
-  // Compare against the real parent, so a source reached through a link is still seen as containing the directory.
   const parent = yield* fs
     .realPath(path.dirname(target))
     .pipe(Effect.mapError(() => refuse(`${path.dirname(target)} does not exist`)))
@@ -165,15 +142,12 @@ export const createProject = Effect.fn("createProject")(function* (directory: st
   return { directory: real, folders } satisfies CreatedProject
 })
 
-/** A direct child of a multi-repository project: its own git checkout. */
 export interface ProjectRepository {
   readonly name: string
   readonly path: string
-  /** Current branch; empty when HEAD is detached. */
   readonly branch: string
 }
 
-/** True when `dir` is a git checkout whose toplevel is `dir` itself (a linked worktree counts; a subdirectory of one does not). */
 const ownGitCheckout = (dir: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
@@ -182,11 +156,6 @@ const ownGitCheckout = (dir: string) =>
     return (yield* fs.realPath(top.value)) === (yield* fs.realPath(dir))
   })
 
-/**
- * The direct child git repositories of `directory` when `directory` itself is not a git repository.
- * Undefined when it is a git repository (a single-repository project, even with nested repositories) or it has no
- * child git repository. Names that cannot be a worktree folder are skipped.
- */
 export const listProjectRepositories = Effect.fn("listProjectRepositories")(function* (directory: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -197,7 +166,6 @@ export const listProjectRepositories = Effect.fn("listProjectRepositories")(func
     ),
   )
   if (info === undefined || info.type !== "Directory") return undefined
-  // A checkout, or any directory inside one, is a single-repository Project. `vendor/sdk` under a repository stays that repository.
   if ((yield* git(directory, "rev-parse", "--is-inside-work-tree").pipe(Effect.orElseSucceed(() => ""))) === "true")
     return undefined
   const found: ProjectRepository[] = []
@@ -217,7 +185,6 @@ export const listProjectRepositories = Effect.fn("listProjectRepositories")(func
   return found.length > 0 ? found : undefined
 })
 
-/** A main checkout: `git-dir` is `git-common-dir`. A linked worktree is not. */
 const isMainCheckout = (dir: string) =>
   git(dir, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir").pipe(
     Effect.map((out) => {
@@ -227,11 +194,6 @@ const isMainCheckout = (dir: string) =>
     Effect.orElseSucceed(() => false),
   )
 
-/**
- * The root of the project `directory` belongs to. A directory is a project when every child checkout is a main
- * checkout. A directory of linked worktrees is a Workspace: the project is the shared parent of those main checkouts,
- * not the workspace. Anything else is its own main checkout.
- */
 export const projectRoot = Effect.fn("projectRoot")(function* (directory: string) {
   const children = yield* listProjectRepositories(directory)
   if (children) {
@@ -254,7 +216,6 @@ export const projectRoot = Effect.fn("projectRoot")(function* (directory: string
       else if (linkedParent !== parent) same = false
     }
     if (mains === children.length) return { root: directory }
-    // One level: the shared parent is the project (its own checkouts), not another workspace.
     if (same && mains === 0 && linkedParent !== undefined) {
       const nested = yield* listProjectRepositories(linkedParent)
       let nestedMains = nested !== undefined
@@ -266,16 +227,11 @@ export const projectRoot = Effect.fn("projectRoot")(function* (directory: string
   return { root: yield* mainCheckout(directory) }
 })
 
-/** A repository of a project: its main checkout's realpath and `remote.origin.url` as git prints it (not identity). */
 export interface RepositoryPlace {
   readonly path: string
   readonly remote: string | undefined
 }
 
-/**
- * The repositories of the project at `root` (as `projectRoot` returns it): the main checkout itself, or each direct
- * child repository's main checkout of a multi-repository project.
- */
 export const projectRepositories = Effect.fn("projectRepositories")(function* (root: string) {
   const fs = yield* FileSystem.FileSystem
   const children = yield* listProjectRepositories(root)
@@ -291,7 +247,6 @@ export const projectRepositories = Effect.fn("projectRepositories")(function* (r
   return places
 })
 
-/** Remove each worktree (from its repository, without force: it refuses on anything not clean), then `workspace` when it is empty. Never deletes a branch. */
 const removeWorktrees = (
   worktrees: ReadonlyArray<{ readonly repository: string; readonly worktree: string }>,
   workspace: string,
@@ -304,11 +259,6 @@ const removeWorktrees = (
     if (left.length === 0) yield* fs.remove(workspace, { recursive: true }).pipe(Effect.ignore)
   })
 
-/**
- * One detached worktree per project folder (`addWorktree`) at `<workspace>/<folder name>`, then `copyIncluded`; no
- * branch is ever created, so a leftover `refs/heads/vibest/<name>` cannot fail it. On failure or interruption, only the
- * worktrees this call created are removed, then the workspace directory when it is empty. Returns their paths.
- */
 export const createIsolatedWorktrees = Effect.fn("createIsolatedWorktrees")(function* (
   folders: ReadonlyArray<Pick<ProjectFolder, "name" | "path">>,
   workspace: string,
@@ -320,7 +270,6 @@ export const createIsolatedWorktrees = Effect.fn("createIsolatedWorktrees")(func
   yield* Effect.gen(function* () {
     for (const folder of folders) {
       const worktree = path.join(workspace, folder.name)
-      // Recorded before the add, so a failure or interrupt during it still removes whatever git left.
       made.push({ repository: folder.path, worktree })
       yield* addWorktree(folder.path, worktree)
       yield* copyIncluded(folder.path, worktree)
@@ -333,7 +282,6 @@ export const createIsolatedWorktrees = Effect.fn("createIsolatedWorktrees")(func
   return made.map((entry) => entry.worktree)
 })
 
-/** Launch failed after the worktrees existed: remove each, then the workspace directory when it is empty. */
 export const discardIsolatedWorktrees = Effect.fn("discardIsolatedWorktrees")(function* (workspace: string) {
   const folders = (yield* listProjectRepositories(workspace)) ?? []
   const entries = yield* Effect.forEach(folders, (folder) =>
@@ -349,7 +297,6 @@ export interface RepositoryGit extends GitState {
   readonly name: string
 }
 
-/** Git state of each repository in a multi-repository workspace; undefined when `workspace` is not one. */
 export const workspaceGit = Effect.fn("workspaceGit")(function* (workspace: string) {
   const folders = yield* listProjectRepositories(workspace)
   if (!folders) return undefined

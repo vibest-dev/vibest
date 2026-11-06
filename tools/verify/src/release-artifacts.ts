@@ -1,10 +1,3 @@
-// `bun tools/verify/src/release-artifacts.ts <version> [--out <dir> | --from <dir>]`: the Release workflow's check of
-// what it publishes, before Publish. It packs every published workspace package (pnpm pack), or with --from takes the
-// tarballs an earlier --out run packed into <dir>; checks each tarball holds what its packed package.json declares
-// (files, bin, main, exports; for @vibest/cli the harness plugins); then installs the packed @vibest/cli and this
-// platform's binary package into an empty npm prefix outside the checkout and checks that `vibest --version` prints
-// <version>. With --out the checked tarballs stay in <dir>, with `publish-order` listing them dependencies first, one
-// "<name> <file>" per line: what Publish publishes. No harness, no model, no secrets.
 import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
@@ -42,7 +35,6 @@ if (flag !== "--from") {
     console.error(`release-artifacts: ${packs} is not empty`)
     process.exit(1)
   }
-  // The workspace packages to publish: every one not private.
   const published: Array<string> = JSON.parse(run(["pnpm", "-r", "ls", "--json", "--depth", "-1"], root))
     .filter((p: { private?: boolean }) => !p.private)
     .map((p: { path: string }) => p.path)
@@ -76,7 +68,6 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
   if (manifest.main) has(manifest.main, "main")
   for (const f of targets(manifest.exports)) has(f, "exports target")
   if (manifest.name === "@vibest/cli") {
-    // What the binary starts each harness with (packages/core/src/harnesses/), and each harness's skills.
     for (const f of [
       "harnesses/claude/.claude-plugin/plugin.json",
       "harnesses/claude/hooks/hooks.json",
@@ -91,7 +82,6 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
   }
 }
 if (flag === "--from") {
-  // Exactly the tarballs publish-order lists: nothing missing, nothing extra.
   const listed = fs
     .readFileSync(path.join(packs, "publish-order"), "utf8")
     .split("\n")
@@ -102,7 +92,6 @@ if (flag === "--from") {
     errors.push(`publish-order lists ${listed.join(", ")}; ${packs} holds ${found.join(", ")}`)
 }
 
-// npm, as `npm i -g @vibest/cli` installs it: only the two tarballs, from an empty directory outside the checkout.
 const target = `${process.platform}-${process.arch}`
 const platform = tarballs.get(`@vibest/cli-${target}`)
 const cli = tarballs.get("@vibest/cli")
@@ -125,7 +114,6 @@ else {
 }
 
 if (flag === "--out") {
-  // Dependencies first: a package's dependencies, optional and peer dependencies among the published ones before it.
   const order: Array<string> = []
   const visit = (name: string, chain: ReadonlyArray<string>) => {
     if (order.includes(name)) return

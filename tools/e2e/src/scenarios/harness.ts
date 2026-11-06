@@ -51,8 +51,8 @@ const checks: ReadonlyArray<Check> = [
       const out = await w.ok(["doctor"], { timeoutMs: 120_000 })
       for (const h of HARNESSES) {
         expect(new RegExp(`^  [✓✗] ${h} +\\d+ models|^  ✗ ${h} `, "m").test(out), `no agent line for ${h}:\n${out}`)
-        // herdr's line is only for a harness vibest can start.
-        if (new RegExp(`^  ✓ ${h} +\\d+ models`, "m").test(out))
+        const vibestCanStartIt = new RegExp(`^  ✓ ${h} +\\d+ models`, "m").test(out)
+        if (vibestCanStartIt)
           expect(
             new RegExp(`^  [✓✗] ${h} +herdr can(not)? see its state`, "m").test(out),
             `no herdr line for ${h}:\n${out}`,

@@ -1,11 +1,3 @@
-/**
- * Which result `type` tag each method returns.
- *
- * The schema does not carry this — `ResponseResult` is one flat union — so it
- * was established empirically against herdr 0.8.2 and is kept true by
- * `test/live/method-result-map.test.ts`. A method absent here is typed as the
- * loose `ResponseResult` union: a typing gap, never a runtime bug.
- */
 export const METHOD_RESULT: Readonly<Record<string, string>> = {
   ping: "pong",
   "session.snapshot": "session_snapshot",

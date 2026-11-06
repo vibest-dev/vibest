@@ -1,8 +1,5 @@
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-// The restart in place (`vibest update`, .agents/rules/update-restart.md 6 and 7): only the harness ends; its terminal's
-// shell runs it again through the runtime's `run`, on the same session and conversation. Subagents first, then main
-// agents, whose continue notice names the subagents restarted with them.
 import { Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope } from "effect"
 
 import { awaitEvent, Bus } from "./bus.ts"
@@ -22,12 +19,10 @@ import {
   type Terminal,
 } from "./runtimes.ts"
 
-/** An agent `vibest update` finds on an old integration. `blocked`: why it cannot be restarted in place (null: it can). */
 export interface Outdated {
   readonly id: string
   readonly agent: string
   readonly harness: HarnessId
-  /** The integration version it last reported; null when it never reported one. */
   readonly integration: string | null
   readonly working: boolean
   readonly blocked: string | null
@@ -39,24 +34,14 @@ export interface Restarted {
   readonly message: string
 }
 
-/** How long a restarted harness has to exit and its terminal to start it again. */
 export const RESTART_TIMEOUT = Duration.seconds(60)
-/** How long a restart waits for the `vibest update` that asked for it to exit. */
 export const AFTER_WAIT = Duration.seconds(10)
-/** Subagents restarted at once by `vibest update`. */
 export const RESTART_CONCURRENCY = 4
-/**
- * The instruction an interrupted turn gets once its harness is back. It is the first line of a main agent's notice, the
- * line its delivery shows and the model acts on, so it fits LINE_MAX with no version in it (an agent that ran `vibest
- * update` itself must not run it again).
- */
 export const CONTINUE =
   "vibest update is done and restarted this agent; do not run it again, continue the interrupted work."
 
-/** A subagent's continue turn. */
 export const continueText = (version: string) => `${CONTINUE} vibest is now ${version}.`
 
-/** A main agent's continue notice: the instruction first, then the version and who was restarted. */
 export const continueNotice = (version: string, restarted: ReadonlyArray<Restarted>) =>
   [
     CONTINUE,
@@ -72,11 +57,9 @@ export const continueNotice = (version: string, restarted: ReadonlyArray<Restart
     ...restarted.filter((r) => !r.ok).map((r) => r.message),
   ].join("\n")
 
-/** The agent's recorded integration is this vibestd's own. */
 export const current = (integration: { readonly version: string; readonly protocol: number } | undefined) =>
   integration !== undefined && integration.version === VERSION && integration.protocol === PROTOCOL
 
-/** Why an agent cannot be restarted in place; undefined when it can. */
 export const blockedOf = (
   adapter: HarnessAdapter,
   h: Runtime | undefined,
@@ -93,10 +76,8 @@ export const blockedOf = (
           ? "its conversation id is not known, so a restart would start a new conversation"
           : undefined
 
-/** Only `restartLater` polls: the pid it waits on is the `vibest update` CLI, whose exit no runtime reports. */
-const TICK = Schedule.spaced("500 millis")
+const UPDATE_CLI_EXIT_POLL = Schedule.spaced("500 millis")
 
-/** What the pid, ready report and integration of an agent being restarted read now. */
 type LiveNow = Effect.Effect<
   | {
       readonly pid?: number | undefined
@@ -106,11 +87,9 @@ type LiveNow = Effect.Effect<
   | undefined
 >
 
-/** One agent to restart in place: what differs between a subagent and a main agent. */
 interface Target {
   readonly id: string
   readonly projectId: string
-  /** How messages name it: its id, and "(main agent)" for one. */
   readonly label: string
   readonly adapter: HarnessAdapter
   readonly h: Runtime | undefined
@@ -118,16 +97,11 @@ interface Target {
   readonly pid: number | undefined
   readonly harnessSessionId: string | null
   readonly interrupted: boolean
-  /** What its terminal's shell runs again. */
   readonly argv: Effect.Effect<ReadonlyArray<string>, unknown>
   readonly liveNow: LiveNow
-  /** The session's lock (a subagent), or none (a main agent). */
   readonly locked: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
-  /** Appended to a failure: where to look. */
   readonly hint: string
-  /** Under `locked`, once it is back: the continue for an interrupted turn, and the outcome. */
   readonly onBack: (h: Runtime) => Effect.Effect<Restarted, unknown>
-  /** Once the mark is cleared, however it ended: the one look its checks skipped while it was set. Returns at once. */
   readonly reconcile: Effect.Effect<void>
 }
 
@@ -139,25 +113,18 @@ export const sessionRestart = (deps: {
   readonly processes: Processes["Service"]
   readonly restarting: Restarting["Service"]
   readonly inbox: Inbox["Service"]
-  /** vibestd's own scope: `restartLater` runs there. */
   readonly scope: Scope.Scope
-  /** The session's lock, as every session change takes it. */
   readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
-  /** Check subagent `id` once, in vibestd's scope (returns at once). */
   readonly checkLater: (id: string) => Effect.Effect<void>
-  /** The harness argv that starts the session (resume: on its conversation). */
   readonly launchArgv: (session: SessionRow, resume: boolean) => Effect.Effect<ReadonlyArray<string>, unknown>
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, unknown>
-  /** vibestd's platform services, for a harness's own `canResume`. */
   readonly withPlatform: <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) => Effect.Effect<A, E>
-  /** Wait until the harness takes input, as any start does. */
   readonly awaitReady: (
     h: Runtime,
     terminal: Terminal,
     adapter: HarnessAdapter,
     id: string,
   ) => Effect.Effect<unknown, unknown>
-  /** A turn typed into the session, as `vibest send` delivers; why it was missed, or undefined. */
   readonly prompt: (
     h: Runtime,
     session: SessionRow,
@@ -170,16 +137,11 @@ export const sessionRestart = (deps: {
   const routed = (kind: string | null | undefined) =>
     kind ? runtimes.route(kind).pipe(Effect.orElseSucceed(() => undefined)) : Effect.succeed(undefined)
 
-  /**
-   * Wait for the harness `run` started to report its pid (the restart cleared the old one) and, on this vibest's
-   * integration, that it is ready; false when RESTART_TIMEOUT passes. The caller then waits as any start does.
-   */
   const startedAgain = (id: string, liveNow: LiveNow) => {
     const again = liveNow.pipe(
       Effect.map((live) => live?.pid !== undefined && live.ready !== undefined && current(live.integration)),
     )
     const look = Effect.map(again, (yes) => (yes ? Option.some(true) : Option.none()))
-    // The pid and ready report arrive as the session's `process.ready`: each one is a reason to look again.
     return awaitEvent(
       look,
       (event) => (event.type === "process.ready" && event.sessionId === id ? look : Effect.succeed(Option.none())),
@@ -188,7 +150,6 @@ export const sessionRestart = (deps: {
     ).pipe(Effect.provideService(Bus, deps.bus))
   }
 
-  /** Mark, SIGTERM to its harness pid only, `run` in the same terminal, then wait for it; written once for both kinds. */
   const inPlace = (t: Target): Effect.Effect<Restarted> => {
     const { id, projectId, label } = t
     const failed = (why: string): Restarted => ({ id, projectId, ok: false, message: `${label} ${why}` })
@@ -202,15 +163,12 @@ export const sessionRestart = (deps: {
         Effect.gen(function* () {
           yield* deps.restarting.mark(id)
           const sent = yield* processes.terminate(pid)
-          // A refused SIGTERM writes nothing. Otherwise the old harness's process ends (its pid and ready report with
-          // it) and the next one starts in the same terminal on the same conversation.
           if (sent === "denied") yield* deps.restarting.clear(id)
           else yield* db.restartProcess(id)
           return sent
         }),
       )
       if (signalled === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
-      // Only the harness ended: its terminal's shell takes it again, on the same conversation.
       const ran = yield* h.run!(t.terminal, argv).pipe(Effect.exit)
       const back =
         Exit.isSuccess(ran) &&
@@ -229,14 +187,11 @@ export const sessionRestart = (deps: {
         }),
       )
     }).pipe(
-      // However it ends (back, failed, or vibestd stopping part way): the mark must not keep the session from its checks,
-      // and what it skipped meanwhile is looked at once.
       Effect.ensuring(deps.restarting.clear(id).pipe(Effect.andThen(t.reconcile))),
       Effect.catchCause((cause) => Effect.succeed(failed(`not restarted: ${errorMessage(cause)}`))),
     )
   }
 
-  /** The harness argv that reopens a subagent's own conversation when the harness can (a first start has none yet). */
   const againArgv = (session: SessionRow) =>
     Effect.gen(function* () {
       const adapter = harnesses.get(session.harnessId)
@@ -252,7 +207,6 @@ export const sessionRestart = (deps: {
       const session = yield* db.getSession(id)
       if (session === undefined)
         return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
-      // An open round stays open across the restart: the continue is another turn of it, and it reports once.
       const interrupted = session.turnState === "open"
       return yield* inPlace({
         id,
@@ -273,7 +227,6 @@ export const sessionRestart = (deps: {
           Effect.gen(function* () {
             const projectId = session.projectId
             if (!interrupted) return { id, projectId, ok: true, message: `${id} restarted` }
-            // The same delivery a `vibest send` gets: a turn of the open round, typed in once the harness takes it.
             const missed = yield* deps.prompt(
               h,
               (yield* db.getSession(id)) ?? session,
@@ -287,12 +240,6 @@ export const sessionRestart = (deps: {
       })
     })
 
-  /**
-   * The main agent last: when it was working, its inbox gets the continue notice once its new harness reports ready,
-   * delivered as any row is for its harness (subscribe, the HTTP poll, or typed in). `before`: the subagents of this
-   * restart, which the notice names. `wasWorking`: it was working when the restart was asked (a `vibest update` it
-   * ran itself, whose turn may end before the restart comes).
-   */
   const restartMain = (main: CoordinatorRow, before: ReadonlyArray<Restarted>, wasWorking: boolean) =>
     Effect.gen(function* () {
       const { id, projectId } = main
@@ -315,8 +262,6 @@ export const sessionRestart = (deps: {
         pid: main.pid,
         harnessSessionId: main.harnessSessionId,
         interrupted,
-        // Its own shell, at the project's root, starts it again on its conversation. `vibest` is the bare name, so the
-        // version on the person's PATH; an older one is refused with a mismatch.
         argv: Effect.succeed(["vibest", "integration", "start", id]),
         liveNow: Effect.gen(function* () {
           const row = yield* db.coordinatorOf(projectId)
@@ -345,7 +290,6 @@ export const sessionRestart = (deps: {
       })
     })
 
-  /** A main agent's terminal still runs it: the runtime sees an agent there. */
   const mainRunning = (main: CoordinatorRow) =>
     Effect.gen(function* () {
       if (!main.runtime || !main.address || main.address.id === "") return undefined
@@ -355,7 +299,6 @@ export const sessionRestart = (deps: {
       return Option.isNone(seen) || seen.value === "absent" ? undefined : seen.value
     })
 
-  /** Only a harness whose integration reports its version can be on an old one; any other is never listed. */
   const reports = (harness: HarnessId) => harnesses.get(harness).ready === "integration"
 
   const outdated = Effect.gen(function* () {
@@ -411,7 +354,6 @@ export const sessionRestart = (deps: {
 
   const restartLater = (ids: ReadonlyArray<string>, after: number | undefined) =>
     Effect.gen(function* () {
-      // Read before the wait: a main agent that ran `vibest update` itself is working now, maybe not once it exits.
       const working: Array<string> = []
       for (const main of yield* db.coordinators)
         if (ids.includes(main.id) && stateOf((yield* mainRunning(main)) ?? "unknown") === "working")
@@ -421,7 +363,10 @@ export const sessionRestart = (deps: {
           ? Effect.void
           : processes
               .liveness(after)
-              .pipe(Effect.repeat({ until: (l) => l !== "alive", schedule: TICK }), Effect.timeoutOption(AFTER_WAIT))
+              .pipe(
+                Effect.repeat({ until: (l) => l !== "alive", schedule: UPDATE_CLI_EXIT_POLL }),
+                Effect.timeoutOption(AFTER_WAIT),
+              )
       yield* waited.pipe(Effect.andThen(restart(ids, working)), Effect.forkIn(deps.scope))
     }).pipe(Effect.asVoid)
 

@@ -1,9 +1,3 @@
-// Forbids eslint/oxlint disable comments on the import rules this repository treats as
-// non-negotiable (the `node:` prefix and default imports for Node builtins), and blanket
-// disables, which would turn them off too. Fix the import instead of silencing the diagnostic.
-// oxlint accepts a rule name without its plugin prefix or under another plugin's prefix
-// (prefer-node-protocol, node/prefer-node-protocol), so only the last segment is compared.
-
 const DISABLE_DIRECTIVE = /^\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?(?:\s+(?<body>[\s\S]*))?$/u
 
 const PROTECTED_RULES = new Set(["prefer-node-protocol", "node-import-style", "no-restricted-disable"])

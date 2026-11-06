@@ -1,4 +1,3 @@
-// Every session is a tab beside the project's main agent. A worktree is vibest's own (detached), never herdr's.
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Sessions } from "@vibest/core/sessions"
@@ -30,7 +29,7 @@ const spawnInput = (repo: string) =>
     harness: "pi" as const,
   }))
 
-describe("placement", () => {
+describe("placement: every session is a tab beside the project's main agent, in vibest's own detached worktree", () => {
   test(
     "a subagent is a tab in the main agent's workspace with its shell in a detached worktree; labelled, labelled again after a restart, archived without closing that workspace",
     Effect.gen(function* () {
@@ -67,7 +66,6 @@ describe("placement", () => {
         },
       })
 
-      // The runtime came back (its labels gone): every live session's terminal is labelled again.
       yield* PubSub.publish(herdr.events, { type: "reset", machine: "local" })
       yield* until(herdr.callsTo("present"), (calls) => calls.length > 1)
 
@@ -81,7 +79,7 @@ describe("placement", () => {
   )
 
   test(
-    "the project workspace's live count is published again when a session ends, and when the last one is archived",
+    "the project workspace's live count is published again when a session's harness exits, and when the last one is archived the main agent's terminal publishes the count alone with no pane metadata",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db
@@ -103,12 +101,10 @@ describe("placement", () => {
       yield* until(db.getSession(b.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
       yield* until(herdr.callsTo("present"), (calls) => calls.at(-1)!.info.live === "2")
 
-      // The harness of a exits: its terminal relabels the workspace without it.
       yield* herdr.updateAgent(a.id, (agent) => ({ ...agent, alive: false }))
       yield* sessions.check(a.id)
       assert.deepInclude((yield* herdr.callsTo("present")).at(-1)!.info, { live: "1" })
 
-      // The last live session archived: the main agent's terminal publishes the count alone, with no pane metadata.
       yield* sessions.remove(b.id)
       const last = (yield* herdr.callsTo("present")).at(-1)!
       assert.deepInclude(last, { terminal: "main:coord" })
@@ -117,13 +113,12 @@ describe("placement", () => {
   )
 
   test(
-    "a main agent in another herdr session does not place near its pane id: the id repeats in every session",
+    "a main agent in another herdr session does not place near its pane id: the id repeats in every session; the workspace still resolves by the project",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      // The main agent of another runtime does not place near its terminal: pane ids are the runtime's own.
       yield* herdr.addWorkspace("w1", repo)
       yield* herdr.addPane("w1:coord", "w1", repo)
       yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
@@ -135,7 +130,6 @@ describe("placement", () => {
       yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.strictEqual(placed.near, undefined)
-      // Its workspace still resolves by the project; only the other runtime's terminal does not place it.
       assert.strictEqual((yield* herdr.agent(id))!.terminal.split(":")[0], "w1")
     }),
   )

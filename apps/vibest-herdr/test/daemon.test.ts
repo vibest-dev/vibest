@@ -2,8 +2,6 @@ import childProcess from "node:child_process"
 import net from "node:net"
 import util from "node:util"
 
-// vibestd's start lock (flock on vibestd.pid): one vibestd per VIBEST_HOME, and a socket that something else answers on is never
-// unlinked. Real vibestd processes on temporary VIBEST_HOMEs, in real time; never the user's.
 import { assert, describe, it } from "@effect/vitest"
 import { probe } from "@vibest/client/client"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
@@ -18,27 +16,25 @@ import { pingOf, recordedInfo, runVibest, tempDirectory } from "./fakes.ts"
 
 const execFile = util.promisify(childProcess.execFile)
 
-/**
- * `vibest daemon --foreground` on its own VIBEST_HOME, with nothing of this test run's environment but a PATH that has
- * no harness CLI. The subscription poll runs real commands for whatever is installed; this keeps it off the user's.
- */
-const daemon = (home: string) =>
-  runVibest(home, { HOME: home, VIBEST_HOME: home, PATH: "/usr/bin:/bin" }, ["daemon", "--foreground"])
+const PATH_WITHOUT_HARNESS_CLIS = "/usr/bin:/bin"
 
-/** A server on `socket` that takes no lock: Ping answered like an vibestd that takes no lock, or never answered at all. */
-const listen = (socket: string, answer: boolean) =>
+const daemon = (home: string) =>
+  runVibest(home, { HOME: home, VIBEST_HOME: home, PATH: PATH_WITHOUT_HARNESS_CLIS }, ["daemon", "--foreground"])
+
+const ignoreEpipe = () => {}
+
+const listen = (socket: string, answersPing: boolean) =>
   Effect.acquireRelease(
     Effect.promise(
       () =>
         new Promise<net.Server>((resolve) => {
           const server = net.createServer((sock) => {
-            // A client that gave up (its Ping timed out) has closed: the late reply's EPIPE is not this test's failure.
-            sock.on("error", () => {})
+            sock.on("error", ignoreEpipe)
             let buf = ""
             sock.on("data", (chunk) => {
               buf += chunk.toString()
               const nl = buf.indexOf("\n")
-              if (nl < 0 || !answer) return
+              if (nl < 0 || !answersPing) return
               const req = JSON.parse(buf.slice(0, nl)) as { id?: string }
               sock.write(
                 JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { version: "0.0.0", runtimes: [] } }) + "\n",
@@ -126,7 +122,6 @@ describe.concurrent("vibestd.pid lock", () => {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
         const starts = yield* Effect.forEach([1, 2, 3, 4], () => Effect.forkScoped(daemon(layout.home)))
         const ping = yield* pingOf(layout.socket)
-        // The 10s bound is how long the three that must exit may take. The one that keeps serving is not a wait.
         const running = [...starts]
         const exited: Array<{ readonly code: number; readonly stdout: string; readonly stderr: string }> = []
         for (const deadline = Date.now() + 10_000; running.length > 1 && Date.now() < deadline;) {
@@ -157,14 +152,11 @@ describe.concurrent("vibestd.pid lock", () => {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
         const first = yield* Effect.forkScoped(daemon(layout.home))
         const old = yield* pingOf(layout.socket)
-        // Killed only once it has recorded itself: the PID this test then hands to another process.
         const info = yield* recordedInfo(layout.daemonInfo, old.instance)
         process.kill(old.pid!, "SIGKILL")
-        // Its runVibest dies on the signal; only the exit matters.
         yield* Fiber.await(first)
         assert.strictEqual(Platform.liveness(old.pid!), "exited")
         assert.isTrue(yield* fs.exists(layout.socket))
-        // The PID reused by a process that is not vibestd: this test's own.
         yield* fs.writeFileString(layout.daemonInfo, JSON.stringify({ ...info, pid: process.pid }))
         yield* Effect.forkScoped(daemon(layout.home))
         const next = yield* pingOf(layout.socket)
@@ -196,7 +188,6 @@ describe.concurrent("vibestd.pid lock", () => {
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-        // The old vibestd in this process, its socket server taking 1.5 s to close (the delay runs before Bun's close and unlink).
         const slowClose: Host = {
           ...Platform.daemon,
           socketServer: (path) =>
@@ -214,7 +205,7 @@ describe.concurrent("vibestd.pid lock", () => {
           Effect.provideService(VibestCommand, ["vibestd-under-test"]),
           Effect.provide(builtinHarnesses),
           Effect.provide(
-            ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: layout.home, PATH: "/usr/bin:/bin" })),
+            ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: layout.home, PATH: PATH_WITHOUT_HARNESS_CLIS })),
           ),
           Effect.forkScoped,
         )
@@ -233,18 +224,13 @@ describe.concurrent("vibestd.pid lock", () => {
     30_000,
   )
 
-  // An unreferenced handle is collected within seconds and its lock goes with it, while its process lives (on Linux in
-  // 1.9-2.9 s with no forced GC). The adapter's handle is captured by the finalizer that closes it, so it lives as long
-  // as vibestd's scope does. The control shows this pressure does collect a handle nobody keeps.
   it.live(
-    "the lock is held for the scope and readable meanwhile: another process stays BUSY until the scope closes, then the file is empty",
+    "the lock is held for the scope and readable meanwhile: another process (spawned async, so this file's servers keep answering) stays BUSY until the scope closes, then the file is empty",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-        // Async: a sync spawn blocks this worker's event loop for a whole Bun start, and the concurrent tests' servers
-        // here (the fake vibestd that answers Ping) then answer too late.
-        const contender = (file: string) =>
+        const contend = (file: string) =>
           Effect.promise(() =>
             execFile(process.execPath, [`${import.meta.dirname}/lock-contender.ts`, file], {
               encoding: "utf8",
@@ -257,12 +243,12 @@ describe.concurrent("vibestd.pid lock", () => {
           assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), '{"pid":1}')
           for (let i = 0; i < 3; i++) {
             Bun.gc(true)
-            assert.strictEqual(yield* contender(layout.daemonInfo), "BUSY")
+            assert.strictEqual(yield* contend(layout.daemonInfo), "BUSY")
             yield* Effect.sleep("300 millis")
           }
         }).pipe(Effect.scoped)
         assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), "")
-        assert.strictEqual(yield* contender(layout.daemonInfo), "ACQUIRED")
+        assert.strictEqual(yield* contend(layout.daemonInfo), "ACQUIRED")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )

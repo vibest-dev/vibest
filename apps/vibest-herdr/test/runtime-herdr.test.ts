@@ -1,4 +1,3 @@
-// The herdr terminal runtime against a temporary headless session. Skipped when `herdr` is not on PATH.
 import childProcess from "node:child_process"
 import crypto from "node:crypto"
 import fs from "node:fs"
@@ -21,8 +20,9 @@ import * as Platform from "#platform"
 
 const herdrOnPath = childProcess.spawnSync("herdr", ["--version"], { stdio: "ignore" }).status === 0
 const piOnPath = childProcess.spawnSync("pi", ["--version"], { stdio: "ignore" }).status === 0
+const barePiArgv = ["pi", "--no-extensions", "--no-mcp", "--no-skills", "--no-session"]
+const coldPiStartupAttempts = 1400
 
-/** This process may be inside a herdr pane. A child must not inherit that socket or session. */
 const herdrChildEnv = () => {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
@@ -51,13 +51,24 @@ const readSessions = (): ReadonlyArray<ListedSession> | undefined => {
   }
 }
 
-/** Pid of a detached server that has not exited. `> 1` so the group signal cannot be `-1`. */
+const signalablePid = (pid: number) => pid > 1
+
 const livePid = (child: ReturnType<typeof childProcess.spawn> | undefined) => {
   const pid = child?.pid
-  return child?.exitCode === null && child?.signalCode === null && pid !== undefined && pid > 1 ? pid : undefined
+  return child?.exitCode === null && child?.signalCode === null && pid !== undefined && signalablePid(pid)
+    ? pid
+    : undefined
 }
 
-/** Stop, kill this server's process group if it is still alive, delete, and retry until `session list` drops the name. */
+const killDetachedProcessGroup = (leader: number) => {
+  try {
+    process.kill(-leader, "SIGKILL")
+    return true
+  } catch {
+    return false
+  }
+}
+
 const stopSession = async (name: string) => {
   if (!sessionName.test(name)) return
   const env = herdrChildEnv()
@@ -66,14 +77,7 @@ const stopSession = async (name: string) => {
   for (;;) {
     childProcess.spawnSync("herdr", ["session", "stop", name], { env, stdio: "ignore", timeout: 2_000 })
     const pid = livePid(child)
-    if (pid !== undefined) {
-      try {
-        // Detached: this pid is the process group. Negative signals only that group.
-        process.kill(-pid, "SIGKILL")
-      } catch {
-        // already exited
-      }
-    }
+    if (pid !== undefined) killDetachedProcessGroup(pid)
     childProcess.spawnSync("herdr", ["session", "delete", name], { env, stdio: "ignore", timeout: 2_000 })
     await new Promise((resolve) => setTimeout(resolve, 100))
     const sessions = readSessions()
@@ -93,10 +97,16 @@ const socketOf = (name: string) => {
 
 const layer = HerdrPool.layer.pipe(Layer.provideMerge(Platform.services))
 
-const waitFor = <A, E, R>(read: Effect.Effect<A, E, R>, ready: (value: A) => boolean, label: string, attempts = 200) =>
+const loadedSuiteAttempts = 200
+
+const waitFor = <A, E, R>(
+  read: Effect.Effect<A, E, R>,
+  ready: (value: A) => boolean,
+  label: string,
+  attempts = loadedSuiteAttempts,
+) =>
   Effect.gen(function* () {
     let last = ""
-    // A real herdr session under a loaded full-suite run needs more than 5 s to run a typed command.
     for (let attempt = 0; attempt < attempts; attempt++) {
       const value = yield* read
       if (ready(value)) return value
@@ -106,7 +116,6 @@ const waitFor = <A, E, R>(read: Effect.Effect<A, E, R>, ready: (value: A) => boo
     return yield* Effect.die(new Error(`${label}: ${last}`))
   })
 
-/** `herdr --session <name> server`, headless. Stopped and deleted when the test scope closes. */
 const withSession = <A, E, R>(
   use: (session: { readonly name: string; readonly socketPath: string }) => Effect.Effect<A, E, R>,
 ) =>
@@ -130,7 +139,6 @@ const withSession = <A, E, R>(
     return yield* use({ name, socketPath })
   })
 
-/** The terminal runtime on the pool, in this test's scope. */
 const withRuntime = <A, E, R>(use: (runtime: TerminalRuntime.Runtime) => Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const runtime = yield* fromPool({
@@ -144,19 +152,18 @@ const withRuntime = <A, E, R>(use: (runtime: TerminalRuntime.Runtime) => Effect.
 
 type Scripted = (method: string, params: Record<string, unknown>) => Effect.Effect<unknown, HerdrError>
 
-/** The terminal runtime over a scripted herdr client (no server). Every call is recorded with its params. */
 const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = Stream.empty) =>
   Effect.gen(function* () {
     const calls: Array<{ readonly method: string; readonly params: Record<string, unknown> }> = []
+    const resendingCall = ((method: string, params: Record<string, unknown>) =>
+      Effect.suspend(() => {
+        calls.push({ method, params })
+        return answer(method, params)
+      })) as HerdrShape["call"]
     const client: HerdrShape = {
       socketPath: "/nowhere",
       subscribe: () => pushed,
-      // Lazy, as the real client's: a retry sends the request again.
-      call: ((method: string, params: Record<string, unknown>) =>
-        Effect.suspend(() => {
-          calls.push({ method, params })
-          return answer(method, params)
-        })) as HerdrShape["call"],
+      call: resendingCall,
     }
     const pool = HerdrPool.of({
       resolve: () => Effect.succeed("s"),
@@ -176,11 +183,7 @@ const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = St
 
 const herdrError = (method: string, code: string) => Effect.fail(new HerdrError({ method, code, message: code }))
 
-/**
- * `send` to a started agent: herdr refuses `agent.prompt` with agent_not_ready for the first `notReady` calls (its
- * agent.start launch still pending), then takes it. The methods called, agent.get left out.
- */
-const scriptedSend = (notReady: number) =>
+const scriptedSend = (agentNotReadyRefusals: number) =>
   Effect.gen(function* () {
     let refused = 0
     const { runtime, calls } = yield* scriptedRuntime((method) => {
@@ -188,7 +191,7 @@ const scriptedSend = (notReady: number) =>
         return Effect.succeed({
           agent: { name: "s-abcd1234abcd4abc8abcabcd1234ab", pane_id: "w1:p2", agent: "claude" },
         })
-      if (method === "agent.prompt" && refused < notReady) {
+      if (method === "agent.prompt" && refused < agentNotReadyRefusals) {
         refused++
         return herdrError(method, "agent_not_ready")
       }
@@ -213,8 +216,6 @@ describe("send to an agent herdr started", () => {
 
   it.effect("herdr marks it ready only when it is read (agent.get), so each try reads it before agent.prompt", () =>
     Effect.gen(function* () {
-      // As herdr does for an agent whose harness hook reports its state: the pending launch becomes ready at the first
-      // agent.get after the settle delay, and agent.prompt alone never moves it.
       let ready = false
       let gets = 0
       const { runtime, calls } = yield* scriptedRuntime((method) => {
@@ -250,7 +251,6 @@ describe("pane events", () => {
   it.effect("a pane.agent_status_changed subscription frame (its data has no type) is a state event", () =>
     Effect.gen(function* () {
       const go = yield* Deferred.make<void>()
-      // A frame as herdr pushes it on a per-pane subscription: the kind is the frame's `event`, not a field of its data.
       const frame = {
         event: "pane.agent_status_changed",
         data: { pane_id: "w1:p2", workspace_id: "w1", agent: "pi", agent_status: "done" },
@@ -260,8 +260,8 @@ describe("pane events", () => {
         Stream.fromEffect(Deferred.await(go)).pipe(Stream.as(frame)),
       )
       const first = yield* runtime.events!.pipe(Stream.take(1), Stream.runCollect, Effect.forkChild)
-      // A `state` read installs the pane's subscription (its own answer does not matter here).
-      yield* runtime.state!(TerminalRuntime.terminalOf("s", "w1:p2")).pipe(Effect.ignore)
+      const installPaneSubscription = runtime.state!(TerminalRuntime.terminalOf("s", "w1:p2")).pipe(Effect.ignore)
+      yield* installPaneSubscription
       for (let i = 0; i < 10; i++) yield* Effect.yieldNow
       yield* Deferred.succeed(go, undefined)
       assert.deepStrictEqual(yield* Fiber.join(first), [
@@ -272,11 +272,10 @@ describe("pane events", () => {
 })
 
 describe("terminal ids", () => {
-  it("a terminal is `<session>/<pane>[/<name>]`, the parts non-empty; the caller's location is the machine target", () => {
+  it("a terminal is `<session>/<pane>[/<name>]`, the parts non-empty, the agent name telling a pane id herdr reused apart; the caller's location is the machine target", () => {
     const terminal = TerminalRuntime.terminalOf("s1", "w1:p1")
     assert.deepStrictEqual(terminal, { machine: "local", id: "s1/w1:p1" })
     assert.deepStrictEqual(TerminalRuntime.parseTerminal(terminal), { session: "s1", paneId: "w1:p1", name: undefined })
-    // The agent name `open` gave the pane rides in the id, so a pane id herdr reused is not the earlier terminal.
     assert.deepStrictEqual(
       TerminalRuntime.parseTerminal(TerminalRuntime.terminalOf("s1", "w1:p1", "vbt-w1:p1-ab12cd34")),
       { session: "s1", paneId: "w1:p1", name: "vbt-w1:p1-ab12cd34" },
@@ -303,18 +302,14 @@ describe("callerLocation", () => {
     Effect.gen(function* () {
       const ambient = env({ HERDR_SOCKET_PATH: "/h/ambient.sock" })
       const bare = env({})
-      // Inside herdr with --session: the named session, not the ambient socket (Finding 1).
       assert.deepStrictEqual(yield* callerLocation("other").pipe(Effect.provide(ambient)), { session: "other" })
-      // Inside herdr without --session: the ambient socket, as before.
       assert.deepStrictEqual(yield* callerLocation().pipe(Effect.provide(ambient)), { socketPath: "/h/ambient.sock" })
-      // Outside herdr: the default session, or the named one.
       assert.deepStrictEqual(yield* callerLocation().pipe(Effect.provide(bare)), { session: "vibest" })
       assert.deepStrictEqual(yield* callerLocation("mine").pipe(Effect.provide(bare)), { session: "mine" })
     }),
   )
 })
 
-/** `git` in `cwd`, failing the test when it does not run. */
 const git = (cwd: string | undefined, ...args: string[]) => {
   const run = childProcess.spawnSync("git", args, { cwd, encoding: "utf8", env: herdrChildEnv() })
   if (run.status !== 0) throw new Error(`git ${args.join(" ")}: ${(run.stderr ?? run.stdout ?? "").trim()}`)
@@ -350,7 +345,6 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
           Effect.gen(function* () {
             const cwd = fs.realpathSync(os.tmpdir())
             const env = { HERDR_SOCKET_PATH: socketPath }
-            // `open` types argv into the pane's interactive shell (no exec): once it ends, that shell stays.
             const opened = yield* runtime
               .open(
                 { id: "local" },
@@ -367,21 +361,20 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             assert.isDefined(seen)
             assert.strictEqual(seen!.session, name)
             yield* waitFor(runtime.read(opened, 40), (value) => value.includes("VBT_TYPED"), "the typed argv ran")
-            // The shell is back: what `send` types into it shows in `read`.
             yield* runtime.send(opened, { text: "printf 'VBT_%s\\n' OPENED", keys: ["enter"] })
             const text = yield* waitFor(runtime.read(opened, 40), (value) => value.includes("VBT_OPENED"), "pane text")
             assert.include(text, "VBT_OPENED")
-            // No agent of this terminal runs in the pane (open started none): state names no agent there - not_found.
             if (runtime.state !== undefined) {
               const failed = yield* runtime.state(opened).pipe(Effect.flip, Effect.option)
-              assert.isTrue(Option.isSome(failed) && Option.getOrThrow(failed).code === "not_found")
+              assert.isTrue(
+                Option.isSome(failed) && Option.getOrThrow(failed).code === "not_found",
+                "open started no agent, so state finds none of this terminal's",
+              )
             }
-            // Something is in the foreground only while it runs.
             yield* runtime.send(opened, { text: "sleep 2", keys: ["enter"] })
             yield* waitFor(runtime.process(opened), (p) => p.running, "foreground program")
             yield* runtime.send(opened, { keys: ["enter"] })
             yield* waitFor(runtime.process(opened), (p) => !p.running, "shell again")
-            // Pane tokens: the vibest labels herdr shows on the pane.
             if (runtime.present !== undefined)
               yield* runtime.present(opened, {
                 agent: "general",
@@ -394,7 +387,6 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               })
             const herdr = yield* (yield* HerdrPool).client(name)
             const pane = (yield* herdr.call("pane.get", { pane_id: seen!.paneId })).pane
-            // `agent · harness`, each part and the join cut to herdr's 80-char token limit.
             assert.strictEqual(pane.display_agent, "general \u00b7 pi")
             assert.strictEqual(pane.title, "task")
             assert.strictEqual(pane.tokens?.definition, "general")
@@ -405,7 +397,6 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             )
             assert.strictEqual(workspace?.tokens?.project, "repo")
             assert.strictEqual(workspace?.tokens?.agents, "2")
-            // Each label is cut to herdr's 80-char token limit, the joined display_agent with them.
             if (runtime.present !== undefined) {
               yield* runtime.present(opened, {
                 agent: "g".repeat(90),
@@ -417,13 +408,15 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               assert.strictEqual(limited.display_agent?.length, 80)
               assert.strictEqual(limited.title?.length, 80)
               assert.strictEqual(limited.tokens?.definition?.length, 80)
-              // Two presents back to back both land: herdr drops a report whose seq is not newer, so the seq must increase.
               yield* runtime.present(opened, { agent: "reviewer", harness: "pi", title: "later" })
               const again = (yield* herdr.call("pane.get", { pane_id: seen!.paneId })).pane
               assert.strictEqual(again.display_agent, "reviewer \u00b7 pi")
-              assert.strictEqual(again.title, "later")
+              assert.strictEqual(
+                again.title,
+                "later",
+                "a present right after another lands: each report's seq is newer",
+              )
             }
-            // `near` places the terminal in that pane's workspace: same workspace, no new one, a labelled unfocused tab.
             const before = (yield* herdr.call("workspace.list", {})).workspaces.map((item) => item.workspace_id)
             const beside = yield* runtime
               .open(
@@ -450,9 +443,8 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               (item) => item.tab_id === besidePane.tab_id,
             )
             assert.strictEqual(tab?.label, "beside")
-            assert.strictEqual(tab?.focused, false)
+            assert.strictEqual(tab?.focused, false, "near opens an unfocused tab in that pane's workspace")
             yield* runtime.close(beside).pipe(Effect.ignore)
-            // The same project without `near` still reuses the group's workspace (a pane at the directory names it).
             const grouped = yield* runtime
               .open(
                 { id: "local" },
@@ -468,7 +460,11 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             const groupedPane = (yield* herdr.call("pane.get", {
               pane_id: TerminalRuntime.parseTerminal(grouped)!.paneId,
             })).pane
-            assert.strictEqual(groupedPane.workspace_id, pane.workspace_id)
+            assert.strictEqual(
+              groupedPane.workspace_id,
+              pane.workspace_id,
+              "the same project without near reuses the workspace a pane at its directory names",
+            )
             yield* runtime.close(grouped).pipe(Effect.ignore)
           }),
         ),
@@ -488,7 +484,6 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               Stream.runForEach((event) => Ref.update(log, (events) => [...events, event])),
               Effect.forkScoped,
             )
-            // `open` types `sleep 1`: the program ends on its own and the pane stays at its shell; nothing closed it.
             const ended = yield* runtime
               .open(
                 { id: "local" },
@@ -502,7 +497,6 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               )
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
             yield* waitFor(runtime.process(ended), (p) => !p.running, "the shell again")
-            // `run` waits for that idle shell and types the next program into it.
             yield* runtime.run!(ended, ["printf", "VBT_%s\\n", "AGAIN"])
             yield* waitFor(runtime.read(ended, 20), (value) => value.includes("VBT_AGAIN"), "run typed the next one")
             assert.isFalse(
@@ -510,7 +504,6 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               "a program that ends is not the terminal's exit",
             )
             yield* runtime.close(ended)
-            // A shell pane, driven by `send` (no agent in it, so the runtime types into the pane), closed by `close`.
             const opened = yield* runtime
               .open(
                 { id: "local" },
@@ -537,16 +530,14 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
     60_000,
   )
 
-  // How the main agent runs in place: a harness a shell ran, herdr detected it, and no `open` named it.
   it.live.skipIf(!piOnPath)(
-    "an agent herdr detected in a pane is still ours: state reads it, and send submits (Enter included)",
+    "the main agent in place, a harness a shell ran that herdr detected and no open named, is still ours: state reads it, and send submits (Enter included)",
     () =>
       withSession(({ name }) =>
         withRuntime((runtime) =>
           Effect.gen(function* () {
             const herdr = yield* (yield* HerdrPool).client(name)
             const cwd = fs.realpathSync(os.tmpdir())
-            // A pane of its own, its shell running pi by hand; not focused, as when the user is on another tab.
             const made = yield* herdr.call("workspace.create", { cwd, label: "detected", focus: false })
             const paneId = made.root_pane.pane_id
             yield* Effect.gen(function* () {
@@ -556,39 +547,33 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 match: { type: "regex", value: "\\S" },
                 timeout_ms: 60_000,
               })
-              // A bare pi (none of the user's extensions, MCP servers or skills): light enough for the parallel suite.
-              yield* herdr.call("pane.send_text", {
-                pane_id: paneId,
-                text: "pi --no-extensions --no-mcp --no-skills --no-session",
-              })
+              yield* herdr.call("pane.send_text", { pane_id: paneId, text: barePiArgv.join(" ") })
               yield* herdr.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] })
               yield* waitFor(
                 herdr.call("agent.get", { target: paneId }).pipe(Effect.exit),
                 Exit.isSuccess,
                 "herdr detected the agent",
-                1400,
+                coldPiStartupAttempts,
               )
-              // What the CLI reports for its own pane: `<session>/<pane>`, no name.
               const terminal = TerminalRuntime.terminalOf(name, paneId)
-              // state reads the detected agent; core delivers only once it is idle, so the test waits for that too (a cold
-              // pi can sit a minute at its own startup, an MCP timeout).
               if (runtime.state !== undefined)
-                yield* waitFor(runtime.state(terminal), (state) => state === "idle", "the detected agent idle", 1400)
-              // `send` reaches the detected agent as a submitted prompt (`agent.prompt`, Enter included): pi runs the
-              // `!` shell line and prints a word the typed text itself does not contain — typed without submitting, it
-              // never runs.
+                yield* waitFor(
+                  runtime.state(terminal),
+                  (state) => state === "idle",
+                  "the detected agent idle",
+                  coldPiStartupAttempts,
+                )
               yield* runtime.send(terminal, { text: "! printf 'VBT_%s\\n' SUBMITS" })
               yield* waitFor(
                 runtime.read(terminal, 80),
                 (text) => text.includes("VBT_SUBMITS"),
-                "the submitted prompt ran",
-                1400,
+                "the submitted prompt ran, printing VBT_SUBMITS that the typed text does not contain",
+                coldPiStartupAttempts,
               )
-              // A subagent's old terminal whose pane id now holds this stranger agent: not its agent, never closed.
-              const stale = TerminalRuntime.terminalOf(name, paneId, "vbt-gone-00000000")
+              const oldTerminal = TerminalRuntime.terminalOf(name, paneId, "vbt-gone-00000000")
               if (runtime.state !== undefined)
-                assert.strictEqual((yield* Effect.flip(runtime.state(stale))).code, "not_found")
-              assert.strictEqual((yield* Effect.flip(runtime.close(stale))).code, "failed")
+                assert.strictEqual((yield* Effect.flip(runtime.state(oldTerminal))).code, "not_found")
+              assert.strictEqual((yield* Effect.flip(runtime.close(oldTerminal))).code, "failed")
               assert.isTrue(Exit.isSuccess(yield* Effect.exit(herdr.call("pane.get", { pane_id: paneId }))))
             }).pipe(
               Effect.ensuring(
@@ -601,10 +586,8 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
     400_000,
   )
 
-  // How every subagent runs: `open` with the harness argv starts a named agent, and `send` prompts it. Ten opens so
-  // pane ids pass `p9` (herdr's later ids carry uppercase, which an agent name must not).
   it.live.skipIf(!piOnPath)(
-    "open starts a harness as a named agent that state reads and send prompts, whatever its pane id",
+    "every subagent's way: open starts a harness as a named agent that state reads and send prompts, whatever its pane id (past p9 herdr's ids carry uppercase)",
     () =>
       withSession(({ socketPath }) =>
         withRuntime((runtime) => {
@@ -615,16 +598,30 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               .open({ id: "local" }, { project: cwd, cwd, argv, env: vars, label: "harness" })
               .pipe(Effect.provide(env))
           return Effect.gen(function* () {
-            for (let i = 0; i < 10; i++) yield* open(["/bin/sh"])
-            const terminal = yield* open(["pi", "--no-extensions", "--no-mcp", "--no-skills", "--no-session"], {
+            const shellsPastP9 = 10
+            for (let i = 0; i < shellsPastP9; i++) yield* open(["/bin/sh"])
+            const terminal = yield* open(barePiArgv, {
               VIBEST_SESSION_ID: "ab12cd34-5678-4abc-8def-0123456789ab",
             })
-            // Named after the vibest session, as before the port: `herdr agent list` shows which session runs where.
-            assert.strictEqual(TerminalRuntime.parseTerminal(terminal)?.name, "s-ab12cd3456784abc8def0123456789")
+            assert.strictEqual(
+              TerminalRuntime.parseTerminal(terminal)?.name,
+              "s-ab12cd3456784abc8def0123456789",
+              "named after the vibest session, so herdr agent list shows which session runs where",
+            )
             if (runtime.state !== undefined)
-              yield* waitFor(runtime.state(terminal), (state) => state === "idle", "the started agent idle", 1400)
+              yield* waitFor(
+                runtime.state(terminal),
+                (state) => state === "idle",
+                "the started agent idle",
+                coldPiStartupAttempts,
+              )
             yield* runtime.send(terminal, { text: "! printf 'VBT_%s\\n' STARTED" })
-            yield* waitFor(runtime.read(terminal, 80), (text) => text.includes("VBT_STARTED"), "the prompt ran", 1400)
+            yield* waitFor(
+              runtime.read(terminal, 80),
+              (text) => text.includes("VBT_STARTED"),
+              "the prompt ran",
+              coldPiStartupAttempts,
+            )
           })
         }),
       ).pipe(Effect.provide(layer)),
@@ -651,8 +648,6 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             const herdr = yield* (yield* HerdrPool).client(name)
             const workspaces = () => herdr.call("workspace.list", {}).pipe(Effect.map((r) => r.workspaces))
 
-            // A repository (a main checkout) with one linked worktree: herdr keeps each in a workspace of its own, and
-            // closing the main checkout's workspace (its last pane) takes the linked one with it — so vibest moves first.
             const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "vibest-close-")))
             const repo = path.join(dir, "repo")
             fs.mkdirSync(repo)
@@ -668,13 +663,10 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             })
             const linkedPane = linked.root_pane.pane_id
             yield* runtime.close(main)
-            // The main pane is closed; the linked worktree's pane and workspace survived what would have taken them too.
             assert.isTrue(Exit.isFailure(yield* Effect.exit(herdr.call("pane.get", { pane_id: mainPane }))))
             assert.strictEqual((yield* herdr.call("pane.get", { pane_id: linkedPane })).pane.pane_id, linkedPane)
             assert.isTrue((yield* workspaces()).some((w) => w.workspace_id === linked.workspace.workspace_id))
 
-            // A workspace without a worktree closes at most itself: one of two panes closed with its sibling left, the
-            // last in place (its pane id unchanged to the end, so no move happened).
             const plain = path.join(dir, "plain")
             fs.mkdirSync(plain)
             const first = yield* open(plain)
@@ -688,8 +680,6 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               ws,
             )
             yield* runtime.close(second)
-            // Closed in place: the pane is gone under its own id (a move would have renamed it first), the workspace
-            // with no worktree took at most itself — its sibling's close above already left everything else alone.
             assert.isTrue(
               Exit.isFailure(
                 yield* Effect.exit(herdr.call("pane.get", { pane_id: TerminalRuntime.parseTerminal(second)!.paneId })),
@@ -698,7 +688,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             yield* waitFor(
               Ref.get(log),
               (events) => events.some((event) => event.type === "exited" && event.terminal.id === second.id),
-              "closed in place",
+              "closed in place: gone under its own id, which a move would have changed",
             )
           })
         }),

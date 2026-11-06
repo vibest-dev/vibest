@@ -1,6 +1,3 @@
-// `vibest update` updates vibest the way it was installed: install.sh runs again from the release into the same
-// directories, npm reinstalls @vibest/cli, and a build has nothing to install (the steps after it still run). A local server stands in for the GitHub release
-// and the npm registry, offering a newer version; the installers it hands out only record how they were run.
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -13,7 +10,6 @@ const checks: ReadonlyArray<Check> = [
     title:
       "update installs the newer version the way vibest was installed (install.sh or npm); a build installs nothing",
     run: async (w) => {
-      // A running vibestd would be offered for replacement, which needs a terminal: this check is about the install.
       await w.stopDaemon()
       const log = path.join(w.root, "update.log")
       const server = Bun.serve({
@@ -32,13 +28,18 @@ const checks: ReadonlyArray<Check> = [
       })
       try {
         const origin = `http://127.0.0.1:${server.port}`
-        // npm and bun that only record their arguments, first on PATH.
-        const stubs = path.join(w.root, "update-bin")
-        await fs.mkdir(stubs, { recursive: true })
+        const argRecordingPmStubs = path.join(w.root, "update-bin")
+        await fs.mkdir(argRecordingPmStubs, { recursive: true })
         for (const pm of ["npm", "bun"])
-          await fs.writeFile(path.join(stubs, pm), `#!/bin/sh\necho "${pm} $*" >> '${log}'\n`, { mode: 0o755 })
+          await fs.writeFile(path.join(argRecordingPmStubs, pm), `#!/bin/sh\necho "${pm} $*" >> '${log}'\n`, {
+            mode: 0o755,
+          })
         const r = await w.vibest(["update"], {
-          env: { VIBEST_DOWNLOAD_URL: origin, npm_config_registry: origin, PATH: `${stubs}:${w.env().PATH}` },
+          env: {
+            VIBEST_DOWNLOAD_URL: origin,
+            npm_config_registry: origin,
+            PATH: `${argRecordingPmStubs}:${w.env().PATH}`,
+          },
           timeoutMs: 60_000,
         })
         const ran = await fs.readFile(log, "utf8").catch(() => "")
@@ -56,9 +57,8 @@ const checks: ReadonlyArray<Check> = [
         )
         if (method === "npm") expect(ran === "npm install -g @vibest/cli@beta\n", `ran: ${ran}`)
         else {
-          // The release's install.sh, into the directory this vibest was installed in (the link resolved).
-          const share = path.dirname(path.dirname(path.dirname(path.dirname(await fs.realpath(binary)))))
-          expect(ran === `install.sh VIBEST_INSTALL=${share} VIBEST_DOWNLOAD_URL=${origin}\n`, `ran: ${ran}`)
+          const installDir = path.dirname(path.dirname(path.dirname(path.dirname(await fs.realpath(binary)))))
+          expect(ran === `install.sh VIBEST_INSTALL=${installDir} VIBEST_DOWNLOAD_URL=${origin}\n`, `ran: ${ran}`)
         }
       } finally {
         await server.stop(true)

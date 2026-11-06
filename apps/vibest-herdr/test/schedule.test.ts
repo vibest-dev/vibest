@@ -1,5 +1,3 @@
-// Plugin host semantics (architecture.md §8, plugins.md §5): one event mutated in place in plugin order, refusals
-// and failures that always surface, and the trace of who changed what.
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { type Candidate, Plugins } from "@vibest/core/plugins"
@@ -19,8 +17,7 @@ const candidate = (id: string, plugin: Plugin.Plugin, options: Record<string, un
   plugin,
 })
 
-/** Fake preflight output: every harness usable, in HARNESS_IDS order. */
-const harnesses = [
+const usableHarnesses = [
   { harness: "pi", available: true },
   { harness: "claude", available: true },
   { harness: "cursor", available: true },
@@ -39,7 +36,7 @@ const start = {
   parentRuntime: undefined,
   machines: [],
   attempts: [],
-  harnesses,
+  harnesses: usableHarnesses,
 }
 const failed = {
   project: "/r",
@@ -52,7 +49,7 @@ const failed = {
   harness: "pi",
   provider: undefined,
   attempts: [],
-  harnesses,
+  harnesses: usableHarnesses,
 }
 
 const run = <A, E, R>(plugins: ReadonlyArray<Candidate>, f: (p: Plugins["Service"]) => Effect.Effect<A, E, R>) =>
@@ -64,7 +61,7 @@ const run = <A, E, R>(plugins: ReadonlyArray<Candidate>, f: (p: Plugins["Service
     Effect.provide(Bus.layer),
   )
 
-describe("plugin host", () => {
+describe("plugin host: one event mutated in place in plugin order, refusals and failures always surface, a trace of who changed what", () => {
   it.effect(
     "callbacks mutate one event in place, in plugin order: a later plugin sees and overwrites what an earlier one wrote",
     () => {

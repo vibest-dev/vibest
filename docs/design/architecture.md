@@ -58,7 +58,7 @@ Reference implementations:
 | D11 | Information comes through the best channel each CLI offers: hooks forward events and results where a CLI has them; an agent's own `vibest report` is for explicit or structured results; reading the screen is last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | D12 | Where omac's implementation is good, vibest copies its code and tests and refactors them (session → Agent and Run, inbox row → Message, plugin hooks → §7 kinds) instead of designing again. §15 lists every part.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | D13 | The engine knows one kind of session, described by an agent definition. Routing, permissions and whether a session may spawn are data and plugin policy, never branches in the code. The coordinator mode (one main Agent and its subagents) is the configuration of the default plugin (§1.1). Status: decided; today the code still has the coordinator and its subagents as two cases, and the planned parts of §1 replace them.                                                                                                                                                                                                                                                                                    |
-| D14 | vibest is not bound to herdr. `schema`, `core`, `server`, `protocol`, `client`, the harness adapters, and the integrations never import herdr or name its types; they use the Runtime port (§10) and vibest's own types (Agent `status`, `runtime { kind, address }`). Everything herdr-specific (`effect-herdr-sdk`, `runtime-herdr`, the herdr plugin, the presenter) lives in herdr packages and the herdr product. Runtimes are plugins registering the `Runtime` API (`runtime-port.md`, `runtime-api.ts`): herdr, rex and tern are builtin; another product is a new plugin, not a core change.                                                                                                                  |
+| D14 | vibest is not bound to herdr. `schema`, `core`, `server`, `protocol`, `client`, the harness adapters, and the integrations never import herdr or name its types; they use the Runtime port (§10) and vibest's own types (Agent `status`, `runtime { kind, address }`). Everything herdr-specific (`effect-herdr-sdk`, `runtime-herdr`, the herdr plugin, the presenter) lives in herdr packages and the herdr product. Runtimes are plugins registering the `Runtime` API (`runtime-port.md`, `plugin/src/runtime.ts`): herdr, rex and tern are builtin; another product is a new plugin, not a core change.                                                                                                           |
 
 ## 1. A multi-CLI agent engine
 
@@ -326,7 +326,10 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
   Claude plugin polls vibestd over HTTP on `vibest-http.sock` (each row handed out is leased for 30 s, its lease in
   vibestd's memory; ack by row id, or give rows back; a project that stops polling for 5 s gets its leases back; only the
   session's own harness may poll); `subscribe`, the Pi extension's subscription stream; `prompt`, typed through herdr
-  `agent.prompt`. No main Agent pane: Messages are `dropped`.
+  `agent.prompt`. No main Agent pane: Messages are `dropped`. A main Agent whose terminal the runtime cannot name
+  (reused, or its record dropped) is judged by its process. A `subscribe` batch counts as delivered once the RPC
+  client queued it (the next pull starts only after the socket Ack), not once `pi.sendMessage` returned: a dropped Ack
+  can mark a batch failed that the client already has (a known gap).
 - **Into a subagent** through herdr `agent.prompt`, text unchanged, then confirmed: within 8 s the state
   sequence must move or the agent must be working; otherwise press Enter and wait 8 s; otherwise paste once more
   and wait 8 s; otherwise `not_started` with a notice naming `vibest peek <id>` (CAO #479, #496, #566). No screen text is ever
@@ -341,6 +344,72 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
 - Decision points (`agent.fail`, `run.end`) are recorded before their hook runs;
   after a restart an unfinished decision runs again, so plugin decisions must be idempotent.
 
+How `packages/core/src/sessions.ts` keeps these:
+
+- Every operation on one session runs under that session's lock; different sessions proceed in parallel. A
+  session directory has its own lock (`directory:<path>`), which an archive holds while it decides whether the
+  directory goes and a `--peer` spawn holds while it joins it. Per-session flags live in memory and are dropped once
+  the session is no longer live and nothing is in flight on them (`forget`, under the lock).
+- Remove and archive close the round and mark the session archived and exited under its lock. The aborted turn
+  end their interrupt causes, landing during the interrupt or after the archive, is no result for two independent
+  reasons: check returns early for an archived session, and an aborted payload with no open round collects
+  nothing (`rounds.ts` `collectResult`).
+- Ready for input: a harness whose integration reports ready is ready once that report is on its row (a restart or
+  move removes the previous one); any other once the runtime's state is idle, working or blocked. While neither (a
+  harness starting, or a startup dialog such as Claude's folder trust) the harness's startup step answers it, polled
+  every 500 ms because a drawn dialog has no event. A runtime without `state` and a harness without a report are
+  ready when `open` returned. What the terminal showed goes to vibestd.log only.
+- Handing over a turn: the round opens before the wait for ready, so a prompt typed during a resume sees it; rows
+  are claimed after ready, so a session that never gets ready does not take them. The round is open, and the
+  subscription to its state taken, before the runtime gets the text, so the paste's own prompt hook is ignored and
+  no turn start can come before the wait on it. Only a turn start of this round confirms pickup: the previous
+  round's start would confirm a text whose Enter was swallowed. The text is pasted again once only, so a task never
+  runs twice. A refused text undoes the round unless the integration wrote a result anyway or a usage-limit move
+  will try the next harness; a broken connection is not a refusal (the text may have arrived), so the round stays.
+- A check decides nothing for an exited session (the next Message resumes it), an archived one, or one whose harness
+  vibestd is restarting. Unreachable or `unknown` status is no answer. A turn counts as worked when it was seen
+  working, a turn start of this round was reported, or after a restart when it was typed or a row was delivered into
+  it. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
+  after the hook grace. A prompt that failed part way closes the turn so the queue moves again.
+- A Message stays queued only for what a retry can fix (the runtime unreachable, vibestd stopping); a refused start
+  is final. A session whose harness is being restarted is never resumed in another terminal.
+- Placing a start (`placement.ts`): the session's `process.start` is written before its terminal exists, so what the
+  harness reports while it starts (ready, its pid) belongs to it; a terminal that never opens ends it as
+  `launch_failed`. The worktree comes first: the terminal's cwd is in it, the argv names it, and the
+  `.worktreeinclude` files are in place before the harness starts. It is detached and made by vibest (a linked
+  worktree of the main checkout would group away from the project's terminals); a multi-repository project gets one
+  detached worktree per repository. A failed start undoes its steps in reverse order, uninterruptibly, before the
+  failure becomes a notice: the terminal, the system prompt file, the worktree (with git, without force; a refusal,
+  or a reserved directory git left something in, stays for `vibest archive`). A failed resume closes its terminal
+  too. A terminal opens beside `--peer`'s, else beside the main Agent's when that runs in the same runtime. When a
+  project's last live session ends, the main Agent's terminal publishes the workspace alone; without a stored
+  project directory its name cannot be given again and is left as it is (a known gap).
+- Starting the main Agent (`launch.ts`): every check that can refuse the launch (harness, provider, binary, plugin,
+  temporary directory) runs before the coordinator session is recorded, since that supersedes the running main
+  Agent's launch. The shell a launch opens at the root runs the command and then stays, so a failed start (or a
+  main Agent the user quits) leaves its error and a shell, not a closing terminal. `VIBEST_HOME` is set last in its
+  environment, so a caller's `--env` cannot point that shell at another vibestd.
+- On start: subscribe before writing anything, settle the deliveries a stop cut off, label terminals again (the
+  runtime does not keep labels), then check every live session once. The same reconcile runs when a runtime
+  registers or comes back, and finishes archives and `--archive-on-completion` archives a stop cut off.
+
+How `packages/core/src/rounds.ts` ends a round (under the session's lock, except where noted):
+
+- A reported turn end counts only when it is from the session's current harness, stored after its current process's
+  ready report (`Db.latestReport`, a fence that holds across a vibestd restart), and received after the open round's
+  prompt. The `turn.end` is stamped no earlier than the report, so one report is not taken twice. A late end from the
+  harness the session just left is left alone: the new harness's end replaces it. A turn stopped in its terminal with
+  no round open is `vibest interrupt`'s own, or no round of vibest's. A usage-limit end moves the session to the next
+  harness and the open round stays the one that finishes.
+- Queued Messages: one wake is one delivery; the batch goes pending, sending, delivered, or failed with the owner
+  told. A broken connection before the handover leaves it pending for the next check; after it, the text may have
+  arrived, so it is not sent again and the owner decides.
+- Text the user types while no round is open opens one (no inbox row). It is stamped when the hook arrives, before
+  the session's lock is taken: the lock can be held for seconds (a delivery, an interrupt, an archive) and the typed
+  turn may already be over when it frees, and a later stamp would drop that turn's reported end. vibest's own paste
+  sets a flag around its send, so that echo is no round and the hook cannot deadlock on the lock the paste holds. A
+  round that opened after the read is not recorded twice.
+
 ### 3.3 Ending and cleanup
 
 Copied from omac `remove.ts`, `processes.ts`, `worktree.ts`. `vibest interrupt <agent>` sends the adapter's
@@ -350,13 +419,43 @@ interrupt key and waits 10 s for idle; the Agent and pane stay. `vibest stop <ag
 2. records the pane's shell and foreground PIDs, then closes the pane; if the pane is the last one of a main
    checkout's workspace, it is first moved alone into a new workspace, because closing it would close the
    whole herdr worktree group;
-3. proves exit with signal 0 (every 100 ms, 30 times); `alive` or `unknown` keeps everything and a later
+3. proves exit with signal 0 (every 100 ms, 30 times); `alive` or `unknown` (no PIDs recorded, or signal 0 could
+   not answer) keeps everything and a later
    `vibest stop` checks again;
 4. removes a Workspace made for this Agent only when it is a listed worktree, no pane or process (lsof cwd scan)
    is inside it, `git status` is clean, and HEAD is on a branch or remote ref; `git worktree remove` without
    force; branches are never deleted.
 
+How `packages/core/src/remove.ts` and `processes.ts` keep this:
+
+- Every fact that guards a destructive step is asked right before that step, never reused from earlier: git state
+  and live sharers are read again right before `git worktree remove`. Only a directory under vibest's worktrees root
+  is removed; a row with no directory recorded closes nothing and removes nothing.
+- vibest never signals a process it found or recorded. The runtime's close sees a terminal's processes off (by
+  contract; vibestd still proves it by cwd before the worktree goes), and a close that failed proves nothing. The
+  only signal vibest sends is SIGTERM to one harness pid it was told (a restart, a usage-limit move, a main agent
+  moving terminal), never its group. A reused pid reads as alive, which can only keep more.
+- The cwd check is one lsof run (`lsof +w -a -u <uid> -d cwd -Fpfn0`, no shell) in its own process group, cut off
+  after 10 s, then SIGTERM and SIGKILL 1 s later; a helper stuck in uninterruptible I/O holds the run until it
+  returns. The listing is trusted only when lsof exited 0 with nothing on stderr (warnings mean a partial listing),
+  every set is well formed, no name is lsof's `(readlink: …)` or `(stat: …)` diagnostic, and vibestd's own process
+  is in it with its cwd (a sanity check, not a proof of completeness). A name lsof printed with escapes, or a
+  `(deleted)` cwd, counts as a holder of anything in the worktree it could stand for.
+- A main agent stopped so it can start in another terminal (`Project.StopCoordinator`): its row leaves its place
+  first, so the harness's exit drops nothing, and from there to the answer the stop is uninterruptible, so a Ctrl-C
+  cannot leave the row detached while the harness runs. It is signalled only while the runtime sees an agent in that
+  terminal, and a harness still there after 10 s gets its row back. Ceiling: local machine only (a pid names a
+  process on vibestd's machine; a remote one needs a runtime operation), and a pid reused by another program while
+  the runtime still sees an agent there would get the signal.
+
 Rows are never deleted. `vibest ls` lists Agents that have not exited; `vibest ls --all` and `vibest result <id>` still show an exited one.
+
+An archive marks the session archived before anything is closed, so from then no Send, check or resume brings it
+back. A row that already exited is not closed again. A spawn reserves its worktree name with an atomic `mkdir`; a
+start cut off before its terminal was recorded is undone as a failed launch (its worktree goes when nothing can be
+lost, its reserved directory when still empty), while a resume or move falls back to its previous start.
+`--archive-on-completion` decides on the newest result, under the session's lock: a session with work again (a queued
+Message or a newer turn) stays, and a clean archive sends no notice, since each notice is a coordinator turn.
 
 ## 4. Patterns
 
@@ -476,6 +575,13 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
 - SQLite, WAL, STRICT tables, foreign keys on, all SQL in one service. The database carries an
   `application_id` and a `user_version`; a file that is not vibest's, or not this version, is refused before any
   writable open (`SchemaMismatch`), leaving it untouched. Migrations start with the first release.
+- The check runs on a read-only connection, which sees committed WAL frames and does not checkpoint, so a refused
+  database and its WAL keep their bytes (the WAL index, `-shm`, may still change). WAL mode stays off until `Db`
+  accepts the file. A missing database is created mode 0600, and each open forces 0600 on the database and any
+  existing `-wal` / `-shm` (SQLite copies the database's mode onto those it creates later). Closing the last
+  connection may delete `-wal` / `-shm` (SQLite's default, as on Linux) or keep them (Apple's system SQLite), and two
+  first opens of a missing file at once fail with `SQLITE_CANTOPEN`. A writable transaction
+  is `BEGIN IMMEDIATE`, with a 5 s busy timeout.
 - Tables `project`, `session`, `inbox` (delivery) and the append-only `event` (each process and turn, and each
   inbox row's queue and status changes) in `docs/design/schema.md` are the state, changed in transactions. The
   conversation is the Project's entry session row. An Agent's status is live from the runtime (memory only); its
@@ -483,6 +589,12 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
 - Files keep one writer each and are written to a temporary file and renamed (omac write model): system prompt
   files by the daemon (the main Agent's by `vibest`); never the user's harness configuration.
 - Not stored: worktree branches and dirty state (asked from git), herdr panes and states (asked from herdr).
+- Events reach the engine through one in-memory Bus (`core/bus.ts`): the Db publishes a committed transaction's rows
+  in id order, and observations the schema does not store (`live.*`) are published only. A waiter subscribes before
+  the action whose consequence it waits for (`awaitEvent` before its first look), so an event in between is not lost.
+  The engine (`core/engine.ts`) knows events, not sessions or projects: each handler runs in a fiber of its own, a
+  failing one is logged and stops nothing else, and none depends on the order events arrive in. Each re-derives what
+  to do from storage under its session's lock, so a late or repeated event finds the work done or redoes it once.
 
 ## 7. Plugin architecture (Effect only)
 
@@ -541,6 +653,15 @@ else is routed to the available harness with the most quota left, and a start wi
 run is refused naming each harness's problem. On `agent.fail` with reason `limited` and `move` still unset, it
 moves to the best harness that is neither limited nor already tried.
 
+**Plugin API facts** (`@vibest/plugin`): vibestd maps this module and `effect` to its own instances when it loads a
+plugin, so a plugin imports both normally and bundles neither. A plugin's `effect` runs once per load in the plugin's
+own scope; what it registers (hooks, runtimes) and acquires lasts until unload, and a hook name not in `Hooks` fails
+its setup. In `subscriptions`, `provider` is empty for Claude Code and Cursor and set for Pi; empty `limits` means
+unknown, not unlimited, and a login is limited when any of its usage windows is. A remembered limit rules its login
+out until that login's own row was refreshed after it and reads fine again; a login with no row, or none named by the
+attempt, keeps the plain memory. `usage.report` replaces one `(harness, provider)` row's limits until the next usage
+poll of a harness that reads usage. `agent.fail`'s `reason` is a union with one member today, `limited`.
+
 **Counters and traces** (omac `plugins.ts`): per plugin and hook, calls, changes, crashes, timeouts, refusals,
 and the last error, shown by `vibest plugins`; every trace entry is `{ plugin, hook, ms, outcome:
 "ok" | "refused" | "crashed" | "timeout", changes }`, a diff against the event before that callback.
@@ -554,6 +675,32 @@ rebuilds the rest in order inside a batch; a failing new revision falls back to 
 retried until it changes; an activation latch gates entry points; triggers are configuration changes, module
 file changes, and a daily update tick, debounced by 100 ms; npm plugins install into the vibest home and
 activate after local ones.
+
+**Loading and watching** (`plugin-sources.ts`): a half-saved `vibest.json` keeps its last parsed plugin list. An
+entry is imported by its real path, so imports resolve next to the real file and Bun never sees two paths for one
+module (its resolver keeps failing for files added later under a symlinked directory, such as /var on macOS); a
+dangling link is watched at its target until it appears. Imports are cached by the digests of the entry's local
+graph and of the listings of its unresolved import directories: an unchanged graph is not imported again, failed or
+not, so unrelated saves never repeat a broken plugin's import-time effects. An import that never settles times out
+like a setup. `node_modules` is neither watched nor evicted: a dependency installed later is retried only when the
+plugin's own graph changes, and an upgraded one already loaded needs a vibestd restart. While the watched
+directories change the plugins are read again, because a change made before its watch began is not reported; after
+such a rewatch one more read follows a second later, because Bun 1.4's `fs.watch` on macOS sometimes drops other
+directories' events right after a watch closes (drop it when Bun no longer does). A teardown that times out is left
+running, so an old revision's finalizers can overlap the new setup.
+
+**Loading on Bun** (`platform/bun.ts`, `platform/plugin-source.ts`, after OpenCode V2's `source.bun.ts`): inside the
+compiled binary nothing resolves a plugin's `effect` and `@vibest/plugin` imports, and a copy beside the plugin would
+be a second effect instance, so `Bun.plugin` maps them to vibestd's own modules (`effect/X` is `effect.X` for every
+top-level module the root namespace exports). A plugin's graph is its entry and the local files it imports,
+transitively, outside `node_modules`; a local import that does not resolve yet adds its directory to the watched
+ones. Each load imports the entry and its local imports under keys of their own (`<file>?vibest-load=<n>`), after
+dropping the previous and current graph from the module registry, so a changed transitive import is evaluated again
+and old revisions do not pile up: since Bun 1.4.3 a module whose top-level await never settled stays in the
+registry under its path, outside `require.cache`, and every later import of that path waits for it. `node_modules`
+keeps its plain keys, so it is shared and never reloaded. Bun hands `onResolve` the importer without its query, so
+each file remembers the load that last imported it, and a later `import("./lazy.ts")` from a running plugin gets that
+plugin's key. A watched directory that goes away closes its watcher; the next read watches what still exists.
 
 **Order:**
 
@@ -628,7 +775,9 @@ works on day one.
 (`harnesses/<harness>`, `scripts/build-harnesses.ts`): in each release archive beside `bin/vibest`, and in the
 `@vibest/cli` npm package, whose platform packages hold only the binary. `bin/vibest.cjs` hands the npm directory to the
 binary as `VIBEST_HARNESSES`; without it the compiled binary looks beside its own directory (`<root>/bin/vibest`,
-`<root>/harnesses`, the link resolved), which is how install.sh's install runs, without Node. The adapter loads the plugin into
+`<root>/harnesses`, the link resolved), which is how install.sh's install runs, without Node; a binary run bare from the
+npm package (a pane vibestd opened runs the binary, not the launcher) then tries the `@vibest/cli` package, flat
+(`node_modules/@vibest/cli`) or nested. From source there is no layout to look beside. The adapter loads the plugin into
 each session it starts, and into the main Agent: Pi `-e <dir>/extension.mjs`, Claude Code and Cursor `--plugin-dir <dir>`.
 Each of these adds to what the harness loads; the user's own plugins, extensions and hooks keep loading beside it
 (checked against Pi 1.4, Claude Code 2.1.316 and cursor-agent 2026.10.22). Why not install into the harness's config:
@@ -639,7 +788,7 @@ Each of these adds to what the harness loads; the user's own plugins, extensions
 - no writes to the user's config, so no diff, backup or uninstall leftovers; Cursor's marketplace is account-level and
   cannot be installed into locally at all.
 
-The cost: a harness started by hand does not load it, which is the intent. vibest never writes into a harness's config. `preflight` refuses a harness whose plugin directory is missing.
+The cost: a harness started by hand does not load it, which is the intent. vibest never writes into a harness's config. `preflight` refuses a harness whose plugin directory is missing: results come only from the plugin's turn-end hook.
 
 | vibest event                   | Claude Code              | Cursor                       | Pi                              |
 | ------------------------------ | ------------------------ | ---------------------------- | ------------------------------- |
@@ -667,6 +816,66 @@ so a Claude usage limit is a failed result, not a usage-limit move.
 `packages/claude`, copied) is a hooks module (`hooks/hooks.json` → `register.mjs`, no command hooks, no shell) whose native
 listeners cover every Claude row of the table above, including `PreToolUse` for the guard, and the inbox module for the
 main Agent; each listener calls the `vibest` binary on PATH. omac's settings.json script is not copied.
+Claude's trust and bypass menus are answered in the pane, one key per tick, as CAO does: Down until the accept option
+is under `❯`, then Enter (the trust menu preselects "No, exit"; no flag or setting skips it). The project folder's
+permission rules are `Read(//<dir>/**)` and `Edit(//<dir>/**)`: Claude matches file tools only against Read and Edit
+rules (an Edit rule covers Write), and `//` starts an absolute path. A user prompt is a `prompt.submit` from origin
+`composer` or `bridge` (Remote Control); a task notification, a scheduled trigger, a peer or a plugin's prompt is not
+the person. An aborted `turn.complete` is a result only while vibest's round is open, so `vibest interrupt`'s own Esc
+is none. `--resume` of a session Claude never wrote fails, so a resume first checks its transcript,
+`<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<root with every non-alphanumeric as ->/<id>.jsonl`. Its models come from
+the stream-json `initialize` control request (the Agent SDK's `supportedModels()`; the list's `default` entry is
+Anthropic's recommendation, not the user's setting, and is dropped) and `get_settings` (`applied.model`, what it
+runs), under `--safe-mode` so no hooks or plugins run (`--bare` would skip OAuth and return a short list).
+
+**Cursor: hook files.** `@vibest/cursor` is the plugin as files that vibest writes into its home; cursor-agent
+(checked against 2026.10.22) runs a plugin directory's `hooks/hooks.json` like `~/.cursor/hooks.json`, with the plugin
+root as the hook's working directory; `afterAgentResponse` carries the reply as `text`, `stop` only a status. The hook
+script acts only for a vibest agent (`VIBEST_AGENT`). The guard hook is fail-closed: a crash, timeout or missing answer
+refuses the call, which Cursor would otherwise let through, so the guard always answers explicitly; `allow` only lets the
+call go on to Cursor's own permission checks. Every hook input carries `conversation_id`. A resume is one argument,
+`--resume=<id>`: `--resume` takes an optional value, so a separate id starting with `-` would read as a flag.
+
+**Pi: one extension.** `pi -e <dir>/extension.mjs` loads `src/extension.ts` bundled with everything it imports except
+Pi's own packages, which Pi resolves for the extensions it loads. `VIBEST_AGENT=coordinator` makes it the main Agent
+(inbox rows delivered in process as custom messages the model sees and the TUI hides: a turn starts when Pi is idle,
+else they queue as follow-ups); another agent with `VIBEST_SESSION_ID` sends its turn starts and ends; without
+`VIBEST_AGENT` it does nothing. Tool calls go through that agent's rules in `guard.ts`, in process. Only the TUI session
+is the harness's root session: print, RPC and JSON modes have no PTY, so a Pi child of the main Agent, which inherits
+`VIBEST_AGENT`, takes no rows, reports nothing and does not change the TUI. Pi calls the extension factory once per
+session and awaits it, then awaits `session_shutdown`; the extension is built in a scope that lives as long as the
+session, its handlers registered before `session_start`, and `session_shutdown` (kept outside that scope) closes it.
+The extension never starts vibestd: during `vibest daemon restart` the replacement may be between sockets. The inbox
+stream is subscribed again when the connection drops or vibestd closes it (rows not yet taken stay pending); anything
+else ends it with a notice to the user. A send that got no answer is unknown, not failed: vibestd may still apply it,
+and keeps the newest conversation id either way (the last report wins). A TUI `session_start` for `new`, `resume` or
+`fork` reports its conversation id before another turn; `agent_end` reports the first startup id. Pi 1.1.0 warns and
+recreates the id of an empty `/new` that has no file yet. Only the main Agent gets the `delegate` and `pipeline` skills.
+Its `before_agent_start` clears the prompt sections other coding-agent extensions add; Pi runs those handlers in load
+order, so only extensions loaded before this one are cleared, and turns started by inbox rows skip that event.
+The main Agent's `--system-prompt` replaces Pi's coding-assistant preamble (Pi still adds context files, skills and
+cwd), and its `--tools` is an exact allowlist, not +/- entries on the defaults: those keep every extension's tools,
+and a user's delegation extension (pi-subagents' `subagent`) would then win over `vibest run`. A user prompt is Pi's
+`input` event, except source `extension`, which is vibest's own deliveries. Pi refuses `--provider` without
+`--model`, so a login chosen without a model is dropped and Pi starts on its own default (a known ceiling: pick that
+provider's default model when quota routing on Pi matters).
+
+The main Agent's Pi TUI groups adjacent tool rows (thinking does not split a group; user text, assistant text or a
+displayed custom message does; image results stay outside) and compacts user messages. Pi's values are read
+defensively, as their shapes differ across versions. A custom message sent with `triggerTurn: false` during a run is
+appended outside the agent loop and reaches no `message_start`, so the extension observes the session's
+`appendCustomMessageEntry` and restores it on release. With two copies of the extension loaded, the later copy's
+renderers are marked and used alone, so a group gets one header; the original renderer still runs on every update,
+hidden, so its timers and redraws keep working. The user-message patch of Pi's shared prototypes is one lease that
+lives on `UserMessageComponent.prototype` while its wrappers are installed: overlapping instances of the same module
+share it, a lease from another module evaluation (after `/reload`) is never joined, the lease is published before any
+wrapper, and an install refuses when the prototypes' methods changed since this instance first saw them.
+
+**Arguments and models.** herdr refuses launch arguments with newlines, so Pi and Claude read the system prompt from
+a file and Cursor gets it in front of its first prompt. A harness lists its models from the user's home, not the
+caller's directory (a worktree may be gone since). With a request the listing keeps stdin open, since a server may
+exit at EOF before it answers, and stops at the first output that holds a list. A model's provider null is the
+harness's default provider; `default` marks what it runs with no model given, as its own settings decide.
 
 **Nested conversations are filtered** (omac `integration.ts`): events carrying `agent_id` (the CLI's own
 subagents), and Cursor events whose `CURSOR_CONVERSATION_ID` differs from the conversation's, are ignored.
@@ -700,6 +909,27 @@ a round that hit limits on every login it may use fails instead of cycling, and 
 again once its reading is free. A preflight miss, or a start or prompt that fails, is not a limit — the next move
 may use that harness again. A login already limited before start is `agent.start.before`'s to avoid (the builtin
 does), never a move's.
+
+How the move runs (`move.ts`, under the session's lock): a choice the chains already ruled out (an unknown harness,
+a login limited in this round, a harness this move skipped) ends the move, since asking the same plugins again cannot
+change the answer; a limit from an earlier round no longer rules a login out once its own usage row, refreshed after
+it, says it is free. The move stays on the session's own runtime and machine. It ends the old agent before the next
+starts: a refused SIGTERM (sent to the harness pid alone, never its group, which is the terminal's shell) or a failed
+close keeps the session where it was, so no second agent ever runs. With a runtime that can `run` in a terminal the
+next harness starts in the session's own terminal, and the row names it first so what it reports while starting is its
+own; otherwise the terminal closes and a new one opens before the row names the new harness, so a failed placement
+leaves the row on the last live one. `open` failing with code `failed` is the start dying inside the terminal (its
+own limit, a crash) and skips to the next candidate; any other code is a placement refusal and ends the move. A
+prompt the runtime took whose turn never started counts as a failed prompt: the round stays working and the next
+harness prompts it again. Giving up with no terminal of its own (the turn-end path) fails the round but leaves the
+agent running, so check keeps polling it.
+
+The default choice ranks a harness by its emptiest non-limited, non-excluded login (the lowest fullest usage window;
+a login that reported no window scores -1) and starts on that login, so the harness's own default cannot be its limited
+one. A harness with no known logins is available but ranks after every harness whose quota is known, unless exactly
+that pair was tried. A caller who named a limited login does not get another login of that harness. A move does not
+carry the model named for the old harness, which the new one would not list: the move starts on the new harness's
+default. The memory of tried pairs is per harness when no login was named and per login when one was.
 
 ## 10. Ports
 
@@ -776,7 +1006,9 @@ host. Every method but `Ping` needs the `vibest-protocol` header; each command P
 and the HTTP API alike (HTTP paths carry none); old versions are not served. An additive feature does not bump it:
 Ping's `capabilities` gets a boolean flag, and a client uses the feature only when the flag is there. Flags: `http`,
 `handoff`, `requests` (`Send` and `Spawn` take an optional `request` id: `vibest send` and `vibest run` make one per
-invocation and send a call whose connection dropped once more with it, and vibestd answers a repeat as the first). A mismatch is
+invocation and send a call whose connection dropped once more with it, and vibestd answers a repeat as the first;
+only to a vibestd that has the flag, since an older one would act on a repeat twice, and never after an answer, a
+refusal included). A mismatch is
 answered with what vibestd speaks (protocol, package version), a message and the command to run (`protocol.ts`
 `protocolMismatch`, the command in `MISMATCH_ACTION`): both ways it is `vibest update`, which restarts the agents on
 the new version; an older caller is told vibest was updated, a newer one that vibestd is older. RPC fails with `ProtocolRejected`, HTTP answers 409. Scoped methods need caller headers
@@ -786,20 +1018,175 @@ compile time: open (integration notifications), subagent (`Report`), main Agent 
 `Interrupt`, `Stop`, …, only on Runs of its Project), user only (daemon, update). Socket mode 0600 is
 the authentication; roles prevent mistakes, not attackers.
 
-**Daemon** (omac `daemon.ts`, `drain.ts`, `replace.ts`, copied): a start lock held by an exclusive SQLite
-transaction; a socket that answers is never unlinked; the instance (pid, start id, argv) is in Ping and
+**RPC methods** (`packages/protocol/src/rpc.ts`). Three middlewares: `ProtocolGate` (every method but `Ping`),
+`CallerGate` on scoped methods (resolves the caller for that request only, from its headers and the stored row; a
+session never declares itself coordinator), and `Admission` on methods that change something (counted while they
+run, refused with `DaemonStopping` while a `Daemon.Stop` drains, except the hooks' `TurnEnd` and `Prompt`, and
+after it is accepted). Protocol-only methods take no caller: `Plugins`, `Runtimes.Doctor`, `Subscriptions`,
+`Republish` (put terminal labels back after the runtime started or restarted; answers how many), the hooks'
+`TurnEnd` and `Prompt` (verbatim harness JSON read with the adapter's `turnEnd` / `userPrompt`; unknown ids,
+another harness than the session's, and events the adapter ignores change nothing; a prompt from the main agent or
+from vibest's own delivery is ignored), and `CoordinatorSessionReady` (the conversation id a harness made for a
+coordinator; the last report wins). Of the rest:
+
+- `Spawn`: `harness` is optional when a routing plugin picks it; `agent` defaults to general and may not be the
+  coordinator; `machine` defaults to `local`; `peer` shares that session's worktree in a split of its pane;
+  `archive` archives the session once a completed result reached its coordinator.
+- `Send` queues and returns; vibestd delivers once the session is idle, and failures reach its coordinator as
+  notices. An `id` is a session id or a unique prefix of at least 8 characters, and the answer names the full id.
+- `Remove`: only the session's own coordinator or the user's command line. `Get` never waits. `Peek` reads the last
+  `lines` (default 30) of the terminal when asked: screen text is never pushed to an agent, so a coordinator looks
+  there itself when a turn ended without a report. `Report` goes to the caller's own coordinator.
+  `Inbox.Subscribe` streams the coordinator's inbox batches (the Pi extension) instead of the runtime's prompt.
+- `SessionInfo.task` is the first row delivered from the user or the parent (`List` cuts it to 500 characters);
+  `latest.summary` is `metadata.summary` when that is a string, else the output's first line.
+- `Launch` opens `vibest`'s main agent outside the repository's workspace: a tab there, or a new workspace at its
+  root, whose shell runs argv. `Project.Open` finds or makes the project of the directory (`move` answers a
+  `ProjectMoved`). `Project.StartMain` picks the main agent's harness, provider, model and runtime and writes
+  nothing. `Project.CoordinatorSession` then upserts the coordinator row at its terminal, with the caller's PID
+  (it execs the harness, so it is the harness's) and `--env` held in memory only, for a restart in place.
+  `Project.RunningCoordinator` finds a coordinator in another pane; `Project.StopCoordinator` sends SIGTERM to its
+  recorded PID only, keeps its terminal, and answers `stopped`, `running` (nothing changed), `moved` (the row is no
+  longer there) or `unsupported` (with the reason).
+- `Daemon.Stop` (user only, naming the instance from Ping): accepted, not exited; a client sends it once and
+  watches Ping. `Daemon.Handoff` (`handoff` capability) checks that `command` opens the database, drains as
+  `Daemon.Stop` does, starts `command daemon --foreground --import`, then hands over its sockets and lock; a
+  failure before that leaves it serving. `spawnDaemon`'s `env` reaches only the new vibestd's environment.
+- `Session.Start` gives a main agent restarted in its own shell (`vibest integration start <id>`) its row and its
+  `--env` from memory (absent after a stop without a handoff). `Session.Ready` is the integration saying the harness
+  takes input, with the harness's own `pid`; vibestd hands over a first or restarted turn only after it.
+- `Agents.Outdated` lists live agents whose integration is not this vibestd's (`blocked`: why one cannot restart in
+  place). `Agents.Restart` returns at once and, once process `after` exited, restarts them in place: subagents
+  first (at most 4 at a time), then main agents; SIGTERM to the harness alone, then the runtime runs it again on
+  the same conversation. An interrupted subagent turn gets a continue turn, a working main agent a continue notice
+  naming the outcomes, which also go to vibestd.log.
+
+**Client** (`packages/client`). One short connection per command; the Ping preflight is the only Ping, and the
+call itself carries its headers. The RPC protocol layer is built into the caller's scope: `Effect.provide` would
+close the socket as soon as the client is made. Its keep-alive ping timeout is a day, because the JSON-RPC
+serialization does not encode keep-alive pings and the default 5 s timeout would cut every longer call (an
+`Inbox.Subscribe` stream); a closed unix socket still fails the read at once. An incompatible vibestd that `vibest
+daemon restart` cannot replace is stopped by the user: vibest prints the PID check and `kill -TERM`, and never
+signals it.
+
+**Daemon** (omac `daemon.ts`, `drain.ts`, `replace.ts`, copied): a start lock held by `flock` on
+`vibestd.pid` (below); a socket that answers is never unlinked; the instance (pid, start id, argv) is in Ping and
 `vibestd.pid`; only the user's command starts the daemon, never an agent's (it would inherit the agent's
 sandbox). `daemon restart` and `update` replace it only after `y` on a terminal, while agents keep running: the old
 one refuses new changes with `DaemonStopping`, drains its own operations (admitted requests, deliveries, launches,
-archives; `core/drain.ts`) for up to 5 s, and leaves pending Messages in sqlite for the next one.
+archives; `core/drain.ts`) for up to 5 s, and leaves pending Messages in sqlite for the next one. Drain counts
+daemon operations, not agent lifetimes. While it drains, only a settlement of work already started is admitted;
+other work waits and wakes once a refused Stop reopens. The start lock's
+file handle must stay referenced for vibestd's whole scope: Bun collects an unreferenced handle within seconds (on
+Linux in about 2-3 s without a forced GC) and the lock goes with it while the process lives, so the finalizer that
+closes the handle is what keeps it (`daemon.test.ts` checks it under `Bun.gc`).
+On Bun, `vibestd.pid` is both the record and the start lock: `flock` on the file itself, so readers still read it
+while it is held and a killed vibestd leaves no stale lock. It is written in place and never replaced (a new inode
+would be unlocked) or unlinked (a contender may have the old inode open); release empties it. A failed `flock` is
+taken as held by another process without reading errno.
+A replacement never signals vibestd and never removes its socket or lock; the outcome is what Ping shows afterwards.
+It sends one `Daemon.Stop` (the same call on every protocol since it was added, so in the running vibestd's
+protocol), never again: only one of vibestd's own refusals, decoded, changes nothing; an accepted, lost or
+undecodable reply, or none, is a hint and Ping decides. A vibestd before 0.0.1-beta.10 refuses while any agent or
+queued message is active. The client waits 55 s for the reply (above an older vibestd's two 20 s quiet checks and a
+5 s drain, so only a wedged vibestd reaches it) and 15 s for the old one to stop answering; nothing answering is not
+proof it exited, so the new vibestd waits for the lock, boundedly. With `--version` (15 s) and the new start, a
+replacement ends in about two minutes whatever the other side does, not counting the wait for the yes.
+
+**Daemon start** (`packages/server/src/daemon.ts`): take the flock on `vibestd.pid`, retrying while it is busy (a
+vibestd whose socket closed may still run its finalizers, or another starter is mid-attempt; each attempt is a fresh
+connection) and exiting once a vibestd that holds it answers; a handoff's new vibestd waits for the old one's lock,
+not its socket, which answers until the old one has drained. With the lock held, whatever still answers on
+`vibest.sock` took none (an older vibestd or another program): its socket stays and the start fails, after three
+Pings, since one can outlast its 1 s timeout on a loaded machine. Else the socket is unlinked, a handoff backs up the
+database the old vibestd left before this one opens and migrates it, sessions are recovered and the socket served.
+The lock is taken first and released last, after the socket server has closed and removed its path, so a successor's
+socket is never unlinked. The PID line is written into the locked file, and releasing the lock empties it; it is for
+people to read, since a stale file's PID may belong to another process by now, and nothing signals it. An accepted
+`Daemon.Stop` keeps a short grace before the server closes so its reply is written; a lost reply is still handled by
+the client, which watches Ping. Each daemon has its own plugin registry (a service, never a global), provided after
+every layer that reads it, since a `provideMerge` satisfies only requirements outstanding before it; and one event bus
+below Db and Runtimes, so a commit is visible to whoever subscribed first. The main Agents' `vibest --env` values live
+in vibestd's memory only (never stored, logged or sent); a handoff passes them to the next vibestd in its environment
+(`VIBEST_HANDOFF_ENV`), which `vibest daemon --import` reads and removes before anything starts, and a handoff first
+has the new binary check read-only that it can open the database (`vibest daemon import-check`). The pairs go on the
+pane's environment, not into the typed command, so they stay out of the shell history; the pane gets them in one
+variable a shell rc does not set, since an rc that exports the names themselves would win.
+
+**Admission while draining**: changes are counted at the RPC and HTTP entry until they end, failed or interrupted
+ones too, and refused once a Stop drains, except settlements of work already handed out: a hook's turn start or turn
+end and an inbox ack. Refused, a spawn's first turn would never show its pickup proof (its launch then holds the
+drain open) and a turn end would lose its result. A turn end is one `turn.reported` event, written without the
+session lock; a write that fails fails the request, so the caller sees a failure, not a silent retry. A turn start is
+stamped once, when the hook arrives: `userPrompt` notes the start before it may wait for the session's lock, held
+through a send's whole confirm, and stamps the round with the same time, so the pending send sees its pickup proof
+while it still waits.
+
+**Session requests**: middleware checks caller and protocol headers before a handler runs and never calls
+`client.annotate`, so a later request on the same socket starts clean. A session's environment must name its own
+project (`VIBEST_PROJECT_ID`); one naming another or none is refused, over RPC as over HTTP. The integration version
+and protocol a session's request carries are recorded on its row when they changed, whether or not the protocol
+matches and before the protocol check, so an agent left on an old integration is known and `vibest update` restarts
+it; the `vibest` CLI an agent runs sends no plugin version and records nothing. The harness conversation id is taken
+from the session's own harness only, latest wins (a `/clear` changes it): a process of another harness under the same
+session id (an old main Agent after a switch) changes nothing. ACCESS roles: `open` (protocol only), `session` (a
+subagent), `agent` (a main Agent or the command line), `coordinator`, `owner` (a main Agent of the session's Project,
+or the command line) and `self` (a subagent's own terminal for its own id, or the command line at the Project root for
+its main Agent, its start after a restart). One main Agent per Project: every start passes one check that holds the
+Project's lock through the launch, as a stop does, so two starts at once cannot both pass; the check fails open
+(nothing running) when the runtime cannot be reached or cannot tell, and a main Agent that `vibest update` is
+restarting counts as running. A stop of a main Agent that is restarting is refused rather than waited for, since its
+next harness starts in seconds. A main Agent's working directory places it only in a Project without a directory;
+otherwise it starts sessions in its own Project wherever its shell is.
+
+**HTTP API** (`vibest-http.sock`, `packages/server/src/http.ts`): what an integration that can only make HTTP requests
+calls (the Claude plugin's `$.http.fetch`). Every route is `POST /<route>` with a JSON body, answered at once; the
+caller is named by the shared session headers.
+
+| Route                          | Answer                | What                                                             |
+| ------------------------------ | --------------------- | ---------------------------------------------------------------- |
+| `/inbox/poll`                  | `{ ids, line, text }` | the main Agent's next batch, each row leased (Inbox.poll)        |
+| `/inbox/ack { ids, release? }` | `{ acked }`           | delivered, or given back (Inbox.ack); a settlement               |
+| `/hooks/<harness>/turn-end`    | 204                   | the adapter's `turnEnd`, kept as the turn's report; a settlement |
+| `/hooks/<harness>/prompt`      | 204                   | the adapter's `userPrompt`: the round starts; a settlement       |
+| `/hooks/<harness>/guard`       | `{ deny? }`           | Guard.check with the session's own agent and project folder      |
+
+Errors are `{ error }`: 409 another protocol (with `ProtocolMismatch`), 404 no such session or route, 403 another
+project, another harness than the session's, or a poll from what is not a main Agent whose harness polls, 503 vibestd
+is stopping. Routes match on the path alone, whether the server reports it with or without scheme and host. The guard
+reads the session's project folder as its terminal's `VIBEST_PROJECT_DIR`, which vibestd itself has none of.
+`Session.Ready`, sent once at the harness's start with the harness's own pid (which a restart signals), says it takes
+input now; vibestd waits for it before handing the harness a turn.
 
 **Distribution** (omac `bin/`, `cli-<platform>` packages, `build-flags.ts`): two installs of the same compiled binary,
-built without `bunfig` and `.env` autoloading. install.sh (`curl … | sh`) downloads this platform's archive from the
+built without `bunfig` and `.env` autoloading (otherwise a compiled Bun executable loads `bunfig.toml`, whose
+`preload` runs code, and `.env` from the directory it runs in, and vibest runs in repositories it does not control). install.sh (`curl … | sh`) downloads this platform's archive from the
 latest GitHub Release (a `v*` tag's release: one archive per platform, install.sh, and `version`), unpacks it to
 `~/.local/share/vibest/versions/<version>/` and links `~/.local/bin/vibest` to it; it keeps the version before as well, for a
 vibestd and sessions still running it. npm (`npm i -g @vibest/cli@beta`): a Node launcher runs the platform package's
 binary. `vibest update` updates the way vibest was installed: install.sh again into the same directories, or the package
 manager; a build or source checkout is refused. The install never lives under `~/.vibest`, which holds data only.
+The archive also holds `herdr-plugin/`, which install.sh does not link; the user links it.
+
+The npm launcher (`bin/vibest.cjs`) passes arguments and stdio through and hands the binary the package's
+`harnesses/` as `VIBEST_HARNESSES`, which is also how the binary knows npm installed it. It forwards SIGTERM and
+SIGHUP but not SIGINT: the terminal already delivers Ctrl-C to the binary in the same process group, and forwarding
+it would make one Ctrl-C two. It ends with the binary's exit status, or dies of the same signal; a signal Node
+ignores (SIGPIPE) becomes exit status 128 + its number. When the package manager skipped the optional platform
+package (bun does at times), it prints the exact command that adds it.
+
+`vibest update` upgrades an npm install with the package manager that owns the binary's real path, not the first
+npm on PATH: bun's global directory, or an npm prefix (`<prefix>/lib/node_modules/@vibest/…`, as under fnm, mise,
+nvm and Homebrew), whose own npm is taken to be `<prefix>/bin/npm`. bun is also given the platform package, which
+it may skip. install.sh is read whole before it runs, so a cut-off download never runs half a script. An install
+already current goes on to the vibestd and agent steps, which also covers an upgrade made with npm or bun directly.
+`update` and `doctor` report more than one `vibest` on PATH (one per real file, in PATH order): the first as the
+one that runs, the others with the command that removes them. The user's own `vibest`, `vibest status` and
+`vibest doctor`, never an agent's, print one line when a newer version is out (the registry's `beta` tag, or the
+release's `version` file), read at most once a day (a failed read waits as long), cached in
+`$VIBEST_HOME/update-check.json`, waited on for at most 2 s; any failure prints nothing, and
+`VIBEST_NO_UPDATE_CHECK=1` turns it off. A registry that answers 404 (a local build installed from a tarball) is
+reported as having no release yet.
 
 ## 14. Home layout
 
@@ -817,8 +1204,24 @@ those. The vibest install itself is not here: install.sh puts it in `~/.local` (
 The system prompt each harness gets is not kept here. It is generated again from the session's row and the
 Project's files on every harness start (new, resume, restart, move to another harness) and written to
 `$TMPDIR/vibest/<session id>/system-prompt.md`; without TMPDIR, to `/tmp/vibest-<uid>/<session id>/`, a directory
-that must be the user's own with mode 0700 and no symlink. Archive removes the session's directory; the system
-cleans the rest.
+that must be the user's own with mode 0700 and no symlink, checked with one `lstat` that does not follow a link, so
+nothing can be swapped between two checks. Archive removes the session's directory once its processes have exited
+(they may still read the prompt or report a turn end); the system cleans the rest.
+
+`vibest project create` (`core/project-create.ts`) checks everything before it writes anything, and on failure or
+interruption removes only what it created. Each copy is independent (`--no-hardlinks`, no alternates), on the
+source's branch, with the source's origin, `origin/*` refs and upstream; the local path it was cloned from is not
+kept as a remote, and uncommitted changes are not copied. A directory is a multi-repository project when it is not
+itself in a git checkout and its direct children are main checkouts; a directory of linked worktrees is a Workspace,
+whose project is the shared parent of those main checkouts (one level).
+
+An isolated Workspace (`core/worktree.ts`) is one detached worktree per repository; no branch is created, so a
+leftover `refs/heads/vibest/<name>` cannot fail it. A worktree is recorded before `git worktree add`, so a failure
+or interrupt during the add still removes what git left. `.worktreeinclude` (gitignore syntax, the Claude Code
+convention) copies only paths git ignores both in the main checkout and in the worktree (a rule only the main
+checkout has would leave the copy untracked); git does the matching, and a nested repository is never included. A
+symlink is recreated as the same link, never followed; a path that exists in the worktree or lies under a link there
+is left alone (git check-ignore fails on a path beyond a symlink). Nothing is recorded in git.
 
 ## 15. Copied from omac and refactored (D12)
 

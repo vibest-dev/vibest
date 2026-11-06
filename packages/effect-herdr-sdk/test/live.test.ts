@@ -1,14 +1,12 @@
-// Against the running herdr (needs HERDR_SOCKET_PATH or herdr's default socket). Skipped when HERDR_LIVE is unset.
 import { assert, describe, layer } from "@effect/vitest"
 import { Config, Effect, Fiber, Layer, Option, Stream } from "effect"
 
 import * as HerdrBun from "../src/bun.js"
 import { Herdr, HerdrError } from "../src/index.js"
 
-// Deciding whether to register the tests happens at collection time, before any test fiber exists.
 const enabled = await Effect.runPromise(Config.option(Config.String("HERDR_LIVE")).pipe(Effect.map(Option.isSome)))
 
-describe.skipIf(!enabled)("live", () =>
+describe.skipIf(!enabled)("live against the running herdr (HERDR_LIVE set)", () =>
   layer(Herdr.layer().pipe(Layer.provide(HerdrBun.layer)), { excludeTestServices: true })("herdr live", (it) => {
     it.effect("the running herdr speaks the protocol these types were generated for", () =>
       Effect.gen(function* () {
@@ -41,9 +39,8 @@ describe.skipIf(!enabled)("live", () =>
       }),
     )
 
-    it.effect("per-pane subscription without pane_id is rejected by herdr", () =>
+    it.effect("per-pane subscription without pane_id is rejected by herdr too, not only by the types", () =>
       Effect.gen(function* () {
-        // The types already forbid this; the test pins down that herdr refuses it too (SPEC §6.2).
         const e = yield* Effect.flip(
           // @ts-expect-error pane.agent_status_changed requires pane_id
           (yield* Herdr).subscribe([{ type: "pane.agent_status_changed" }]).pipe(Stream.runHead),
@@ -55,7 +52,6 @@ describe.skipIf(!enabled)("live", () =>
     it.effect("a per-pane subscription pushes that pane's agent status changes", () =>
       Effect.gen(function* () {
         const h = yield* Herdr
-        // A throwaway pane beside this one, closed afterwards.
         const pane = yield* Effect.acquireRelease(
           h.call("pane.split", { direction: "down", focus: false }).pipe(Effect.map((r) => r.pane.pane_id)),
           (paneId) => h.call("pane.close", { pane_id: paneId }).pipe(Effect.ignore),

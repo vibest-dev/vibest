@@ -28,6 +28,11 @@ interface Limit { window: string; percent: number /* 0–100 */; status: "availa
   its turn fails (`agent.fail`, reason `limited`).
 - Two refresh paths per harness: a **poll** (no Agent needed, D10 asks for every harness on every machine) and
   **push** from a running Agent's integration plugin, which is fresher and free. Push overrides poll until the next poll.
+- vibestd keeps the rows in memory, one per `(harness, provider, machine "local")`. It polls once as it starts; after
+  that a `list` whose rows are a minute old or more polls first: one poll at a time, shared by every reader, and a
+  reader waits at most the CLI timeout for it before it gets the stored rows. Nothing polls while nobody reads. A CLI
+  read runs with stdin closed and stderr discarded, for at most 10 s. A defect in a poll is not a failed read either:
+  the row stays, and its message carries no token.
 - vibest never refreshes or rotates a CLI's token and never writes its credential store: a refresh rotates the
   refresh token and can sign the CLI out. An expired or unreadable token skips that poll; the limits stay as last
   known (or unknown).
@@ -45,7 +50,8 @@ interface Limit { window: string; percent: number /* 0–100 */; status: "availa
 Token: macOS keychain item `Claude Code-credentials` (JSON `claudeAiOauth.{accessToken, expiresAt,
 subscriptionType, rateLimitTier}`); on Linux `~/.claude/.credentials.json`, same shape. On this Mac the file
 also exists but was **stale** (expired 10 minutes before, while the keychain token was valid for 7 hours): read
-the keychain first on macOS.
+the keychain first on macOS. vibestd reads a keychain item with `security -w` (at most 10 s); an empty answer,
+a non-zero exit or a timeout is unreadable, and the value is never logged.
 
 Push in practice: vibest's Claude sessions are interactive, so stream-json is not available. Hook payloads do not
 carry rate limits (assumed: none of the documented hook inputs has them). The statusline is the only in-session
@@ -92,7 +98,8 @@ accounts have no `planUsage` (the CLI then aggregates spend events; prototype re
 vibest's Pi adapter reports only login readiness (`pi auth check --provider <p> --json --no-refresh`). Pi has no
 usage command. Usage limits come from plugins: any vibest plugin may report a Subscription's limits (for example
 a user's plugin that reads a provider's usage). vibest does not parse Pi provider response headers. With no such
-report, limits stay unknown (`[]`). Login is per provider, so `provider` is set.
+report, limits stay unknown (`[]`). Login is per provider, so `provider` is set. Pi refuses `--provider` without
+`--model`: a move to a Pi login with no model records the login on the session and starts Pi on its default.
 
 |       | Source                                             | Fields                                                                                                                                                          | Freshness         | Status                                                                                                                                                            |
 | ----- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |

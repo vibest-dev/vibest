@@ -1,4 +1,3 @@
-// The harnesses vibest ships, provided as `Harnesses` by the composition root (and by tests).
 import { Harnesses } from "./harness.ts"
 import { claude } from "./harnesses/claude.ts"
 import { cursor } from "./harnesses/cursor.ts"

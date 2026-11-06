@@ -14,10 +14,6 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { VERSION } from "@vibest/protocol/rpc"
-// vibestd (SPEC §14): one per machine, one socket. Start: take the flock on vibestd.pid (retrying while busy; exit once an vibestd that
-// holds it answers); then if something still answers on vibest.sock, leave it and fail; else unlink it, open the
-// database, recover sessions (the first poll tick), serve. Rows are kept. Host pieces (SQLite driver, socket
-// server) come from the entry through `Host`, so this file stays on effect's abstract services.
 import { newId } from "@vibest/schema/id"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
@@ -28,10 +24,6 @@ import type { SqlClient } from "effect/sql"
 import * as Http from "./http.ts"
 import * as Server from "./server.ts"
 
-/**
- * vibestd.pid (SPEC §14): written once vibestd serves its socket, removed when it stops. For people to read: nothing signals
- * the PID it names, which a stale file may share with another process by now. instance / command: an older vibestd did not write them.
- */
 export const DaemonInfo = Schema.Struct({
   pid: Schema.Number,
   version: Schema.String,
@@ -43,7 +35,6 @@ export const DaemonInfo = Schema.Struct({
 export type DaemonInfo = typeof DaemonInfo.Type
 const DaemonInfoJson = Schema.fromJsonString(DaemonInfo)
 
-/** The vibestd.pid at `file`; none when it is missing or not one. */
 export const readDaemonInfo = (file: string) =>
   Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString(file)).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(DaemonInfoJson)),
@@ -53,32 +44,21 @@ export const readDaemonInfo = (file: string) =>
 export interface Host {
   readonly sqlite: (filename: string) => Layer.Layer<SqlClient.SqlClient, unknown>
   readonly socketServer: (path: string) => Layer.Layer<SocketServer, unknown>
-  /** The HTTP server on a unix socket (vibest-http.sock: the Claude plugin's poll, ack and hooks). */
   readonly httpServer: (path: string) => Layer.Layer<HttpServer, unknown>
   readonly plugins: PluginLoader["Service"]
-  /** Builtin plugins of this app, after the default harness choice: the runtime plugins (runtime-port.md §2). */
   readonly builtinPlugins: ReadonlyArray<Candidate>
-  /** Signal 0, vibestd's PID and user id (Processes). */
   readonly processes: ProcessPlatform
-  /** A harness credential (the macOS keychain, or Claude's Linux file). The value is never logged. */
   readonly keychain: KeychainPlatform
-  /**
-   * Take the start lock on `file` (vibestd.pid) for the scope: a writer for the file's content once this process holds it,
-   * undefined while another process does. Released, the file is left empty. Fails when the file cannot be opened.
-   */
   readonly lock: (
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, Error>) | undefined, Error, Scope.Scope>
-  /** Read-only: whether this vibest can open the database at `filename` (missing is fine); writes nothing. */
   readonly checkDatabase: (filename: string) => Effect.Effect<void, Error>
 }
 
 export { HANDOFF_ENV, type MainEnv } from "./server.ts"
 
-/** How long the new vibestd of a handoff waits for the old one to release the lock. */
 export const HANDOFF_TIMEOUT = Duration.seconds(30)
 
-/** `vibest daemon import-check`: this vibest can take over the running vibestd's database (a handoff checks it first). */
 export const checkImport = (host: Host) => Effect.flatMap(Layout, (layout) => host.checkDatabase(layout.database))
 
 export class DaemonLockUnavailable extends Schema.TaggedError<DaemonLockUnavailable>()("DaemonLockUnavailable", {
@@ -111,29 +91,17 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(Harness.layer),
     Layer.provideMerge(Db.layer.pipe(Layer.provide(host.sqlite(layout.database)))),
-    // One registry per daemon (a Service, never a global), provided after every layer that reads it — a provideMerge
-    // satisfies only requirements outstanding before it (runtime-port §2): two hosts in one process each get their own.
     Layer.provideMerge(Runtimes.layer),
     Layer.provide(Drain.layer),
     Layer.provide(Restarting.layer),
-    // Below Db and Runtimes: one bus, so a commit is visible to whoever subscribed first.
     Layer.provide(Bus.layer),
   )
 
-/**
- * Run vibestd in this process until interrupted (SIGTERM / SIGINT through the runtime's runMain) or stopped by an accepted
- * Daemon.Stop. `handoff`: started by the running vibestd (Daemon.Handoff), so it waits for that one to release the lock
- * instead of leaving it running, and backs the database up before opening it.
- */
 export const run = (host: Host, options: { readonly handoff?: boolean; readonly mainEnv?: Server.MainEnv } = {}) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
     yield* fs.makeDirectory(layout.home, { recursive: true })
-    // Busy is transient: an vibestd whose socket is closed may still run its finalizers, or another starter is mid-attempt.
-    // Each attempt is a fresh connection, closed when busy; retry until this one holds the lock or an vibestd answers.
-    // Only then the socket. Taken first in this scope, the lock is released last: after the socket server has closed
-    // and removed its path, so a successor's socket is never unlinked by this one.
     let write: ((text: string) => Effect.Effect<void, Error>) | undefined
     const held = yield* host.lock(layout.daemonInfo).pipe(
       Effect.mapError(
@@ -147,7 +115,6 @@ export const run = (host: Host, options: { readonly handoff?: boolean; readonly 
           write = writer
           return Effect.succeed(true)
         }
-        // A handoff's old vibestd still answers until it has drained and closed: wait for its lock, not its socket.
         if (options.handoff) return Effect.succeed(undefined)
         return probe(layout.socket).pipe(Effect.map((up) => (up ? false : undefined)))
       }),
@@ -166,9 +133,6 @@ export const run = (host: Host, options: { readonly handoff?: boolean; readonly 
       }),
     )
     if (!held) return yield* Effect.log(`vibestd is already running on ${layout.socket}`)
-    // No other vibestd that takes the lock is starting or serving, so whatever answers took none: an older vibestd, or
-    // another program. Its socket stays. One Ping can outlast its 1 s timeout on a loaded machine: three before "does
-    // not answer".
     const inUse = (yield* probe(layout.socket).pipe(Effect.repeat({ until: (up) => up, times: 2 })))
       ? "answers Ping (an vibestd that takes no start lock, from an older vibest)"
       : (yield* accepts(layout.socket))
@@ -180,7 +144,6 @@ export const run = (host: Host, options: { readonly handoff?: boolean; readonly 
       })
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
-    // The old vibestd closed the database with its lock: a copy of what it left, before this vibest opens (and migrates) it.
     if (options.handoff) {
       const backup = `${layout.database}.before-${VERSION}`
       for (const suffix of ["", "-wal"])
@@ -206,19 +169,12 @@ export const run = (host: Host, options: { readonly handoff?: boolean; readonly 
         ),
       ),
     )
-    // The socket files' permissions are the authentication (SPEC §13).
     yield* fs.chmod(layout.socket, 0o600)
     yield* fs.chmod(layout.httpSocket, 0o600)
     const info: DaemonInfo = { ...identity, version: VERSION, socket: layout.socket }
-    // Into the locked file itself; releasing the lock empties it.
     yield* write!(Schema.encodeSync(DaemonInfoJson)(info)).pipe(Effect.orDie)
-    // An older vibest's separate lock file, unused now (nothing that takes it can be serving: this one holds vibestd.pid
-    // and the socket answered no one).
     yield* fs.remove(`${layout.home}/vibestd.lock`, { force: true }).pipe(Effect.ignore)
     yield* Effect.log(`vibestd listening on ${layout.socket}`)
-    // Until interrupted (SIGTERM / SIGINT) or an accepted Daemon.Stop; then the scope closes the server, then the lock.
     yield* Deferred.await(shutdown)
-    // ponytail: a short grace so the accepted Stop's reply is written before the server closes; a lost reply is still
-    // handled by the client (it watches Ping), this only keeps the common case clean.
     yield* Effect.sleep("200 millis")
   }).pipe(Effect.scoped)

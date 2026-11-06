@@ -19,19 +19,10 @@ import {
   ProtocolRejected,
   WrongInstance,
 } from "@vibest/protocol/rpc"
-// Replacing the running vibestd with the vibest the user invoked (issue #80), for `vibest daemon restart` and `vibest update`.
-// Only on a terminal, after a yes, and only when vibestd drains its own operations while agents keep running (Daemon.Stop, the same call on every protocol
-// since it was added, so it is sent in the running vibestd's protocol). vibest never signals vibestd and
-// never removes its socket or lock: exclusion comes from the flock on vibestd.pid, and the outcome is what Ping shows afterwards.
 import { Cause, Console, Duration, Effect, Exit, Option, Path, Schedule, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, type RpcClientError } from "effect/rpc"
 
-/**
- * Where a replacement that did not happen left vibestd. declined: the user said no (or nothing) on the terminal. busy: vibestd
- * refused the Stop because daemon work did not drain. unchanged: refused or not attempted otherwise; the old vibestd still runs.
- * unknown: the old vibestd was asked to stop and what runs now is not known to be the target. other: another vibestd answers.
- */
 export const ReplaceOutcome = Schema.Literals(["declined", "busy", "unchanged", "unknown", "other"])
 
 export class ReplaceFailed extends Schema.TaggedError<ReplaceFailed>()("ReplaceFailed", {
@@ -39,7 +30,6 @@ export class ReplaceFailed extends Schema.TaggedError<ReplaceFailed>()("ReplaceF
   message: Schema.String,
 }) {}
 
-/** Daemon.Stop's own errors and the gates' that every request passes: vibestd decoded the request and refused it. */
 const REFUSALS = [
   Forbidden,
   WrongInstance,
@@ -51,19 +41,11 @@ const REFUSALS = [
 ] as const
 type Refusal = InstanceType<(typeof REFUSALS)[number]>
 const isRefusal = (e: unknown): e is Refusal => REFUSALS.some((c) => e instanceof c)
-// Every error Stop is declared to fail with is a refusal or the transport's: a new one fails to compile here.
 type StopError = Effect.Error<ReturnType<VibestClient["Daemon.Stop"]>>
-const _everyStopError: [Exclude<StopError, Refusal | RpcClientError.RpcClientError>] extends [never] ? true : never =
-  true
+const _stopErrorsClassified: [Exclude<StopError, Refusal | RpcClientError.RpcClientError>] extends [never]
+  ? true
+  : never = true
 
-/**
- * How long the client waits. reply: for Stop's answer, connecting included; above what vibestd itself may take (an older
- * vibestd's two 20 s quiet checks and a 5 s drain, plus a margin), so only a wedged vibestd runs into it. observe: for the old
- * vibestd to stop answering afterwards. With `--version` (15 s) and the new vibestd's start (DAEMON_START_TIMEOUT), a
- * replacement ends in about two minutes at most, whatever the other side does: not counting the wait for the yes (up to
- * two more minutes), nor `vibest update`'s package manager and integration steps around it.
- */
-/** Semver order of `a` and `b`: negative, 0 or positive. A prerelease sorts before its release; build metadata is ignored. */
 export const compareVersions = (a: string, b: string) => {
   const parse = (v: string) => {
     const [core = "", pre] = v.replace(/\+.*/, "").split(/-(.*)/)
@@ -84,8 +66,7 @@ export const compareVersions = (a: string, b: string) => {
   return 0
 }
 
-/** The first vibest whose vibestd lets a restart happen while agents keep running. */
-const GRACEFUL = "0.0.1-beta.10"
+const FIRST_VERSION_RESTARTABLE_WITH_AGENTS = "0.0.1-beta.10"
 
 export interface Timing {
   readonly reply: Duration.Duration
@@ -96,7 +77,6 @@ export const TIMING: Timing = {
   observe: Duration.seconds(15),
 }
 
-/** The vibest to run vibestd with: its argv, and the version that argv reports. */
 export interface Target {
   readonly version: string
   readonly command: ReadonlyArray<string>
@@ -104,7 +84,6 @@ export interface Target {
 
 const quoted = (argv: ReadonlyArray<string>) => argv.map(shellQuote).join(" ")
 
-/** What `argv --version` prints (`vibest v1.2.3`), as `1.2.3`; why not, when it cannot be read. */
 export const versionOf = (argv: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -116,17 +95,12 @@ export const versionOf = (argv: ReadonlyArray<string>) =>
     Effect.catch((e) => Effect.succeed(`unreadable (${e.message})`)),
   )
 
-/** The vibestd that answers is `target` and not `old`. */
 const isTarget = (ping: Ping, old: Ping, target: Target) =>
   ping.instance !== undefined &&
   ping.instance !== old.instance &&
   ping.version === target.version &&
   ping.command?.join("\0") === target.command.join("\0")
 
-/**
- * Replace the answering vibestd with one run by `target`. Fails with ReplaceFailed, saying what happened and what did not,
- * at the first thing that is not as expected; nothing is retried and nothing is undone.
- */
 export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
   Effect.gen(function* () {
     const layout = yield* Layout
@@ -149,7 +123,6 @@ export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
         "unchanged",
         `\`${quoted(target.command)} --version\` reports ${reported}, not ${target.version}; vibestd was not stopped`,
       )
-    // Paths only when they differ: the usual upgrade runs the same installed binary.
     const samePath = old.command !== undefined && quoted(old.command) === quoted(target.command)
     if (!samePath)
       yield* Console.log(
@@ -157,16 +130,13 @@ export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
       )
     if (!(yield* interactive))
       return yield* fail("unchanged", "replacing vibestd needs a yes on a terminal; nothing was stopped")
-    // Before beta.10 vibestd decided by its quiet check: it refuses while any agent or queued message is active.
-    const quietOnly = old.version === undefined || compareVersions(old.version, GRACEFUL) < 0
+    const quietOnly =
+      old.version === undefined || compareVersions(old.version, FIRST_VERSION_RESTARTABLE_WITH_AGENTS) < 0
     const question = quietOnly
       ? `Replace vibestd ${old.version || "unknown"} (pid ${old.pid ?? "unknown"}) with ${target.version}? This old vibestd refuses while any agent is open. [y/N]: `
       : `Replace vibestd ${old.version || "unknown"} (pid ${old.pid ?? "unknown"}) with ${target.version}? Agents keep running. [y/N]: `
     if (!(yield* askYesNo(question))) return yield* fail("declined", "not confirmed; nothing was stopped")
 
-    // One Stop, never sent again. Only one of vibestd's own refusals, decoded, is a refusal and changes nothing. An accepted
-    // reply, a lost one (the transport's RpcClientError), one this vibest cannot decode (a defect), or none by the deadline
-    // is only a hint: Ping decides. Interrupting vibest (Ctrl-C) interrupts it here, before anything below runs.
     const path = yield* Path.Path
     const reply = yield* RpcClient.withHeaders(
       connect(layout.socket).pipe(Effect.flatMap((c) => c["Daemon.Stop"]({ instance: old.instance! }))),
@@ -194,7 +164,6 @@ export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
         "unknown",
         `vibestd instance ${old.instance} still answers ${Duration.format(timing.observe)} after its Stop was sent; it was not stopped, or is still stopping. Stop was not sent again and nothing else was done; see vibest status`,
       )
-    // Nothing answers: that is not proof it exited, so the new vibestd waits for the lock on vibestd.pid, boundedly.
     const started = Option.isNone(after.value)
     if (started)
       yield* startDaemon.pipe(

@@ -1,13 +1,9 @@
-// The system prompt vibest gives each harness. Generated again from the database row and the project files on every
-// harness start (new, resume, restart, move) into `$TMPDIR/vibest/<session id>/system-prompt.md`, never read back.
 import { Config, Context, Data, Effect, FileSystem, Option, Path } from "effect"
 
 import { shellQuote, writeAtomic } from "./paths.ts"
 
-/** The per-user temporary directory cannot be used safely: the start fails with this. */
 export class SystemPromptDirUnsafe extends Data.TaggedError("SystemPromptDirUnsafe")<{ readonly message: string }> {}
 
-/** What `lstat` says of a path: the link itself, never what it points to. */
 export interface LinkInfo {
   readonly symlink: boolean
   readonly directory: boolean
@@ -15,7 +11,6 @@ export interface LinkInfo {
   readonly mode: number
 }
 
-/** From the platform (src/platform): this user's numeric id and `lstat`. Only the fallback without TMPDIR needs them. */
 export const UserPlatform = Context.Reference<{
   readonly uid: number | undefined
   readonly lstat: (path: string) => Promise<LinkInfo>
@@ -23,11 +18,6 @@ export const UserPlatform = Context.Reference<{
   defaultValue: () => ({ uid: undefined, lstat: () => Promise.reject(new Error("no lstat on this platform")) }),
 })
 
-/**
- * The parent of every session's system prompt directory: `<tmpdir>/vibest`, or `<fallbackParent>/vibest-<uid>` when
- * tmpdir is empty. The fallback sits in a shared directory, so it must be a real directory (no symlink) owned by this
- * user with mode 0700, else it is refused.
- */
 export const privateTmp = Effect.fn("privateTmp")(function* (tmpdir: string, fallbackParent: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -47,8 +37,6 @@ export const privateTmp = Effect.fn("privateTmp")(function* (tmpdir: string, fal
         e.reason._tag === "AlreadyExists" ? Effect.void : Effect.fail(unsafe(e.message)),
       ),
     )
-  // One lstat, which does not follow a link: nothing can be swapped between two checks. Another user cannot replace
-  // a directory of ours in a sticky /tmp afterwards.
   const st = yield* Effect.tryPromise({ try: () => user.lstat(dir), catch: (e) => unsafe(`${dir}: ${String(e)}`) })
   if (st.symlink || !st.directory || st.uid !== user.uid || (st.mode & 0o777) !== 0o700)
     return yield* unsafe(
@@ -57,7 +45,6 @@ export const privateTmp = Effect.fn("privateTmp")(function* (tmpdir: string, fal
   return dir
 })
 
-/** `privateTmp` for this process: TMPDIR, else `/tmp`. */
 export const systemPromptRoot = Effect.gen(function* () {
   return yield* privateTmp(
     Option.getOrElse(yield* Config.option(Config.String("TMPDIR")), () => ""),
@@ -65,7 +52,6 @@ export const systemPromptRoot = Effect.gen(function* () {
   )
 })
 
-/** Writes session `id`'s system prompt; its path, for the harness flag. */
 export const writeSystemPrompt = Effect.fn("writeSystemPrompt")(function* (id: string, text: string) {
   const path = yield* Path.Path
   const file = path.join(yield* systemPromptRoot, id, "system-prompt.md")
@@ -73,7 +59,6 @@ export const writeSystemPrompt = Effect.fn("writeSystemPrompt")(function* (id: s
   return file
 })
 
-/** Session `id`'s temporary directory goes, best effort (archive). */
 export const removeSystemPrompt = (id: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
@@ -92,7 +77,6 @@ const truncate = (text: string, what: string) =>
 
 const clip = (text: string) => (text.length <= SUMMARY_LIMIT ? text : text.slice(0, SUMMARY_LIMIT))
 
-/** Frontmatter `description`, else the first non-empty line (`---` and a leading `#` stripped). */
 const memorySummary = (text: string) => {
   const lines = text.split(/\r?\n/)
   let rest = lines
@@ -105,7 +89,6 @@ const memorySummary = (text: string) => {
         .trim()
         .replace(/^(['"])(.*)\1$/, "$2")
         .trim()
-      // shortcut: one `description:` line, not a folded YAML block, until a memory needs that
       if (value) return clip(value)
       rest = lines.slice(end + 1)
     }
@@ -130,10 +113,8 @@ const memoryIndex = (entries: ReadonlyArray<readonly [string, string]>, left: nu
   return lines.join("\n")
 }
 
-/** How an agent types vibest in its shell: `vibest`, or `bun …/main.ts` when vibest runs from source. */
 const invocation = (vibest: ReadonlyArray<string>) => vibest.map(shellQuote).join(" ")
 
-/** preferences.md (capped) and an index of the markdown files under memories/. A missing file or folder reads as empty. */
 export const projectText = Effect.fn("projectText")(function* (projectDir: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -160,13 +141,10 @@ export const projectText = Effect.fn("projectText")(function* (projectDir: strin
 
 export interface SystemPromptInput {
   readonly id: string
-  /** The project folder (VIBEST_PROJECT_DIR). */
   readonly projectDir: string
-  /** argv that runs vibest (`VibestCommand`). */
   readonly vibest: ReadonlyArray<string>
   readonly preferences: string
   readonly memories: string
-  /** `vibest run --peer`: the session whose worktree this one shares. Only whether it is set reaches the system prompt. */
   readonly peer?: string | undefined
 }
 
@@ -223,9 +201,6 @@ Optionally end with a \`## Remember\` section: lessons worth keeping for future 
 ${r.preferences ? `\n# User preferences\n\n${r.preferences}\n` : ""}${r.memories ? `\n# Project memories\n\n${r.memories}\n` : ""}`
 }
 
-/** "pi, claude or cursor": every harness, so the prompt stays fixed; `vibest run` itself says when one is not set up. */
-
-/** The coordinator's system prompt (`vibest`). How to run agents is the `delegate` and `pipeline` skills, not this prompt. */
 export function coordinatorSystemPrompt(r: {
   readonly projectDir: string
   readonly preferences: string

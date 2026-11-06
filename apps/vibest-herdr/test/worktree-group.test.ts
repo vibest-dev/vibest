@@ -1,5 +1,3 @@
-// New worktrees are worktrees/<repository name>/<4 hex>, recorded as the session's directory. The name is reserved by
-// creating its directory, so whatever already sits at a path (a directory, a file, a dangling link) takes that name.
 import { assert, describe, it } from "@effect/vitest"
 import { Db, type SessionRow } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
@@ -57,7 +55,7 @@ const marker = (dir: string) =>
 
 const directoryOf = (id: string) => Effect.flatMap(Db, (db) => db.sessionDirectory(id)).pipe(Effect.map((d) => d ?? ""))
 
-describe("repository-grouped worktrees", () => {
+describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a name is reserved by creating its directory, so whatever already sits at a path takes that name", () => {
   test(
     "a new worktree is the repository name plus a 4-hex leaf, and the full session id stays",
     Effect.gen(function* () {
@@ -162,8 +160,6 @@ describe("repository-grouped worktrees", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      // Both leaves scripted: the live session takes the first, a plain file sits at the second, so the draw
-      // refuses it and the spawn never starts. The file stays beside the real worktree through it all.
       allocationNameSource.leaves = ["ab01", "ab02"]
       const reset = Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined)))
       const { id: live } = yield* sessions.spawn(yield* spawnInput(repo))
@@ -256,7 +252,7 @@ describe("repository-grouped worktrees", () => {
   )
 
   test(
-    "a held creation reserves its leaf, so the next draw does not alias it",
+    "a held creation reserves its leaf, so the next draw does not alias it, even under a name differing only in case on a case-folding file system",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const sessions = yield* Sessions
@@ -274,9 +270,10 @@ describe("repository-grouped worktrees", () => {
         const first = yield* sessions.spawn(yield* spawnInput(repo))
         yield* held.reached
         assert.strictEqual(yield* directoryOf(first.id), layout.allocationWorktree("MyRepo", "abcd"))
-        // The directory exists before the terminal opens: it is the reservation, so the next draw cannot alias it,
-        // even under a name that differs only in case on a case-folding file system.
-        assert.isTrue(yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")))
+        assert.isTrue(
+          yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")),
+          "the directory exists before the terminal opens",
+        )
         allocationNameSource.leaves = ["abcd", "abce"]
         const second = yield* sessions.spawn(yield* spawnInput(other))
         yield* until(db.getSession(second.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")

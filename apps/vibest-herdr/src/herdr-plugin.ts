@@ -1,5 +1,3 @@
-// `vibest herdr`: the command group the herdr plugin runs. The project directory comes from
-// HERDR_PLUGIN_CONTEXT_JSON (focused pane, else workspace). Never from this process's cwd, which is the plugin directory.
 import readline from "node:readline"
 
 import { type Claim, type VibestClient, withVibest } from "@vibest/client/client"
@@ -13,15 +11,12 @@ import { Config, Console, Effect, Option, Schema } from "effect"
 import { Herdr } from "effect-herdr-sdk"
 import { Command } from "effect/cli"
 
-/** HERDR_PLUGIN_CONTEXT_JSON is missing or not the object herdr documents. */
 export class BadPluginContext extends Schema.TaggedError<BadPluginContext>()("BadPluginContext", {
   message: Schema.String,
 }) {}
 
-/** The popup prompt was empty. Same tag the other commands use for empty text. */
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
 
-/** The focused pane is not one of this project's live sessions. */
 export class NoFocusedSession extends Schema.TaggedError<NoFocusedSession>()("NoFocusedSession", {
   message: Schema.String,
 }) {}
@@ -51,25 +46,19 @@ export interface UsageWindow {
 
 type Step<A, E, R> = Effect.Effect<A, E, R>
 
-/** What the commands ask vibestd and herdr to do. The fake the tests pass never fails and needs nothing; the live
- * daemon's steps fail with the RPC's and herdr's errors (E) and need the CLI's services (R). */
 export interface HerdrDaemon<E = never, R = never> {
-  /** Republish pane metadata for live herdr sessions. `directory` is only the caller header, not a filter. */
   readonly republish: (directory: string | undefined) => Step<number, E, R>
   readonly openMain: (
     directory: string,
   ) => Step<{ readonly action: "focused" | "opened"; readonly place: string }, E, R>
   readonly spawn: (directory: string, prompt: string) => Step<string, E, R>
   readonly interrupt: (id: string) => Step<void, E, R>
-  /** Live sessions only: `directory` set, that project's; unset, every project's (`stop` matches a pane). */
   readonly list: (directory: string | undefined) => Step<ReadonlyArray<LiveSession>, E, R>
-  /** `undefined` or empty: usage is not available. */
   readonly usage: () => Step<ReadonlyArray<UsageWindow> | undefined, E, R>
 }
 
 const field = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined)
 
-/** The documented context object. Unknown keys (worktree, selection) are ignored. Null cwd fields are absent. */
 export const parsePluginContext = (raw: string) =>
   Effect.gen(function* () {
     let parsed: unknown
@@ -91,7 +80,6 @@ export const parsePluginContext = (raw: string) =>
     } satisfies PluginContext
   })
 
-/** Focused pane directory, else the workspace directory. Never the process cwd. */
 export const projectDirectory = (context: PluginContext) => context.focusedPaneCwd ?? context.workspaceCwd
 
 const requireDirectory = (context: PluginContext) => {
@@ -118,7 +106,6 @@ export const formatUsage = (usage: ReadonlyArray<UsageWindow> | undefined) => {
   return usage.map((window) => `${window.harness}  ${window.window}  ${window.percent}%  ${window.status}`).join("\n")
 }
 
-/** The live subagent in the focused pane, else the session whose herdr agent name is `agentName(id)`. The main agent is not one. */
 export const sessionToStop = (
   sessions: ReadonlyArray<LiveSession>,
   paneId: string | undefined,
@@ -130,7 +117,6 @@ export const sessionToStop = (
   return agent === undefined ? undefined : live.find((session) => agentName(session.id) === agent)?.id
 }
 
-/** Numbered menu. startup is a hook, and the palette does not list itself. */
 export const ACTIONS = [
   ["open-main", "Open or focus the main agent"],
   ["run", "Run a subagent"],
@@ -150,10 +136,6 @@ const actionAt = (choice: string) => {
   return index <= ACTIONS.length ? ACTIONS[index - 1] : undefined
 }
 
-/**
- * Run one plugin verb. `write` is for text the user must see before the next line (the menu, `Prompt:`).
- * The returned string is the rest, printed after.
- */
 export const perform = <E, R>(
   verb: Verb,
   context: PluginContext,
@@ -172,7 +154,6 @@ export const perform = <E, R>(
         }
         case "run": {
           yield* write("Prompt:")
-          // shortcut: one line. A multi-line prompt is `vibest run`.
           const prompt = (yield* readLine()).trim()
           if (prompt === "") return yield* new EmptyInput({ message: "the prompt is empty" })
           return `started ${shortId(yield* daemon.spawn(yield* requireDirectory(context), prompt))}`
@@ -184,7 +165,6 @@ export const perform = <E, R>(
               context.focusedPaneId === undefined ? "no focused pane" : `no session in ${context.focusedPaneId}`
             return yield* new NoFocusedSession({ message: where })
           }
-          // Stop ends the turn; the session, its pane and its worktree stay (archive is `vibest rm`).
           yield* daemon.interrupt(id)
           return `stopped ${shortId(id)}`
         }
@@ -203,6 +183,8 @@ export const perform = <E, R>(
     })
   return go(verb)
 }
+
+const NOT_A_PANE = "vibest-open-main"
 
 const claim = (directory: string): Claim => ({ _tag: "cli", repositoryRoot: directory })
 
@@ -228,26 +210,19 @@ const toLive = (session: SessionInfo): LiveSession => ({
   paneId: parseTerminal(session.address)?.paneId,
 })
 
-/** The live daemon's steps: vibestd for sessions, this herdr for focus and metadata. The error and service unions
- * below are derived from these methods, so a wrong signature here does not compile. */
 const theDaemon = {
   republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
   openMain: (directory: string) =>
     Effect.gen(function* () {
       const machine = yield* callerMachine()
-      // An empty match would hide the main agent when this pane is already it. This id is not a pane.
-      const running = yield* ask(directory, (client) =>
-        client["Project.RunningCoordinator"]({ terminal: "vibest-open-main" }),
-      )
+      const running = yield* ask(directory, (client) => client["Project.RunningCoordinator"]({ terminal: NOT_A_PANE }))
       if (running) {
         const address = yield* decodeAddress(running.address)
         const pane = parseTerminal(address)?.paneId
         if (pane === undefined) return yield* new BadPluginContext({ message: "the main agent has no pane" })
-        // shortcut: focus uses the plugin's herdr server; a main agent on another server is not focused.
         yield* (yield* herdrClient).call("pane.focus", { pane_id: pane })
         return { action: "focused" as const, place: pane }
       }
-      // The same start path as `vibest`: the main agent's current harness, or what scheduling plugins choose.
       const self = yield* VibestCommand
       const opened = yield* ask(directory, (client) =>
         client.Launch({ argv: [...self], focus: true, machine, runtime: KIND }),
@@ -257,12 +232,10 @@ const theDaemon = {
   spawn: (directory: string, prompt: string) =>
     Effect.gen(function* () {
       const machine = yield* callerMachine()
-      // No harness: scheduling picks it, as for `vibest run`.
       return (yield* ask(directory, (client) => client.Spawn({ prompt, machine }))).id
     }),
   interrupt: (id: string) => ask("/", (client) => client.Interrupt({ id })).pipe(Effect.asVoid),
   list: (directory: string | undefined) =>
-    // No directory: ask for every project's live sessions, not one project's. `/` is the caller header only.
     ask(directory ?? "/", (client) => client.List(directory === undefined ? { all: true } : {})).pipe(
       Effect.map((rows) => rows.filter((row) => row.exitedAt === null).map(toLive)),
     ),
@@ -281,15 +254,12 @@ const theDaemon = {
     ),
 }
 
-/** What every live step can fail with, and the services they need: inferred from the methods above. */
 type LiveSteps = ReturnType<(typeof theDaemon)[keyof typeof theDaemon]>
 export type DaemonError = LiveSteps extends Effect.Effect<any, infer E, any> ? E : never
 export type DaemonServices = LiveSteps extends Effect.Effect<any, any, infer R> ? R : never
 
-/** The real daemon. The process that runs the commands provides DaemonServices. */
 export const liveDaemon = (): HerdrDaemon<DaemonError, DaemonServices> => theDaemon
 
-/** One line at a time from stdin. Closed when the command finishes so a TTY does not hold the process. */
 const stdinLines = () => {
   let reader: readline.Interface | undefined
   const readLine = () =>
@@ -321,7 +291,6 @@ const DESCRIPTIONS: Record<Verb, string> = {
   palette: "A numbered menu of the herdr plugin actions",
 }
 
-/** `refuseAgent` is the CLI's user-only check. An agent's `vibest herdr` would run inside its sandbox. */
 export const herdrCommands = <E, R>(refuseAgent: (command: string) => Effect.Effect<void, E, R>) =>
   Command.make("herdr").pipe(
     Command.withDescription(

@@ -24,8 +24,11 @@ default server, the empty `plugins/config/vibest` directory removed, no plugin c
 | Environment for the agent                                                            | `env` on `tab.create` reaches the root pane's shell                                                                                                                                                                                              | Verified: `VIBEST_AGENT_ID`, `VIBEST_RUN_ID` echoed in the pane                                                            |
 | Environment after a herdr server restart                                             | **Lost.** Restored panes start a new shell without the creation `env`                                                                                                                                                                            | Verified: `ENV=[]` after stop and start                                                                                    |
 | Pane ids after a server restart                                                      | Kept (`w1:p2`, `w1:p4`)                                                                                                                                                                                                                          | Verified                                                                                                                   |
+| Pane ids past `p9`                                                                   | Carry uppercase, which an agent name must not: agents are named after the vibest session (`s-<id>`), not the pane                                                                                                                                | Verified (runtime-herdr test)                                                                                              |
 | Start the agent                                                                      | `agent.start { name, kind, pane_id, args }` into the tab's root pane                                                                                                                                                                             | Documented (schema); omac already uses it                                                                                  |
+| Prompt a just-started agent                                                          | `agent.prompt` fails `agent_not_ready` while the `agent.start` launch is pending; herdr marks the agent ready only when `agent.get` reads it after the settle delay, so each try reads it first                                                  | Verified (runtime-herdr test)                                                                                              |
 | Worktree grouping                                                                    | herdr groups worktrees at **workspace** level only: `worktree.create/open` make a new workspace grouped under the source workspace. A tab whose cwd is a worktree is not linked: `worktree list` shows that worktree with no `open_workspace_id` | Verified                                                                                                                   |
+| Close the last pane of a main checkout's workspace                                   | Closes the whole worktree group, the linked worktrees' workspaces too, so vibest first moves that pane into a workspace of its own; a linked worktree's workspace, or one without a worktree, closes only itself                                 | Verified (runtime-herdr test)                                                                                              |
 | What herdr shows for the tab                                                         | The tab label (any text, e.g. `reviewer · claude`) in the tab bar and the `tab` token of Agent rows; the Agent row shows the agent name, or `display_agent` when reported                                                                        | Verified (tab label, pane fields); rendering in a client not observed (headless)                                           |
 
 Pane metadata (`pane.report_metadata`, CLI `herdr pane report-metadata`):
@@ -79,6 +82,13 @@ Manifest `herdr-plugin.toml` (documented, and verified by linking the draft in a
   `ui_busy` while another herdr modal is open (documented).
 - Plugin panes start in the plugin root as cwd (verified). vibest must take the Project directory from
   `focused_pane_cwd` / `workspace_cwd` in the context, not from its cwd.
+- vibest's actions (`vibest herdr <verb>`): `run` reads a one-line prompt (a multi-line one is `vibest run`);
+  `stop` interrupts the turn of the subagent in the focused pane, its session, pane and worktree kept (archive is
+  `vibest rm`); `open-main` focuses the main agent only on the plugin's own herdr server, and otherwise starts it
+  the way `vibest` does. An agent may not run them (it would run inside its sandbox).
+- `vibest` outside herdr opens a tab in the repository's parent workspace and types `vibest --in-parent <root>`
+  there, which runs in place without asking herdr: herdr does not report a just-created workspace as the parent,
+  so asking would open another one, without end.
 
 Environment, verified with the fake `vibest`: `HERDR_PLUGIN_ACTION_ID` (actions), `HERDR_PLUGIN_ENTRYPOINT_ID`
 (panes), `HERDR_PLUGIN_EVENT=startup` (startup hook), `HERDR_PANE_ID`, `HERDR_WORKSPACE_ID`, and
@@ -199,3 +209,92 @@ fragile.
 - `agent.start` into a `tab.create` pane and how `display_agent` shows next to a herdr-detected agent in a real
   client were not observed (headless server only).
 - `apps/vibest-herdr/package.json` `files` does not include `herdr-plugin` yet (not changed here).
+
+## 6. How runtime-herdr drives herdr
+
+- **Terminal ids.** A terminal is `<herdr session>/<pane id>`, plus `/<agent name>` when `open` started its agent.
+  Pane ids repeat across sessions and are reused after a close, so the agent name keeps a reused pane from being
+  taken for the earlier terminal's agent. A named terminal is only the agent `open` named while it still sits in that
+  pane; an unnamed one (the main agent, whose harness a shell ran) is the agent herdr detected holding the pane, never
+  a named one. A pane another agent holds is never closed or read as this terminal: `state` answers `not_found`,
+  which core reads as absent. `Machine.target` is the caller's herdr location as JSON, read only by runtime-herdr.
+- **Agent names.** A vibest session's agent is `s-` and the first 30 hex digits of its id (herdr allows
+  `[a-z][a-z0-9_-]{0,31}`), so `herdr agent list` shows which session runs where; any other agent `open` starts is
+  `vbt-` and random hex. Never the pane id: it is reused and carries uppercase (`w1:pC`). herdr's `done` is `idle`.
+- **open.** The session is `near`'s, else the caller's location, else `HERDR_SOCKET_PATH`, else `vibest`. `near`
+  places the terminal only while its pane exists; a stale one (closed while vibestd was down, or herdr restarted)
+  falls back to the Project's workspace: the checkout's worktree group, else a workspace with a pane at that path
+  (symlinks resolved), else a new one. `tab.create` and `pane.split` are the only places env can be set. A command
+  that is not a harness is typed into the shell after it drew (up to 30 s), not exec'd, so the terminal stays at
+  its shell and `run` can start another there. Anything that fails after the pane exists closes it again: core only
+  closes what `open` returned, and a harness that dies at start (its usage limit, a bad flag) must not leave an
+  empty shell.
+- **agent.start.** herdr types the harness once the shell is idle. After a harness exits herdr keeps its name on
+  that pane until it sees the agent gone, so `agent_name_taken` on the same pane and `agent_pane_busy` are retried
+  (40 times, 500 ms apart). Without herdr's integration for that harness a start never settles; the error and
+  `vibest doctor` point at `herdr integration status` and `herdr integration install <harness>`.
+- **send.** herdr refuses `agent.prompt` (`agent_not_ready`) until it marks the agent ready, and it marks it only
+  when something reads it (`agent.get`), never on `agent.prompt`; a harness that reports its own state (herdr's Pi
+  hook) sends no further event once idle. A prompt sent before the mark works, but herdr then drops the name when
+  `agent.start`'s timeout passes unmarked, and the terminal reads as exited while its harness works. So each try
+  reads the agent and then prompts, for about 30 s; an agent never marked gets the text as one bracketed paste and
+  Enter (`pane.send_input`), as `agent.prompt` sends it. `pane.send_text` reaches a TUI as keystrokes in chunks,
+  and a long multi-line text loses its first chunks.
+- **run.** A harness in a named terminal goes through `agent.start` again. Any other command is typed only once
+  every foreground process of the pane is a shell: its own, or one a wrapper left (`sh -c '"$@"; exec $SHELL'`).
+  `process` counts as running anything in the foreground besides the pane's shell. Commands are typed as POSIX shell
+  words (`shellQuote`); fish reads backslashes inside single quotes as escapes, so such an argument is misread there.
+- **close.** herdr closes a workspace with its last pane, and a main checkout's workspace takes its linked
+  worktrees' workspaces with it. So the last pane of a workspace that is not listed, or whose worktree is a main
+  checkout, is moved alone into a workspace of its own first; a workspace without a worktree closes at most itself.
+  The pane is read again right before the close, so a sibling closing in the gap cannot turn it into a group close.
+- **state and events.** One subscription per pane: `pane.agent_status_changed` gives `state`, and
+  `pane.agent_detected` with no agent gives `exited` (the program ended, the pane stays at its shell).
+  `pane.agent_detected` has no pane filter, so its frames are picked by `pane_id`; a subscription frame names its
+  kind in `event`, a workspace event in its data's `type`. `pane_closed` and `pane_exited` on the session's broadcast
+  are `exited` too. A herdr restart ends every pane subscription and is published as `reset`; core then reads each
+  terminal's `state` once, which subscribes again. A row from before this vibestd teaches the name its events carry
+  once its agent is found in the pane. `state` is herdr's status for a detected agent, and for one `open` started
+  only once it is `interactive_ready`.
+- **present.** Pane tokens for the session, workspace tokens for the Project; other keys are left alone. `seq` is
+  `max(now, last + 1)`: herdr keeps a source's seq until it restarts and drops a report that is not newer.
+- **The pool.** One vibestd talks to every herdr session on the machine. Rows store the session name; `herdr
+  session list --json` maps it to a socket. Each session gets one broadcast subscription, handshaken on every
+  connect (a live handoff can swap the server under a running vibestd), reconnected at once after a clean close and
+  with backoff (1 s doubling to 30 s) after failures. Every connect after the first is a restart: herdr restored the
+  panes and dropped their metadata. A named session that is not running is started headless (`herdr server
+  --session <name>`, detached, so it outlives vibestd).
+- **The caller.** Inside herdr its location is its own socket (`HERDR_SOCKET_PATH`), else a session name (`vibest`);
+  `--session` wins. Its terminal is `<session>/<HERDR_PANE_ID>`, the session found by its socket in `herdr session
+  list`. A harness may hand its shell less environment than it got, so `HERDR_PANE_ID` and `HERDR_SOCKET_PATH` are
+  passed on explicitly (`CALLER_ENV`).
+- **The plugin.** `runtime-herdr` builds its own platform (socket dialing, file system, child processes), so it
+  loads in any host that runs the plugin API; its pool lives in the plugin's scope and closes with it. `doctor`
+  asserts the type of the spawner's output, since `spawner` is typed by its tag.
+
+## 7. effect-herdr-sdk
+
+- **Wire** (protocol 22): newline-delimited JSON, `{id, method, params}` → `{id, result}` or `{id, error}`; the
+  server closes after one response, so every call is its own connection. A response with `id: ""` means the server
+  could not parse the request; it is still ours. `events.subscribe` answers first and then streams `{event, data}`
+  frames on the same connection, so no ack state is needed.
+- **Trust.** Results and frames are not decoded at runtime: the generated types, and the casts that hand them out,
+  hold only for the protocol they were generated from. Every consumer runs `Herdr.verifyProtocol` once per server.
+- **Sockets.** The reader is acquired before the writer: acquiring the reader dials, and the writer waits on it. A
+  close surfaces as a `SocketError`; a clean close ends the stream. `src/bun.ts` is the only file that names a
+  runtime; the rest asks for a `SocketConnector`.
+- **Socket path.** `HERDR_SOCKET_PATH`, else the deprecated `HERDR_SOCKET`, else `<configdir>/herdr.sock`
+  (`<configdir>/sessions/<name>/herdr.sock` for a named session). The config dir mirrors herdr's `config_dir()`:
+  `XDG_CONFIG_HOME`; on Windows `%APPDATA%`, then `%USERPROFILE%\AppData\Roaming`; then `$HOME/.config`; then the
+  temp dir (`TMPDIR` or `/tmp`; on Windows `TMP`, `TEMP`, else `C:\Windows\Temp`, without GetTempPath's Windows
+  directory fallback). A `herdr-dev` debug build is never guessed: pass `dev`. Windows is recognised by `path.sep`, so
+  `BunPath.layerWin32` reproduces its rules on any host. On Windows herdr writes only a marker file at the path and
+  listens on the named pipe `\\.\pipe\<path>`; a path with a drive or a backslash is dialed there.
+- **Generation.** `bun run generate` writes `src/generated` from the schema pinned in `schema/herdr-version.json`;
+  `--check` fails when it differs. Each schema namespace is its own module: several type names (`PaneInfo`,
+  `TabInfo`, `WorkspaceInfo`, …) differ between the event and response namespaces. `AgentStatus` and `PaneScrollInfo`
+  are defined identically in the session and subscription event namespaces, so the events module emits them once. The schema has no method →
+  result map (`ResponseResult` is one flat union), so `scripts/gen/method-result-map.ts` was found empirically
+  against herdr 0.8.2; a method missing there is typed as the loose union, a typing gap and never a runtime bug.
+- **Tests.** `test/client.test.ts` runs against a fake herdr on a temp socket; `test/live.test.ts` against the
+  running herdr, only with `HERDR_LIVE` set.

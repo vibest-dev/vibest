@@ -5,12 +5,6 @@ import { shellQuote } from "@vibest/schema/layout"
 import type { RuntimeLocation } from "@vibest/schema/session"
 import { Config, Duration, Effect, Option, PubSub, Schedule, type Scope, Stream } from "effect"
 import type { FileSystem } from "effect"
-// The Runtime API (runtime-api.ts) on herdr. Everything herdr-specific lives here and in the plugin: agent.start and
-// interactive_ready, workspace grouping by worktree, pane tokens. A terminal id is `<herdr session>/<pane id>` (pane
-// ids repeat across sessions, and are even reused after a close) plus, for a terminal whose agent `open` started, the
-// agent name it gave it: `<session>/<pane>/<name>`, unique per open, so a pane id reused by herdr is never mistaken
-// for the earlier terminal's agent; `Machine.target` is the caller's herdr location as JSON (runtime-port.md §2: a herdr
-// session is the runtime on a machine), decoded only by this module.
 import type { HerdrFailure, HerdrShape, PushFrame, results } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
@@ -23,16 +17,13 @@ export type Runtime = VibestPlugin.Runtime.Runtime
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 
-/** The `runtime.kind` of every row this runtime started. */
 export const KIND = "herdr"
 
-/** Terminal of `paneId` in `session` (machine is `local` in this phase), addressed by its `name` when `open` started an agent in it. */
 export const terminalOf = (session: string, paneId: string, name?: string): Terminal => ({
   machine: "local",
   id: name === undefined ? `${session}/${paneId}` : `${session}/${paneId}/${name}`,
 })
 
-/** The session, pane and agent name a terminal id names (the name only for one whose agent `open` started); undefined when it is not one of ours. */
 export const parseTerminal = (
   terminal: Terminal,
 ): { readonly session: string; readonly paneId: string; readonly name: string | undefined } | undefined => {
@@ -45,7 +36,6 @@ export const parseTerminal = (
   return { session: terminal.id.slice(0, at), paneId, name: named === -1 ? undefined : rest.slice(named + 1) }
 }
 
-/** The caller's herdr location, as `Machine.target` (runtime-port.md §4): opaque to core, ours to read. */
 export const encodeTarget = (location: RuntimeLocation) => JSON.stringify(location)
 export const decodeTarget = (target: string | undefined): RuntimeLocation | undefined => {
   if (target === undefined) return undefined
@@ -62,7 +52,6 @@ export const decodeTarget = (target: string | undefined): RuntimeLocation | unde
   return undefined
 }
 
-/** Any way a herdr call can fail, as the one error type of the Runtime API. */
 export const failure = (
   error:
     | HerdrFailure
@@ -89,74 +78,54 @@ export const failure = (
 
 const failWith = <A, R>(effect: Effect.Effect<A, HerdrFailure, R>) => effect.pipe(Effect.mapError(failure))
 
-/** The herdr agent kind a binary name runs (cursor's binary is `cursor-agent`, its kind `cursor`). */
-const KINDS: Readonly<Record<string, string>> = { pi: "pi", claude: "claude", "cursor-agent": "cursor" }
+const HERDR_AGENT_KIND_BY_BINARY: Readonly<Record<string, string>> = {
+  pi: "pi",
+  claude: "claude",
+  "cursor-agent": "cursor",
+}
 const agentKindOf = (binary: string): string | undefined => {
   const name = binary.slice(binary.lastIndexOf("/") + 1)
-  return KINDS[name]
+  return HERDR_AGENT_KIND_BY_BINARY[name]
 }
 
-/**
- * The herdr agent name of vibest session `id` (herdr allows `[a-z][a-z0-9_-]{0,31}`): `s-` and the first 30 hex of the
- * UUID without its dashes, so `herdr agent list` shows which session runs where.
- */
 export const agentName = (id: string) => `s-${id.replaceAll("-", "").slice(0, 30)}`
 
-/** The herdr agent name `open` gives a harness: never from the pane id, which is reused and carries uppercase (`w1:pC`). */
 const agentNameOf = (env: Readonly<Record<string, string>>) => {
-  // The vibest session's own id; else unique per open.
   const id = env["VIBEST_SESSION_ID"]
   return id !== undefined && ID.test(id) ? agentName(id) : `vbt-${randomId().replaceAll("-", "").slice(0, 28)}`
 }
 
-/** `done` is herdr's own; the Runtime API's state has no such value, and an agent that is done is idle for input. */
 const stateOf = (status: results.AgentStatus): AgentState => (status === "done" ? "idle" : status)
 
 const TICK = Schedule.spaced("500 millis")
 
-/** How long `open` waits for a fresh pane's shell to draw (generous: a loaded machine draws slowly), and how often `agent_pane_busy` is retried. */
 const OUTPUT_TIMEOUT = Duration.seconds(30)
 const BUSY_RETRIES = 40
-/** How often `send` asks again for an agent herdr has not marked ready (about 30 s at TICK). */
 const READY_RETRIES = 60
-/** Process names of an interactive shell waiting at its prompt. */
-const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "nu"])
+const INTERACTIVE_SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "nu"])
 
-/** herdr drops a token or title longer than this. */
-const TOKEN = 80
+const HERDR_METADATA_MAX_LENGTH = 80
 const cut = (value: string | undefined): string | undefined =>
-  value === undefined || value === "" ? undefined : value.slice(0, TOKEN)
+  value === undefined || value === "" ? undefined : value.slice(0, HERDR_METADATA_MAX_LENGTH)
 
 export interface PoolDeps {
   readonly pool: HerdrPool["Service"]
   readonly spawner: InstanceType<typeof ChildProcessSpawner.ChildProcessSpawner>
-  /** Lets workspace grouping see through symlinks; without it only exact paths match. */
   readonly fs: FileSystem.FileSystem | undefined
-  /** Where per-pane event subscriptions live; they close with it (the plugin's scope). */
   readonly scope: Scope.Scope
 }
 
-/**
- * The herdr Runtime: `open` is `tab.create` (the only place env can be set) plus `agent.start` for a harness argv
- * (typed into the pane's shell for anything else), `send` reaches the agent in a pane when herdr knows one, and
- * `state` is herdr's detected status, `events` its pushes. Optional members: `state`, `present`, `attach` (runtime-port.md §3);
- * herdr has no `exec`.
- */
 export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
   Effect.gen(function* () {
     const { pool, spawner, fs, scope } = deps
     const events = yield* PubSub.unbounded<RuntimeEvent>()
-    /** Pane subscriptions installed (`<session>/<pane>`); cleared for a session when its server restarts. */
-    const watched = new Set<string>()
-    /** The agent name of the terminal in each pane (`<session>/<pane>`), from `open` or a `state` read, so events name the terminal the row recorded. */
-    const names = new Map<string, string>()
-    /** herdr keeps a source's seq until it restarts, and drops a report that is not newer. Two publishes in one millisecond still increase. */
+    const subscribedPanes = new Set<string>()
+    const agentNameByPane = new Map<string, string>()
     let lastSeq = 0
     const nextSeq = () => Math.max(Date.now(), ++lastSeq)
 
     const client = (session: string) => pool.client(session).pipe(Effect.mapError(failure))
 
-    /** The workspace `root` belongs to (a checkout's group, else a pane at it), as vibest's placement asked herdr. */
     const groupWorkspace = (h: HerdrShape, root: string) =>
       Effect.gen(function* () {
         const grouped = yield* h.call("worktree.list", { cwd: root }).pipe(
@@ -177,42 +146,36 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         return Option.getOrUndefined(found)?.workspace_id
       })
 
-    /** One per-pane subscription → `state` events, and `exited` when the pane's agent is gone but the pane is not. Ends with the scope. */
     const watch = (session: string, paneId: string) =>
       Effect.gen(function* () {
         const key = `${session}/${paneId}`
-        if (watched.has(key)) return
-        watched.add(key)
+        if (subscribedPanes.has(key)) return
+        subscribedPanes.add(key)
         yield* client(session).pipe(
           Effect.flatMap((h) =>
-            // `pane.agent_detected` has no pane filter (a workspace-wide subscription), so this pane's frames are picked below.
             h.subscribe([{ type: "pane.agent_status_changed", pane_id: paneId }, { type: "pane.agent_detected" }]).pipe(
               Stream.runForEach((frame: PushFrame) => {
-                // A workspace event (`pane_agent_detected`) carries `type`; a subscription frame does not.
                 const data = frame.data as {
                   readonly type?: string
                   readonly pane_id?: string
                   readonly agent_status?: results.AgentStatus | null
                   readonly agent?: string | null
                 }
-                // A subscription frame names its kind in `event`; its data has no `type`.
                 if (frame.event === "pane.agent_status_changed" && data.agent_status)
                   return PubSub.publish(events, {
                     type: "state",
-                    terminal: terminalOf(session, paneId, names.get(key)),
+                    terminal: terminalOf(session, paneId, agentNameByPane.get(key)),
                     state: stateOf(data.agent_status),
                   })
-                // An agent that ended while the pane stays at its shell: the program of this terminal is gone.
                 if (data.type === "pane_agent_detected" && data.pane_id === paneId && data.agent === null)
                   return PubSub.publish(events, {
                     type: "exited",
-                    terminal: terminalOf(session, paneId, names.get(key)),
+                    terminal: terminalOf(session, paneId, agentNameByPane.get(key)),
                   })
                 return Effect.void
               }),
-              // A stream that ends (a herdr restart) drops its key, so the next `state` installs a fresh one.
               Effect.ignore,
-              Effect.ensuring(Effect.sync(() => watched.delete(key))),
+              Effect.ensuring(Effect.sync(() => subscribedPanes.delete(key))),
             ),
           ),
           Effect.ignore,
@@ -220,23 +183,19 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         )
       })
 
-    // The pool's own broadcasts: a closed pane is an exited terminal, and a program that ended (the pane back at its
-    // shell) is an exited terminal too — the turn is over either way, and no one called `close`.
     yield* pool.events.pipe(
       Stream.runForEach(({ session, frame }) => {
         const data = frame.data as { readonly type: string; readonly pane_id?: string }
         return data.pane_id && (data.type === "pane_closed" || data.type === "pane_exited")
           ? PubSub.publish(events, {
               type: "exited",
-              terminal: terminalOf(session, data.pane_id, names.get(`${session}/${data.pane_id}`)),
+              terminal: terminalOf(session, data.pane_id, agentNameByPane.get(`${session}/${data.pane_id}`)),
             })
           : Effect.void
       }),
       Effect.catchCause(() => Effect.void),
       Effect.forkIn(scope),
     )
-    // A herdr server that came back: every per-pane subscription died with it. Their keys were dropped by each
-    // stream's `ensuring`; on this `reset` core reads each of its terminals' `state` once, which installs fresh ones.
     yield* pool.restarts.pipe(
       Stream.runForEach((_session) => PubSub.publish(events, { type: "reset", machine: "local" })),
       Effect.catchCause(() => Effect.void),
@@ -249,9 +208,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         Effect.catch(() => Effect.succeed({ status: "blocked" as const, reason: "herdr is not on PATH" })),
       )
 
-    // herdr knows an agent's state (ready, working, done) from a hook it installs into each harness itself.
     const doctor: NonNullable<Runtime["doctor"]> = (_machine, harnesses) => {
-      // ponytail: `deps.spawner` is typed by its tag, so its output type is asserted here.
       const herdr = (args: ReadonlyArray<string>) =>
         (spawner.string(ChildProcess.make("herdr", [...args])) as Effect.Effect<string, unknown>).pipe(Effect.option)
       return Effect.all([herdr(["--version"]), herdr(["integration", "status"])]).pipe(
@@ -281,7 +238,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       )
     }
 
-    /** The pane record of `paneId`, undefined when the pane is gone. */
     const paneOf = (h: HerdrShape, paneId: string) =>
       h.call("pane.get", { pane_id: paneId }).pipe(
         Effect.map((r) => r.pane),
@@ -291,8 +247,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         failWith,
       )
 
-    /** The agent `open` started under `name`; undefined when no agent of ours carries it. */
-    const named = (h: HerdrShape, name: string) =>
+    const agentNamed = (h: HerdrShape, name: string) =>
       h.call("agent.get", { target: name }).pipe(
         Effect.map((r) => r.agent),
         Effect.catchTag("HerdrError", (e) =>
@@ -301,8 +256,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         failWith,
       )
 
-    /** Whatever agent holds the pane (started by `open` or detected by herdr itself); undefined when none does. */
-    const holder = (h: HerdrShape, paneId: string) =>
+    const agentHoldingPane = (h: HerdrShape, paneId: string) =>
       h.call("agent.get", { target: paneId }).pipe(
         Effect.map((r) => r.agent),
         Effect.catchTag("HerdrError", (e) =>
@@ -311,24 +265,20 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         failWith,
       )
 
-    /** The agent of this terminal, and how to address it: for a named terminal, only the agent `open` named, while it
-     * still sits in this pane (a reused pane id is someone else's); for an unnamed one (the main agent, whose harness a
-     * shell ran), the agent herdr detected holding the pane, never a named one (`open` named it for another terminal). undefined when none. */
-    const ours = (h: HerdrShape, paneId: string, name: string | undefined) =>
+    const agentOfTerminal = (h: HerdrShape, paneId: string, name: string | undefined) =>
       Effect.gen(function* () {
         if (name !== undefined) {
-          const started = yield* named(h, name)
+          const started = yield* agentNamed(h, name)
           return started !== undefined && started.pane_id === paneId
             ? { agent: started, target: name, detected: false }
             : undefined
         }
-        const holds = yield* holder(h, paneId)
+        const holds = yield* agentHoldingPane(h, paneId)
         if (holds !== undefined && (holds.name ?? undefined) === undefined)
           return { agent: holds, target: paneId, detected: true }
         return undefined
       })
 
-    /** herdr's agent.start: it types the harness into the pane's shell once that shell is idle, and names it `name`. */
     const startAgent = (h: HerdrShape, name: string, kind: string, paneId: string, args: ReadonlyArray<string>) =>
       h
         .call("agent.start", {
@@ -339,7 +289,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
           timeout_ms: Duration.toMillis(Duration.seconds(120)),
         })
         .pipe(
-          // After its harness exits, herdr keeps the name on that same pane until it sees the agent gone (`run`).
           Effect.retry({
             while: (error) =>
               error._tag === "HerdrError" &&
@@ -352,7 +301,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         )
         .pipe(
           Effect.retry({ while: (error) => error.code === "busy", times: BUSY_RETRIES, schedule: TICK }),
-          // herdr sees an agent through its own integration for that harness; without it a start never settles.
           Effect.mapError((error) =>
             error.code === "failed"
               ? new RuntimeApi.RuntimeError({
@@ -370,7 +318,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
 
     const open: Runtime["open"] = (machine, input) =>
       Effect.gen(function* () {
-        // The session: beside `near`, else the caller's location, else the ambient socket, else the default session.
         const near = input.near !== undefined ? parseTerminal(input.near) : undefined
         const ambient = Option.getOrUndefined(
           yield* Config.option(Config.String("HERDR_SOCKET_PATH")).pipe(Effect.orDie),
@@ -384,8 +331,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
           .resolve(near !== undefined ? { session: near.session } : location)
           .pipe(Effect.mapError(failure))
         const h = yield* client(session)
-        // `near` places the terminal only while that pane still exists: a stale address (the pane closed while
-        // vibestd was down, or herdr restarted) must not fail every later start, so it falls back to the group.
         const nearPane = near !== undefined ? yield* paneOf(h, near.paneId) : undefined
         const workspaceId =
           nearPane !== undefined
@@ -393,7 +338,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             : ((yield* groupWorkspace(h, input.project)) ??
               (yield* failWith(h.call("workspace.create", { cwd: input.project, focus: false, label: "project" })))
                 .workspace.workspace_id)
-        // A split beside `near` when asked for one (`vibest run --peer`); otherwise a tab of its own in the workspace.
         const split = input.split === true && nearPane !== undefined
         const paneId = split
           ? (yield* failWith(
@@ -414,15 +358,12 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                 label: input.label,
               }),
             )).root_pane.pane_id
-        // The name the terminal's agent (if `open` starts one) is addressed by, unique per open.
         const name = agentNameOf(input.env)
         const kind = input.argv.length > 0 ? agentKindOf(input.argv[0]!) : undefined
         const agent = kind !== undefined
-        if (agent) names.set(`${session}/${paneId}`, name)
-        else names.delete(`${session}/${paneId}`)
+        if (agent) agentNameByPane.set(`${session}/${paneId}`, name)
+        else agentNameByPane.delete(`${session}/${paneId}`)
         const tabId = split ? undefined : (yield* failWith(h.call("pane.get", { pane_id: paneId }))).pane.tab_id
-        // Everything after the terminal exists is undone when it fails: a start that dies inside it (a harness on
-        // its own usage limit, a bad flag) must not leave an empty shell behind (core only closes what `open` returned).
         const undo = () =>
           (tabId !== undefined
             ? h.call("tab.close", { tab_id: tabId })
@@ -431,7 +372,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         yield* Effect.catch(
           Effect.gen(function* () {
             if (kind !== undefined) {
-              // A fresh pane's shell may still be starting.
               yield* startAgent(h, name, kind, paneId, input.argv.slice(1))
             } else {
               yield* failWith(
@@ -442,7 +382,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                   timeout_ms: Duration.toMillis(OUTPUT_TIMEOUT),
                 }),
               )
-              // Not exec'd: the terminal stays at its shell after the program ends, so `run` can start one there again.
               yield* typeLine(h, paneId, input.argv)
             }
           }),
@@ -452,7 +391,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         return terminalOf(session, paneId, agent === true ? name : undefined)
       })
 
-    /** The session and pane a terminal id names, or a not_found error. */
     const at = (terminal: Terminal, method: string) => {
       const parsed = parseTerminal(terminal)
       return parsed !== undefined
@@ -469,17 +407,8 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "send")
         const h = yield* client(place.session)
-        // The agent of this terminal — addressed by its `open` name or, for one herdr detected (the main agent), by
-        // its pane. `agent.prompt` submits (Enter), as a prompt does; the pane fallback only types.
-        const found = yield* ours(h, place.paneId, place.name)
+        const found = yield* agentOfTerminal(h, place.paneId, place.name)
         if (found !== undefined) {
-          // herdr refuses a prompt to an agent it has not marked ready yet (`agent_not_ready`): one `open` started is
-          // marked once herdr sees it idle. Prompted before that, it works without the mark, and herdr drops its name
-          // when agent.start's timeout passes unmarked: the terminal reads as exited while its harness works. So the
-          // prompt waits for the mark; an agent herdr never marks (its herdr integration missing) gets the text pasted
-          // and Enter, as a user would.
-          // herdr moves a started agent to ready only when something reads it (agent.get), never on agent.prompt; an agent
-          // whose harness reports its own state (herdr's Pi hook) sends no further event once idle, so each try reads it first.
           if (text !== undefined)
             yield* h.call("agent.get", { target: found.target }).pipe(
               Effect.ignore,
@@ -490,8 +419,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                 schedule: TICK,
               }),
               Effect.catchTag("HerdrError", (e) =>
-                // `send_input`, not `send_text`: one bracketed paste, as agent.prompt sends it. Raw bytes reach a TUI
-                // as keystrokes in chunks, and a long multi-line text arrives split, its first chunks lost.
                 e.code === "agent_not_ready"
                   ? h.call("pane.send_input", { pane_id: place.paneId, text, keys: ["enter"] })
                   : Effect.fail(e),
@@ -507,10 +434,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         }
       })
 
-    /**
-     * A harness in a named terminal goes through agent.start again, which waits for an idle shell and names it as `open`
-     * did; any other command is typed once only the pane's shell is in its foreground.
-     */
     const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "run")
@@ -520,12 +443,13 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const kind = argv.length > 0 ? agentKindOf(argv[0]!) : undefined
         if (kind !== undefined && place.name !== undefined)
           return yield* startAgent(h, place.name, kind, place.paneId, argv.slice(1))
-        // Only a shell in the foreground: the pane's own, or one a wrapper left there (`sh -c '"$@"; exec $SHELL'`).
         const atShell = failWith(h.call("pane.process_info", { pane_id: place.paneId })).pipe(
           Effect.map((r) => {
             if (r.type !== "pane_process_info") return false
             const fg = r.process_info.foreground_processes ?? []
-            return fg.length > 0 && fg.every((p) => SHELLS.has(p.name.replace(/^-/, "").replace(/^.*\//, "")))
+            return (
+              fg.length > 0 && fg.every((p) => INTERACTIVE_SHELLS.has(p.name.replace(/^-/, "").replace(/^.*\//, "")))
+            )
           }),
         )
         const idle = yield* atShell.pipe(
@@ -555,24 +479,20 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const r = yield* failWith(h.call("pane.process_info", { pane_id: place.paneId }))
         if (r.type !== "pane_process_info") return { running: false }
         const info = r.process_info
-        // The pane's program is what runs besides its shell; the shell alone is not a running program.
         const others = (info.foreground_processes ?? []).filter((p) => p.pid !== info.shell_pid)
         return { running: others.length > 0 }
       })
 
-    /** The pane is still this terminal's to close. A named terminal: its agent still sits in it, or the pane holds no
-     * agent at all (it exited to the shell). An unnamed one (the main agent): no named agent holds the pane. Pane
-     * ids are reused, so a pane another agent holds is never closed by this terminal's old id. */
     const stillOurs = (h: HerdrShape, paneId: string, name: string | undefined) =>
       Effect.gen(function* () {
-        const started = name === undefined ? undefined : yield* named(h, name)
+        const started = name === undefined ? undefined : yield* agentNamed(h, name)
         if (started !== undefined && started.pane_id !== paneId)
           return yield* new RuntimeApi.RuntimeError({
             code: "failed",
             message: `pane ${paneId} kept: its agent moved to pane ${started.pane_id}`,
           })
         if (started === undefined) {
-          const holds = yield* holder(h, paneId)
+          const holds = yield* agentHoldingPane(h, paneId)
           if (holds !== undefined && (name !== undefined || (holds.name ?? undefined) !== undefined))
             return yield* new RuntimeApi.RuntimeError({
               code: "failed",
@@ -581,13 +501,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         }
       })
 
-    /**
-     * Close the pane. herdr closes a workspace with its last pane, and a main checkout's workspace takes its linked
-     * worktrees' workspaces with it, so the last pane of a workspace that is not listed, or whose worktree is not a
-     * linked one (a main checkout), is moved alone into a workspace of its own first. A workspace without a worktree
-     * closes at most itself. The check runs right before the close: a sibling closing in the gap must not turn this
-     * close into a group close.
-     */
     const close: Runtime["close"] = (terminal) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "close")
@@ -596,8 +509,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         if (pane === undefined) return
         yield* stillOurs(h, place.paneId, place.name)
         let paneId = place.paneId
-        /** Whether the last pane of `workspaceId` must be moved out before it is closed. */
-        const isolate = (workspaceId: string) =>
+        const mustMoveOutBeforeClose = (workspaceId: string) =>
           Effect.gen(function* () {
             const panes = yield* failWith(h.call("pane.list", { workspace_id: workspaceId }))
             if (panes.panes.length > 1) return false
@@ -610,10 +522,8 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
                 !workspace.worktree.is_linked_worktree)
             )
           })
-        // One path: the pane is read again right before the close, so a sibling that closed in the gap cannot turn
-        // this close into a group close.
         const current = yield* paneOf(h, paneId)
-        if (current !== undefined && (yield* isolate(current.workspace_id))) {
+        if (current !== undefined && (yield* mustMoveOutBeforeClose(current.workspace_id))) {
           const moved = yield* failWith(
             h.call("pane.move", {
               pane_id: paneId,
@@ -634,17 +544,14 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const place = yield* at(terminal, "state")
         const h = yield* client(place.session)
         yield* watch(place.session, place.paneId)
-        const found = yield* ours(h, place.paneId, place.name)
-        // A row from before this vibestd (a restart, a migrated `s-<id>` row) teaches the name its events must carry,
-        // once its agent is found in the pane (a stale row on a reused pane id must not rename the live one).
-        if (found !== undefined && place.name !== undefined) names.set(`${place.session}/${place.paneId}`, place.name)
-        // No agent of ours in the pane: not_found, so core reads "absent" — a reused pane id is not this terminal.
+        const found = yield* agentOfTerminal(h, place.paneId, place.name)
+        if (found !== undefined && place.name !== undefined)
+          agentNameByPane.set(`${place.session}/${place.paneId}`, place.name)
         if (found === undefined)
           return yield* new RuntimeApi.RuntimeError({
             code: "not_found",
             message: `pane ${place.paneId} holds no agent of this terminal`,
           })
-        // A detected agent (the main agent) reports its status as herdr reads it; one `open` started only once ready.
         if (!found.agent.agent) return "unknown"
         return found.detected || found.agent.interactive_ready ? stateOf(found.agent.agent_status) : "unknown"
       })
@@ -653,7 +560,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "session")
         const h = yield* client(place.session)
-        const found = yield* ours(h, place.paneId, place.name)
+        const found = yield* agentOfTerminal(h, place.paneId, place.name)
         return found !== undefined ? (found.agent.agent_session?.value ?? null) : null
       })
 
@@ -663,8 +570,6 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const h = yield* client(place.session)
         const pane = yield* failWith(h.call("pane.get", { pane_id: place.paneId }))
         const seq = nextSeq()
-        // vibest's labels: pane tokens for the session, a workspace token for the Project. Anything else a caller
-        // passes is left alone — herdr shows only what it knows a key for.
         const value = (key: string) => cut(info[key])
         const agent = value("agent")
         const harness = value("harness")

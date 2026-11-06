@@ -1,4 +1,3 @@
-// The Claude types cache: reuse a verified file, or fetch the pinned URL. No upstream declaration body is stored here.
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"

@@ -1,5 +1,3 @@
-// Session handlers on the bus (engine.ts): runtime events, stored turn ends and queued messages drive the session, with
-// no explicit check and no clock advance, except where a one-shot timer is the point.
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { HOOK_GRACE, Sessions } from "@vibest/core/sessions"
@@ -19,10 +17,11 @@ import {
   writeResult,
 } from "./fakes.ts"
 
+const OFF_THE_POLL_BEAT = "1 second"
+
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ hooked: ["pi"], statusEvents: true }))))
 
-/** A Pi subagent in its first turn, its launch done. */
 const working = Effect.gen(function* () {
   const sessions = yield* Sessions
   const db = yield* Db
@@ -61,7 +60,6 @@ describe("session handlers", () => {
     Effect.gen(function* () {
       const { id, sessions, db, herdr } = yield* working
       yield* sessions.send(id, "next")
-      // Idle before the report (the case the 5 s poll used to wait for): the report's turn end delivers it.
       yield* herdr.endTurn(id)
       yield* settled
       assert.notInclude(yield* texts(herdr), "next")
@@ -76,8 +74,7 @@ describe("session handlers", () => {
     "an idle turn with no report is lost exactly HOOK_GRACE after it went idle",
     Effect.gen(function* () {
       const { id, db, herdr } = yield* working
-      // Off the poll's 5 s beat: only the grace timer can end it at the deadline.
-      yield* TestClock.adjust("1 second")
+      yield* TestClock.adjust(OFF_THE_POLL_BEAT)
       yield* herdr.endTurn(id)
       yield* settled
       yield* TestClock.adjust(Duration.subtract(HOOK_GRACE, Duration.millis(1)))
@@ -143,8 +140,6 @@ describe("session handlers", () => {
           runtime: RUNTIME,
           address: { machine: "local", id: "test/coord" },
         })
-        // The runtime never shows the turn working: the hook's turn start is the only pickup proof, and it comes while
-        // the runtime's send has not returned yet.
         const held = yield* herdr.hold("send")
         const { id } = yield* sessions.spawn({
           machine: { id: "local" },

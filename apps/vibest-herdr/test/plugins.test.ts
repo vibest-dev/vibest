@@ -1,4 +1,3 @@
-// Plugins (plugins.md §6): finding and loading from VIBEST_HOME, and the spawn hook's rules through Sessions.spawn.
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
@@ -39,14 +38,12 @@ const hook = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void,
   Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) })
 const write = (id: string, f: (e: AgentStartBefore) => void) => hook(id, (e) => Effect.sync(() => f(e)))
 
-/** Models the plugins below route to; Spawn checks the harness lists them. */
-const PLUGIN_MODELS = ["claude-haiku-5-5", "a", "b", "two", "after", "m"]
+const HARNESS_MODELS = ["claude-haiku-5-5", "a", "b", "two", "after", "m"]
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
-  it.effect(name, () => program.pipe(Effect.provide(testLayer({ models: PLUGIN_MODELS, ...options }))))
+  it.effect(name, () => program.pipe(Effect.provide(testLayer({ models: HARNESS_MODELS, ...options }))))
 
-/** The session count in db and herdr after a refused or failed spawn. */
-const sessionCount = Effect.gen(function* () {
+const sessionRowsAndRuntimeOpens = Effect.gen(function* () {
   const db = yield* Db
   const herdr = yield* FakeRuntime
   return { rows: (yield* db.listSessions()).length, starts: (yield* herdr.callsTo("open")).length }
@@ -61,7 +58,6 @@ describe("plugins: spawn hook", () => {
       const herdr = yield* FakeRuntime
       const nested = `${repo}/sub`
       yield* (yield* FileSystem.FileSystem).makeDirectory(nested)
-      // Server resolves the main checkout before Spawn, as here.
       const s = yield* (yield* Sessions).spawn(
         yield* spawnInput(yield* mainCheckout(nested), { prompt: "research: how does the cache work?" }),
       )
@@ -124,7 +120,7 @@ describe("plugins: spawn hook", () => {
       )
       assert.strictEqual(error._tag, "AgentRefused")
       assert.deepInclude(error, { plugin: "fails", reason: "plugin fails crashed: boom" })
-      assert.deepStrictEqual(yield* sessionCount, { rows: 0, starts: 0 })
+      assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
       const listed = yield* (yield* Plugins).list
       const fails = listed.find((q) => q.id === "fails")!
       const after = listed.find((q) => q.id === "after")!
@@ -147,7 +143,7 @@ describe("plugins: spawn hook", () => {
         (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" })),
       )
       assert.deepInclude(error, { _tag: "AgentRefused", plugin: "dies", reason: "plugin dies crashed: defect" })
-      assert.deepStrictEqual(yield* sessionCount, { rows: 0, starts: 0 })
+      assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
     }),
     {
       plugins: [
@@ -156,8 +152,8 @@ describe("plugins: spawn hook", () => {
     },
   )
 
-  /** Set when the stuck hook starts, so virtual time moves only once it is waiting. */
-  const entered = { value: false }
+  const stuckHookEntered = { value: false }
+  const pastUninterruptibleSleep = "1 minute"
   for (const [label, stuck] of [
     ["never", Effect.never],
     ["a promise that never settles", Effect.promise(() => new Promise<void>(() => {}))],
@@ -168,23 +164,22 @@ describe("plugins: spawn hook", () => {
       `P3: a hook stuck in ${label} times out and refuses the start`,
       Effect.gen(function* () {
         const repo = yield* makeRepository
-        entered.value = false
+        stuckHookEntered.value = false
         const spawning = yield* Effect.forkChild((yield* Sessions).spawn(yield* spawnInput(repo, { harness: "pi" })))
         yield* until(
-          Effect.sync(() => entered.value),
+          Effect.sync(() => stuckHookEntered.value),
           (x) => x,
         )
         yield* TestClock.adjust("5 seconds")
         const error = yield* Effect.flip(Fiber.join(spawning))
         assert.strictEqual(error._tag, "AgentRefused")
         assert.deepInclude(error, { plugin: "stuck", reason: "plugin stuck timed out after 5s" })
-        assert.deepStrictEqual(yield* sessionCount, { rows: 0, starts: 0 })
-        // Past the uninterruptible sleep, so the plugin scope can close at teardown.
-        yield* TestClock.adjust("1 minute")
+        assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
+        yield* TestClock.adjust(pastUninterruptibleSleep)
       }),
       {
         plugins: [
-          hook("stuck", () => Effect.sync(() => (entered.value = true)).pipe(Effect.andThen(stuck))),
+          hook("stuck", () => Effect.sync(() => (stuckHookEntered.value = true)).pipe(Effect.andThen(stuck))),
           write("after", () => assert.fail("must not run after a timeout")),
         ],
       },
@@ -219,7 +214,7 @@ describe("plugins: spawn hook", () => {
       assert.strictEqual(error._tag, "HarnessUnavailable")
       assert.include(error.message, "vim")
       assert.include(error.message, "editor")
-      assert.deepStrictEqual(yield* sessionCount, { rows: 0, starts: 0 })
+      assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
     }),
     { plugins: [write("editor", (e) => (e.harness = "vim"))] },
   )
@@ -232,7 +227,7 @@ describe("plugins: spawn hook", () => {
       )
       assert.strictEqual(error._tag, "AgentRefused")
       assert.deepInclude(error, { plugin: "budget", reason: "no opus here" })
-      assert.deepStrictEqual(yield* sessionCount, { rows: 0, starts: 0 })
+      assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
       const listed = yield* (yield* Plugins).list
       assert.strictEqual(listed.find((q) => q.id === "budget")!.refused, 1)
       assert.strictEqual(listed.find((q) => q.id === "after")!.calls, 0)
@@ -270,7 +265,7 @@ describe("plugins: spawn hook", () => {
         reason:
           "no harness available: pi: pi model discovery failed: Not logged in, claude: claude model discovery failed: Not logged in, cursor: cursor model discovery failed: Not logged in",
       })
-      assert.deepStrictEqual(yield* sessionCount, { rows: 0, starts: 0 })
+      assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
     }),
     { unusable: ["pi", "claude", "cursor"] },
   )
@@ -400,10 +395,7 @@ describe("plugins: spawn hook", () => {
   )
 })
 
-// ---- loading from VIBEST_HOME ----
-
-/** VIBEST_HOME inside the package, so plugin files resolve `effect` and `@vibest/plugin` the way the repo does. */
-const home = Effect.gen(function* () {
+const packageHome = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const base = path.join(import.meta.dirname, ".tmp")
@@ -459,58 +451,59 @@ describe("plugins: loading", () => {
     ])
   })
 
-  it.live("P1: plugins/ first in path order, then vibest.json in its order; -x removes; bad entries fail visibly", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* home
-      const plugins = path.join(dir, "plugins")
-      yield* fs.writeFileString(path.join(plugins, "b.ts"), source("b", "from-b"))
-      yield* fs.writeFileString(path.join(plugins, "a.ts"), source("a", "from-a"))
-      yield* fs.writeFileString(path.join(plugins, "a.d.ts"), "export {}")
-      yield* fs.writeFileString(path.join(plugins, "notes.md"), "not a plugin")
-      yield* fs.makeDirectory(path.join(plugins, "empty"))
-      yield* fs.makeDirectory(path.join(plugins, "node_modules"))
-      yield* fs.writeFileString(path.join(plugins, "broken.ts"), "export default 42\n")
-      for (const name of ["x", "y"]) {
-        yield* fs.makeDirectory(path.join(dir, name))
-        yield* fs.writeFileString(path.join(dir, name, "index.ts"), source(name, `from-${name}`))
-      }
-      // A configured local plugin may be one source file too.
-      yield* fs.writeFileString(path.join(dir, "a-file.ts"), source("f", "from-f"))
-      const config = (entries: ReadonlyArray<unknown>) =>
-        fs.writeFileString(
-          path.join(dir, "vibest.json"),
-          `// comments are fine\n{ "plugins": ${JSON.stringify(entries)}, }\n`,
+  it.live(
+    "P1: plugins/ first in path order, then vibest.json in its order (a local entry may be one source file); -x removes; bad entries fail visibly",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* packageHome
+        const plugins = path.join(dir, "plugins")
+        yield* fs.writeFileString(path.join(plugins, "b.ts"), source("b", "from-b"))
+        yield* fs.writeFileString(path.join(plugins, "a.ts"), source("a", "from-a"))
+        yield* fs.writeFileString(path.join(plugins, "a.d.ts"), "export {}")
+        yield* fs.writeFileString(path.join(plugins, "notes.md"), "not a plugin")
+        yield* fs.makeDirectory(path.join(plugins, "empty"))
+        yield* fs.makeDirectory(path.join(plugins, "node_modules"))
+        yield* fs.writeFileString(path.join(plugins, "broken.ts"), "export default 42\n")
+        for (const name of ["x", "y"]) {
+          yield* fs.makeDirectory(path.join(dir, name))
+          yield* fs.writeFileString(path.join(dir, name, "index.ts"), source(name, `from-${name}`))
+        }
+        yield* fs.writeFileString(path.join(dir, "a-file.ts"), source("f", "from-f"))
+        const config = (entries: ReadonlyArray<unknown>) =>
+          fs.writeFileString(
+            path.join(dir, "vibest.json"),
+            `// comments are fine\n{ "plugins": ${JSON.stringify(entries)}, }\n`,
+          )
+
+        yield* config(["./x", "./y", "-b", "vibest-plugin-npm@1.0.0", "./a-file.ts"])
+        const first = yield* loaded(dir)
+        assert.deepStrictEqual(
+          (yield* first.list).map((p) => [p.id, p.status]),
+          [
+            ["harness-choice", "active"],
+            ["a", "active"],
+            [path.join(plugins, "broken.ts"), "failed"],
+            ["x", "active"],
+            ["y", "active"],
+            ["vibest-plugin-npm@1.0.0", "failed"],
+            ["f", "active"],
+          ],
         )
+        const listed = yield* first.list
+        assert.include(listed.find((p) => p.id.endsWith("broken.ts"))!.error, "Plugin.define")
+        assert.include(listed.find((p) => p.id.startsWith("vibest-plugin-npm"))!.error, "not supported yet")
+        assert.match(listed.find((p) => p.id === "a")!.revision, /^[0-9a-f]{12}$/)
+        assert.strictEqual((yield* first.start(event)).model, "from-f")
 
-      yield* config(["./x", "./y", "-b", "vibest-plugin-npm@1.0.0", "./a-file.ts"])
-      const first = yield* loaded(dir)
-      assert.deepStrictEqual(
-        (yield* first.list).map((p) => [p.id, p.status]),
-        [
-          ["harness-choice", "active"],
-          ["a", "active"],
-          [path.join(plugins, "broken.ts"), "failed"],
-          ["x", "active"],
-          ["y", "active"],
-          ["vibest-plugin-npm@1.0.0", "failed"],
-          ["f", "active"],
-        ],
-      )
-      const listed = yield* first.list
-      assert.include(listed.find((p) => p.id.endsWith("broken.ts"))!.error, "Plugin.define")
-      assert.include(listed.find((p) => p.id.startsWith("vibest-plugin-npm"))!.error, "not supported yet")
-      assert.match(listed.find((p) => p.id === "a")!.revision, /^[0-9a-f]{12}$/)
-      assert.strictEqual((yield* first.start(event)).model, "from-f")
-
-      yield* config(["-*", "./y", "./x"])
-      const second = yield* loaded(dir)
-      assert.deepStrictEqual(
-        (yield* second.list).map((p) => p.id),
-        ["harness-choice", "y", "x"],
-      )
-      assert.strictEqual((yield* second.start(event)).model, "from-x")
-    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+        yield* config(["-*", "./y", "./x"])
+        const second = yield* loaded(dir)
+        assert.deepStrictEqual(
+          (yield* second.list).map((p) => p.id),
+          ["harness-choice", "y", "x"],
+        )
+        assert.strictEqual((yield* second.start(event)).model, "from-x")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

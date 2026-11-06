@@ -1,11 +1,5 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui"
 
-// The vibest coordinator's tool rows: adjacent ones grouped in the transcript.
-// Thinking does not split a group. User text, assistant body text or a displayed custom message does.
-// Image results are not folded into the group.
-// An open group is flat rows. The host expanded bit on a non-anchor still shows its renderer.
-
-// Values Pi hands to the handlers and renderers. Their shapes differ across Pi versions, so they are read defensively.
 type Host = any
 type Row = {
   id: string
@@ -142,7 +136,6 @@ export default function (pi: ToolGroupsApi) {
     return lines
   }
 
-  // Collapse is checked by the caller. A singleton expanded bit is the native renderer. The anchor keeps its summary when every member is expanded.
   function showNative(ctx: Host, group: Group | undefined) {
     if (ctx?.expanded !== true || !group) return false
     if (group.members.length < 2) return true
@@ -447,8 +440,6 @@ export default function (pi: ToolGroupsApi) {
     for (const invalidate of invalidators.values()) invalidate()
   }
 
-  // A custom message sent with triggerTurn:false during a run is appended outside the agent loop, so no message_start reaches extensions.
-  // Every custom message entry goes through this session's appendCustomMessageEntry. Observe it on this instance and put it back on release.
   let unwatch: (() => void) | null = null
   function watch(manager: Host) {
     unwatch?.()
@@ -515,8 +506,6 @@ export default function (pi: ToolGroupsApi) {
   })
 
   pi.registerToolRenderer((toolName, next) => {
-    // With two copies of @vibest/pi loaded, the later-loaded copy's renderers come back here, marked: render
-    // through them alone so a group gets one header. A throw from `next` propagates as it would without this resolver.
     const later = next()
     if (later?.isVibestToolGroups === true) return later
     return {
@@ -539,7 +528,6 @@ export default function (pi: ToolGroupsApi) {
             return undefined
           }
         })()
-        // The original renderer runs on every host update, even while hidden, so its timers, async redraws and component reuse keep working.
         let native: Host
         if (renderers?.renderCall) {
           try {
@@ -577,7 +565,6 @@ export default function (pi: ToolGroupsApi) {
               })
             }
             const { pad, limit } = gutter(width, ctx.outputPad)
-            // The group's title row is drawn in the theme's muted foreground.
             const paint = (line: string) => (typeof theme?.fg === "function" ? theme.fg("muted", line) : line)
             const title = indent(fit(header(current), limit).map(paint), pad)
             if (!current.expanded) return isAnchor ? title : []

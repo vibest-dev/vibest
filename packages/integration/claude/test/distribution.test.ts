@@ -1,12 +1,11 @@
-// The Claude plugin as it is built, checked offline: real `pnpm pack` tarballs (prepack builds them) extracted and
-// inspected; they must hold the built module and a manifest stamped with the package version. Only a fake host loads
-// the module.
 import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
+
+import { CLAUDE_TYPES_PIN } from "../scripts/prepare-claude-types.ts"
 
 const pkg = path.join(import.meta.dirname, "..")
 const repo = path.join(pkg, "../../..")
@@ -18,12 +17,8 @@ const FILES = [
   "hooks/register.mjs",
   "package.json",
 ]
-// What a versioned copy of the package needs to pack. Not the type cache or generated files.
 const SOURCES = ["package.json", "src", "scripts", "hooks/hooks.json", "README.md", "LICENSE"]
-// Static, dynamic and CommonJS imports, and re-exports. The bundle must need nothing outside itself.
 const IMPORT = /\bimport\s*[\s({*"'`]|\brequire\s*\(|\bexport\s[^;]*\bfrom\s*["'`]/
-// Claude Code loads `register` only as a top-level function declaration. Bun emits top-level code unindented and
-// exports through one trailing list, so both halves are checked: the declaration, and `register` exported.
 const REGISTER_DECLARED = /^(export )?function register\(/m
 const REGISTER_EXPORTED = /^export (function register\(|\{[^}]*\bregister\b[^}]*\})/m
 const EVENTS = ["prompt.submit", "session.start", "tool.call", "turn.complete", "ui.render"]
@@ -37,7 +32,6 @@ const listFiles = (dir: string) =>
     .map((e) => path.relative(dir, path.join(e.parentPath, e.name)) + (e.isSymbolicLink() ? " (symlink)" : ""))
     .sort()
 
-// What is wrong with the extracted package `dir`. Empty when it is installable as is.
 const problems = (dir: string): string[] => {
   const out: string[] = []
   const files = listFiles(dir)
@@ -53,7 +47,6 @@ const problems = (dir: string): string[] => {
   if (IMPORT.test(text)) out.push("register.mjs imports")
   if (!REGISTER_DECLARED.test(text)) out.push("register.mjs has no top-level function register")
   if (!REGISTER_EXPORTED.test(text)) out.push("register.mjs does not export register")
-  // Claude Code refuses the module unless every $.env.get names its variable literally.
   if (/\$\.env\.get\((?!")/.test(text)) out.push("register.mjs reads an environment variable by a computed name")
   return out
 }
@@ -65,7 +58,6 @@ const run = (command: string, args: string[], cwd: string) => {
   if (r.status !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${r.stderr}${r.stdout}`)
 }
 
-// `pnpm pack` of `dir` (prepack enabled), extracted. Returns the extracted package directory.
 const pack = (dir: string, name: string) => {
   const out = path.join(tmp, name)
   fs.mkdirSync(out)
@@ -75,14 +67,11 @@ const pack = (dir: string, name: string) => {
   return path.join(out, "package")
 }
 
-// The package's sources copied to a temp dir under another version, as CI's canary or beta versioning leaves it.
 const versioned = (version: string) => {
   const dir = path.join(tmp, `src-${version}`)
   for (const name of SOURCES) fs.cpSync(path.join(pkg, name), path.join(dir, name), { recursive: true })
   const manifest = readJson(path.join(dir, "package.json"))
-  // Outside the workspace pnpm would otherwise fetch its own latest release; pin the repository's.
   const { packageManager } = readJson(path.join(repo, "package.json"))
-  // The bundle's workspace import (@vibest/protocol) resolves through the package's own node_modules; nothing to install.
   const { devDependencies: _bundled, ...rest } = manifest
   fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ ...rest, version, packageManager }, null, 2))
   fs.symlinkSync(path.join(pkg, "node_modules"), path.join(dir, "node_modules"))
@@ -134,7 +123,6 @@ describe("claude plugin distribution", () => {
   }, 60_000)
 
   it("packs only the allowlisted files, not other files beside them", () => {
-    // Synthetic stand-ins: Claude development tooling can generate .claude-plugin/types, Git ignores it, npm must too.
     const dir = versioned("0.0.2-beta.8")
     fs.mkdirSync(path.join(dir, ".claude-plugin/types"), { recursive: true })
     fs.writeFileSync(path.join(dir, ".claude-plugin/types/x.d.ts"), "export {}\n")
@@ -230,7 +218,10 @@ describe("claude plugin distribution", () => {
   it("the official-type source still bundles to import-free JS", () => {
     const source = fs.readFileSync(path.join(pkg, "src/plugin.ts"), "utf8")
     assert.match(source, /import type \{[^}]*\bRegister\b[^}]*\} from "claude-code"/)
-    assert.include(source, "2eff7a8d21c80be48904f62ebdea36d945d7b504")
+    assert.include(
+      fs.readFileSync(path.join(pkg, "README.md"), "utf8"),
+      `The pin is anthropics/claude-code \`${CLAUDE_TYPES_PIN}\``,
+    )
     const bundle = fs.readFileSync(path.join(packed, "hooks/register.mjs"), "utf8")
     assert.isFalse(IMPORT.test(bundle))
     assert.match(bundle, /on\("turn\.complete"/)

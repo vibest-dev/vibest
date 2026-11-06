@@ -1,8 +1,6 @@
 import type { HarnessOption } from "@vibest/plugin"
 import { VibestCommand } from "@vibest/schema/layout"
 import { HARNESS_IDS, type HarnessId, HarnessUnavailable, isHarnessId } from "@vibest/schema/session"
-// HarnessAdapter: everything that differs between pi / claude / cursor (SPEC §10); each adapter lives in harnesses/ and
-// reaches the code through the `Harnesses` service.
 import { Clock, Config, Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -11,135 +9,78 @@ export { HARNESS_IDS, type HarnessId, HarnessUnavailable, isHarnessId } from "@v
 
 export interface LaunchInput {
   readonly worktree: string
-  /** The session's project folder (VIBEST_PROJECT_DIR), which it reads and writes with its file tools. */
   readonly projectDir: string
-  /** Pi and Claude read the system prompt from this file (herdr refuses multi-line args); Cursor gets it in its first prompt. */
   readonly systemPromptFile: string
   readonly provider: string | null
   readonly model: string | null
-  /** Pi / Claude: the uuid vibestd chose. Cursor: the id herdr reported (resume only). */
   readonly sessionId: string | null
   readonly resume: boolean
-  /** vibest's plugin for this harness (`Harness.plugin`), loaded for this session only. */
   readonly pluginDir: string
-  /** argv that runs vibest, for the permission to run `vibest report`. */
   readonly vibest: ReadonlyArray<string>
-  /** vibest's variables for the session's shell (VIBEST_SESSION_ID, VIBEST_AGENT …). */
   readonly env: Readonly<Record<string, string>>
 }
 
-/** What `vibest` starts the main agent with (SPEC §12.1). */
 export interface CoordinatorInput {
-  /** Repository root, the Coordinator's working directory. */
   readonly root: string
-  /** The project folder (VIBEST_PROJECT_DIR): the one place the Coordinator writes files. */
   readonly projectDir: string
   readonly systemPromptFile: string
   readonly provider: string | null
   readonly model: string | null
-  /** The repository's Coordinator session to reopen, as the harness reported it after a turn; null: the harness starts a new one. */
   readonly sessionId: string | null
-  /** vibest's plugin for this harness (`Harness.plugin`). */
   readonly pluginDir: string
-  /** vibest's variables for the coordinator's shell (VIBEST_AGENT, HERDR_PANE_ID …). */
   readonly env: Readonly<Record<string, string>>
 }
 
-/** The session's pane while the harness starts, as a startup adapter sees it. */
 export interface StartupPane {
-  /** The last 40 lines on screen. */
   readonly screen: Effect.Effect<string>
   readonly sendKeys: (keys: ReadonlyArray<string>) => Effect.Effect<void>
 }
 
-/** Per launch: makes the step vibestd runs on every tick until the harness is `interactive_ready`. */
 export type Startup = Effect.Effect<(pane: StartupPane) => Effect.Effect<void>>
 
 export interface HarnessAdapter {
   readonly id: HarnessId
-  /** Executable that must be on PATH. */
   readonly binary: string
-  /** vibestd picks the session id up front (Pi, Claude); otherwise herdr reports it after launch. */
   readonly ownSessionId: boolean
-  /** No system-prompt flag: the system prompt goes in front of the first prompt (Cursor). */
   readonly systemPromptInPrompt: boolean
   readonly interruptKey: string
-  /** Harness-specific startup handling while vibestd waits for ready (Claude: its trust / bypass menus). */
   readonly startup?: Startup
-  /** Field of the hook payload holding the last reply. */
   readonly resultField: "text" | "last_assistant_message"
-  /**
-   * A Coordinator's inbox rows: typed into its pane (`prompt`), streamed to its integration over vibest.sock
-   * (`subscribe`: the Pi extension), or polled by its integration over vibestd's HTTP socket (`poll`: the Claude
-   * plugin; rows it took are leased, and a vibestd restart puts them back to pending).
-   */
   readonly inbox: "prompt" | "subscribe" | "poll"
-  /**
-   * How vibestd knows a started harness takes input: its integration reports it with one request at its start
-   * (`integration`: Session.Ready, or the HTTP `/session/ready`), or the runtime's agent state (`runtime`).
-   */
   readonly ready: "integration" | "runtime"
-  /** Error message when this harness cannot use `provider`, else undefined. */
   readonly checkProvider: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
-  /**
-   * Coordinator argv: its system prompt and the inspection tools, among them the shell it runs `vibest` in; no MCP servers.
-   * Absent: the harness is not currently supported as a Coordinator (Cursor).
-   */
   readonly coordinatorArgs?: (input: CoordinatorInput) => ReadonlyArray<string>
-  /** How the harness lists its models. */
   readonly models: ModelLister
-  /** The pre-tool hook's answer in the harness's format; `reason` refuses the call. Absent: the harness guards in process (Pi). */
   readonly guardAnswer?: (reason: string | undefined) => unknown
-  /**
-   * A turn end the harness's own plugin hands to vibestd (RPC `TurnEnd`, from `vibest integration stop` or the Pi
-   * extension, or the HTTP hook): a session's result payload; undefined ignores it. Absent: the harness has no turn ends.
-   */
   readonly turnEnd?: (
     event: Readonly<Record<string, unknown>>,
     coordinator: boolean,
   ) => { readonly result: Readonly<Record<string, unknown>> } | undefined
-  /**
-   * A prompt the harness plugin hands to vibestd (RPC `Prompt`, or the HTTP hook). Undefined ignores it: the main agent,
-   * a nested agent, or text that is not the user typing.
-   */
   readonly userPrompt?: (
     event: Readonly<Record<string, unknown>>,
     coordinator: boolean,
   ) => { readonly text: string } | undefined
-  /**
-   * The harness's own conversation id in an event its plugin hands to vibest, sent as vibest-harness-session-id.
-   * Absent: the events carry none (the plugin sends it another way).
-   */
   readonly conversationOf?: (event: Readonly<Record<string, unknown>>) => string | undefined
-  /** Whether conversation `sessionId` can be reopened at `root`. Absent: it can. */
   readonly canResume?: (
     root: string,
     sessionId: string,
   ) => Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path>
 }
 
-/** `[flag, value]`, or nothing when there is no value. */
 export const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
-/** checkProvider for a harness that only runs Anthropic's models. */
 export const anthropicOnly = (harness: string) => (provider: string | null) =>
   provider && provider !== "anthropic"
     ? `${harness} has no provider option; only "anthropic" (or none) is accepted, got "${provider}"`
     : undefined
 
-/** argv as JSON, for the `VIBEST_COMMAND` env the Pi extension reads. */
 export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 
-/**
- * The harnesses vibest runs, provided by the composition root: every place that differs by harness asks its adapter
- * here, never the harness id.
- */
 export class Harnesses extends Context.Service<
   Harnesses,
   {
     readonly all: ReadonlyArray<HarnessAdapter>
     readonly get: (id: HarnessId) => HarnessAdapter
-    /** The adapter of an id read from outside (herdr, the database); undefined when it names no harness. */
     readonly find: (id: string | null | undefined) => HarnessAdapter | undefined
   }
 >()("vibest/Harnesses") {
@@ -154,26 +95,15 @@ export class Harnesses extends Context.Service<
     )
 }
 
-/** Argv check: herdr refuses launch arguments containing newlines. */
 export const hasNewline = (args: ReadonlyArray<string>) => args.some((a) => /[\r\n]/.test(a))
 
-/** How long a successful model listing stands for "the CLI runs and its login works". */
 export const MODELS_TTL = Duration.minutes(5)
 
-/** The machine-facing side of the adapter table: what vibestd asks the host. Swapped out in tests. */
 export class Harness extends Context.Service<
   Harness,
   {
-    /** The harness binary is on PATH. */
     readonly available: (id: HarnessId) => Effect.Effect<boolean>
-    /**
-     * vibest's plugin for `id`, which vibest loads into each session it starts (`--plugin-dir`, `pi -e`): a directory of
-     * VIBEST_HARNESSES (the npm package's bin/vibest.cjs sets it), else of `harnesses/` beside the compiled binary's
-     * directory (`<root>/bin/vibest` and `<root>/harnesses`), so the binary alone runs without Node. Nothing is installed
-     * into the harness's own config.
-     */
     readonly plugin: (id: HarnessId) => Effect.Effect<string, HarnessUnavailable>
-    /** `listModels`, successes cached for MODELS_TTL: the harness runs and its auth works. */
     readonly models: (id: HarnessId, provider: string | null) => Effect.Effect<ReadonlyArray<Model>, HarnessUnavailable>
   }
 >()("vibest/Harness") {
@@ -184,9 +114,6 @@ export class Harness extends Context.Service<
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const harnesses = yield* Harnesses
       const self = yield* VibestCommand
-      // A compiled binary runs as itself alone; from source (`bun main.ts`) there is no layout to look beside.
-      // Run bare (a pane vibestd opened runs the binary, not the npm launcher): `harnesses/` beside it (install.sh), else in
-      // the @vibest/cli package it came with, flat (bun, npm dedupe: node_modules/@vibest/cli) or nested under it.
       const pkg = self.length === 1 && path.isAbsolute(self[0]!) ? path.dirname(path.dirname(self[0]!)) : undefined
       const beside =
         pkg === undefined
@@ -238,10 +165,6 @@ export class Harness extends Context.Service<
   static readonly layer = Layer.effect(Harness, Harness.make())
 }
 
-/**
- * Everything that keeps `id` from running a session with `provider` / `model`, in order: provider accepted, binary
- * installed, vibest's plugin for it present, harness usable (lists its models), model one of those. Returns the models.
- */
 export const preflight = Effect.fn("preflight")(function* (
   id: HarnessId,
   provider: string | null,
@@ -253,7 +176,6 @@ export const preflight = Effect.fn("preflight")(function* (
   const providerError = adapter.checkProvider(provider)
   if (providerError) return yield* unavailable(providerError)
   if (!(yield* harness.available(id))) return yield* unavailable(`${adapter.binary} is not on PATH`)
-  // Results only come from the plugin's turn-end hook (SPEC §2): no plugin, no session.
   yield* harness.plugin(id)
   const models = yield* harness
     .models(id, provider)
@@ -267,7 +189,6 @@ export const preflight = Effect.fn("preflight")(function* (
   return models
 })
 
-/** Every harness as preflight saw it, in HARNESS_IDS order: what an `agent.start.before` chain chooses among. */
 export const harnessOptions = Effect.forEach(
   HARNESS_IDS,
   (id) =>

@@ -1,5 +1,3 @@
-// `vibest update`'s restart in place (sessions.ts outdated / restart: the runtime's `run`) over the fake runtime, and the plan it
-// makes for vibestd from Ping (cli.ts daemonPlan).
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { line } from "@vibest/core/inbox"
@@ -32,12 +30,11 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 describe("vibest update's plan for vibestd", () => {
   const target = { version: "2.0.0", command: ["/v/2/bin/vibest"] }
   const ping = { protocol: PROTOCOL, version: "1.0.0", command: ["/v/1/bin/vibest"], instance: "i" }
-  it("keeps, hands off or restarts, as Ping says", () => {
+  it("keeps, hands off or restarts, as Ping says; same version from another binary (npm over curl) is handed off", () => {
     assert.strictEqual(daemonPlan(undefined, target).action, "none")
     assert.strictEqual(daemonPlan({ ...ping, version: "2.0.0", command: target.command }, target).action, "keep")
     assert.strictEqual(daemonPlan({ ...ping, capabilities: { handoff: true } }, target).action, "handoff")
     assert.strictEqual(daemonPlan(ping, target).action, "restart")
-    // Same version, other binary (an npm upgrade over a curl install): handed off all the same.
     assert.strictEqual(
       daemonPlan({ ...ping, version: "2.0.0", capabilities: { handoff: true } }, target).action,
       "handoff",
@@ -45,8 +42,7 @@ describe("vibest update's plan for vibestd", () => {
   })
 })
 
-/** A Pi subagent in a turn, under a main agent; its integration reported its harness's pid. */
-const started = Effect.gen(function* () {
+const busyPiSubagent = Effect.gen(function* () {
   const db = yield* Db
   const sessions = yield* Sessions
   const repo = yield* makeRepository
@@ -70,7 +66,7 @@ describe("restart in place", () => {
   test(
     "outdated lists an agent whose integration is not this vibestd's; one that reported this version is current",
     Effect.gen(function* () {
-      const { db, sessions, id } = yield* started
+      const { db, sessions, id } = yield* busyPiSubagent
       assert.deepStrictEqual(
         (yield* sessions.outdated).map((a) => [a.id, a.integration, a.working, a.blocked]),
         [[id, null, true, null]],
@@ -83,9 +79,9 @@ describe("restart in place", () => {
   )
 
   test(
-    "a restart mid-turn: SIGTERM to the harness pid only, nothing recorded while it is down, then one continue and one result",
+    "a restart mid-turn: SIGTERM to the harness pid only, its exit and aborted turn end not recorded while it is down, the same terminal runs it again on the same conversation, then one continue and one result (pending for an idle Pi main agent, which takes its rows itself)",
     Effect.gen(function* () {
-      const { db, sessions, id, pid } = yield* started
+      const { db, sessions, id, pid } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
       const processes = yield* FakeProcesses
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
@@ -94,7 +90,6 @@ describe("restart in place", () => {
       yield* ran.reached
       assert.deepStrictEqual(yield* processes.signaled, [pid])
       assert.isTrue((yield* Restarting).has(id))
-      // The harness is gone and it wrote an aborted turn end: neither is recorded while vibestd restarts it.
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false, status: "idle" }))
       yield* writeResult(id, "pi", { text: "", error: "aborted", aborted: true })
       yield* sessions.check(id)
@@ -104,8 +99,6 @@ describe("restart in place", () => {
       assert.deepStrictEqual(yield* db.coordinatorPending(down.projectId), [])
       assert.isUndefined(yield* db.readyAt(id), "the old harness's ready report is gone")
       assert.isUndefined(down.metadata.pid, "so is its pid")
-      // Its terminal's shell runs the harness again, on the same conversation; the new harness's integration reports,
-      // on this version, that it takes input.
       const opened = (yield* herdr.callsTo("open")).length
       yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
       yield* ran.release()
@@ -123,8 +116,6 @@ describe("restart in place", () => {
         (yield* herdr.callsTo("send")).map((s) => s.text),
         continueText(VERSION),
       )
-      // The continued turn ends: one result for the round. The Pi main agent is idle in its pane: it takes its rows
-      // itself, so the result stays pending here.
       yield* herdr.seedAgent("test/coord")
       yield* writeResult(id, "pi", { text: "done\nstatus: completed" })
       yield* herdr.endTurn(id)
@@ -152,7 +143,6 @@ describe("restart in place", () => {
     assert.include(notice, "Restarted: ab12cd34-ab12-4ab1-8ab1-ab12cd34ab12.")
   })
 
-  /** The project's main agent at `test/coord`, working, on harness `harness`, its harness pid 100. */
   const workingMain = (harness: "cursor" | "pi") =>
     Effect.gen(function* () {
       const db = yield* Db
@@ -186,19 +176,18 @@ describe("restart in place", () => {
   )
 
   test(
-    "a main agent that ran vibest update itself: working when it asked, idle once the update exited, it still gets the continue notice",
+    "a main agent that ran vibest update itself: working when it asked, idle once the update returned, restarted only after the update process exits, it still gets the continue notice",
     Effect.gen(function* () {
+      const updatePid = 900
       const { db, herdr, id, projectId } = yield* workingMain("pi")
       const sessions = yield* Sessions
       const processes = yield* FakeProcesses
-      // The `vibest update` process, a child of the main agent's harness.
-      yield* processes.set(900, "alive")
-      yield* sessions.restartLater([id], 900)
-      // Its turn ends after the update returned; then the update process exits, and only then the restart begins.
+      yield* processes.set(updatePid, "alive")
+      yield* sessions.restartLater([id], updatePid)
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "idle" }))
       yield* TestClock.adjust("2 seconds")
       assert.deepStrictEqual(yield* processes.signaled, [], "nothing ended while the update still runs")
-      yield* processes.set(900, "exited")
+      yield* processes.set(updatePid, "exited")
       yield* untilVirtual(processes.signaled, (t) => t.includes(100))
       yield* db.patchLive(id, { pid: 300, ready: null })
       yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
@@ -212,9 +201,9 @@ describe("restart in place", () => {
   )
 
   test(
-    "a Pi main agent (inbox subscribe) after its subagent: waits for its integration's ready report, then its inbox holds one continue notice naming both",
+    "a Pi main agent (inbox subscribe) after its idle subagent: waits for its integration's ready report even when the runtime sees it idle, then its inbox holds one continue notice naming both",
     Effect.gen(function* () {
-      const { db, sessions, id: sub, pid } = yield* started
+      const { db, sessions, id: sub, pid } = yield* busyPiSubagent
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
       const projectId = (yield* db.getSession(sub))!.projectId
@@ -223,16 +212,13 @@ describe("restart in place", () => {
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
       yield* db.reportCoordinatorSession(main, "pi", "conversation-1")
       yield* db.patchLive(main, { pid: 400 })
-      // The subagent is idle: it restarts without a continue turn.
       yield* herdr.endTurn(sub)
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
       yield* Effect.forkChild(sessions.restart([main, sub]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
       yield* until(processes.signaled, (t) => t.includes(pid))
-      // Its shell runs it again and its integration reports, on this version.
       yield* db.noteIntegration(sub, { version: VERSION, protocol: PROTOCOL })
       yield* untilVirtual(processes.signaled, (t) => t.includes(400))
       assert.deepStrictEqual(yield* processes.signaled, [pid, 400], "the subagent first, the main agent last")
-      // The main agent's loop starts it; the runtime already sees it idle, but its integration has not reported yet.
       yield* db.patchLive(main, { pid: 500, ready: null })
       yield* db.noteIntegration(main, { version: VERSION, protocol: PROTOCOL })
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "idle" }))
@@ -257,14 +243,13 @@ describe("restart in place", () => {
   test(
     "the old harness's report after the new process.start is not its result, even for a fresh Sessions",
     Effect.gen(function* () {
-      const { db, sessions, id, pid } = yield* started
+      const { db, sessions, id, pid } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
       yield* db.noteHarnessSession(id, "conv-1")
       const held = yield* herdr.hold("run", id)
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
       yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((rows) => Ref.set(outcomes, rows))))
       yield* held.reached
-      // The new process.start is written; the old harness, stopping, still reports its turn end.
       const [restarted] = (yield* eventsOf(id, "process.start")).slice(-1)
       yield* writeResult(id, "pi", { text: "status: completed\nsummary: old harness" })
       assert.isAbove((yield* eventsOf(id, "turn.reported")).at(-1)!.id, restarted!.id)
@@ -274,9 +259,8 @@ describe("restart in place", () => {
       assert.strictEqual(outcome?.ok, true, outcome?.message)
       assert.notStrictEqual((yield* db.getSession(id))!.metadata.pid, pid)
       yield* sessions.check(id)
-      // A new vibestd: nothing in memory, only what is stored.
-      const fresh = yield* Sessions.make({ maxSessions: undefined })
-      yield* fresh.check(id)
+      const freshSessions = yield* Sessions.make({ maxSessions: undefined })
+      yield* freshSessions.check(id)
       assert.strictEqual((yield* eventsOf(id, "turn.end")).length, 0)
       assert.isUndefined(yield* db.latestInbox(id, "result"))
     }),

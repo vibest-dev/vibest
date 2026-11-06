@@ -4,10 +4,8 @@ import * as Leases from "@vibest/core/leases"
 import { Duration, Effect, Ref, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
-/** Let the timer and handler fibers run. */
 const settled = Effect.yieldNow.pipe(Effect.repeat({ times: 20 }))
 
-/** Leases, and every `onExpire` call they made. */
 const leases = Effect.gen(function* () {
   const expired = yield* Ref.make<ReadonlyArray<ReadonlyArray<number>>>([])
   const onExpire = (ids: ReadonlyArray<number>) => Ref.update(expired, (all) => [...all, ids])

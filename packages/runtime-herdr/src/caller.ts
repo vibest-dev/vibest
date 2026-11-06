@@ -1,13 +1,9 @@
 import { Config, Effect, Option, Schema } from "effect"
-// What the vibest CLI and the herdr plugin command need to say where they are: the caller's herdr location as
-// `Machine.target` (runtime-port.md §2, §4) and the terminal id of the pane it runs in. Everything herdr-specific
-// about *being* a caller lives here.
 import { Herdr } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { encodeTarget } from "./terminal-runtime.ts"
 
-/** The caller's location: its own herdr socket inside herdr, otherwise a session name (default vibest). An explicit `--session` wins over the ambient socket. */
 export const callerLocation = (named?: string) =>
   Effect.gen(function* () {
     if (named !== undefined) return { session: named }
@@ -15,11 +11,9 @@ export const callerLocation = (named?: string) =>
     return socketPath !== undefined ? { socketPath } : { session: "vibest" }
   })
 
-/** The caller's location as the `Machine` the RPCs carry: local host, the herdr to reach as `target` JSON (§2). */
 export const callerMachine = (named?: string) =>
   callerLocation(named).pipe(Effect.map((location) => ({ id: "local", target: encodeTarget(location) })))
 
-/** What `vibest` in a coordinator's shell needs to find its own pane; a harness may hand its shell less than it got. */
 export const CALLER_ENV = ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"] as const
 
 const SessionList = Schema.decodeUnknownEffect(
@@ -32,10 +26,6 @@ const SessionList = Schema.decodeUnknownEffect(
   ),
 )
 
-/**
- * The pane this process runs in, as a terminal id (`<session>/<pane>`: pane ids repeat across herdr sessions, so both
- * go in). The session is found by this pane's socket, one local `herdr session list`; undefined outside herdr.
- */
 export const callerTerminal = Effect.gen(function* () {
   const paneId = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_PANE_ID")))
   const socketPath = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_SOCKET_PATH")))
@@ -47,7 +37,6 @@ export const callerTerminal = Effect.gen(function* () {
   return session === undefined ? undefined : `${session.name}/${paneId}`
 })
 
-/** A herdr client on the ambient socket, for the in-place path (verified once; the pane's own server). */
 export const ambientHerdr = Effect.gen(function* () {
   const socket = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_SOCKET_PATH")))
   const pane = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_PANE_ID")))

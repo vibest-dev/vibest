@@ -1,5 +1,3 @@
-// `vibest` in a checkout that moved: it asks `[Y/n]` before anything starts. y or Enter moves the project, n makes a
-// new one; anything else, EOF or a non-interactive terminal asks vibestd for nothing more.
 import { assert, describe, it } from "@effect/vitest"
 import { ProjectMoved } from "@vibest/schema/session"
 import { Effect, Exit, Sink, Stdio, Stream } from "effect"
@@ -15,8 +13,7 @@ const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>, out: Array<s
   })
 const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 
-/** vibestd's answers for a checkout that moved from /old to /new; every `move` it was asked with is recorded. */
-const fake = () => {
+const movedCheckout = () => {
   const moves: Array<boolean | undefined> = []
   const client = {
     "Project.Open": ({ move }: { move?: boolean }) => {
@@ -29,7 +26,7 @@ const fake = () => {
   return { moves, run: openProject(client) }
 }
 
-describe("openProject", () => {
+describe("openProject in a checkout that moved asks [Y/n] before anything starts", () => {
   for (const [name, stdin, move, id] of [
     ["y", typed("y\n"), true, "p"],
     ["Enter", typed("\n"), true, "p"],
@@ -38,7 +35,7 @@ describe("openProject", () => {
     it.effect(`${name}: Project.Open again with move ${move}`, () => {
       const out: Array<string> = []
       return Effect.gen(function* () {
-        const f = fake()
+        const f = movedCheckout()
         assert.strictEqual((yield* f.run).projectId, id)
         assert.deepStrictEqual(f.moves, [undefined, move])
         assert.include(out.join(""), "The project moved from /old to here, move it? [Y/n]: ")
@@ -52,7 +49,7 @@ describe("openProject", () => {
   ] as const)
     it.effect(`${name}: fails naming both places, nothing changed`, () =>
       Effect.gen(function* () {
-        const f = fake()
+        const f = movedCheckout()
         const exit = yield* Effect.exit(f.run)
         assert.isTrue(Exit.isFailure(exit))
         assert.include(String(exit), "the project moved from /old to /new")

@@ -1,5 +1,3 @@
-// Parsers checked against what the real CLIs and endpoints returned on 2026-10-31 (Claude Code 2.1.316,
-// cursor-agent 2026.10.22, Pi 1.4.0). Identifiers, emails and unrelated fields are removed; numbers are as captured.
 import { assert, describe, it } from "@effect/vitest"
 
 import { claudeAccount, claudeUsage, cursorAccount, cursorUsage, piAccount } from "./index.ts"

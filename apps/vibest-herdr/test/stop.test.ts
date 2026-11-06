@@ -1,7 +1,5 @@
 import net from "node:net"
 
-// Daemon.Stop (issue #80): a planned replacement over the RPC server on a real unix socket and the fake runtime. Only
-// vibestd's own operations block it (core/drain.ts); agents keep running and queued Messages stay for the next vibestd.
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect, protocolHeaders } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
@@ -66,8 +64,7 @@ const errorOf = <A, E>(exit: Exit.Exit<A, E>) =>
 const tagOf = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) =>
   errorOf(exit)?._tag ?? (Exit.isSuccess(exit) ? "success" : "defect")
 
-/** One Stop from the command line: "accepted", or what blocks it, or the refusal's tag. */
-const stop = (repo: string) =>
+const stopFromCli = (repo: string) =>
   Effect.gen(function* () {
     const exit = yield* Effect.exit((yield* cli(repo))["Daemon.Stop"]({ instance: INSTANCE }))
     if (Exit.isSuccess(exit)) return "accepted" as const
@@ -77,21 +74,18 @@ const stop = (repo: string) =>
 
 const shutdownDone = Effect.flatMap(Server.Shutdown, Deferred.isDone)
 const draining = Effect.flatMap(Drain, (d) => until(d.phase, (p) => p === "draining"))
-/** Once nothing is pending, one Stop on a moving clock (its drain polls on the clock). */
 const stopOnceIdle = (repo: string) =>
   Effect.gen(function* () {
     yield* until((yield* Drain).pending, (p) => p.length === 0)
-    return yield* settled(yield* Effect.forkScoped(stop(repo)))
+    return yield* joinAdvancingClock(yield* Effect.forkScoped(stopFromCli(repo)))
   })
-/** A forked Stop's answer, moving virtual time (its drain polls and times out on the clock) until it has one. */
-const settled = <A, E>(stopping: Fiber.Fiber<A, E>) =>
+const joinAdvancingClock = <A, E>(stopping: Fiber.Fiber<A, E>) =>
   untilVirtual(
     Effect.sync(() => stopping.pollUnsafe()),
     (exit) => exit !== undefined,
   ).pipe(Effect.andThen(Fiber.join(stopping)))
 
-/** A main agent of `harness` registered at terminal wC:p1 (idle), its session client, and a working worker in its project. */
-const receiver = (repo: string, harness: "pi" | "claude") =>
+const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
   Effect.gen(function* () {
     const db = yield* Db
     const herdr = yield* FakeRuntime
@@ -109,7 +103,7 @@ const receiver = (repo: string, harness: "pi" | "claude") =>
     return { db, herdr, c, sessionId, worker, projectId: (yield* db.projectOfSession(sessionId))! }
   })
 
-describe("Daemon.Stop", () => {
+describe("Daemon.Stop over a real unix socket: only vibestd's own operations block it; agents keep running and queued messages stay for the next vibestd", () => {
   it("the client waits for Stop's reply longer than vibestd's bounded drain", () => {
     assert.isTrue(Duration.isGreaterThan(TIMING.reply, Server.DRAIN_TIMEOUT))
   })
@@ -118,7 +112,7 @@ describe("Daemon.Stop", () => {
     "the command line only, for this vibestd's instance; once accepted, no change is admitted, settlement included",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { c } = yield* receiver(repo, "claude")
+      const { c } = yield* idleMainWithWorker(repo, "claude")
       const raw = yield* client
       assert.strictEqual(
         tagOf(yield* Effect.exit(authed(raw, cliHeaders(repo))["Daemon.Stop"]({ instance: "another" }))),
@@ -147,9 +141,8 @@ describe("Daemon.Stop", () => {
         ),
         "DaemonStopping",
       )
-      assert.strictEqual(yield* stop(repo), "DaemonStopping")
-      // Reads still answer.
-      assert.isAbove((yield* user.List({})).length, 0)
+      assert.strictEqual(yield* stopFromCli(repo), "DaemonStopping")
+      assert.isAbove((yield* user.List({})).length, 0, "reads still answer")
     }),
   )
 
@@ -157,7 +150,7 @@ describe("Daemon.Stop", () => {
     "working agents, a busy main agent, an open subscription and queued messages neither block nor change",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, herdr, c, worker } = yield* receiver(repo, "pi")
+      const { db, herdr, c, worker } = yield* idleMainWithWorker(repo, "pi")
       yield* herdr.updateAgent("wC:p1", (a) => ({ ...a, status: "working" }))
       const user = yield* cli(repo)
       yield* user.Send({ id: worker, message: "keep the exact task" })
@@ -185,13 +178,13 @@ describe("Daemon.Stop", () => {
       const held = yield* herdr.hold("open")
       const { id } = yield* user.Spawn({ harness: "pi", prompt: "work" })
       yield* held.reached
-      const stopping = yield* Effect.forkScoped(stop(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       assert.strictEqual(
         tagOf(yield* Effect.exit(user.Send({ id: "00000000-0000-4000-8000-000000000000", message: "x" }))),
         "DaemonStopping",
       )
-      const refused = yield* settled(stopping)
+      const refused = yield* joinAdvancingClock(stopping)
       assert.include(JSON.stringify(refused), `spawn ${id}`)
       assert.strictEqual(yield* (yield* Drain).phase, "open")
       assert.isFalse(yield* shutdownDone)
@@ -206,11 +199,10 @@ describe("Daemon.Stop", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
-      // A spawn parked inside the runtime: an admitted operation the Stop waits for.
       const held = yield* herdr.hold("open")
       yield* (yield* cli(repo)).Spawn({ harness: "pi", prompt: "work" })
       yield* held.reached
-      const stopping = yield* Effect.forkScoped(stop(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       yield* held.release()
       assert.strictEqual(yield* Fiber.join(stopping), "accepted")
@@ -218,29 +210,30 @@ describe("Daemon.Stop", () => {
   )
 
   test(
-    "a spawn's turn start and end from its harness hook settle while draining: the launch confirms and the Stop is accepted",
+    "a spawn's turn start and end from its harness hook settle while draining (a fast turn the runtime never shows working): the end first keeps the drain open for the unconfirmed launch, then the launch confirms and the Stop is accepted",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const raw = yield* client
-      // The runtime never shows the turn working (a fast turn), so the hook's start line is the launch's only pickup proof.
       const { id } = yield* (yield* cli(repo)).Spawn({ harness: "pi", prompt: "work" })
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("work") === true))
-      const stopping = yield* Effect.forkScoped(stop(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
-      // What the Pi extension sends for that turn's `input` and `agent_settled`.
-      const hook = (call: "Prompt" | "TurnEnd", event: object) =>
+      const piExtensionHook = (call: "Prompt" | "TurnEnd", event: object) =>
         Effect.forkScoped(
           Effect.exit(
             raw[call]({ sessionId: id, harness: "pi", event: JSON.stringify(event) }, { headers: protocolHeaders() }),
           ),
         )
-      // The end first: the launch, still unconfirmed, keeps the drain open for it. The Stop looks again as soon as the
-      // launch leaves, so a hook after the start's confirm could find it already accepted.
-      const ended = yield* hook("TurnEnd", { type: "agent_settled", text: "done", error: "", aborted: false })
+      const ended = yield* piExtensionHook("TurnEnd", {
+        type: "agent_settled",
+        text: "done",
+        error: "",
+        aborted: false,
+      })
       assert.strictEqual(tagOf(yield* Fiber.join(ended)), "success")
-      const prompted = yield* hook("Prompt", { type: "input", text: "work", source: "interactive" })
-      assert.strictEqual(yield* settled(stopping), "accepted")
+      const prompted = yield* piExtensionHook("Prompt", { type: "input", text: "work", source: "interactive" })
+      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
       assert.strictEqual(tagOf(yield* Fiber.join(prompted)), "success")
       assert.include(yield* resultText(id), "done")
     }),
@@ -251,7 +244,7 @@ describe("Daemon.Stop", () => {
     "a Send and a Pi arrival deferred by the drain wake after a refused Stop, with nothing failed",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, herdr, c, worker } = yield* receiver(repo, "pi")
+      const { db, herdr, c, worker } = yield* idleMainWithWorker(repo, "pi")
       const sessions = yield* Sessions
       const drain = yield* Drain
       yield* herdr.endTurn(worker)
@@ -269,9 +262,8 @@ describe("Daemon.Stop", () => {
       )
       yield* until(db.latestInbox(worker, "result"), (r) => r?.status === "delivered")
       const leave = drain.track("held short operation")
-      const stopping = yield* Effect.forkScoped(stop(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
-      // An already-admitted Send whose fork reaches the session lock after the cut.
       yield* sessions.send(worker, "after reopen")
       yield* (yield* Inbox).enqueue({
         sessionId: worker,
@@ -279,7 +271,7 @@ describe("Daemon.Stop", () => {
         message: "arrival while draining",
         details: {},
       })
-      assert.isArray(yield* settled(stopping))
+      assert.isArray(yield* joinAdvancingClock(stopping))
       yield* leave
       yield* until(db.inboxWithStatus(worker, "delivered"), (rows) => rows.some((r) => r.message === "after reopen"))
       yield* until(
@@ -295,20 +287,19 @@ describe("Daemon.Stop", () => {
     "a delivered row stays counted until its completion work is done",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, worker, projectId } = yield* receiver(repo, "pi")
-      // A second Inbox with no taker, to stop at the queue-to-consumer seam.
+      const { db, worker, projectId } = yield* idleMainWithWorker(repo, "pi")
       const inbox = Context.get(yield* Layer.build(Layer.fresh(Inbox.layer)), Inbox)
       const stream = yield* Effect.forkScoped(Stream.runDrain(inbox.stream(projectId)))
       const row = yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "completion", details: {} })
       yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "delivered")
-      const stopping = yield* Effect.forkScoped(stop(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       assert.include(yield* (yield* Drain).pending, `completion inbox ${row.id}`)
       assert.isFalse(yield* shutdownDone)
       const consequence = yield* inbox.delivered
       assert.strictEqual(consequence.row.id, row.id)
       yield* consequence.done
-      assert.strictEqual(yield* settled(stopping), "accepted")
+      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
       yield* Fiber.interrupt(stream)
     }),
   )
@@ -328,9 +319,9 @@ describe("Daemon.Stop", () => {
       const held = yield* (yield* FakeProcesses).holdCwd()
       const removing = yield* Effect.forkScoped(sessions.remove(id))
       yield* held.reached
-      const stopping = yield* Effect.forkScoped(stop(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
-      assert.include(JSON.stringify(yield* settled(stopping)), `session ${id}`)
+      assert.include(JSON.stringify(yield* joinAdvancingClock(stopping)), `session ${id}`)
       assert.isUndefined(removing.pollUnsafe())
       yield* held.release()
       yield* Fiber.join(removing)
@@ -342,7 +333,7 @@ describe("Daemon.Stop", () => {
     "a Pi batch on the wire blocks until its ACK; the drained close fails nothing",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, sessionId, worker, projectId } = yield* receiver(repo, "pi")
+      const { db, sessionId, worker, projectId } = yield* idleMainWithWorker(repo, "pi")
       const layout = yield* Layout
       const socket = yield* Effect.acquireRelease(
         Effect.promise(
@@ -367,12 +358,12 @@ describe("Daemon.Stop", () => {
       socket.write(JSON.stringify({ jsonrpc: "2.0", id: "s", method: "Inbox.Subscribe", params: null, headers }) + "\n")
       yield* (yield* Inbox).enqueue({ sessionId: worker, kind: "report", message: "held", details: {} })
       yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "sending")
-      const stopping = yield* Effect.forkScoped(stop(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       assert.isFalse(yield* shutdownDone)
       socket.write(JSON.stringify({ jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: "s" } }) + "\n")
       yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "delivered")
-      assert.strictEqual(yield* settled(stopping), "accepted")
+      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
       socket.destroy()
       assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, "delivered")
     }),
@@ -382,17 +373,16 @@ describe("Daemon.Stop", () => {
     "a Claude ack settles a batch already leased while the Stop drains",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, worker, projectId } = yield* receiver(repo, "claude")
+      const { db, worker, projectId } = yield* idleMainWithWorker(repo, "claude")
       const inbox = yield* Inbox
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "ack", details: {} })
       const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
-      const stopping = yield* Effect.forkScoped(stop(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
-      // A poll while draining hands out nothing new.
-      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
+      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [], "a poll while draining hands out nothing new")
       assert.deepStrictEqual(yield* inbox.ack(projectId, polled.ids), polled.ids)
       assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, "delivered")
-      assert.strictEqual(yield* settled(stopping), "accepted")
+      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
     }),
   )
 
@@ -402,7 +392,7 @@ describe("Daemon.Stop", () => {
       const repo = yield* makeRepository
       const drain = yield* Drain
       const leave = drain.track("still running")
-      const stopping = yield* Effect.forkScoped(stop(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       yield* Fiber.interrupt(stopping)
       yield* until(drain.phase, (phase) => phase === "open")
@@ -410,7 +400,6 @@ describe("Daemon.Stop", () => {
       const user = yield* cli(repo)
       assert.strictEqual(
         tagOf(yield* Effect.exit(user.Send({ id: "00000000-0000-4000-8000-000000000000", message: "x" }))),
-        // Admitted: it reaches the handler, which knows no such session.
         "NoSuchSession",
       )
       yield* leave

@@ -1,7 +1,3 @@
-// The pre-tool guard as a harness plugin runs it. Cursor's: `vibest integration guard --harness cursor`, the tool call on
-// stdin, the agent's environment. Claude's: `POST /hooks/claude/guard` on vibestd's HTTP socket, as a session vibestd
-// knows. Both plugins ask only for a vibest agent (I4, I9 run them for real); Pi's extension applies the same rules in
-// process (needs Pi running: runtime, not here).
 import path from "node:path"
 
 import { sessionHeaders } from "../../../../packages/protocol/src/protocol.ts"
@@ -11,30 +7,27 @@ import { binary, expect, knownSessions, type World } from "../world.ts"
 type Harness = "claude" | "cursor"
 type Answer = { code: number; decision: "deny" | "allow" | "none"; reason: string }
 
-/** The project of each world's Claude guard sessions, made on first use. */
 const GENERAL = "e2e0a001-e2e0-4e2e-8e2e-e2e0a001e2e0"
 const COORDINATOR = "e2e0c001-e2e0-4e2e-8e2e-e2e0c001e2e0"
 const projects = new WeakMap<World, Promise<string>>()
-const projectOf = (w: World) => {
+const guardSessionsProject = (w: World) => {
   projects.set(w, projects.get(w) ?? knownSessions(w, { [GENERAL]: "general", [COORDINATOR]: "coordinator" }))
   return projects.get(w)!
 }
-/** The project folder of those sessions (VIBEST_PROJECT_DIR): vibestd's for Claude, the environment's for Cursor. */
-const projectDir = async (w: World) => path.join(w.vibestHome, "projects", await projectOf(w))
+const projectDir = async (w: World) => path.join(w.vibestHome, "projects", await guardSessionsProject(w))
 
-/** One tool call through the guard. `agent` undefined: no vibest agent. `raw` replaces the input. */
 const ask = async (
   w: World,
   harness: Harness,
   agent: string | undefined,
   tool: string,
   input: Record<string, unknown>,
-  raw?: string,
+  rawStdin?: string,
 ): Promise<Answer> => {
-  const stdin = raw ?? JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository })
+  const stdin = rawStdin ?? JSON.stringify({ tool_name: tool, tool_input: input, cwd: w.repository })
   if (harness === "claude" && agent !== undefined) {
     const sessionId = agent === "coordinator" ? COORDINATOR : GENERAL
-    const projectId = await projectOf(w)
+    const projectId = await guardSessionsProject(w)
     const r = await fetch("http://vibestd/hooks/claude/guard", {
       method: "POST",
       unix: path.join(w.vibestHome, "vibest-http.sock"),
@@ -121,7 +114,6 @@ const checks: ReadonlyArray<Check> = [
     id: "R4",
     title: "without a vibest agent the guard answers nothing and fails (the plugin does not ask it then)",
     run: async (w) => {
-      // Claude's plugin makes no request without a vibest agent (packages/integration/claude/test/plugin.test.ts).
       for (const h of ["cursor"] as const) {
         const a = await ask(w, h, undefined, shell(h), { command: "git status" })
         expect(a.code !== 0 && a.decision === "none", `${h}: ${JSON.stringify(a)}`)

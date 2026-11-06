@@ -1,7 +1,3 @@
-// The daily start (architecture.md D4): install, `cd shop`, `vibest`. Outside herdr, `vibest` opens a workspace in this
-// run's own herdr session whose shell runs `vibest` again and becomes the project's main agent. S1's Pi runs with this
-// run's PI_CODING_AGENT_DIR (passed with --env), never the user's. S10 and S10-pi move a running main agent to another
-// terminal with a real herdr and harness (the user's own login and config); S10-pi runs only with VIBEST_E2E_MODEL set.
 import fs from "node:fs/promises"
 import net from "node:net"
 import os from "node:os"
@@ -18,7 +14,6 @@ const start = (w: World) =>
     timeoutMs: 60_000,
   })
 
-/** One request to a herdr session's socket (one JSON line each way); its result, or a thrown error. */
 const herdr = (socket: string, method: string, params: Record<string, unknown>) =>
   new Promise<any>((resolve, reject) => {
     const conn = net.createConnection(socket)
@@ -45,17 +40,14 @@ const foreground = async (socket: string, pane: string): Promise<Array<Proc>> =>
   ).process_info.foreground_processes ?? []
 const screen = async (socket: string, pane: string): Promise<string> =>
   ((await herdr(socket, "pane.read", { pane_id: pane, source: "visible" })) as { read: { text: string } }).read.text
-/** The harness's argv in that pane, if it runs there (Pi renames its process to pi; herdr may then have no argv for it). */
 const harnessArgv = async (socket: string, pane: string, harness: "claude" | "pi") => {
   for (const p of await foreground(socket, pane)) {
-    // The program itself, not the shell or `vibest` that names it in its arguments.
     const argv = p.argv ?? []
-    const names = [p.name, p.argv0 ?? "", ...argv.slice(0, harness === "pi" ? 2 : 1)]
-    if (names.some((n) => (harness === "claude" ? /claude/.test(n) : path.basename(n) === "pi"))) return argv
+    const programNames = [p.name, p.argv0 ?? "", ...argv.slice(0, harness === "pi" ? 2 : 1)]
+    if (programNames.some((n) => (harness === "claude" ? /claude/.test(n) : path.basename(n) === "pi"))) return argv
   }
   return undefined
 }
-/** The value after `flag` in the harness's argv in that pane, if the harness runs there with it. */
 const harnessFlag = async (socket: string, pane: string, harness: "claude" | "pi", flag: string) => {
   const argv = (await harnessArgv(socket, pane, harness)) ?? []
   const i = argv.indexOf(flag)
@@ -65,8 +57,7 @@ const type = async (socket: string, pane: string, text: string) => {
   await herdr(socket, "pane.send_text", { pane_id: pane, text })
   await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
 }
-/** Claude's folder trust menu, answered as vibestd answers it for a session: Down to "Yes, I trust this folder", Enter. */
-const trust = async (socket: string, pane: string) => {
+const answerFolderTrust = async (socket: string, pane: string) => {
   const text = await screen(socket, pane)
   if (!/trust this folder/i.test(text)) return false
   const ready = /^\s*❯.*Yes, I trust this folder/im.test(text)
@@ -74,16 +65,11 @@ const trust = async (socket: string, pane: string) => {
   return ready
 }
 
-/**
- * The model of the real-model checks: VIBEST_E2E_PROVIDER and VIBEST_E2E_MODEL from this run's environment, passed with
- * vibest's own --provider and --model. Unset, each check keeps its own default.
- */
 const e2eModel = {
   provider: process.env.VIBEST_E2E_PROVIDER || undefined,
   model: process.env.VIBEST_E2E_MODEL || undefined,
 }
 
-/** vibest's options for a main agent on `harness` in the move check, or a Skip saying why it cannot run. */
 const moveOptions = (harness: "claude" | "pi"): Array<string> => {
   const { provider, model } = e2eModel
   if (harness === "claude") {
@@ -93,12 +79,10 @@ const moveOptions = (harness: "claude" | "pi"): Array<string> => {
       )
     return ["--harness", "claude", "--model", model ?? "haiku"]
   }
-  // Pi refuses --provider without --model, and Pi's own default model is whatever the user last picked.
   if (!model) throw new Skip("VIBEST_E2E_MODEL is not set (with VIBEST_E2E_PROVIDER for a provider of the user's Pi)")
   return ["--harness", "pi", ...(provider ? ["--provider", provider] : []), "--model", model]
 }
 
-/** Has Pi written a conversation with a reply for `cwd` in the user's Pi config? */
 const piWrote = async (cwd: string) => {
   const real = await fs.realpath(cwd)
   const dir = path.join(os.homedir(), ".pi", "agent", "sessions", `--${real.slice(1).replaceAll("/", "-")}--`)
@@ -110,13 +94,6 @@ const piWrote = async (cwd: string) => {
   return false
 }
 
-/**
- * The main agent moved between terminals: `harness` runs as the main agent in terminal A; `vibest` in terminal B,
- * answered y, ends A's harness (A keeps its shell) and resumes the same conversation in B. Its own herdr session and
- * vibestd, with the user's harness login and config (read, not changed; the harness keeps its conversation there), as
- * I4 does. An empty ZDOTDIR keeps a pane's zsh from reading the user's zshrc, which can put an installed vibest ahead of
- * this build.
- */
 const move = (harness: "claude" | "pi"): Check => ({
   id: harness === "claude" ? "S10" : "S10-pi",
   title: `a ${harness === "claude" ? "Claude" : "Pi"} main agent in terminal A; \`vibest\` in terminal B answered y: A's harness ends and A keeps its shell, B resumes the same conversation`,
@@ -132,7 +109,6 @@ const move = (harness: "claude" | "pi"): Check => ({
     await w.ok(["daemon"], { env })
     try {
       await w.ok([...options, "--session", session, "--headless"], { env, timeoutMs: 60_000 })
-      // Terminal A: the one pane running the harness.
       let a = ""
       await until(
         `${harness} in terminal A`,
@@ -151,7 +127,6 @@ const move = (harness: "claude" | "pi"): Check => ({
         },
         60_000,
       )
-      // One turn, so the harness writes the conversation (vibest resumes only a conversation the harness wrote).
       const status = async (pane: string) =>
         ((await herdr(socket, "pane.get", { pane_id: pane })) as { pane: { agent_status: string } }).pane.agent_status
       await until(
@@ -159,30 +134,26 @@ const move = (harness: "claude" | "pi"): Check => ({
         async () =>
           harness === "pi"
             ? (await status(a)) === "idle"
-            : !(await trust(socket, a)) &&
+            : !(await answerFolderTrust(socket, a)) &&
               !/trust this folder/i.test(await screen(socket, a)) &&
               (await status(a)) === "idle",
         60_000,
       )
       const prompt = "Do not use any tools. Reply with exactly: ok"
-      // As vibest prompts a main agent: herdr's agent.prompt submits it (Enter typed into Pi's editor only adds a line).
       await herdr(socket, "agent.prompt", { target: a, text: prompt })
       let conversation: string | undefined
       const projects = path.join(w.home, ".claude", "projects")
-      // macOS realpath: the db stores /private/tmp, w.repository is /tmp. Another check's main session is also a
-      // project entry; row() returns the first, and that conversation stays null.
-      const repo = await fs.realpath(w.repository)
+      const realRepository = await fs.realpath(w.repository)
       await until(
         "A's conversation written",
         async () => {
           if (harness === "pi") return await piWrote(w.repository)
-          // The plugin reports Claude's own conversation id; vibestd keeps it on this repository's main session.
           conversation =
             row<{ c: string | null }>(
               w,
               `SELECT s.harness_session_id AS c FROM ${SESSIONS} s
                WHERE s.agent_type = 'main' AND s.directory = ? AND s.ended_at IS NULL`,
-              repo,
+              realRepository,
             )?.c ?? undefined
           if (conversation === undefined) return false
           for (const dir of await fs.readdir(projects).catch(() => [] as Array<string>))
@@ -191,9 +162,8 @@ const move = (harness: "claude" | "pi"): Check => ({
         },
         120_000,
       )
-      // herdr marks a finished turn nobody looked at "done".
-      await until("A idle after its turn", async () => ["idle", "done"].includes(await status(a)), 120_000)
-      // Terminal B: a split beside A, at the repository, running `vibest` as a user types it.
+      const idleOrUnseenTurnDone = ["idle", "done"]
+      await until("A idle after its turn", async () => idleOrUnseenTurnDone.includes(await status(a)), 120_000)
       const b = (
         (await herdr(socket, "pane.split", {
           target_pane_id: a,
@@ -220,17 +190,14 @@ const move = (harness: "claude" | "pi"): Check => ({
         const resumed = await harnessFlag(socket, b, "claude", "--resume")
         expect(resumed === conversation, `B resumed ${resumed}, not ${conversation}`)
       } else {
-        // herdr shows no argv for Pi, so the proof is Pi's own: B shows A's conversation.
         await until("Pi in B shows A's conversation", async () => (await screen(socket, b)).includes(prompt), 60_000)
       }
-      // A: its harness gone, the pane still there at its shell.
       await until("A's harness gone", async () => (await harnessArgv(socket, a, harness)) === undefined, 20_000)
       const kept = ((await herdr(socket, "pane.list", {})) as { panes: Array<{ pane_id: string }> }).panes
       expect(
         kept.some((p) => p.pane_id === a),
         `pane ${a} closed`,
       )
-      // Only its shell, once what the harness's own extensions started (Pi's update checks) has finished too.
       const shellOnly = async () => {
         const procs = await foreground(socket, a)
         return procs.length > 0 && procs.every((p) => /^-?(zsh|bash|sh|fish)$/.test(path.basename(p.name)))
@@ -238,7 +205,6 @@ const move = (harness: "claude" | "pi"): Check => ({
       await until("only a shell in A", shellOnly, 30_000).catch(async () =>
         fail(`A runs ${JSON.stringify(await foreground(socket, a))}`),
       )
-      // vibest's record: the same main agent, now at B.
       const mains = (await w.json<Array<{ agent: string; address: { id: string } }>>(["ls"])).filter(
         (e) => e.agent === "main",
       )

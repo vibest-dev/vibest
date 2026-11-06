@@ -1,22 +1,9 @@
 import module from "node:module"
 
+import { noComments } from "./no-comments.mjs"
 import { noRestrictedDisable } from "./no-restricted-disable.mjs"
 
 const { isBuiltin } = module
-
-// Enforces the repo convention for Node builtin imports:
-//   import fs from "node:fs/promises"
-// i.e. a lone default import bound to the module's canonical name, with call
-// sites using property access (fs.rename(...)). Named and namespace specifiers
-// are rejected; so are ad-hoc local names (nodePath, NodeAssert). The `node:`
-// prefix itself is `unicorn/prefer-node-protocol`'s job. Type-only imports are
-// exempt: types have no runtime binding.
-//
-// Canonical name: the module's first path segment, camelCased ("child_process"
-// -> childProcess, "fs/promises" -> fs, "assert/strict" -> assert). Only when
-// one file imports two builtins sharing a first segment (node:fs AND
-// node:fs/promises) does the subpath import fall back to the full camelCased
-// path (fsPromises).
 
 const bareName = (source) => source.replace(/^node:/, "")
 const camelize = (s) => s.replace(/[/_](\w)/g, (_, c) => c.toUpperCase())
@@ -41,7 +28,6 @@ const nodeImportStyle = {
   create(context) {
     const declarations = []
 
-    // `export { readFileSync } from "node:fs"` and `export * from "node:fs"` are named imports by another name.
     const reexport = (node) => {
       const source = node.source?.value
       if (typeof source !== "string" || !isBuiltin(source) || node.exportKind === "type") return
@@ -102,5 +88,6 @@ export default {
   rules: {
     "node-import-style": nodeImportStyle,
     "no-restricted-disable": noRestrictedDisable,
+    "no-comments": noComments,
   },
 }

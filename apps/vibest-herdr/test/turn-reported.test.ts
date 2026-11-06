@@ -1,4 +1,3 @@
-// A harness turn end is a `turn.reported` event. A check writes one `turn.end` that points at it.
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
@@ -67,12 +66,11 @@ describe("turn.reported", () => {
   )
 
   test(
-    "a report written before the same harness reports ready again still counts",
+    "a report written before the same harness reports ready again (a plugin reload or a new conversation) still counts",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* writeResult(id, "pi", { text: "status: completed\nsummary: before the reload" })
-      // A plugin reload (or a new conversation) in the same harness: a second ready, after the report.
       yield* db.patchLive(id, { ready: yield* Clock.currentTimeMillis })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -101,7 +99,6 @@ describe("turn.reported", () => {
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      // Received 1 s after the frozen now: the next prompt, stamped now, is earlier than the report.
       yield* writeResult(id, "pi", { text: "status: completed\nsummary: first" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)

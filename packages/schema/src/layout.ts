@@ -1,4 +1,3 @@
-// ~/.vibest layout (SPEC §5.1): where the daemon and its clients find each other.
 import { Config, Context, Effect, Layer, Path } from "effect"
 
 export class Layout extends Context.Service<
@@ -7,19 +6,13 @@ export class Layout extends Context.Service<
     readonly home: string
     readonly database: string
     readonly socket: string
-    /** vibestd's HTTP socket (the Claude plugin's poll, ack and hooks). */
     readonly httpSocket: string
-    /** vibestd.pid: the running vibestd's PID and version (DaemonInfo), and its start lock (flock on this file); empty when none runs. */
     readonly daemonInfo: string
     readonly worktrees: string
     readonly projects: string
-    /** vibest.json: the plugin list (plugins.md §4). */
     readonly config: string
-    /** Plugins found by directory listing. */
     readonly plugins: string
-    /** `worktrees/<repository>/<name>`. `name` is the recorded 4-hex leaf, not the session id. */
     readonly allocationWorktree: (repository: string, name: string) => string
-    /** `projects/<project id>`: the project folder, VIBEST_PROJECT_DIR (preferences.md, docs/, memories/, artifacts/). */
     readonly project: (projectId: string) => string
     readonly artifacts: (projectId: string) => string
   }
@@ -43,7 +36,6 @@ export class Layout extends Context.Service<
       })
     })
 
-  /** VIBEST_HOME, default `$HOME/.vibest`. */
   static readonly layer = Layer.effect(
     Layout,
     Effect.gen(function* () {
@@ -56,10 +48,8 @@ export class Layout extends Context.Service<
   )
 }
 
-/** argv that runs this vibest again (`bun <script>` from source, the binary itself when compiled). Provided by the entry. */
 export const VibestCommand = Context.Reference<ReadonlyArray<string>>("vibest/VibestCommand", {
   defaultValue: () => ["vibest"],
 })
 
-/** One POSIX shell word for `s` (ponytail: fish reads backslashes inside quotes as escapes). */
 export const shellQuote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`)

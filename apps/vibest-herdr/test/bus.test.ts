@@ -43,7 +43,6 @@ describe("bus", () => {
         const bus = yield* Bus
         yield* db.insertSession(session, yield* projectOf("r"))
         const sub = yield* bus.subscribe
-        // One transaction: the old process ends, the next one starts.
         yield* db.restartProcess(session.id)
         const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
         assert.deepStrictEqual(
@@ -63,7 +62,6 @@ describe("bus", () => {
         const sql = yield* SqlClient.SqlClient
         yield* db.insertSession(session, yield* projectOf("r"))
         const before = yield* sql<{ n: number }>`SELECT count(*) AS n FROM event`
-        // The restart's process.end is appended, then its process.start fails: the whole transaction rolls back.
         yield* sql.unsafe(`CREATE TEMP TRIGGER refuse BEFORE INSERT ON event WHEN NEW.type = 'process.start'
           BEGIN SELECT RAISE(ABORT, 'refused'); END`)
         const sub = yield* bus.subscribe
@@ -91,7 +89,6 @@ describe("bus", () => {
         const rows = [yield* notice("one"), yield* notice("two")]
         yield* db.claim(rows.map((row) => row.id))
         const sub = yield* bus.subscribe
-        // recoverDelivering is one transaction around inner ones (moveInbox), each publishing nothing itself.
         yield* db.recoverDelivering([], () => "")
         const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
         assert.deepStrictEqual(
