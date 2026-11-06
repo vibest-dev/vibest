@@ -102,9 +102,7 @@ to be a regular file under HOME; an empty Keychains directory is refused. This a
 and harness-choice plugin from starting real Cursor behind its hook fixture. H4 puts a sentinel CLI on PATH
 and fails if it runs. Direct Cursor commands in the E2E World check the login keychain file too.
 When a World changes HOME (including T1), it removes the inherited SSH session indicators; H4 checks
-this in a spawned process. The release-artifacts installation check clears them for its temporary HOME too.
-H2 records its install method, binary, HOME, PATH and Cursor path in `H2-environment.json`; the curl and npm
-verify legs keep the login HOME and isolate `VIBEST_HOME` and harness configuration instead.
+this in a spawned process.
 
 ## Integrations (harness adapters)
 

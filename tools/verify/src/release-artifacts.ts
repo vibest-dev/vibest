@@ -103,11 +103,6 @@ else {
   const env = {
     ...process.env,
     HOME: home,
-    SSH_CLIENT: undefined,
-    SSH_CONNECTION: undefined,
-    SSH_TTY: undefined,
-    SSH2_CLIENT: undefined,
-    SSH2_TTY: undefined,
     VIBEST_HOME: path.join(home, ".vibest"),
     npm_config_cache: path.join(dir, "npm-cache"),
   }

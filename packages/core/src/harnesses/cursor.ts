@@ -2,6 +2,7 @@ import { Effect, FileSystem, Path } from "effect"
 
 import { anthropicOnly, type HarnessAdapter, opt } from "../harness.ts"
 import type { RawModel } from "../models.ts"
+import { hostPlatform } from "../paths.ts"
 
 export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawModel> | undefined => {
   if (!lines.some((l) => l.startsWith("Available models"))) return undefined
@@ -11,10 +12,9 @@ export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawMod
   })
 }
 
-export const cursorEnvironment = (home: string) =>
+const cursorEnvironment = (home: string) =>
   Effect.gen(function* () {
-    const platform = (globalThis as { readonly process?: { readonly platform?: string } }).process?.platform
-    if (platform !== "darwin") return undefined
+    if (hostPlatform !== "darwin") return undefined
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const keychain = path.join(home, "Library", "Keychains", "login.keychain-db")

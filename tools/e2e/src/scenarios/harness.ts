@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { binary, expect, method, Skip, type World } from "../world.ts"
+import { expect, Skip, type World } from "../world.ts"
 
 const HARNESSES = ["claude", "pi", "cursor"] as const
 type Listed = { harness: string; binary: string; available: boolean; error: string | null }
@@ -85,28 +85,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H2",
     title: "harness models: a non-empty list for each installed harness",
-    run: async (w, evidence) => {
-      const env = w.env()
-      await fs.writeFile(
-        path.join(evidence, "H2-environment.json"),
-        JSON.stringify(
-          {
-            method,
-            binary,
-            HOME: env.HOME,
-            PATH: env.PATH,
-            cursor: Bun.which("cursor-agent", { PATH: env.PATH }),
-            loginKeychain:
-              !!env.HOME &&
-              (await fs
-                .stat(path.join(env.HOME, "Library/Keychains/login.keychain-db"))
-                .then((s) => s.isFile())
-                .catch(() => false)),
-          },
-          null,
-          2,
-        ),
-      )
+    run: async (w) => {
       const installed = (await listed(w)).filter((e) => e.available).map((e) => e.harness)
       if (installed.length === 0) throw new Skip("no harness CLI on PATH")
       for (const h of installed) {

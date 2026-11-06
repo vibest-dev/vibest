@@ -6,7 +6,7 @@ const LEGACY_SESSION_DIRECTORY = /^[0-9a-f]{8}$/
 export const ALLOCATION_LEAF = /^[0-9a-f]{4}$/
 export const ALLOCATION_NAME_ATTEMPTS = 16
 
-const hostPlatform = (globalThis as { readonly process?: { readonly platform?: string } }).process?.platform
+export const hostPlatform = (globalThis as { readonly process?: { readonly platform?: string } }).process?.platform
 export const caseFoldedWorktrees = hostPlatform === "darwin" || hostPlatform === "win32"
 
 export const sameWorktreeBucket = (a: string, b: string) =>

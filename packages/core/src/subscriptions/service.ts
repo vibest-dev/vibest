@@ -20,7 +20,7 @@ import { HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { Harness, type HarnessId, isHarnessId } from "../harness.ts"
-import { cursorEnvironment } from "../harnesses/cursor.ts"
+import { cursor } from "../harnesses/cursor.ts"
 import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Keychain } from "../keychain.ts"
 import { claudeAccount, claudeUsage, cursorAccount, cursorUsage, num, piAccount, record } from "./index.ts"
 
@@ -232,7 +232,7 @@ export class Subscriptions extends Context.Service<
 
     const pollCursor = Effect.gen(function* () {
       const cwd = yield* homeDir
-      const problem = yield* cursorEnvironment(cwd)
+      const problem = yield* cursor.checkEnvironment?.(cwd) ?? Effect.succeed(undefined)
       if (problem) return yield* modify("cursor", "", (prev, now) => keep(prev, now, problem, "cursor", ""))
       const status = parseJson(yield* runCli("cursor-agent", ["status", "--format", "json"], cwd))
       if (status === undefined)
