@@ -52,14 +52,15 @@ variable a shell rc does not set, since an rc that exports the names themselves 
 
 ## Admission while draining
 
-Changes are counted at the RPC and HTTP entry until they end, failed or interrupted
-ones too, and refused with `DaemonStopping` once a `Daemon.Stop` drains and after it is accepted, except settlements
-of work already handed out: a hook's turn start (`Prompt`) or turn end (`TurnEnd`) and an inbox ack. Refused, a spawn's
-first turn would never show its pickup proof (its launch then holds the drain open) and a turn end would lose its result. A turn end is one `turn.reported` event, written without the
-session lock; a write that fails fails the request, so the caller sees a failure, not a silent retry. A turn start is
-stamped once, when the hook arrives: `userPrompt` notes the start before it may wait for the session's lock, held
-through a send's whole confirm, and stamps the round with the same time, so the pending send sees its pickup proof
-while it still waits.
+Changes are counted at the RPC and HTTP entry until they end, failed or interrupted ones too, and refused once a
+`Daemon.Stop` drains (`DaemonStopping` over RPC, 503 over HTTP), except settlements of work already handed out: a
+hook's turn start (`Prompt`) or turn end (`TurnEnd`) and an inbox ack. While it drains these are still admitted;
+after the Stop is accepted they are refused too. Refused while draining, a spawn's first turn would never show its
+pickup proof (its launch then holds the drain open) and a turn end would lose its result. A turn end is one
+`turn.reported` event, written without the session lock; a write that fails fails the request, so the caller sees a
+failure, not a silent retry. A turn start is stamped once, when the hook arrives: `userPrompt` notes the start before
+it may wait for the session's lock, held through a send's whole confirm, and stamps the round with the same time, so
+the pending send sees its pickup proof while it still waits.
 
 ## Session requests
 

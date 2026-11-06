@@ -971,11 +971,11 @@ the authentication; roles prevent mistakes, not attackers.
 `CallerGate` on scoped methods (resolves the caller for that request only, from its headers and the stored row; a
 session never declares itself coordinator), and `Admission` on methods that change something (see
 [drain admission](daemon.md#admission-while-draining)). Protocol-only methods take no caller: `Plugins`,
-`Runtimes.Doctor`, `Subscriptions`, `Republish` (put terminal labels back after the runtime started or restarted; answers how many), the hooks'
-`TurnEnd` and `Prompt` (verbatim harness JSON read with the adapter's `turnEnd` / `userPrompt`; unknown ids,
-another harness than the session's, and events the adapter ignores change nothing; a prompt from the main agent or
-from vibest's own delivery is ignored), and `CoordinatorSessionReady` (the conversation id a harness made for a
-coordinator; the last report wins). Of the rest:
+`Runtimes.Doctor`, `Subscriptions`, `Republish` (put terminal labels back after the runtime started or restarted;
+answers how many), the hooks' `TurnEnd` and `Prompt` (verbatim harness JSON read with the adapter's `turnEnd` /
+`userPrompt`; unknown ids, another harness than the session's, and events the adapter ignores change nothing; a
+prompt from the main agent or from vibest's own delivery is ignored), and `CoordinatorSessionReady` (the conversation
+id a harness made for a coordinator; the last report wins). Of the rest:
 
 - `Spawn`: `harness` is optional when a routing plugin picks it; `agent` defaults to general and may not be the
   coordinator; `machine` defaults to `local`; `peer` shares that session's worktree in a split of its pane;
