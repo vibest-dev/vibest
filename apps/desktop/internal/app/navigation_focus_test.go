@@ -40,7 +40,7 @@ func TestNavigationRestoresPaneFocus(t *testing.T) {
 						if focus == "rename" {
 							a.askInWindow("Rename", "", false, func(string) {})
 						} else {
-							a.confirmInWindow("Close pane?", "", func() {}, nil)
+							a.confirmInWindow("Close pane?", "", "Close", func() {}, nil)
 						}
 					})
 					tt.Frame()

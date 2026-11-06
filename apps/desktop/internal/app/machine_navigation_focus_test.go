@@ -173,7 +173,7 @@ func TestNavigationResponsesPreserveIntentionalFocus(t *testing.T) {
 					coreAppAct(a, func() { a.askInWindow(label, "", false, func(string) {}) })
 				case "confirm":
 					label = "Cancel"
-					coreAppAct(a, func() { a.confirmInWindow("Close pane?", "", func() {}, nil) })
+					coreAppAct(a, func() { a.confirmInWindow("Close pane?", "", "Close", func() {}, nil) })
 				}
 				tt.Frame()
 				reportActivity(t, a, f, "b", "working", 5, true)

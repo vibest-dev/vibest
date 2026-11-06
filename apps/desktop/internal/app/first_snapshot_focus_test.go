@@ -82,7 +82,7 @@ func TestFirstSnapshotPreservesLaterModalChoice(t *testing.T) {
 		t.Run(origin, func(t *testing.T) {
 			a, f, tt, release, target := delayedCoreDestination(t, origin)
 			ran := false
-			coreAppAct(a, func() { a.confirmInWindow("Later choice", "", func() { ran = true }, nil) })
+			coreAppAct(a, func() { a.confirmInWindow("Later choice", "", "Close", func() { ran = true }, nil) })
 			tt.Frame()
 			tt.Key(0, ui.KeyTab)
 			if !tt.Focused("Close") {

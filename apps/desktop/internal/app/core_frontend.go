@@ -543,7 +543,7 @@ func (a *App) coreClose(ids []string) {
 	a.coreClosing = slices.Clone(ids)
 	active := true
 	a.coreSelect(nil)
-	a.confirm("Close terminal?", "This ends the selected terminal programs, including any other viewers. Unreported activity is unknown, not idle.", func() {
+	a.confirm("Close terminal?", "This ends the selected terminal programs, including any other viewers. Unreported activity is unknown, not idle.", "Close", func() {
 		if !active {
 			return
 		}

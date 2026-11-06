@@ -21,6 +21,7 @@ type projectWindow struct {
 	dialVibest    func(context.Context, string) (*vibest.Client, error)
 	vibestModel   vibest.Model
 	vibestNote    string
+	vibestCommand []string
 	foldedProject map[string]bool
 	folderPicker  func(start string, run func(string)) bool
 }
@@ -85,6 +86,9 @@ func (a *App) vibestWatch(ctx context.Context, socket string, dial func(context.
 		a.setVibestNote("vibestd " + ping.Version + " cannot stream changes: run vibest update")
 		return false, true
 	}
+	a.mu.Lock()
+	a.vibestCommand = ping.Command
+	a.mu.Unlock()
 	w, err := c.Watch("/")
 	if err != nil {
 		a.setVibestNote(vibestMessage(err))
@@ -162,6 +166,36 @@ func (a *App) projectOpenFolder(dir string) {
 		a.mu.Unlock()
 		return nil
 	})
+}
+
+func (a *App) mainRunning(p vibest.Project) bool {
+	if p.EntrySessionID == nil {
+		return false
+	}
+	s, ok := a.vibestModel.Sessions[*p.EntrySessionID]
+	return ok && s.ExitedAt == nil
+}
+
+func (a *App) projectStartMain(p vibest.Project) {
+	argv := a.vibestCommand
+	if len(argv) == 0 {
+		argv = []string{"vibest"}
+	}
+	runtime := "hc"
+	dir := directory(p)
+	a.vibestDo(func(ctx context.Context, c *vibest.Client) error {
+		_, err := c.Launch(ctx, dir, vibest.LaunchParams{Argv: argv, Runtime: &runtime})
+		return err
+	})
+}
+
+func (a *App) sessionArchive(s vibest.Session) {
+	a.confirm("Archive "+s.Name+"?", "vibest stops this agent and closes its terminal; a checkout with unsaved work is kept.", "Archive", func() {
+		a.vibestDo(func(ctx context.Context, c *vibest.Client) error {
+			_, err := c.Remove(ctx, vibest.RemoveParams{ID: s.ID})
+			return err
+		})
+	}, nil)
 }
 
 func (a *App) focusedPlace() (coreID, cwd string) {
@@ -353,6 +387,9 @@ func (a *App) projectHeader(c *ui.Context, g vibest.Group) {
 		if b.Clicked() {
 			a.projectSelect(p)
 		}
+		if !a.mainRunning(p) && a.iconButton(c.Key("project-start-main/"+id), chrome.IconStart, "Start main agent in "+p.Name()).Clicked() {
+			a.projectStartMain(p)
+		}
 		if a.iconButton(c.Key("project-new-terminal/"+id), chrome.IconPlus, "New terminal in "+p.Name()).Clicked() {
 			a.projectNewTerminal(p)
 			a.returnFocus = true
@@ -400,6 +437,11 @@ func (a *App) sessionRow(c *ui.Context, g vibest.Group, r vibest.Row, focused st
 			a.sessionOpen(g, r)
 			a.returnFocus = true
 		}
+		b.ContextMenu(func(m *ui.Menu) {
+			if m.Item("Archive…").Chosen() {
+				a.sessionArchive(s)
+			}
+		})
 	})
 }
 

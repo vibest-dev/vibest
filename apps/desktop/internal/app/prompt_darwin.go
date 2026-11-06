@@ -84,10 +84,10 @@ func (a *App) ask(title, value string, confirm bool, run func(string)) {
 	}()
 }
 
-func (a *App) confirm(title, detail string, run, cancel func()) {
+func (a *App) confirm(title, detail, action string, run, cancel func()) {
 	win := a.macWin
 	if win == nil {
-		a.confirmInWindow(title, detail, run, cancel)
+		a.confirmInWindow(title, detail, action, run, cancel)
 		return
 	}
 	d := &dialog{run: func(string) { run() }, cancel: cancel}
@@ -98,7 +98,7 @@ func (a *App) confirm(title, detail string, run, cancel func()) {
 			Type:          mygo.MessageWarning,
 			Message:       title,
 			Detail:        detail,
-			Buttons:       []string{"Cancel", "Close"},
+			Buttons:       []string{"Cancel", action},
 			DefaultButton: -1,
 			CancelButton:  0,
 		})

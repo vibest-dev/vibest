@@ -6,8 +6,8 @@ func (a *App) askInWindow(title, value string, confirm bool, run func(string)) {
 	a.openDialog(&dialog{title: title, value: value, confirm: confirm, open: true, run: run})
 }
 
-func (a *App) confirmInWindow(title, detail string, run, cancel func()) {
-	a.openDialog(&dialog{title: title, detail: detail, confirm: true, safe: true, open: true, run: func(string) { run() }, cancel: cancel})
+func (a *App) confirmInWindow(title, detail, action string, run, cancel func()) {
+	a.openDialog(&dialog{title: title, detail: detail, confirm: true, action: action, safe: true, open: true, run: func(string) { run() }, cancel: cancel})
 }
 
 func (a *App) openDialog(d *dialog) {
@@ -79,7 +79,7 @@ func (a *App) dialogView(c *ui.Context) {
 				}
 				ok := "OK"
 				if d.confirm {
-					ok = "Close"
+					ok = d.action
 				}
 				button := ui.PrimaryButton
 				if d.safe {

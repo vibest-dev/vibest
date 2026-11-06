@@ -137,7 +137,7 @@ func TestNotificationNavigationPreservesModalControl(t *testing.T) {
 						a.dialog.cancel = func() { canceled = true }
 					} else {
 						label = "Close"
-						a.confirmInWindow("Close pane?", "", func() { accepted = true }, func() { canceled = true })
+						a.confirmInWindow("Close pane?", "", "Close", func() { accepted = true }, func() { canceled = true })
 					}
 				})
 				d := a.dialog

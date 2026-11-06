@@ -72,6 +72,7 @@ type dialog struct {
 	title, value string
 	detail       string
 	confirm      bool
+	action       string
 	safe         bool
 	open         bool
 	run          func(value string)

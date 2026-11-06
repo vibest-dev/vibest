@@ -15,7 +15,7 @@ func TestFirstSnapshotDismissalRestoresViewerInput(t *testing.T) {
 				choice := "Cancel"
 				coreAppAct(a, func() {
 					if strings.HasPrefix(dismiss, "confirmation") {
-						a.confirmInWindow("Later confirmation", "", func() { ran = true }, nil)
+						a.confirmInWindow("Later confirmation", "", "Close", func() { ran = true }, nil)
 						if dismiss == "confirmation-Close" {
 							choice = "Close"
 						}
@@ -82,7 +82,7 @@ func TestFirstSnapshotDismissalPreservesReplacementDialog(t *testing.T) {
 				if dismiss == "confirm" {
 					a.askInWindow("First rename", "", false, func(string) { replace() })
 				} else {
-					a.confirmInWindow("First confirmation", "", func() {}, replace)
+					a.confirmInWindow("First confirmation", "", "Close", func() {}, replace)
 				}
 			})
 			tt.Frame()

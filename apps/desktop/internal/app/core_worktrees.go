@@ -279,7 +279,7 @@ func (a *App) coreRemoveWorktree(id string) {
 		return
 	}
 	run := a.gitRunner()
-	a.confirmInWindow("Remove worktree checkout?", "Git must accept a non-forced removal. The branch is kept.", func() {
+	a.confirmInWindow("Remove worktree checkout?", "Git must accept a non-forced removal. The branch is kept.", "Close", func() {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
