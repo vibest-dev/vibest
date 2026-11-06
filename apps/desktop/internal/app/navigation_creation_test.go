@@ -170,19 +170,24 @@ func TestNavigationCreationFirstInputWaitsForItsReturnedTarget(t *testing.T) {
 			noCoreData(t, f)
 			releaseAttach, attach := holdCoreMethod(t, f, "terminal.attach t5")
 			release()
-			awaitCoreApp(t, a, func() bool { return !a.corePending && a.coreSelection.Pane != "a" })
+			var id string
+			awaitCoreApp(t, a, func() bool {
+				id = a.coreSelection.Pane
+				return !a.corePending && id != "a" && a.coreState.Programs["t5"] != 0
+			})
 			tt.Frame()
 			<-attach
 			noCoreData(t, f)
 			releaseAttach()
-			id := a.coreSelection.Pane
 			readyCorePane(t, a, tt, id)
 			wantCorePaneInput(t, f, "t5", "x")
 			tt.TypeKeyNative(0, ui.KeyY, "y")
 			wantCorePaneInput(t, f, "t5", "y")
-			if a.coreAttached[id].Address != "t5" {
-				t.Fatal("creation guessed old target")
-			}
+			coreAppAct(a, func() {
+				if a.coreAttached[id].Address != "t5" {
+					t.Fatal("creation guessed old target")
+				}
+			})
 			noCoreData(t, other)
 			noCoreData(t, f)
 		})
