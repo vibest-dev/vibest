@@ -27,6 +27,13 @@ until mkdir "$LOCK" 2>/dev/null; do
 		rm "$LOCK/pid.$holder" 2>/dev/null && rmdir "$LOCK" 2>/dev/null
 		continue
 	fi
+	if [ -z "$holder" ]; then
+		made=$(stat -c %Y "$LOCK" 2>/dev/null || stat -f %m "$LOCK" 2>/dev/null) || made=
+		if [ -n "$made" ] && [ $(($(date +%s) - made)) -gt 30 ]; then
+			rmdir "$LOCK" 2>/dev/null
+			continue
+		fi
+	fi
 	[ $waited -lt 6000 ] || die "$LOCK is held by process ${holder:-unknown}; remove it if no preparation is running"
 	sleep 0.1
 	waited=$((waited + 1))

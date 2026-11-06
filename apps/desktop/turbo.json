@@ -4,6 +4,9 @@
   "tasks": {
     "typecheck": {
       "env": ["GO_VERSION"]
+    },
+    "test": {
+      "passThroughEnv": ["MYGO_GHOSTTY_VT"]
     }
   }
 }

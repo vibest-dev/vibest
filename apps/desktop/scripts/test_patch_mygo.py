@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 
@@ -91,6 +92,27 @@ class PreparationTest(unittest.TestCase):
         self.assertEqual(sum("made third_party/mygo" in out for out in outputs), 1, outputs)
         self.assertIn("// patched", (self.output / "source.go").read_text())
         self.assertFalse((self.root / "third_party/.mygo.lock").exists())
+
+    def test_empty_lock_counts_as_stale_after_30_seconds(self):
+        lock = self.root / "third_party/.mygo.lock"
+        lock.mkdir(parents=True)
+        old = time.time() - 31
+        os.utime(lock, (old, old))
+        self.assertIn("made third_party/mygo", self.prepare())
+        self.assertFalse(lock.exists())
+
+    def test_fresh_empty_lock_is_waited_for(self):
+        lock = self.root / "third_party/.mygo.lock"
+        lock.mkdir(parents=True)
+        run = subprocess.Popen(["sh", "scripts/patch-mygo.sh"], cwd=self.root, env=self.env, text=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        time.sleep(1)
+        self.assertIsNone(run.poll())
+        self.assertFalse(self.output.exists())
+        lock.rmdir()
+        out = run.communicate(timeout=20)[0]
+        self.assertEqual(run.returncode, 0, out)
+        self.assertIn("made third_party/mygo", out)
 
     def test_lock_of_a_dead_process_is_taken_over(self):
         dead = subprocess.Popen(["true"])
