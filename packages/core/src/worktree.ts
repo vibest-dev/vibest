@@ -12,7 +12,7 @@ const gitRaw = (cwd: string, args: ReadonlyArray<string>, input?: string, ok: Re
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const stdin = input === undefined ? {} : { stdin: Stream.make(new TextEncoder().encode(input)) }
-    const handle = yield* spawner.spawn(ChildProcess.make("git", args, { cwd, ...stdin }))
+    const handle = yield* spawner.spawn(ChildProcess.make("git", ["--no-optional-locks", ...args], { cwd, ...stdin }))
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
         Stream.mkString(Stream.decodeText(handle.stdout)),

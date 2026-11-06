@@ -3,7 +3,7 @@ import { Db, type SessionRow } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { allocationNameSource, Sessions } from "@vibest/core/sessions"
-import { repositoryDirectoryName } from "@vibest/core/worktree"
+import { gitState, repositoryDirectoryName } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID } from "@vibest/schema/id"
 import { Effect, FileSystem, Path, type Scope } from "effect"
@@ -239,6 +239,21 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
         (yield* db.listSessions({ stopped: true })).map((row) => row.id),
         before,
       )
+    }),
+  )
+})
+
+describe("reading a worktree's git state", () => {
+  test(
+    "takes no index lock, so a spawn's git worktree add at that moment does not fail on index.lock",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const repo = yield* makeRepository
+      const index = path.join(repo, ".git", "index")
+      const before = (yield* fs.stat(index)).ino
+      yield* gitState(repo)
+      assert.deepStrictEqual((yield* fs.stat(index)).ino, before)
     }),
   )
 })
