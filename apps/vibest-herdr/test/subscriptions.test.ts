@@ -326,6 +326,42 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
     }),
   )
 
+  it.effect("a failed GetHardLimit is an error and does not mark Cursor limited", () =>
+    Effect.gen(function* () {
+      const fake = fakeMachine({
+        installed: ["cursor"],
+        home: yield* home,
+        commands: {
+          "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
+          "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
+        },
+        passwords: { [CURSOR_ACCESS_TOKEN]: CURSOR_SECRET },
+        http: {
+          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage": {
+            status: 200,
+            body: {
+              billingCycleEnd: "1794886804000",
+              planUsage: { totalPercentUsed: 100, autoPercentUsed: 10, apiPercentUsed: 10, limit: 40000 },
+            },
+          },
+          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetHardLimit": { status: 500, body: {} },
+        },
+      })
+      const row = yield* fake.provide(
+        Effect.gen(function* () {
+          const subs = yield* Subscriptions
+          yield* subs.poll
+          return (yield* subs.list).find((entry) => entry.harness === "cursor")!
+        }),
+      )
+      assert.include(row.error ?? "", "GetHardLimit")
+      assert.strictEqual(
+        row.limits.some((limit) => limit.status === "limited"),
+        false,
+      )
+    }),
+  )
+
   const loggedOut = (dir: string) =>
     fakeMachine({
       installed: ["claude"],

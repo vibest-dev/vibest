@@ -86,6 +86,14 @@ describe("cursor", () => {
     ])
     assert.strictEqual(cursorUsage(full, { hardLimit: 50 })[0]?.status, "available")
     assert.deepStrictEqual(cursorUsage({ spendLimitUsage: { limitType: "team" } }), [])
+    const capped = {
+      billingCycleEnd: "1794886804000",
+      planUsage: { totalPercentUsed: 100, autoPercentUsed: 100, apiPercentUsed: 100, limit: 40000 },
+    }
+    assert.deepStrictEqual(
+      cursorUsage(capped).map((limit) => limit.status),
+      ["available", "available", "available"],
+    )
   })
 })
 
