@@ -169,7 +169,7 @@ func TestSelectedTabAndRowShareTheCorner(t *testing.T) {
 		tt.Frame()
 		img := tt.Image()
 		tab, ok := tt.Find("shell")
-		name, ok2 := tt.Find("Repo One")
+		name, ok2 := tt.Find("terminals-name")
 		if !ok || !ok2 {
 			t.Fatalf("%s: tab %v row %v", th.Name, ok, ok2)
 		}

@@ -44,7 +44,7 @@ func wantRemoteNavigation(t *testing.T, a *App, f *coreAppFixture, tt *ui.Tester
 func focusNavigationControl(t *testing.T, tt *ui.Tester, row string) {
 	t.Helper()
 	if strings.HasPrefix(row, "tab/") {
-		focusNavigationControl(t, tt, "machine: Local")
+		focusNavigationControl(t, tt, "Terminals")
 		for range 128 {
 			tt.Key(0, ui.KeyTab)
 			if tt.Focused(row) {
@@ -72,21 +72,24 @@ func focusNavigationControl(t *testing.T, tt *ui.Tester, row string) {
 	}
 }
 func TestMachineNavigationRestoresPaneFocus(t *testing.T) {
-	for _, row := range []string{"machine: Remote", "machine: Local", "Remote Bravo"} {
+	for _, row := range []string{"Remote Alpha", "Repo", "Remote Bravo"} {
 		for _, activation := range []string{"pointer", "enter", "space"} {
 			t.Run(row+"/"+activation, func(t *testing.T) {
 				a, f, tt := coreMachineUI(t)
 				if activation == "pointer" {
-					navigationRelease(t, tt, row)
+					terminalWorkspace(t, tt, row)
 				} else {
-					focusNavigationControl(t, tt, row)
+					focusNavigationControl(t, tt, "Terminals")
 					key := ui.KeyEnter
 					if activation == "space" {
 						key = ui.KeySpace
 					}
 					tt.Key(0, key)
+					if err := tt.ChooseMenuItem(row, "Open"); err != nil {
+						t.Fatal(err)
+					}
 				}
-				if row == "machine: Local" {
+				if row == "Repo" {
 					if !tt.TypeKeyNative(0, ui.KeyX, "x") {
 						t.Fatal("local first native character lost")
 					}
@@ -98,9 +101,9 @@ func TestMachineNavigationRestoresPaneFocus(t *testing.T) {
 						id = "r2"
 					}
 					wantRemoteNavigation(t, a, f, tt, id)
-					navigationRelease(t, tt, "machine: Remote")
+					terminalWorkspace(t, tt, row)
 					wantRemoteNavigation(t, a, f, tt, id)
-					navigationRelease(t, tt, "machine: Local")
+					terminalWorkspace(t, tt, "Repo")
 					tt.TypeKeyNative(0, ui.KeyX, "x")
 					readyCorePane(t, a, tt, "a")
 					wantCorePaneInput(t, f, "a", "x")
@@ -126,12 +129,11 @@ func TestMachineNavigationRestoresPaneFocus(t *testing.T) {
 }
 func TestRapidMachineNavigationKeepsPaneInput(t *testing.T) {
 	a, f, tt := coreMachineUI(t)
-	remembered := "d"
 	local := a.coreViews["a"]
 	for range 5 {
-		navigationRelease(t, tt, "machine: Remote")
-		wantRemoteNavigation(t, a, f, tt, remembered)
-		navigationRelease(t, tt, "Remote Bravo")
+		terminalWorkspace(t, tt, "Remote Alpha")
+		wantRemoteNavigation(t, a, f, tt, "d")
+		terminalWorkspace(t, tt, "Remote Bravo")
 		wantRemoteNavigation(t, a, f, tt, "r2")
 		a.ShowNotice("Remote/r2")
 		tt.Frame()
@@ -140,14 +142,13 @@ func TestRapidMachineNavigationKeepsPaneInput(t *testing.T) {
 		if a.coreSelection.Pane != "r2" {
 			t.Fatal("background output changed local selection")
 		}
-		navigationRelease(t, tt, "machine: Local")
+		terminalWorkspace(t, tt, "Repo")
 		tt.TypeKeyNative(0, ui.KeyX, "x")
 		readyCorePane(t, a, tt, "a")
 		wantCorePaneInput(t, f, "a", "x")
 		if a.coreViews["a"] != local {
 			t.Fatal("machine navigation replaced local VT")
 		}
-		remembered = "r2"
 	}
 	noCoreData(t, f)
 }
@@ -166,7 +167,7 @@ func TestNavigationResponsesPreserveIntentionalFocus(t *testing.T) {
 				label := ""
 				switch focus {
 				case "row":
-					label = "machine: Local"
+					label = "Terminals"
 					focusNavigationControl(t, tt, label)
 				case "rename":
 					label = "Rename"
@@ -203,7 +204,7 @@ func TestNavigationResponsesPreserveIntentionalFocus(t *testing.T) {
 func TestUncachedMachineNavigationPreservesDialogFocus(t *testing.T) {
 	a, f, tt := coreMachineUI(t)
 	release, held := holdCoreMethod(t, f, "terminal.attach remote-A/r")
-	navigationRelease(t, tt, "machine: Remote")
+	terminalWorkspace(t, tt, "Remote Alpha")
 	tt.Frame()
 	select {
 	case <-held:

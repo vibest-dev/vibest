@@ -29,29 +29,34 @@ func blockedLeadSnapshot() json.RawMessage {
 }
 
 func TestWatchFeedsTheSidebarLiveAndANewSnapshotRecoversAfterALoss(t *testing.T) {
-	first := append(watchScript(t, 2), vibestfake.Hangup)
+	first := watchScript(t, 2)
 	second := append(watchScript(t, 0), blockedLeadSnapshot())
 	server := vibestfake.Serve(t, first, second)
 	a, _, tt := coreActivityUIWith(t, func(f *coreAppFixture) { f.vibest = server.Path })
 	awaitCoreApp(t, a, func() bool { _, ok := a.vibestModel.Projects[watchOther]; return ok })
 	tt.Frame()
-	for _, s := range []string{"repo", "other", "main", "do it", "1 working"} {
-		if !tt.HasText(s) {
-			t.Fatalf("%q not shown in %v", s, tt.Texts())
-		}
+	for _, name := range []string{"project: repo", "project: other"} {
+		find(t, tt, name)
 	}
+	absent(t, tt, "main", "do it")
+	if activityDescriptions(tt)["Working"] != 1 {
+		t.Fatal("live working aggregate missing")
+	}
+	server.DropConnections()
 	awaitCoreApp(t, a, func() bool { s, ok := a.vibestModel.Sessions[watchMain]; return ok && s.Name == "lead" })
 	tt.Frame()
-	for _, s := range []string{"lead", "1 waiting", "Waiting for you"} {
-		if !tt.HasText(s) {
-			t.Fatalf("%q not shown after the reconnect: %v", s, tt.Texts())
-		}
+	find(t, tt, "project: repo")
+	absent(t, tt, "project: other", "do it")
+	if activityDescriptions(tt)["Waiting for you"] != 1 {
+		t.Fatal("reconnected waiting aggregate missing")
 	}
-	for _, s := range []string{"other", "do it", "1 working"} {
-		if tt.HasText(s) {
-			t.Fatalf("%q survived the new Snapshot: %v", s, tt.Texts())
-		}
+	if err := tt.Click("project: repo"); err != nil {
+		t.Fatal(err)
 	}
+	finishProjectOpen(t, a, tt)
+	awaitCoreApp(t, a, func() bool { return a.currentProject() == watchProject && !a.corePending })
+	tt.Frame()
+	find(t, tt, "session: lead")
 }
 
 func TestAMissingVibestdIsShown(t *testing.T) {

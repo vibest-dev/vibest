@@ -37,10 +37,22 @@ func TestNavigationHoldsSemanticOrderUntilAcknowledged(t *testing.T) {
 				release, held := holdCoreMethod(t, f, "terminal.attach "+id)
 				switch activation {
 				case "pointer":
-					navigationRelease(t, tt, label)
+					if path == "workspace" {
+						terminalWorkspace(t, tt, label)
+					} else {
+						navigationRelease(t, tt, label)
+					}
 				case "enter":
-					focusNavigationControl(t, tt, label)
-					tt.KeyUnframed(0, ui.KeyEnter)
+					if path == "workspace" {
+						focusNavigationControl(t, tt, "Terminals")
+						tt.Key(0, ui.KeyEnter)
+						if err := tt.ChooseMenuItem(label, "Open"); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						focusNavigationControl(t, tt, label)
+						tt.KeyUnframed(0, ui.KeyEnter)
+					}
 				case "shortcut":
 					tt.KeyUnframed(ui.Cmd, ui.Key2)
 				}

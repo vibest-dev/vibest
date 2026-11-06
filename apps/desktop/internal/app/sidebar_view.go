@@ -1,13 +1,9 @@
 package app
 
 import (
-	"fmt"
 	"time"
-	"vibest-desktop/internal/presentation"
 
 	"vibest-desktop/internal/chrome"
-
-	"vibest-desktop/internal/sidebar"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -15,34 +11,6 @@ import (
 const sidebarSlide = 260 * time.Millisecond
 
 var sidebarMotion = ui.Animation{Duration: sidebarSlide, Ease: ui.CubicBezier(0.25, 1, 0.5, 1)}
-
-func paintMark(c *ui.Context, th *chrome.Theme, glyph string, color ui.Color) {
-	box := ui.Row(c).Size(th.Slot, th.Slot).Shrink(0)
-	box.Draw(func(p *ui.Painter, r ui.Rect) {
-		drawMark(p, r, glyph, color, th.Mark)
-	})
-	box.Children(func() {
-		ui.Text(c, glyph).FontSize(chrome.Step12).TextColor(ui.RGBA(color.R, color.G, color.B, 0)).SingleLine()
-	})
-}
-
-func drawMark(p *ui.Painter, r ui.Rect, glyph string, color ui.Color, size float32) {
-	cx := r.X + r.W/2
-	cy := r.Y + r.H/2
-	half := size / 2
-	switch glyph {
-	case "▾":
-		path := &ui.Path{}
-		path.MoveTo(cx-half, cy-half*0.45).LineTo(cx+half, cy-half*0.45).LineTo(cx, cy+half*0.7).Close()
-		p.FillPath(path, color)
-	case "▸":
-		path := &ui.Path{}
-		path.MoveTo(cx-half*0.5, cy-half).LineTo(cx+half*0.65, cy).LineTo(cx-half*0.5, cy+half).Close()
-		p.FillPath(path, color)
-	default:
-		return
-	}
-}
 
 func clampSidebar(width, windowW float32) float32 {
 	maxW := windowW * chrome.SidebarMaxFrac
@@ -93,28 +61,12 @@ func (a *App) sidebarColumn(c *ui.Context, w float32) {
 		list.Children(func() {
 			ui.Column(c).FillWidth().Padding(0, chrome.Step8, 0, 0).Gap(2).FocusGroup(ui.Vertical).Children(func() {
 				a.projectSection(c)
-				owned := map[string]bool{}
-				for _, w := range a.coreState.Layout.Workspaces {
-					if w.Project != "" {
-						owned[w.ID] = true
-					}
-				}
-				for _, m := range a.machines {
-					a.machineItem(c, m)
-					if m.snap == nil || a.foldedMachines[m.sidebarID()] {
-						continue
-					}
-					for _, e := range sidebar.VisibleEntries(m.snap.Workspaces, a.collapsed[m.id()]) {
-						if owned[m.snap.Workspaces[e.Index].ID] {
-							continue
-						}
-						if m == a.machine {
-							a.workspaceItem(c, m.snap.Workspaces[e.Index], e)
-						} else {
-							a.otherWorkspaceItem(c, m, m.snap.Workspaces[e.Index], e)
-						}
-					}
-				}
+				_, project := a.vibestModel.Projects[a.currentProject()]
+				b := a.rowButton(c, "terminals", !project).FillWidth().Label("Terminals")
+				b.Children(func() {
+					ui.Text(c, "Terminals").Label("terminals-name").FontSize(th.Row.FontSize).TextColor(a.rowInk(th.Row.Pick(!project, b.Hovered(), a.windowFocused)))
+				})
+				b.Menu(a.terminalsMenu)
 			})
 		})
 		ui.Row(c).FillWidth().Padding(0, chrome.Step8, 0, 0).Justify(ui.End).AlignItems(ui.Center).Children(func() {
@@ -186,193 +138,6 @@ func (a *App) rowInk(st chrome.Style) ui.Color {
 		return a.th.SidebarForeground
 	}
 	return st.Foreground
-}
-
-func (a *App) workspaceItem(c *ui.Context, ws presentation.Workspace, e sidebar.Entry) {
-	name := label(ws.Label, ws.Number)
-	on := ws.ID == a.snap.FocusedWorkspaceID
-	row := ui.Row(c).Gap(2).AlignItems(ui.Center)
-	if e.Child {
-		row.Padding(0, 0, 0, a.th.GroupIndent)
-	}
-	row.Children(func() {
-		a.workspaceButton(c, ws, e, name, on)
-	})
-}
-
-func (a *App) toggleFold(m *machine, key string) {
-	if a.collapsed[m.id()] == nil {
-		a.collapsed[m.id()] = map[string]bool{}
-	}
-	a.collapsed[m.id()][key] = !a.collapsed[m.id()][key]
-}
-
-func (a *App) foldControl(c *ui.Context, m *machine, key string, ink ui.Color) {
-	label, mark := a.foldWord(m, key)
-	th := a.th
-	b := ui.ButtonBase(c.Key("repository-disclosure")).Size(th.Slot, th.Slot).Padding(0).Radius(0).Shrink(0).KeepFocus().Role(ui.RoleDisclosure).Expanded(!a.collapsed[m.id()][key]).Label(label)
-	b.Children(func() { paintMark(c, th, mark, ink) })
-	if b.Clicked() {
-		a.toggleFold(m, key)
-	}
-}
-
-func (a *App) workspaceButton(c *ui.Context, ws presentation.Workspace, e sidebar.Entry, name string, on bool) {
-	th := a.th
-	status, description := a.activity(activityScope{workspace: ws.ID})
-	b := a.rowButton(c, ws.ID, on).Grow(1).Description(description)
-	st := th.Row.Pick(on, b.Hovered(), a.windowFocused)
-	ink := a.rowInk(st)
-	b.Children(func() {
-		if e.GroupParent() {
-			a.foldControl(c, a.machine, e.Group, ink)
-		} else {
-			ui.Box(c).Size(th.Slot, th.Slot).Shrink(0).PassThrough()
-		}
-		a.workspaceText(c, ws, name, st.Weight, ink)
-		paintActivity(c, th, status)
-	})
-	if b.Clicked() {
-		a.SelectWorkspace(ws.ID)
-		a.returnFocus = true
-	}
-	linked := ws.Worktree != nil && ws.Worktree.Linked
-	b.ContextMenu(func(m *ui.Menu) { a.sideMenu(m, a.machine, ws.ID, name, e, linked) })
-}
-
-func (a *App) workspaceText(c *ui.Context, ws presentation.Workspace, name string, weight int, ink ui.Color) {
-	th := a.th
-	ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-		ui.Text(c, name).FontSize(th.Row.FontSize).FontWeight(weight).TextColor(ink).SingleLine()
-		if ws.Branch != "" {
-			branch := ws.Branch
-			if len(ws.AheadBehind) == 2 && (ws.AheadBehind[0] > 0 || ws.AheadBehind[1] > 0) {
-				branch += fmt.Sprintf(" ↑%d↓%d", ws.AheadBehind[0], ws.AheadBehind[1])
-			}
-			ui.Text(c, branch).FontSize(th.FontSizeSmall).TextColor(th.Secondary).SingleLine()
-		}
-	})
-}
-
-func (a *App) sideMenu(m *ui.Menu, owner *machine, id, name string, e sidebar.Entry, linked bool) {
-	if m.Item("Refresh Git metadata").Chosen() {
-		a.RefreshRepository(id)
-	}
-	if m.Item("Rename").Chosen() {
-		a.ask("Rename", name, false, func(v string) { a.RenameWorkspace(id, v) })
-	}
-	if e.GroupParent() {
-		key := e.Group
-		fold, _ := a.foldWord(owner, key)
-		if m.Item("Close group").Chosen() {
-			a.CloseWorkspaceGroup(id)
-		}
-		if m.Item("New worktree").Chosen() {
-			a.ask("New worktree", "", false, func(v string) {
-				if v != "" {
-					a.CreateWorktree(id, v)
-				}
-			})
-		}
-		if m.Item("Open worktree...").Chosen() {
-			a.ask("Open worktree", "", false, func(v string) {
-				if v != "" {
-					a.OpenWorktree(id, v)
-				}
-			})
-		}
-		if m.Item(fold).Chosen() {
-			a.toggleFold(owner, key)
-		}
-		return
-	}
-	if m.Item("Close").Chosen() {
-		a.CloseWorkspace(id)
-	}
-	if linked && m.Item("Delete worktree checkout...").Chosen() {
-		a.RemoveWorktree(id)
-	}
-}
-
-func (a *App) foldWord(m *machine, key string) (label, mark string) {
-	if a.collapsed[m.id()][key] {
-		return "Expand", "▸"
-	}
-	return "Collapse", "▾"
-}
-
-func (a *App) machineItem(c *ui.Context, m *machine) {
-	th := a.th
-	id := m.sidebarID()
-	ui.Row(c.Key("machine-header/" + id)).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
-		folded := a.foldedMachines[id]
-		action, glyph := "Collapse machine: ", "▾"
-		if folded {
-			action, glyph = "Expand machine: ", "▸"
-		}
-		disclosure := ui.ButtonBase(c.Key("machine-disclosure/"+id)).Size(th.IconButton, th.IconButton).Padding(0).Radius(th.Radius).KeepFocus().Role(ui.RoleDisclosure).Expanded(!folded).Label(action + m.label()).Tooltip(action + m.label())
-		if disclosure.Hovered() {
-			disclosure.Background(th.Row.Hover.Background)
-		}
-		disclosure.Children(func() { paintMark(c, th, glyph, th.Secondary) })
-		if disclosure.Clicked() {
-			a.foldedMachines[id] = !folded
-		}
-		b := a.rowButton(c, "machine/"+id, false).Grow(1).MinWidth(0).Label("machine: " + m.label())
-		ink := a.rowInk(th.Row.Pick(false, b.Hovered(), a.windowFocused))
-		status := ""
-		switch {
-		case m.connected:
-		case m.err == "":
-			status = "connecting"
-		default:
-			status = "offline"
-			b.Tooltip(m.err)
-		}
-		b.Children(func() {
-			ui.Text(c, m.label()).FontSize(th.Row.FontSize).FontWeight(600).TextColor(ink).Grow(1).MinWidth(0).SingleLine()
-			if status != "" {
-				ui.Text(c, status).FontSize(th.FontSizeSmall).TextColor(th.Secondary).Shrink(0).SingleLine()
-			}
-		})
-		if b.Clicked() {
-			a.coreActivateMachine(m)
-			a.returnFocus = true
-		}
-	})
-}
-
-func (a *App) otherWorkspaceItem(c *ui.Context, m *machine, ws presentation.Workspace, e sidebar.Entry) {
-	th := a.th
-	row := ui.Row(c).FillWidth()
-	if e.Child {
-		row.Padding(0, 0, 0, th.GroupIndent)
-	}
-	row.Children(func() {
-		status, description := m.activity(activityScope{workspace: ws.ID})
-		b := a.rowButton(c, m.id()+"/"+ws.ID, false).Grow(1).Description(description)
-		st := th.Row.Pick(false, b.Hovered(), a.windowFocused)
-		ink := a.rowInk(st)
-		if !m.connected {
-			ink = th.Tertiary
-		}
-		b.Children(func() {
-			if e.GroupParent() {
-				a.foldControl(c, m, e.Group, ink)
-			} else {
-				ui.Box(c).Size(th.Slot, th.Slot).Shrink(0).PassThrough()
-			}
-			a.workspaceText(c, ws, label(ws.Label, ws.Number), st.Weight, ink)
-			paintActivity(c, th, status)
-		})
-		b.ContextMenu(func(menu *ui.Menu) {
-			a.sideMenu(menu, m, ws.ID, label(ws.Label, ws.Number), e, ws.Worktree != nil && ws.Worktree.Linked)
-		})
-		if b.Clicked() {
-			a.showWorkspaceOf(m, ws.ID)
-			a.returnFocus = true
-		}
-	})
 }
 
 func toggleX(c *ui.Context) float32 { return c.TitleBar().Left + chrome.Step8 }

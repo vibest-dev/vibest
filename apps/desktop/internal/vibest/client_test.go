@@ -276,7 +276,7 @@ func TestWatchReplaysTheRecordedSnapshotAndDeltas(t *testing.T) {
 	}
 	groups := m.Groups(nil)
 	got := []string{shape(groups[0]), shape(groups[1])}
-	if got[0] != "other waiting=0 working=0:" || got[1] != "repo waiting=0 working=1: 00000000-0000-4000-8000-000000000002/0* 00000000-0000-4000-8000-000000000003/1" {
+	if got[0] != "other:" || got[1] != "repo: 00000000-0000-4000-8000-000000000002* 00000000-0000-4000-8000-000000000003" {
 		t.Fatalf("%q", got)
 	}
 	if m.Sessions["00000000-0000-4000-8000-000000000003"].Name != "renamed" {

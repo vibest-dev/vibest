@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"vibest-desktop/internal/chrome"
 	"vibest-desktop/internal/core"
+	"vibest-desktop/internal/vibest"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -440,7 +441,7 @@ func TestPaneStyleResizeFollowsTheSettledShell(t *testing.T) {
 	}
 }
 
-var sidebarNames = []string{"sidebar", "sidebar-grip", "workspace-list", "Theme", "Hide sidebar", "Show sidebar", "new-workspace", "machine: Local", "Repo"}
+var sidebarNames = []string{"sidebar", "sidebar-grip", "workspace-list", "Theme", "Hide sidebar", "Show sidebar", "new-workspace", "Projects", "Terminals"}
 
 func sidebarRects(tt *ui.Tester) map[string]ui.Rect {
 	out := map[string]ui.Rect{}
@@ -479,30 +480,25 @@ func sidebarPixels(tt *ui.Tester, r ui.Rect, scale float32) []byte {
 	return b
 }
 
-func fillWorkspaces(t *testing.T, a *App) {
-	coreAppAct(a, func() {
-		a.coreEdit(func(l *core.Layout) error {
-			for i := range 24 {
-				p := core.NewPane(core.TerminalRef{CoreID: l.CoreID, Address: fmt.Sprintf("extra-%d", i)})
-				l.AddWorkspace(fmt.Sprintf("Extra %d", i), "", "", p)
-			}
-			return nil
-		})
-	})
-	awaitCoreApp(t, a, func() bool { return len(a.coreState.Layout.Workspaces) == 25 })
+func fillProjects(t *testing.T, a *App) {
+	var projects []vibest.Project
+	for i := range 24 {
+		projects = append(projects, vibest.Project{ID: fmt.Sprintf("extra-%d", i), Directory: ptrTo(fmt.Sprintf("/Extra %d", i))})
+	}
+	applyVibest(a, vibest.Event{Tag: "Snapshot", Projects: projects})
 }
 
 func TestPaneStyleLeavesTheSidebarStill(t *testing.T) {
 	const scale float32 = 1.25
 	app, _, tt := coreShellFixture(t, 1000, 640, scale, false, "single")
 	app.sideWidth = 280
-	fillWorkspaces(t, app)
+	fillProjects(t, app)
 	tt.Frame()
 	side, grip := find(t, tt, "sidebar"), find(t, tt, "sidebar-grip")
 	if side.X != 0 || side.Y != 0 || side.Y+side.H != 640 || grip.X != side.X+side.W || grip.H != side.H {
 		t.Fatalf("sidebar %v grip %v, want the full window", side, grip)
 	}
-	disc, theme := find(t, tt, "Collapse machine: Local"), find(t, tt, "Theme")
+	disc, theme := find(t, tt, "Terminals"), find(t, tt, "Theme")
 	if !nearDip(disc.X-side.X, chrome.Step8) || !nearDip(side.X+side.W-(theme.X+theme.W), chrome.Step8) {
 		t.Fatalf("insets disclosure %v theme %v sidebar %v", disc, theme, side)
 	}
@@ -570,7 +566,7 @@ func TestPaneStyleLeavesTheSidebarStill(t *testing.T) {
 	}
 
 	slide, _, ts := coreShellFixture(t, 1000, 640, scale, false, "single")
-	fillWorkspaces(t, slide)
+	fillProjects(t, slide)
 	slide.sideScroll.Y = 1e9
 	ts.Frame()
 	y := slide.sideScroll.Y
@@ -579,14 +575,14 @@ func TestPaneStyleLeavesTheSidebarStill(t *testing.T) {
 	}
 	ts.Advance(sidebarMotion.Duration / 3)
 	mid := find(t, ts, "sidebar")
-	inset := find(t, ts, "Repo").X - mid.X
+	inset := find(t, ts, "Terminals").X - mid.X
 	useStyle(t, slide, paneCompact)
 	ts.Frame()
 	now := find(t, ts, "sidebar")
 	if now.Y != mid.Y || now.H != mid.H || now.W-mid.W > sideGutter || mid.W-now.W > sideGutter {
 		t.Fatalf("style moved the sliding sidebar %v from %v", now, mid)
 	}
-	if got := find(t, ts, "Repo").X - now.X; !nearDip(got, inset) || slide.sideScroll.Y != y {
+	if got := find(t, ts, "Terminals").X - now.X; !nearDip(got, inset) || slide.sideScroll.Y != y {
 		t.Fatalf("inset %v want %v, scroll %v want %v", got, inset, slide.sideScroll.Y, y)
 	}
 }

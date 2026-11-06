@@ -90,7 +90,11 @@ func TestNavigationResolvedPaneNeedsCommittedSurface(t *testing.T) {
 					}
 					f.attachData = map[string]string{"terminal.attach " + id: mode + "Core fixture ready"}
 				})
-				navigationRelease(t, tt, row)
+				if scope == "workspace" {
+					terminalWorkspace(t, tt, row)
+				} else {
+					navigationRelease(t, tt, row)
+				}
 				tt.Type("x")
 				tt.Key(0, ui.KeyEnter)
 				awaitCoreApp(t, a, func() bool { return a.coreViews[id] != nil })

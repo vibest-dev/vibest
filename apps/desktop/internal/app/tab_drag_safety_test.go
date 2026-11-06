@@ -84,7 +84,7 @@ func finishTabGesture(t *testing.T, tt *ui.Tester, finish, source string) {
 
 func TestTabDragRetainsControlKeyboardOwner(t *testing.T) {
 	for _, style := range []string{paneCompact, paneComfortable} {
-		for _, owner := range []string{"machine: Local", "tab/t1"} {
+		for _, owner := range []string{"Terminals", "tab/t1"} {
 			for _, finish := range []string{"move", "end", "self", "outside", "escape"} {
 				t.Run(style+owner+finish, func(t *testing.T) {
 					a, f, _, tt := tabDragFixture(t, style)

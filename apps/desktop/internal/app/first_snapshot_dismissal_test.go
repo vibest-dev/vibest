@@ -62,10 +62,10 @@ func TestFirstSnapshotDismissalRestoresViewerInput(t *testing.T) {
 					t.Fatal("first Cmd+K did not clear current VT locally")
 				}
 				noLegacyNavigation(t, f)
-				focusNavigationControl(t, tt, "machine: Local")
+				focusNavigationControl(t, tt, "Terminals")
 				reportActivity(t, a, f, "a", "idle", 1, true)
 				tt.Frame()
-				if a.returnFocus || !tt.Focused("machine: Local") {
+				if a.returnFocus || !tt.Focused("Terminals") {
 					t.Fatal("dismissal repeated its one-shot handoff")
 				}
 			})

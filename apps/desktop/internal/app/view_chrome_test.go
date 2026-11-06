@@ -28,7 +28,7 @@ func TestChromeShell(t *testing.T) {
 		t.Fatal("frame is blank")
 	}
 	joined := strings.Join(tt.Texts(), "\n")
-	for _, want := range []string{"ReHerdr", "other", "shell", "logs", "new-workspace"} {
+	for _, want := range []string{"Projects", "Terminals", "shell", "logs", "new-workspace"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %q in\n%s", want, joined)
 		}
@@ -52,11 +52,11 @@ func TestChromeShell(t *testing.T) {
 	if !nearColor(side, chrome.Light.Sidebar) {
 		t.Errorf("sidebar %v, want %v", side, chrome.Light.Sidebar)
 	}
-	name, ok := tt.Find("ReHerdr")
+	name, ok := tt.Find("Terminals")
 	if !ok {
 		t.Fatal("selected workspace not found")
 	}
-	sel := img.RGBAAt(int(name.X)-6, int(name.Y+name.H/2))
+	sel := img.RGBAAt(int(name.X)+4, int(name.Y+name.H/2))
 	if !nearColor(sel, chrome.Light.Row.Active.Background) {
 		t.Errorf("selection %v at %v, want %v", sel, name, chrome.Light.Row.Active.Background)
 	}
@@ -94,15 +94,11 @@ func TestChromeShell(t *testing.T) {
 		t.Errorf("container %v panes %v, want the panes to fill the container", box, panes)
 	}
 
-	if err := tt.Click("other"); err != nil {
-		t.Fatal(err)
-	}
+	terminalWorkspace(t, tt, "other")
 	if app.coreSelection.Workspace != "w2" {
 		t.Fatal("workspace click failed")
 	}
-	if err := tt.Click("ReHerdr"); err != nil {
-		t.Fatal(err)
-	}
+	terminalWorkspace(t, tt, "ReHerdr")
 	if err := tt.Click("logs"); err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +220,7 @@ func TestClampSidebar(t *testing.T) {
 	}
 }
 
-func TestRunningMarkShowsOnAWorkingWorkspace(t *testing.T) {
+func TestRunningMarkShowsOnAWorkingTab(t *testing.T) {
 	a, f, tt := coreActivityUI(t)
 	reportActivity(t, a, f, "a", "working", 0, true)
 	reportActivity(t, a, f, "b", "idle", 0, true)
@@ -233,7 +229,7 @@ func TestRunningMarkShowsOnAWorkingWorkspace(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		tt.SetDark(dark)
 		tt.Frame()
-		name := find(t, tt, "Repo")
+		name := find(t, tt, "Build")
 		spinner := find(t, tt, "activity: working")
 		if spinner.X <= name.X+name.W || spinner.W != a.th.Slot || spinner.H != a.th.Slot {
 			t.Fatal("activity not trailing", name, spinner)
@@ -566,55 +562,10 @@ func TestSidebarMenus(t *testing.T) {
 		}
 	})
 	tt.Frame()
-	if err := tt.RightClick("rparent"); err != nil {
+	if err := tt.Click("Terminals"); err != nil {
 		t.Fatal(err)
 	}
-	if err := tt.ChooseMenuItem("Collapse"); err != nil {
-		t.Fatal(err)
-	}
-	if !a.collapsed["Remote"]["/r/.git"] || a.collapsed[""]["/r/.git"] {
-		t.Fatal("background machine menu folded wrong owner")
-	}
-	absent(t, tt, "rchild")
-	find(t, tt, "lchild")
-	tt.RightClick("rparent")
-	if err := tt.ChooseMenuItem("Expand"); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range []struct {
-		row    string
-		linked bool
-	}{{"rnotes", false}, {"rsolo", false}, {"rorphan", true}} {
-		if err := tt.RightClick(c.row); err != nil {
-			t.Fatal(err)
-		}
-		if slices.Contains(tt.Menu(), "Delete worktree checkout...") != c.linked {
-			t.Fatal("delete offered for wrong metadata", c.row)
-		}
-		for _, item := range []string{"Rename", "Close"} {
-			if !slices.Contains(tt.Menu(), item) {
-				t.Fatal("missing row action", item)
-			}
-		}
-		tt.CloseMenu()
-	}
-	tt.RightClick("lparent")
-	for _, item := range []string{"Rename", "Close group", "New worktree", "Open worktree...", "Collapse"} {
-		if !slices.Contains(tt.Menu(), item) {
-			t.Fatal("missing group action", item)
-		}
-	}
-	if err := tt.ChooseMenuItem("Collapse"); err != nil {
-		t.Fatal(err)
-	}
-	if !a.collapsed[""]["/r/.git"] {
-		t.Fatal("collapse did not fold local group")
-	}
-	tt.RightClick("lparent")
-	if !slices.Contains(tt.Menu(), "Expand") || slices.Contains(tt.Menu(), "Collapse") {
-		t.Fatal("folded menu state")
-	}
-	if err := tt.ChooseMenuItem("New worktree"); err != nil {
+	if err := tt.ChooseMenuItem("lparent", "New worktree"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Type("branch")
@@ -637,8 +588,8 @@ func TestSidebarMenus(t *testing.T) {
 	}
 	coreAppAct(a, func() { a.ShowPane(a.coreState.Layout.Workspaces[0].Tabs[0].Root.Pane.ID) })
 	readyCorePane(t, a, tt, a.coreSelection.Pane)
-	tt.RightClick("rnotes")
-	if err := tt.ChooseMenuItem("Close"); err != nil {
+	tt.Click("Terminals")
+	if err := tt.ChooseMenuItem("rnotes", "Close"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -652,7 +603,7 @@ func TestSidebarMenus(t *testing.T) {
 func TestSelectionKeepsSidebarGeometry(t *testing.T) {
 	newsprint, _ := chrome.Builtin("Newsprint")
 	themes := []*chrome.Theme{chrome.Light, newsprint, chrome.Dark, chrome.Ghostty(chrome.Light.Terminal)}
-	rows := []string{"repo", "main", "feat", "feat-x", "plain", "other", "dev", "new-workspace"}
+	rows := []string{"Projects", "Terminals", "new-workspace"}
 	tabs := []string{"tab/t1", "shell", "tab/t2", "logs"}
 	for _, th := range themes {
 		for _, scale := range []float32{1, 1.25, 1.5, 2} {
@@ -693,48 +644,6 @@ func TestSelectionKeepsSidebarGeometry(t *testing.T) {
 					}
 				}
 			}
-		}
-	}
-}
-
-func TestSelectedMachineRowKeepsItsHeight(t *testing.T) {
-	for _, th := range []*chrome.Theme{chrome.Light, chrome.Dark} {
-		a, _, tt := coreMachineUI(t)
-		coreAppAct(a, func() { a.themes.light = th; a.themes.dark = th })
-		tt.SetDark(th.Dark)
-		tt.Frame()
-		on, _ := tt.Find("machine: Local")
-		off, _ := tt.Find("machine: Remote")
-		if on.H != off.H || on.W != off.W {
-			t.Errorf("%s: selected machine row %v, other %v", th.Name, on, off)
-		}
-	}
-}
-
-func TestSelectedRowEdge(t *testing.T) {
-	th := chrome.Light
-	for _, scale := range []float32{1, 2} {
-		app, tt := selectionApp(t, th, scale)
-		coreAppAct(app, func() { app.SelectWorkspace("ws3") })
-		tt.Frame()
-		img := tt.Image()
-		name, _ := tt.Find("plain")
-		x := int((name.X + name.W - 4) * scale)
-		y := int((name.Y + name.H/2) * scale)
-		for nearColor(img.RGBAAt(x, y-1), th.Row.Active.Background) {
-			y--
-		}
-		edge, side := img.RGBAAt(x, y-1), img.RGBAAt(x, y-1-int(scale))
-		if !nearColor(edge, th.Row.Active.Border) || !nearColor(side, th.Sidebar) {
-			t.Errorf("x%v top edge %v over %v, want %v over %v", scale, edge, side, th.Row.Active.Border, th.Sidebar)
-		}
-		top := y - int(scale)
-		left := x
-		for !nearColor(img.RGBAAt(left-1, y+int(2*scale)), th.Sidebar) {
-			left--
-		}
-		if corner := img.RGBAAt(left, top); colorDist(corner, th.Sidebar) >= colorDist(edge, th.Sidebar) {
-			t.Errorf("x%v corner %v as far from the sidebar as the edge %v: not rounded", scale, corner, edge)
 		}
 	}
 }

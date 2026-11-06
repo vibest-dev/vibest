@@ -17,7 +17,7 @@ func TestDispatchedNavigationRestoresPaneFocus(t *testing.T) {
 			t.Run(action.name+"/"+origin, func(t *testing.T) {
 				a, f, tt := coreActivityUI(t)
 				if origin == "control" {
-					focusNavigationControl(t, tt, "machine: Local")
+					focusNavigationControl(t, tt, "Terminals")
 				}
 				switch {
 				case action.button != "":
@@ -70,7 +70,7 @@ func TestHoveredPaneMenuNavigationRestoresFocus(t *testing.T) {
 	a, f, tt := coreActivityUI(t)
 	awaitCorePaintWithoutOwnership(t, a, tt, "b")
 	old := a.coreViews["a"]
-	focusNavigationControl(t, tt, "machine: Local")
+	focusNavigationControl(t, tt, "Terminals")
 	if err := tt.RightClick("terminal/b"); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestNotificationNavigationRestoresPaneFocus(t *testing.T) {
 	for _, id := range []string{"c", "rohan/r"} {
 		t.Run(id, func(t *testing.T) {
 			a, f, tt := noticeCoreUI(t)
-			focusNavigationControl(t, tt, "machine: Local")
+			focusNavigationControl(t, tt, "Terminals")
 			a.ShowNotice(id)
 			tt.Frame()
 			if id == "c" {
@@ -170,8 +170,8 @@ func TestUndispatchedNavigationPreservesFocus(t *testing.T) {
 					f.layout.Workspaces[0].Tabs = f.layout.Workspaces[0].Tabs[:1]
 				}
 			})
-			focusNavigationControl(t, tt, "machine: Local")
-			label := "machine: Local"
+			focusNavigationControl(t, tt, "Terminals")
+			label := "Terminals"
 			switch path {
 			case "unbound-number":
 				tt.Key(ui.Cmd, ui.Key9)

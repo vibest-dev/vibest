@@ -71,7 +71,7 @@ func TestNavigationCancellationOwnership(t *testing.T) {
 					t.Fatal("modal lost intentional input")
 				}
 			case "control":
-				focusNavigationControl(t, tt, "machine: Local")
+				focusNavigationControl(t, tt, "Terminals")
 				tt.Frame()
 			case "attach-error":
 				f.mu.Lock()

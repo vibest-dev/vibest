@@ -103,7 +103,7 @@ func (a *App) sessionTerminal(s vibest.Session) (core.Terminal, bool) {
 }
 
 func (a *App) sessionStatus(s vibest.Session) string {
-	if s.Status == "working" || s.Status == "blocked" {
+	if s.Status == "working" || s.Status == "blocked" || s.Status == "error" {
 		return s.Status
 	}
 	t, ok := a.sessionTerminal(s)

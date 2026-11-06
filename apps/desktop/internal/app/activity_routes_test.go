@@ -8,13 +8,13 @@ import (
 )
 
 func TestActivityExplicitVisitRoutes(t *testing.T) {
-	for _, route := range []string{"workspace-pointer", "workspace-indicator", "workspace-enter", "workspace-space", "workspace-other", "tab-pointer", "tab-enter", "tab-space", "tab-number", "tab-next", "notification", "pane-reactivation"} {
+	for _, route := range []string{"workspace-pointer", "workspace-enter", "workspace-space", "workspace-other", "tab-pointer", "tab-enter", "tab-space", "tab-number", "tab-next", "notification", "pane-reactivation"} {
 		t.Run(route, func(t *testing.T) {
 			a, f, tt := coreActivityUI(t)
 			want := map[string]uint64{}
 			row, target := "", "a"
 			switch route {
-			case "workspace-pointer", "workspace-indicator", "workspace-enter", "workspace-space":
+			case "workspace-pointer", "workspace-enter", "workspace-space":
 				row = "Repo"
 				want = map[string]uint64{"a": 1, "b": 2, "c": 3}
 			case "tab-pointer", "tab-enter", "tab-space", "tab-number":
@@ -33,9 +33,8 @@ func TestActivityExplicitVisitRoutes(t *testing.T) {
 				want = map[string]uint64{"a": 1}
 			}
 			switch route {
-			case "workspace-indicator":
-				r := sidebarActivity(t, tt, "Repo")
-				tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+			case "workspace-pointer", "workspace-other":
+				terminalWorkspace(t, tt, row)
 			case "tab-number":
 				tt.Key(ui.Cmd, ui.Key1)
 			case "tab-next":
@@ -47,13 +46,22 @@ func TestActivityExplicitVisitRoutes(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "workspace-enter", "workspace-space", "tab-enter", "tab-space":
-				focusNavigationControl(t, tt, row)
+				control := row
+				if route == "workspace-enter" || route == "workspace-space" {
+					control = "Terminals"
+				}
+				focusNavigationControl(t, tt, control)
 				wantCoreSeen(t, a, map[string]uint64{})
 				key := ui.KeyEnter
 				if route == "workspace-space" || route == "tab-space" {
 					key = ui.KeySpace
 				}
 				tt.Key(0, key)
+				if control == "Terminals" {
+					if err := tt.ChooseMenuItem(row, "Open"); err != nil {
+						t.Fatal(err)
+					}
+				}
 			default:
 				if err := tt.Click(row); err != nil {
 					t.Fatal(err)

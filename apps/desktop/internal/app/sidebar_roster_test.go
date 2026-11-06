@@ -11,9 +11,8 @@ func TestSidebarOmitsAgentsRoster(t *testing.T) {
 		t.Fatal("fixture lacks local reports or pinned remote unknown state")
 	}
 	tt.Frame()
-	find(t, tt, "local repo")
-	find(t, tt, "remote repo")
-	find(t, tt, "machine: Remote")
+	find(t, tt, "Terminals")
+	absent(t, tt, "local repo", "remote repo", "machine: Remote")
 	find(t, tt, "new-workspace")
 	absent(t, tt, "Agents", "local agent · local task", "remote agent · remote task")
 	for _, txt := range tt.Texts() {

@@ -1,11 +1,13 @@
 # Navigation input ownership
 
-Machine/workspace/tab/pane activation is consumed before native text eligibility and
+Project, Terminals-menu workspace, tab and pane activation is consumed before native text eligibility and
 routing. The tracked MyGo patch drains pending activation through the existing
 surface-frame path before the next physical intent or terminal input entry. This
 covers keyDown, direct text commits and the production SurfaceCommand menu-paste
 route, even when text is already active. Complete clicks resolve chronologically,
 not in the order their controls happen to be visited by View.
+
+Project and unplaced-terminal opening reuse existing pane identities when adopting terminal references into the desktop-owned layout. Retained local input is bound to the requested reference and its current program, never the old pane or a newly selected project. The adoption worker queues its final selection for the UI frame; it cannot cancel terminal input concurrently with painting. Adoption cannot grant remote input eligibility. Empty projects hide the previous pane and leave input blocked until an explicit destination is chosen.
 
 An unacknowledged destination owns one temporary native input context per window.
 It retains semantic terminal events, not bytes encoded for the old pane's mode.

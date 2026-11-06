@@ -1,24 +1,58 @@
-# Sidebar machine groups
+# Flat project sidebar
 
-- Machine headers are neutral navigation controls, not selected Workspace cards.
-  The selected Workspace alone keeps its existing selection fill/border. Keyboard
-  focus uses the existing control focus ring.
-- The chevron is a separate disclosure with expanded/collapsed accessibility
-  state. Pointer clicks keep pane focus; Enter/Space operate the disclosure while
-  it has keyboard focus. Up from a machine title reaches its disclosure within
-  the existing vertical focus group.
-- A disclosure only hides/shows that machine's Workspace rows.
-  Its title and connecting/offline status stay visible, even without a snapshot
-  and even for a single remaining machine. No connection, session, machine or Workspace selection changes.
-- Clicking/activating the title still shows that machine, including an offline
-  or unloaded machine. Activating the current title also returns focus to Panes.
-  Title navigation does not toggle the disclosure.
-- Groups start expanded. Collapse intent is window-local, like repository folds;
-  there is no new disk setting. Keys are `local` and `remote/<machine-id>`, never names.
-  Catalog renames, snapshots, reconnects and normal rerenders retain that intent;
-  removing/retargeting a machine forgets its fold. Repository/worktree folds stay
-  independent and survive closing/reopening their enclosing machine group.
-- Explicit navigation/notifications and focus changes from another client do not
-  reopen an intentionally collapsed group. Its header remains available; use its
-  disclosure to reveal the current Workspace. This avoids asynchronous server
-  responses unexpectedly undoing a user's collapse.
+The sidebar has exactly one row per vibestd project: its name and one aggregate
+agent status. There are no disclosure buttons, nested sessions, repository folds,
+or machine/workspace trees. Projects without a directory use their ID as the name.
+
+Status comes from vibestd Watch and the existing shared seen rule, not from Core's
+agent-status report. Priority is error, waiting for you, working, then unseen done;
+otherwise the slot is empty. The status is also an accessibility description.
+Selecting a project does not mark every agent seen: only agents actually visited
+or drawn in the focused window use the existing acknowledgment rules.
+
+## Agent tabs
+
+Selecting a project shows its main agents and subagents as tabs above the content.
+Session names and parent relationships come from Watch. Main agents and their
+subagents stay adjacent, with pinned sessions first among siblings. Number and
+previous/next-tab shortcuts follow that displayed order, including agent panes
+that share an existing Core tab.
+
+Watch's project/session ownership is authoritative. Core terminals without a
+Watch session join a project through `vibest.project` or `herdr.space`;
+`herdr.tab` gives their tab grouping/order and fallback name. Existing
+project-owned layout panes remain available too. The desktop adopts existing
+terminal references into its own layout, retaining pane IDs and leaving other
+clients' documents and presentation labels alone. It never duplicates a terminal
+reference. A later session update adds a tab, not an automatic focus change.
+
+Opening a project or an unplaced terminal retains first input for that specific
+local terminal and program until its fitted paint is ready. Replacement intents,
+program changes and reconnects cannot replay it into another pane. Remote tabs
+remain read-only, including while they are being adopted. An empty project hides
+the previous project's terminal and cannot send input to it.
+
+## Actions
+
+- Right-click a project for **Open**, **Start main agent**, and **New terminal**.
+  Starting a main agent is disabled while one is running; creation needs a project
+  directory. The content-area plus and Cmd-T create a terminal in the selected project.
+- Right-click an agent tab for **Open**, **Pin/Unpin**, and **Stop…** (main agent)
+  or **Archive…** (subagent). Stop/archive retain their confirmation and vibestd RPCs.
+- Every agent also has an action submenu in its project's context menu. This keeps
+  actions reachable for overflowed tabs and sessions in another runtime/Core;
+  opening those sessions explains that their terminal is not in this Core rather
+  than borrowing a local terminal with the same address.
+- Pinning writes the existing `herdr.pinned` label; there is no separate desktop pin store.
+
+## Unprojected terminals
+
+**Terminals** is the single sidebar location for Core terminals outside known
+projects. Its menu lists existing workspaces and unplaced live terminals, including
+remote terminals. Choose a workspace's **Open**, or **Open <address>** for an
+unplaced terminal. Unrecognized project labels do not make a terminal inaccessible.
+
+Workspace submenus retain rename/close, Git metadata refresh and worktree actions.
+Once opened, ordinary Core tabs and pane menus retain their existing controls,
+including confirmation before closing terminals. New terminal in this menu, Cmd-N,
+and the window's new-workspace button create an unprojected terminal.

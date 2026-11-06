@@ -163,7 +163,7 @@ func TestNavigationSessionLossClearsApplicationPreedit(t *testing.T) {
 		t.Fatal("missing VT preedit", got)
 	}
 	noCoreData(t, f)
-	focusNavigationControl(t, tt, "machine: Local")
+	focusNavigationControl(t, tt, "Terminals")
 	if got := vtView(t, a.coreViews["a"]).FieldByName("preedit").String(); got != "" {
 		t.Fatal("preedit outlived owner", got)
 	}

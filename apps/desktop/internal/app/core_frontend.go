@@ -309,12 +309,6 @@ func (a *App) coreChrome() {
 			})
 		}
 	}
-	for id, m := range previous {
-		if groups[id] == nil {
-			delete(a.foldedMachines, m.sidebarID())
-			delete(a.collapsed, id)
-		}
-	}
 	a.machines, a.machine = machines, selected
 }
 

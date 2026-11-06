@@ -53,13 +53,13 @@ func TestTabDragPendingEscapeKeepsTerminalPreedit(t *testing.T) {
 }
 func TestTabDragPendingEscapeKeepsControlOwner(t *testing.T) {
 	a, f, _, tt := tabDragFixture(t, paneComfortable)
-	focusNavigationControl(t, tt, "machine: Local")
+	focusNavigationControl(t, tt, "Terminals")
 	s := find(t, tt, "tab/t2")
 	tt.Press(s.X+20, s.Y+14)
 	tt.KeyUnframed(0, ui.KeyEscape)
 	tt.ReleaseUnframed(s.X+20, s.Y+14)
 	tt.Frame()
-	if !tt.Focused("machine: Local") || a.activeTabDrag != nil {
+	if !tt.Focused("Terminals") || a.activeTabDrag != nil {
 		t.Fatal("cancel displaced control owner")
 	}
 	tabDragOnly(t, a, f, 0)

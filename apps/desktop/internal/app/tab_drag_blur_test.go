@@ -4,7 +4,7 @@ import "testing"
 
 func TestTabDragBlurRecoversFirstGesture(t *testing.T) {
 	for _, style := range []string{paneCompact, paneComfortable} {
-		for _, owner := range []string{"terminal/p-t1", "machine: Local"} {
+		for _, owner := range []string{"terminal/p-t1", "Terminals"} {
 			t.Run(style+owner, func(t *testing.T) {
 				a, f, _, tt := tabDragFixture(t, style)
 				if owner != "terminal/p-t1" {

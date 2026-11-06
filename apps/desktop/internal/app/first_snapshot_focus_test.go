@@ -124,10 +124,10 @@ func TestFirstSnapshotConsumesNavigationFocusOnce(t *testing.T) {
 			}
 			tt.Type("first")
 			wantCoreInput(t, f, "first")
-			focusNavigationControl(t, tt, "machine: Local")
+			focusNavigationControl(t, tt, "Terminals")
 			reportActivity(t, a, f, "a", "working", 1, true)
 			tt.Frame()
-			if a.returnFocus || !tt.Focused("machine: Local") {
+			if a.returnFocus || !tt.Focused("Terminals") {
 				t.Fatal("later update repeated focus handoff")
 			}
 		})

@@ -51,7 +51,9 @@ func TestActivityReportMissingAtAcknowledgmentIsConservative(t *testing.T) {
 }
 func TestActivityContextMenuDoesNotVisit(t *testing.T) {
 	a, _, tt := coreActivityUI(t)
-	status := sidebarActivity(t, tt, "Repo")
+	applyVibest(a, shippingSnapshot(vibestSession("main", "lead", "p1", "done", "a", nil, 1)))
+	tt.Frame()
+	status := sidebarActivity(t, tt, "Shipping")
 	tt.RightClickAt(status.X+status.W/2, status.Y+status.H/2)
 	if len(tt.Menu()) == 0 {
 		t.Fatal("passive activity swallowed context menu")

@@ -16,6 +16,16 @@ func navigationWait(t *testing.T, f func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 }
+func terminalWorkspace(t *testing.T, tt *ui.Tester, label string) {
+	t.Helper()
+	if err := tt.Click("Terminals"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem(label, "Open"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func navigationRelease(t *testing.T, tt *ui.Tester, label string) {
 	t.Helper()
 	r := find(t, tt, label)

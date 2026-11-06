@@ -13,14 +13,19 @@ func TestNavigationRestoresPaneFocus(t *testing.T) {
 				if path == "tab" {
 					row, id = "tab/t2", "c"
 				}
+				click := func() {
+					if path == "workspace" {
+						terminalWorkspace(t, tt, row)
+					} else if err := tt.Click(row); err != nil {
+						t.Fatal(err)
+					}
+				}
 				if focus == "selected" {
 					row, id = "Repo", "a"
 					if path == "tab" {
 						row = "tab/t1"
 					}
-					if err := tt.Click(row); err != nil {
-						t.Fatal(err)
-					}
+					click()
 					readyCorePane(t, a, tt, id)
 					tt.Type("x")
 					wantCorePaneInput(t, f, id, "x")
@@ -28,9 +33,7 @@ func TestNavigationRestoresPaneFocus(t *testing.T) {
 					return
 				}
 				release, held := holdCoreMethod(t, f, "terminal.attach "+id)
-				if err := tt.Click(row); err != nil {
-					t.Fatal(err)
-				}
+				click()
 				<-held
 				if !terminalInputFocused(tt) {
 					t.Fatal("navigation control retained keyboard")

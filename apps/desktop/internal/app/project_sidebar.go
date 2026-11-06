@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"time"
 
@@ -23,7 +22,8 @@ type projectWindow struct {
 	vibestModel   vibest.Model
 	vibestNote    string
 	vibestCommand []string
-	foldedProject map[string]bool
+	emptyProject  string
+	projectOpened func()
 	folderPicker  func(start string, run func(string)) bool
 	seenWindow
 }
@@ -280,10 +280,12 @@ func addToProject(l *core.Layout, p vibest.Project, machine, tab string, pane co
 	}
 	l.AddWorkspace(p.Name(), directory(p), machine, pane)
 	l.Workspaces[len(l.Workspaces)-1].Project = p.ID
+	l.Workspaces[len(l.Workspaces)-1].Tabs[0].Label = tab
 	return nil
 }
 
 func (a *App) projectNewTerminal(p vibest.Project) {
+	a.emptyProject = ""
 	s := a.coreSession
 	if s == nil {
 		a.err = "Not connected to Core"
@@ -303,14 +305,7 @@ func (a *App) projectNewTerminal(p vibest.Project) {
 	})
 }
 
-func (a *App) projectSelect(p vibest.Project) {
-	if ws := a.projectWorkspace(p.ID); ws != "" {
-		a.SelectWorkspace(ws)
-		a.returnFocus = true
-		return
-	}
-	a.navigationNote = p.Name() + " has no terminals yet; use + to start one"
-}
+func (a *App) projectSelect(p vibest.Project) { a.openProject(p, "") }
 
 func (a *App) paneShowing(address string) string {
 	var pane string
@@ -326,37 +321,15 @@ func (a *App) paneShowing(address string) string {
 	return pane
 }
 
-func (a *App) sessionOpen(g vibest.Group, r vibest.Row) {
+func (a *App) sessionOpen(p vibest.Project, r vibest.Row) {
 	address, ok := a.sessionAddress(r.Session)
 	if !ok {
-		if r.Session.Runtime == "hc" {
-			a.navigationNote = r.Session.Name + " runs in another herdr-core"
-		} else {
-			a.navigationNote = r.Session.Name + " runs in " + r.Session.Runtime + "; only herdr-core terminals open here"
-		}
+		a.coreNavigate(func(*core.Selection, *core.Layout) error {
+			return errors.New(r.Session.Name + " is not in this Core; its actions remain available here")
+		})
 		return
 	}
-	if pane := a.paneShowing(address); pane != "" {
-		a.coreNavigate(func(sel *core.Selection, l *core.Layout) error { return sel.SelectPane(l, pane) })
-		return
-	}
-	if a.coreSession == nil {
-		a.err = "Not connected to Core"
-		return
-	}
-	ref, err := a.coreSession.Ref(address)
-	if err != nil {
-		a.navigationNote = "Cannot open " + r.Session.Name + ": machine unavailable"
-		return
-	}
-	machine := ""
-	if m := r.Session.Address.Machine; m != "" && m != vibest.LocalMachine {
-		machine = m
-	}
-	added := core.NewPane(ref)
-	a.coreEditAndFollow(added.ID, func(l *core.Layout) error {
-		return addToProject(l, g.Project, machine, r.Session.Name, added)
-	})
+	a.openProject(p, address)
 }
 
 func (a *App) projectSection(c *ui.Context) {
@@ -370,123 +343,87 @@ func (a *App) projectSection(c *ui.Context) {
 	if a.vibestNote != "" {
 		ui.Text(c.Key("vibest-note"), a.vibestNote).FontSize(th.FontSizeSmall).TextColor(th.Danger).Margin(0, 0, 0, chrome.Step8)
 	}
-	focused := a.focusedAddress()
 	for _, g := range a.vibestModel.Groups(a.sessionPinned) {
 		a.projectHeader(c, g)
-		if a.foldedProject[g.Project.ID] {
-			continue
-		}
-		for _, r := range g.Rows {
-			a.sessionRow(c, g, r, focused)
-		}
 	}
 }
 
 func (a *App) projectHeader(c *ui.Context, g vibest.Group) {
-	th := a.th
-	p := g.Project
-	id := p.ID
-	folded := a.foldedProject[id]
-	ui.Row(c.Key("project-header/" + id)).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
-		action, glyph := "Collapse project: ", "▾"
-		if folded {
-			action, glyph = "Expand project: ", "▸"
-		}
-		d := ui.ButtonBase(c.Key("project-disclosure/"+id)).Size(th.IconButton, th.IconButton).Padding(0).Radius(th.Radius).KeepFocus().Role(ui.RoleDisclosure).Expanded(!folded).Label(action + p.Name()).Tooltip(action + p.Name())
-		if d.Hovered() {
-			d.Background(th.Row.Hover.Background)
-		}
-		d.Children(func() { paintMark(c, th, glyph, th.Secondary) })
-		if d.Clicked() {
-			if a.foldedProject == nil {
-				a.foldedProject = map[string]bool{}
-			}
-			a.foldedProject[id] = !folded
-		}
-		on := a.projectWorkspace(id) != "" && a.projectWorkspace(id) == a.coreSelection.Workspace
-		b := a.rowButton(c, "project/"+id, on).Grow(1).MinWidth(0).Label("project: " + p.Name()).Tooltip(directory(p))
-		ink := a.rowInk(th.Row.Pick(on, b.Hovered(), a.windowFocused))
-		b.Children(func() {
-			ui.Text(c, p.Name()).FontSize(th.Row.FontSize).FontWeight(600).TextColor(ink).Grow(1).MinWidth(0).SingleLine()
-			if g.Waiting > 0 {
-				ui.Text(c, fmt.Sprintf("%d waiting", g.Waiting)).FontSize(th.FontSizeSmall).TextColor(th.Blocked).Shrink(0).SingleLine()
-			}
-			if g.Working > 0 {
-				ui.Text(c, fmt.Sprintf("%d working", g.Working)).FontSize(th.FontSizeSmall).TextColor(th.Working).Shrink(0).SingleLine()
-			}
-		})
-		if b.Clicked() {
+	th, p := a.th, g.Project
+	on := a.currentProject() == p.ID
+	status := a.projectStatus(g)
+	b := a.rowButton(c, "project/"+p.ID, on).FillWidth().Label("project: " + p.Name()).Description(statusDescription(status)).Tooltip(directory(p))
+	ink := a.rowInk(th.Row.Pick(on, b.Hovered(), a.windowFocused))
+	b.Children(func() {
+		ui.Text(c, p.Name()).FontSize(th.Row.FontSize).FontWeight(600).TextColor(ink).Grow(1).MinWidth(0).SingleLine()
+		sessionActivity(c, th, status)
+	})
+	if b.Clicked() {
+		a.projectSelect(p)
+	}
+	b.ContextMenu(func(m *ui.Menu) {
+		if m.Item("Open").Chosen() {
 			a.projectSelect(p)
 		}
-		if !a.mainRunning(p) && a.iconButton(c.Key("project-start-main/"+id), chrome.IconStart, "Start main agent in "+p.Name()).Clicked() {
+		if m.Item("Start main agent").Disabled(directory(p) == "" || a.mainRunning(p)).Chosen() {
 			a.projectStartMain(p)
 		}
-		if a.iconButton(c.Key("project-new-terminal/"+id), chrome.IconPlus, "New terminal in "+p.Name()).Clicked() {
+		if m.Item("New terminal").Disabled(directory(p) == "").Chosen() {
 			a.projectNewTerminal(p)
-			a.returnFocus = true
+		}
+		for _, r := range g.Rows {
+			m.Submenu(r.Session.Name, func(m *ui.Menu) { a.sessionMenu(m, p, r) })
 		}
 	})
 }
 
-func (a *App) focusedAddress() string {
-	if p := a.coreState.Layout.Pane(a.coreSelection.Pane); p != nil {
-		return p.Terminal.Address
-	}
-	return ""
-}
-
-func (a *App) sessionRow(c *ui.Context, g vibest.Group, r vibest.Row, focused string) {
-	th := a.th
+func (a *App) sessionMenu(m *ui.Menu, p vibest.Project, r vibest.Row) {
 	s := r.Session
-	address, inCore := a.sessionAddress(s)
-	on := inCore && address == focused
-	ui.Row(c).FillWidth().Padding(0, 0, 0, th.GroupIndent*float32(r.Depth+1)).Children(func() {
-		b := a.rowButton(c, "session/"+s.ID, on).Grow(1).MinWidth(0).Label("session: " + s.Name)
-		st := th.Row.Pick(on, b.Hovered(), a.windowFocused)
-		ink := a.rowInk(st)
-		if !inCore {
-			ink = th.Tertiary
+	if m.Item("Open").Chosen() {
+		a.sessionOpen(p, r)
+	}
+	if address, ok := a.sessionAddress(s); ok {
+		label, value := "Pin", "1"
+		if a.sessionPinned(s) {
+			label, value = "Unpin", ""
 		}
-		weight := st.Weight
-		if r.Main {
-			weight = 600
+		if m.Item(label).Chosen() {
+			a.writeLabel(address, pinnedLabel, value)
 		}
-		b.Children(func() {
-			sessionActivity(c, th, a.sessionStatus(s))
-			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-				ui.Text(c, s.Name).FontSize(th.Row.FontSize).FontWeight(weight).TextColor(ink).SingleLine()
-				if s.Status == "blocked" {
-					ui.Text(c, "Waiting for you").FontSize(th.FontSizeSmall).TextColor(th.Blocked).SingleLine()
-				}
-			})
-			ui.Text(c, s.Harness).FontSize(th.FontSizeSmall).TextColor(th.Secondary).Shrink(0).SingleLine()
-		})
-		if s.Task != nil && *s.Task != "" {
-			b.Tooltip(*s.Task)
+	}
+	if r.Main {
+		if m.Item("Stop…").Chosen() {
+			a.sessionStop(p, s)
 		}
-		if b.Clicked() {
-			a.sessionOpen(g, r)
-			a.returnFocus = true
+	} else if m.Item("Archive…").Chosen() {
+		a.sessionArchive(s)
+	}
+}
+
+func (a *App) projectStatus(g vibest.Group) string {
+	status := "idle"
+	rank := map[string]int{"done": 1, "working": 2, "blocked": 3, "error": 4}
+	for _, r := range g.Rows {
+		if next := a.sessionStatus(r.Session); rank[next] > rank[status] {
+			status = next
 		}
-		b.ContextMenu(func(m *ui.Menu) {
-			if inCore {
-				label, value := "Pin", "1"
-				if a.sessionPinned(s) {
-					label, value = "Unpin", ""
-				}
-				if m.Item(label).Chosen() {
-					a.writeLabel(address, pinnedLabel, value)
-				}
-			}
-			if r.Main {
-				if m.Item("Stop…").Chosen() {
-					a.sessionStop(g.Project, s)
-				}
-			} else if m.Item("Archive…").Chosen() {
-				a.sessionArchive(s)
-			}
-		})
-	})
+	}
+	return status
+}
+
+func statusDescription(status string) string {
+	switch status {
+	case "working":
+		return "Working"
+	case "blocked":
+		return "Waiting for you"
+	case "error":
+		return "Error"
+	case "done":
+		return "Unseen done"
+	default:
+		return "Idle"
+	}
 }
 
 func sessionActivity(c *ui.Context, th *chrome.Theme, status string) {
@@ -497,6 +434,8 @@ func sessionActivity(c *ui.Context, th *chrome.Theme, status string) {
 		ui.Row(c.Key("activity")).Size(th.Slot, th.Slot).Shrink(0).Center().PassThrough().Label("session activity: waiting").Children(func() {
 			ui.Box(c).Size(8, 8).Radius(4).Background(th.Blocked)
 		})
+	case "error":
+		ui.Text(c.Key("activity"), "!").Size(th.Slot, th.Slot).TextColor(th.Danger).PassThrough().Label("session activity: error")
 	case "done":
 		ui.Icon(c.Key("activity"), chrome.IconCheck).Size(th.Slot, th.Slot).Shrink(0).TextColor(th.Done).PassThrough().Label("session activity: done")
 	default:

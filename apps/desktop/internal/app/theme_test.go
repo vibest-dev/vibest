@@ -15,6 +15,7 @@ import (
 
 	"reflect"
 	"vibest-desktop/internal/chrome"
+	"vibest-desktop/internal/vibest"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/terminal"
@@ -34,6 +35,7 @@ func themedCoreApp(t *testing.T, dir string) (*App, *coreAppFixture, *ui.Tester,
 		f.layout.Workspaces[0].Tabs[0].ID = "t"
 		f.layout.Workspaces[1].Label = "notes"
 	})
+	applyVibest(a, vibest.Event{Tag: "Snapshot", Projects: []vibest.Project{{ID: "notes", Directory: ptrTo("/notes")}}})
 	if dir != "" {
 		a.LoadThemes(dir)
 	}
@@ -85,8 +87,8 @@ func look(t *testing.T, app *App, tt *ui.Tester, panes paneRect, th *chrome.Them
 	bar, _ := tt.Find("tab-bar")
 	check("tab strip", int(bar.X+bar.W)-8, int(bar.Y+bar.H/2), th.TabBar)
 	check("pane surround", panes.X+int(b.term.X+b.cw*2.5), panes.Y+int(b.term.Y+b.ch*3.5), th.Terminal.Background.Mix(th.Foreground, inactiveVeil))
-	name, _ := tt.Find("reherdr")
-	check("selected row", int(name.X)-24, int(name.Y+name.H/2), th.Row.Active.Background)
+	name, _ := tt.Find("Terminals")
+	check("selected row", int(name.X)+4, int(name.Y+name.H/2), th.Row.Active.Background)
 	check("pane", panes.X+int(a.term.X+cw*2.5), panes.Y+int(a.term.Y+ch*3.5), th.Terminal.Background)
 	check("cursor", panes.X+int(a.term.X+cw*1)+1, panes.Y+int(a.term.Y)+1, th.Terminal.Cursor)
 	check("card gap", panes.X+int(l.X+l.W/2), panes.Y+int(a.term.Y+ch*2), th.Background)
@@ -167,8 +169,8 @@ func TestThemeMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	name, _ := tt.Find("reherdr")
-	if got := tt.Image().RGBAAt(int(name.X)-24, int(name.Y+name.H/2)); !nearColor(got, newsprint.Row.Active.Background) {
+	name, _ := tt.Find("Terminals")
+	if got := tt.Image().RGBAAt(int(name.X)+4, int(name.Y+name.H/2)); !nearColor(got, newsprint.Row.Active.Background) {
 		t.Fatalf("selected row %v, want Newsprint's %v", got, newsprint.Row.Active.Background)
 	}
 	if err := tt.Click("Theme"); err != nil {
@@ -277,8 +279,8 @@ func TestGhosttyChoice(t *testing.T) {
 
 func TestWindowFocusStylesTheSelection(t *testing.T) {
 	app, tt, _ := themedApp(t, "")
-	name, _ := tt.Find("reherdr")
-	x, y := int(name.X)-24, int(name.Y+name.H/2)
+	name, _ := tt.Find("Terminals")
+	x, y := int(name.X)+4, int(name.Y+name.H/2)
 	app.Focus(false)
 	tt.Frame()
 	if got := tt.Image().RGBAAt(x, y); !nearColor(got, chrome.Light.Row.ActiveUnfocused.Background) {
@@ -286,7 +288,7 @@ func TestWindowFocusStylesTheSelection(t *testing.T) {
 	}
 	other, _ := tt.Find("notes")
 	tt.Move(other.X+4, other.Y+other.H/2)
-	if got := tt.Image().RGBAAt(int(other.X)-24, int(other.Y+other.H/2)); !nearColor(got, chrome.Light.Row.Hover.Background) {
+	if got := tt.Image().RGBAAt(int(other.X)-4, int(other.Y+other.H/2)); !nearColor(got, chrome.Light.Row.Hover.Background) {
 		t.Fatalf("hovered row %v, want %v", got, chrome.Light.Row.Hover.Background)
 	}
 	tab, _ := tt.Find("tab/t")
@@ -773,16 +775,16 @@ func TestTVASwitchKeepsTheGrid(t *testing.T) {
 		p := tt.Image().RGBAAt(x, y)
 		return ui.RGB(p.R, p.G, p.B)
 	}
-	name, _ := tt.Find("reherdr")
+	name, _ := tt.Find("Terminals")
 	if got := mid(); !nearColor(got, tvaLight.Terminal.Background) {
 		t.Errorf("unfocused cursor middle %v, want hollow %v", got, tvaLight.Terminal.Background)
 	}
-	if got := pixel(int(name.X)-24, int(name.Y+name.H/2)); got != tvaLight.Row.ActiveUnfocused.Background {
+	if got := pixel(int(name.X)+4, int(name.Y+name.H/2)); got != tvaLight.Row.ActiveUnfocused.Background {
 		t.Errorf("unfocused row %v, want %v", got, tvaLight.Row.ActiveUnfocused.Background)
 	}
 	other, _ := tt.Find("notes")
 	tt.Move(other.X+4, other.Y+other.H/2)
-	if got := pixel(int(other.X)-24, int(other.Y+other.H/2)); got != tvaLight.Row.Hover.Background {
+	if got := pixel(int(other.X)-4, int(other.Y+other.H/2)); got != tvaLight.Row.Hover.Background {
 		t.Errorf("hovered row %v, want %v", got, tvaLight.Row.Hover.Background)
 	}
 	bar, _ := tt.Find("tab/t")

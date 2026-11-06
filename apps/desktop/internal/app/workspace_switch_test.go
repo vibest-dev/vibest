@@ -33,7 +33,7 @@ func TestAWorkspaceSwitchIsSizedBeforeItShows(t *testing.T) {
 	a, f, tt := coreWorkspaceFixture(t, 2, paneComfortable, "split", "single")
 	before := corePaneGeometries(t, a, tt)
 	release, held := holdCoreMethod(t, f, "terminal.attach d")
-	navigationRelease(t, tt, "Bravo")
+	terminalWorkspace(t, tt, "Bravo")
 	if !tt.TypeKeyNative(0, ui.KeyX, "x") {
 		t.Fatal("first workspace character lost")
 	}
@@ -50,7 +50,7 @@ func TestAWorkspaceSwitchIsSizedBeforeItShows(t *testing.T) {
 	if len(after) != 1 || after[0].card.W <= before[0].card.W {
 		t.Fatal("destination did not use own geometry")
 	}
-	navigationRelease(t, tt, "Alpha")
+	terminalWorkspace(t, tt, "Alpha")
 	readyCorePane(t, a, tt, "a")
 	if !reflect.DeepEqual(before, corePaneGeometries(t, a, tt)) {
 		t.Fatal("return resized old tree incorrectly")
@@ -65,7 +65,7 @@ func TestWorkspaceSwitchesAcrossChrome(t *testing.T) {
 					a, f, tt := coreWorkspaceFixture(t, scale, style, pair[0], pair[1])
 					first := corePaneGeometries(t, a, tt)
 					v := a.coreViews["a"]
-					navigationRelease(t, tt, "Bravo")
+					terminalWorkspace(t, tt, "Bravo")
 					readyCorePane(t, a, tt, "d")
 					for _, id := range []string{"e", "f"} {
 						if _, ok := tt.Find("terminal/" + id); ok {
@@ -78,7 +78,7 @@ func TestWorkspaceSwitchesAcrossChrome(t *testing.T) {
 						if i%2 == 1 {
 							row, id, want = "Bravo", "d", second
 						}
-						navigationRelease(t, tt, row)
+						terminalWorkspace(t, tt, row)
 						if !tt.TypeKeyNative(0, ui.KeyX, "x") {
 							t.Fatal("switch lost first native character")
 						}
@@ -103,11 +103,11 @@ func TestWorkspaceSwitchesAcrossChrome(t *testing.T) {
 func TestRapidWorkspaceSwitchesSettleOnTheLast(t *testing.T) {
 	a, f, tt := coreWorkspaceFixture(t, 2, paneComfortable, "split", "single")
 	release, held := holdCoreMethod(t, f, "terminal.attach d")
-	navigationRelease(t, tt, "Bravo")
+	terminalWorkspace(t, tt, "Bravo")
 	tt.Type("lost")
 	tt.Frame()
 	<-held
-	navigationRelease(t, tt, "Alpha")
+	terminalWorkspace(t, tt, "Alpha")
 	tt.Type("fresh")
 	readyCorePane(t, a, tt, "a")
 	wantCorePaneInput(t, f, "a", "fresh")
@@ -131,7 +131,7 @@ func TestARefusedSwitchTakesTheGridBack(t *testing.T) {
 	}
 	tt.Type("refused")
 	noCoreData(t, f)
-	navigationRelease(t, tt, "Alpha")
+	terminalWorkspace(t, tt, "Alpha")
 	tt.Type("fresh")
 	readyCorePane(t, a, tt, "a")
 	wantCorePaneInput(t, f, "a", "fresh")
@@ -139,7 +139,7 @@ func TestARefusedSwitchTakesTheGridBack(t *testing.T) {
 }
 func TestLayoutsKnownFollowTheSession(t *testing.T) {
 	a, f, tt := coreWorkspaceFixture(t, 1, paneComfortable, "split", "single")
-	navigationRelease(t, tt, "Bravo")
+	terminalWorkspace(t, tt, "Bravo")
 	readyCorePane(t, a, tt, "d")
 	old := a.coreViews["a"]
 	publishCoreLayout(t, a, f, func(f *coreAppFixture) { f.layout.Workspaces = f.layout.Workspaces[1:] })

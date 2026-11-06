@@ -28,13 +28,6 @@ func (m *machine) id() string {
 	return m.remote.ID
 }
 
-func (m *machine) sidebarID() string {
-	if m.remote == nil {
-		return "local"
-	}
-	return "remote/" + m.id()
-}
-
 func (m *machine) label() string {
 	if m.remote == nil {
 		return "Local"

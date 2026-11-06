@@ -9,7 +9,6 @@ import (
 	"github.com/egoist/mygo/ui"
 	"vibest-desktop/internal/chrome"
 	"vibest-desktop/internal/core"
-	"vibest-desktop/internal/sidebar"
 )
 
 func activityRowFixture(t *testing.T, kind string, th *chrome.Theme) (*App, *coreAppFixture, *ui.Tester, string) {
@@ -31,8 +30,6 @@ func activityRowFixture(t *testing.T, kind string, th *chrome.Theme) (*App, *cor
 		ui.Column(c).Fill().Padding(10).Background(th.Sidebar).Children(func() {
 			ui.Row(c).Width(chrome.SidebarMin).Label("fixture").Children(func() {
 				switch kind {
-				case "workspace":
-					a.workspaceButton(c, a.snap.Workspaces[0], sidebar.Entry{}, name, true)
 				case "tab":
 					a.tabButton(c, a.snap.Tabs[0], 0, a.snap.Tabs[:1])
 				}
@@ -86,7 +83,7 @@ func TestActivityRingPaintOnlyScheduling(t *testing.T) {
 func TestActivityRingRowBounds(t *testing.T) {
 	for _, theme := range chrome.Builtins {
 		for _, scale := range []float32{1, 2} {
-			for _, kind := range []string{"workspace", "tab"} {
+			for _, kind := range []string{"tab"} {
 				t.Run(fmt.Sprintf("%s/%v/%s", theme, scale, kind), func(t *testing.T) {
 					th, _ := chrome.Builtin(theme)
 					a, f, tt, name := activityRowFixture(t, kind, th)

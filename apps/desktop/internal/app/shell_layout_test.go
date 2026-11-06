@@ -297,7 +297,7 @@ func TestPaneStyleKeepsTheLinearShellUnlessCompact(t *testing.T) {
 			t.Fatalf("compact gap %v, want only the hairline", gap)
 		}
 	}
-	disc, themeBtn := find(t, tt, "Collapse machine: Local"), find(t, tt, "Theme")
+	disc, themeBtn := find(t, tt, "Terminals"), find(t, tt, "Theme")
 	if !nearDip(disc.X-side.X, chrome.Step8) || !nearDip(side.X+side.W-(themeBtn.X+themeBtn.W), chrome.Step8) {
 		t.Fatalf("compact sidebar disclosure %v theme %v sidebar %v, want 8-point insets", disc, themeBtn, side)
 	}
@@ -344,7 +344,7 @@ func TestPaneStyleKeepsTheLinearShellUnlessCompact(t *testing.T) {
 		t.Fatal("style switch changed the theme")
 	}
 	side = find(t, tt, "sidebar")
-	disc, themeBtn = find(t, tt, "Collapse machine: Local"), find(t, tt, "Theme")
+	disc, themeBtn = find(t, tt, "Terminals"), find(t, tt, "Theme")
 	if side.Y != 0 || !nearDip(disc.X-side.X, chrome.Step8) || !nearDip(side.X+side.W-(themeBtn.X+themeBtn.W), chrome.Step8) {
 		t.Fatalf("comfortable sidebar %v disclosure %v theme %v, want the original insets", side, disc, themeBtn)
 	}
@@ -397,7 +397,7 @@ func checkShell(t *testing.T, w, h int, scale float32, hidden bool, mode string)
 		if theme.X+theme.W != side.X+side.W-chrome.Step8 || theme.Y+theme.H != float32(h)-chrome.Step8 {
 			t.Fatalf("theme %v sidebar %v", theme, side)
 		}
-		disc := find(t, tt, "Collapse machine: Local")
+		disc := find(t, tt, "Terminals")
 		if !nearDip(disc.X, side.X+chrome.Step8) {
 			t.Fatalf("sidebar row inset disc %v sidebar %v, want %v", disc, side, chrome.Step8)
 		}

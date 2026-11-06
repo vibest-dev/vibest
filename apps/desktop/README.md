@@ -56,6 +56,12 @@ When no `hc` is found the window says so and shows the install command (`curl -f
 
 Running the app against a real Core needs an isolated Core session; never point it at a session you use.
 
+## Projects and terminals
+
+The sidebar is flat: one row per project with aggregate agent status. Select a project for main-agent and subagent tabs. Agent tab context menus retain Open, Pin/Unpin, Stop and Archive; the project context menu also exposes these actions and Start main agent. **Terminals** is the single entry for unprojected Core terminals and workspace/worktree actions. See [sidebar behavior and grouping](docs/sidebar.md).
+
+For an isolated native demo, build first, then run `scripts/demo.sh start`. Open the printed project folder with the sidebar plus; right-click its project row to start the main agent, select its tab, and submit `delegate` twice for two subagents. Use the printed teardown command afterward. The fake model uses no user model credentials or Core sessions.
+
 ## Current policies
 
 - Local input is bound to a captured viewer/selection and a parsed, fitted paint; unknown activity is not idle.

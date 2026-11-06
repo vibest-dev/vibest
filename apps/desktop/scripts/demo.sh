@@ -78,7 +78,7 @@ start() {
 	cat <<EOF
 Demo world: $DIR
   project:  $DIR/project
-  in the app: open the folder above (sidebar +), start its main agent, click it, type "delegate" and Enter
+  in the app: open the folder above (sidebar +), right-click its project > Start main agent, select its tab, submit "delegate" twice for two subagents
   hc ls:    $0 hc $DIR ls --all
   teardown: $0 stop $DIR
 EOF

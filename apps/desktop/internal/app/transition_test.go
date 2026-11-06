@@ -248,9 +248,9 @@ func TestPopupKeysFollowTheLatestSurface(t *testing.T) {
 }
 func TestAMachineSwitchKeepsKeys(t *testing.T) {
 	a, f, tt := coreMachineUI(t)
-	navigationRelease(t, tt, "machine: Remote")
+	terminalWorkspace(t, tt, "Remote Alpha")
 	wantRemoteNavigation(t, a, f, tt, "d")
-	navigationRelease(t, tt, "machine: Local")
+	terminalWorkspace(t, tt, "Repo")
 	tt.TypeKeyNative(0, ui.KeyX, "x")
 	readyCorePane(t, a, tt, "a")
 	wantCorePaneInput(t, f, "a", "x")

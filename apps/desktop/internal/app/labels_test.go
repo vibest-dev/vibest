@@ -106,7 +106,8 @@ func TestDoneAndPinFollowTheSharedLabels(t *testing.T) {
 	if _, done := tt.Find("session activity: done"); !done {
 		t.Fatalf("turn 3 over seen 2 is not done: %v", tt.Texts())
 	}
-	if find(t, tt, "pinned-one").Y >= find(t, tt, "lead").Y {
+	openShipping(t, a, tt)
+	if find(t, tt, "pinned-one").X >= find(t, tt, "lead").X {
 		t.Fatal("the pinned session is not first")
 	}
 	if got := a.sessionStatus(vibestSession("late", "pinned-one", "p1", "done", "g", nil, 2)); got != "idle" {

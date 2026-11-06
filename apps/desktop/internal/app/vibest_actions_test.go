@@ -11,6 +11,7 @@ import (
 func useVibest(a *App, path string) {
 	a.mu.Lock()
 	a.vibestSocket = path
+	a.vibestNote = "previous failure"
 	a.mu.Unlock()
 }
 
@@ -26,11 +27,17 @@ func TestStartMainAgentLaunchesInHcOnlyWhenNoneRuns(t *testing.T) {
 	useVibest(a, server.Path)
 	applyVibest(a, shippingSnapshot())
 	tt.Frame()
-	if err := tt.Click("Start main agent in Shipping"); err != nil {
+	if err := tt.RightClick("project: Shipping"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("Start main agent"); err != nil {
 		t.Fatal(err)
 	}
 	awaitCoreApp(t, a, func() bool { return a.vibestNote == "" })
-	if err := tt.Click("Start main agent in Shipping"); err != nil {
+	if err := tt.RightClick("project: Shipping"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("Start main agent"); err != nil {
 		t.Fatal(err)
 	}
 	awaitCoreApp(t, a, func() bool { return a.vibestNote != "" })
@@ -40,9 +47,13 @@ func TestStartMainAgentLaunchesInHcOnlyWhenNoneRuns(t *testing.T) {
 	}
 	applyVibest(a, vibest.Event{Tag: "Session", Session: ptrTo(vibestSession("main", "lead", "p1", "idle", "a", nil, 1))})
 	tt.Frame()
-	if _, shown := tt.Find("Start main agent in Shipping"); shown {
-		t.Fatal("start offered while the main agent runs")
+	if err := tt.RightClick("project: Shipping"); err != nil {
+		t.Fatal(err)
 	}
+	if err := tt.ChooseMenuItem("Start main agent"); err == nil {
+		t.Fatal("start enabled while the main agent runs")
+	}
+	tt.CloseMenu()
 }
 
 func TestArchiveAsksFirstThenRemovesAndShowsFailures(t *testing.T) {
@@ -55,6 +66,7 @@ func TestArchiveAsksFirstThenRemovesAndShowsFailures(t *testing.T) {
 		vibestSession("0000000000", "ghost", "p1", "idle", "b", nil, 2),
 	))
 	tt.Frame()
+	openShipping(t, a, tt)
 	archive := func(name string) {
 		t.Helper()
 		if err := tt.RightClick("session: " + name); err != nil {
@@ -102,6 +114,7 @@ func TestStopEndsTheMainAgentThroughStopCoordinator(t *testing.T) {
 	useVibest(a, server.Path)
 	applyVibest(a, shippingSnapshot(vibestSession("main", "lead", "p1", "idle", "a", nil, 1)))
 	tt.Frame()
+	openShipping(t, a, tt)
 	stop := func() {
 		t.Helper()
 		if err := tt.RightClick("session: lead"); err != nil {

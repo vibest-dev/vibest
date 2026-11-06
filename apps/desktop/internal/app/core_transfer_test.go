@@ -84,7 +84,7 @@ func TestCoreRemotePasteCannotCreateLocalImageOrSendPaths(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("TMPDIR", tmp)
 	a, f, tt := coreMachineUI(t)
-	navigationRelease(t, tt, "machine: Remote")
+	terminalWorkspace(t, tt, "Remote Alpha")
 	wantRemoteNavigation(t, a, f, tt, "d")
 	tt.SetClipboardData(transfer.New(transfer.NewItem(transfer.Bytes(transfer.PNG, []byte("never materialize")))))
 	tt.Command("paste")

@@ -41,8 +41,6 @@ type App struct {
 	macWin               *mygo.Window
 	dialog               *dialog
 	nativeDialog         *dialog
-	collapsed            map[string]map[string]bool
-	foldedMachines       map[string]bool
 	sideWidth            float32
 	sidebarVisible       bool
 	sideMoving           bool
@@ -97,8 +95,6 @@ func NewApp(socket string) *App {
 		notify:         func(string, string, string) {},
 		setTitle:       func(string) {},
 		bell:           func() {},
-		collapsed:      map[string]map[string]bool{},
-		foldedMachines: map[string]bool{},
 		sideWidth:      chrome.SidebarWidth,
 		sidebarVisible: true,
 		themes:         themes{settings: chrome.DefaultSettings(), light: chrome.Light, dark: chrome.Dark},
@@ -160,6 +156,7 @@ func (a *App) fail(err error) {
 }
 
 func (a *App) NewWorkspace() {
+	a.emptyProject = ""
 	a.coreCreate("", "", "")
 }
 
@@ -203,6 +200,7 @@ func (a *App) RemoveWorktree(id string) {
 }
 
 func (a *App) NewTab(workspaceID string) {
+	a.emptyProject = ""
 	a.coreCreate(workspaceID, "", "")
 }
 
@@ -310,6 +308,7 @@ func (a *App) ClearPane(id string) {
 }
 
 func (a *App) SelectWorkspace(id string) {
+	a.emptyProject = ""
 	visit := a.captureCoreVisit(activityScope{workspace: id})
 	if a.coreNavigate(func(s *core.Selection, l *core.Layout) error { return s.SelectWorkspace(l, id) }) {
 		a.acknowledgeCoreVisit(visit)
@@ -317,6 +316,7 @@ func (a *App) SelectWorkspace(id string) {
 }
 
 func (a *App) SelectTab(id string) {
+	a.emptyProject = ""
 	visit := a.captureCoreVisit(activityScope{tab: id})
 	if a.coreNavigate(func(s *core.Selection, l *core.Layout) error { return s.SelectTab(l, id) }) {
 		a.acknowledgeCoreVisit(visit)
@@ -324,6 +324,7 @@ func (a *App) SelectTab(id string) {
 }
 
 func (a *App) ShowPane(id string) {
+	a.emptyProject = ""
 	visit := a.captureCoreVisit(activityScope{pane: id})
 	if a.coreNavigate(func(s *core.Selection, l *core.Layout) error { return s.SelectPane(l, id) }) {
 		a.acknowledgeCoreVisit(visit)

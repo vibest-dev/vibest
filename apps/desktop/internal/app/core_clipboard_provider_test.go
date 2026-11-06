@@ -66,7 +66,7 @@ func TestCoreClipboardProviderReentryLazyAndEager(t *testing.T) {
 
 func TestCoreClipboardEagerRemoteRefusesBeforeProvider(t *testing.T) {
 	a, f, tt := coreMachineUI(t)
-	navigationRelease(t, tt, "machine: Remote")
+	terminalWorkspace(t, tt, "Remote Alpha")
 	wantRemoteNavigation(t, a, f, tt, "d")
 	tt.SetClipboardEager(true)
 	called := false

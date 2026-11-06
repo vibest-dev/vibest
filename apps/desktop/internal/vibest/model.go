@@ -133,15 +133,12 @@ func (m *Model) ensure() {
 
 type Row struct {
 	Session Session
-	Depth   int
 	Main    bool
 }
 
 type Group struct {
 	Project Project
 	Rows    []Row
-	Waiting int
-	Working int
 }
 
 func (m Model) Groups(pinned func(Session) bool) []Group {
@@ -154,9 +151,6 @@ func (m Model) Groups(pinned func(Session) bool) []Group {
 	}
 	var groups []Group
 	for _, p := range m.Projects {
-		if p.Directory == nil {
-			continue
-		}
 		groups = append(groups, group(p, byProject[p.ID], pinned))
 	}
 	sort.Slice(groups, func(i, j int) bool {
@@ -203,28 +197,22 @@ func group(p Project, sessions []Session, pinned func(Session) bool) Group {
 	}
 	g := Group{Project: p}
 	seen := map[string]bool{}
-	var walk func(s Session, depth int)
-	walk = func(s Session, depth int) {
+	var walk func(s Session)
+	walk = func(s Session) {
 		if seen[s.ID] {
 			return
 		}
 		seen[s.ID] = true
-		g.Rows = append(g.Rows, Row{Session: s, Depth: depth, Main: s.ID == main})
-		switch s.Status {
-		case "blocked":
-			g.Waiting++
-		case "working":
-			g.Working++
-		}
+		g.Rows = append(g.Rows, Row{Session: s, Main: s.ID == main})
 		for _, c := range children[s.ID] {
-			walk(c, depth+1)
+			walk(c)
 		}
 	}
 	for _, s := range roots {
-		walk(s, 0)
+		walk(s)
 	}
 	for _, s := range sessions {
-		walk(s, 0)
+		walk(s)
 	}
 	return g
 }

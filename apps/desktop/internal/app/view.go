@@ -120,6 +120,10 @@ func (a *App) View(c *ui.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	defer a.endSeenFrame()
+	if apply := a.projectOpened; apply != nil {
+		a.projectOpened = nil
+		apply()
+	}
 	a.checkTabDrag()
 	a.coreFocus()
 	th := a.theme(c.Theme().Dark)
@@ -227,6 +231,10 @@ func (a *App) contentControls(c *ui.Context, shown float32) {
 		bar.BorderWidth(0, 0, gridLine(a.g.scale), 0).BorderColor(th.Divider)
 	}
 	bar.Children(func() {
+		if a.projectTabs(c) {
+			a.retiredTabDragSource(c)
+			return
+		}
 		if a.snap != nil {
 			tabs := a.snap.TabsOf(a.snap.FocusedWorkspaceID)
 			for i, t := range tabs {
@@ -348,7 +356,11 @@ func (a *App) shortcuts(c *ui.Context, root ui.Element) {
 		}
 	}
 	on(ui.Cmd, ui.KeyT, func() {
-		a.NewTab(ws)
+		if p, ok := a.vibestModel.Projects[a.currentProject()]; ok {
+			a.projectNewTerminal(p)
+		} else {
+			a.NewTab(ws)
+		}
 		a.returnFocus = true
 	})
 	on(ui.Cmd, ui.KeyN, func() {
@@ -381,7 +393,9 @@ func (a *App) shortcuts(c *ui.Context, root ui.Element) {
 		}))
 		on(ui.Cmd|ui.Ctrl, d.key, targetDo(pane, func(p string) { a.ResizePane(p, dir) }))
 	}
-	if a.snap != nil {
+	if p, ok := a.vibestModel.Projects[a.currentProject()]; ok {
+		a.projectTabShortcuts(p, on)
+	} else if a.snap != nil {
 		tabs := a.snap.TabsOf(ws)
 		for i, k := range []ui.Key{ui.Key1, ui.Key2, ui.Key3, ui.Key4, ui.Key5, ui.Key6, ui.Key7, ui.Key8, ui.Key9} {
 			if i < len(tabs) {
@@ -474,6 +488,10 @@ func (a *App) headerTabs(c *ui.Context, h, lead float32) {
 	th := a.th
 	bar := ui.Row(c).Grow(1).Height(h).Margin(0, a.shell().outer, 0, lead).Clip().Gap(chrome.Step4).Padding(0, chrome.Step8, 0, 0).AlignItems(ui.Center).Background(th.TabBar).FocusGroup(ui.Horizontal).DragWindow().Label("tab-bar")
 	bar.Children(func() {
+		if a.projectTabs(c) {
+			a.retiredTabDragSource(c)
+			return
+		}
 		if a.snap != nil {
 			tabs := a.snap.TabsOf(a.snap.FocusedWorkspaceID)
 			for i, t := range tabs {
@@ -770,7 +788,13 @@ func (a *App) paneContainer(c *ui.Context, w float32) {
 	} else {
 		box.Background(th.Terminal.Background)
 	}
-	box.Children(func() { a.corePanes(c) })
+	box.Children(func() {
+		if p, ok := a.vibestModel.Projects[a.emptyProject]; ok {
+			ui.Text(c, "Select an agent in "+p.Name()+", or start one from the project menu.").TextColor(th.Secondary)
+			return
+		}
+		a.corePanes(c)
+	})
 }
 
 const inactiveVeil = 0.06

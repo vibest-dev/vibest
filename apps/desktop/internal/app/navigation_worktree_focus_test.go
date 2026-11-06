@@ -51,7 +51,7 @@ func TestRemoteWorktreeRefusesWithoutLocalGitOrInput(t *testing.T) {
 	coreAppAct(a, func() {
 		a.gitExec = func(context.Context, *core.Session, string, []string) ([]byte, error) { called = true; return nil, nil }
 	})
-	navigationRelease(t, tt, "machine: Remote")
+	terminalWorkspace(t, tt, "Remote Alpha")
 	wantRemoteNavigation(t, a, f, tt, "d")
 	for _, action := range []string{"create", "open", "remove"} {
 		coreAppAct(a, func() {

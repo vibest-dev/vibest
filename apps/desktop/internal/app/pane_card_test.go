@@ -17,7 +17,7 @@ func TestPaneCardTargetsTheClickedPane(t *testing.T) {
 	tt.Frame()
 	find(t, tt, "alpha")
 	find(t, tt, "b")
-	find(t, tt, "Repo")
+	find(t, tt, "Terminals")
 	for _, text := range tt.Texts() {
 		if strings.HasPrefix(text, "status:") {
 			t.Fatal("redundant activity dot")

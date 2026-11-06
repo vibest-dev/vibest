@@ -1,21 +1,19 @@
 # Activity and deliberate visits
 
-Workspace and top-tab rows have one trailing status slot:
+Project rows aggregate their Watch sessions: error, waiting for you, working, then
+unseen done, in that order. Agent tabs show the individual session status. Working,
+waiting and error come only from vibestd; Core supplies the shared seen/pinned labels.
+The sidebar has no machine/workspace hierarchy or separate Agents roster. See
+[sidebar actions and grouping](sidebar.md).
 
-- An actual agent working in that row's scope shows a spinner. Work takes
-  precedence over completion, even if the backend's aggregate says done.
-- Otherwise, a current authoritative completion token not acknowledged by this
-  window shows a checkmark.
-- Otherwise the slot is empty. Blocked/input waits, unknown status and offline
-  transport are not work or successful completion. Existing attention notices
-  and connection tooltips remain independent.
+Ordinary Core tabs retain their existing status slot: actual working agents show a
+spinner; otherwise an authoritative unacknowledged completion shows a checkmark.
+Unknown status, offline transport and input waits are not successful completion.
+Hovering these tabs replaces the slot with their existing close control. Agent tabs
+use Stop/Archive in context menus instead of a terminal-kill close button.
 
-The indicators are passive: no action, keyboard stop or pointer interception.
-The row's accessibility description conveys its status. Repository disclosure
-arrows remain visible independently of activity. Machine headers stay where they
-were. The sidebar has no separate Agents roster. Top tabs keep their existing single 12-DIP slot:
-hovering a tab replaces its status with the existing close control, including
-its original close hit target. Native window buttons and other icons are unchanged.
+All status indicators are passive and have no keyboard stop or pointer interception.
+The row/tab accessibility description conveys the status.
 
 ## Authoritative tokens, local acknowledgments
 
@@ -41,7 +39,7 @@ remote navigation never acknowledges tokens arriving after the click, or on
 failure. A newer completion sequence remains new even if an older visit finishes
 later. This does not change the backend's shared seen state.
 
-Rendering, selected/focused state, restored sessions, hovering, folding, resizing
+Rendering, selected/focused state, restored sessions, hovering, resizing
 and reconnecting do not acknowledge completions. Geometry/refocus requests are
 not deliberate visits.
 
@@ -56,10 +54,10 @@ or interpret idle/blocked/disconnection as completion.
 
 ## Headless visual comparison
 
-The same compact fixture renders the sidebar and top tabs without opening an
-application window. The before images use the renderer at main
-`423077610869294a48236bc0e6de62118cf03b26`; after images show working/completed/attention
-rows and independent repository disclosure.
+The compact fixture renders the sidebar and top tabs without opening an
+application window. These archived comparisons predate the flat project sidebar:
+the before images use main `423077610869294a48236bc0e6de62118cf03b26`. They are
+activity-rendering history, not evidence of the current sidebar layout.
 
 | Theme | Before                                                  | After                                                 |
 | ----- | ------------------------------------------------------- | ----------------------------------------------------- |
@@ -80,6 +78,6 @@ overruled until the pane leaves the screen or the window loses focus and the
 agent is looked at again. A terminal this app starts gets `herdr.seen=0`. Where
 the label is present it decides the Done mark (`turn > herdr.seen`) for the
 workspace and tab marks and for a vibest session that vibestd reports neither
-working nor blocked; without it the deliberate-visit rules above stay in force.
-`herdr.pinned=1` (written by Pin and Unpin on a session row; Unpin writes it
-empty) puts a session first among its siblings in the Projects section.
+working, blocked nor error; without it the deliberate-visit rules above stay in force.
+`herdr.pinned=1` (written by Pin and Unpin on a agent tab or project submenu; Unpin writes it
+empty) puts a session first among its sibling content tabs.

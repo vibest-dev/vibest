@@ -52,7 +52,7 @@ func TestNavigationQuietCancelIsNotALoss(t *testing.T) {
 			case "target-command":
 				tt.Key(ui.Cmd, ui.KeyK)
 			case "control":
-				focusNavigationControl(t, tt, "machine: Local")
+				focusNavigationControl(t, tt, "Terminals")
 			case "blur":
 				a.Focus(false)
 				a.Focus(true)
