@@ -1,4 +1,5 @@
 import fs from "node:fs/promises"
+import net from "node:net"
 
 import { readPing } from "@vibest/client/client"
 import { Bus, type EngineEvent } from "@vibest/core/bus"
@@ -519,3 +520,58 @@ export const stopRecorded = (daemonInfo: string) =>
       Effect.repeat({ until: () => Platform.liveness(running.pid) === "exited", times: 100 }),
     )
   }).pipe(Effect.ignore)
+
+export type Line = Record<string, unknown>
+
+export interface Wire {
+  readonly send: (message: Line) => Effect.Effect<void>
+  readonly recv: Effect.Effect<Line>
+  readonly lines: Array<Line>
+}
+
+export const wire = Effect.gen(function* () {
+  const layout = yield* Layout
+  const lines: Array<Line> = []
+  const received: Array<Line> = []
+  const waiting: Array<(line: Line) => void> = []
+  const conn = yield* Effect.acquireRelease(
+    Effect.promise(
+      () =>
+        new Promise<net.Socket>((resolve, reject) => {
+          const socket = net.createConnection(layout.socket)
+          let buffer = ""
+          socket.setEncoding("utf8")
+          socket.on("data", (chunk: string) => {
+            buffer += chunk
+            for (let end = buffer.indexOf("\n"); end >= 0; end = buffer.indexOf("\n")) {
+              const text = buffer.slice(0, end)
+              buffer = buffer.slice(end + 1)
+              if (text === "") continue
+              const line = JSON.parse(text) as Line
+              const waiter = waiting.shift()
+              if (waiter) waiter(line)
+              else received.push(line)
+            }
+          })
+          socket.once("connect", () => resolve(socket))
+          socket.once("error", reject)
+        }),
+    ),
+    (socket) => Effect.sync(() => socket.destroy()),
+  )
+  return {
+    lines,
+    send: (message) =>
+      Effect.sync(() => {
+        lines.push(message)
+        conn.write(`${JSON.stringify(message)}\n`)
+      }),
+    recv: Effect.promise(
+      () => new Promise<Line>((resolve) => (received.length > 0 ? resolve(received.shift()!) : waiting.push(resolve))),
+    ).pipe(
+      Effect.timeout("10 seconds"),
+      Effect.orDie,
+      Effect.tap((line) => Effect.sync(() => lines.push(line))),
+    ),
+  } satisfies Wire
+})

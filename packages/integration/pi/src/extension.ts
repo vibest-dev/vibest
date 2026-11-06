@@ -16,7 +16,6 @@ import {
 } from "@vibest/client/client"
 import * as Guard from "@vibest/core/guard"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { writeTerminalStatus } from "@vibest/core/results"
 import { VERSION } from "@vibest/protocol/rpc"
 import { Cause, Config, Deferred, Effect, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
 
@@ -72,14 +71,12 @@ const session = (sessionId: string): Role =>
           const headers = yield* piHeaders(sessionId, ctx)
           const event = encodeJson({ type: "input", text: e.text, source: e.source })
           yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
-          yield* writeTerminalStatus("working")
         }),
       )
       yield* pi.handle("agent_settled", (e, ctx) =>
         Effect.gen(function* () {
           if (!(yield* Ref.get(root)) || !ctx.isIdle()) return
           const { text, error } = yield* Ref.get(reply)
-          yield* writeTerminalStatus("idle")
           const headers = yield* piHeaders(sessionId, ctx)
           const event = encodeJson({ type: "agent_settled", text, error, aborted: e.aborted })
           yield* hookCall(layout.socket, headers, (client) => client.TurnEnd({ sessionId, harness: "pi", event }))

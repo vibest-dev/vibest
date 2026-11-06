@@ -10,6 +10,7 @@ import { DaemonIdentity, VibestRpcs, type Ping, VERSION } from "@vibest/protocol
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 import {
   Cause,
+  Context,
   Config,
   Duration,
   Effect,
@@ -196,12 +197,20 @@ export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArr
         client: { version: VERSION, command: self },
       })
 
+export const CallerEnv = Context.Reference<ReadonlyArray<string>>("vibest/CallerEnv", { defaultValue: () => [] })
+
+export const daemonEnv = (callerEnv: ReadonlyArray<string>, env: Record<string, string> = {}) => ({
+  ...Object.fromEntries(callerEnv.map((name) => [name, undefined])),
+  ...env,
+})
+
 export const spawnDaemon = (
   command: ReadonlyArray<string>,
   args: ReadonlyArray<string> = [],
   env?: Record<string, string>,
 ) =>
   Effect.gen(function* () {
+    const callerEnv = yield* CallerEnv
     const layout = yield* Layout
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -222,7 +231,8 @@ export const spawnDaemon = (
           ],
           {
             detached: true,
-            ...(env ? { env, extendEnv: true } : {}),
+            env: daemonEnv(callerEnv, env),
+            extendEnv: true,
             stdin: "ignore",
             stdout: "ignore",
             stderr: "ignore",

@@ -5,12 +5,14 @@ import type { Check } from "./check.ts"
 import daemon from "./scenarios/daemon.ts"
 import exits from "./scenarios/exits.ts"
 import harness from "./scenarios/harness.ts"
+import hc from "./scenarios/hc.ts"
 import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
 import restart from "./scenarios/restart.ts"
 import start from "./scenarios/start.ts"
+import terminalStatus from "./scenarios/terminal-status.ts"
 import update from "./scenarios/update.ts"
 import { binary, checkout, harnesses, redact, Skip, World } from "./world.ts"
 
@@ -25,6 +27,8 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   inbox,
   exits,
   restart,
+  hc,
+  "terminal-status": terminalStatus,
 }
 const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check })))
 const strict = process.argv.includes("--strict")

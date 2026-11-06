@@ -94,7 +94,14 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   }
 })
 
-export const inParent = (argv: ReadonlyArray<string>, root: string) => [...argv, "--in-parent", root]
+export const inParent = (argv: ReadonlyArray<string>, root: string, runtime: string) => {
+  const rest: Array<string> = []
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--runtime") i++
+    else if (!argv[i]!.startsWith("--runtime=")) rest.push(argv[i]!)
+  }
+  return [...rest, "--runtime", runtime, "--in-parent", root]
+}
 
 export const MAIN_ENV = "VIBEST_MAIN_ENV"
 

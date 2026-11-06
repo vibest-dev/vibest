@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":1,"method":"Remove","params":{"id":"00000000-0000-4000-8000-000000000001"},"headers":[["vibest-protocol","5"],["vibest-caller","cli"],["vibest-repository","/"]]}
+{"jsonrpc":"2.0","id":1,"result":{"id":"00000000-0000-4000-8000-000000000001","processes":"exited","pane":"closed","workspace":"none","worktree":"removed","path":"/fixture/home/worktrees/repo/w1","branch":null,"reasons":["00000000-0000-4000-8000-000000000001 was working: interrupted, then its terminal closed"]}}
+{"jsonrpc":"2.0","id":2,"method":"Remove","params":{"id":"0000000000"},"headers":[["vibest-protocol","5"],["vibest-caller","cli"],["vibest-repository","/"]]}
+{"jsonrpc":"2.0","id":2,"error":{"_tag":"Cause","code":0,"message":"no session 0000000000","data":[{"_tag":"Fail","error":{"_tag":"NoSuchSession","id":"0000000000","message":"no session 0000000000"}}]}}

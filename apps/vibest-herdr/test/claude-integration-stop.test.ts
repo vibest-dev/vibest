@@ -8,11 +8,27 @@ import { Layout } from "@vibest/core/paths"
 import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { ConfigProvider, Effect, Fiber, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
+import { beforeEach, vi } from "vitest"
 
 import * as Platform from "#platform"
 
 import { integrationPrompt, integrationStop } from "../src/cli.ts"
-import { tempDirectory, untilVirtual } from "./fakes.ts"
+import { tempDirectory, until, untilVirtual } from "./fakes.ts"
+
+const statusReports = vi.hoisted(() => [] as Array<string>)
+vi.mock("@vibest/core/results", async (importOriginal) => {
+  const results = await importOriginal<typeof import("@vibest/core/results")>()
+  return {
+    ...results,
+    writeTerminalStatus: (...[state]: Parameters<typeof results.writeTerminalStatus>) =>
+      Effect.sync(() => {
+        statusReports.push(state)
+      }),
+  }
+})
+beforeEach(() => {
+  statusReports.length = 0
+})
 
 const stopAt = (home: string, env: Record<string, string>, raw: string) =>
   integrationStop(claude, raw).pipe(
@@ -227,6 +243,71 @@ layer(Platform.services)("claude integration stop", (it) => {
         yield* promptAt(home, env, raw)
       }
       assert.strictEqual(rpc(lines).length, 1)
+    }),
+  )
+
+  it.effect("Cursor reports working before a held Prompt RPC completes", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path
+      const home = yield* tempDirectory("c-")
+      const lines: Array<string> = []
+      yield* listen(path.join(home, "vibest.sock"), lines, () => "hang")
+      const sending = yield* integrationPrompt(
+        cursor,
+        JSON.stringify({ hook_event_name: "beforeSubmitPrompt", prompt: "go" }),
+      ).pipe(
+        Effect.provideServiceEffect(Layout, Layout.make(home)),
+        Effect.provide(
+          ConfigProvider.layer(ConfigProvider.fromUnknown({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" })),
+        ),
+        Effect.forkChild,
+      )
+      yield* until(
+        Effect.sync(() => rpc(lines).length),
+        (n) => n === 1,
+      )
+      assert.deepStrictEqual(statusReports, ["working"])
+      yield* Fiber.interrupt(sending)
+    }),
+  )
+
+  it.effect("Cursor reports idle only for accepted response/stop events and never guesses blocked", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path
+      const home = yield* tempDirectory("c-")
+      const lines: Array<string> = []
+      yield* listen(path.join(home, "vibest.sock"), lines)
+      const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
+      const invoke = (stop: boolean, raw: string, env: Record<string, string> = worker) =>
+        (stop ? integrationStop(cursor, raw) : integrationPrompt(cursor, raw)).pipe(
+          Effect.provideServiceEffect(Layout, Layout.make(home)),
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
+        )
+      for (const event of [
+        { hook_event_name: "afterAgentResponse", text: "done" },
+        { hook_event_name: "stop", status: "aborted" },
+      ])
+        yield* invoke(true, JSON.stringify(event))
+      assert.deepStrictEqual(statusReports, ["idle", "idle"])
+      statusReports.length = 0
+      for (const stop of [false, true]) {
+        for (const raw of [
+          "",
+          "null",
+          "[]",
+          "broken",
+          JSON.stringify({ hook_event_name: "preToolUse" }),
+          JSON.stringify({ hook_event_name: "stop", status: "completed" }),
+          JSON.stringify({ hook_event_name: "beforeSubmitPrompt", prompt: " " }),
+        ])
+          yield* invoke(stop, raw)
+        const raw = JSON.stringify(
+          stop ? { hook_event_name: "afterAgentResponse" } : { hook_event_name: "beforeSubmitPrompt", prompt: "go" },
+        )
+        for (const env of [{}, { VIBEST_AGENT: "general" }, { VIBEST_SESSION_ID: "w1" }]) yield* invoke(stop, raw, env)
+      }
+      assert.deepStrictEqual(statusReports, [])
+      assert.strictEqual(rpc(lines).length, 2)
     }),
   )
 

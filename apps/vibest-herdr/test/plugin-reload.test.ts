@@ -6,8 +6,21 @@ import { Layout } from "@vibest/core/paths"
 import { Builtins, type Candidate, makeHost, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { Plugin, type AgentStartBefore } from "@vibest/plugin"
-import { Context, type Crypto, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Schedule, Scope } from "effect"
+import { Plugin, type AgentStartBefore, type Runtime } from "@vibest/plugin"
+import {
+  Context,
+  type Crypto,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Path,
+  Schedule,
+  Scope,
+  Stream,
+} from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -583,6 +596,32 @@ describe("plugins: supervisor", () => {
         ],
       )
       assert.strictEqual(s.model, "early")
+    }),
+  )
+
+  live(
+    "a builtin runtime is registered once the layer is built, before vibestd admits a request that routes to it",
+    Effect.gen(function* () {
+      const dir = yield* packageHome
+      const runtimePlugin: Candidate = candidate(
+        "builtin:runtime-fake",
+        "1",
+        Plugin.define({
+          id: "runtime-fake",
+          effect: (ctx) => ctx.runtime.register({ kind: "fake", events: Stream.empty } as unknown as Runtime.Runtime),
+        }),
+      )
+      const built = yield* Plugins.layer.pipe(
+        Layer.provide(Layer.succeed(PluginLoader, loader)),
+        Layer.provide(Layer.succeed(Builtins, [runtimePlugin])),
+        Layer.provide(Subscriptions.layer),
+        Layer.provide(Layer.effect(Layout, Layout.make(dir))),
+        Layer.provideMerge(Runtimes.layer),
+        Layer.provide(Bus.layer),
+        Layer.build,
+      )
+      const routed = yield* Context.get(built, Runtimes).route("fake")
+      assert.strictEqual(routed.kind, "fake")
     }),
   )
 

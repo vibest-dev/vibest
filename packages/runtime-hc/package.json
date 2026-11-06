@@ -1,0 +1,23 @@
+{
+  "name": "@vibest/runtime-hc",
+  "version": "0.0.1-beta.17",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.core.json"
+  },
+  "dependencies": {
+    "@effect/platform-node-shared": "catalog:",
+    "@vibest/plugin": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "effect": "catalog:",
+    "effect-hc-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:"
+  }
+}

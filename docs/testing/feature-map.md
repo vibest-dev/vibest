@@ -62,6 +62,16 @@ on the user's own Cursor login.
 | G4  | a refusing `run` hook blocks `vibest run` with its reason, before any pane or worktree | script  | non-zero exit, reason printed, no worktree, no herdr pane |
 | G5  | a routing plugin picks the harness for `run`                                           | runtime |                                                           |
 
+## Terminal reports
+
+| ID  | Capability                                                        | Method | Pass when                                                                                                           |
+| --- | ----------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------- |
+| T1  | Native Claude/Pi OSC 7501 and shipped Cursor hooks in isolated HC | script | Native working/blocked/resume/done/abort, unchanged results, Cursor working/idle only; raw evidence, no visible OSC |
+
+T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG state/config/runtime directories; it never contacts the
+user's herdr-core or changes harness configuration outside that temporary root. Coordinator coverage awaits
+`feat/runtime-hc` caller detection; the exact follow-up check is in [runtime-port.md](../design/runtime-port.md#terminal-status-ownership).
+
 ## Harnesses and models (harness adapters)
 
 | ID  | Capability                                                                                                | Method | Pass when                                                           |
@@ -135,3 +145,5 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S30 | archive cut off after its mark: the next vibestd closes its tab, ends it `archived`, keeps the worktree                                                                                  | exits: `tools/e2e` S30                                               |
 | S31 | vibestd killed between a delivered result and `--archive-on-completion`: archived once, no notice                                                                                        | exits: `tools/e2e` S31                                               |
 | S32 | Send repeated with one request id: the same answer, one row, one delivery, one result                                                                                                    | exits: `tools/e2e` S32                                               |
+| S33 | herdr-core runtime: Pi main agent and subagents in hc, results and send, status, herdr-app labels and parent                                                                             | hc: `tools/e2e` S33                                                  |
+| S34 | herdr-core runtime: `vibest --runtime hc` typed in the user's hc terminal starts the main agent in place                                                                                 | hc: `tools/e2e` S34                                                  |
