@@ -53,8 +53,11 @@ Terminal-free contract; that assertion was added to its existing cursor test.
 | 0018  | Ported                                                                                                                   | TestCancelingInputKeepsQueuedEmulatorReplies: runtime, only the following human-input marker remains                                |
 
 Patch **0019** adds output-only visibility control and drawable-change detection.
-Its six TestOutput regressions pass both with this patch stack and with 0019
-alone over the official pin (Go overlay; no earlier patches). Removing 0019,
+Its original six TestOutput regressions passed both with this patch stack and
+with 0019 alone over the official pin (Go overlay; no earlier patches). Three
+additional request-level regressions cover pointer shape/tracking, scrollback
+growth and offscreen search matches; each fails before the review fixes. They
+check the invalidation count and pending frame before running a frame. Removing 0019,
 preparing with make setup and retaining only its tests makes identical titles
 request 100 frames, held output request unchanged frames, and unchanged cursor
 commands request frames. The hidden-output test also detects the missing
@@ -76,8 +79,12 @@ fitted keyboard ownership can change without dirty VT cells. No output clock or 
 introduced.
 
 Under the existing VT and render-state locks, 0019 updates the render snapshot
-without consuming dirty rows, then checks dirty state, cursor, colors and Kitty
-graphics generation against the last paint. Only paint cleans those changes.
+without consuming dirty rows, then checks dirty state, cursor, colors, scrollbar
+and Kitty graphics generation against the last paint. Pointer shape and mouse
+tracking are compared with the last view build, where the native pointer is
+chosen. Active searches feed their bounded VT snapshot and request a frame for
+pending work or a changed match count; unchanged titles do not wake a settled
+search. Only paint cleans render-state changes.
 Starting synchronized output still requests the frame that schedules the existing
 one-second timeout; subsequent held output does not request unchanged frames.
 Clipboard service requests and terminal lifecycle invalidation are unchanged.
