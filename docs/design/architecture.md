@@ -652,8 +652,8 @@ runtime plugins and user plugins): an explicit harness is never replaced. A usab
 login is picked when the provider is unset); one that cannot run refuses the start, naming that harness and the
 cause (its preflight error, or each exhausted subscription limit and its reset time). Only `auto` (no harness
 named) is routed to the available harness with the most quota left, and a start no harness can run is refused
-naming each harness's problem. On `agent.fail` with reason `limited` and `move` still unset, it moves to the best
-harness that is neither limited nor already tried.
+naming each harness's problem. On `agent.fail` with reason `limited` and `move` still unset, it leaves the move
+unset: the round fails naming that harness and each exhausted limit with its reset time, and nothing else starts.
 
 **Plugin API facts** (`@vibest/plugin`): vibestd maps this module and `effect` to its own instances when it loads a
 plugin, so a plugin imports both normally and bundles neither. A plugin's `effect` runs once per load in the plugin's
@@ -855,9 +855,9 @@ the launch was about to send, else the trailing delivered batch) — on the harn
 `event.move`. Before each candidate starts, the move runs the `agent.start.before` chain with the move's
 harness/provider/model and the session's real attempts prefilled: a refusal skips that candidate (recorded as a
 `refused` try), and what the chain decides — including a rewritten harness or prompt — is what gets patched and
-started, so a start policy plugin governs a moved Agent exactly like a first start. The default choice moves to
-the available harness with the most quota left that is neither limited nor already tried; nothing left ends the
-round failed, naming what ran out. The pairs that already hit a limit are remembered per (harness, provider) in
+started, so a start policy plugin governs a moved Agent exactly like a first start. The default choice does not
+move: with `move` still unset the round fails, naming that harness and each exhausted limit with its reset time,
+and no other harness starts. A plugin may still set `move`. The pairs that already hit a limit are remembered per (harness, provider) in
 `process.end` events with reason `limited` (joined to their `process.start`), so they survive moves and a vibestd
 restart. Within one round (since its turn started; for a launch's own limit, since the last turn ended or the
 session began) vibest never moves to a pair that hit a limit in it, whatever that login's usage reading says now:
