@@ -16,22 +16,8 @@ import {
 } from "@vibest/client/client"
 import * as Guard from "@vibest/core/guard"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { writeTerminalStatus } from "@vibest/core/results"
 import { VERSION } from "@vibest/protocol/rpc"
-import {
-  Cause,
-  Config,
-  Deferred,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Ref,
-  Schedule,
-  Schema,
-  Semaphore,
-  Stream,
-} from "effect"
+import { Cause, Config, Deferred, Effect, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
 
 import { Pi } from "./pi.ts"
 import toolGroups from "./tui/tool-groups.ts"
@@ -69,56 +55,6 @@ const piHeaders = (sessionId: string, ctx: ExtensionContext) =>
   })
 
 type Role = Layer.Layer<never, Config.ConfigError, Pi | ClientServices | FileSystem.FileSystem>
-
-const terminalStatus: Role = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const pi = yield* Pi
-    const writes = yield* Semaphore.make(1)
-    let root = false
-    let running = false
-    let waiting = false
-    const update = (ctx: ExtensionContext, change: () => void) =>
-      writes.withPermit(
-        Effect.gen(function* () {
-          if (!root || ctx.mode !== "tui") return
-          change()
-          yield* waiting ? writeTerminalStatus("blocked") : writeTerminalStatus(running ? "working" : "idle")
-        }),
-      )
-    yield* pi.handle("session_start", (_e, ctx) =>
-      writes.withPermit(
-        Effect.sync(() => {
-          root = ctx.mode === "tui"
-          running = false
-          waiting = false
-        }),
-      ),
-    )
-    yield* pi.handle("agent_start", (_e, ctx) =>
-      update(ctx, () => {
-        running = true
-      }),
-    )
-    yield* pi.handle("ui_prompt_start", (_e, ctx) =>
-      update(ctx, () => {
-        waiting = true
-      }),
-    )
-    yield* pi.handle("ui_prompt_end", (_e, ctx) =>
-      update(ctx, () => {
-        waiting = false
-        running = running && !ctx.isIdle()
-      }),
-    )
-    yield* pi.handle("agent_settled", (_e, ctx) =>
-      ctx.isIdle()
-        ? update(ctx, () => {
-            running = false
-          })
-        : Effect.void,
-    )
-  }),
-)
 
 const session = (sessionId: string): Role =>
   Layer.effectDiscard(
@@ -266,7 +202,7 @@ export const extension = Layer.unwrap(
     if (!agent) return Layer.empty
     const guarding: Role = Layer.effectDiscard(guarded(Guard.rulesOf(agent)))
     const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID")))
-    const guard = sessionId ? Layer.mergeAll(guarding, ready(sessionId), terminalStatus) : guarding
+    const guard = sessionId ? Layer.merge(guarding, ready(sessionId)) : guarding
     if (agent === Guard.COORDINATOR) return coordinator.pipe(Layer.provideMerge(guard))
     return sessionId ? session(sessionId).pipe(Layer.provideMerge(guard)) : guard
   }),

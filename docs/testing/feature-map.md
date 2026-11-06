@@ -62,12 +62,13 @@ check skips on a provider other than `anthropic`, which vibest does not give a C
 
 ## Terminal reports
 
-| ID  | Capability                                                         | Method | Pass when                                                                                                           |
-| --- | ------------------------------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------- |
-| T1  | Native Claude OSC 7501 in an isolated herdr-core with a fake model | script | Held response is working, successful turn is done with an unchanged vibest result, Esc is idle; no visible OSC text |
+| ID  | Capability                                                        | Method | Pass when                                                                                                           |
+| --- | ----------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------- |
+| T1  | Native Claude/Pi OSC 7501 and shipped Cursor hooks in isolated HC | script | Native working/blocked/resume/done/abort, unchanged results, Cursor working/idle only; raw evidence, no visible OSC |
 
 T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG state/config/runtime directories; it never contacts the
-user's herdr-core or changes harness configuration outside that temporary root.
+user's herdr-core or changes harness configuration outside that temporary root. Coordinator coverage awaits
+`feat/runtime-hc` caller detection; the exact follow-up check is in [runtime-port.md](../design/runtime-port.md#terminal-status-ownership).
 
 ## Harnesses and models (harness adapters)
 

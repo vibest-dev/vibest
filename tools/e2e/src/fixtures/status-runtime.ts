@@ -31,6 +31,10 @@ const runtime: Runtime.Runtime = {
       "--",
       "env",
       ...Object.entries(input.env).map(([k, v]) => k + "=" + v),
+      "python3",
+      "-I",
+      path.join(root, "status-pty.py"),
+      path.join(root, "status-output", crypto.randomUUID()),
       ...input.argv,
     ).pipe(Effect.map((raw) => ({ machine: machine.id, id: prefix + "/" + JSON.parse(raw).address }))),
   send: (terminal, input) =>

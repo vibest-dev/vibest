@@ -21,7 +21,7 @@ import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import * as Server from "@vibest/server/server"
-import { Clock, ConfigProvider, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, type Ref, Scope } from "effect"
+import { Clock, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 import { vi } from "vitest"
@@ -59,7 +59,7 @@ const test = <E>(
   timeout?: number,
 ) => it.effect(name, () => program.pipe(Effect.scoped, Effect.provide(served)), timeout)
 
-const session = (env: Record<string, string>, beforeWrite: Effect.Effect<void> = Effect.void) =>
+const session = (env: Record<string, string>) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
@@ -75,14 +75,10 @@ const session = (env: Record<string, string>, beforeWrite: Effect.Effect<void> =
       truncate: () => unused,
       writeAll: () => unused,
       write: (bytes: Uint8Array) =>
-        beforeWrite.pipe(
-          Effect.andThen(
-            Effect.sync(() => {
-              statuses.push(new TextDecoder().decode(bytes))
-              return bytes.length
-            }),
-          ),
-        ),
+        Effect.sync(() => {
+          statuses.push(new TextDecoder().decode(bytes))
+          return bytes.length
+        }),
     }
     const noTty = Layer.succeed(
       FileSystem.FileSystem,
@@ -142,108 +138,26 @@ const cli = Effect.gen(function* () {
 })
 
 describe("pi-vibest", () => {
-  const states = (...values: Array<string>) => values.map((value) => "\x1b]7501;state=" + value + "\x1b\\")
-  const running = { ...tuiStart, isIdle: () => false }
-  const idle = { ...tuiStart, isIdle: () => true }
-  const prompt = { reason: "ui_prompt", kind: "confirm", title: "permission is just title text" }
-  const identity = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }
-
   test(
-    "real starts, including extension-origin and coordinator turns, report working; UI waits resume until settled",
+    "Pi owns all terminal reports; vibest never writes a competing status",
     Effect.gen(function* () {
       for (const agent of ["general", "coordinator"]) {
-        const s = yield* session({ ...identity, VIBEST_AGENT: agent })
-        yield* s.emit("session_start", { reason: "startup" }, idle)
-        yield* s.emit("input", { source: "extension", text: "delivered" }, idle)
-        yield* s.emit("input", { source: "interactive", text: " " }, idle)
-        assert.deepStrictEqual(s.statuses, [])
-        yield* s.emit("agent_start", {}, running)
-        yield* s.emit("ui_prompt_start", prompt, running)
-        yield* s.emit("ui_prompt_end", prompt, running)
-        yield* s.emit("agent_end", { messages: [] }, running)
-        yield* s.emit("agent_settled", { aborted: false }, running)
-        assert.deepStrictEqual(s.statuses, states("working", "blocked", "working"))
-        yield* s.emit("agent_settled", { aborted: false }, idle)
-        assert.deepStrictEqual(s.statuses, states("working", "blocked", "working", "idle"))
-      }
-    }),
-  )
-
-  test(
-    "an idle prompt restores idle and an abort while waiting never restores working",
-    Effect.gen(function* () {
-      const s = yield* session(identity)
-      yield* s.emit("session_start", {}, idle)
-      for (const kind of ["confirm", "select", "input", "editor", "custom"]) {
-        yield* s.emit("ui_prompt_start", { ...prompt, kind }, idle)
-        yield* s.emit("ui_prompt_end", { ...prompt, kind }, idle)
-      }
-      assert.deepStrictEqual(s.statuses, states(...Array.from({ length: 5 }, () => ["blocked", "idle"]).flat()))
-      s.statuses.length = 0
-      yield* s.emit("agent_start", {}, running)
-      yield* s.emit("ui_prompt_start", prompt, running)
-      yield* s.emit("agent_settled", { aborted: true }, idle)
-      yield* s.emit("ui_prompt_end", prompt, idle)
-      assert.deepStrictEqual(s.statuses, states("working", "blocked", "blocked", "idle"))
-      s.statuses.length = 0
-      yield* s.emit("ui_prompt_start", prompt, idle)
-      yield* s.emit("agent_start", {}, running)
-      yield* s.emit("ui_prompt_end", prompt, running)
-      assert.deepStrictEqual(s.statuses, states("blocked", "blocked", "working"))
-    }),
-  )
-
-  test(
-    "rapid UI notifications cannot overtake a held tty write",
-    Effect.gen(function* () {
-      const entered = yield* Deferred.make<void>()
-      const release = yield* Deferred.make<void>()
-      const s = yield* session(
-        identity,
-        Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
-      )
-      yield* s.emit("session_start", {}, idle)
-      const start = yield* Effect.forkChild(s.emit("agent_start", {}, running))
-      yield* Deferred.await(entered)
-      const waiting = yield* Effect.forkChild(s.emit("ui_prompt_start", prompt, running))
-      yield* Effect.yieldNow
-      const end = yield* Effect.forkChild(s.emit("ui_prompt_end", prompt, running))
-      yield* Effect.yieldNow
-      assert.deepStrictEqual(s.statuses, [])
-      yield* Deferred.succeed(release, undefined)
-      yield* Fiber.join(start)
-      yield* Fiber.join(waiting)
-      yield* Fiber.join(end)
-      yield* s.emit("agent_settled", { aborted: false }, idle)
-      assert.deepStrictEqual(s.statuses, states("working", "blocked", "working", "idle"))
-    }),
-  )
-
-  test(
-    "no tty writes without identity or from non-TUI and nested contexts",
-    Effect.gen(function* () {
-      for (const env of [{}, { VIBEST_AGENT: "general" }, identity]) {
-        const s = yield* session(env)
-        for (const mode of ["rpc", "print", "json"]) {
-          const ctx = { ...idle, mode }
-          yield* s.emit("session_start", {}, ctx)
+        const s = yield* session({ VIBEST_AGENT: agent, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" })
+        for (const mode of ["tui", "rpc", "print", "json"]) {
+          const ctx = { ...tuiStart, mode, isIdle: () => true }
+          yield* s.emit("session_start", { reason: "startup" }, ctx)
+          yield* s.emit("input", { source: "interactive", text: "hello" }, ctx)
           yield* s.emit("agent_start", {}, ctx)
-          yield* s.emit("ui_prompt_start", prompt, ctx)
-          yield* s.emit("ui_prompt_end", prompt, ctx)
+          for (const kind of ["confirm", "select", "input", "editor", "custom"]) {
+            yield* s.emit("ui_prompt_start", { reason: "ui_prompt", kind }, ctx)
+            yield* s.emit("ui_prompt_end", { reason: "ui_prompt", kind }, ctx)
+          }
+          yield* s.emit("agent_end", { messages: [] }, ctx)
+          yield* s.emit("agent_settled", { aborted: false }, ctx)
           yield* s.emit("agent_settled", { aborted: true }, ctx)
         }
         assert.deepStrictEqual(s.statuses, [])
       }
-      const s = yield* session(identity)
-      yield* s.emit("session_start", {}, idle)
-      for (const mode of ["rpc", "print", "json"]) {
-        const ctx = { ...idle, mode }
-        yield* s.emit("agent_start", {}, ctx)
-        yield* s.emit("ui_prompt_start", prompt, ctx)
-        yield* s.emit("ui_prompt_end", prompt, ctx)
-        yield* s.emit("agent_settled", {}, ctx)
-      }
-      assert.deepStrictEqual(s.statuses, [])
     }),
   )
 
@@ -466,6 +380,7 @@ describe("pi-vibest", () => {
             "tool_execution_end",
             "session_compact",
             "session_tree",
+            "agent_start",
           ].some((e) => s.handlers.has(e)),
         )
         yield* s.emit("session_start", { reason: "startup" }, tuiStart)
