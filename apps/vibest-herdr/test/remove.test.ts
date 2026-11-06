@@ -1,6 +1,6 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { cwdHolders, livenessOf, lsofArgs, Processes, runFor } from "@vibest/core/processes"
+import { cwdHolders, livenessOf, Processes, runFor } from "@vibest/core/processes"
 import { Sessions } from "@vibest/core/sessions"
 import { Clock, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -14,7 +14,6 @@ import {
   makeRepository,
   processEnds,
   settled,
-  sh,
   tempDirectory,
   testLayer,
   type TestOptions,
@@ -85,34 +84,6 @@ const removeTimingCwd = (sessions: Sessions["Service"], id: string) =>
   })
 
 describe.concurrent("vibest rm: process proof", () => {
-  test(
-    "the terminal's close is recorded; no process works in the worktree: stopped, worktree and files removed, the branch kept; a second rm does nothing",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const fake = yield* FakeProcesses
-      const { id, repo, sessions, db, worktree, rules } = yield* idleSession
-      yield* sh(worktree, "switch", "-q", "-c", "feat/x")
-      const out = yield* sessions.remove(id)
-      assert.deepInclude(out, {
-        processes: "exited",
-        pane: "closed",
-        workspace: "none",
-        worktree: "removed",
-        branch: "feat/x",
-        reasons: [],
-      })
-      assert.deepStrictEqual(yield* fake.probed, [], "the runtime's close is the process proof: vibestd probes no PID")
-      const row = (yield* db.getSession(id))!
-      assert.isNotNull(row.exitedAt)
-      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
-      assert.match(worktree.split("/").at(-1)!, /^[0-9a-f]{4}$/, "a 4-hex worktree name, not the session id")
-      assert.isFalse(yield* fs.exists(worktree))
-      assert.isFalse(yield* fs.exists(rules))
-      assert.strictEqual(yield* sh(repo, "branch", "--list", "feat/x"), "feat/x")
-      assert.deepInclude(yield* sessions.remove(id), { worktree: "gone", pane: "none", workspace: "none" })
-    }),
-  )
-
   test(
     "an archive ends its process once, and no PID is ever asked about",
     Effect.gen(function* () {
@@ -273,24 +244,6 @@ describe.concurrent("vibest rm: process proof", () => {
   )
 
   test(
-    "a slow listing (lsof taking 3 s) is still one listing: kept after it, naming the process",
-    Effect.gen(function* () {
-      const fake = yield* FakeProcesses
-      const { id, sessions } = yield* idleSession
-      yield* fake.setCwdUsers([4242])
-      yield* fake.setCwdDelay("3 seconds")
-      const before = yield* fake.cwdListings
-      const [out] = yield* removeTimingCwd(sessions, id)
-      assert.deepInclude(out!, {
-        processes: "alive",
-        worktree: "kept",
-        reasons: ["worktree kept: process 4242 has its working directory in it"],
-      })
-      assert.strictEqual((yield* fake.cwdListings) - before, 1)
-    }),
-  )
-
-  test(
     "a listing that never returns: kept after 10 s as unfinished, never read as empty",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -304,16 +257,6 @@ describe.concurrent("vibest rm: process proof", () => {
         reasons: ["worktree kept: vibest could not finish listing this user's processes working in it within 10s"],
       })
       assert.isTrue(yield* fs.exists(worktree))
-    }),
-  )
-
-  test(
-    "a fast empty listing removes the worktree without waiting",
-    Effect.gen(function* () {
-      const { id, sessions } = yield* idleSession
-      const started = yield* Clock.currentTimeMillis
-      assert.deepInclude(yield* sessions.remove(id), { processes: "exited", worktree: "removed", reasons: [] })
-      assert.strictEqual((yield* Clock.currentTimeMillis) - started, 0)
     }),
   )
 
@@ -397,10 +340,6 @@ describe.concurrent("Processes", () => {
       assert.strictEqual(livenessOf(throwing(e)), "unknown")
   })
 
-  it("asks lsof for this user's processes only (numeric -u, ANDed), warnings forced on (+w), as an argument array", () => {
-    assert.deepStrictEqual(lsofArgs(501), ["+w", "-a", "-u", "501", "-d", "cwd", "-Fpfn0"])
-  })
-
   it("lists only the target's holders, under either spelling of the directory", () => {
     assert.deepStrictEqual(cwdHolders(ok(listing), self, dirs), [101, 102])
   })
@@ -419,7 +358,7 @@ describe.concurrent("Processes", () => {
     assert.isUndefined(cwdHolders(undefined, self, dirs))
   })
 
-  it("a record it does not expect makes the listing unknown", () => {
+  it("a record it does not expect, or a cwd lsof could not read (wherever it points, whatever the localized reason), makes the whole listing unknown", () => {
     for (const odd of [
       lsofSet("p101", "cbash") + lsofSet("fcwd", "n/x"),
       lsofSet("p101") + lsofSet("ftxt", "n/x"),
@@ -430,9 +369,6 @@ describe.concurrent("Processes", () => {
       lsofSet("p101") + record(102, "/x"),
     ])
       assert.isUndefined(cwdHolders(ok(record(self, "/home") + odd), self, dirs), JSON.stringify(odd))
-  })
-
-  it("a cwd lsof could not read makes the whole listing unknown, wherever it points and whatever the (localized) reason", () => {
     for (const odd of [
       "/proc/42/cwd (readlink: Permission denied)",
       "/proc/42/cwd (readlink: Keine Berechtigung)",

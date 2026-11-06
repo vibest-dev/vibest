@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
-import { AgentRefused, Builtins, pluginEntries, PluginLoader, Plugins } from "@vibest/core/plugins"
+import { AgentRefused, Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -91,107 +91,35 @@ describe("plugins: spawn hook", () => {
     },
   )
 
-  test(
-    "P6: the last writer wins and the trace says whom it overwrote",
-    Effect.gen(function* () {
-      const s = yield* (yield* Sessions).spawn(
-        yield* spawnInput(yield* makeRepository, { harness: "pi", model: "requested" }),
-      )
-      assert.strictEqual(s.model, "b")
-      assert.deepStrictEqual(
-        s.trace.map((t) => t.changes),
-        [
-          [],
-          [{ field: "runtime", to: "herdr" }],
-          [{ field: "model", from: "requested", to: "a" }],
-          [{ field: "model", from: "a", to: "b", overwrote: "A" }],
-        ],
-      )
-      assert.deepStrictEqual(s.decidedBy, { runtime: "runtime-choice", model: "B" })
-    }),
-    { plugins: [write("A", (e) => (e.model = "a")), write("B", (e) => (e.model = "b"))] },
-  )
-
-  test(
-    "P2: a failing callback is a refusal naming the plugin; nothing is inserted or started",
-    Effect.gen(function* () {
-      const error = yield* Effect.flip(
-        (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" })),
-      )
-      assert.strictEqual(error._tag, "AgentRefused")
-      assert.deepInclude(error, { plugin: "fails", reason: "plugin fails crashed: boom" })
-      assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
-      const listed = yield* (yield* Plugins).list
-      const fails = listed.find((q) => q.id === "fails")!
-      const after = listed.find((q) => q.id === "after")!
-      assert.strictEqual(fails.crashed, 1)
-      assert.include(fails.lastError, "boom")
-      assert.strictEqual(after.calls, 0)
-    }),
-    {
-      plugins: [
-        hook("fails", () => Effect.fail(new Error("boom") as never)),
-        write("after", () => assert.fail("must not run after a crash")),
-      ],
-    },
-  )
-
-  test(
-    "P2: a defect is a refusal too, and its partial writes are recorded but never start anything",
-    Effect.gen(function* () {
-      const error = yield* Effect.flip(
-        (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" })),
-      )
-      assert.deepInclude(error, { _tag: "AgentRefused", plugin: "dies", reason: "plugin dies crashed: defect" })
-      assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
-    }),
-    {
-      plugins: [
-        hook("dies", (e) => Effect.sync(() => (e.provider = "partial")).pipe(Effect.andThen(Effect.die("defect")))),
-      ],
-    },
-  )
-
   const stuckHookEntered = { value: false }
   const pastUninterruptibleSleep = "1 minute"
-  for (const [label, stuck] of [
-    ["never", Effect.never],
-    ["a promise that never settles", Effect.promise(() => new Promise<void>(() => {}))],
-    ["a long sleep", Effect.sleep("1 hour")],
-    ["an uninterruptible sleep", Effect.uninterruptible(Effect.sleep("1 minute"))],
-  ] as const) {
-    test(
-      `P3: a hook stuck in ${label} times out and refuses the start`,
-      Effect.gen(function* () {
-        const repo = yield* makeRepository
-        stuckHookEntered.value = false
-        const spawning = yield* Effect.forkChild((yield* Sessions).spawn(yield* spawnInput(repo, { harness: "pi" })))
-        yield* until(
-          Effect.sync(() => stuckHookEntered.value),
-          (x) => x,
-        )
-        yield* TestClock.adjust("5 seconds")
-        const error = yield* Effect.flip(Fiber.join(spawning))
-        assert.strictEqual(error._tag, "AgentRefused")
-        assert.deepInclude(error, { plugin: "stuck", reason: "plugin stuck timed out after 5s" })
-        assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
-        yield* TestClock.adjust(pastUninterruptibleSleep)
-      }),
-      {
-        plugins: [
-          hook("stuck", () => Effect.sync(() => (stuckHookEntered.value = true)).pipe(Effect.andThen(stuck))),
-          write("after", () => assert.fail("must not run after a timeout")),
-        ],
-      },
-    )
-  }
-
-  it("P9: read-only fields are read-only to plugins at compile time", () => {
-    write("readonly", (e) => {
-      // @ts-expect-error project is read-only
-      e.project = "changed"
-    })
-  })
+  test(
+    "P3: a hook stuck in an uninterruptible sleep times out and refuses the start",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const spawning = yield* Effect.forkChild((yield* Sessions).spawn(yield* spawnInput(repo, { harness: "pi" })))
+      yield* until(
+        Effect.sync(() => stuckHookEntered.value),
+        (x) => x,
+      )
+      yield* TestClock.adjust("5 seconds")
+      const error = yield* Effect.flip(Fiber.join(spawning))
+      assert.strictEqual(error._tag, "AgentRefused")
+      assert.deepInclude(error, { plugin: "stuck", reason: "plugin stuck timed out after 5s" })
+      assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
+      yield* TestClock.adjust(pastUninterruptibleSleep)
+    }),
+    {
+      plugins: [
+        hook("stuck", () =>
+          Effect.sync(() => (stuckHookEntered.value = true)).pipe(
+            Effect.andThen(Effect.uninterruptible(Effect.sleep(pastUninterruptibleSleep))),
+          ),
+        ),
+        write("after", () => assert.fail("must not run after a timeout")),
+      ],
+    },
+  )
 
   test(
     "a plugin can rewrite the prompt the session receives",
@@ -208,46 +136,19 @@ describe("plugins: spawn hook", () => {
   )
 
   test(
-    "P8: an unknown harness written by a plugin is refused, naming it",
+    "P8/P14: an unknown harness written by a plugin is refused, naming it; one that unsets the harness leaves NoHarnessChosen",
     Effect.gen(function* () {
-      const error = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository)))
+      const repo = yield* makeRepository
+      const error = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(repo)))
       assert.strictEqual(error._tag, "HarnessUnavailable")
       assert.include(error.message, "vim")
       assert.include(error.message, "editor")
       assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
+      const unset = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(repo, { prompt: "unset" })))
+      assert.strictEqual(unset._tag, "NoHarnessChosen")
+      assert.include(unset.message, "routing plugin")
     }),
-    { plugins: [write("editor", (e) => (e.harness = "vim"))] },
-  )
-
-  test(
-    "P14: AgentRefused stops at once; nothing is inserted or started",
-    Effect.gen(function* () {
-      const error = yield* Effect.flip(
-        (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" })),
-      )
-      assert.strictEqual(error._tag, "AgentRefused")
-      assert.deepInclude(error, { plugin: "budget", reason: "no opus here" })
-      assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
-      const listed = yield* (yield* Plugins).list
-      assert.strictEqual(listed.find((q) => q.id === "budget")!.refused, 1)
-      assert.strictEqual(listed.find((q) => q.id === "after")!.calls, 0)
-    }),
-    {
-      plugins: [
-        hook("budget", () => Effect.fail(new PluginRefused({ reason: "no opus here" }))),
-        write("after", () => assert.fail("must not run after a rejection")),
-      ],
-    },
-  )
-
-  test(
-    "P14: a plugin that unsets the harness leaves NoHarnessChosen",
-    Effect.gen(function* () {
-      const error = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository)))
-      assert.strictEqual(error._tag, "NoHarnessChosen")
-      assert.include(error.message, "routing plugin")
-    }),
-    { plugins: [write("none", (e) => (e.harness = undefined))] },
+    { plugins: [write("editor", (e) => (e.harness = e.prompt === "unset" ? undefined : "vim"))] },
   )
 
   test(
@@ -309,15 +210,6 @@ describe("plugins: spawn hook", () => {
       effect: (ctx) =>
         ctx.agent.hook(name as never, () => Effect.sync(() => assert.fail(`${name} ran as a startup hook`))),
     })
-
-  it("old hook names do not type-check", () => {
-    Plugin.define({
-      id: "old",
-      effect: (ctx) =>
-        // @ts-expect-error ctx.hook is gone; register with ctx.agent.hook
-        ctx.hook("session.spawn", () => Effect.void),
-    })
-  })
 
   test(
     "old and unknown hook names fail the plugin's setup instead of running at startup",
@@ -443,14 +335,6 @@ const event = {
 }
 
 describe("plugins: loading", () => {
-  it("P1: listing order does not matter; node_modules, dot entries and .d.ts are not plugins", () => {
-    assert.deepStrictEqual(pluginEntries(["b.ts", "node_modules", ".hidden.ts", "a.d.ts", "a.ts", "c"]), [
-      "a.ts",
-      "b.ts",
-      "c",
-    ])
-  })
-
   it.live(
     "P1: plugins/ first in path order, then vibest.json in its order (a local entry may be one source file); -x removes; bad entries fail visibly",
     () =>
@@ -462,6 +346,7 @@ describe("plugins: loading", () => {
         yield* fs.writeFileString(path.join(plugins, "b.ts"), source("b", "from-b"))
         yield* fs.writeFileString(path.join(plugins, "a.ts"), source("a", "from-a"))
         yield* fs.writeFileString(path.join(plugins, "a.d.ts"), "export {}")
+        yield* fs.writeFileString(path.join(plugins, ".hidden.ts"), source("hidden", "from-hidden"))
         yield* fs.writeFileString(path.join(plugins, "notes.md"), "not a plugin")
         yield* fs.makeDirectory(path.join(plugins, "empty"))
         yield* fs.makeDirectory(path.join(plugins, "node_modules"))

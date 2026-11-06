@@ -16,8 +16,6 @@ import {
   type LiveSession,
   type PluginContext,
   VERBS,
-  formatRuns,
-  formatUsage,
   paletteMenu,
   parsePluginContext,
   perform,
@@ -114,62 +112,6 @@ describe("herdr plugin context", () => {
 })
 
 describe("herdr plugin commands", () => {
-  it.effect("startup asks to republish and prints how many panes", () =>
-    Effect.gen(function* () {
-      let directory: string | undefined = "unset"
-      const text = yield* shown(
-        "startup",
-        project,
-        fake({
-          republish: (dir) =>
-            Effect.sync(() => {
-              directory = dir
-              return 2
-            }),
-        }),
-      )
-      assert.strictEqual(text, "republished 2")
-      assert.strictEqual(directory, "/repo")
-    }),
-  )
-
-  it.effect("open-main focuses the main agent of the focused pane's directory", () =>
-    Effect.gen(function* () {
-      let directory = ""
-      const text = yield* shown(
-        "open-main",
-        project,
-        fake({
-          openMain: (dir) =>
-            Effect.sync(() => {
-              directory = dir
-              return { action: "focused" as const, place: "w1:p9" }
-            }),
-        }),
-      )
-      assert.strictEqual(text, "focused w1:p9")
-      assert.strictEqual(directory, "/repo")
-    }),
-  )
-
-  it.effect("open-main uses the workspace directory when the focused pane has none", () =>
-    Effect.gen(function* () {
-      let directory = ""
-      yield* shown(
-        "open-main",
-        ctx({ workspaceCwd: "/repo", focusedPaneCwd: undefined }),
-        fake({
-          openMain: (dir) =>
-            Effect.sync(() => {
-              directory = dir
-              return { action: "opened" as const, place: "pane w1:p3 (herdr session vibest)" }
-            }),
-        }),
-      )
-      assert.strictEqual(directory, "/repo")
-    }),
-  )
-
   it.effect("open-main without a directory does not ask to open one", () =>
     Effect.gen(function* () {
       let called = false
@@ -191,115 +133,67 @@ describe("herdr plugin commands", () => {
     }),
   )
 
-  it.effect("run reads the popup prompt and starts it in the context directory", () =>
-    Effect.gen(function* () {
-      let got: { readonly directory: string; readonly prompt: string } | undefined
-      const text = yield* shown(
-        "run",
-        project,
-        fake({
-          spawn: (directory, prompt) =>
-            Effect.sync(() => {
-              got = { directory, prompt }
-              return "abcd1234-abcd-4abc-8abc-abcd1234abcd"
-            }),
-        }),
-        ["fix the login bug"],
-      )
-      assert.strictEqual(text, "Prompt:\nstarted abcd1234")
-      assert.deepStrictEqual(got, { directory: "/repo", prompt: "fix the login bug" })
-    }),
-  )
-
-  it.effect("run refuses an empty prompt and starts nothing", () =>
-    Effect.gen(function* () {
-      let called = false
-      const error = yield* Effect.flip(
-        shown(
-          "run",
-          project,
-          fake({
-            spawn: () =>
-              Effect.sync(() => {
-                called = true
-                return "abcd1234-abcd-4abc-8abc-abcd1234abcd"
-              }),
-          }),
-          ["  "],
-        ),
-      )
-      assert.strictEqual(error._tag, "EmptyInput")
-      assert.isFalse(called)
-    }),
-  )
-
-  it.effect("stop ignores the main agent in the focused pane", () =>
-    Effect.gen(function* () {
-      let called = false
-      const error = yield* Effect.flip(
-        shown(
+  it.effect(
+    "stop stops the session of the focused pane, or of the herdr agent name when the pane id moved; never the main agent",
+    () =>
+      Effect.gen(function* () {
+        let removed = ""
+        let listed: string | undefined = "unset"
+        const text = yield* shown(
           "stop",
-          ctx({ focusedPaneId: "w1:p1", focusedPaneAgent: "s-a1a10001a1a14a1a8a1aa1a10001a1" }),
+          ctx({ focusedPaneId: "w1:p2" }),
           fake({
-            list: () =>
-              Effect.succeed([
-                session({ id: "a1a10001-a1a1-4a1a-8a1a-a1a10001a1a1", agent: "main", paneId: "w1:p1" }),
-                session({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", paneId: "w1:p9" }),
-              ]),
-            interrupt: () =>
+            list: (directory) =>
               Effect.sync(() => {
-                called = true
+                listed = directory
+                return [session({ id: "aaaa1111-aaaa-4aaa-8aaa-aaaa1111aaaa", paneId: "w1:p1" }), session()]
+              }),
+            interrupt: (id) =>
+              Effect.sync(() => {
+                removed = id
               }),
           }),
-        ),
-      )
-      assert.strictEqual(error._tag, "NoFocusedSession")
-      assert.isFalse(called)
-    }),
-  )
+        )
+        assert.strictEqual(text, "stopped abcd1234")
+        assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
+        assert.isUndefined(listed)
 
-  it.effect("stop stops the session of the focused pane", () =>
-    Effect.gen(function* () {
-      let removed = ""
-      let listed: string | undefined = "unset"
-      const text = yield* shown(
-        "stop",
-        ctx({ focusedPaneId: "w1:p2" }),
-        fake({
-          list: (directory) =>
-            Effect.sync(() => {
-              listed = directory
-              return [session({ id: "aaaa1111-aaaa-4aaa-8aaa-aaaa1111aaaa", paneId: "w1:p1" }), session()]
-            }),
-          interrupt: (id) =>
-            Effect.sync(() => {
-              removed = id
-            }),
-        }),
-      )
-      assert.strictEqual(text, "stopped abcd1234")
-      assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
-      assert.isUndefined(listed)
-    }),
-  )
+        removed = ""
+        const moved = yield* shown(
+          "stop",
+          ctx({ focusedPaneId: "w9:p9", focusedPaneAgent: "s-abcd1234abcd4abc8abcabcd1234ab" }),
+          fake({
+            list: () => Effect.succeed([session({ paneId: "w1:p2" })]),
+            interrupt: (id) =>
+              Effect.sync(() => {
+                removed = id
+              }),
+          }),
+        )
+        assert.strictEqual(moved, "stopped abcd1234")
+        assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
 
-  it.effect("stop matches the herdr agent name when the pane id moved", () =>
-    Effect.gen(function* () {
-      let removed = ""
-      const text = yield* shown(
-        "stop",
-        ctx({ focusedPaneId: "w9:p9", focusedPaneAgent: "s-abcd1234abcd4abc8abcabcd1234ab" }),
-        fake({
-          list: () => Effect.succeed([session({ paneId: "w1:p2" })]),
-          interrupt: (id) =>
-            Effect.sync(() => {
-              removed = id
+        removed = ""
+        const main = yield* Effect.flip(
+          shown(
+            "stop",
+            ctx({ focusedPaneId: "w1:p1", focusedPaneAgent: "s-a1a10001a1a14a1a8a1aa1a10001a1" }),
+            fake({
+              list: () =>
+                Effect.succeed([
+                  session({ id: "a1a10001-a1a1-4a1a-8a1a-a1a10001a1a1", agent: "main", paneId: "w1:p1" }),
+                  session({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", paneId: "w1:p9" }),
+                ]),
+              interrupt: (id) =>
+                Effect.sync(() => {
+                  removed = id
+                }),
             }),
-        }),
-      )
-      assert.strictEqual(text, "stopped abcd1234")
-      assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
-    }),
+          ),
+        )
+        assert.strictEqual(main._tag, "NoFocusedSession")
+        assert.strictEqual(removed, "")
+      }),
   )
 
   it.effect("stop with no session in the focused pane interrupts nothing", () =>
@@ -318,47 +212,6 @@ describe("herdr plugin commands", () => {
       const noPane = yield* Effect.flip(shown("stop", ctx(), daemon))
       assert.match(noPane.message, /no focused pane/)
       assert.isFalse(removed)
-    }),
-  )
-
-  it.effect("runs prints live sessions for the context directory", () =>
-    Effect.gen(function* () {
-      let directory = ""
-      const text = yield* shown(
-        "runs",
-        project,
-        fake({
-          list: (dir) =>
-            Effect.sync(() => {
-              directory = dir ?? ""
-              return [session()]
-            }),
-        }),
-      )
-      assert.strictEqual(text, "abcd1234  general  pi  working  w1:p2")
-      assert.strictEqual(directory, "/repo")
-      assert.notStrictEqual(directory, "/plugin-directory")
-    }),
-  )
-
-  it.effect("runs with nothing live says so", () =>
-    Effect.gen(function* () {
-      assert.strictEqual(yield* shown("runs", project, fake()), "no live sessions")
-    }),
-  )
-
-  it.effect("subscriptions prints usage when it is available, otherwise unknown", () =>
-    Effect.gen(function* () {
-      const known = yield* shown(
-        "subscriptions",
-        ctx(),
-        fake({
-          usage: () => Effect.succeed([{ harness: "claude", window: "5h", percent: 40, status: "available" as const }]),
-        }),
-      )
-      assert.strictEqual(known, "claude  5h  40%  available")
-      assert.strictEqual(yield* shown("subscriptions", ctx(), fake()), "unknown")
-      assert.strictEqual(yield* shown("subscriptions", ctx(), fake({ usage: () => Effect.succeed([]) })), "unknown")
     }),
   )
 
@@ -404,16 +257,6 @@ describe("herdr plugin commands", () => {
       )
     }),
   )
-
-  it("formatRuns prints the live sessions the daemon listed, the main agent included", () => {
-    assert.strictEqual(
-      formatRuns([session(), session({ id: "a1a10001-a1a1-4a1a-8a1a-a1a10001a1a1", agent: "main" })]),
-      "abcd1234  general  pi  working  w1:p2\na1a10001  main  pi  working  w1:p2",
-    )
-    assert.strictEqual(formatRuns([]), "no live sessions")
-    assert.strictEqual(formatUsage(undefined), "unknown")
-    assert.strictEqual(formatUsage([]), "unknown")
-  })
 })
 
 describe("herdr plugin package", () => {

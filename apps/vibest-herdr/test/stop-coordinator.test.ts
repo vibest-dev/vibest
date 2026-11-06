@@ -161,11 +161,13 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   )
 
   test(
-    "y: SIGTERM to the harness PID only, its terminal kept; its exit and a delivery round before the launch drop nothing; the start in another terminal resumes the same conversation and gets what waited",
+    "y: SIGTERM to the harness PID only (after a restart in place, the pid it reported ready with), its terminal kept; its exit and a delivery round before the launch drop nothing; the start in another terminal resumes the same conversation and gets what waited",
     Effect.gen(function* () {
       const s = yield* workingPiMain
+      yield* s.processes.set(7777, "alive")
+      yield* s.db.patchLive(s.started.sessionId, { pid: 7777 })
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
-      assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
+      assert.deepStrictEqual(yield* s.processes.signaled, [7777])
       assert.deepStrictEqual(yield* s.herdr.callsTo("close"), [])
       assert.deepStrictEqual(yield* s.herdr.callsTo("send"), [])
       assert.isTrue(HashMap.has(yield* s.herdr.panes, s.paneId))
@@ -193,18 +195,6 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
         harnessSessionId: null,
       })
       assert.strictEqual((yield* s.db.coordinatorOf(s.projectId))!.harnessId, "claude")
-    }),
-  )
-
-  test(
-    "y after a restart in place: SIGTERM to the pid the restarted harness reported ready with, its terminal kept",
-    Effect.gen(function* () {
-      const s = yield* workingPiMain
-      yield* s.processes.set(7777, "alive")
-      yield* s.db.patchLive(s.started.sessionId, { pid: 7777 })
-      assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
-      assert.deepStrictEqual(yield* s.processes.signaled, [7777])
-      assert.deepStrictEqual(yield* s.herdr.callsTo("close"), [])
     }),
   )
 

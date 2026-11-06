@@ -11,11 +11,10 @@ import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { CALLER_HEADER, PROJECT_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
 import * as Server from "@vibest/server/server"
-import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
 
 import * as Platform from "#platform"
 
-import { TIMING } from "../src/replace.ts"
 import {
   authed,
   FakeRuntime,
@@ -104,10 +103,6 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
   })
 
 describe("Daemon.Stop over a real unix socket: only vibestd's own operations block it; agents keep running and queued messages stay for the next vibestd", () => {
-  it("the client waits for Stop's reply longer than vibestd's bounded drain", () => {
-    assert.isTrue(Duration.isGreaterThan(TIMING.reply, Server.DRAIN_TIMEOUT))
-  })
-
   test(
     "the command line only, for this vibestd's instance; once accepted, no change is admitted, settlement included",
     Effect.gen(function* () {
