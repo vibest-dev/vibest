@@ -107,6 +107,28 @@ describe("harness choice", () => {
     }).pipe(Effect.scoped),
   )
 
+  it.effect("an exhausted cursor auto bucket does not refuse the harness", () =>
+    Effect.gen(function* () {
+      const hook = yield* startHook
+      const event = start({
+        harness: "cursor",
+        model: "composer",
+        subscriptions: [
+          {
+            ...limitedCursor,
+            limits: [
+              { window: "monthly", percent: 30, status: "available", resetTime },
+              { window: "monthly-auto", percent: 100, status: "limited", resetTime },
+              { window: "monthly-api", percent: 20, status: "available", resetTime },
+            ],
+          },
+        ],
+      })
+      yield* hook(event)
+      assert.deepStrictEqual([event.harness, event.model], ["cursor", "composer"])
+    }).pipe(Effect.scoped),
+  )
+
   it.effect("an explicit limited harness fails with the limit", () =>
     Effect.gen(function* () {
       const hook = yield* startHook

@@ -94,6 +94,18 @@ describe("cursor", () => {
       cursorUsage(capped).map((limit) => limit.status),
       ["available", "available", "available"],
     )
+    const split = {
+      billingCycleEnd: "1794886804000",
+      planUsage: { totalPercentUsed: 30, autoPercentUsed: 100, apiPercentUsed: 20, limit: 40000 },
+    }
+    assert.deepStrictEqual(
+      cursorUsage(split, { noUsageBasedAllowed: true }).map((limit) => [limit.window, limit.status]),
+      [
+        ["monthly", "available"],
+        ["monthly-auto", "available"],
+        ["monthly-api", "available"],
+      ],
+    )
   })
 })
 

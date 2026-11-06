@@ -28,13 +28,7 @@ export const cursorUsage = (usage: unknown, hardLimit?: unknown): ReadonlyArray<
   return buckets.flatMap<SubscriptionLimit>(([window, used]) => {
     if (used === undefined) return []
     const percent = clampPercent(used)
-    return [
-      {
-        window,
-        percent,
-        status: percent >= 100 && onDemandKnown && !onDemand ? "limited" : "available",
-        resetTime,
-      },
-    ]
+    const counts = window === "monthly" && percent >= 100 && onDemandKnown && !onDemand
+    return [{ window, percent, status: counts ? "limited" : "available", resetTime }]
   })
 }

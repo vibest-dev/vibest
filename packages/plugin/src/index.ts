@@ -31,10 +31,21 @@ export interface SubscriptionSnapshot {
 const resetPassed = (resetTime: number | null | undefined, now: number) =>
   typeof resetTime === "number" && resetTime <= now
 
+const bucketWindow = (window: string | undefined) => window === "monthly-auto" || window === "monthly-api"
+
 export const isLimited = (
-  row: { readonly limits: ReadonlyArray<{ readonly status: string; readonly resetTime?: number | null }> },
+  row: {
+    readonly limits: ReadonlyArray<{
+      readonly status: string
+      readonly resetTime?: number | null
+      readonly window?: string
+    }>
+  },
   now = Date.now(),
-) => row.limits.some((limit) => limit.status === "limited" && !resetPassed(limit.resetTime, now))
+) =>
+  row.limits.some(
+    (limit) => limit.status === "limited" && !bucketWindow(limit.window) && !resetPassed(limit.resetTime, now),
+  )
 
 export const stillLimited = (
   attempt: { readonly harness: string; readonly provider: string | undefined; readonly at: number },
