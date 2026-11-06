@@ -220,6 +220,7 @@ const envOffArgv = (argv: ReadonlyArray<string>) => {
 }
 
 export const DRAIN_TIMEOUT = Duration.seconds(5)
+export const PRESENT_TIMEOUT = Duration.seconds(5)
 
 const SETTLEMENTS: ReadonlySet<string> = new Set(["TurnEnd", "Prompt"])
 
@@ -862,7 +863,7 @@ export const handlers = VibestRpcs.toLayer(
                     { machine: machineOf(machine).id, id: terminal },
                     { mainSession: saved.sessionId, projectId },
                   )
-                  .pipe(Effect.ignore)
+                  .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
               return { ...saved, runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }) }
             }),
           )
