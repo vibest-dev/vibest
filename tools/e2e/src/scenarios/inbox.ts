@@ -439,7 +439,18 @@ const checks: ReadonlyArray<Check> = [
         await w.ok(["send", a, "--", ask("cmmid")], { cwd: c.repo })
         await until("the cmmid result queued while the main agent's turn runs", () => results() > queued, 180_000)
         await fs.writeFile(go, "")
-        await c.result(a, "Answer probe alpha", "cmmid", before)
+        const mid = await c.result(a, "Answer probe alpha", "cmmid", before)
+        const midAt = mid.findIndex(
+          (e) => e.type === "attachment" && e.raw.includes("hook_additional_context") && e.raw.includes("done-cmmid"),
+        )
+        await until(
+          "the main agent's turn on the cmmid result ended",
+          async () =>
+            (await transcript(w, c!.repo))
+              .slice(midAt)
+              .some((e) => e.type === "system" && e.raw.includes('"subtype":"turn_duration"')),
+          180_000,
+        )
 
         stopped = await c.claudePid()
         expect(stopped !== undefined, "no claude process in the main agent's pane")
