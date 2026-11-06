@@ -1,0 +1,81 @@
+# Daemon
+
+Implementation notes for [surfaces and protocol](architecture.md#13-surfaces-and-protocol).
+
+## Lifecycle and replacement
+
+From omac `daemon.ts`, `drain.ts`, `replace.ts` (copied): a start lock held by `flock` on
+`vibestd.pid` (below); a socket that answers is never unlinked; the instance (pid, start id, argv) is in Ping and
+`vibestd.pid`; only the user's command starts the daemon, never an agent's (it would inherit the agent's
+sandbox). `daemon restart` and `update` replace it only after `y` on a terminal, while agents keep running: the old
+one refuses new changes with `DaemonStopping`, drains its own operations (admitted requests, deliveries, launches,
+archives; `core/drain.ts`) for up to 5 s, and leaves pending Messages in sqlite for the next one. Drain counts
+daemon operations, not agent lifetimes. While it drains, only a settlement of work already started is admitted;
+other work waits and wakes once a refused Stop reopens. The start lock's
+file handle must stay referenced for vibestd's whole scope: Bun collects an unreferenced handle within seconds (on
+Linux in about 2-3 s without a forced GC) and the lock goes with it while the process lives, so the finalizer that
+closes the handle is what keeps it (`daemon.test.ts` checks it under `Bun.gc`).
+On Bun, `vibestd.pid` is both the record and the start lock: `flock` on the file itself, so readers still read it
+while it is held and a killed vibestd leaves no stale lock. It is written in place and never replaced (a new inode
+would be unlocked) or unlinked (a contender may have the old inode open); release empties it. A failed `flock` is
+taken as held by another process without reading errno.
+A replacement never signals vibestd and never removes its socket or lock; the outcome is what Ping shows afterwards.
+It sends one `Daemon.Stop` (the same call on every protocol since it was added, so in the running vibestd's
+protocol), never again: only one of vibestd's own refusals, decoded, changes nothing; an accepted, lost or
+undecodable reply, or none, is a hint and Ping decides. A vibestd before 0.0.1-beta.10 refuses while any agent or
+queued message is active. The client waits 55 s for the reply (above an older vibestd's two 20 s quiet checks and a
+5 s drain, so only a wedged vibestd reaches it) and 15 s for the old one to stop answering; nothing answering is not
+proof it exited, so the new vibestd waits for the lock, boundedly. With `--version` (15 s) and the new start, a
+replacement ends in about two minutes whatever the other side does, not counting the wait for the yes.
+
+## Daemon start
+
+In `packages/server/src/daemon.ts`: take the flock on `vibestd.pid`, retrying while it is busy (a
+vibestd whose socket closed may still run its finalizers, or another starter is mid-attempt; each attempt is a fresh
+connection) and exiting once a vibestd that holds it answers; a handoff's new vibestd waits for the old one's lock,
+not its socket, which answers until the old one has drained. With the lock held, whatever still answers on
+`vibest.sock` took none (an older vibestd or another program): its socket stays and the start fails, after three
+Pings, since one can outlast its 1 s timeout on a loaded machine. Else the socket is unlinked, a handoff backs up the
+database the old vibestd left before this one opens and migrates it, sessions are recovered and the socket served.
+The lock is taken first and released last, after the socket server has closed and removed its path, so a successor's
+socket is never unlinked. The PID line is written into the locked file, and releasing the lock empties it; it is for
+people to read, since a stale file's PID may belong to another process by now, and nothing signals it. An accepted
+`Daemon.Stop` keeps a short grace before the server closes so its reply is written; a lost reply is still handled by
+the client, which watches Ping. Each daemon has its own plugin registry (a service, never a global), provided after
+every layer that reads it, since a `provideMerge` satisfies only requirements outstanding before it; and one event bus
+below Db and Runtimes, so a commit is visible to whoever subscribed first. The main Agents' `vibest --env` values live
+in vibestd's memory only (never stored, logged or sent); a handoff passes them to the next vibestd in its environment
+(`VIBEST_HANDOFF_ENV`), which `vibest daemon --import` reads and removes before anything starts, and a handoff first
+has the new binary check read-only that it can open the database (`vibest daemon import-check`). The pairs go on the
+pane's environment, not into the typed command, so they stay out of the shell history; the pane gets them in one
+variable a shell rc does not set, since an rc that exports the names themselves would win.
+
+## Admission while draining
+
+Changes are counted at the RPC and HTTP entry until they end, failed or interrupted
+ones too, and refused with `DaemonStopping` once a `Daemon.Stop` drains and after it is accepted, except settlements
+of work already handed out: a hook's turn start (`Prompt`) or turn end (`TurnEnd`) and an inbox ack. Refused, a spawn's
+first turn would never show its pickup proof (its launch then holds the drain open) and a turn end would lose its result. A turn end is one `turn.reported` event, written without the
+session lock; a write that fails fails the request, so the caller sees a failure, not a silent retry. A turn start is
+stamped once, when the hook arrives: `userPrompt` notes the start before it may wait for the session's lock, held
+through a send's whole confirm, and stamps the round with the same time, so the pending send sees its pickup proof
+while it still waits.
+
+## Session requests
+
+Middleware checks caller and protocol headers before a handler runs and never calls
+`client.annotate`, so a later request on the same socket starts clean. A session's environment must name its own
+project (`VIBEST_PROJECT_ID`); one naming another or none is refused, over RPC as over HTTP. The integration version
+and protocol a session's request carries are recorded on its row when they changed, whether or not the protocol
+matches and before the protocol check, so an agent left on an old integration is known and `vibest update` restarts
+it; the `vibest` CLI an agent runs sends no plugin version and records nothing. The harness conversation id is taken
+from the session's own harness only, latest wins (a `/clear` changes it): a process of another harness under the same
+session id (an old main Agent after a switch) changes nothing. ACCESS roles: `open` (protocol only), `session` (a
+subagent), `agent` (a main Agent or the command line), `coordinator`, `owner` (a main Agent of the session's Project,
+or the command line) and `self` (a subagent's own terminal for its own id, or the command line at the Project root for
+its main Agent, its start after a restart). One main Agent per Project: every start passes one check that holds the
+Project's lock through the launch, as a stop does, so two starts at once cannot both pass; the check fails open
+(nothing running) when the runtime cannot be reached or cannot tell, and a main Agent that `vibest update` is
+restarting counts as running. A stop of a main Agent that is restarting is refused rather than waited for, since its
+next harness starts in seconds. A main Agent's working directory places it only in a Project without a directory;
+otherwise it starts sessions in its own Project wherever its shell is.
