@@ -13,7 +13,7 @@ import {
 import { Clock, Context, Effect, Layer, Schema, String as Str } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
-import { Bus, type StoredEvent, type StoredType } from "./bus.ts"
+import { Bus, type EngineEvent, type LiveEvent, type StoredEvent, type StoredType } from "./bus.ts"
 import { HARNESS_IDS, type HarnessId } from "./harness.ts"
 import { Routing } from "./plugins.ts"
 import type { TurnEnded } from "./results.ts"
@@ -433,7 +433,7 @@ const roundStatus = (status: unknown): TurnEnd["status"] =>
 const TO_SESSION = `('task', 'send')`
 
 const TxBuffer = Context.Reference<
-  { readonly events: Array<StoredEvent>; readonly fiberId: number; closed: boolean } | undefined
+  { readonly events: Array<EngineEvent>; readonly fiberId: number; closed: boolean } | undefined
 >("vibest/TxBuffer", { defaultValue: () => undefined })
 
 const make = Effect.gen(function* () {
@@ -501,7 +501,7 @@ const make = Effect.gen(function* () {
       if ((yield* TxBuffer) !== undefined) return yield* body
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const buffer = { events: [] as Array<StoredEvent>, fiberId: yield* Effect.fiberId, closed: false }
+          const buffer = { events: [] as Array<EngineEvent>, fiberId: yield* Effect.fiberId, closed: false }
           const result = yield* sql
             .withTransaction(restore(Effect.provideService(body, TxBuffer, buffer)))
             .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
@@ -509,6 +509,13 @@ const make = Effect.gen(function* () {
           return result
         }),
       )
+    })
+
+  const notify = (event: LiveEvent) =>
+    Effect.gen(function* () {
+      const buffer = yield* TxBuffer
+      if (buffer !== undefined && !buffer.closed) buffer.events.push(event)
+      else yield* bus.observe(event)
     })
 
   const projectPrefixTaken = (short: string) =>
@@ -886,6 +893,7 @@ const make = Effect.gen(function* () {
       if (current === undefined) return
       const next = { ...current, ...patch }
       remember(next)
+      yield* notify({ type: "live.session", sessionId: id })
       if (patch.name !== undefined && patch.name !== current.name)
         yield* sql`UPDATE session SET name = ${patch.name} WHERE id = ${id}`
       const ending = !!(next.metadata.archived || next.metadata.removed)
@@ -1040,6 +1048,7 @@ const make = Effect.gen(function* () {
           yield* sql`INSERT INTO project ${sql.insert({ id, directory })} ON CONFLICT (directory) DO NOTHING`
           const [row] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
           yield* putRepositories(row!.id, repositories)
+          yield* notify({ type: "live.project", projectId: row!.id })
           return row!.id
         }),
       ).pipe(Effect.orDie),
@@ -1071,6 +1080,7 @@ const make = Effect.gen(function* () {
           const [row] = yield* sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${id}`
           const from = row!.directory
           yield* sql`UPDATE project SET directory = ${to} WHERE id = ${id}`
+          yield* notify({ type: "live.project", projectId: id })
           yield* sql`DELETE FROM project_repository WHERE project_id = ${id}`
           yield* putRepositories(id, repositories)
           yield* sql`UPDATE session SET directory = ${to} || substr(directory, ${from.length + 1})
@@ -1078,6 +1088,21 @@ const make = Effect.gen(function* () {
           return from
         }),
       ).pipe(Effect.orDie),
+
+    watchProjects: (id?: string) =>
+      sql<{ id: string; directory: string | null; entrySessionId: string | null }>`SELECT id, directory,
+          entry_session_id FROM project WHERE directory IS NOT NULL ${id === undefined ? sql`` : sql`AND id = ${id}`}
+          ORDER BY rowid`.pipe(Effect.orDie),
+
+    sessionParents: (ids: ReadonlyArray<string>) =>
+      (ids.length === 0
+        ? Effect.succeed([] as ReadonlyArray<{ id: string; parentSessionId: string | null }>)
+        : sql<{ id: string; parentSessionId: string | null }>`SELECT id, parent_session_id FROM session
+            WHERE ${sql.in("id", ids)}`
+      ).pipe(
+        Effect.map((rows) => new Map(rows.map((row) => [row.id, row.parentSessionId]))),
+        Effect.orDie,
+      ),
 
     projectDirectory: (id: string) =>
       sql<{ directory: string | null }>`SELECT directory FROM project WHERE id = ${id}`.pipe(
@@ -1351,6 +1376,7 @@ const make = Effect.gen(function* () {
                 createdAt: at,
               })}`
               yield* sql`UPDATE project SET entry_session_id = ${id} WHERE id = ${project}`
+              yield* notify({ type: "live.project", projectId: project })
             }
             const mainId = !existing?.main || fresh ? id : existing.main
             if (start.projectDirectory)

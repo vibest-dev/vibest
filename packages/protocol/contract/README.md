@@ -17,3 +17,9 @@ Wire: one JSON object per line (effect `RpcSerialization.layerNdJsonRpc`). A req
 `{"jsonrpc":"2.0","chunk":true,"id":<id>,"result":[<element>,…]}` and sends the next chunk only after the client
 answers `{"jsonrpc":"2.0","method":"@effect/rpc/Ack","params":{"requestId":<id>}}`; the client ends it with
 `@effect/rpc/Interrupt`. A failure is `{"jsonrpc":"2.0","id":<id>,"error":{"_tag":"Cause","code":0,"message":…,"data":[{"_tag":"Fail","error":<error>}]}}`.
+
+`Watch` (`cli`, capability `watch`): the first element is a `Snapshot` of every project with a directory and every
+session `List({ all: true })` answers, each with its `parentId`; after it come `Project`, `Session` and
+`SessionEnded` as they commit. A session that leaves the `List` set is `SessionEnded`; the same row may come again.
+When the client stops acknowledging, the stream fails with `WatchLagged` instead of buffering without bound; on that
+or any other end, reconnect and take the new `Snapshot` as the truth.

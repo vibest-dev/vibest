@@ -34,6 +34,8 @@ export type LiveEvent =
   | { readonly type: "live.reset"; readonly runtime: string; readonly machine: string }
   | { readonly type: "live.turn_start"; readonly sessionId: string; readonly at: number }
   | { readonly type: "live.drain" }
+  | { readonly type: "live.session"; readonly sessionId: string }
+  | { readonly type: "live.project"; readonly projectId: string }
 
 export type EngineEvent = StoredEvent | LiveEvent
 
@@ -42,7 +44,7 @@ const make = Effect.gen(function* () {
   return {
     observe: (event: LiveEvent) => PubSub.publish(pubsub, event).pipe(Effect.asVoid),
     subscribe: PubSub.subscribe(pubsub),
-    published: (events: ReadonlyArray<StoredEvent>) =>
+    published: (events: ReadonlyArray<EngineEvent>) =>
       events.length === 0 ? Effect.void : PubSub.publishAll(pubsub, events).pipe(Effect.asVoid),
   }
 })
