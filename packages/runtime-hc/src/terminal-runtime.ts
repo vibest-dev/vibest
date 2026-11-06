@@ -164,6 +164,7 @@ export const make = (deps: {
             ),
             Effect.ignore,
           )
+          if (subscribed) yield* PubSub.publish(events, { type: "reset", machine: "local" })
           failures = subscribed ? 1 : failures + 1
           yield* Effect.sleep(followBackoff(failures))
         }

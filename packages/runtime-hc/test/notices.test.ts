@@ -193,11 +193,12 @@ describe("runtime-hc against a fake core", () => {
   )
 
   live(
-    "a subscription the core closes is made again, and its snapshot publishes reset",
+    "a lost subscription publishes reset at once, then is made again, and its snapshot publishes reset",
     Effect.gen(function* () {
       const core = yield* fakeCore
       const first = yield* core.follow
       yield* first.close
+      assert.deepStrictEqual(yield* core.next, { type: "reset", machine: "local" })
       yield* core.subscriber
       assert.deepStrictEqual(yield* core.next, { type: "reset", machine: "local" })
     }),
