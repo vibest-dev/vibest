@@ -1,11 +1,8 @@
-// Pi: vibest's plugin is the @vibest/pi extension (its turn-end report, the coordinator's inbox, and the guard on tool
-// calls, in process), loaded with `pi -e` into each Pi vibest starts; models come from `pi --mode rpc`.
 import { Schema } from "effect"
 
 import { type HarnessAdapter, opt } from "../harness.ts"
 import { findMessage, jsonLines, type RawModel, withConfigured } from "../models.ts"
 
-/** The extension in vibest's Pi plugin directory (packages/integration/pi/scripts/build.ts). */
 const extension = (pluginDir: string) => `${pluginDir}/extension.mjs`
 
 const piState = findMessage(
@@ -37,7 +34,6 @@ const piList = findMessage(
   }),
 )
 
-/** Pi: `pi --mode rpc`, `get_state` for the model it starts with and `get_available_models` for every provider's models. */
 export const piModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawModel> | undefined => {
   const state = piState(lines)
   const list = piList(lines)
@@ -55,13 +51,10 @@ export const piModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawModel> 
   )
 }
 
-/**
- * Pi refuses `--provider` without `--model` ("--provider requires --model"), so a login chosen without a model is
- * dropped and Pi starts on its own default.
- * ponytail: the chosen login is lost then; pick that provider's default model when quota routing on Pi matters.
- */
 const providerModel = (provider: string | null, model: string | null) =>
   model ? [...opt("--provider", provider), "--model", model] : []
+
+const VIBEST_DELIVERY_SOURCE = "extension"
 
 export const pi: HarnessAdapter = {
   id: "pi",
@@ -82,14 +75,10 @@ export const pi: HarnessAdapter = {
     extension(i.pluginDir),
     ...providerModel(i.provider, i.model),
   ],
-  // The coordinator's system prompt replaces Pi's coding-assistant preamble; Pi still adds context files (AGENTS.md), skills and cwd after them.
   coordinatorArgs: (i) => [
     ...opt("--session-id", i.sessionId),
     "--system-prompt",
     i.systemPromptFile,
-    // An exact allowlist, not +/- entries on the defaults: those keep every extension's tools, and a user's delegation
-    // extension (pi-subagents' `subagent`) then wins over `vibest run`. Extensions still load; only their tools are off.
-    // write and edit are for the project folder: the guard refuses them anywhere else.
     "--tools",
     "read,bash,codemode,grep,find,ls,write,edit",
     "--no-mcp",
@@ -105,13 +94,11 @@ export const pi: HarnessAdapter = {
     ),
     answer: piModels,
   },
-  // Pi's `input` event. `extension` is sendUserMessage, which vibest uses for its own deliveries.
   userPrompt: (event, coordinator) => {
-    if (coordinator || event.source === "extension" || event.type !== "input") return undefined
+    if (coordinator || event.source === VIBEST_DELIVERY_SOURCE || event.type !== "input") return undefined
     if (typeof event.text !== "string" || event.text.trim() === "") return undefined
     return { text: event.text }
   },
-  // The extension's turn end: Pi's `agent_settled` with the last reply `agent_end` saw (`text`, `error`), as it sends it.
   turnEnd: (event, coordinator) => {
     if (coordinator || event.type !== "agent_settled") return undefined
     const aborted = event.aborted === true

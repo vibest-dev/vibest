@@ -1,6 +1,3 @@
-// Plugins (plugins.md): found and loaded the way OpenCode V2 does it (§4), kept current by a supervisor that reloads
-// what changed on disk; their hooks run under vibest's own rules (§5): one event mutated in place, a diff of what each
-// callback changed, a timeout, and refusals or failures that always surface.
 import type * as VibestPlugin from "@vibest/plugin"
 import { AgentRefused, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 import {
@@ -27,16 +24,12 @@ export { AgentRefused, Change, HookFailed, PluginInfo, Routing, TraceEntry } fro
 export { type Candidate, pluginEntries, PluginLoader } from "./plugin-sources.ts"
 
 export const DEFAULT_TIMEOUT = Duration.seconds(5)
-/** How long a spawn waits for plugins being (re)loaded before it goes on with the active ones (plugins.md §5). */
 const ACTIVATION_WAIT = Duration.seconds(10)
-/** Quiet time after a file change before reloading, so a burst of saves is one reload. */
 const DEBOUNCE = Duration.millis(100)
-/** When to read once more after the watched directories changed (see `Plugins.layer`). */
 const RECHECK = Duration.seconds(1)
 
 type HookName = keyof VibestPlugin.Hooks
 
-/** "claude / claude-haiku-5-5 (chosen by plugin route)" */
 export const describeSpawn = (s: {
   harness: string
   provider?: string | undefined
@@ -48,10 +41,8 @@ export const describeSpawn = (s: {
   return [s.harness, s.provider, s.model].filter(Boolean).join(" / ") + by
 }
 
-/** Before any Agent starts, the main agent included: the event minus what the host itself reads. */
 export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions">
 
-/** A started Agent's round failed; `agent.fail` decides whether it moves. */
 export type FailInput = Omit<VibestPlugin.AgentFail, "subscriptions" | "move">
 
 export interface SpawnDecision extends Routing {
@@ -59,7 +50,6 @@ export interface SpawnDecision extends Routing {
   readonly harness: string | undefined
   readonly provider: string | undefined
   readonly model: string | undefined
-  /** Where the Agent runs: the machine the start named, and the runtime the chain chose (unchanged when no plugin set one). */
   readonly machine: { readonly id: string }
   readonly runtime: string | undefined
 }
@@ -81,34 +71,23 @@ type Registered<N extends HookName> = {
   readonly stats: Stats
   readonly callback: HookFn<N>
 }
-/** One list per hook, so a callback is stored and called as that hook's event. */
 type HookBuckets = { [N in HookName]: Array<Registered<N>> }
 const emptyBuckets = (): HookBuckets => ({ "agent.start.before": [], "agent.fail": [] })
 type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
-/** Builtin plugins of the host app, before user plugins: the default harness choice first (architecture.md §9), then
- * the runtime plugins (runtime-port.md §2). The core itself holds no choice policy. */
 export const Builtins = Context.Reference<ReadonlyArray<Candidate>>("vibest/Plugins/Builtins", {
   defaultValue: () => [],
 })
-/** A plugin set up in its own scope, with the hooks it registered there. */
 type Running = { readonly candidate: Loaded; readonly scope: Scope.Closeable; readonly hooks: HookBuckets }
-/**
- * One plugin in the requested order. `running` is what is set up: `candidate` itself, or the last revision of the same
- * source that worked while `candidate` fails (`failure`). A failed setup (`setupFailed`) is not retried until the
- * candidate changes.
- */
 type Slot = {
   readonly candidate: Candidate
   readonly running: Running | undefined
   readonly failure: string | undefined
-  /** Why the last working revision could not be restored in its place. */
   readonly rollback?: string
   readonly setupFailed: boolean
   readonly loadedAt: number
   readonly stats: Stats
 }
 
-/** Same source, revision and options: the same plugin, which a reload keeps if everything before it is kept too. */
 const keyOf = (c: Candidate) => JSON.stringify([c.source, c.revision, c.options])
 
 const info = (slot: Slot): PluginInfo => {
@@ -135,7 +114,6 @@ export const errorMessage = (cause: Cause.Cause<unknown>) => messageOf(Cause.squ
 const isAgentRefused = (e: unknown): e is VibestPlugin.AgentRefused =>
   (e as { _tag?: unknown } | undefined)?._tag === "AgentRefused"
 
-/** The top-level fields `after` changed, each attributed to `plugin` in `decidedBy` (which it updates). */
 const diff = (before: object, after: object, plugin: string, decidedBy: Record<string, string>) => {
   const [from, to] = [before as Record<string, unknown>, after as Record<string, unknown>]
   return [...new Set([...Object.keys(from), ...Object.keys(to)])].flatMap((field) => {
@@ -151,11 +129,6 @@ const diff = (before: object, after: object, plugin: string, decidedBy: Record<s
   })
 }
 
-/**
- * Run `effect` in a fiber owned by `scope` and wait at most `timeout`. Waiting on the fiber rather than timing the effect
- * itself returns on time even when the plugin is inside an uninterruptible region (plugins.md §2); the abandoned fiber
- * is interrupted in the background and otherwise ends with the scope.
- */
 const runBounded = <A, E>(effect: Effect.Effect<A, E>, scope: Scope.Scope, timeout: Duration.Input) =>
   Effect.gen(function* () {
     const fiber = yield* Effect.forkIn(
@@ -167,25 +140,17 @@ const runBounded = <A, E>(effect: Effect.Effect<A, E>, scope: Scope.Scope, timeo
     return exit
   })
 
-/** How one callback stopped the chain: the plugin and the full reason text (wire error, log, result). */
 type Stopped = { readonly plugin: string; readonly reason: string }
 
-/**
- * The plugin set and how to replace it. `activate` keeps the longest unchanged prefix, tears the rest down (last
- * first) and sets the new suffix up in order (OpenCode V2 `core/src/plugin.ts`); spawns wait while `ready` is closed.
- */
 export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
   Effect.gen(function* () {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT
     const root = yield* Effect.scope
     const ready = yield* Latch.make(true)
-    /** What dispatch reads; replaced whole, never edited in place. */
     let slots: ReadonlyArray<Slot> = []
-    /** Dispatches in flight: a reload tears hooks down only once none is still running them. */
     let dispatching = 0
     const idle = yield* Latch.make(true)
 
-    /** Close a plugin scope, waiting at most `timeout` for its finalizers. */
     const close = (scope: Scope.Closeable, id: string) =>
       runBounded(Scope.close(scope, Exit.void), root, timeout).pipe(
         Effect.flatMap((exit) =>
@@ -197,7 +162,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
 
     const subscriptions = yield* Subscriptions
     const runtimes = yield* Runtimes
-    /** Set `candidate` up in a new scope: what runs, or why it failed. */
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin
       const scope = yield* Scope.fork(root)
@@ -215,7 +179,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             }),
           )
         })
-      // Each short name registers into its own list. A plain-JS plugin can pass any string; that fails setup.
       const bind = (
         prefix: "agent",
         register: {
@@ -225,7 +188,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         },
       ): VibestPlugin.Domain<"agent"> => ({
         hook: <S extends VibestPlugin.HookOf<"agent">>(short: S, callback: HookFn<Extract<`agent.${S}`, HookName>>) => {
-          // hasOwn, not a property read: `toString` is on the prototype and is not a hook.
           if (typeof short !== "string" || !Object.hasOwn(register, short)) {
             return Effect.die(
               new Error(
@@ -246,7 +208,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           "start.before": (callback) => remember("agent.start.before", callback),
           fail: (callback) => remember("agent.fail", callback),
         }),
-        // Beside agent.hook (runtime-port.md §2): registered for the plugin's lifetime, in the plugin's own scope.
         runtime: { register: (runtime) => runtimes.register(runtime).pipe(Scope.provide(scope)) },
         subscription: { report: (input) => subscriptions.report(input) },
       }
@@ -265,7 +226,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       return error
     })
 
-    /** The slot for `candidate`, which replaces `previous` (the same source in the torn-down suffix, if any). */
     const build = Effect.fnUntraced(function* (
       candidate: Candidate,
       previous: Slot | undefined,
@@ -290,7 +250,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       const plugin = candidate.plugin
       if (!("error" in plugin) && ids.has(plugin.id)) return { ...base, failure: `Duplicate plugin ID: ${plugin.id}` }
       const unchanged = previous !== undefined && keyOf(previous.candidate) === keyOf(candidate)
-      // Being rebuilt after an earlier plugin changed is no reason to run a setup that already failed.
       const outcome =
         "error" in plugin
           ? plugin.error
@@ -299,10 +258,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             : yield* setUp({ ...candidate, plugin }, stats)
       if (typeof outcome !== "string") return { ...base, running: outcome }
       const failed: Slot = { ...base, failure: outcome, setupFailed: !("error" in plugin) }
-      // The last revision that worked keeps running while this one fails, under the same rules (its id must still be free).
       const last = previous?.running?.candidate
       if (last === undefined) {
-        // Rebuilt unchanged, a failure keeps saying why the revision before it is not running either.
         return unchanged && previous.rollback !== undefined ? { ...failed, rollback: previous.rollback } : failed
       }
       const restored = ids.has(last.plugin.id) ? `Duplicate plugin ID: ${last.plugin.id}` : yield* setUp(last, stats)
@@ -311,7 +268,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         : { ...failed, running: restored }
     })
 
-    /** Callers run one at a time (the supervisor's single consumer). */
     const activate = Effect.fnUntraced(function* (candidates: ReadonlyArray<Candidate>) {
       let prefix = 0
       while (
@@ -322,11 +278,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         prefix++
       if (prefix === candidates.length && prefix === slots.length) return
       const retired = slots.slice(prefix)
-      // Dispatch always sees an ordered prefix of plugins that are fully set up: first the unchanged ones, then each
-      // rebuilt one as it is ready. The old suffix goes once no dispatch still runs it.
       slots = slots.slice(0, prefix)
       yield* idle.await
-      // ponytail: a teardown that times out is left running, so an old revision's finalizers can overlap the new setup.
       for (const slot of retired.toReversed())
         if (slot.running) yield* close(slot.running.scope, slot.running.candidate.plugin.id)
       const ids = new Set(slots.flatMap((s) => (s.running ? [s.running.candidate.plugin.id] : [])))
@@ -341,16 +294,10 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       }
     })
 
-    /** Wait for a pending reload, at most ACTIVATION_WAIT: false when it is still going. */
     const settled = ready.await.pipe(Effect.timeoutOption(ACTIVATION_WAIT), Effect.map(Option.isSome))
 
     const bucket = <N extends HookName>(hooks: ReadonlyArray<HookBuckets>, name: N) => hooks.flatMap((set) => set[name])
 
-    /**
-     * Run `name`'s callbacks on `event`, in plugin order, each mutating it in place; `decidedBy` attributes each changed
-     * field to the plugin that wrote it last. Only `agent.start.before` can refuse: anywhere else an `AgentRefused`
-     * counts as a crash. Undefined when the chain finished; a `Stopped` says which callback ended it and why.
-     */
     const runHook = Effect.fnUntraced(function* <N extends HookName>(
       hooks: ReadonlyArray<Registered<N>>,
       name: N,
@@ -403,13 +350,10 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       return undefined
     })
 
-    /** The refusal an `agent.start.before` chain ended with: a real refusal as it was, a crash or timeout in its words. */
     const refusal = (stopped: Stopped) => new AgentRefused({ plugin: stopped.plugin, reason: stopped.reason })
 
-    /** The failure an `agent.fail` chain ended with: that operation fails. */
     const failure = (stopped: Stopped) => new HookFailed({ message: stopped.reason })
 
-    /** Run `f` on the active hooks once a pending reload settles (waiting at most ACTIVATION_WAIT); a reload waits for it. */
     const withHooks = <A, E>(
       name: string,
       f: (hooks: ReadonlyArray<HookBuckets>, trace: Array<TraceEntry>) => Effect.Effect<A, E>,
@@ -442,8 +386,6 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       return yield* withHooks("agent.start.before", (hooks, trace) =>
         Effect.gen(function* () {
           const current = yield* subscriptions.list
-          // Listed again now the plugins are active: a caller that listed before the first activation (a start right
-          // after vibestd came up) saw no runtime registered yet, and the choice would find none online.
           const machines = yield* machinesListing(runtimes, input.machines[0]?.harnesses ?? [])
           const event: VibestPlugin.AgentStartBefore = { ...input, machines, subscriptions: current }
           const decidedBy: Record<string, string> = {}
@@ -487,15 +429,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
 export class Plugins extends Context.Service<
   Plugins,
   {
-    /**
-     * Before any Agent starts, the main agent included: every `agent.start.before` callback in plugin order, each
-     * mutating one event. A refusal (or a crash, or a timeout: the host says which) stops the chain and fails the start.
-     */
     readonly start: (input: StartInput) => Effect.Effect<SpawnDecision, AgentRefused>
-    /**
-     * A started Agent's round failed: every `agent.fail` callback in plugin order; the last one to write `move` decides
-     * where the session restarts (undefined: nowhere). A crash or a timeout fails this, and the round ends failed.
-     */
     readonly fail: (
       input: FailInput,
     ) => Effect.Effect<
@@ -505,18 +439,12 @@ export class Plugins extends Context.Service<
     readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   }
 >()("vibest/Plugins") {
-  /** Set up `candidates` in order, each in its own scope under the caller's. */
   static readonly make = (candidates: ReadonlyArray<Candidate>, options: { readonly timeout?: Duration.Input } = {}) =>
     makeHost(options).pipe(
       Effect.tap((host) => host.activate(candidates)),
       Effect.map((host) => host.service),
     )
 
-  /**
-   * Plugins from VIBEST_HOME (`plugins/` then `vibest.json`), reloaded when they change (OpenCode V2 `plugin/supervisor.ts`):
-   * every relevant change closes readiness and lands in a capacity-1 sliding queue; after DEBOUNCE of quiet one consumer
-   * re-reads and activates, so reloads never overlap. vibestd does not wait for the first activation; spawns do.
-   */
   static readonly layer = Layer.effect(
     Plugins,
     Effect.gen(function* () {
@@ -540,15 +468,12 @@ export class Plugins extends Context.Service<
         if (changed.size > 0) yield* Effect.log(`plugins: reloading after changes to ${[...changed].join(", ")}`)
         changed.clear()
         let read = yield* sources.read
-        // Read again while the watched directories change: a change made before its watch began is not reported.
         let rewatched = false
         while (yield* watcher.update(read.watched)) {
           rewatched = true
           read = yield* sources.read
         }
         yield* host.activate([...builtins, ...read.candidates])
-        // ponytail: Bun 1.4's fs.watch on macOS sometimes drops other directories' events for a moment after a watch
-        // closes (seen in 2–6% of tries); one more read RECHECK later catches those. Drop when Bun no longer does.
         if (rewatched)
           yield* Effect.sleep(RECHECK).pipe(Effect.andThen(Effect.sync(() => notify())), Effect.forkIn(scope))
       }).pipe(Effect.catchCause((cause) => Effect.logError("plugins: reload failed", cause)))
@@ -557,7 +482,6 @@ export class Plugins extends Context.Service<
           Effect.gen(function* () {
             const target = observed
             yield* reload
-            // A change during the reload queued another one; readiness stays closed until that settles.
             if (observed === target) host.ready.openUnsafe()
           }),
         ),

@@ -1,8 +1,5 @@
 import { shortId } from "@vibest/schema/id"
 import { NoSuchSession, NotReady } from "@vibest/schema/session"
-// Where a session's terminal goes, and the labels the runtime shows on it. `root` is a project directory, never the
-// project key. Placement is the runtime's (runtime-port.md §3): core asks for a terminal running the harness argv,
-// kept beside the project's other terminals (`near`), and labels it with `present` when the runtime has one.
 import {
   Cause,
   Clock,
@@ -33,7 +30,6 @@ import { RuntimeError } from "./runtimes.ts"
 import { removeSystemPrompt, type SystemPromptDirUnsafe } from "./system-prompt.ts"
 import { addWorktree, copyIncluded, git, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 
-/** The harness dying on its own usage limit inside `open` (§3): the launch hands over to the limit move, as a failed start did. */
 class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message: string }> {}
 
 export const sessionPlacement = (deps: {
@@ -41,12 +37,10 @@ export const sessionPlacement = (deps: {
     readonly coordinatorOf: (projectId: string) => Effect.Effect<CoordinatorRow | undefined>
     readonly listSessions: (filter?: { readonly projectId?: string }) => Effect.Effect<ReadonlyArray<SessionRow>>
     readonly closeTurn: (id: string, end: "failed", patch: SessionPatch) => Effect.Effect<void>
-    /** The row of `--peer`'s named session. */
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly endProcess: (id: string, reason: EndReason) => Effect.Effect<boolean>
   }
-  /** The registry every row's `runtime.kind` routes through. */
   readonly runtimes: RuntimesShape
   readonly layout: {
     readonly artifacts: (projectId: string) => string
@@ -66,7 +60,6 @@ export const sessionPlacement = (deps: {
   readonly harnesses: { readonly get: (id: SessionRow["harnessId"]) => { readonly systemPromptInPrompt: boolean } }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
   readonly vibestEnv: (session: SessionRow) => Readonly<Record<string, string>>
-  /** The harness argv a terminal runs (sessions.ts `launchArgv`). */
   readonly launchArgv: (
     session: SessionRow,
     resume: boolean,
@@ -83,7 +76,6 @@ export const sessionPlacement = (deps: {
     onHandover?: Effect.Effect<void>,
     options?: { readonly keepRound?: boolean },
   ) => Effect.Effect<string | undefined, NotReady | unknown, FileSystem.FileSystem>
-  /** Sessions' post-open step: the first turn's prompt, once the terminal exists. */
   readonly afterOpen: (
     h: Runtime,
     session: SessionRow,
@@ -91,11 +83,9 @@ export const sessionPlacement = (deps: {
     root: string,
     firstPrompt: string,
   ) => Effect.Effect<void, unknown, FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner | Path.Path>
-  /** The usage-limit move (move.ts), wired in after placement exists. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
   const { db, runtimes, layout, fs } = deps
-  /** Project name on the workspace: the directory's own name, not the key. */
   const projectName = (root: string) =>
     repositoryDirectoryName(root).pipe(
       Effect.catch(() => Effect.flatMap(Path.Path, (p) => Effect.succeed(p.basename(root)))),
@@ -106,7 +96,6 @@ export const sessionPlacement = (deps: {
       .listSessions({ projectId })
       .pipe(Effect.map((rows) => rows.filter((row) => !(row.metadata.archived || row.metadata.removed)).length))
 
-  /** Terminal labels (§3 `present`, [the `label` given to `open`] when absent). A failure here does not fail the session: the terminal is already up. */
   const show = (h: Runtime, session: SessionRow, terminal: Terminal, root: string) =>
     Effect.gen(function* () {
       if (h.present === undefined) return
@@ -121,13 +110,11 @@ export const sessionPlacement = (deps: {
       })
     }).pipe(Effect.ignore)
 
-  /** Undo a step of a launch only when the launch as a whole failed (SPEC §8.2 step 7: reverse order, uninterruptible). */
   const undoOnFailure = <A, E, R, R2>(
     acquire: Effect.Effect<A, E, R>,
     undo: (a: A) => Effect.Effect<unknown, unknown, R2>,
   ) => Effect.acquireRelease(acquire, (a, exit) => (Exit.isFailure(exit) ? undo(a).pipe(Effect.ignore) : Effect.void))
 
-  /** The project's main agent terminal, when it runs in this same runtime (pane ids are the runtime's own). */
   const nearMain = (session: SessionRow, kind: string) =>
     db
       .coordinatorOf(session.projectId)
@@ -137,11 +124,6 @@ export const sessionPlacement = (deps: {
         ),
       )
 
-  /**
-   * The session's terminal (runtime-port.md §3 `open`): running `argv`, kept with the project's other terminals, beside
-   * `near` when given. Recorded on the row the moment it exists, so events and checks can find it; closed again by the
-   * runtime when its own start inside `open` fails.
-   */
   const openTerminal = Effect.fn("Sessions.openTerminal")(function* (
     h: Runtime,
     machine: Machine,
@@ -152,13 +134,10 @@ export const sessionPlacement = (deps: {
       readonly argv: ReadonlyArray<string>
       readonly near?: Terminal | undefined
       readonly split?: boolean | undefined
-      /** `vibest run --env`: given only to the first terminal, never stored (a later terminal starts without it). */
       readonly env?: Readonly<Record<string, string>> | undefined
-      /** A launch ends the process itself (`closeTurn`), once its worktree is undone. */
       readonly endedByCaller?: boolean
     },
   ) {
-    // Beside the pane a caller names (--peer), else beside the project's main agent when it runs in this runtime.
     const near = input.near !== undefined ? input.near : yield* nearMain(session, h.kind)
     const choice = {
       harnessId: session.harnessId,
@@ -166,8 +145,6 @@ export const sessionPlacement = (deps: {
       model: session.model,
       harnessSessionId: session.harnessSessionId,
     }
-    // Its `process.start` before the terminal exists (no terminal yet): what the harness reports while it starts
-    // (ready, its pid) belongs to it. One that never opens ends as launch_failed.
     yield* db.updateSession(session.id, { ...choice, address: { machine: session.address.machine, id: "" } })
     const terminal = yield* h
       .open(machine, {
@@ -181,12 +158,10 @@ export const sessionPlacement = (deps: {
       })
       .pipe(Effect.onError(() => (input.endedByCaller ? Effect.void : db.endProcess(session.id, "launch_failed"))))
     const at = yield* Clock.currentTimeMillis
-    // The same process, now in its terminal (`process.start` with it; what it reported while starting carries over).
     yield* db.updateSession(session.id, { ...choice, address: terminal, startedAt: at, exitedAt: null })
     return terminal
   })
 
-  /** `splitFrom` (`vibest run --peer`): the session whose worktree this one shares, and beside whose terminal it opens. */
   const peerRow = (session: SessionRow, splitFrom: string) =>
     Effect.gen(function* () {
       const peer = yield* db.getSession(splitFrom)
@@ -200,7 +175,6 @@ export const sessionPlacement = (deps: {
       return peer
     })
 
-  /** `splitFrom`: the session named by `--peer`, whose terminal the new one opens beside. `env`: `vibest run --env`. */
   const launchRaw = Effect.fn("Sessions.launch")(function* (
     h: Runtime,
     machine: Machine,
@@ -212,11 +186,8 @@ export const sessionPlacement = (deps: {
   ) {
     const folders = yield* listProjectRepositories(root)
     const peer = splitFrom !== undefined ? yield* peerRow(session, splitFrom) : undefined
-    // Beside the peer's pane (openTerminal adds the main agent's when there is no peer).
     const near = peer?.address
-    // The row's own project folder, with its artifacts/ (the session's --add-dir must exist).
     yield* fs.makeDirectory(layout.artifacts(session.projectId), { recursive: true })
-    // The same limit-move a failed start always had: it runs inside the scope, so the worktree the move reuses is still there.
     const openOrMove = (
       open: Effect.Effect<
         Terminal,
@@ -241,11 +212,8 @@ export const sessionPlacement = (deps: {
         ),
         Effect.map((outcome) => (Option.isOption(outcome) ? outcome : Option.some<Terminal>(outcome))),
       )
-    // The worktree comes first: the terminal's cwd is in it, the harness argv names it, and the `.worktreeinclude` files are in place before the harness starts.
     const worktree = yield* deps.worktreeOf(session)
     if (peer === undefined) {
-      // Spawn reserved the name by creating the directory, empty. A failed start removes it again, unless git left
-      // something in it (a refused undo leaves it for `vibest archive`).
       yield* undoOnFailure(Effect.void, () =>
         fs.readDirectory(worktree).pipe(
           Effect.flatMap((left) => (left.length === 0 ? fs.remove(worktree, { recursive: true }) : Effect.void)),
@@ -253,16 +221,12 @@ export const sessionPlacement = (deps: {
         ),
       )
       if (folders) {
-        // One detached worktree per repository: a plain directory, not one linked worktree of the first.
         yield* undoOnFailure(createIsolatedWorktrees(folders, worktree), () => discardIsolatedWorktrees(worktree))
       } else {
-        // Detached, made by vibest: a linked worktree of the main checkout would group away from the project's terminals.
-        // Undone with git without force (it deletes ignored files, refuses on anything else); a refusal leaves it for `vibest archive`.
         yield* undoOnFailure(addWorktree(root, worktree), () => git(root, "worktree", "remove", worktree))
       }
     }
     if (!folders) yield* copyIncluded(root, worktree)
-    // The system prompt launchArgv writes goes again when the start fails.
     yield* undoOnFailure(Effect.void, () => removeSystemPrompt(session.id))
     const argv = yield* deps.launchArgv(session, false)
     const terminal = yield* openOrMove(
@@ -278,9 +242,7 @@ export const sessionPlacement = (deps: {
     )
     if (Option.isNone(terminal)) return
     return yield* deps.afterOpen(h, session, terminal.value, root, firstPrompt)
-    // The undos above (worktree, terminal) run when this scope closes: before `launch`'s catch below turns the failure into a notice.
   }, Effect.scoped)
-  /** A failed launch closes the row's turn and tells the owner why, with no screen text (its terminal is closed by then). */
   const launch = (
     h: Runtime,
     machine: Machine,
@@ -309,15 +271,9 @@ export const sessionPlacement = (deps: {
       ),
     )
 
-  /** The project directory stored on the main agent, if this start wrote one. Never the lookup key. */
   const storedDirectory = (projectId: string) =>
     db.coordinatorOf(projectId).pipe(Effect.map((main) => main?.projectDirectory))
 
-  /**
-   * The project's workspace presentation again, after its live count changed (a session ended, was archived or
-   * removed): each remaining live session's terminal relabels it, as `republish` does; with none left, the main agent's
-   * terminal publishes the workspace alone, without labels of its own. Best-effort: callers ignore failures.
-   */
   const recount = Effect.fn("Sessions.recount")(function* (kind: string, projectId: string) {
     const h = yield* runtimes.route(kind).pipe(Effect.option)
     if (Option.isNone(h)) return
@@ -337,7 +293,6 @@ export const sessionPlacement = (deps: {
       shown = true
     }
     if (shown) return
-    // shortcut: without a stored project directory the workspace's project token cannot be named again, so it is left as it is
     const main = yield* db.coordinatorOf(projectId)
     if (main?.runtime !== kind || !main.address || main.address.id === "" || stored === undefined) return
     if (h.value.present === undefined) return
@@ -354,7 +309,6 @@ export const sessionPlacement = (deps: {
       .pipe(Effect.ignore)
   })
 
-  /** Where a resumed session is placed (its system prompt is its row's own project's, always). */
   const locate = (session: SessionRow) =>
     Effect.gen(function* () {
       const cwd = yield* deps.worktreeOf(session)
@@ -366,8 +320,6 @@ export const sessionPlacement = (deps: {
   const resume = Effect.fn("Sessions.resume")(function* (h: Runtime, session: SessionRow) {
     const machine: Machine = { id: session.address.machine }
     const { root, cwd } = yield* locate(session)
-    // The terminal is undone when the start fails, like launch: a failed resume must not leave a shell beside the main agent.
-    // (openTerminal places it beside the project's main agent, as any start.)
     const terminal = yield* undoOnFailure(
       deps
         .launchArgv(session, true)
@@ -377,7 +329,6 @@ export const sessionPlacement = (deps: {
     yield* show(h, session, terminal, root)
   }, Effect.scoped)
 
-  /** The runtime drops terminal metadata on restart. Put back what the live sessions still are. */
   const republish = Effect.fn("Sessions.republish")(function* () {
     const rows = (yield* db.listSessions()).filter(
       (row) => !(row.metadata.archived || row.metadata.removed) && row.address.id !== "",
