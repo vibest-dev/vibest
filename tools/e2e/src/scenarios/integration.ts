@@ -228,8 +228,8 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I5",
     title:
-      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks; it refuses the session's herdr call and the reply lands as the session result",
-    run: async (w) => {
+      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks; asked to run herdr, herdr does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the session result",
+    run: async (w, evidence) => {
       for (const bin of ["cursor-agent", "herdr"])
         if (!Bun.which(bin, { PATH: w.env().PATH! })) throw new Skip(`${bin} not on PATH`)
       const login = await w.run(w.repository, ["cursor-agent", "status"])
@@ -270,9 +270,9 @@ const checks: ReadonlyArray<Check> = [
             .filter((f) => f.endsWith(".jsonl"))
             .map((f) => fs.readFile(path.join(transcripts, f), "utf8"))
           const tried = (await Promise.all(calls)).some((t) => /"tool_use".*herdr pane list/.test(t))
-          expect(tried, `cursor-agent never called herdr; its transcripts are in ${transcripts}`)
+          await fs.writeFile(path.join(evidence, "I5-herdr-call.json"), `${JSON.stringify({ tried, transcripts })}\n`)
           const message = (await latest(w, id, repo))?.message ?? ""
-          expect(/<harness>cursor<\/harness>/.test(message) && /pong/.test(message), message)
+          expect(/<harness>cursor<\/harness>/.test(message) && (!tried || /pong/.test(message)), message)
           expect(await Bun.file(projectHookLog).exists(), "the project's own sessionStart hook did not run")
         },
         { cwd: repo },

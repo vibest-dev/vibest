@@ -6,7 +6,13 @@ import type { Check } from "../check.ts"
 import { claudeConfigOf, claudeEnv, fakeAnthropic, heldModel, piDir } from "../fake-model.ts"
 import { expect, fail, row, SESSIONS, Skip, until, type World } from "../world.ts"
 
-type Entry = { id: string; agent: string; harness: string; routing?: { trace: Array<{ hook: string }> } }
+type Entry = {
+  id: string
+  agent: string
+  harness: string
+  address: { id: string }
+  routing?: { trace: Array<{ hook: string }> }
+}
 
 const mains = async (w: World) => (await w.json<Array<Entry>>(["ls"])).filter((e) => e.agent === "main")
 const start = (w: World) =>
@@ -117,7 +123,18 @@ const move = (harness: "claude" | "pi"): Check => ({
           return false
         },
         60_000,
-      )
+      ).catch(async (e: Error) => {
+        const panes = (
+          (await herdr(socket, "pane.list", {}).catch(() => ({ panes: [] }))) as { panes: Array<{ pane_id: string }> }
+        ).panes
+        const seen = await Promise.all(
+          panes.map(
+            async (p) =>
+              `${p.pane_id}: ${JSON.stringify(await foreground(socket, p.pane_id))}\n${await screen(socket, p.pane_id)}`,
+          ),
+        )
+        fail(`${e.message}; panes:\n${seen.join("\n")}`)
+      })
       const status = async (pane: string) =>
         ((await herdr(socket, "pane.get", { pane_id: pane })) as { pane: { agent_status: string } }).pane.agent_status
       await until(
@@ -237,6 +254,14 @@ const checks: ReadonlyArray<Check> = [
       expect(
         main!.routing === undefined || main!.routing.trace.every((t) => typeof t.hook === "string"),
         `routing: ${JSON.stringify(main)}`,
+      )
+      const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
+      await herdr(socket, "pane.close", { pane_id: main!.address.id.split("/").pop() })
+      await until(
+        "the main agent's exit recorded",
+        () =>
+          row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, main!.id)?.e != null,
+        30_000,
       )
     },
   },
