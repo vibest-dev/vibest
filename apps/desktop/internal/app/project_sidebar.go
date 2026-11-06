@@ -303,7 +303,11 @@ func (a *App) paneShowing(address string) string {
 func (a *App) sessionOpen(g vibest.Group, r vibest.Row) {
 	address, ok := a.sessionAddress(r.Session)
 	if !ok {
-		a.navigationNote = r.Session.Name + " runs in " + r.Session.Runtime + "; only herdr-core terminals open here"
+		if r.Session.Runtime == "hc" {
+			a.navigationNote = r.Session.Name + " runs in another herdr-core"
+		} else {
+			a.navigationNote = r.Session.Name + " runs in " + r.Session.Runtime + "; only herdr-core terminals open here"
+		}
 		return
 	}
 	if pane := a.paneShowing(address); pane != "" {

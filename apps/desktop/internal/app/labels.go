@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"strconv"
-	"strings"
 	"time"
 
 	"vibest-desktop/internal/core"
@@ -91,24 +90,7 @@ func withSeenZero(labels map[string]string) map[string]string {
 }
 
 func (a *App) sessionAddress(s vibest.Session) (string, bool) {
-	address, ok := s.CoreAddress()
-	if !ok {
-		return "", false
-	}
-	if _, known := a.coreState.Terminals[address]; known {
-		return address, true
-	}
-	machine, name, remote := strings.Cut(address, "/")
-	if !remote {
-		machine, name = "", address
-	}
-	for key, t := range a.coreState.Terminals {
-		owner, _, keyRemote := strings.Cut(key, "/")
-		if t.Name != nil && *t.Name == name && keyRemote == remote && (!remote || owner == machine) {
-			return key, true
-		}
-	}
-	return address, true
+	return s.CoreAddress(a.socket)
 }
 
 func (a *App) sessionTerminal(s vibest.Session) (core.Terminal, bool) {

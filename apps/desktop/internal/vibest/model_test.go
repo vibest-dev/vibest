@@ -82,15 +82,22 @@ func TestAParentCycleStillShowsEverySession(t *testing.T) {
 
 func TestCoreAddressOnlyForHcSessions(t *testing.T) {
 	s := session("s", "p", 1, nil, "idle")
-	if a, ok := s.CoreAddress(); !ok || a != "t-s" {
+	if a, ok := s.CoreAddress("/run/core.sock"); !ok || a != "t-s" {
 		t.Fatal(a, ok)
 	}
+	s.Address.ID = "t3@/run/core.sock"
+	if a, ok := s.CoreAddress("/run/core.sock"); !ok || a != "t3" {
+		t.Fatal(a, ok)
+	}
+	if _, ok := s.CoreAddress("/run/other.sock"); ok {
+		t.Fatal("a terminal on another core is not in this Core")
+	}
 	s.Address.Machine = "box"
-	if a, ok := s.CoreAddress(); !ok || a != "box/t-s" {
+	if a, ok := s.CoreAddress("/run/core.sock"); !ok || a != "box/t3" {
 		t.Fatal(a, ok)
 	}
 	s.Runtime = "herdr"
-	if _, ok := s.CoreAddress(); ok {
+	if _, ok := s.CoreAddress("/run/core.sock"); ok {
 		t.Fatal("a herdr session has no Core terminal")
 	}
 }

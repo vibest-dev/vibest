@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 const LocalMachine = "local"
@@ -44,14 +45,27 @@ type Session struct {
 	ParentID       *string         `json:"parentId"`
 }
 
-func (s Session) CoreAddress() (string, bool) {
+func (s Session) CoreAddress(socket string) (string, bool) {
 	if s.Runtime != "hc" || s.Address.ID == "" {
 		return "", false
 	}
-	if s.Address.Machine == "" || s.Address.Machine == LocalMachine {
-		return s.Address.ID, true
+	address, owner, named := strings.Cut(s.Address.ID, "@")
+	if address == "" || named && !sameSocket(owner, socket) {
+		return "", false
 	}
-	return s.Address.Machine + "/" + s.Address.ID, true
+	if s.Address.Machine == "" || s.Address.Machine == LocalMachine {
+		return address, true
+	}
+	return s.Address.Machine + "/" + address, true
+}
+
+func sameSocket(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
 }
 
 type Project struct {

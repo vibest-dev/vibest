@@ -72,10 +72,9 @@ func TestProjectSidebarShowsTheMainAgentWithItsSubagentsNested(t *testing.T) {
 func TestProjectOwnsWorkspaceAndOpensItsSessionsAndTerminals(t *testing.T) {
 	a, f, tt := coreActivityUIWith(t, func(f *coreAppFixture) {
 		f.layout.Workspaces[1].Project = "p1"
-		name := "vbt-echo"
-		f.terminals["e"] = core.Terminal{Address: "e", Name: &name, State: "live", Cols: 80, Rows: 24}
+		f.terminals["e"] = core.Terminal{Address: "e", State: "live", Cols: 80, Rows: 24}
 	})
-	applyVibest(a, shippingSnapshot(vibestSession("main", "echo", "p1", "idle", "vbt-echo", nil, 1)))
+	applyVibest(a, shippingSnapshot(vibestSession("main", "echo", "p1", "idle", "e@/inert/never-dialed.sock", nil, 1)))
 	tt.Frame()
 	tabs := func() int {
 		for _, w := range a.coreState.Layout.Workspaces {
