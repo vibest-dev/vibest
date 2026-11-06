@@ -42,7 +42,7 @@ func (m *machine) activity(scope activityScope) (string, string) {
 		if !scope.contains(m.snap, pane) || !t.Reported {
 			continue
 		}
-		pending = pending || (t.Turn > 0 && t.Turn > m.coreSeen[m.coreRefs[pane]])
+		pending = pending || turnUnseen(t, m.coreSeen[m.coreRefs[pane]])
 		rank, text := 0, ""
 		switch t.Activity() {
 		case "working":

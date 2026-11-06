@@ -174,6 +174,7 @@ func (a *App) corePaneView(c *ui.Context, p *core.Pane) {
 				ui.Text(c, message).Padding(chrome.Step8).TextColor(a.th.Secondary).MaxLines(4)
 				return
 			}
+			a.lookedAt(p.Terminal.Address)
 			style := ui.Local(card, "terminal-look", func() coreLook { return coreLook{opts.Font, a.th.Terminal} })
 			if style.theme != a.th.Terminal {
 				view.VT.SetTheme(a.th.Terminal, nil)

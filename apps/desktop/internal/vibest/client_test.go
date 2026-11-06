@@ -274,7 +274,7 @@ func TestWatchReplaysTheRecordedSnapshotAndDeltas(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	groups := m.Groups()
+	groups := m.Groups(nil)
 	got := []string{shape(groups[0]), shape(groups[1])}
 	if got[0] != "other waiting=0 working=0:" || got[1] != "repo waiting=0 working=1: 00000000-0000-4000-8000-000000000002/0* 00000000-0000-4000-8000-000000000003/1" {
 		t.Fatalf("%q", got)

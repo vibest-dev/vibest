@@ -24,6 +24,7 @@ type projectWindow struct {
 	vibestCommand []string
 	foldedProject map[string]bool
 	folderPicker  func(start string, run func(string)) bool
+	seenWindow
 }
 
 func newProjectWindow() projectWindow {
@@ -340,7 +341,7 @@ func (a *App) projectSection(c *ui.Context) {
 		ui.Text(c.Key("vibest-note"), a.vibestNote).FontSize(th.FontSizeSmall).TextColor(th.Danger).Margin(0, 0, 0, chrome.Step8)
 	}
 	focused := a.focusedAddress()
-	for _, g := range a.vibestModel.Groups() {
+	for _, g := range a.vibestModel.Groups(a.sessionPinned) {
 		a.projectHeader(c, g)
 		if a.foldedProject[g.Project.ID] {
 			continue
@@ -421,7 +422,7 @@ func (a *App) sessionRow(c *ui.Context, g vibest.Group, r vibest.Row, focused st
 			weight = 600
 		}
 		b.Children(func() {
-			sessionActivity(c, th, s.Status)
+			sessionActivity(c, th, a.sessionStatus(s))
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 				ui.Text(c, s.Name).FontSize(th.Row.FontSize).FontWeight(weight).TextColor(ink).SingleLine()
 				if s.Status == "blocked" {
@@ -438,6 +439,15 @@ func (a *App) sessionRow(c *ui.Context, g vibest.Group, r vibest.Row, focused st
 			a.returnFocus = true
 		}
 		b.ContextMenu(func(m *ui.Menu) {
+			if inCore {
+				label, value := "Pin", "1"
+				if a.sessionPinned(s) {
+					label, value = "Unpin", ""
+				}
+				if m.Item(label).Chosen() {
+					a.writeLabel(address, pinnedLabel, value)
+				}
+			}
 			if m.Item("Archive…").Chosen() {
 				a.sessionArchive(s)
 			}

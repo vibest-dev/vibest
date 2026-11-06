@@ -130,7 +130,10 @@ type Group struct {
 	Working int
 }
 
-func (m Model) Groups() []Group {
+func (m Model) Groups(pinned func(Session) bool) []Group {
+	if pinned == nil {
+		pinned = func(Session) bool { return false }
+	}
 	byProject := map[string][]Session{}
 	for _, s := range m.Sessions {
 		byProject[s.ProjectID] = append(byProject[s.ProjectID], s)
@@ -140,7 +143,7 @@ func (m Model) Groups() []Group {
 		if p.Directory == nil {
 			continue
 		}
-		groups = append(groups, group(p, byProject[p.ID]))
+		groups = append(groups, group(p, byProject[p.ID], pinned))
 	}
 	sort.Slice(groups, func(i, j int) bool {
 		a, b := groups[i].Project, groups[j].Project
@@ -152,7 +155,7 @@ func (m Model) Groups() []Group {
 	return groups
 }
 
-func group(p Project, sessions []Session) Group {
+func group(p Project, sessions []Session, pinned func(Session) bool) Group {
 	sort.Slice(sessions, func(i, j int) bool {
 		if sessions[i].CreatedAt != sessions[j].CreatedAt {
 			return sessions[i].CreatedAt < sessions[j].CreatedAt
@@ -176,7 +179,14 @@ func group(p Project, sessions []Session) Group {
 	if p.EntrySessionID != nil {
 		main = *p.EntrySessionID
 	}
+	pinFirst := func(list []Session) {
+		sort.SliceStable(list, func(i, j int) bool { return pinned(list[i]) && !pinned(list[j]) })
+	}
 	sort.SliceStable(roots, func(i, j int) bool { return roots[i].ID == main && roots[j].ID != main })
+	pinFirst(roots)
+	for _, list := range children {
+		pinFirst(list)
+	}
 	g := Group{Project: p}
 	seen := map[string]bool{}
 	var walk func(s Session, depth int)

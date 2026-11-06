@@ -69,3 +69,17 @@ rows and independent repository disclosure.
 Capture with `THEME_SHOTS=/tmp/activity-shots go test ./internal/app -run '^TestActivityVisuals$' -count=1`.
 The ordinary suite also checks built-in themes at 1x/2x and uses the headless
 clock to verify animation, stopping and stable slot geometry.
+
+## Seen and pinned shared with other herdr clients
+
+The labels of herdr-app `docs/labels.md` carry seen and pinned state across
+clients. `herdr.seen=<turn>` is written for a terminal while its pane is drawn
+and the window is in front, only to raise it or when it is missing, and once per
+turn while it stays on screen: a "mark unread" from another client is not
+overruled until the pane leaves the screen or the window loses focus and the
+agent is looked at again. A terminal this app starts gets `herdr.seen=0`. Where
+the label is present it decides the Done mark (`turn > herdr.seen`) for the
+workspace and tab marks and for a vibest session that vibestd reports neither
+working nor blocked; without it the deliberate-visit rules above stay in force.
+`herdr.pinned=1` (written by Pin and Unpin on a session row; Unpin writes it
+empty) puts a session first among its siblings in the Projects section.

@@ -40,7 +40,7 @@ func TestGroupsPutTheMainAgentFirstWithItsSubagentsNestedUnderIt(t *testing.T) {
 			session("other", "p2", 1, nil, "idle"),
 		},
 	})
-	groups := m.Groups()
+	groups := m.Groups(nil)
 	got := []string{shape(groups[0]), shape(groups[1])}
 	want := []string{
 		"alpha waiting=0 working=0: other/0",
@@ -56,15 +56,15 @@ func TestDeltasUpdateAndEndSessions(t *testing.T) {
 	m.Apply(Event{Tag: "Snapshot", Projects: []Project{{ID: "p1", Directory: ptr("/code/a")}}})
 	m.Apply(Event{Tag: "Session", Session: ptr(session("s", "p1", 1, nil, "working"))})
 	m.Apply(Event{Tag: "Project", Project: &Project{ID: "p1", Directory: ptr("/code/a"), EntrySessionID: ptr("s")}})
-	if got := shape(m.Groups()[0]); got != "a waiting=0 working=1: s/0*" {
+	if got := shape(m.Groups(nil)[0]); got != "a waiting=0 working=1: s/0*" {
 		t.Fatal(got)
 	}
 	m.Apply(Event{Tag: "Session", Session: ptr(session("s", "p1", 1, nil, "idle"))})
-	if got := shape(m.Groups()[0]); got != "a waiting=0 working=0: s/0*" {
+	if got := shape(m.Groups(nil)[0]); got != "a waiting=0 working=0: s/0*" {
 		t.Fatal(got)
 	}
 	m.Apply(Event{Tag: "SessionEnded", ID: "s", ProjectID: "p1"})
-	if got := shape(m.Groups()[0]); got != "a waiting=0 working=0:" {
+	if got := shape(m.Groups(nil)[0]); got != "a waiting=0 working=0:" {
 		t.Fatal(got)
 	}
 }
@@ -75,7 +75,7 @@ func TestAParentCycleStillShowsEverySession(t *testing.T) {
 		session("x", "p", 1, ptr("y"), "idle"),
 		session("y", "p", 2, ptr("x"), "idle"),
 	}})
-	if got := shape(m.Groups()[0]); got != "a waiting=0 working=0: x/0 y/1" {
+	if got := shape(m.Groups(nil)[0]); got != "a waiting=0 working=0: x/0 y/1" {
 		t.Fatal(got)
 	}
 }
@@ -101,7 +101,21 @@ func TestWatchEventsDecodeFromThePlannedShape(t *testing.T) {
 	strictDecode(t, json.RawMessage(line), &e)
 	var m Model
 	m.Apply(e)
-	if got := shape(m.Groups()[0]); got != "a waiting=0 working=0: s/0" {
+	if got := shape(m.Groups(nil)[0]); got != "a waiting=0 working=0: s/0" {
+		t.Fatal(got)
+	}
+}
+
+func TestPinnedSessionsGoFirstAmongTheirSiblings(t *testing.T) {
+	var m Model
+	m.Apply(Event{Tag: "Snapshot", Projects: []Project{{ID: "p", Directory: ptr("/a"), EntrySessionID: ptr("main")}}, Sessions: []Session{
+		session("main", "p", 1, nil, "idle"),
+		session("s1", "p", 2, ptr("main"), "idle"),
+		session("s2", "p", 3, ptr("main"), "idle"),
+		session("loose", "p", 4, nil, "idle"),
+	}})
+	pinned := func(s Session) bool { return s.ID == "s2" || s.ID == "loose" }
+	if got := shape(m.Groups(pinned)[0]); got != "a waiting=0 working=0: loose/0 main/0* s2/1 s1/1" {
 		t.Fatal(got)
 	}
 }

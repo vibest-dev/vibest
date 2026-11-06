@@ -119,6 +119,7 @@ var closeX = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" vie
 func (a *App) View(c *ui.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	defer a.endSeenFrame()
 	a.checkTabDrag()
 	a.coreFocus()
 	th := a.theme(c.Theme().Dark)

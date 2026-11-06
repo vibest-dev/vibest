@@ -71,7 +71,7 @@ func (f *coreAppFixture) serve() {
 	if _, err := r.ReadBytes('\n'); err != nil {
 		return
 	}
-	h := map[string]any{"jsonrpc": "2.0", "id": 1, "result": map[string]any{"version": "0.1.13", "generation": 1, "framed": true, "core": map[string]string{"id": "app-fixture"}, "methods": []string{"terminal.run", "terminal.get", "terminal.attach", "terminal.kill", "events.subscribe", "doc.get", "doc.set", "machine.list", "machine.exec"}, "features": []string{"framed", "attach", "events", "status", "shell"}}}
+	h := map[string]any{"jsonrpc": "2.0", "id": 1, "result": map[string]any{"version": "0.1.13", "generation": 1, "framed": true, "core": map[string]string{"id": "app-fixture"}, "methods": []string{"terminal.run", "terminal.get", "terminal.attach", "terminal.kill", "events.subscribe", "doc.get", "doc.set", "machine.list", "machine.exec", "terminal.label"}, "features": []string{"framed", "attach", "events", "status", "shell"}}}
 	hello, _ := json.Marshal(h)
 	f.peer.Write(append(hello, '\n'))
 	channel := uint32(1)
@@ -114,7 +114,7 @@ func (f *coreAppFixture) serve() {
 			continue
 		}
 		var result any = map[string]any{}
-		var created *core.Terminal
+		var created, labelled *core.Terminal
 		var attach bool
 		gateKey := req.Method
 		switch req.Method {
@@ -184,6 +184,28 @@ func (f *coreAppFixture) serve() {
 			result = map[string]any{"channel": channel, "terminal": f.terminals[args.Terminal]}
 			attach = true
 		case "terminal.kill":
+		case "terminal.label":
+			var args struct {
+				Terminal string
+				Labels   map[string]string
+			}
+			json.Unmarshal(req.Params, &args)
+			record, ok := f.terminals[args.Terminal]
+			if ok {
+				labels := map[string]string{}
+				for k, v := range record.Labels {
+					labels[k] = v
+				}
+				for k, v := range args.Labels {
+					if v == "" {
+						delete(labels, k)
+					} else {
+						labels[k] = v
+					}
+				}
+				record.Labels = labels
+				labelled = &record
+			}
 		case "doc.set":
 			var args struct {
 				Name    string
@@ -237,6 +259,9 @@ func (f *coreAppFixture) serve() {
 				} else {
 					f.report("created", *created)
 				}
+			}
+			if labelled != nil {
+				f.report("labels", *labelled)
 			}
 			if attach {
 				data := "\x1b[?9001lCore fixture ready\r\n"
