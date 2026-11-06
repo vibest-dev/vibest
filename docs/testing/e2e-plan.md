@@ -8,16 +8,16 @@ those, for every omac feature vibest carries.
 
 vibest writes nothing into the user's `~/.vibest`, harness config (`~/.claude`, `~/.pi`, `~/.cursor`) or main herdr session.
 
-| Thing          | E2E value                                                                                                                                                                                                                                                                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `HOME`         | the user's own: the harnesses' subscription logins live in its keychain, and a temp `HOME` is logged out                                                                                                                                                                                               |
-| `VIBEST_HOME`  | a fresh `0700` temp directory per run                                                                                                                                                                                                                                                                  |
-| Harness config | temp directories per run through each harness's own variable: `PI_CODING_AGENT_DIR`, `CLAUDE_CONFIG_DIR`, `CURSOR_CONFIG_DIR`. The real-harness turns (I3–I5) use the user's own config, read only, and load vibest's plugin from `VIBEST_HARNESSES`. The user's real files are checked unchanged (I6) |
-| herdr session  | herdr keeps its sessions under the real `HOME`: a session vibest starts during the run is stopped at the end; the user's sessions stay                                                                                                                                                                 |
-| Repository     | a scratch git repository with a local bare `origin`, so pushed / unpushed / dirty states are real                                                                                                                                                                                                      |
-| Binary         | `apps/vibest-herdr/dist/vibest` from this checkout, first on `PATH` (harness plugins run `vibest` from `PATH`), then `~/.local/bin` (cursor-agent)                                                                                                                                                     |
-| Credentials    | the user's subscription logins; never printed or written to evidence                                                                                                                                                                                                                                   |
-| Releases       | `npm_config_registry` and `VIBEST_DOWNLOAD_URL` point at a local stand-in that names this checkout's version as the latest, so `vibest update` and the update notice never reach npm or GitHub and never install into the user's global npm                                                            |
+| Thing          | E2E value                                                                                                                                                                                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HOME`         | the user's own: the harnesses' subscription logins live in its keychain, and a temp `HOME` is logged out                                                                                                                                                                                                      |
+| `VIBEST_HOME`  | a fresh `0700` temp directory per run                                                                                                                                                                                                                                                                         |
+| Harness config | temp directories per run through each harness's own variable: `PI_CODING_AGENT_DIR`, `CLAUDE_CONFIG_DIR`, `CURSOR_CONFIG_DIR`. I5, the one real-model turn, uses the user's own Cursor config, read only, and loads vibest's plugin from `VIBEST_HARNESSES`. The user's real files are checked unchanged (I6) |
+| herdr session  | herdr keeps its sessions under the real `HOME`: a session vibest starts during the run is stopped at the end; the user's sessions stay                                                                                                                                                                        |
+| Repository     | a scratch git repository with a local bare `origin`, so pushed / unpushed / dirty states are real                                                                                                                                                                                                             |
+| Binary         | `apps/vibest-herdr/dist/vibest` from this checkout, first on `PATH` (harness plugins run `vibest` from `PATH`), then `~/.local/bin` (cursor-agent)                                                                                                                                                            |
+| Credentials    | the user's subscription logins; never printed or written to evidence                                                                                                                                                                                                                                          |
+| Releases       | `npm_config_registry` and `VIBEST_DOWNLOAD_URL` point at a local stand-in that names this checkout's version as the latest, so `vibest update` and the update notice never reach npm or GitHub and never install into the user's global npm                                                                   |
 
 | Harness             | Login                   | Note                                                                                                                |
 | ------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -44,10 +44,11 @@ every script check on that install, a skip failing the run (tools/verify/README.
 | Project store | `project info` and `search`; agents write and read the project folder with file tools, another project refused                                      |
 | Plugins       | `plugins` lists a routing plugin; edit it on disk and see the reload; a refusing plugin blocks `run`                                                |
 | Integrations  | each harness loads vibest's plugin from the built `harnesses/` (`pi -e`, `--plugin-dir`) beside the user's own; `doctor` without `VIBEST_HARNESSES` |
-| Guard         | the hook script denies `vibest rm` / project-store paths for a worker and allows them for the coordinator                                           |
+| Guard         | a real agent of each harness is refused herdr and another project's folder (I3, I9, I5)                                                             |
 | Models        | `models`, `harness list`, `harness models <each>`                                                                                                   |
 
-**L2, real harness and model.** One matrix row per harness (Claude, Pi, Cursor). Prompts are deterministic:
+**L2, real harness, fake model by default.** One matrix row per harness (Claude, Pi, Cursor); a real model only for the
+login smoke (I5). Prompts are deterministic:
 "create `out-<nonce>.txt` containing `<nonce>`, then reply `DONE-<nonce>`".
 
 | #   | Scenario                                                                          | Pass when                                                                                                                 |
@@ -79,14 +80,13 @@ that leaves a pane outside the run's herdr sessions fails, whatever it proved. A
 for inspection; a clean run removes it. U1 stops vibestd first: a running one would be offered for replacement, which
 asks on a terminal.
 
-Real-model checks give the agents they have vibest start a model through vibest's own options (`--provider`,
-`--model`), chosen in one place (`tools/e2e/src/world.ts` `agentModel`): `VIBEST_E2E_PROVIDER` and `VIBEST_E2E_MODEL`
-when set, else Claude Haiku. The checks that start a harness directly (I3–I5) keep their own flags. vibest's Claude
-adapter accepts no provider other than `anthropic`, so a provider for the Claude checks is refused by vibest itself.
-`VIBEST_E2E_ENV` adds environment for those agents: `KEY=VALUE` pairs, one per line, each passed as vibest's own
-`--env`. With `--model` it runs a Claude agent on another Anthropic-compatible endpoint, for example
-`VIBEST_E2E_ENV=$'ANTHROPIC_BASE_URL=<endpoint>\nANTHROPIC_AUTH_TOKEN=<token>' VIBEST_E2E_MODEL=<model>`. Unset, nothing
-changes. Its values are never printed: console output, failure details and evidence show `<redacted>` instead.
+Checks that run a turn use a fake model by default (`tools/e2e/src/fake-model.ts`): a local Anthropic Messages server
+for Claude (a temp `CLAUDE_CONFIG_DIR` with its onboarding done, `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` passed as
+vibest's own `--env`) and OpenAI-compatible servers for Pi (a temp `PI_CODING_AGENT_DIR` whose `models.json` names
+them). The fake answers from the request, so what the agent asks and does is scripted, and a turn can be held open until
+the check releases it. Only I5 runs a real model: the login smoke on the user's Cursor login. `VIBEST_E2E_ENV` (`KEY=VALUE`
+pairs, one per line) names values the evidence masks: console output, failure details and evidence show `<redacted>`
+instead.
 
 ### The world
 
@@ -101,9 +101,7 @@ changes. Its values are never printed: console output, failure details and evide
 - `vibest run` and a bare `vibest` get `--session <run>` unless they name one: vibest's default session `vibest` is the
   user's own. A check's own sessions are named `<run>-…`.
 - `World.tty` types the answers on a pseudo-terminal (Python `pty`); its output has CR LF line ends.
-- Integration checks seed sessions straight into vibest.db (`knownSessions`), in a project with no directory, so no
-  `vibest` finds them and no harness starts: vibestd records turn events, and answers the Claude plugin, only for a
-  session it knows.
+- Integration checks start their agents with `vibest run`, so vibestd knows each session as it would for a user.
 
 ### Real panes
 
@@ -129,7 +127,7 @@ What the checks that drive real herdr panes rely on:
   turn starts.
 - A fake usage limit is an error inside the stream: Pi reports its message as the turn's error, and retries a failed
   request, so every retry fails too (U5, U8).
-- I3–I5 stop the harness once `vibest result` shows its result (`until-file.py`). I6 leaves out
+- I6 leaves out
   `~/.cursor/cli-config.json`: vibest never touches it, and cursor-agent rewrites it while it runs.
 - cursor-agent's hook shell rebuilds `PATH`, so I5 names its recording `vibest` wrapper through `VIBEST_COMMAND`, which
   is how an agent vibest starts names its own binary.
@@ -140,8 +138,6 @@ What the checks that drive real herdr panes rely on:
 - S10 runs one turn first: vibest resumes only a conversation the harness wrote. It prompts through herdr's
   `agent.prompt`, as vibest does; an enter typed into Pi's editor only adds a line. herdr marks a finished turn nobody
   looked at `done`. A keeps only its shell once what the harness's extensions started (Pi's update checks) has ended.
-- S10-pi needs `VIBEST_E2E_MODEL`: Pi refuses `--provider` without `--model`, and Pi's own default is whatever the user
-  last picked.
 
 ### Kill windows
 
@@ -149,13 +145,14 @@ S24, S28, S29 and S31 kill vibestd inside a window. S24: while the row is `deliv
 is seen to start the turn. S28: after `vibest run` answers, which it does once the row is stored; the start then makes
 the worktree and opens the terminal. S29: at the first look for the harness's ready report. S31: between the result's
 delivery and the archive's mark. A try that misses its window (the task linked, or the session archived, before the
-kill) is not the case, so S29 and S31 try a new subagent, up to five times. S30 writes only the mark `vibest archive`
-stores first, before it closes anything. S27's process outside the pane works in the worktree: closing the pane does not
+kill) is not the case, so S24, S28, S29, S30 and S31 try again, up to five times. S30 kills vibestd once `vibest archive`
+has stored its mark, before it closes anything. S27's process outside the pane works in the worktree: closing the pane does not
 end it.
 
 ## 4. Cost and time
 
-About 12 short turns per harness on the cheapest model: roughly 50 turns per full run, about 20–30 minutes.
+The turns run on fake models and cost nothing; I5's Cursor turn is the one real-model turn. A full `pnpm e2e` takes
+about 20–30 minutes.
 
 `bun tools/bench/src/ls.ts` measures `vibest ls` at 200 and 1000 sessions: the median and p95 of 20 runs, and vibestd's
 CPU seconds over 60 idle seconds. It seeds the sessions in a temp home under a runtime kind that is not registered, so no

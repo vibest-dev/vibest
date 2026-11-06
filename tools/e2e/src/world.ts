@@ -310,16 +310,6 @@ export const redact = (text: string) =>
     return value === "" ? t : t.split(value).join("<redacted>")
   }, text)
 
-export const agentModel = (): ReadonlyArray<string> => {
-  const provider = process.env.VIBEST_E2E_PROVIDER
-  return [
-    ...(provider ? ["--provider", provider] : []),
-    "--model",
-    process.env.VIBEST_E2E_MODEL || "haiku",
-    ...agentEnv.flatMap((pair) => ["--env", pair]),
-  ]
-}
-
 export const agentName = (id: string) => `s-${id.replaceAll("-", "").slice(0, 30)}`
 
 export const herdr = (socket: string, method: string, params: object) =>

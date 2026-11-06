@@ -22,7 +22,7 @@ leg, and the run fails at the end naming each failed leg:
 4. Prints, by name, the feature-map checks marked `agent` or `runtime`: no script proves them, so an agent does, with
    evidence.
 
-Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `guard`, `update`.
+Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `update`, `start`, `inbox`, `exits`, `restart`.
 
 Nothing is published: no GitHub Release, no npm package, nothing in `~/.local`.
 
