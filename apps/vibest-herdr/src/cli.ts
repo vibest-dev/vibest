@@ -1407,7 +1407,7 @@ const update = Command.make(
 ).pipe(
   Command.withAlias("upgrade"),
   Command.withDescription(
-    "Update vibest the way it was installed (install.sh: the latest GitHub release; npm: @vibest/cli@beta with the package manager that installed it), hand the running vibestd over to it (agents keep running), then offer to restart the agents still on the old integration in place, with their conversations",
+    "Update vibest the way it was installed (install.sh: the latest GitHub release; npm: the version the registry's beta tag names, at that exact version, with the package manager that installed it; either is first tried aside and must open the database), hand the running vibestd over to it (agents keep running), then offer to restart the agents still on the old integration in place, with their conversations",
   ),
 )
 
