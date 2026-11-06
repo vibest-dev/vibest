@@ -84,14 +84,58 @@ without a `close`, and `process` on it reports `running: false`, then `not_found
 Several runtimes run at once, on any machine; core routes every call by the Agent's own `runtime.kind`. Each runtime
 product keeps one instance per machine (one herdr session `vibest`, one rex server, one tern daemon).
 
-- Each Agent gets its runtime in `agent.start.before` (`event.runtime`, beside `machine` and `harness`). The builtin
-  plugin: the parent's runtime when it is online on the chosen machine (the subagent opens beside its parent), else
-  the configured `runtime`, else herdr, else the only one online. Core checks after the chain: that runtime online on
-  that machine, else refuses with the reason. A runtime a caller or another plugin already set (`vibest
-  --runtime`, a user plugin) stands. The configured `runtime` is vibest.json's top-level key, read by the product on
-  every start (an edit applies to the next one) and handed to the plugin, which ships with the herdr product.
-- The main Agent: `vibest --runtime <kind>`, else the configured `runtime`, else herdr, else the only one online.
+- Each Agent gets its runtime in `agent.start.before` (`event.runtime`, beside `machine` and `harness`). A runtime
+  already set by the caller (`--runtime`) or a plugin stands. Next is vibest.json's top-level `runtime`, then the
+  parent's runtime, then herdr, then the only online runtime. The product reads the configuration on every start.
+  An unavailable configured or parent runtime is refused, never silently replaced by another runtime. Main agents
+  count as parents too; their rows are read through `coordinatorOf`, not the worker-only `getSession`.
+- A main Agent defaults to the positively identified caller terminal's runtime. An explicit/configured different
+  runtime opens a new terminal instead of registering the caller's terminal under the other runtime. Outside any
+  runtime the default remains herdr, then the only online runtime. Subagents open near their parent; reachability
+  can be proved at that parent endpoint even when the default server of the same runtime kind is offline.
 - None online: refused, listing each runtime and why. vibest never installs a runtime locally.
+
+### Identifying the caller terminal
+
+A runtime may expose `caller: { env, detect }`. Environment keys and terminal/server encodings belong to the plugin.
+`detect(values)` returns no candidate, or `{ terminal, live, localRootPid? }`; live is shell/root liveness, not
+`process.running` (an idle shell is live). Missing/finished terminals are false; unavailable or incompatible
+endpoints remain typed errors. Detection must not start a runtime or query its default/focused terminal.
+
+The CLI obtains the installed key union with `Caller.Keys`, then sends only those values, its own PID, the key
+snapshot and an optional explicit runtime filter through `Caller.Detect`. Plugins run only in vibestd, after
+activation settles. Each detector gets only its own declared values, has a two-second deadline, and runs with at
+most eight concurrent probes. Undeclared keys and values over 4096 characters are refused. Neither raw environment
+values nor detector error messages are logged or returned in diagnostics. Key changes between calls and registry
+changes during detection return unresolved; the caller retries rather than using a stale plugin snapshot. Ping
+advertises the additive `callerRuntime` capability; the database and protocol generation do not change.
+
+Shared code in `core/caller-runtime.ts` chooses among live local roots, without runtime-name precedence:
+
+1. A unique matching controlling tty wins; when either tty is unavailable, a matching process session can win.
+2. Otherwise the nearest root on the caller's parent chain wins, including the caller itself, bounded to 64
+   processes with cycle detection. A known different tty excludes that ancestor. Unresolved competing roots
+   prevent ancestry-only selection, but do not outweigh a positive direct tty/session match.
+3. A sole live but unrelated terminal is never adopted. Missing facts, foreign namespaces, ambiguity and stale
+   context are explained and require `--runtime`. Explicit runtime selects eligible candidates, not proof of
+   membership: a mismatched candidate causes a new terminal to open, never adoption of the stale ID.
+
+The existing Processes platform boundary supplies process facts: macOS `proc_pidinfo(PROC_PIDTBSDINFO)` plus
+`getsid`; Linux `/proc/<pid>/stat` with PID and mount namespace identities. Neither reads stdio, argv nor
+environments. Zombie/exited roots cannot match. Detection rechecks the selected terminal, caller and root start
+tokens; the CLI detects again immediately before main-session registration. Normal runtime calls still handle a
+terminal disappearing afterward. No periodic detector or persistent caller cache is added.
+
+Current ceiling: directly connected local runtimes in the daemon's host/PID namespace. Machine-qualified HC
+addresses supply no local PID. SSH-forwarded sockets and remotely forwarded runtime variables are unsupported;
+a local-looking socket alone does not authenticate a remote process namespace. tmux or a harness-created PTY may
+have no installed provider for the direct terminal and require explicit placement. Neither server records the
+original process start token, so reuse of an already stale server PID before the first inspection cannot be ruled
+out cryptographically. Environment hints and these checks are placement evidence, not caller authentication.
+
+`pnpm e2e S35` creates its own herdr session and isolated core, opens an HC shell from the herdr pane with both
+real terminal identities, types `vibest` without `--runtime`, and proves that main and its subagent stay in HC
+while a separately started agent uses herdr. The user's herdr session and default core are never queried.
 
 ## 5. Agent state, one direction
 
@@ -134,9 +178,8 @@ it tests terminal reports, not exit-event recovery. Raw output and timestamped i
 evidence files, never the runner terminal. Claude ignores keys at its first dialog draw; the check waits for
 visible dialog text, pauses, reads it again, then answers only the scratch action.
 
-Coordinator coverage is blocked until herdr-core caller detection lands: the CLI caller detector still requires herdr
-identity even when a different runtime opened its terminal. Do not forge that identity in E2E. Once native HC
-caller detection lands, add this check: launch a real Claude and Pi coordinator through built `vibest --harness
+Caller detection now supports HC coordinators (S33–S35), but T1's coordinator OSC assertions remain a separate
+follow-up. Do not forge herdr identity for them. Add this check: launch a real Claude and Pi coordinator through built `vibest --harness
 <harness> --runtime hc --headless` in the isolated core; hold its fake model and assert native working, complete
 it and assert native done, then start another turn and interrupt it to assert idle, with the loaded vibest
 integration and no competing OSC writer. This is independent of worker result coverage. In the same follow-up,

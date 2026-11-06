@@ -1,9 +1,10 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { shellQuote } from "../../../../packages/schema/src/layout.ts"
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
-import { expect, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { binary, expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { project } from "./inbox.ts"
 
 type Entry = { id: string; agent: string; status: string; turnState: string }
@@ -45,6 +46,7 @@ const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
       return (JSON.parse(listed.stdout) as { terminals: Array<HcListed> }).terminals
     },
     hc,
+    env,
     get: async (terminal: string) => JSON.parse((await hc("get", terminal, "--json")).stdout) as HcTerminal,
     screens: async () => {
       const listed = JSON.parse((await hc("ls", "--all", "--json")).stdout) as { terminals: Array<HcListed> }
@@ -68,6 +70,100 @@ const configureRuntime = async (w: World, runtime: string | undefined) => {
 }
 
 const checks: ReadonlyArray<Check> = [
+  {
+    id: "S35",
+    title:
+      "caller runtime: vibest typed in hc nested inside a live herdr pane needs no --runtime; its main and subagents stay in hc while another agent runs in herdr",
+    run: async (w) => {
+      for (const bin of ["pi", "hc", "herdr"]) if (!Bun.which(bin)) throw new Skip(bin + " not on PATH")
+      w.ownRuntimes.add("hc")
+      await w.stopDaemon()
+      const model = delegatingModel("pi")
+      const piAgentDir = await piDir(w, "pi-nested", model.url)
+      const core = await isolatedCore(w, piAgentDir, "nested")
+      const restore = await configureRuntime(w, undefined)
+      const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
+      w.spawn(["herdr", "server", "--session", w.herdrSession], path.join(w.root, "nested-herdr.log"))
+      try {
+        const repo = await project(w, "nested")
+        await until(
+          "isolated herdr ready",
+          () =>
+            fs.stat(socket).then(
+              () => true,
+              () => false,
+            ),
+          30_000,
+        )
+        await w.ok(["daemon"], { env: core.env })
+        const created = await herdr(socket, "workspace.create", { cwd: repo, env: w.env(core.env), focus: false })
+        const pane = (created.root_pane as { pane_id: string }).pane_id
+        const command =
+          'hc run --keep --name nested -- /usr/bin/env "HERDR_PANE_ID=$HERDR_PANE_ID" "HERDR_SOCKET_PATH=$HERDR_SOCKET_PATH" /bin/zsh -l'
+        await herdr(socket, "pane.send_text", { pane_id: pane, text: command })
+        await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
+        await until(
+          "hc terminal nested in herdr",
+          async () => (await core.terminals()).some((t) => t.name === "nested"),
+          30_000,
+        )
+        const inner = await core.get("nested")
+        const typed = await core.hc(
+          "send",
+          "nested",
+          "cd " +
+            shellQuote(repo) +
+            " && " +
+            shellQuote(binary) +
+            " --harness pi --env " +
+            shellQuote("PI_CODING_AGENT_DIR=" + piAgentDir),
+        )
+        expect(typed.code === 0, "typed vibest: " + typed.stderr)
+        let main = ""
+        await until(
+          "main in nested hc",
+          async () => {
+            main = (await w.json<Array<Entry>>(["ls"], { cwd: repo })).find((e) => e.agent === "main")?.id ?? ""
+            return main !== ""
+          },
+          90_000,
+        ).catch(async (error: Error) => {
+          throw new Error(error.message + "\n" + (await core.screens()))
+        })
+        const runtimeOf = (id: string) =>
+          JSON.parse(
+            row<{ runtime: string }>(w, `SELECT runtime FROM ${SESSIONS} s WHERE id = ?`, id)?.runtime ?? "{}",
+          ) as { kind?: string; id?: string }
+        expect(
+          runtimeOf(main).kind === "hc" && runtimeOf(main).id === inner.address + "@" + w.hcSocket,
+          "main adopted the outer pane: " + JSON.stringify(runtimeOf(main)),
+        )
+        const seed = await w.json<{ id: string }>(
+          ["run", "pi", "--env", "PI_CODING_AGENT_DIR=" + piAgentDir, ask("zero")],
+          { cwd: repo, timeoutMs: 90_000 },
+        )
+        expect(runtimeOf(seed.id).kind === "herdr", "outside-runtime creation no longer uses the default")
+        await until(
+          "hc main creates and continues its hc subagent",
+          () => model.seen.some((m) => m.includes("<agent-") && m.includes("done-two")),
+          180_000,
+        )
+        const sub = runtimeOf(model.sessionId())
+        expect(sub.kind === "hc", "subagent escaped its parent runtime: " + JSON.stringify(sub))
+        expect(
+          (await core.get(addressOf(sub.id!))).parent === inner.address,
+          "subagent did not open beside its hc parent",
+        )
+        const outer = await herdr(socket, "pane.process_info", { pane_id: pane })
+        expect((outer.process_info as { shell_pid?: number }).shell_pid !== undefined, "outer herdr shell died")
+      } finally {
+        model.stop()
+        await w.stopDaemon()
+        await restore()
+        await core.stop()
+      }
+    },
+  },
   {
     id: "S33",
     title:

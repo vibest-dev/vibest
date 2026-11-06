@@ -17,6 +17,15 @@ such a rewatch one more read follows a second later, because Bun 1.4's `fs.watch
 directories' events right after a watch closes (drop it when Bun no longer does). A teardown that times out is left
 running, so an old revision's finalizers can overlap the new setup.
 
+## Caller discovery
+
+Runtime plugins optionally register `caller.env` and `caller.detect` alongside their other capabilities. The CLI
+never imports plugins: `Caller.Keys` reads the settled runtime registry, and `Caller.Detect` dispatches against
+one registration snapshot with the CLI's PID and only the declared environment values. Each detector receives
+only its own keys. Activation that has not settled, a changed key set, or a registration replaced during probing
+returns an unresolved diagnostic instead of adopting a terminal from an incomplete snapshot. Detection is bounded
+and on demand; no watcher, cache or database field is added. See [runtime-port.md](runtime-port.md#identifying-the-caller-terminal).
+
 ## Loading on Bun
 
 In `platform/bun.ts` and `platform/plugin-source.ts` (after OpenCode V2's `source.bun.ts`): inside the
