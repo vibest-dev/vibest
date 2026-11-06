@@ -65,6 +65,13 @@ const foregroundEvent = (seq: number, foreground: Foreground) =>
     params: { data: foreground, seq, terminal: "t1", type: "foreground" },
   })
 
+const statusEvent = (seq: number, state: string) =>
+  JSON.stringify({
+    jsonrpc: "2.0",
+    method: "event",
+    params: { data: { records: {}, reported: true, status: { state } }, seq, terminal: "t1", type: "status" },
+  })
+
 const MISSED = JSON.stringify({ jsonrpc: "2.0", method: "missed", params: {} })
 
 const Request = Schema.decodeUnknownEffect(
@@ -143,6 +150,19 @@ const live = <A, E>(
   it.live(name, () => body.pipe(Effect.scoped, Effect.provide(Layer.mergeAll(BunServices.layer, HcBun.layer))), 20_000)
 
 describe("runtime-hc against a fake core", () => {
+  live(
+    "the status a program reports over OSC 7501 is the agent's state: working, then idle when done",
+    Effect.gen(function* () {
+      const core = yield* fakeCore
+      yield* core.runtime.process(core.terminal)
+      const sub = yield* core.subscriber
+      yield* sub.push(statusEvent(1, "working"))
+      assert.deepStrictEqual(yield* core.next, { type: "state", terminal: core.terminal, state: "working" })
+      yield* sub.push(statusEvent(2, "done"))
+      assert.deepStrictEqual(yield* core.next, { type: "state", terminal: core.terminal, state: "idle" })
+    }),
+  )
+
   live(
     "a foreground change back to the shell after a program ran is the terminal's exit",
     Effect.gen(function* () {

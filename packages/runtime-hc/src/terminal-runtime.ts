@@ -9,6 +9,14 @@ export type Machine = VibestPlugin.Runtime.Machine
 export type Terminal = VibestPlugin.Runtime.Terminal
 export type Runtime = VibestPlugin.Runtime.Runtime
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
+export type AgentState = VibestPlugin.Runtime.AgentState
+
+export const agentStateOf = (status: api.Status | null | undefined): AgentState =>
+  status === null || status === undefined
+    ? "unknown"
+    : status.state === "working" || status.state === "blocked"
+      ? status.state
+      : "idle"
 
 export const KIND = "hc"
 
@@ -121,6 +129,16 @@ export const make = (deps: {
         return Effect.void
       }
       if (EXIT_EVENTS.has(type)) return exited(socket, core, terminal)
+      if (type === "status") {
+        const state = agentStateOf((data as { readonly status?: api.Status | null }).status)
+        return state === "unknown"
+          ? Effect.void
+          : PubSub.publish(events, {
+              type: "state",
+              terminal: { machine: "local", id: terminalId(socket, terminal) },
+              state,
+            })
+      }
       if (type === "foreground") {
         if (!atShell(data as api.Foreground)) {
           core.busy.add(terminal)
@@ -243,6 +261,17 @@ export const make = (deps: {
         Effect.map((r) => r.text),
       )
 
+    const state: NonNullable<Runtime["state"]> = (terminal) =>
+      get(terminal).pipe(
+        Effect.flatMap((t) =>
+          t.state === "live"
+            ? Effect.succeed(agentStateOf(t.status))
+            : Effect.fail(
+                new RuntimeApi.RuntimeError({ code: "not_found", message: `terminal ${terminal.id} has finished` }),
+              ),
+        ),
+      )
+
     const process: Runtime["process"] = (terminal) =>
       get(terminal).pipe(
         Effect.map((t) =>
@@ -340,6 +369,7 @@ export const make = (deps: {
       send,
       read,
       process,
+      state,
       close,
       run,
       present,

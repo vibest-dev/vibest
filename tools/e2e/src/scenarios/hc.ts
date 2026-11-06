@@ -5,7 +5,8 @@ import type { Check } from "../check.ts"
 import { expect, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { ask, delegatingModel, piDir, project } from "./inbox.ts"
 
-type Entry = { id: string; agent: string }
+type Entry = { id: string; agent: string; status: string; turnState: string }
+type Sample = { at: number; status: string; turnState: string }
 type HcListed = { address: string; name?: string | null; state: string }
 type HcTerminal = {
   address: string
@@ -66,7 +67,7 @@ const checks: ReadonlyArray<Check> = [
       "herdr-core runtime: a Pi main agent started with --runtime hc runs `vibest run`, the subagent starts in hc as its child (no notes, outlives it), results and a send go both ways; the main terminal carries herdr.space=<project> and herdr.tab=<main session>",
     run: async (w) => {
       for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const model = delegatingModel("pi")
+      const model = delegatingModel("pi", { heldMs: 3_000 })
       w.ownRuntimes.add("hc")
       await w.stopDaemon()
       const piAgentDir = await piDir(w, "pi-hc", model.url)
@@ -97,10 +98,27 @@ const checks: ReadonlyArray<Check> = [
               )
             },
           )
+        const samples = new Map<string, Array<Sample>>()
+        let sampling = true
+        const sampler = (async () => {
+          while (sampling) {
+            const at = Date.now()
+            for (const e of await w.json<Array<Entry>>(["ls"], { cwd: repo }).catch(() => [] as Array<Entry>))
+              samples.set(e.id, [...(samples.get(e.id) ?? []), { at, status: e.status, turnState: e.turnState }])
+            await Bun.sleep(100)
+          }
+        })()
         await w.ok(["run", "pi", "--env", env, ask("zero")], { cwd: repo, timeoutMs: 60_000 })
         await reached("the main agent's turn on the first result", "done-zero")
         await reached("the main agent's turn on the result of the subagent it started", "done-one")
         await reached("the main agent's turn on the result after its vibest send", "done-two")
+        await until(
+          "the main agent idle after its last turn",
+          () => samples.get(main)?.at(-1)?.status === "idle",
+          60_000,
+        )
+        sampling = false
+        await sampler
 
         const runtimeOf = (id: string) =>
           JSON.parse(
@@ -133,6 +151,24 @@ const checks: ReadonlyArray<Check> = [
             subTerminal.labels["herdr.space"] === undefined,
           `the subagent's terminal: ${JSON.stringify(subTerminal)}; main ${mainTerminal.address}`,
         )
+        const shown = (id: string) =>
+          JSON.stringify((samples.get(id) ?? []).map((x) => `${x.at % 100_000} ${x.status}/${x.turnState}`))
+        const mainSeen = samples.get(main) ?? []
+        const mainWorking = mainSeen.findIndex((x) => x.status === "working")
+        expect(
+          mainWorking >= 0 && mainSeen.slice(mainWorking).some((x) => x.status === "idle"),
+          `the main agent was not seen working, then idle: ${shown(main)}`,
+        )
+        const subSeen = samples.get(sub) ?? []
+        for (const marker of ["one", "two"]) {
+          const turn = model.answered.find((t) => t.marker === marker)
+          expect(turn !== undefined, `the model never answered the subagent's ${marker} task`)
+          const during = subSeen.filter((x) => x.at > turn!.from + 500 && x.at < turn!.to)
+          expect(
+            during.length > 0 && during.every((x) => x.status === "working"),
+            `the subagent was not shown working while the model held its ${marker} answer (${turn!.from % 100_000}-${turn!.to % 100_000}): ${shown(sub)}`,
+          )
+        }
         const all = await Promise.all((await core.terminals()).map((t) => core.get(t.address)))
         expect(
           all.every((t) => t.labels["vibest.runtime"] === "hc"),
