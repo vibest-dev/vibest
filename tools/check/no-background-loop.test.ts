@@ -1,6 +1,3 @@
-// .agents/rules/no-background-polling.md: vibestd runs no background loop that scans state on an interval. This greps
-// packages/core/src and packages/server/src for the loop shapes; a hit fails unless the allowlist names it with a reason.
-// The client, CLI, integration and runtime packages are not scanned: their reconnect loops are allowed.
 import fs from "node:fs"
 import path from "node:path"
 
@@ -8,21 +5,15 @@ import { assert, describe, it } from "@effect/vitest"
 
 const ROOTS = ["packages/core/src", "packages/server/src"]
 
-/** Shapes that run on and on by themselves. `Effect.repeat` is counted below: it is one only without a bound. */
-const PATTERNS = ["Effect.forever", "setInterval", "Stream.tick", "Effect.schedule("]
+const UNBOUNDED_LOOP_SHAPES = ["Effect.forever", "setInterval", "Stream.tick", "Effect.schedule("]
 const REPEAT = "Effect.repeat"
 
-/** The code without its comment lines (`//`, and the lines of a `/* … *\/` block). */
-const code = (text: string) =>
+const withoutCommentLines = (text: string) =>
   text
     .split("\n")
     .filter((line) => !/^\s*(\/\/|\/\*|\*)/.test(line))
     .join("\n")
 
-/**
- * `Effect.repeat` calls with no `until`, `while` or `times` in their arguments: `Effect.repeat(Schedule.…)`, the
- * data-first `Effect.repeat(effect, schedule)`, and `Effect.repeat({ schedule })`.
- */
 const unboundedRepeats = (text: string) => {
   let hits = 0
   for (let at = text.indexOf(`${REPEAT}(`); at !== -1; at = text.indexOf(`${REPEAT}(`, at + 1)) {
@@ -37,7 +28,6 @@ const unboundedRepeats = (text: string) => {
   return hits
 }
 
-/** file → pattern → how many hits are allowed, and why. */
 const ALLOWED: Record<string, Record<string, { readonly count: number; readonly reason: string }>> = {
   "packages/core/src/sessions.ts": {
     "Effect.forever": { count: 1, reason: "a blocking take from the delivered-rows queue (archive), not polling" },
@@ -59,8 +49,8 @@ describe("no background loop", () => {
   it("core and server have no interval loop outside the allowlist", () => {
     const found: Array<string> = []
     for (const file of ROOTS.flatMap(files)) {
-      const text = code(fs.readFileSync(file, "utf8"))
-      for (const pattern of [...PATTERNS, REPEAT]) {
+      const text = withoutCommentLines(fs.readFileSync(file, "utf8"))
+      for (const pattern of [...UNBOUNDED_LOOP_SHAPES, REPEAT]) {
         const hits = pattern === REPEAT ? unboundedRepeats(text) : text.split(pattern).length - 1
         const allowed = ALLOWED[file]?.[pattern]?.count ?? 0
         if (hits !== allowed) found.push(`${file}: ${hits} × ${pattern} (allowed ${allowed})`)
@@ -79,7 +69,7 @@ describe("no background loop", () => {
       "// Effect.repeat(Schedule.spaced(TICK))",
       " * Effect.forever",
     ].join("\n")
-    assert.strictEqual(unboundedRepeats(code(sample)), 3)
-    assert.isFalse(code(sample).includes("Effect.forever"))
+    assert.strictEqual(unboundedRepeats(withoutCommentLines(sample)), 3)
+    assert.isFalse(withoutCommentLines(sample).includes("Effect.forever"))
   })
 })

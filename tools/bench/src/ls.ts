@@ -1,6 +1,3 @@
-// Baseline for vibest ls (plan step 0). A temp home, N sessions seeded through Db with runtime kind
-// bench (not registered, so no runtime is called). Prints the median and p95 of vibest ls (20 runs) and the
-// daemon CPU seconds over 60 idle seconds, at N = 200 and N = 1000. ls already prints JSON; there is no --json flag.
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -15,6 +12,7 @@ const sizes = [200, 1000]
 const runs = 20
 const idleMs = 15_000
 const cpuMs = 60_000
+const UNREGISTERED_RUNTIME_SO_NONE_IS_CALLED = "bench"
 
 const quantile = (xs: ReadonlyArray<number>, p: number) => {
   const s = [...xs].sort((a, b) => a - b)
@@ -76,9 +74,7 @@ const stop = async (home: string) => {
   }
   try {
     process.kill(pid, "SIGKILL")
-  } catch {
-    /* already gone */
-  }
+  } catch {}
 }
 
 const seed = (file: string, directory: string, n: number) =>
@@ -96,7 +92,7 @@ const seed = (file: string, directory: string, n: number) =>
           provider: null,
           model: null,
           harnessSessionId: null,
-          runtime: "bench",
+          runtime: UNREGISTERED_RUNTIME_SO_NONE_IS_CALLED,
           address: { machine: "bench", id: `b${i}` },
           status: "unknown",
           startedAt: now,

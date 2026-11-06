@@ -1,5 +1,3 @@
-// The project folder (feature-map P1, P2, P7, P8): `vibest project info` names it, agents read and write it with their
-// own file tools, and a moved checkout keeps its project.
 import fs from "node:fs/promises"
 import path from "node:path"
 
@@ -11,11 +9,6 @@ type Info = { directory: string; preferences: string; docs: string; memories: st
 
 type Step = { readonly tool: string; readonly input: Record<string, string> } | string
 
-/**
- * Each agent's turn on the project folder named in its system prompt (`dir`), one step per model call, by the number
- * of tool results so far: write `artifacts/<who>.md`, read it, write into another project's folder (`other`), then
- * answer. Every tool result is kept in `results[who]`.
- */
 const filesTurn =
   (results: Record<string, Array<string>>, other: string, names: { write: string; read: string; path: string }) =>
   (who: string, dir: string, done: number, last: string | undefined): Step => {
@@ -28,7 +21,6 @@ const filesTurn =
     return `done-${who}\nstatus: completed`
   }
 
-/** An OpenAI-compatible model for Pi: the main agent and a Pi subagent, told apart by their system prompts. */
 const fakeOpenAI = (step: ReturnType<typeof filesTurn>, dirs: Record<string, string>) => {
   let calls = 0
   const chunk = (o: object) =>
@@ -73,9 +65,9 @@ const fakeOpenAI = (step: ReturnType<typeof filesTurn>, dirs: Record<string, str
       const tools = messages.filter((m) => m.role === "tool")
       const last = messages.at(-1)
       const headers = { "content-type": "text/event-stream" }
-      // The main agent works on the folder in its first turn, which a subagent's result starts.
-      if (who === undefined || (who === "main" && tools.length === 0 && !text(last?.content).includes("<agent-")))
-        return new Response(answer("ok"), { headers })
+      const mainTurnNotStartedBySubagentResult =
+        who === "main" && tools.length === 0 && !text(last?.content).includes("<agent-")
+      if (who === undefined || mainTurnNotStartedBySubagentResult) return new Response(answer("ok"), { headers })
       if (tools.length > 3) return new Response(answer("ok"), { headers })
       dirs[who] = (main ?? sub)![1]!
       const result = last?.role === "tool" ? text(last.content) : undefined
@@ -85,7 +77,6 @@ const fakeOpenAI = (step: ReturnType<typeof filesTurn>, dirs: Record<string, str
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
 
-/** An Anthropic Messages API for a Claude subagent (as U7's on feat/lossless-update), driving `step` as "claude". */
 const fakeAnthropic = (step: ReturnType<typeof filesTurn>, dirs: Record<string, string>) => {
   let n = 0
   const sse = (events: ReadonlyArray<readonly [string, object]>) =>
@@ -158,10 +149,11 @@ const fakeAnthropic = (step: ReturnType<typeof filesTurn>, dirs: Record<string, 
   return { url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
 }
 
-/**
- * A Claude config directory of its own for the fake model: the API key approved, onboarding done, auto mode off (its
- * first-run questions would stop the pane). The subagent's environment, as `--env` pairs.
- */
+const autoModeOffSoNoFirstRunQuestionStopsThePane = {
+  disableAutoMode: "disable",
+  permissions: { defaultMode: "default", disableAutoMode: "disable" },
+}
+
 const claudeEnv = async (w: World, name: string, url: string) => {
   const dir = path.join(w.root, `claude-${name}`)
   await fs.mkdir(dir, { recursive: true })
@@ -173,10 +165,7 @@ const claudeEnv = async (w: World, name: string, url: string) => {
       customApiKeyResponses: { approved: [key.slice(-20)], rejected: [] },
     }),
   )
-  await fs.writeFile(
-    path.join(dir, "settings.json"),
-    JSON.stringify({ disableAutoMode: "disable", permissions: { defaultMode: "default", disableAutoMode: "disable" } }),
-  )
+  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify(autoModeOffSoNoFirstRunQuestionStopsThePane))
   return [`CLAUDE_CONFIG_DIR=${dir}`, `ANTHROPIC_BASE_URL=${url}`, `ANTHROPIC_API_KEY=${key}`].flatMap((pair) => [
     "--env",
     pair,
@@ -321,10 +310,9 @@ const checks: ReadonlyArray<Check> = [
       await fs.writeFile(path.join(info.memories, "a.md"), "kept across the move\n")
       const project = row<{ id: string }>(w, "SELECT project_id AS id FROM project_repository WHERE path = ?", old)
       expect(project !== undefined, `no project_repository row for ${old}`)
-      // A worktree where vibest keeps its own, as `vibest run` makes one.
-      const worktree = path.join(w.vibestHome, "worktrees", "repo", "p7a1")
-      await fs.mkdir(path.dirname(worktree), { recursive: true })
-      await sh(old, "git", "worktree", "add", "-q", "--detach", worktree)
+      const vibestOwnWorktree = path.join(w.vibestHome, "worktrees", "repo", "p7a1")
+      await fs.mkdir(path.dirname(vibestOwnWorktree), { recursive: true })
+      await sh(old, "git", "worktree", "add", "-q", "--detach", vibestOwnWorktree)
 
       await fs.rename(old, path.join(w.root, "p7", "moved"))
       const moved = await fs.realpath(path.join(w.root, "p7", "moved"))
@@ -333,8 +321,11 @@ const checks: ReadonlyArray<Check> = [
         refused.code !== 0 && refused.stderr.includes(old) && refused.stderr.includes(moved),
         `project info in the moved checkout: ${refused.code} ${refused.stderr}${refused.stdout}`,
       )
-      // y moves it; the start after it fails on a runtime that does not exist, so no harness runs.
-      const r = await w.tty(["--headless", "--runtime", "e2e-none"], "y\n", { cwd: moved, timeoutMs: 60_000 })
+      const noSuchRuntimeSoNoHarnessRuns = "e2e-none"
+      const r = await w.tty(["--headless", "--runtime", noSuchRuntimeSoNoHarnessRuns], "y\n", {
+        cwd: moved,
+        timeoutMs: 60_000,
+      })
       const out = `${r.stdout}${r.stderr}`
       expect(out.includes(`The project moved from ${old} to here, move it? [Y/n]`), `no question: ${out}`)
       expect(out.includes(`moved the project from ${old} to ${moved}`), `not moved: ${out}`)
@@ -349,7 +340,7 @@ const checks: ReadonlyArray<Check> = [
       expect(now.directory === info.directory, `the project folder is now ${now.directory}, was ${info.directory}`)
       const kept = await fs.readFile(path.join(now.memories, "a.md"), "utf8")
       expect(kept.includes("kept across the move"), `memories after the move: ${kept}`)
-      await sh(worktree, "git", "status", "--short")
+      await sh(vibestOwnWorktree, "git", "status", "--short")
     },
   },
 ]

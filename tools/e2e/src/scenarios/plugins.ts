@@ -8,7 +8,6 @@ type Info = { id: string; source: string; status: "active" | "failed"; error?: s
 
 const list = (w: World) => w.json<Array<Info>>(["plugins"])
 
-/** A plugin file: `id`, and an `agent.start.before` body. */
 const plugin = (id: string, hook = "() => Effect.void") => `import { AgentRefused, Plugin } from "@vibest/plugin"
 import { Effect } from "effect"
 export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", ${hook}) })

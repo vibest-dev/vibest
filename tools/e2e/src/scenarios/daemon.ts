@@ -9,7 +9,6 @@ type Status = { daemon: { status: string; pid?: number | null; protocol?: number
 const status = (w: World) => w.json<Status>(["status"])
 const running = async (w: World) => (await status(w)).daemon
 
-/** One raw JSON-RPC line on vibestd's socket and the first reply line. */
 const raw = (w: World, request: object) =>
   new Promise<Record<string, unknown>>((resolve, reject) => {
     const socket = net.connect(path.join(w.vibestHome, "vibest.sock"))
