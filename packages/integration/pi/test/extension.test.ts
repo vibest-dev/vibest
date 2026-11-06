@@ -13,6 +13,7 @@ import {
   TURNS,
   type TestServices,
   until,
+  untilVirtual,
   projectOf,
 } from "@vibest/cli/test/fakes"
 import { cliHeaders, connect } from "@vibest/client/client"
@@ -228,6 +229,53 @@ describe("pi-vibest", () => {
           display: false,
         })
         assert.deepStrictEqual(notes, [])
+      }).pipe(Effect.scoped, Effect.provide(testLayer())),
+    15_000,
+  )
+
+  it.effect(
+    "Subagent: a ready report made while no vibestd answers reaches the next vibestd",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* Db
+        const layout = yield* Layout
+        const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        const project = yield* projectOf("r")
+        yield* db.insertSession(
+          {
+            id,
+            agent: "general",
+            name: "n",
+            harnessId: "pi",
+            provider: null,
+            model: null,
+            harnessSessionId: null,
+            runtime: "herdr",
+            address: { machine: "local", id: "test/p0" },
+            status: "idle",
+            startedAt: 1,
+            exitedAt: null,
+            turnState: "none",
+            turnPromptedAt: 0,
+            metadata: {},
+            createdAt: 1,
+            lastActive: 1,
+          },
+          project,
+        )
+        const s = yield* session({
+          VIBEST_AGENT: "general",
+          VIBEST_SESSION_ID: id,
+          VIBEST_PROJECT_ID: project,
+          VIBEST_COMMAND: '["vibest"]',
+        })
+        yield* s.emit("session_start", { reason: "startup" }, tuiStart)
+        yield* TestClock.withLive(Effect.sleep("200 millis"))
+        assert.isUndefined(yield* db.readyAt(id))
+        yield* Layer.build(
+          Server.layer.pipe(Layer.provide(Platform.daemon.socketServer(layout.socket)), Layer.provide(Project.layer)),
+        )
+        yield* untilVirtual(db.readyAt(id), (at) => at !== undefined)
       }).pipe(Effect.scoped, Effect.provide(testLayer())),
     15_000,
   )
