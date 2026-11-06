@@ -175,7 +175,7 @@ func (a *App) coreCaptureView(c *ui.Context) {
 	if n != nil {
 		key = n.intent
 	}
-	sink := ui.Box(c).Key(key).Absolute().Size(1, 1).Focusable().FocusRing(false).Label("navigation-input").TextInputSession(n)
+	sink := ui.Box(c.Key(key)).Absolute().Size(1, 1).Focusable().FocusRing(false).Label("navigation-input").TextInputSession(n)
 	if n != nil && !n.focus && !sink.Focused() {
 		a.cancelCoreCapture()
 		n = nil

@@ -287,7 +287,7 @@ func (a *App) mainColumn(c *ui.Context, winW, winH, slot, gap float32, grip bool
 func (a *App) notes(c *ui.Context) {
 	paused := a.coreBlocked
 	if a.navigationNote != "" || paused {
-		ui.Column(c).Key(a.navigationGeneration).Absolute().Left(8).Right(8).Bottom(8).Children(func() {
+		ui.Column(c.Key(a.navigationGeneration)).Absolute().Left(8).Right(8).Bottom(8).Children(func() {
 			if a.navigationNote != "" {
 				a.noteLine(c, a.navigationNote, func() { a.navigationNote = "" })
 			}
@@ -497,8 +497,8 @@ func (a *App) retiredTabDragSource(c *ui.Context) {
 			}
 		}
 	}
-	b := ui.ButtonBase(c).Key(d.tabID).Absolute().Size(0, 0).Disabled(true).
-		PassThrough().Role(ui.RoleNone).Bind(&d.source).Drag(d)
+	b := ui.ButtonBase(c.Key(d.tabID)).Absolute().Size(0, 0).Disabled(true).
+		PassThrough().Role(ui.RoleNone).Bind(&d.source).HandleInput(func(ui.InputEvent) bool { return false }).Drag(d)
 	a.finishTabPress(c, b, d)
 }
 
@@ -642,7 +642,7 @@ func (a *App) tabButton(c *ui.Context, t presentation.Tab, i int, tabs []present
 		style:       a.style(),
 		side:        a.sideAt,
 	}
-	b := ui.ButtonBase(c).Key(t.ID).Description(description).Label("tab/"+t.ID).MinWidth(th.TabWidth).MaxWidth(th.TabWidth).Height(th.IconButton).Padding(0, 10).Radius(th.Radius).Gap(6).AlignItems(ui.Center).Shrink(0).KeepFocus()
+	b := ui.ButtonBase(c.Key(t.ID)).Description(description).Label("tab/"+t.ID).MinWidth(th.TabWidth).MaxWidth(th.TabWidth).Height(th.IconButton).Padding(0, 10).Radius(th.Radius).Gap(6).AlignItems(ui.Center).Shrink(0).KeepFocus()
 	drag := ui.Local(b, "tab-drag", func() tabDrag { return tabDrag{canceled: true} })
 	b.Bind(&drag.source).HandleInput(func(ev ui.InputEvent) bool {
 		a.mu.Lock()

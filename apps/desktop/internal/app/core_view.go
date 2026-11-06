@@ -46,7 +46,7 @@ func (a *App) corePanes(c *ui.Context) {
 			}
 		})
 	}
-	area := ui.Box(c).Key("core-panes").Grow(1).FillWidth().MinHeight(0).Clip().Label("Panes")
+	area := ui.Box(c.Key("core-panes")).Grow(1).FillWidth().MinHeight(0).Clip().Label("Panes")
 	area.Draw(func(p *ui.Painter, r ui.Rect) {
 		a.mu.Lock()
 		changed := a.g.scale != p.Scale()
@@ -136,7 +136,7 @@ func (a *App) coreSplitView(c *ui.Context, n *core.Split, tab string, path []boo
 }
 func (a *App) corePaneView(c *ui.Context, p *core.Pane) {
 	selected := p.ID == a.coreSelection.Pane
-	card := ui.Column(c).Key(p.ID).Fill().MinWidth(0).MinHeight(0).Clip().Radius(a.shell().cardRadius(a.g.scale)).Background(a.th.Terminal.Background).Label("pane/" + p.ID)
+	card := ui.Column(c.Key(p.ID)).Fill().MinWidth(0).MinHeight(0).Clip().Radius(a.shell().cardRadius(a.g.scale)).Background(a.th.Terminal.Background).Label("pane/" + p.ID)
 	bounds := ui.Local(card, "bounds", func() ui.Handle { return ui.Handle{} })
 	card.Bind(bounds)
 	a.coreBounds[p.ID] = bounds.Bounds(c)

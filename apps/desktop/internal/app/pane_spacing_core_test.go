@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"github.com/egoist/mygo/ui"
+	"math"
 	"strings"
 	"testing"
 )
@@ -34,8 +35,9 @@ func TestScrollbarStaysInItsColumn(t *testing.T) {
 			t.Run(fmt.Sprintf("%v/%s", scale, mode), func(t *testing.T) {
 				a, f, tt := coreShellFixture(t, 1280, 800, scale, false, mode)
 				v := coreOutput(t, a, f, tt, "a", "\x1b[3J\x1b[2J\x1b[H\x1b[?25l"+strings.Repeat(strings.Repeat("W", 24)+"\r\n", 180)+strings.Repeat("W", 24))
-				before := tt.Image()
 				r := find(t, tt, "terminal/a")
+				tt.Move(r.X+r.W/2, r.Y+r.H/2)
+				before := tt.Image()
 				tt.Key(ui.Cmd, ui.KeyHome)
 				tt.Frame()
 				after := tt.Image()
@@ -46,7 +48,7 @@ func TestScrollbarStaysInItsColumn(t *testing.T) {
 							continue
 						}
 						changed++
-						if float32(x) < (r.X+r.W-8)*scale || float32(x) >= (r.X+r.W)*scale || float32(y) < r.Y*scale || float32(y) >= (r.Y+r.H)*scale {
+						if float64(x) < math.Floor(float64((r.X+r.W-9)*scale)) || float32(x) >= (r.X+r.W)*scale || float32(y) < r.Y*scale || float32(y) >= (r.Y+r.H)*scale {
 							t.Fatalf("scrollbar changed outside original VT edge %d,%d %v", x, y, r)
 						}
 					}

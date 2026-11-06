@@ -176,7 +176,7 @@ func (a *App) dragSidebar(e ui.Element, windowW float32) {
 
 func (a *App) rowButton(c *ui.Context, key string, on bool) ui.Element {
 	th := a.th
-	b := ui.ButtonBase(c).Key(key).Justify(ui.Start).AlignItems(ui.Center).Padding(5, chrome.Step8).Radius(th.Radius).Gap(6)
+	b := ui.ButtonBase(c.Key(key)).Justify(ui.Start).AlignItems(ui.Center).Padding(5, chrome.Step8).Radius(th.Radius).Gap(6)
 	th.Row.Pick(on, b.Hovered(), a.windowFocused).Apply(b)
 	return b
 }
@@ -304,13 +304,13 @@ func (a *App) foldWord(m *machine, key string) (label, mark string) {
 func (a *App) machineItem(c *ui.Context, m *machine) {
 	th := a.th
 	id := m.sidebarID()
-	ui.Row(c).Key("machine-header/" + id).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("machine-header/" + id)).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
 		folded := a.foldedMachines[id]
 		action, glyph := "Collapse machine: ", "▾"
 		if folded {
 			action, glyph = "Expand machine: ", "▸"
 		}
-		disclosure := ui.ButtonBase(c).Key("machine-disclosure/"+id).Size(th.IconButton, th.IconButton).Padding(0).Radius(th.Radius).KeepFocus().Role(ui.RoleDisclosure).Expanded(!folded).Label(action + m.label()).Tooltip(action + m.label())
+		disclosure := ui.ButtonBase(c.Key("machine-disclosure/"+id)).Size(th.IconButton, th.IconButton).Padding(0).Radius(th.Radius).KeepFocus().Role(ui.RoleDisclosure).Expanded(!folded).Label(action + m.label()).Tooltip(action + m.label())
 		if disclosure.Hovered() {
 			disclosure.Background(th.Row.Hover.Background)
 		}

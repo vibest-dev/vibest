@@ -19,7 +19,7 @@ build:
 	go build -o build/vibest-desktop ./cmd/vibest-desktop
 
 vet:
-	go vet ./...
+	go run github.com/egoist/mygo/cmd/mygo vet .
 	go run ./scripts/hcgen -check
 	@files=$$(gofmt -l cmd internal scripts testdata); [ -z "$$files" ] || { echo "gofmt needed:" $$files >&2; exit 1; }
 

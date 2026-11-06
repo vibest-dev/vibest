@@ -102,7 +102,7 @@ func (t *Terminal) InputError() error {
 		return err
 	}
 	if t.mode.Load() == 2 {
-		return errors.New("Core terminal requires win32 input mode 9001; MyGo0.6 encoding is not supported")
+		return errors.New("Core terminal requires win32 input mode 9001; MyGo encoding is not supported")
 	}
 	return nil
 }

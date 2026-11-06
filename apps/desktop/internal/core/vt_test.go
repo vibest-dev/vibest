@@ -88,7 +88,7 @@ func TestCoreVTKeepsRendererScrollAndCompositionOwnership(t *testing.T) {
 
 func TestCoreVTDisplayInputPasteAndTwoTerminalFocus(t *testing.T) {
 	if os.Getenv("MYGO_GHOSTTY_VT") == "" {
-		t.Fatal("set MYGO_GHOSTTY_VT to the checksum-verified MyGo0.6 library; no automatic download")
+		t.Fatal("set MYGO_GHOSTTY_VT to the checksum-verified MyGo libghostty-vt library; no automatic download")
 	}
 	c, f := newFixture(t)
 	a := attach(t, c, f, "t1", 1)

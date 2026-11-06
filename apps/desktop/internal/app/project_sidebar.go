@@ -361,7 +361,7 @@ func (a *App) sessionOpen(g vibest.Group, r vibest.Row) {
 
 func (a *App) projectSection(c *ui.Context) {
 	th := a.th
-	ui.Row(c).Key("projects-header").FillWidth().AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("projects-header")).FillWidth().AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "Projects").FontSize(th.FontSizeSmall).FontWeight(600).TextColor(th.Secondary).Grow(1).MinWidth(0).SingleLine().Margin(0, 0, 0, chrome.Step8)
 		if a.iconButton(c.Key("new-project"), chrome.IconPlus, "New project").Clicked() {
 			a.projectPrompt()
@@ -387,12 +387,12 @@ func (a *App) projectHeader(c *ui.Context, g vibest.Group) {
 	p := g.Project
 	id := p.ID
 	folded := a.foldedProject[id]
-	ui.Row(c).Key("project-header/" + id).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key("project-header/" + id)).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
 		action, glyph := "Collapse project: ", "▾"
 		if folded {
 			action, glyph = "Expand project: ", "▸"
 		}
-		d := ui.ButtonBase(c).Key("project-disclosure/"+id).Size(th.IconButton, th.IconButton).Padding(0).Radius(th.Radius).KeepFocus().Role(ui.RoleDisclosure).Expanded(!folded).Label(action + p.Name()).Tooltip(action + p.Name())
+		d := ui.ButtonBase(c.Key("project-disclosure/"+id)).Size(th.IconButton, th.IconButton).Padding(0).Radius(th.Radius).KeepFocus().Role(ui.RoleDisclosure).Expanded(!folded).Label(action + p.Name()).Tooltip(action + p.Name())
 		if d.Hovered() {
 			d.Background(th.Row.Hover.Background)
 		}
