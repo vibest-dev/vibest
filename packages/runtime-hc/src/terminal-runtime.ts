@@ -1,6 +1,6 @@
 import type * as VibestPlugin from "@vibest/plugin"
 import { Runtime as RuntimeApi } from "@vibest/plugin"
-import { ID, randomId } from "@vibest/schema/id"
+import { ID, shortId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
 import { Deferred, Duration, Effect, PubSub, type Scope, Stream } from "effect"
 import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-hc-sdk"
@@ -39,11 +39,32 @@ export const atShell = (foreground: api.Foreground | null | undefined): boolean 
   return INTERACTIVE_SHELLS.has(name) && foreground.argv.slice(1).every((arg) => arg.startsWith("-"))
 }
 
-export const terminalName = (env: Readonly<Record<string, string>>) => {
-  const id = env["VIBEST_SESSION_ID"]
-  return id !== undefined && ID.test(id)
-    ? `s-${id.replaceAll("-", "").slice(0, 30)}`
-    : `vbt-${randomId().replaceAll("-", "").slice(0, 28)}`
+const slug = (text: string) =>
+  text
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+
+export const terminalName = (input: Parameters<Runtime["open"]>[1], attempt = 0) => {
+  const id = input.env["VIBEST_SESSION_ID"]
+  const session = id !== undefined && ID.test(id) ? id : undefined
+  const title =
+    session !== undefined && input.label.startsWith(`${shortId(session)} `)
+      ? input.label.slice(shortId(session).length + 1)
+      : input.label
+  const base =
+    session !== undefined
+      ? slug(title) || slug(input.env["VIBEST_HARNESS"] ?? "") || "agent"
+      : slug(
+          input.project
+            .replace(/[\\/]+$/, "")
+            .split(/[\\/]/)
+            .at(-1) ?? "",
+        )
+  const suffix = `${session?.slice(0, 4) ?? "main"}${attempt === 0 ? "" : `-${attempt + 1}`}`
+  return `${base ? `${base.slice(0, 31 - suffix.length).replace(/-+$/, "")}-` : ""}${suffix}`
 }
 
 export const terminalId = (socket: string, address: string) => `${address}@${socket}`
@@ -223,20 +244,28 @@ export const make = (deps: {
         const { hc } = yield* coreAt(socket)
         const project = input.env["VIBEST_PROJECT_ID"]
         const session = input.env["VIBEST_SESSION_ID"]
+        let attempt = 0
         const started = yield* failWith(
-          hc.call("terminal.run", {
-            name: terminalName(input.env),
-            cwd: input.cwd,
-            env: { ...input.env },
-            labels: {
-              [LABEL.runtime]: KIND,
-              ...(project !== undefined ? { [LABEL.project]: project } : {}),
-              ...(session !== undefined ? { [LABEL.session]: session } : {}),
-            },
-            keep: true,
-            no_notify: true,
-            ...(near !== undefined ? { parent: near.address, outlive_parent: true } : { no_parent: true }),
-          }),
+          Effect.suspend(() =>
+            hc.call("terminal.run", {
+              name: terminalName(input, attempt++),
+              cwd: input.cwd,
+              env: { ...input.env },
+              labels: {
+                [LABEL.runtime]: KIND,
+                ...(project !== undefined ? { [LABEL.project]: project } : {}),
+                ...(session !== undefined ? { [LABEL.session]: session } : {}),
+              },
+              keep: true,
+              no_notify: true,
+              ...(near !== undefined ? { parent: near.address, outlive_parent: true } : { no_parent: true }),
+            }),
+          ).pipe(
+            Effect.retry({
+              while: (e) => e._tag === "HcError" && e.kind === "name_taken",
+              times: 8,
+            }),
+          ),
         )
         const terminal: Terminal = { machine: machine.id, id: terminalId(socket, started.address) }
         if (input.argv.length > 0)
