@@ -115,6 +115,10 @@ boundary. Writes are serialized because Pi does not await UI notifications. Prin
 The pinned UI events expose widget kinds (`confirm`, `select`, `input`, `editor`, `custom`), not semantic
 permission/question/auth kinds; these waits omit OSC kind rather than guess from a widget or its title.
 
+Cursor writes working before its prompt RPC and idle for accepted response/stop hooks. Its public hook API has
+no paired permission/question/auth waits, so it never writes blocked. Guard denials remain permission decisions,
+not evidence that a human is being asked.
+
 Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
 and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,
 and `error`. Successful `done` is intentionally not normalized to `idle`: both are non-working; herdr-app uses
