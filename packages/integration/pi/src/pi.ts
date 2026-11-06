@@ -1,6 +1,7 @@
 import type {
   AgentEndEvent,
   AgentSettledEvent,
+  AgentStartEvent,
   BeforeAgentStartEvent,
   ExtensionAPI,
   ExtensionContext,
@@ -11,6 +12,8 @@ import type {
   SessionStartEvent,
   ToolCallEvent,
   ToolCallEventResult,
+  UIPromptStartEvent,
+  UIPromptEndEvent,
 } from "@earendil-works/pi-coding-agent"
 import { Context, Effect, Exit, FiberSet, Layer, Scope } from "effect"
 
@@ -23,6 +26,9 @@ interface Events {
   readonly before_agent_start: { readonly event: BeforeAgentStartEvent; readonly result: void }
   readonly input: { readonly event: InputEvent; readonly result: InputEventResult | void }
   readonly tool_call: { readonly event: ToolCallEvent; readonly result: ToolCallEventResult | undefined }
+  readonly agent_start: { readonly event: AgentStartEvent; readonly result: void }
+  readonly ui_prompt_start: { readonly event: UIPromptStartEvent; readonly result: void }
+  readonly ui_prompt_end: { readonly event: UIPromptEndEvent; readonly result: void }
   readonly agent_end: { readonly event: AgentEndEvent; readonly result: void }
   readonly agent_settled: { readonly event: AgentSettledEvent; readonly result: void }
 }

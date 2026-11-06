@@ -109,6 +109,12 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 
 ### Terminal status ownership
 
+Pi writes working on root-TUI `agent_start`, blocked for real extension UI wait spans, and working or idle when
+the wait ends. `agent_settled`, not `agent_end`, ends the run. A still-open prompt stays blocked across a run
+boundary. Writes are serialized because Pi does not await UI notifications. Print/RPC/JSON contexts never write.
+The pinned UI events expose widget kinds (`confirm`, `select`, `input`, `editor`, `custom`), not semantic
+permission/question/auth kinds; these waits omit OSC kind rather than guess from a widget or its title.
+
 Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
 and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,
 and `error`. Successful `done` is intentionally not normalized to `idle`: both are non-working; herdr-app uses

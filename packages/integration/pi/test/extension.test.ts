@@ -21,7 +21,7 @@ import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import * as Server from "@vibest/server/server"
-import { Clock, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
+import { Clock, ConfigProvider, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, type Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 import { vi } from "vitest"
@@ -59,9 +59,38 @@ const test = <E>(
   timeout?: number,
 ) => it.effect(name, () => program.pipe(Effect.scoped, Effect.provide(served)), timeout)
 
-const session = (env: Record<string, string>) =>
+const session = (env: Record<string, string>, beforeWrite: Effect.Effect<void> = Effect.void) =>
   Effect.gen(function* () {
     const layout = yield* Layout
+    const fs = yield* FileSystem.FileSystem
+    const statuses: Array<string> = []
+    const unused = Effect.die("unexpected tty operation")
+    const file: FileSystem.File = {
+      [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+      stat: unused,
+      seek: () => unused,
+      sync: unused,
+      read: () => unused,
+      readAlloc: () => unused,
+      truncate: () => unused,
+      writeAll: () => unused,
+      write: (bytes: Uint8Array) =>
+        beforeWrite.pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              statuses.push(new TextDecoder().decode(bytes))
+              return bytes.length
+            }),
+          ),
+        ),
+    }
+    const noTty = Layer.succeed(
+      FileSystem.FileSystem,
+      FileSystem.makeNoop({
+        ...fs,
+        open: (path, options) => (path === "/dev/tty" ? Effect.succeed(file) : fs.open(path, options)),
+      }),
+    )
     const handlers = new Map<string, Array<(e: unknown, ctx: unknown) => unknown>>()
     const messages: Array<{ message: unknown; options: unknown }> = []
     const renderers: Array<unknown> = []
@@ -90,9 +119,11 @@ const session = (env: Record<string, string>) =>
     const config = ConfigProvider.layer(
       ConfigProvider.fromUnknown({ HOME: layout.home, VIBEST_HOME: layout.home, ...env }),
     )
-    yield* Effect.promise(() => Pi.runMain(api, extension.pipe(Layer.provide(services), Layer.provide(config))))
+    yield* Effect.promise(() =>
+      Pi.runMain(api, extension.pipe(Layer.provide(Layer.merge(services, noTty)), Layer.provide(config))),
+    )
     yield* Effect.addFinalizer(() => emit("session_shutdown"))
-    return { handlers, messages, renderers, emit }
+    return { handlers, messages, renderers, statuses, emit }
   })
 
 const lease = () =>
@@ -111,6 +142,111 @@ const cli = Effect.gen(function* () {
 })
 
 describe("pi-vibest", () => {
+  const states = (...values: Array<string>) => values.map((value) => "\x1b]7501;state=" + value + "\x1b\\")
+  const running = { ...tuiStart, isIdle: () => false }
+  const idle = { ...tuiStart, isIdle: () => true }
+  const prompt = { reason: "ui_prompt", kind: "confirm", title: "permission is just title text" }
+  const identity = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }
+
+  test(
+    "real starts, including extension-origin and coordinator turns, report working; UI waits resume until settled",
+    Effect.gen(function* () {
+      for (const agent of ["general", "coordinator"]) {
+        const s = yield* session({ ...identity, VIBEST_AGENT: agent })
+        yield* s.emit("session_start", { reason: "startup" }, idle)
+        yield* s.emit("input", { source: "extension", text: "delivered" }, idle)
+        yield* s.emit("input", { source: "interactive", text: " " }, idle)
+        assert.deepStrictEqual(s.statuses, [])
+        yield* s.emit("agent_start", {}, running)
+        yield* s.emit("ui_prompt_start", prompt, running)
+        yield* s.emit("ui_prompt_end", prompt, running)
+        yield* s.emit("agent_end", { messages: [] }, running)
+        yield* s.emit("agent_settled", { aborted: false }, running)
+        assert.deepStrictEqual(s.statuses, states("working", "blocked", "working"))
+        yield* s.emit("agent_settled", { aborted: false }, idle)
+        assert.deepStrictEqual(s.statuses, states("working", "blocked", "working", "idle"))
+      }
+    }),
+  )
+
+  test(
+    "an idle prompt restores idle and an abort while waiting never restores working",
+    Effect.gen(function* () {
+      const s = yield* session(identity)
+      yield* s.emit("session_start", {}, idle)
+      for (const kind of ["confirm", "select", "input", "editor", "custom"]) {
+        yield* s.emit("ui_prompt_start", { ...prompt, kind }, idle)
+        yield* s.emit("ui_prompt_end", { ...prompt, kind }, idle)
+      }
+      assert.deepStrictEqual(s.statuses, states(...Array.from({ length: 5 }, () => ["blocked", "idle"]).flat()))
+      s.statuses.length = 0
+      yield* s.emit("agent_start", {}, running)
+      yield* s.emit("ui_prompt_start", prompt, running)
+      yield* s.emit("agent_settled", { aborted: true }, idle)
+      yield* s.emit("ui_prompt_end", prompt, idle)
+      assert.deepStrictEqual(s.statuses, states("working", "blocked", "blocked", "idle"))
+      s.statuses.length = 0
+      yield* s.emit("ui_prompt_start", prompt, idle)
+      yield* s.emit("agent_start", {}, running)
+      yield* s.emit("ui_prompt_end", prompt, running)
+      assert.deepStrictEqual(s.statuses, states("blocked", "blocked", "working"))
+    }),
+  )
+
+  test(
+    "rapid UI notifications cannot overtake a held tty write",
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const s = yield* session(
+        identity,
+        Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+      )
+      yield* s.emit("session_start", {}, idle)
+      const start = yield* Effect.forkChild(s.emit("agent_start", {}, running))
+      yield* Deferred.await(entered)
+      const waiting = yield* Effect.forkChild(s.emit("ui_prompt_start", prompt, running))
+      yield* Effect.yieldNow
+      const end = yield* Effect.forkChild(s.emit("ui_prompt_end", prompt, running))
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(s.statuses, [])
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(start)
+      yield* Fiber.join(waiting)
+      yield* Fiber.join(end)
+      yield* s.emit("agent_settled", { aborted: false }, idle)
+      assert.deepStrictEqual(s.statuses, states("working", "blocked", "working", "idle"))
+    }),
+  )
+
+  test(
+    "no tty writes without identity or from non-TUI and nested contexts",
+    Effect.gen(function* () {
+      for (const env of [{}, { VIBEST_AGENT: "general" }, identity]) {
+        const s = yield* session(env)
+        for (const mode of ["rpc", "print", "json"]) {
+          const ctx = { ...idle, mode }
+          yield* s.emit("session_start", {}, ctx)
+          yield* s.emit("agent_start", {}, ctx)
+          yield* s.emit("ui_prompt_start", prompt, ctx)
+          yield* s.emit("ui_prompt_end", prompt, ctx)
+          yield* s.emit("agent_settled", { aborted: true }, ctx)
+        }
+        assert.deepStrictEqual(s.statuses, [])
+      }
+      const s = yield* session(identity)
+      yield* s.emit("session_start", {}, idle)
+      for (const mode of ["rpc", "print", "json"]) {
+        const ctx = { ...idle, mode }
+        yield* s.emit("agent_start", {}, ctx)
+        yield* s.emit("ui_prompt_start", prompt, ctx)
+        yield* s.emit("ui_prompt_end", prompt, ctx)
+        yield* s.emit("agent_settled", {}, ctx)
+      }
+      assert.deepStrictEqual(s.statuses, [])
+    }),
+  )
+
   it.effect(
     "Coordinator: while no vibestd answers it waits without starting one, then subscribes to the next vibestd",
     () =>
@@ -330,7 +466,6 @@ describe("pi-vibest", () => {
             "tool_execution_end",
             "session_compact",
             "session_tree",
-            "agent_start",
           ].some((e) => s.handlers.has(e)),
         )
         yield* s.emit("session_start", { reason: "startup" }, tuiStart)
