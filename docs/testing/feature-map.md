@@ -78,6 +78,14 @@ T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG state/config/runtime directo
 user's herdr-core or changes harness configuration outside that temporary root. Coordinator coverage awaits
 `feat/runtime-hc` caller detection; the exact follow-up check is in [runtime-port.md](../design/runtime-port.md#terminal-status-ownership).
 
+T1's Cursor half writes its Cursor session straight into the database and drives the shipped hook script with a
+fixture, because no real start reaches what it checks. A real cursor-agent needs the user's own login and a paid
+model, while T1 runs under its own HOME, and a real model can be neither held between hook events nor made to send
+the malformed and ignored events the check feeds the hook. A stand-in cursor-agent started by `vibest run cursor`
+gets its session from vibestd, but vibestd then waits for herdr-core to report a status before it types the first
+prompt, and herdr-core has none for Cursor until its first hook; the stand-in would have to invent that report, and
+the typed prompt lands in the middle of the scripted hook sequence. I5 is the real Cursor start.
+
 ## Harnesses and models (harness adapters)
 
 | ID  | Capability                                                                                                | Method | Pass when                                                           |
