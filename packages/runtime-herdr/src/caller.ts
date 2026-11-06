@@ -45,3 +45,9 @@ export const ambientHerdr = Effect.gen(function* () {
   yield* Herdr.verifyProtocol(client)
   return { h: client, paneId: pane } as const
 })
+
+export const inPane = Effect.gen(function* () {
+  const set = (name: string) =>
+    Config.option(Config.String(name)).pipe(Effect.map((value) => Option.isSome(value) && value.value !== ""))
+  return (yield* set("HERDR_PANE_ID")) && (yield* set("HERDR_SOCKET_PATH"))
+})

@@ -660,7 +660,7 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(yield* herdr.callsTo("run"), [
         {
           terminal: opened.terminal,
-          argv: ["/bin/vibest", "--harness", "pi", "--model", "it's", "--in-parent", root],
+          argv: ["/bin/vibest", "--harness", "pi", "--model", "it's", "--runtime", "herdr", "--in-parent", root],
         },
       ])
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])

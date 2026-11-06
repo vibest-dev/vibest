@@ -5,6 +5,7 @@ import path from "node:path"
 
 import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
+import { CallerEnv } from "@vibest/client/client"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
 import { CLAUDE_CREDENTIALS, claudeCredentialsFile, type KeychainPlatform, securityArgs } from "@vibest/core/keychain"
@@ -13,7 +14,9 @@ import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibe
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
+import { CALLER_ENV as HC_CALLER_ENV } from "@vibest/runtime-hc/caller"
 import { plugin as runtimeHcPlugin } from "@vibest/runtime-hc/plugin"
+import { CALLER_ENV as HERDR_CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { choicePlugin, type ConfiguredRuntime } from "@vibest/runtime-herdr/choice"
 import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
 import type { Host } from "@vibest/server/daemon"
@@ -49,6 +52,7 @@ export const services = Layer.mergeAll(
   unrefStdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector, (endpoint) => BunSocket.makeNet({ path: endpoint })),
+  Layer.succeed(CallerEnv, [...HERDR_CALLER_ENV, ...HC_CALLER_ENV]),
   user,
 )
 

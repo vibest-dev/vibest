@@ -638,7 +638,7 @@ export const handlers = VibestRpcs.toLayer(
             yield* rt.close(terminal).pipe(Effect.ignore)
             return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
           }
-          yield* run(terminal, Launch.inParent(command, root)).pipe(
+          yield* run(terminal, Launch.inParent(command, root, rt.kind)).pipe(
             Effect.catch((error) =>
               rt
                 .close(terminal)

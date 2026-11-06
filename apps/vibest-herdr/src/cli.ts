@@ -28,6 +28,7 @@ import {
   ambientHerdr,
   callerMachine,
   callerTerminal,
+  inPane,
 } from "@vibest/runtime-herdr/caller"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
@@ -346,6 +347,35 @@ const mainFlags = {
   inParent: Flag.String("in-parent").pipe(Flag.withHidden, Flag.optional),
 }
 
+export type MainPlace =
+  | { readonly in: "hc"; readonly terminal: string }
+  | { readonly in: "caller" }
+  | { readonly in: "launch" }
+  | { readonly in: "refused"; readonly message: string }
+
+export const mainPlace = (o: {
+  readonly marked: boolean
+  readonly runtime: string | undefined
+  readonly hcTerminal: string | undefined
+  readonly herdrPane: boolean
+}): MainPlace => {
+  if (o.marked) {
+    if (o.runtime !== HC_KIND) return { in: "caller" }
+    return o.hcTerminal !== undefined
+      ? { in: "hc", terminal: o.hcTerminal }
+      : { in: "refused", message: "vibestd opened this terminal in herdr-core, but it carries no HC_TERMINAL_ID" }
+  }
+  if (o.runtime === undefined && o.hcTerminal !== undefined && o.herdrPane)
+    return {
+      in: "refused",
+      message:
+        "this terminal carries both herdr-core's HC_TERMINAL_ID and herdr's HERDR_PANE_ID, so vibest cannot tell which one runs it; say which with --runtime hc or --runtime herdr",
+    }
+  if ((o.runtime === undefined || o.runtime === HC_KIND) && o.hcTerminal !== undefined)
+    return { in: "hc", terminal: o.hcTerminal }
+  return o.herdrPane ? { in: "caller" } : { in: "launch" }
+}
+
 const startMain =
   (exec: Exec) =>
   (o: {
@@ -384,8 +414,15 @@ const startMain =
         ...(o.fresh ? ["--new"] : []),
       ]
       const marked = Option.contains(o.inParent, root)
-      const inHc = runtimeKind === undefined || runtimeKind === HC_KIND ? yield* HcCaller.callerTerminal : undefined
-      const here = marked || inHc !== undefined ? undefined : yield* ambientHerdr
+      const place = mainPlace({
+        marked,
+        runtime: runtimeKind,
+        hcTerminal: yield* HcCaller.callerTerminal,
+        herdrPane: yield* inPane,
+      })
+      if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
+      const inHc = place.in === "hc" ? place.terminal : undefined
+      const here = !marked && place.in === "caller" ? yield* ambientHerdr : undefined
       const machine = yield* callerMachine(Option.getOrUndefined(o.session))
       const inPlace = marked || inHc !== undefined || here !== undefined
       if (inPlace) {
