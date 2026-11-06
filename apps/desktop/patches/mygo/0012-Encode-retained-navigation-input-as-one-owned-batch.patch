@@ -1,10 +1,7 @@
 diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
 --- a/plugins/terminal/terminal.go
 +++ b/plugins/terminal/terminal.go
-@@ -275,6 +275,9 @@
- 	// ExtendMenu appends application actions after the built-in terminal menu.
- 	// It runs on the UI thread when the menu opens or an item is chosen.
- 	ExtendMenu func(m *ui.Menu)
+@@ -278,3 +278,6 @@
 +	// TextInputReady gates native text eligibility without disabling selection,
 +	// pointer input or local commands. Nil keeps the normal terminal behavior.
 +	TextInputReady func() bool

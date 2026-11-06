@@ -1,16 +1,16 @@
 diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
 --- a/plugins/terminal/terminal.go
 +++ b/plugins/terminal/terminal.go
-@@ -275,6 +275,9 @@
- 	// the clipboard's files or image (d.Files, transfer.PNG) for a remote
- 	// program, then pastes their paths with Paste.
- 	OnPaste func(d transfer.Data) bool
+@@ -268,6 +268,9 @@
+ 	// opens with the system (Context.OpenURL), and a path it leaves does
+ 	// nothing.
+ 	OpenLink func(link string) bool
 +	// OnDropFiles may consume original paths before shell quoting or clipboard
 +	// offering. It runs on the UI thread; true suppresses the default paste.
 +	OnDropFiles func(paths []string) bool
- 	// ExtendMenu appends application actions after the built-in terminal menu.
- 	// It runs on the UI thread when the menu opens or an item is chosen.
- 	ExtendMenu func(m *ui.Menu)
+ 	// OnPaste sees a paste of the clipboard (ActionPaste's keys, a Paste
+ 	// menu item, a secondary click with RightClickPaste) before the
+ 	// program gets it, on the main thread, with every format the
 @@ -1485,17 +1488,22 @@
  // pushDone queues p, and done to run once it is written, on the queue's
  // goroutine.

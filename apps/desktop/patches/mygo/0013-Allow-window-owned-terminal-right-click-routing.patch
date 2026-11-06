@@ -11,10 +11,7 @@ diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
  	// NoClipboardWrite keeps programs from writing to the clipboard (OSC
  	// 52, OSC 5522), as Ghostty's clipboard-write = deny. Writes go
  	// through unless it is set; reads are governed by ClipboardRead.
-@@ -275,6 +278,9 @@
- 	// ExtendMenu appends application actions after the built-in terminal menu.
- 	// It runs on the UI thread when the menu opens or an item is chosen.
- 	ExtendMenu func(m *ui.Menu)
+@@ -278,3 +281,6 @@
 +	// OnMenuClear may consume Clear before selection/history changes. Like
 +	// ExtendMenu it runs while View builds the menu, not from key dispatch.
 +	OnMenuClear func() bool
@@ -24,7 +21,7 @@ diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
 diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
 --- a/plugins/terminal/view.go
 +++ b/plugins/terminal/view.go
-@@ -582,7 +582,7 @@
+@@ -582,6 +582,6 @@
  	m.Separator()
  	// Clear clears as ⌘K does, as Ghostty's: clearing the scrollback
  	// alone would change nothing on the screen.
@@ -32,7 +29,6 @@ diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
 +	if v.menuItem(m, tx.ClearTerminal(), ActionClearScreen).Disabled(alt).Chosen() && (t.opts.OnMenuClear == nil || !t.opts.OnMenuClear()) {
  		v.clearScreen()
  	}
- 	if more := t.opts.ExtendMenu; more != nil {
 @@ -1063,6 +1063,10 @@
  // selects.
  func (v *view) pointerEvent(ev ui.InputEvent) bool {

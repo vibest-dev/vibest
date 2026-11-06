@@ -65,10 +65,10 @@ new file mode 100644
 diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
 --- a/plugins/terminal/terminal.go
 +++ b/plugins/terminal/terminal.go
-@@ -275,6 +275,10 @@
- 	// the clipboard's files or image (d.Files, transfer.PNG) for a remote
- 	// program, then pastes their paths with Paste.
- 	OnPaste func(d transfer.Data) bool
+@@ -268,6 +268,10 @@
+ 	// opens with the system (Context.OpenURL), and a path it leaves does
+ 	// nothing.
+ 	OpenLink func(link string) bool
 +	// PreparePaste runs before any clipboard service access, without terminal locks.
 +	// It captures an operation-specific OnPaste handler; nil refuses the paste
 +	// without reading the clipboard. Nil PreparePaste keeps OnPaste behavior.

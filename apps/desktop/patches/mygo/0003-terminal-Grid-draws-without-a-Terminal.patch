@@ -58,3 +58,16 @@ diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
  
  	colors    vt.Colors
  	contrast  float32 // Options.MinimumContrast, as of the last paint
+diff --git a/plugins/terminal/grid_test.go b/plugins/terminal/grid_test.go
+--- a/plugins/terminal/grid_test.go
++++ b/plugins/terminal/grid_test.go
+@@ -65,6 +65,9 @@
+ func TestGridCursorApart(t *testing.T) {
+ 	theme := DarkTheme()
+ 	g := NewGrid(theme)
++	if g.v.t != nil {
++		t.Fatal("Grid depends on a Terminal")
++	}
+ 	g.Focused = true
+ 	g.Cursor = GridCursor{X: 1, Visible: true}
+ 	withCursor := false
