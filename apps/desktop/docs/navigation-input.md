@@ -169,6 +169,13 @@ cancellation without forced returnFocus, terminal sends or Chat-only imports her
 
 ## Verification
 
+Creation tests must wait for the new terminal's ordered `created` event, not just
+the creation reply and layout commit, before rendering the frame that starts its
+attach. Those arrive independently: a frame before program observation correctly
+defers attach. A headless test that then blocks on the attach request stops driving
+the later frame and hangs. Read the selected pane and attached state under the app
+lock, since the subscription loop can reconcile them concurrently.
+
 Preparation retains the pinned checksum and modified-tree/symlink/rollback protections;
 the MyGo fork is untouched.
 
