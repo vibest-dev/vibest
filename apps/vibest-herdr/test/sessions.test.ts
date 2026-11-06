@@ -1489,6 +1489,44 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a refused move target is named as tried and not started",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, db } = yield* spawnWorking(yield* makeRepository)
+      yield* writeResult(id, "pi", { error: "rate_limit" })
+      yield* herdr.endTurn(id)
+      yield* (yield* Sessions).check(id)
+      const row = (yield* db.getSession(id))!
+      assert.strictEqual(row.harnessId, "pi")
+      assert.strictEqual(row.turnState, "failed")
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "claude tried and did not start")
+      assert.deepStrictEqual(
+        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
+        ["pi"],
+      )
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "refuse-claude",
+          effect: (ctx) =>
+            Effect.gen(function* () {
+              yield* ctx.agent.hook("start.before", (event) =>
+                event.harness === "claude" ? Effect.fail(new PluginRefused({ reason: "no claude" })) : Effect.void,
+              )
+              yield* ctx.agent.hook("fail", (event) =>
+                Effect.sync(() => {
+                  if (!event.attempts.some((attempt) => attempt.harness === "claude"))
+                    event.move = { harness: "claude" }
+                }),
+              )
+            }),
+        }),
+      ],
+    },
+  )
+
+  test(
     "a plugin that unsets the move keeps the still-running agent listed with one failed result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

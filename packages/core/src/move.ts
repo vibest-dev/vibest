@@ -248,8 +248,14 @@ export const sessionMove = (deps: {
         })
         .pipe(Effect.exit)
       if (Exit.isFailure(decided)) return yield* giveUp(`${yield* left()}: ${errorMessage(decided.cause)}`)
-      if (decided.value.move === undefined)
-        return yield* giveUp(limitFailure(rows, row.harnessId, row.provider ?? undefined, error))
+      if (decided.value.move === undefined) {
+        const why = limitFailure(rows, row.harnessId, row.provider ?? undefined, error)
+        const tried =
+          skipped.length === 0
+            ? ""
+            : `; ${skipped.map((attempt) => attempt.harness).join(", ")} tried and did not start`
+        return yield* giveUp(`${why}${tried}`)
+      }
       if (ruledOut(decided.value.move, rows)) return yield* giveUp(yield* left())
       const move = decided.value.move!
       const decidedStart = yield* plugins
