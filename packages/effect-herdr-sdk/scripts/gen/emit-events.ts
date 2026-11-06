@@ -1,8 +1,7 @@
 import type { JSONSchema } from "./schema.js"
 import { emitDefs } from "./ts-type.js"
 
-/** Both event namespaces define these identically; emit once. */
-const SHARED = new Set(["AgentStatus", "PaneScrollInfo"])
+const DEFINED_IDENTICALLY_IN_BOTH_EVENT_NAMESPACES = new Set(["AgentStatus", "PaneScrollInfo"])
 
 export function emitEvents(schema: JSONSchema, header: string): string {
   const ev = schema.schemas.event as JSONSchema
@@ -14,7 +13,7 @@ ${emitDefs(ev.$defs)}
 export type EventFrame = { event: EventKind; data: EventData };
 
 // ---- subscription-specific events ----
-${emitDefs(sub.$defs, SHARED)}
+${emitDefs(sub.$defs, DEFINED_IDENTICALLY_IN_BOTH_EVENT_NAMESPACES)}
 
 export type SubscriptionEventFrame = { event: SubscriptionEventKind; data: SubscriptionEventData };
 

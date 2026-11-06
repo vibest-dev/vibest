@@ -1,4 +1,3 @@
-// A harness login and its usage windows (architecture D10). In memory on the daemon; not a database row.
 import { Schema } from "effect"
 
 import { HARNESS_IDS } from "./session.ts"
@@ -18,7 +17,6 @@ export const SubscriptionLimit = Schema.Struct({
 })
 export type SubscriptionLimit = typeof SubscriptionLimit.Type
 
-/** One Subscription: `(harness, provider, machine)`. `provider` is empty for a single-login harness. */
 export const Subscription = Schema.Struct({
   harness: Schema.Literals(HARNESS_IDS),
   provider: Schema.String,

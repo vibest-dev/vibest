@@ -1,11 +1,8 @@
-// Project folder contracts (SPEC §5.4): agents read and write the folder with their own file tools.
 import { Schema } from "effect"
 
-/** The fixed subfolders of a project folder (`projects/<project id>/`). */
 export const ProjectKind = Schema.Literals(["docs", "memories", "artifacts"])
 export type ProjectKind = typeof ProjectKind.Type
 
-/** Absolute paths: the project folder, its preferences.md and its subfolders. */
 export const ProjectInfoResult = Schema.Struct({
   directory: Schema.String,
   preferences: Schema.String,

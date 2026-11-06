@@ -1,5 +1,4 @@
 import { BunServices, BunSocketServer } from "@effect/platform-bun"
-// Wire behaviour against a fake herdr on a temp unix socket; no herdr needed.
 import { assert, layer } from "@effect/vitest"
 import { Cause, Effect, FileSystem, Layer, Option, Path, Schema, Stream } from "effect"
 import * as Socket from "effect/socket/Socket"
@@ -24,7 +23,6 @@ const closed = (pane_id: string): EventFrame => ({
   data: { type: "pane_closed", pane_id, workspace_id: "w1" },
 })
 
-// One request per connection, like herdr. `agent.get` errors, `events.subscribe` acks then pushes two frames and closes.
 const fakeHerdr = (protocol: number) => (socket: Socket.Socket) =>
   Effect.gen(function* () {
     const pull = yield* Socket.readerString(socket)
@@ -53,7 +51,6 @@ const fakeHerdr = (protocol: number) => (socket: Socket.Socket) =>
     yield* writer.write(new Socket.CloseEvent())
   }).pipe(Effect.scoped, Effect.orDie)
 
-/** A fresh fake herdr in a temp dir, torn down with the test's scope. */
 const fakeServer = (protocol: number = PROTOCOL) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem

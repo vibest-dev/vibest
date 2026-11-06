@@ -1,7 +1,3 @@
-// Effect-native client for the herdr socket API.
-// Wire facts (herdr 0.9, protocol 22): newline-delimited JSON; `{id, method, params}` → `{id, result}` | `{id, error}`;
-// the server closes after one response, so every call is its own connection. `events.subscribe` acks with
-// `subscription_started` and then keeps the connection open, streaming `{event, data}` frames.
 import { Cause, Config, Context, Effect, Layer, Option, type Path, Random, Schema, Stream } from "effect"
 import * as Socket from "effect/socket/Socket"
 
@@ -17,14 +13,12 @@ export type ResultOf<M extends Method> = M extends keyof typeof METHOD_RESULT
   : ResponseResult
 export type ParamsOf<M extends Method> = MethodParams[M]
 
-/** The server answered `{ error }`. `code` is herdr's machine-readable code (`timeout`, `agent_pane_busy`, …). */
 export class HerdrError extends Schema.TaggedError<HerdrError>()("HerdrError", {
   method: Schema.String,
   code: Schema.String,
   message: Schema.String,
 }) {}
 
-/** Socket missing, refused, or closed before a response. */
 export class HerdrTransportError extends Schema.TaggedError<HerdrTransportError>()("HerdrTransportError", {
   method: Schema.String,
   message: Schema.String,
@@ -32,7 +26,6 @@ export class HerdrTransportError extends Schema.TaggedError<HerdrTransportError>
 
 export type HerdrFailure = HerdrError | HerdrTransportError
 
-/** The server speaks a different protocol than the one this SDK's types were generated for (`PROTOCOL`). */
 export class HerdrProtocolMismatch extends Schema.TaggedError<HerdrProtocolMismatch>()("HerdrProtocolMismatch", {
   socketPath: Schema.String,
   expected: Schema.Number,
@@ -43,15 +36,10 @@ export class HerdrProtocolMismatch extends Schema.TaggedError<HerdrProtocolMisma
 export interface HerdrShape {
   readonly socketPath: string
   readonly call: <M extends Method>(method: M, params: ParamsOf<M>) => Effect.Effect<ResultOf<M>, HerdrFailure>
-  /** Long-lived push stream. Ends when the server closes the connection. */
   readonly subscribe: (subscriptions: ReadonlyArray<Subscription>) => Stream.Stream<PushFrame, HerdrFailure>
 }
 
 export class Herdr extends Context.Service<Herdr, HerdrShape>()("effect-herdr-sdk/Herdr") {
-  /**
-   * The handshake every consumer runs before trusting a server: the generated types (and the unchecked casts that
-   * hand them out, see `call` / `subscribe`) are only true for the protocol they were generated from.
-   */
   static readonly verifyProtocol = (herdr: HerdrShape): Effect.Effect<void, HerdrFailure | HerdrProtocolMismatch> =>
     herdr.call("ping", {}).pipe(
       Effect.flatMap((pong) =>
@@ -68,10 +56,8 @@ export class Herdr extends Context.Service<Herdr, HerdrShape>()("effect-herdr-sd
       ),
     )
 
-  /** A client for `socketPath`, dialing through the provided `SocketConnector`. */
   static readonly make = (socketPath: string): Effect.Effect<HerdrShape, never, SocketConnector> =>
     Effect.map(SocketConnector, (connect) => makeClient(socketPath, connect))
-  /** Socket from `options.socketPath`, else herdr's own resolution (HERDR_SOCKET_PATH, XDG_CONFIG_HOME, HOME …) read through Config. */
   static readonly layer = (
     options: { socketPath?: string } & SocketPathOptions = {},
   ): Layer.Layer<Herdr, Config.ConfigError, SocketConnector | Path.Path> =>
@@ -83,7 +69,6 @@ export class Herdr extends Context.Service<Herdr, HerdrShape>()("effect-herdr-sd
     )
 }
 
-// Wire frames (herdr protocol 22). `id: ""` = the server could not parse our request; still ours.
 const Response = Schema.Struct({
   id: Schema.String,
   result: Schema.optional(Schema.Unknown),
@@ -104,15 +89,12 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
   const serverError = (method: string, error: { code: string; message: string }) =>
     new HerdrError({ method, code: error.code, message: error.message })
 
-  /** Open a connection, send one request line, and expose the decoded response lines. Scoped: closing the scope closes the socket. */
   const open = (method: string, request: typeof Request.Type) =>
     Effect.gen(function* () {
       const socket = yield* connect(socketEndpoint(socketPath))
-      // Acquiring the reader dials; the writer waits on that, so writing first would hang forever.
       const pull = yield* Socket.readerString(socket)
       const writer = yield* socket.writer
       yield* writer.write(`${yield* encodeRequest(request).pipe(Effect.orDie)}\n`)
-      // Every close surfaces as a SocketError; a clean close is just the end of the stream.
       const text = pull.pipe(
         Effect.catchIf(
           (e) => e.reason._tag === "SocketCloseError",
@@ -139,24 +121,21 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): He
       if (Option.isNone(found))
         return yield* new HerdrTransportError({ method, message: "connection closed before a response" })
       if (found.value.error) return yield* serverError(method, found.value.error)
-      // Not decoded at runtime: the shape is herdr's contract for PROTOCOL, checked once per server by verifyProtocol.
       return found.value.result as ResultOf<M>
     }).pipe(Effect.scoped)
 
-  /** herdr acks with a response first and only then pushes frames, so no ack state is needed. */
   const subscribe = (subscriptions: ReadonlyArray<Subscription>): Stream.Stream<PushFrame, HerdrFailure> => {
     const method = "events.subscribe"
     return Effect.gen(function* () {
       const id = yield* requestId("sub")
       const lines = yield* open(method, { id, method, params: { subscriptions } })
       return lines.pipe(
-        Stream.flatMap(
-          (m): Stream.Stream<PushFrame, HerdrFailure> =>
-            isResponse(m)
-              ? (m.id === id || m.id === "") && m.error
-                ? Stream.fail(serverError(method, m.error))
-                : Stream.empty
-              : Stream.make(m as PushFrame), // herdr's contract for PROTOCOL, as in `call`
+        Stream.flatMap((m): Stream.Stream<PushFrame, HerdrFailure> =>
+          isResponse(m)
+            ? (m.id === id || m.id === "") && m.error
+              ? Stream.fail(serverError(method, m.error))
+              : Stream.empty
+            : Stream.make(m as PushFrame),
         ),
       )
     }).pipe(Stream.unwrap)

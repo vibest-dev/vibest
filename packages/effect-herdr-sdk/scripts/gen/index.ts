@@ -7,16 +7,14 @@ import { emitParams } from "./emit-params.js"
 import { emitResults } from "./emit-results.js"
 import { header, loadSchema, packagePath } from "./schema.js"
 
-/** The herdr release and protocol this SDK version is built against (schema/herdr-version.json). */
-const Pin = Schema.fromJsonString(Schema.Struct({ version: Schema.String, protocol: Schema.Number }))
+const HerdrVersionPin = Schema.fromJsonString(Schema.Struct({ version: Schema.String, protocol: Schema.Number }))
 
-/** `bun run generate` writes src/generated; `bun run generate --check` fails if it is not what the schema produces. */
 const main = Effect.gen(function* () {
   const check = (yield* (yield* Stdio.Stdio).args).includes("--check")
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const schema = yield* loadSchema
-  const pin = yield* Schema.decodeUnknownEffect(Pin)(
+  const pin = yield* Schema.decodeUnknownEffect(HerdrVersionPin)(
     yield* fs.readFileString(yield* packagePath("schema", "herdr-version.json")),
   )
   if (schema.protocol !== pin.protocol)

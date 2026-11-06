@@ -1,34 +1,14 @@
-/**
- * Wire protocol, the only version, for RPC and HTTP alike (the `vibest-protocol` header; HTTP paths carry none).
- * Independent of the package version in package.json. Bump only when a request a current daemon accepts would be
- * misunderstood; old versions are not served. An additive feature does not bump it: it gets a flag in Ping's
- * `capabilities`, and a client uses it only when the flag is there.
- */
 export const PROTOCOL = 5
 
-/**
- * What the user runs after a protocol mismatch, either way: `vibest update` brings vibest, vibestd and the agents
- * running on them to one version, restarting the agents. The one place to change it.
- */
 export const MISMATCH_ACTION = "vibest update"
 
-/** vibestd's answer to a request in another protocol (HTTP 409 body, RPC ProtocolRejected, the CLI's preflight). */
 export type ProtocolMismatch = {
-  /** vibestd's PROTOCOL. */
   readonly protocol: number
-  /** vibestd's package version. */
   readonly version: string
-  /** For a person; it names the action. */
   readonly message: string
-  /** The command to run. */
   readonly action: string
 }
 
-/**
- * The mismatch between a caller speaking `caller` (undefined: it sent none, so it predates the header) and a vibestd
- * speaking `server` at package `version`. A caller below vibestd was left behind by an update; above it, vibestd is old.
- * `callerVersion`: the caller's own version when it sent one (vibest-plugin-version), so the line names the old side.
- */
 export const protocolMismatch = (
   caller: number | undefined,
   server: number,
@@ -56,21 +36,15 @@ export const CWD_HEADER = "vibest-cwd"
 export const RUNTIME_HEADER = "vibest-runtime"
 export const PLUGIN_VERSION_HEADER = "vibest-plugin-version"
 
-/**
- * vibestd's HTTP routes (`vibest-http.sock`, every one `POST` with a JSON body). One definition for vibestd and the
- * harness integrations that bundle this file.
- */
 export const POLL_ROUTE = "/inbox/poll"
 export const ACK_ROUTE = "/inbox/ack"
 export type HookKind = "turn-end" | "prompt" | "guard"
 export const hookRoute = (harness: string, hook: HookKind) => `/hooks/${harness}/${hook}`
-/** The harness and hook a path names, or undefined. */
 export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
   const m = /^\/hooks\/([a-z]+)\/(turn-end|prompt|guard)$/.exec(path)
   return m ? { harness: m[1]!, hook: m[2] as HookKind } : undefined
 }
 
-/** `POLL_ROUTE`'s answer: the main agent's next batch, leased (empty `ids`: none). */
 export type Polled = { readonly ids: ReadonlyArray<number>; readonly line: string; readonly text: string }
 export const isPolled = (body: unknown): body is Polled =>
   typeof body === "object" &&
@@ -79,18 +53,8 @@ export const isPolled = (body: unknown): body is Polled =>
   typeof (body as Polled).line === "string" &&
   typeof (body as Polled).text === "string"
 
-/**
- * `ACK_ROUTE`'s body: `ids` were shown (delivered); `release` were handed out but not shown, so they go back to pending
- * at once (a batch that mixed a row already shown with a new one).
- */
 export type AckBody = { readonly ids: ReadonlyArray<number>; readonly release?: ReadonlyArray<number> }
 
-/**
- * Who a session's request comes from, as its environment and harness know it: VIBEST_SESSION_ID, VIBEST_PROJECT_ID,
- * the harness's own conversation id, VIBEST_AGENT, VIBEST_HARNESS, the working directory, VIBEST_RUNTIME (opaque) and
- * the integration's version. vibestd checks the session and project ids, records the conversation id and the version,
- * and only logs the rest.
- */
 export type SessionIdentity = {
   readonly sessionId: string
   readonly projectId?: string | undefined
@@ -103,10 +67,6 @@ export type SessionIdentity = {
   readonly repositoryRoot?: string | undefined
 }
 
-/**
- * The headers of a session's request, for every caller (the vibest CLI, the Pi extension, the Claude plugin's HTTP):
- * one definition, no dependencies, so a harness integration bundles it. Empty values are left out.
- */
 export const sessionHeaders = (who: SessionIdentity): Record<string, string> => {
   const headers: Record<string, string> = {
     [PROTOCOL_HEADER]: String(PROTOCOL),

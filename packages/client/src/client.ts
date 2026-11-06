@@ -8,9 +8,6 @@ import {
 } from "@vibest/protocol/protocol"
 import { DaemonIdentity, VibestRpcs, type Ping, VERSION } from "@vibest/protocol/rpc"
 import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
-// The client side of vibest.sock (SPEC §12): one short connection per command. A missing daemon is started and waited for
-// (up to 10 s) unless the caller is an agent. The existing Ping preflight is the only Ping: it detects a daemon whose
-// Ping lacks this protocol before a mutation. Business requests carry their own headers and do not Ping again.
 import {
   Cause,
   Config,
@@ -32,7 +29,6 @@ import * as Socket from "effect/socket/Socket"
 import { SocketConnector } from "./socket-connector.ts"
 export { SocketConnector } from "./socket-connector.ts"
 
-/** What talking to vibestd needs from the environment. */
 export type ClientServices = Layout | Path.Path | ChildProcessSpawner.ChildProcessSpawner | SocketConnector
 
 export const DAEMON_START_TIMEOUT = Duration.seconds(10)
@@ -42,7 +38,6 @@ export class DaemonUnavailable extends Schema.TaggedError<DaemonUnavailable>()("
   message: Schema.String,
 }) {}
 
-/** How the user stops an vibestd this vibest cannot ask to stop: they check the PID themselves; vibest never signals it. */
 export const stopByHand = (socket: string, pid: number | undefined) => {
   const p = pid === undefined ? "<pid>" : String(pid)
   return [
@@ -54,10 +49,6 @@ export const stopByHand = (socket: string, pid: number | undefined) => {
 export const described = (version: string, identity: DaemonIdentity) =>
   `vibestd ${version || "unknown"} (pid ${identity.pid ?? "unknown"}, ${identity.command ? identity.command.map(shellQuote).join(" ") : "command unknown"})`
 
-/**
- * The answering daemon does not speak this protocol. Package version is not compared. No Hello is attempted.
- * `vibest daemon restart` asks it to stop in its own protocol (Daemon.Stop is the same call on every protocol).
- */
 export class IncompatibleDaemon extends Schema.TaggedError<IncompatibleDaemon>()("IncompatibleDaemon", {
   socket: Schema.String,
   daemonVersion: Schema.String,
@@ -80,16 +71,13 @@ export class IncompatibleDaemon extends Schema.TaggedError<IncompatibleDaemon>()
 
 export type VibestClient = Effect.Success<ReturnType<typeof connect>>
 
-/** Who a scoped call is. A session does not declare itself coordinator. repositoryRoot on a session is the working directory, sent only for a coordinator. */
 export type Claim =
   | { readonly _tag: "cli"; readonly repositoryRoot: string }
   | {
       readonly _tag: "session"
       readonly sessionId: string
       readonly repositoryRoot?: string
-      /** The harness's own conversation id, when the caller knows it (Pi's session id). */
       readonly harnessSessionId?: string
-      /** A harness integration's own version (vibest-plugin-version); the vibest CLI sends none. */
       readonly pluginVersion?: string
     }
 
@@ -101,7 +89,6 @@ export const cliHeaders = (repositoryRoot: string) => ({
   [REPOSITORY_HEADER]: repositoryRoot,
 })
 
-/** The rest of a session's identity from its environment (vibestEnv / the main agent's launch) and its working directory. */
 const fromEnv = Effect.gen(function* () {
   const read = (name: string) =>
     Config.option(Config.String(name)).pipe(Effect.map((v) => Option.getOrUndefined(v) || undefined))
@@ -114,7 +101,6 @@ const fromEnv = Effect.gen(function* () {
   }
 }).pipe(Effect.orElseSucceed(() => ({})))
 
-/** The headers of a call as `claim`: a session's from its environment (@vibest/protocol `sessionHeaders`). */
 export const claimHeaders = (claim: Claim) =>
   claim._tag === "cli"
     ? Effect.succeed(cliHeaders(claim.repositoryRoot))
@@ -128,11 +114,8 @@ export const claimHeaders = (claim: Claim) =>
         }),
       )
 
-/** A client on socket, closed with the scope. The protocol is built into the caller's scope: Effect.provide(layer) would close the socket as soon as the client is made. */
 export const connect = (socket: string) =>
   Layer.build(
-    // The JSON-RPC serialization does not encode the client's keep-alive pings, so the default 5 s ping timeout would cut
-    // every call longer than that (an Inbox.Subscribe stream). A closed unix socket still fails the read at once.
     RpcClient.layerProtocolSocket({ pingInterval: "1 minute", pingTimeout: "1 day" }).pipe(
       Layer.provide(
         Layer.effect(
@@ -144,12 +127,9 @@ export const connect = (socket: string) =>
     ),
   ).pipe(Effect.flatMap((protocol) => RpcClient.make(VibestRpcs).pipe(Effect.provide(protocol))))
 
-/** How long one try of a harness hook's request (`TurnEnd`, `Prompt`) may take to connect and return. */
 export const HOOK_TIMEOUT = Duration.seconds(2)
-/** The pause before the one retry: long enough for a vibestd handoff to start listening again. */
 export const HOOK_RETRY_DELAY = Duration.millis(300)
 
-/** Connecting failed before anything was sent: nothing listens on the socket, or there is no socket. */
 const CONNECT_CODES = new Set(["ECONNREFUSED", "ENOENT"])
 const notConnected = (error: unknown) => {
   if (!Predicate.hasProperty(error, "reason") || !Predicate.hasProperty(error.reason, "_tag")) return false
@@ -158,12 +138,6 @@ const notConnected = (error: unknown) => {
   return Predicate.hasProperty(cause, "code") && Predicate.isString(cause.code) && CONNECT_CODES.has(cause.code)
 }
 
-/**
- * A harness hook's one request to vibestd, with `headers`; it never starts vibestd and never fails. Only a try whose
- * connection could not be made at all (ECONNREFUSED, ENOENT) is tried once more. Once the request may have been sent
- * (a dropped connection, an error answer, a timeout) it is not: vibestd may have handled it, and a second turn end would
- * be delivered twice.
- */
 export const hookCall = (
   socket: string,
   headers: Readonly<Record<string, string>>,
@@ -182,7 +156,6 @@ export const hookCall = (
   })
 }
 
-/** One Ping, or none if nothing answered in time. Does not judge protocol. */
 export const readPing = (socket: string) =>
   connect(socket).pipe(
     Effect.flatMap((client) => client.Ping(undefined)),
@@ -191,21 +164,18 @@ export const readPing = (socket: string) =>
     Effect.scoped,
   )
 
-/** Something answers on the socket. */
 export const probe = (socket: string) =>
   readPing(socket).pipe(
     Effect.map(Option.isSome),
     Effect.orElseSucceed(() => false),
   )
 
-/** Wait up to DAEMON_START_TIMEOUT for something to answer on the socket; false if nothing did. */
 export const awaitDaemon = (socket: string) =>
   probe(socket).pipe(
     Effect.repeat({ until: (up) => up, schedule: Schedule.spaced("200 millis") }),
     Effect.timeoutOrElse({ duration: DAEMON_START_TIMEOUT, orElse: () => Effect.succeed(false) }),
   )
 
-/** Something accepts connections on the socket, whether or not it answers Ping. A connect that hangs counts as yes. */
 export const accepts = (socket: string) =>
   Effect.flatMap(SocketConnector, (dial) => dial(socket)).pipe(
     Effect.flatMap((s) => s.reader),
@@ -215,7 +185,6 @@ export const accepts = (socket: string) =>
     Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.succeed(true) }),
   )
 
-/** Undefined when Ping speaks PROTOCOL. Package version is ignored. `self`: the argv that runs this vibest. */
 export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArray<string>) =>
   ping.protocol === PROTOCOL
     ? undefined
@@ -227,11 +196,6 @@ export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArr
         client: { version: VERSION, command: self },
       })
 
-/**
- * Start `command daemon --foreground` (plus `args`) detached, its output appended to ~/.vibest/vibestd.log; does not wait.
- * `vibest daemon --import` is the new vibestd of a handoff, started by the old one.
- */
-/** `env`: added to the new vibestd's own environment only (a handoff's in-memory state); never written anywhere. */
 export const spawnDaemon = (
   command: ReadonlyArray<string>,
   args: ReadonlyArray<string> = [],
@@ -272,7 +236,6 @@ export const spawnDaemon = (
     )
   })
 
-/** Start `vibest daemon --foreground` detached (output appended to ~/.vibest/vibestd.log) and wait for its socket. */
 export const startDaemon = Effect.gen(function* () {
   const layout = yield* Layout
   const path = yield* Path.Path
@@ -297,14 +260,8 @@ export const startDaemon = Effect.gen(function* () {
   })
 })
 
-/**
- * Run f on a fresh connection. One Ping checks liveness and protocol before the call; the call itself does not Ping.
- * A missing daemon is started unless start is false: an agent's command may run in its harness's sandbox, which a daemon
- * it started would inherit.
- */
 export const withVibest = <A, E, R>(
   claim: Claim,
-  /** `ping`: what the answering vibestd said before the call (its capabilities). */
   f: (client: VibestClient, ping: Ping) => Effect.Effect<A, E, R>,
   options?: { readonly start?: boolean },
 ) =>

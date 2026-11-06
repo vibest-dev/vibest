@@ -1,6 +1,5 @@
 import type { JSONSchema } from "./schema.js"
 
-/** "#/schemas/request/$defs/PingParams" → "PingParams" */
 export const refName = (ref: string): string => ref.split("/").pop()!
 
 export function tsType(s: JSONSchema): string {

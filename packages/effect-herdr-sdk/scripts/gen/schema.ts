@@ -2,7 +2,6 @@ import { Effect, FileSystem, Path, Schema } from "effect"
 
 export type JSONSchema = Record<string, any>
 
-/** `<package root>/…`, resolved from this file's location. */
 export const packagePath = (...segments: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const path = yield* Path.Path

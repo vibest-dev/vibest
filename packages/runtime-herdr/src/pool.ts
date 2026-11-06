@@ -14,9 +14,6 @@ import {
   Stream,
   SynchronizedRef,
 } from "effect"
-// One vibestd talks to every herdr session on the machine (SPEC §4 herdr session, §6). Rows store the session name;
-// name → socket path comes from `herdr session list --json`. Each session gets one broadcast subscription,
-// reconnected with capped exponential backoff, fanned into one event stream.
 import {
   Herdr,
   HerdrProtocolMismatch,
@@ -48,22 +45,17 @@ const SessionList = Schema.fromJsonString(
   }),
 )
 
-/** Connection errors back off 1 s, 2 s, 4 s … capped at 30 s (SPEC §6). */
-const RECONNECT = Schedule.exponential("1 second").pipe(
+const RECONNECT_BACKOFF = Schedule.exponential("1 second").pipe(
   Schedule.modifyDelay(({ duration }) => Effect.succeed(Duration.min(duration, Duration.seconds(30)))),
 )
 
 export class HerdrPool extends Context.Service<
   HerdrPool,
   {
-    /** Resolve a caller location to a session name, starting a named session headless when it is not running. */
     readonly resolve: (location: HerdrLocation) => Effect.Effect<string, HerdrUnreachable | HerdrProtocolMismatch>
-    /** Client for a running session that speaks the SDK's protocol. Never starts a server. */
     readonly client: (session: string) => Effect.Effect<HerdrShape, HerdrUnreachable | HerdrProtocolMismatch>
     readonly events: Stream.Stream<SessionEvent>
-    /** A herdr server this vibestd had connected to came back (restart or live handoff). Metadata is gone. */
     readonly restarts: Stream.Stream<string>
-    /** Sessions this vibestd has connected to. */
     readonly sessions: Effect.Effect<ReadonlyArray<string>>
   }
 >()("vibest/runtime-herdr/HerdrPool") {
@@ -77,11 +69,6 @@ export class HerdrPool extends Context.Service<
       const herdr = (socketPath: string) => Herdr.make(socketPath).pipe(Effect.provideContext(connector))
       const pubsub = yield* PubSub.unbounded<SessionEvent>()
       const restarts = yield* PubSub.unbounded<string>()
-      /**
-       * Session name → socket path, and the protocol mismatch seen on the last (re)connect if any. A key here means the
-       * session passed the handshake once and its event stream is open; the stream re-checks on every reconnect,
-       * since a herdr live handoff can swap the server under a running vibestd.
-       */
       const sessions = yield* SynchronizedRef.make(
         HashMap.empty<
           string,
@@ -94,8 +81,7 @@ export class HerdrPool extends Context.Service<
           HashMap.modify(session, (s) => ({ ...s, mismatch })),
         )
 
-      /** Handshake (SPEC §6.2): the SDK's types only hold for the protocol they were generated from. */
-      const verified = (session: string, socketPath: string) =>
+      const verifiedClient = (session: string, socketPath: string) =>
         herdr(socketPath).pipe(
           Effect.tap(Herdr.verifyProtocol),
           Effect.catchTags({
@@ -111,16 +97,12 @@ export class HerdrPool extends Context.Service<
           Effect.mapError((e) => new HerdrUnreachable({ session, message: `herdr session list: ${e.message}` })),
         )
 
-      /**
-       * A clean close (server restart, live handoff) reconnects at once; failures back off. The first connect is not a
-       * restart. Each later one is: herdr restored the panes and dropped their metadata.
-       */
       const watch = (session: string, socketPath: string) =>
         Effect.gen(function* () {
-          const again = yield* Ref.make(false)
-          const connect = verified(session, socketPath).pipe(
+          const connectedBefore = yield* Ref.make(false)
+          const connect = verifiedClient(session, socketPath).pipe(
             Effect.tap(() =>
-              Ref.getAndSet(again, true).pipe(
+              Ref.getAndSet(connectedBefore, true).pipe(
                 Effect.flatMap((was) => (was ? PubSub.publish(restarts, session).pipe(Effect.asVoid) : Effect.void)),
               ),
             ),
@@ -132,25 +114,23 @@ export class HerdrPool extends Context.Service<
             Stream.unwrap,
             Stream.runForEach((frame) => PubSub.publish(pubsub, { session, frame })),
           )
-          yield* connect.pipe(Effect.retry(RECONNECT), Effect.andThen(Effect.sleep("1 second")), Effect.forever)
+          yield* connect.pipe(Effect.retry(RECONNECT_BACKOFF), Effect.andThen(Effect.sleep("1 second")), Effect.forever)
         })
 
-      /** First sight of a session: handshake, then open its event stream. Later sightings only refresh the path. */
       const remember = (session: string, socketPath: string) =>
         SynchronizedRef.modifyEffect(sessions, (map) =>
           Option.match(HashMap.get(map, session), {
             onSome: (known) =>
               Effect.succeed([undefined, HashMap.set(map, session, { ...known, socketPath })] as const),
             onNone: () =>
-              verified(session, socketPath).pipe(
+              verifiedClient(session, socketPath).pipe(
                 Effect.andThen(Effect.forkIn(watch(session, socketPath), scope)),
                 Effect.as([undefined, HashMap.set(map, session, { socketPath, mismatch: Option.none() })] as const),
               ),
           }),
         )
 
-      /** `herdr server --session <name>`, detached and unreferenced so it outlives vibestd (its sessions live there). */
-      const start = (session: string) =>
+      const startHeadlessServer = (session: string) =>
         Effect.gen(function* () {
           const handle = yield* spawner.spawn(
             ChildProcess.make("herdr", ["server", "--session", session], {
@@ -208,7 +188,7 @@ export class HerdrPool extends Context.Service<
           }
           const session = location.session
           const found = (yield* listSessions(session)).find((s) => s.name === session)
-          yield* remember(session, found?.running ? found.socket_path : yield* start(session))
+          yield* remember(session, found?.running ? found.socket_path : yield* startHeadlessServer(session))
           return session
         })
 
