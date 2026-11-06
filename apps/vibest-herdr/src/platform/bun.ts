@@ -13,6 +13,7 @@ import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibe
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
+import { plugin as runtimeHcPlugin } from "@vibest/runtime-hc/plugin"
 import { choicePlugin, type ConfiguredRuntime } from "@vibest/runtime-herdr/choice"
 import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
 import type { Host } from "@vibest/server/daemon"
@@ -230,6 +231,7 @@ const configuredRuntime: ConfiguredRuntime = () =>
 const builtinPlugins: ReadonlyArray<Candidate> = [
   { source: "builtin:harness-choice", revision: "harness-choice", options: {}, plugin: harnessChoicePlugin },
   { source: "builtin:runtime-herdr", revision: "runtime-herdr", options: {}, plugin: runtimeHerdrPlugin },
+  { source: "builtin:runtime-hc", revision: "runtime-hc", options: {}, plugin: runtimeHcPlugin },
   {
     source: "builtin:runtime-choice",
     revision: "runtime-choice",

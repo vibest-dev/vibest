@@ -11,10 +11,10 @@ const HERDR_AGENT_START_TIMEOUT_MS = 120_000
 
 const text = (m: Message | undefined) =>
   m === undefined ? "" : typeof m.content === "string" ? m.content : JSON.stringify(m.content)
-const ask = (task: string) =>
+export const ask = (task: string) =>
   `Do not run any tool. Reply with exactly two lines: the first is "done-${task}", the second is "status: completed".`
 
-const delegatingModel = (sub: string) => {
+export const delegatingModel = (sub: string) => {
   const seen: Array<string> = []
   let sessionId = ""
   let calls = 0
