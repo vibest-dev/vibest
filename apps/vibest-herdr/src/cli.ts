@@ -394,8 +394,7 @@ const startMain =
             message: `--session ${o.session.value} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
           })
         if ((yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
-        const launched = marked ? yield* Launch.launchedIn : undefined
-        const terminal = inHc ?? launched?.terminal ?? (yield* callerTerminal)
+        const terminal = inHc ?? (yield* callerTerminal)
         if (terminal === undefined)
           return yield* new LaunchFailed({
             message: "this pane's herdr session could not be named; run vibest outside herdr",
@@ -407,7 +406,7 @@ const startMain =
             harness,
             provider,
             model,
-            runtime: inHc !== undefined ? HC_KIND : (runtimeKind ?? launched?.runtime),
+            runtime: inHc !== undefined ? HC_KIND : runtimeKind,
           }),
         )
         if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`main agent: ${describeSpawn(chosen)}`)
