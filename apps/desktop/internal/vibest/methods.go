@@ -90,6 +90,21 @@ func (c *Client) Launch(ctx context.Context, directory string, params LaunchPara
 	return out, c.Call(ctx, "Launch", directory, params, &out)
 }
 
+type StopCoordinatorParams struct {
+	Runtime string `json:"runtime"`
+	Address string `json:"address"`
+}
+
+type StopCoordinatorResult struct {
+	Result string `json:"result"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func (c *Client) StopCoordinator(ctx context.Context, directory string, params StopCoordinatorParams) (StopCoordinatorResult, error) {
+	var out StopCoordinatorResult
+	return out, c.Call(ctx, "Project.StopCoordinator", directory, params, &out)
+}
+
 type RemoveParams struct {
 	ID           string `json:"id"`
 	KeepWorktree *bool  `json:"keepWorktree,omitempty"`

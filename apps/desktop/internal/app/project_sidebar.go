@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -195,6 +196,31 @@ func (a *App) sessionArchive(s vibest.Session) {
 		a.vibestDo(func(ctx context.Context, c *vibest.Client) error {
 			_, err := c.Remove(ctx, vibest.RemoveParams{ID: s.ID})
 			return err
+		})
+	}, nil)
+}
+
+func (a *App) sessionStop(p vibest.Project, s vibest.Session) {
+	a.confirm("Stop "+s.Name+"?", "vibest ends this main agent; its terminal stays open.", "Stop", func() {
+		a.vibestDo(func(ctx context.Context, c *vibest.Client) error {
+			address, err := json.Marshal(s.Address)
+			if err != nil {
+				return err
+			}
+			out, err := c.StopCoordinator(ctx, directory(p), vibest.StopCoordinatorParams{Runtime: s.Runtime, Address: string(address)})
+			if err != nil {
+				return err
+			}
+			switch out.Result {
+			case "stopped":
+				return nil
+			case "unsupported":
+				return errors.New(out.Reason)
+			case "moved":
+				return errors.New(s.Name + " moved meanwhile; nothing was stopped")
+			default:
+				return errors.New(s.Name + " did not exit")
+			}
 		})
 	}, nil)
 }
@@ -452,7 +478,11 @@ func (a *App) sessionRow(c *ui.Context, g vibest.Group, r vibest.Row, focused st
 					a.writeLabel(address, pinnedLabel, value)
 				}
 			}
-			if m.Item("Archive…").Chosen() {
+			if r.Main {
+				if m.Item("Stop…").Chosen() {
+					a.sessionStop(g.Project, s)
+				}
+			} else if m.Item("Archive…").Chosen() {
 				a.sessionArchive(s)
 			}
 		})
