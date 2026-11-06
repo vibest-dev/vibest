@@ -1085,6 +1085,10 @@ const make = Effect.gen(function* () {
           yield* putRepositories(id, repositories)
           yield* sql`UPDATE session SET directory = ${to} || substr(directory, ${from.length + 1})
               WHERE project_id = ${id} AND (directory = ${from} OR substr(directory, 1, ${from.length + 1}) = ${`${from}/`})`
+          for (const session of yield* sql<{
+            id: string
+          }>`SELECT id FROM session WHERE project_id = ${id} AND ended_at IS NULL`)
+            yield* notify({ type: "live.session", sessionId: session.id })
           return from
         }),
       ).pipe(Effect.orDie),

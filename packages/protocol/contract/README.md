@@ -16,7 +16,8 @@ Wire: one JSON object per line (effect `RpcSerialization.layerNdJsonRpc`). A req
 `{"jsonrpc":"2.0","id":<number>,"method":<tag>,"params":<payload>,"headers":[[name,value],…]}`. A stream answers
 `{"jsonrpc":"2.0","chunk":true,"id":<id>,"result":[<element>,…]}` and sends the next chunk only after the client
 answers `{"jsonrpc":"2.0","method":"@effect/rpc/Ack","params":{"requestId":<id>}}`; the client ends it with
-`@effect/rpc/Interrupt`. A failure is `{"jsonrpc":"2.0","id":<id>,"error":{"_tag":"Cause","code":0,"message":…,"data":[{"_tag":"Fail","error":<error>}]}}`.
+`@effect/rpc/Interrupt`; vibestd then answers an error whose `data` holds causes with `_tag` `Interrupt`. Match that
+answer by the `Interrupt` tag only, never by how many causes it lists: the count is effect's and may change. A failure is `{"jsonrpc":"2.0","id":<id>,"error":{"_tag":"Cause","code":0,"message":…,"data":[{"_tag":"Fail","error":<error>}]}}`.
 
 `Watch` (`cli`, capability `watch`): the first element is a `Snapshot` of every project with a directory and every
 session `List({ all: true })` answers, each with its `parentId`; after it come `Project`, `Session` and

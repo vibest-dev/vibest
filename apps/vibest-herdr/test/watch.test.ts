@@ -1,3 +1,5 @@
+import fs from "node:fs/promises"
+
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
@@ -11,7 +13,16 @@ import { Effect, Fiber, Layer, Queue, type Scope, Stream } from "effect"
 
 import * as Platform from "#platform"
 
-import { authed, FakeRuntime, makeRepository, projectOf, testLayer, type TestServices, wire } from "./fakes.ts"
+import {
+  authed,
+  FakeRuntime,
+  makeRepository,
+  projectOf,
+  tempDirectory,
+  testLayer,
+  type TestServices,
+  wire,
+} from "./fakes.ts"
 
 const served = Server.layer.pipe(
   Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
@@ -95,6 +106,23 @@ describe("Watch", () => {
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "SessionEnded" }> =>
           e._tag === "SessionEnded" && e.id === id && e.projectId === project,
+      )
+    }),
+  )
+
+  test(
+    "a project move sends the sessions it moved again, with their new directories",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const { repo, project, main } = yield* withMain
+      const { next } = yield* watching(repo)
+      yield* next(isSnapshot)
+      const moved = `${yield* tempDirectory("vibest-moved-")}/repo`
+      yield* Effect.promise(() => fs.cp(repo, moved, { recursive: true }))
+      yield* db.moveProject(project, moved, [])
+      yield* next(
+        (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
+          e._tag === "Session" && e.session.id === main && e.session.worktree === moved,
       )
     }),
   )
