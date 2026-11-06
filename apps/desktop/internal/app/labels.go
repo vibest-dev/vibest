@@ -128,9 +128,6 @@ func (a *App) sessionStatus(s vibest.Session) string {
 	if !ok {
 		return s.Status
 	}
-	if activity := t.Activity(); t.Reported && (activity == "working" || activity == "blocked") {
-		return activity
-	}
 	if _, labelled := labelSeen(t); !labelled {
 		return s.Status
 	}

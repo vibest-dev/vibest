@@ -97,7 +97,6 @@ func TestDoneAndPinFollowTheSharedLabels(t *testing.T) {
 	a, f, tt := coreActivityUIWith(t, func(f *coreAppFixture) {
 		f.terminals["e"] = core.Terminal{Address: "e", State: "live", Turn: 3, Labels: map[string]string{"herdr.seen": "2"}}
 		f.terminals["g"] = core.Terminal{Address: "g", State: "live", Turn: 3, Labels: map[string]string{"herdr.seen": "3", "herdr.pinned": "1"}}
-		f.terminals["w"] = core.Terminal{Address: "w", State: "live", Reported: true, Status: &core.Status{State: "working"}}
 	})
 	applyVibest(a, shippingSnapshot(
 		vibestSession("main", "lead", "p1", "idle", "e", nil, 1),
@@ -112,9 +111,6 @@ func TestDoneAndPinFollowTheSharedLabels(t *testing.T) {
 	}
 	if got := a.sessionStatus(vibestSession("late", "pinned-one", "p1", "done", "g", nil, 2)); got != "idle" {
 		t.Fatalf("a seen turn shows %q, want idle", got)
-	}
-	if got := a.sessionStatus(vibestSession("busy", "busy", "p1", "idle", "w", nil, 3)); got != "working" {
-		t.Fatalf("a terminal Core reports working shows %q", got)
 	}
 	if err := tt.RightClick("session: lead"); err != nil {
 		t.Fatal(err)
