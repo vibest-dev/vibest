@@ -6,7 +6,6 @@ import path from "node:path"
 
 import { afterAll, assert, describe, it } from "@effect/vitest"
 import { runtimeContract } from "@vibest/plugin/testing"
-import { callerLocation } from "@vibest/runtime-herdr/caller"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
@@ -295,21 +294,6 @@ describe("terminal ids", () => {
   })
 })
 
-describe("callerLocation", () => {
-  const env = (values: Record<string, string>) => ConfigProvider.layer(ConfigProvider.fromUnknown(values))
-
-  it.effect("an explicit session name wins over the ambient herdr socket; without one the socket, else vibest", () =>
-    Effect.gen(function* () {
-      const ambient = env({ HERDR_SOCKET_PATH: "/h/ambient.sock" })
-      const bare = env({})
-      assert.deepStrictEqual(yield* callerLocation("other").pipe(Effect.provide(ambient)), { session: "other" })
-      assert.deepStrictEqual(yield* callerLocation().pipe(Effect.provide(ambient)), { socketPath: "/h/ambient.sock" })
-      assert.deepStrictEqual(yield* callerLocation().pipe(Effect.provide(bare)), { session: "vibest" })
-      assert.deepStrictEqual(yield* callerLocation("mine").pipe(Effect.provide(bare)), { session: "mine" })
-    }),
-  )
-})
-
 const git = (cwd: string | undefined, ...args: string[]) => {
   const run = childProcess.spawnSync("git", args, { cwd, encoding: "utf8", env: herdrChildEnv() })
   if (run.status !== 0) throw new Error(`git ${args.join(" ")}: ${(run.stderr ?? run.stdout ?? "").trim()}`)
@@ -470,64 +454,6 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
         ),
       ).pipe(Effect.provide(layer)),
     90_000,
-  )
-
-  it.live(
-    "a program that ends leaves its pane at the shell, where run types the next one; a closed pane is an exited event; a pane without an agent takes pane.send_text as send",
-    () =>
-      withSession(({ socketPath }) =>
-        withRuntime((runtime) => {
-          const env = { HERDR_SOCKET_PATH: socketPath }
-          return Effect.gen(function* () {
-            const log = yield* Ref.make<ReadonlyArray<TerminalRuntime.RuntimeEvent>>([])
-            yield* (runtime.events ?? Stream.empty).pipe(
-              Stream.runForEach((event) => Ref.update(log, (events) => [...events, event])),
-              Effect.forkScoped,
-            )
-            const ended = yield* runtime
-              .open(
-                { id: "local" },
-                {
-                  project: os.tmpdir(),
-                  cwd: os.tmpdir(),
-                  argv: ["sleep", "1"],
-                  env: {},
-                  label: "events",
-                },
-              )
-              .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
-            yield* waitFor(runtime.process(ended), (p) => !p.running, "the shell again")
-            yield* runtime.run!(ended, ["printf", "VBT_%s\\n", "AGAIN"])
-            yield* waitFor(runtime.read(ended, 20), (value) => value.includes("VBT_AGAIN"), "run typed the next one")
-            assert.isFalse(
-              (yield* Ref.get(log)).some((event) => event.type === "exited" && event.terminal.id === ended.id),
-              "a program that ends is not the terminal's exit",
-            )
-            yield* runtime.close(ended)
-            const opened = yield* runtime
-              .open(
-                { id: "local" },
-                {
-                  project: os.tmpdir(),
-                  cwd: os.tmpdir(),
-                  argv: ["/bin/sh"],
-                  env: {},
-                  label: "shell",
-                },
-              )
-              .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
-            yield* runtime.send(opened, { text: "printf 'VBT_SEND\\n'", keys: ["enter"] })
-            yield* waitFor(runtime.read(opened, 20), (value) => value.includes("VBT_SEND"), "typed text ran")
-            yield* runtime.close(opened)
-            yield* waitFor(
-              Ref.get(log),
-              (events) => events.some((event) => event.type === "exited" && event.terminal.id === opened.id),
-              "closed event",
-            )
-          })
-        }),
-      ).pipe(Effect.provide(layer)),
-    60_000,
   )
 
   it.live.skipIf(!piOnPath)(

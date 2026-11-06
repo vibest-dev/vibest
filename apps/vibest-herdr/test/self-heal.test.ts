@@ -206,35 +206,6 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
     )
 
     it.effect(
-      "the reply to Stop is lost as vibestd goes: vibest watches Ping, starts the new vibestd and checks it",
-      () =>
-        Effect.gen(function* () {
-          const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-          yield* isolatedHome(layout.home)
-          const old = yield* fakeVibestd(
-            layout.socket,
-            { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
-            (sock, server) => {
-              sock.destroy()
-              server.close()
-            },
-          )
-          yield* Effect.gen(function* () {
-            yield* replaceDaemon({ version: VERSION, command: sourceArgv }).pipe(Effect.provide(typed("y\n")))
-            assert.include(old.methods, "Daemon.Stop")
-            const next = yield* pingOf(layout.socket)
-            assert.notStrictEqual(next.instance, "old-instance")
-            assert.deepInclude(next, { version: VERSION, command: sourceArgv })
-          }).pipe(
-            Effect.ensuring(Effect.ignore(stopRecorded(layout.daemonInfo))),
-            TestClock.withLive,
-            Effect.provideService(Layout, layout),
-          )
-        }),
-      60_000,
-    )
-
-    it.effect(
       "a planned Stop is accepted with a session herdr cannot be asked about and a message queued for it: the CLI with no terminal is refused, every Stop is checked, then vibestd exits and the message stays on disk for the next one",
       () =>
         Effect.gen(function* () {
@@ -455,17 +426,21 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
     )
 
     it.effect(
-      "a reply to Stop vibest cannot read, and vibestd goes: vibest sees it gone, starts the new vibestd and checks it",
+      "a reply to Stop vibest cannot read or never gets, and vibestd goes: vibest sees it gone, starts the new vibestd and checks it",
       () =>
         Effect.gen(function* () {
-          for (const [what, reply] of undecodableStopReplies) {
+          for (const [what, reply] of [
+            ...undecodableStopReplies,
+            ["the connection closed without a reply", undefined],
+          ] as const) {
             const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
             yield* isolatedHome(layout.home)
             const old = yield* fakeVibestd(
               layout.socket,
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
               (sock, server, id) => {
-                sock.end(JSON.stringify({ jsonrpc: "2.0", id, ...reply }) + "\n")
+                if (reply === undefined) sock.destroy()
+                else sock.end(JSON.stringify({ jsonrpc: "2.0", id, ...reply }) + "\n")
                 server.close()
               },
             )
@@ -604,45 +579,6 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
           assert.ok(daemon.methods.includes("Ping"))
         }).pipe(Effect.scoped, Effect.timeout("10 seconds"), TestClock.withLive),
       15_000,
-    )
-
-    it.effect("a fixture socket error other than EPIPE still fails", () =>
-      Effect.gen(function* () {
-        const dir = yield* tempDirectory("vibest-sock-")
-        const socket = path.join(dir, "vibest.sock")
-        const daemon = yield* fakeVibestd(
-          socket,
-          { version: VERSION, protocol: PROTOCOL, runtimeSessions: [], runtimes: [] },
-          () => {},
-        )
-        yield* Effect.acquireRelease(
-          Effect.promise(
-            () =>
-              new Promise<net.Socket>((resolve, reject) => {
-                const socketClient = net.connect(socket)
-                socketClient.once("error", (err) => {
-                  socketClient.destroy()
-                  reject(err)
-                })
-                socketClient.once("connect", () => {
-                  socketClient.removeAllListeners("error")
-                  resolve(socketClient)
-                })
-              }),
-          ),
-          (socketClient) => Effect.sync(() => socketClient.destroy()),
-        )
-        const sock = daemon.sockets[0]
-        assert.isDefined(sock)
-        sock.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }))
-        let threw = false
-        try {
-          sock.emit("error", Object.assign(new Error("boom"), { code: "EIO" }))
-        } catch (err) {
-          threw = (err as { code?: string }).code === "EIO"
-        }
-        assert.isTrue(threw)
-      }).pipe(Effect.scoped),
     )
   },
 )

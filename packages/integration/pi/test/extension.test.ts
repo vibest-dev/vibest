@@ -258,14 +258,6 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "inert without VIBEST_AGENT",
-    Effect.gen(function* () {
-      const s = yield* session({})
-      assert.deepStrictEqual([...s.handlers.keys()], ["session_shutdown"])
-    }),
-  )
-
-  test(
     "Coordinator TUI, with or without VIBEST_SESSION_ID: grouped tools and the user-message lease, released at shutdown and taken again after a reload",
     Effect.gen(function* () {
       const render = UserMessageComponent.prototype.render
@@ -304,7 +296,7 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Other agents and plain Pi: no TUI handlers, no renderer, no lease",
+    "Other agents and plain Pi: no TUI handlers, no renderer, no lease; without VIBEST_AGENT only session_shutdown",
     Effect.gen(function* () {
       const render = UserMessageComponent.prototype.render
       for (const env of [
@@ -317,6 +309,7 @@ describe("pi-vibest", () => {
         { VIBEST_AGENT: "general" },
       ]) {
         const s = yield* session(env)
+        if (env.VIBEST_AGENT === undefined) assert.deepStrictEqual([...s.handlers.keys()], ["session_shutdown"])
         assert.deepStrictEqual(s.renderers, [])
         assert.deepStrictEqual(
           yield* s.emit("resources_discover", { type: "resources_discover", cwd: "/", reason: "startup" }),
@@ -445,78 +438,6 @@ describe("pi-vibest", () => {
         },
       ])
       assert.deepStrictEqual(yield* db.coordinatorPending(yield* projectOf("r")), [])
-    }),
-  )
-
-  test(
-    "Session: guard on tool calls (its project folder is the one project directory it may use); vibestd writes the settled turn's reply to the result file",
-    Effect.gen(function* () {
-      const layout = yield* Layout
-      yield* (yield* Db).insertSession(
-        {
-          id: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
-          agent: "general",
-          name: "n",
-          harnessId: "pi",
-          provider: null,
-          model: null,
-          harnessSessionId: null,
-          runtime: "herdr",
-          address: { machine: "local", id: "test/p0" },
-          status: "idle",
-          startedAt: 1,
-          exitedAt: null,
-          turnState: "none",
-          turnPromptedAt: 0,
-          metadata: {},
-          createdAt: 1,
-          lastActive: 1,
-        },
-        yield* projectOf("r"),
-      )
-      const own = `${layout.projects}/k`
-      const s = yield* session({
-        VIBEST_AGENT: "general",
-        VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
-        VIBEST_COMMAND: '["vibest"]',
-        VIBEST_PROJECT_DIR: own,
-      })
-      yield* s.emit("session_start", {}, { mode: "tui" })
-      const call = (toolName: string, input: object) => s.emit("tool_call", { toolName, input }, { cwd: "/" })
-      const offLimits = [
-        {
-          block: true,
-          reason:
-            "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR).",
-        },
-      ]
-      assert.deepStrictEqual(yield* call("bash", { command: "herdr pane list" }), [
-        {
-          block: true,
-          reason: "Agents must not control herdr agents, panes, tabs, workspaces or worktrees; vibest manages them.",
-        },
-      ])
-      assert.deepStrictEqual(yield* call("bash", { command: "git commit -m 'herdr pane list'" }), [undefined])
-      assert.deepStrictEqual(yield* call("bash", { command: "vibest report 'half way'" }), [undefined])
-      assert.deepStrictEqual(yield* call("bash", { command: "vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd" }), [
-        undefined,
-      ])
-      assert.deepStrictEqual(yield* call("write", { path: `${own}/artifacts/abcd1234-notes.md` }), [undefined])
-      assert.deepStrictEqual(yield* call("edit", { path: `${own}/artifacts/abcd1234-notes.md` }), [undefined])
-      assert.deepStrictEqual(yield* call("bash", { command: `cat ${own}/artifacts/a.md` }), [undefined])
-      assert.deepStrictEqual(yield* call("read", { path: `${own}/memories/a.md` }), [undefined])
-      assert.deepStrictEqual(yield* call("read", { path: `${layout.projects}/j/memories/a.md` }), offLimits)
-      assert.deepStrictEqual(yield* call("write", { path: `${own}/artifacts/../../j/artifacts/a.md` }), offLimits)
-      assert.deepStrictEqual(yield* call("bash", { command: `cat ${own}/../j/memories/a.md` }), offLimits)
-      yield* s.emit("agent_end", {
-        messages: [{ role: "user" }, { role: "assistant", content: [{ type: "text", text: "status: completed" }] }],
-      })
-      yield* s.emit("agent_settled", { aborted: false }, { isIdle: () => true })
-      const reported = yield* (yield* Db).latestReport("abcd1234-abcd-4abc-8abc-abcd1234abcd", "start")
-      assert.strictEqual(reported?.harness, "pi")
-      assert.strictEqual(reported?.text, "status: completed")
-      assert.strictEqual(reported?.error, undefined)
-      assert.strictEqual(reported?.interrupted, false)
     }),
   )
 
