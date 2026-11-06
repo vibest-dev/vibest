@@ -603,7 +603,7 @@ layer(Platform.services)("role rules", (it) => {
 
 describe("wizard entry", () => {
   it.effect(
-    "a confirmed --wizard reaches the handler, and a session stops at userOnly before spawn, exec or the daemon host",
+    "a confirmed --wizard (Enter picks daemon, the first subcommand, then restart, its only child) reaches the handler, and a session stops at userOnly before spawn, exec or the daemon host",
     () =>
       Effect.gen(function* () {
         const touched = { spawn: false, exec: false, host: false, socket: false }
@@ -612,8 +612,8 @@ describe("wizard entry", () => {
           key: { name: "enter", ctrl: false, meta: false, shift: false },
         }
         const keys = yield* Queue.unbounded<Terminal.UserInput>()
-        const [pickDaemonTheFirstSubcommand, pickRestartItsOnlyChild, acceptRunDefaultYes] = [enter, enter, enter]
-        yield* Queue.offerAll(keys, [pickDaemonTheFirstSubcommand, pickRestartItsOnlyChild, acceptRunDefaultYes])
+        const [pickDaemon, pickRestart, acceptRunDefaultYes] = [enter, enter, enter]
+        yield* Queue.offerAll(keys, [pickDaemon, pickRestart, acceptRunDefaultYes])
         const terminal = Terminal.make({
           columns: Effect.succeed(80),
           rows: Effect.succeed(24),

@@ -58,7 +58,7 @@ const idleSubagentsBetweenTurns = (n: number, runtime = TEST_HERDR) =>
     return ids
   })
 
-const stateAndProcessReadsOfOurTerminals = Effect.gen(function* () {
+const terminalReads = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
   const ours = (calls: ReadonlyArray<{ readonly terminal: string }>) =>
     calls.filter((call) => call.terminal.startsWith("w9:")).length
@@ -71,14 +71,14 @@ describe("reconcile: one look at every live session at start, when a runtime reg
     Effect.gen(function* () {
       yield* idleSubagentsBetweenTurns(50)
       yield* Sessions.make({ maxSessions: undefined })
-      yield* until(stateAndProcessReadsOfOurTerminals, (n) => n >= 50)
+      yield* until(terminalReads, (n) => n >= 50)
       yield* settled
-      assert.strictEqual(yield* stateAndProcessReadsOfOurTerminals, 50)
+      assert.strictEqual(yield* terminalReads, 50)
       for (let minute = 0; minute < 60; minute++) {
         yield* TestClock.adjust("1 minute")
         yield* settled
       }
-      assert.strictEqual(yield* stateAndProcessReadsOfOurTerminals, 50)
+      assert.strictEqual(yield* terminalReads, 50)
     }),
   )
 
@@ -106,11 +106,11 @@ describe("reconcile: one look at every live session at start, when a runtime reg
     Effect.gen(function* () {
       yield* idleSubagentsBetweenTurns(4)
       yield* settled
-      assert.strictEqual(yield* stateAndProcessReadsOfOurTerminals, 0)
+      assert.strictEqual(yield* terminalReads, 0)
       yield* (yield* Bus).observe({ type: "live.reset", runtime: TEST_HERDR, machine: "local" })
-      yield* until(stateAndProcessReadsOfOurTerminals, (n) => n >= 4)
+      yield* until(terminalReads, (n) => n >= 4)
       yield* settled
-      assert.strictEqual(yield* stateAndProcessReadsOfOurTerminals, 4)
+      assert.strictEqual(yield* terminalReads, 4)
     }),
   )
 })

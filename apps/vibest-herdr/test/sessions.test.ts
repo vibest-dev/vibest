@@ -2995,14 +2995,14 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "interrupt that does not take: SessionBusy, the turn stays open",
+    "interrupt that does not take: SessionBusy, the turn stays open (each virtual step yields real time so a loaded machine cannot starve the fork)",
     Effect.gen(function* () {
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
-      const yieldRealTimeSoALoadedMachineCannotStarveTheFork = TestClock.withLive(Effect.sleep("2 millis"))
+      const yieldRealTime = TestClock.withLive(Effect.sleep("2 millis"))
       for (let i = 0; i < 60 && interrupting.pollUnsafe() === undefined; i++) {
         yield* TestClock.adjust("250 millis")
-        yield* yieldRealTimeSoALoadedMachineCannotStarveTheFork
+        yield* yieldRealTime
       }
       const error = yield* Effect.flip(Fiber.join(interrupting))
       assert.strictEqual(error._tag, "SessionBusy")
@@ -3785,7 +3785,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     }),
   )
 
-  const firstArchiveWaitingWithNewerResult = (
+  const firstArchiveWaiting = (
     w: Effect.Success<ReturnType<typeof archiveSession>>,
     details: Record<string, unknown>,
   ) =>
@@ -3820,7 +3820,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       }),
     )
 
-  const assertBothArchivesDoneUninterrupted = (w: Effect.Success<ReturnType<typeof archiveSession>>) =>
+  const assertArchivesDone = (w: Effect.Success<ReturnType<typeof archiveSession>>) =>
     Effect.gen(function* () {
       const sends = (yield* w.herdr.callsTo("send")).length
       yield* w.sessions.check(w.id)
@@ -3832,14 +3832,14 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     Effect.gen(function* () {
       const inbox = yield* Inbox
       const w = yield* archiveSession(yield* makeRepository)
-      const first = yield* firstArchiveWaitingWithNewerResult(w, { status: "completed", summary: "second" })
+      const first = yield* firstArchiveWaiting(w, { status: "completed", summary: "second" })
       const looked = yield* awaitArchiveStart(w.id)
       yield* inbox.deliver(w.projectId)
       assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
       yield* looked
       yield* first.release
       yield* until(archived(w.db, w.id), (a) => a)
-      yield* assertBothArchivesDoneUninterrupted(w)
+      yield* assertArchivesDone(w)
       assert.lengthOf(yield* w.herdr.callsTo("close"), 1)
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
@@ -3854,7 +3854,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const repo = yield* makeRepository
       for (const failure of [undefined, "server_error"]) {
         const w = yield* archiveSession(repo)
-        const first = yield* firstArchiveWaitingWithNewerResult(w, { status: "completed", summary: "second" })
+        const first = yield* firstArchiveWaiting(w, { status: "completed", summary: "second" })
         const prompt = yield* w.herdr.hold("send", "test/coord")
         const sending = yield* Effect.forkChild(inbox.deliver(w.projectId))
         yield* prompt.reached
@@ -3873,12 +3873,12 @@ describe.concurrent("vibest run --archive-on-completion", () => {
         yield* Deferred.succeed(read.release, undefined)
         if (failure === undefined) {
           yield* until(archived(w.db, w.id), (a) => a)
-          yield* assertBothArchivesDoneUninterrupted(w)
+          yield* assertArchivesDone(w)
           assert.deepStrictEqual(yield* sqlNotices(w.id), [])
           continue
         }
         archiveStartedSignal = undefined
-        yield* assertBothArchivesDoneUninterrupted(w)
+        yield* assertArchivesDone(w)
         assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "failed")
         assert.isFalse(yield* archived(w.db, w.id))
       }
@@ -3895,7 +3895,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       for (const newer of ["failed", "message", "turn"]) {
         const w = yield* archiveSession(repo)
         const completed = newer === "message" || newer === "turn"
-        const first = yield* firstArchiveWaitingWithNewerResult(w, { status: completed ? "completed" : newer })
+        const first = yield* firstArchiveWaiting(w, { status: completed ? "completed" : newer })
         if (newer === "message") assert.isDefined(yield* w.db.insertSend(w.id, "one more thing"))
         if (newer === "turn") yield* w.db.updateSession(w.id, { turnState: "open" })
         const looked = completed ? yield* awaitArchiveStart(w.id) : Effect.void
@@ -3903,7 +3903,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
         assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
         yield* looked
         yield* first.release
-        yield* assertBothArchivesDoneUninterrupted(w)
+        yield* assertArchivesDone(w)
         assert.isFalse(yield* archived(w.db, w.id), newer)
         assert.isUndefined((yield* w.db.getSession(w.id))!.metadata.removed, newer)
         if (newer === "message") {

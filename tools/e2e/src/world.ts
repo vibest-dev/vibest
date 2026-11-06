@@ -73,8 +73,8 @@ export class World {
   }
 
   static async create(): Promise<World> {
-    const tmpShortEnoughForMacosSocketPath = process.platform === "darwin" ? "/tmp" : os.tmpdir()
-    const root = await fsPromises.mkdtemp(path.join(tmpShortEnoughForMacosSocketPath, "vbe-"))
+    const tmpBase = process.platform === "darwin" ? "/tmp" : os.tmpdir()
+    const root = await fsPromises.mkdtemp(path.join(tmpBase, "vbe-"))
     await fsPromises.chmod(root, 0o700)
     const w = new World(root)
     for (const dir of [w.vibestHome, ...Object.values(w.config), path.join(root, "tmp")])
@@ -223,13 +223,13 @@ export class World {
 
   async close() {
     await this.stopDaemon()
-    const vibestStartedThisRunsHerdrSession = await fsPromises
+    const startedHerdrSession = await fsPromises
       .stat(path.join(this.home, ".config", "herdr", "sessions", this.herdrSession))
       .then(
         () => true,
         () => false,
       )
-    if (vibestStartedThisRunsHerdrSession) {
+    if (startedHerdrSession) {
       await this.run(this.root, ["herdr", "session", "stop", this.herdrSession])
       await this.run(this.root, ["herdr", "session", "delete", this.herdrSession])
     }

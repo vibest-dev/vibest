@@ -1069,8 +1069,8 @@ serialization does not encode keep-alive pings and the default 5 s timeout would
 daemon restart` cannot replace is stopped by the user: vibest prints the PID check and `kill -TERM`, and never
 signals it.
 
-**Daemon** (omac `daemon.ts`, `drain.ts`, `replace.ts`, copied): a start lock held by an exclusive SQLite
-transaction; a socket that answers is never unlinked; the instance (pid, start id, argv) is in Ping and
+**Daemon** (omac `daemon.ts`, `drain.ts`, `replace.ts`, copied): a start lock held by `flock` on
+`vibestd.pid` (below); a socket that answers is never unlinked; the instance (pid, start id, argv) is in Ping and
 `vibestd.pid`; only the user's command starts the daemon, never an agent's (it would inherit the agent's
 sandbox). `daemon restart` and `update` replace it only after `y` on a terminal, while agents keep running: the old
 one refuses new changes with `DaemonStopping`, drains its own operations (admitted requests, deliveries, launches,

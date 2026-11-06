@@ -21,7 +21,7 @@ const PATH_WITHOUT_HARNESS_CLIS = "/usr/bin:/bin"
 const daemon = (home: string) =>
   runVibest(home, { HOME: home, VIBEST_HOME: home, PATH: PATH_WITHOUT_HARNESS_CLIS }, ["daemon", "--foreground"])
 
-const ignoreEpipeOfAClientWhosePingTimedOut = () => {}
+const ignoreEpipe = () => {}
 
 const listen = (socket: string, answersPing: boolean) =>
   Effect.acquireRelease(
@@ -29,7 +29,7 @@ const listen = (socket: string, answersPing: boolean) =>
       () =>
         new Promise<net.Server>((resolve) => {
           const server = net.createServer((sock) => {
-            sock.on("error", ignoreEpipeOfAClientWhosePingTimedOut)
+            sock.on("error", ignoreEpipe)
             let buf = ""
             sock.on("data", (chunk) => {
               buf += chunk.toString()
@@ -225,12 +225,12 @@ describe.concurrent("vibestd.pid lock", () => {
   )
 
   it.live(
-    "the lock is held for the scope and readable meanwhile: another process stays BUSY until the scope closes, then the file is empty",
+    "the lock is held for the scope and readable meanwhile: another process (spawned async, so this file's servers keep answering) stays BUSY until the scope closes, then the file is empty",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-        const contenderSpawnedAsyncSoConcurrentServersStillAnswer = (file: string) =>
+        const contend = (file: string) =>
           Effect.promise(() =>
             execFile(process.execPath, [`${import.meta.dirname}/lock-contender.ts`, file], {
               encoding: "utf8",
@@ -243,12 +243,12 @@ describe.concurrent("vibestd.pid lock", () => {
           assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), '{"pid":1}')
           for (let i = 0; i < 3; i++) {
             Bun.gc(true)
-            assert.strictEqual(yield* contenderSpawnedAsyncSoConcurrentServersStillAnswer(layout.daemonInfo), "BUSY")
+            assert.strictEqual(yield* contend(layout.daemonInfo), "BUSY")
             yield* Effect.sleep("300 millis")
           }
         }).pipe(Effect.scoped)
         assert.strictEqual(yield* fs.readFileString(layout.daemonInfo), "")
-        assert.strictEqual(yield* contenderSpawnedAsyncSoConcurrentServersStillAnswer(layout.daemonInfo), "ACQUIRED")
+        assert.strictEqual(yield* contend(layout.daemonInfo), "ACQUIRED")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     30_000,
   )

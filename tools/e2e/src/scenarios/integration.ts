@@ -16,12 +16,12 @@ import {
   type World,
 } from "../world.ts"
 
-const userHarnessFilesVibestCouldWrite = [".claude/settings.json", ".cursor/hooks.json", ".pi/agent/settings.json"].map(
-  (p) => path.join(os.homedir(), p),
+const userHarnessFiles = [".claude/settings.json", ".cursor/hooks.json", ".pi/agent/settings.json"].map((p) =>
+  path.join(os.homedir(), p),
 )
 const stamp = () =>
   Promise.all(
-    userHarnessFilesVibestCouldWrite.map((p) =>
+    userHarnessFiles.map((p) =>
       fs.stat(p).then(
         (s) => `${p} ${s.mtimeMs}`,
         () => `${p} missing`,
@@ -476,10 +476,8 @@ const checks: ReadonlyArray<Check> = [
               }
             return [...calls.values()]
           }
-          const modelKeptToTheNoHerdrRule = !(await toolCalls()).some(
-            (c) => c.name === "Bash" && c.input.includes("herdr "),
-          )
-          if (modelKeptToTheNoHerdrRule) {
+          const keptNoHerdrRule = !(await toolCalls()).some((c) => c.name === "Bash" && c.input.includes("herdr "))
+          if (keptNoHerdrRule) {
             await w.ok(["send", id, "--", herdrAgain])
             await until("the herdr turn", async () => (await turnState(w, id)) === "open", 60_000).catch(
               () => undefined,

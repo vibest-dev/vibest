@@ -5,6 +5,8 @@ import path from "node:path"
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 
+import { CLAUDE_TYPES_PIN } from "../scripts/prepare-claude-types.ts"
+
 const pkg = path.join(import.meta.dirname, "..")
 const repo = path.join(pkg, "../../..")
 const FILES = [
@@ -216,7 +218,10 @@ describe("claude plugin distribution", () => {
   it("the official-type source still bundles to import-free JS", () => {
     const source = fs.readFileSync(path.join(pkg, "src/plugin.ts"), "utf8")
     assert.match(source, /import type \{[^}]*\bRegister\b[^}]*\} from "claude-code"/)
-    assert.include(fs.readFileSync(path.join(pkg, "README.md"), "utf8"), "2eff7a8d21c80be48904f62ebdea36d945d7b504")
+    assert.include(
+      fs.readFileSync(path.join(pkg, "README.md"), "utf8"),
+      `The pin is anthropics/claude-code \`${CLAUDE_TYPES_PIN}\``,
+    )
     const bundle = fs.readFileSync(path.join(packed, "hooks/register.mjs"), "utf8")
     assert.isFalse(IMPORT.test(bundle))
     assert.match(bundle, /on\("turn\.complete"/)

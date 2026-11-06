@@ -5,11 +5,11 @@ import path from "node:path"
 
 import { assert, it } from "@effect/vitest"
 
-const withoutPnpmShimNodePathToTheRealPlatformPackage = { NODE_PATH: "" }
+const NO_NODE_PATH = { NODE_PATH: "" }
 
 const launcher = path.join(import.meta.dirname, "..", "bin", "vibest.cjs")
 
-it("bin/vibest.cjs runs @vibest/cli-<platform>-<arch>/bin/vibest with the arguments and exits with its status", async () => {
+it("bin/vibest.cjs runs @vibest/cli-<platform>-<arch>/bin/vibest with the arguments and exits with its status (NODE_PATH cleared: pnpm's shim points it at the real platform package)", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-launcher-"))
   try {
     const cli = path.join(root, "node_modules", "@vibest", "cli", "bin")
@@ -27,7 +27,7 @@ it("bin/vibest.cjs runs @vibest/cli-<platform>-<arch>/bin/vibest with the argume
     const run = () =>
       childProcess.spawnSync("node", [path.join(cli, "vibest.cjs"), "a b", "--x"], {
         encoding: "utf8",
-        env: { ...process.env, ...withoutPnpmShimNodePathToTheRealPlatformPackage },
+        env: { ...process.env, ...NO_NODE_PATH },
       })
 
     const missing = run()

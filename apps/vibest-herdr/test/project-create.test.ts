@@ -108,8 +108,8 @@ describe("project create", () => {
       assert.strictEqual(yield* sh(copy, "rev-parse", "--abbrev-ref", "@{upstream}"), "origin/main")
       assert.isFalse(yield* fs.exists(path.join(copy, ".git/objects/info/alternates")))
       const head = yield* sh(copy, "rev-parse", "HEAD")
-      const headObjectNotHardlinkedToSource = path.join(copy, ".git/objects", head.slice(0, 2), head.slice(2))
-      assert.strictEqual(Option.getOrUndefined((yield* fs.stat(headObjectNotHardlinkedToSource)).nlink), 1)
+      const headObject = path.join(copy, ".git/objects", head.slice(0, 2), head.slice(2))
+      assert.strictEqual(Option.getOrUndefined((yield* fs.stat(headObject)).nlink), 1)
 
       const plain = path.join(directory, "sdk")
       assert.strictEqual(yield* sh(plain, "remote"), "")
@@ -167,56 +167,52 @@ describe("project create", () => {
   )
 
   test(
-    "a failed copy removes only what the call created",
+    "a failed copy (an unborn repository passes inspection, then fails the clone) removes only what the call created",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const sources = yield* scopedRealPathTempDirectory("vibest-sources-")
       const app = yield* repositoryWithOneCommitOnMain(sources, "app")
-      const unbornPassesInspectionFailsClone = path.join(sources, "unborn")
-      yield* fs.makeDirectory(unbornPassesInspectionFailsClone)
-      yield* sh(unbornPassesInspectionFailsClone, "init", "-q", "-b", "main")
+      const unbornRepository = path.join(sources, "unborn")
+      yield* fs.makeDirectory(unbornRepository)
+      yield* sh(unbornRepository, "init", "-q", "-b", "main")
       const base = yield* scopedRealPathTempDirectory("vibest-project-")
 
       const fresh = path.join(base, "fresh")
-      assert.match(yield* failure(createProject(fresh, [app, unbornPassesInspectionFailsClone])), /copy .*unborn/)
+      assert.match(yield* failure(createProject(fresh, [app, unbornRepository])), /copy .*unborn/)
       assert.isFalse(yield* fs.exists(fresh))
 
       const kept = path.join(base, "kept")
       yield* fs.makeDirectory(kept)
-      assert.match(yield* failure(createProject(kept, [app, unbornPassesInspectionFailsClone])), /copy .*unborn/)
+      assert.match(yield* failure(createProject(kept, [app, unbornRepository])), /copy .*unborn/)
       assert.deepStrictEqual(yield* fs.readDirectory(kept), [])
     }),
   )
 
   test(
-    "an interrupt removes only what the call created",
+    "an interrupt during checkout (a slow smudge filter set in the environment, as a clone skips the source's config) removes only what the call created",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const sources = yield* scopedRealPathTempDirectory("vibest-sources-")
       const app = yield* repositoryWithOneCommitOnMain(sources, "app")
-      const smudgeWaitsDuringCloneCheckoutSetInEnvSinceCloneSkipsSourceConfig = {
+      const smudgeFilter = {
         "filter.slow.clean": "cat",
         "filter.slow.smudge": "sleep 30",
         "filter.slow.required": "true",
       }
       yield* Effect.acquireRelease(
         Effect.sync(() => {
-          process.env.GIT_CONFIG_COUNT = String(
-            Object.keys(smudgeWaitsDuringCloneCheckoutSetInEnvSinceCloneSkipsSourceConfig).length,
-          )
-          Object.entries(smudgeWaitsDuringCloneCheckoutSetInEnvSinceCloneSkipsSourceConfig).forEach(
-            ([key, value], i) => {
-              process.env[`GIT_CONFIG_KEY_${i}`] = key
-              process.env[`GIT_CONFIG_VALUE_${i}`] = value
-            },
-          )
+          process.env.GIT_CONFIG_COUNT = String(Object.keys(smudgeFilter).length)
+          Object.entries(smudgeFilter).forEach(([key, value], i) => {
+            process.env[`GIT_CONFIG_KEY_${i}`] = key
+            process.env[`GIT_CONFIG_VALUE_${i}`] = value
+          })
         }),
         () =>
           Effect.sync(() => {
             delete process.env.GIT_CONFIG_COUNT
-            Object.keys(smudgeWaitsDuringCloneCheckoutSetInEnvSinceCloneSkipsSourceConfig).forEach((_, i) => {
+            Object.keys(smudgeFilter).forEach((_, i) => {
               delete process.env[`GIT_CONFIG_KEY_${i}`]
               delete process.env[`GIT_CONFIG_VALUE_${i}`]
             })
@@ -345,8 +341,8 @@ describe("multi-repository project", () => {
         assert.strictEqual(yield* sh(folder.path, "branch", "--list", "vibest/*"), "")
         assert.strictEqual(yield* sh(wt, "rev-parse", "HEAD"), yield* sh(folder.path, "rev-parse", "HEAD"))
       }
-      const fromWorkspaceOfLinkedWorktrees = yield* projectRoot(workspace)
-      assert.strictEqual(fromWorkspaceOfLinkedWorktrees.root, root)
+      const fromWorkspace = yield* projectRoot(workspace)
+      assert.strictEqual(fromWorkspace.root, root)
     }),
   )
 

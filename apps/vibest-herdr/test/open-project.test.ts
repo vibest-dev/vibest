@@ -13,7 +13,7 @@ const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>, out: Array<s
   })
 const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 
-const vibestdWithCheckoutMovedFromOldToNew = () => {
+const movedCheckout = () => {
   const moves: Array<boolean | undefined> = []
   const client = {
     "Project.Open": ({ move }: { move?: boolean }) => {
@@ -35,7 +35,7 @@ describe("openProject in a checkout that moved asks [Y/n] before anything starts
     it.effect(`${name}: Project.Open again with move ${move}`, () => {
       const out: Array<string> = []
       return Effect.gen(function* () {
-        const f = vibestdWithCheckoutMovedFromOldToNew()
+        const f = movedCheckout()
         assert.strictEqual((yield* f.run).projectId, id)
         assert.deepStrictEqual(f.moves, [undefined, move])
         assert.include(out.join(""), "The project moved from /old to here, move it? [Y/n]: ")
@@ -49,7 +49,7 @@ describe("openProject in a checkout that moved asks [Y/n] before anything starts
   ] as const)
     it.effect(`${name}: fails naming both places, nothing changed`, () =>
       Effect.gen(function* () {
-        const f = vibestdWithCheckoutMovedFromOldToNew()
+        const f = movedCheckout()
         const exit = yield* Effect.exit(f.run)
         assert.isTrue(Exit.isFailure(exit))
         assert.include(String(exit), "the project moved from /old to /new")
