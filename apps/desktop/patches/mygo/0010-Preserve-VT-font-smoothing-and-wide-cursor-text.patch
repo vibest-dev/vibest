@@ -1,6 +1,7 @@
+diff --git a/plugins/terminal/font.go b/plugins/terminal/font.go
 --- a/plugins/terminal/font.go
 +++ b/plugins/terminal/font.go
-@@ -33,6 +33,8 @@
+@@ -43,6 +43,8 @@
  	// the text's color and the system's setting. It changes nothing on
  	// Linux and Windows.
  	Thicken bool
@@ -9,7 +10,7 @@
  }
  
  // fontKey is a Font at a scale, with the defaults, comparable.
-@@ -44,12 +46,12 @@
+@@ -55,12 +57,12 @@
  	lineHeight float32
  	thicken    bool
  	scale      float32
@@ -19,14 +20,15 @@
  }
  
  func (f *Font) key(scale float32) fontKey {
--	k := fontKey{family: f.Family, size: f.Size, weight: f.Weight, features: featureList(f.Features), lineHeight: f.LineHeight, thicken: f.Thicken, scale: scale}
-+	k := fontKey{family: f.Family, size: f.Size, weight: f.Weight, features: featureList(f.Features), lineHeight: f.LineHeight, thicken: f.Thicken, scale: scale, flat: f.Antialiased}
- 	if strings.TrimSpace(k.family) == "" {
- 		k.family = "monospace"
+-	k := fontKey{family: f.Family, size: f.Size, weight: f.Weight, features: featureList(f.Features), cellWidth: f.CellWidth, lineHeight: f.LineHeight, thicken: f.Thicken, scale: scale}
++	k := fontKey{family: f.Family, size: f.Size, weight: f.Weight, features: featureList(f.Features), cellWidth: f.CellWidth, lineHeight: f.LineHeight, thicken: f.Thicken, scale: scale, flat: f.Antialiased}
+ 	if runtime.GOOS == "darwin" {
+ 		k.features = unkerned(k.features)
  	}
+diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
 --- a/plugins/terminal/paint.go
 +++ b/plugins/terminal/paint.go
-@@ -640,17 +640,21 @@
+@@ -669,17 +669,21 @@
  	if block && v.cursor.Y < len(v.lines) {
  		// The text under a block cursor, in the cursor's text color.
  		line := &v.lines[v.cursor.Y]

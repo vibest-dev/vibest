@@ -1,8 +1,7 @@
 diff --git a/plugins/terminal/automatic_input_test.go b/plugins/terminal/automatic_input_test.go
-index 5d2064e..4dabf63 100644
 --- a/plugins/terminal/automatic_input_test.go
 +++ b/plugins/terminal/automatic_input_test.go
-@@ -76,3 +76,25 @@ func TestEmulatorRepliesUseTheirOwnCaptureWithoutTheKeyboard(t *testing.T) {
+@@ -76,3 +76,25 @@
  		t.Fatalf("got %q", out.String())
  	}
  }
@@ -29,10 +28,9 @@ index 5d2064e..4dabf63 100644
 +	}
 +}
 diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
-index 8b3110c..42b844c 100644
 --- a/plugins/terminal/terminal.go
 +++ b/plugins/terminal/terminal.go
-@@ -1115,7 +1115,15 @@ func (t *Terminal) CancelInput() {
+@@ -1194,7 +1194,15 @@
  	t.mu.Lock()
  	t.offer, t.clipReads, t.replying = nil, nil, false
  	t.in.mu.Lock()

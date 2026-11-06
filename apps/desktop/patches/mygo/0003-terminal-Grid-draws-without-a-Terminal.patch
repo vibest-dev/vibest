@@ -1,24 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: oxwen11 <iamoxwen@gmail.com>
-Date: Fri, 23 Oct 2026 16:56:29 +0800
-Subject: [PATCH 3/3] terminal: Grid draws without a Terminal
-
-view.draw read Options.Transparent and Options.PaddingColor through
-v.t, so NewGrid made an empty Terminal for their defaults. paint now
-copies them into the view where it reads MinimumContrast, and draw and
-extendPadding read the copies; a Grid has the zero values, the
-defaults. View's behavior is unchanged.
----
- plugins/terminal/grid.go  | 3 +--
- plugins/terminal/paint.go | 7 ++++---
- plugins/terminal/view.go  | 4 ++++
- 3 files changed, 9 insertions(+), 5 deletions(-)
-
 diff --git a/plugins/terminal/grid.go b/plugins/terminal/grid.go
-index c9fd12f..9f09aae 100644
 --- a/plugins/terminal/grid.go
 +++ b/plugins/terminal/grid.go
-@@ -55,8 +55,7 @@ type GridCursor struct {
+@@ -55,8 +55,7 @@
  // selection's and its cursor's.
  func NewGrid(theme *Theme) *Grid {
  	g := &Grid{}
@@ -29,10 +12,9 @@ index c9fd12f..9f09aae 100644
  	return g
  }
 diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
-index b9d91e2..6925bec 100644
 --- a/plugins/terminal/paint.go
 +++ b/plugins/terminal/paint.go
-@@ -156,6 +156,7 @@ func (v *view) paint(p *ui.Painter, r ui.Rect) {
+@@ -160,6 +160,7 @@
  	}
  	v.scrollbar = t.term.Scrollbar()
  	contrast := t.opts.MinimumContrast
@@ -40,7 +22,7 @@ index b9d91e2..6925bec 100644
  	tc, tr := t.term.Size()
  	v.matches, v.matchBuf = t.viewportMatches(v.matches, v.matchBuf, tc, tr)
  	if !held {
-@@ -533,10 +534,10 @@ func (v *view) draw(p *ui.Painter, r ui.Rect) {
+@@ -562,10 +563,10 @@
  	base := float32(v.baseline) / s
  	// A transparent terminal still draws a background a program set (OSC
  	// 11), as Ghostty shows it.
@@ -53,7 +35,7 @@ index b9d91e2..6925bec 100644
  		v.extendPadding(p, r, ox, oy, cw, ch)
  	}
  	selection := v.theme.Selection
-@@ -673,7 +674,7 @@ func (v *view) extendPadding(p *ui.Painter, r ui.Rect, ox, oy, cw, ch float32) {
+@@ -702,7 +703,7 @@
  	if len(v.lines) == 0 {
  		return
  	}
@@ -63,17 +45,16 @@ index b9d91e2..6925bec 100644
  	cols := v.cols
  	left, right := r.X, r.X+r.W
 diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
-index 1b0d5f5..ed8b43b 100644
 --- a/plugins/terminal/view.go
 +++ b/plugins/terminal/view.go
-@@ -159,6 +159,10 @@ type view struct {
+@@ -164,6 +164,10 @@
+ 	fitW                   int
  	ox, oy                 int
  	cols, rows             int
- 
++
 +	// Options.Transparent and Options.PaddingColor, as of the last paint.
 +	transparent bool
 +	padding     PaddingColor
-+
+ 
  	colors    vt.Colors
  	contrast  float32 // Options.MinimumContrast, as of the last paint
- 	cursor    vt.Cursor

@@ -1,7 +1,7 @@
 diff --git a/internal/platform/surface.go b/internal/platform/surface.go
 --- a/internal/platform/surface.go
 +++ b/internal/platform/surface.go
-@@ -122,6 +122,8 @@
+@@ -205,6 +205,8 @@
  // TextInputState is the state of the text input that has the keyboard,
  // for input methods.
  type TextInputState struct {
@@ -10,20 +10,18 @@ diff --git a/internal/platform/surface.go b/internal/platform/surface.go
  	// Active is true while an editable element has the keyboard.
  	Active bool
  	// Caret is the caret's rectangle, in DIPs relative to the surface.
-@@ -250,6 +252,9 @@
- 	// the surface has the keyboard again, and the content moves the focus
- 	// on from the web view's element.
- 	WebViewTabOut
-+	// SurfacePrepareInput queries whether queued activation needs a frame before
-+	// the native backend decides text eligibility. It does not itself take input.
+@@ -365,6 +367,7 @@
+ 	// takes it as if the web view's element had the focus, and the
+ 	// keyboard stays with the page.
+ 	WebViewKey
 +	SurfacePrepareInput
  )
  
- // SurfaceEvent is input on a Surface, or a change of it.
+ // EditCommands are the menu roles of edit commands, which native UI takes as
 diff --git a/ui/runtime.go b/ui/runtime.go
 --- a/ui/runtime.go
 +++ b/ui/runtime.go
-@@ -258,8 +258,9 @@
+@@ -351,8 +351,9 @@
  	cellInBlock func(f *listFrame, x, y float32) bool
  	// pressDragger is the element around the one pressed that drags a
  	// value, which takes the press as it moves (dragMove), or 0.
@@ -35,7 +33,7 @@ diff --git a/ui/runtime.go b/ui/runtime.go
  	// texts are selectable paragraphs in build order; selection spans those
  	// of one Selectable container (textselection.go).
  	texts        []*state
-@@ -327,8 +328,9 @@
+@@ -471,8 +472,9 @@
  	// ime is the text input state the host has, and base the rune of the
  	// focused editor its text starts at.
  	ime struct {
@@ -47,52 +45,50 @@ diff --git a/ui/runtime.go b/ui/runtime.go
  	}
  	// drag is the value being dragged within the window.
  	drag        *valueDrag
-@@ -484,6 +486,7 @@
+@@ -648,6 +650,7 @@
  	rt.inFrame = true
  	defer rt.endFrame()
  
 +	rt.activationPending = false
  	rt.frame++
  	rt.input = false
- 	rt.focusRead = false
+ 	rt.focusRead, rt.activeRead, rt.withinRead, rt.keysRead = false, false, false, false
 diff --git a/ui/input.go b/ui/input.go
 --- a/ui/input.go
 +++ b/ui/input.go
-@@ -11,6 +11,15 @@
- // event handles a surface event on the main thread. It reports whether
- // an element takes files dragged over or dropped at the event's position.
+@@ -13,6 +13,13 @@
+ // an element takes files dragged over or dropped at the event's position,
+ // the key pressed or the composition (platform.WindowHandler.SurfaceEvent).
  func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 +	if ev.Kind == platform.SurfacePrepareInput {
 +		return !rt.inFrame && (rt.activationPending || len(rt.keys) > 0)
 +	}
-+	// Drain completed activation before the next physical intent or terminal
-+	// entry, including menu commands/commits that never call native keyDown.
 +	switch ev.Kind {
 +	case platform.PointerDown, platform.KeyPressed, platform.TextInput, platform.TextComposition, platform.SurfaceCommand:
 +		rt.prepareInputFrame()
 +	}
- 	if ev.Kind != platform.SurfaceFrame {
- 		// Whatever the event changes, the next frame builds anew.
- 		rt.redraw = false
-@@ -417,6 +426,7 @@
+ 	if ev.Kind == platform.SurfaceCommandEnabled {
+ 		// A menu asking about its item changes nothing.
+ 		return rt.commandEnabled(ev.Text)
+@@ -675,6 +682,7 @@
  				break // it moved the element (Draggable): no click
  			}
- 			s.clicks++
+ 			s.click(s.pressMods)
 +			rt.activationPending = true
- 			s.clickMods = s.pressMods
  		case 1:
- 			s.rightClicks++
-@@ -690,6 +700,7 @@
- 		window := s != nil && key == KeyEnter && s.flags&flagToggle != 0
- 		if s != nil && !rt.claimedBy(k, window) && s.flags&flagClickable != 0 && s.flags&flagDisabled == 0 {
- 			s.clicks++
+ 			r.rightClicks++
+ 		}
+@@ -1039,6 +1047,7 @@
+ 		if s != nil && !rt.claimedBy(k, window) && s.flags&flagClickable != 0 && s.flags&flagDisabled == 0 &&
+ 			(key == KeyEnter || s.role != RoleLink) {
+ 			s.click(0)
 +			rt.activationPending = true
- 			s.clickMods = 0
  			rt.focusVisible = true
  			rt.requestFrame()
-@@ -952,12 +963,24 @@
+ 			return false
+@@ -1388,10 +1397,22 @@
  		r := transformRect(s.world, Rect{s.x + s.caret.X, s.y + s.caret.Y, s.caret.W, s.caret.H})
- 		t.Caret = platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)}
+ 		t.Caret = rt.toWindow(platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)})
  	}
 +	if t.Active {
 +		t.Session = rt.focused
@@ -101,8 +97,8 @@ diff --git a/ui/input.go b/ui/input.go
  		if t.Client != rt.ime.state.Client {
  			if old, ok := rt.ime.state.Client.(*textInputAdapter); ok {
  				old.release()
- 			}
- 		}
++			}
++		}
 +		if t.Session != rt.ime.state.Session && rt.ime.cancel != nil {
 +			rt.ime.cancel(InputEvent{Kind: InputCompose, Session: rt.ime.state.Session, Time: rt.now()})
 +		}
@@ -110,15 +106,13 @@ diff --git a/ui/input.go b/ui/input.go
 +		if t.Active {
 +			if s := rt.states[rt.focused]; s != nil && s.input != nil && s.takesText {
 +				rt.ime.cancel = s.input
-+			}
-+		}
+ 			}
+ 		}
  		rt.ime.state, rt.ime.base = t, base
- 		rt.host.setTextInput(t)
- 	}
 diff --git a/ui/handler.go b/ui/handler.go
 --- a/ui/handler.go
 +++ b/ui/handler.go
-@@ -47,8 +47,10 @@
+@@ -71,8 +71,10 @@
  
  // InputEvent is input an element takes as it comes (HandleInput).
  type InputEvent struct {
@@ -131,51 +125,49 @@ diff --git a/ui/handler.go b/ui/handler.go
  	// PhysicalKey is Key by position on an ANSI US keyboard, whatever the
  	// layout types: the S key is KeyS on a Cyrillic layout too, where Key
  	// is KeyUnknown. KeyUnknown where the platform does not report it.
-@@ -134,6 +136,7 @@
+@@ -230,6 +232,7 @@
  	}
  	ev.X, ev.Y = s.local(rt.pointerX, rt.pointerY)
  	ev.Time = rt.now()
 +	ev.Session = s.id
- 	if ev.Kind == InputScroll {
- 		ev.DX, ev.DY = s.vector(rt.pointerX, rt.pointerY, ev.DX, ev.DY)
- 	}
+ 	switch ev.Kind {
+ 	case InputPointerDown, InputPointerUp, InputPointerMove:
+ 		ev.Pointer, ev.Pressure = rt.pointerType, rt.pressure
 diff --git a/internal/darwin/surface.go b/internal/darwin/surface.go
 --- a/internal/darwin/surface.go
 +++ b/internal/darwin/surface.go
-@@ -460,6 +460,10 @@
+@@ -750,7 +750,7 @@
  }
  
  func (s *surface) SetTextInput(t platform.TextInputState) {
-+	if s.input.Active && s.input.Session != t.Session {
-+		s.marked = ""
-+		send(send(s.view, "inputContext"), "discardMarkedText")
-+	}
- 	if s.input.Client != t.Client && s.input.Active {
- 		s.marked = ""
- 		send(send(s.view, "inputContext"), "discardMarkedText")
-@@ -496,6 +500,13 @@
+-	if s.input.Client != t.Client && s.input.Active {
++	if (s.input.Client != t.Client || s.input.Session != t.Session) && s.input.Active {
+ 		s.discardComposition()
+ 	}
+ 	if s.input.Active && t.Active && t.NoInputMethod && !s.input.NoInputMethod {
+@@ -781,6 +781,13 @@
+ 		kind = platform.SurfaceFocus
+ 	}
  	s.send(platform.SurfaceEvent{Kind: kind})
- }
- 
++}
++
 +// Resolve queued clicks/shortcuts before keyDown captures the native text state.
 +func (s *surface) prepareInput() {
 +	if s.send(platform.SurfaceEvent{Kind: platform.SurfacePrepareInput}) {
 +		s.frameNow(false)
 +	}
-+}
-+
+ }
+ 
  func (s *surface) send(ev platform.SurfaceEvent) bool {
- 	if s.w.closed {
- 		return false
-@@ -709,6 +720,7 @@
- 	command := func(name string) objc.MethodDef {
- 		return method(name+":", func(self id, _ objc.SEL, sender id) {
- 			if s := b().surfaceOf(self); s != nil {
+@@ -1117,6 +1124,7 @@
+ 				// shortcuts that take the command tell (ShortcutRepeated).
+ 				ev := send(s.w.b.app, "currentEvent")
+ 				repeat := ev != 0 && sendInt(ev, "type") == 10 && sendBool(ev, "isARepeat") // NSEventTypeKeyDown
 +				s.prepareInput()
- 				s.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name})
+ 				s.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name, Repeat: repeat})
  			}
  		})
-@@ -879,6 +891,7 @@
+@@ -1324,6 +1332,7 @@
  			if s == nil {
  				return
  			}
@@ -196,7 +188,7 @@ diff --git a/internal/darwin/surface_input.go b/internal/darwin/surface_input.go
  	if c := s.input.Client; c != nil {
  		c.SetMarkedText(clientRange(replacement), text, platform.TextRange{Start: int(selected.Location), End: int(selected.Location + selected.Length)})
  		return
-@@ -140,6 +143,9 @@
+@@ -155,6 +158,9 @@
  }
  
  func (s *surface) insertText(text string, replacement nsRange) {
@@ -390,7 +382,7 @@ new file mode 100644
 +		h.pending = false
 +		h.s.input = platform.TextInputState{Active: true, Session: 2}
 +	}
-+	return false
++	return e.Kind == platform.TextComposition
 +}
 +
 +func TestNativePrepareBeforeTextEligibility(t *testing.T) {
@@ -497,7 +489,7 @@ new file mode 100644
 diff --git a/ui/scope.go b/ui/scope.go
 --- a/ui/scope.go
 +++ b/ui/scope.go
-@@ -50,7 +50,7 @@
+@@ -54,7 +54,7 @@
  	if slices.ContainsFunc(scopes, func(sc focusScope) bool { return sc.anchor != 0 }) {
  		rt.placePopovers(order, scopes)
  	}

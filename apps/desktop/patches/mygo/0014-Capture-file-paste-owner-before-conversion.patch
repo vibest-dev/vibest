@@ -1,8 +1,7 @@
 diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
-index e1fabbc..5c51fea 100644
 --- a/plugins/terminal/terminal.go
 +++ b/plugins/terminal/terminal.go
-@@ -266,6 +266,9 @@ type Options struct {
+@@ -275,6 +275,9 @@
  	// the clipboard's files or image (d.Files, transfer.PNG) for a remote
  	// program, then pastes their paths with Paste.
  	OnPaste func(d transfer.Data) bool
@@ -12,7 +11,7 @@ index e1fabbc..5c51fea 100644
  	// ExtendMenu appends application actions after the built-in terminal menu.
  	// It runs on the UI thread when the menu opens or an item is chosen.
  	ExtendMenu func(m *ui.Menu)
-@@ -1394,17 +1397,22 @@ func (q *inputQueue) push(p []byte) { q.pushDone(p, nil) }
+@@ -1485,17 +1488,22 @@
  // pushDone queues p, and done to run once it is written, on the queue's
  // goroutine.
  func (q *inputQueue) pushDone(p []byte, done func()) bool {
@@ -42,10 +41,9 @@ index e1fabbc..5c51fea 100644
  			if limit == 0 {
  				limit = 1 << 20
 diff --git a/plugins/terminal/paste.go b/plugins/terminal/paste.go
-index fac0352..f218f92 100644
 --- a/plugins/terminal/paste.go
 +++ b/plugins/terminal/paste.go
-@@ -305,6 +305,9 @@ func (t *Terminal) dropFiles(paths []string) {
+@@ -305,6 +305,9 @@
  	if len(paths) == 0 {
  		return
  	}
@@ -57,7 +55,6 @@ index fac0352..f218f92 100644
  		escaped[i] = t.quoting.quote(p)
 diff --git a/plugins/terminal/capture_paste.go b/plugins/terminal/capture_paste.go
 new file mode 100644
-index 0000000..75ac948
 --- /dev/null
 +++ b/plugins/terminal/capture_paste.go
 @@ -0,0 +1,29 @@
@@ -92,7 +89,6 @@ index 0000000..75ac948
 +}
 diff --git a/plugins/terminal/drop_owner_test.go b/plugins/terminal/drop_owner_test.go
 new file mode 100644
-index 0000000..54708ae
 --- /dev/null
 +++ b/plugins/terminal/drop_owner_test.go
 @@ -0,0 +1,54 @@

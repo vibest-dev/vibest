@@ -1,8 +1,7 @@
 diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
-index a43cb8d..b1f4c7d 100644
 --- a/plugins/terminal/terminal.go
 +++ b/plugins/terminal/terminal.go
-@@ -266,6 +266,9 @@ type Options struct {
+@@ -275,6 +275,9 @@
  	// ExtendMenu appends application actions after the built-in terminal menu.
  	// It runs on the UI thread when the menu opens or an item is chosen.
  	ExtendMenu func(m *ui.Menu)
@@ -13,10 +12,9 @@ index a43cb8d..b1f4c7d 100644
  	// encodes it, on the main thread, and reports whether it took the key;
  	// a key taken sends nothing, neither the text it types nor its
 diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
-index dfd333d..2a3880a 100644
 --- a/plugins/terminal/view.go
 +++ b/plugins/terminal/view.go
-@@ -42,7 +42,9 @@ func View(c *ui.Context, t *Terminal) ui.Element {
+@@ -44,7 +44,9 @@
  	}
  	e.Cursor(cursor)
  	e.HandleInput(v.input)
@@ -27,7 +25,7 @@ index dfd333d..2a3880a 100644
  	e.Draw(v.paint)
  	e.ContextMenu(v.menu)
  	return e
-@@ -144,7 +146,10 @@ type view struct {
+@@ -146,7 +148,10 @@
  	t        *Terminal
  	services ui.Services
  	// lang is the window's language, for the menu's items.
@@ -39,15 +37,15 @@ index dfd333d..2a3880a 100644
  
  	theme   *Theme
  	applied *Theme // the theme the emulator has
-@@ -627,7 +632,6 @@ func (v *view) keyDown(ev ui.InputEvent) bool {
+@@ -675,7 +680,6 @@
  		v.pending = &pendingKey{key: k, taken: true}
  		return true
  	}
--	mac := runtime.GOOS == "darwin"
+-	mac := goos == "darwin"
  	mods, key := ev.Mods, ev.Key
  	if b, ok := t.binding(mods, key); ok {
  		if v.perform(b.Action, b.Performable) || !b.Performable {
-@@ -637,8 +641,15 @@ func (v *view) keyDown(ev ui.InputEvent) bool {
+@@ -685,8 +689,15 @@
  			return true
  		}
  	}
@@ -56,7 +54,7 @@ index dfd333d..2a3880a 100644
 +
 +func (v *view) terminalKeyDown(ev ui.InputEvent) bool {
 +	t := v.t
-+	mac := runtime.GOOS == "darwin"
++	mac := goos == "darwin"
 +	mods, key := ev.Mods, ev.Key
  	if mods&ui.Super != 0 {
 -		return false // the app's shortcuts
@@ -64,7 +62,7 @@ index dfd333d..2a3880a 100644
  	}
  	k, unshifted := vtKey(key)
  	if k == vt.KeyUnidentified {
-@@ -852,7 +863,7 @@ func (v *view) encodeKey(k vt.KeyEvent, press bool) bool {
+@@ -917,7 +928,7 @@
  	if len(b) == 0 {
  		return false
  	}
@@ -73,7 +71,7 @@ index dfd333d..2a3880a 100644
  	if press {
  		t.term.ScrollToBottom()
  		t.term.SetSelection(nil)
-@@ -869,7 +880,7 @@ func (v *view) sendText(text string) {
+@@ -934,7 +945,7 @@
  		t.term.SetSelection(nil)
  	}
  	t.mu.Unlock()
@@ -84,7 +82,6 @@ index dfd333d..2a3880a 100644
  
 diff --git a/plugins/terminal/input_batch.go b/plugins/terminal/input_batch.go
 new file mode 100644
-index 0000000..bef86ab
 --- /dev/null
 +++ b/plugins/terminal/input_batch.go
 @@ -0,0 +1,86 @@
@@ -176,7 +173,6 @@ index 0000000..bef86ab
 +}
 diff --git a/plugins/terminal/input_batch_test.go b/plugins/terminal/input_batch_test.go
 new file mode 100644
-index 0000000..ad61770
 --- /dev/null
 +++ b/plugins/terminal/input_batch_test.go
 @@ -0,0 +1,56 @@

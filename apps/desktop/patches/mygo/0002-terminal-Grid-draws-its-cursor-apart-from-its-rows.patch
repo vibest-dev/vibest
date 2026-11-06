@@ -1,20 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: oxwen11 <iamoxwen@gmail.com>
-Date: Fri, 23 Oct 2026 14:41:52 +0800
-Subject: [PATCH 2/3] terminal: Grid draws its cursor apart from its rows
-
-Grid.Draw draws the rows alone and Grid.DrawCursor the cursor or the
-preedit alone, so an owner that caches the rows in a texture keeps it
-when the cursor moves or hides. View.draw's cursor code moves into
-drawCursor, called where it was.
----
- plugins/terminal/grid.go      | 24 +++++++++++++++---
- plugins/terminal/grid_test.go | 48 +++++++++++++++++++++++++++++++++++
- plugins/terminal/paint.go     | 11 ++++++--
- 3 files changed, 78 insertions(+), 5 deletions(-)
-
 diff --git a/plugins/terminal/grid.go b/plugins/terminal/grid.go
-index 00e07a6..c9fd12f 100644
 --- a/plugins/terminal/grid.go
 +++ b/plugins/terminal/grid.go
 @@ -1,6 +1,7 @@
@@ -25,7 +9,7 @@ index 00e07a6..c9fd12f 100644
  	"slices"
  	"unicode/utf8"
  
-@@ -22,7 +23,7 @@ type Grid struct {
+@@ -22,7 +23,7 @@
  	// hollow without it.
  	Focused bool
  	// Cursor is the cursor, and Preedit an input method's composition,
@@ -34,7 +18,7 @@ index 00e07a6..c9fd12f 100644
  	Cursor  GridCursor
  	Preedit string
  
-@@ -130,8 +131,18 @@ func (g *Grid) buildRow(line *rowCache, cells []Cell) {
+@@ -130,8 +131,18 @@
  	b.flush()
  }
  
@@ -54,7 +38,7 @@ index 00e07a6..c9fd12f 100644
  	v := &g.v
  	c := g.Cursor
  	style := vt.CursorBlock
-@@ -143,5 +154,12 @@ func (g *Grid) Draw(p *ui.Painter, r ui.Rect) {
+@@ -143,5 +154,12 @@
  	}
  	v.cursor = vt.Cursor{X: c.X, Y: c.Y, InView: c.Y >= 0 && c.Y < len(v.lines), Visible: c.Visible, Style: style}
  	v.focused, v.preedit = g.Focused, g.Preedit
@@ -69,10 +53,9 @@ index 00e07a6..c9fd12f 100644
 +	v.drawCursor(p, cur, curColor, curText, block, ox, oy, cw, ch, float32(v.baseline)/s)
  }
 diff --git a/plugins/terminal/grid_test.go b/plugins/terminal/grid_test.go
-index 17fd966..eb48660 100644
 --- a/plugins/terminal/grid_test.go
 +++ b/plugins/terminal/grid_test.go
-@@ -59,3 +59,51 @@ func TestGridRowAsView(t *testing.T) {
+@@ -59,3 +59,51 @@
  		t.Fatalf("CellSize %dx%d, grid %dx%d, view %dx%d", w, h, g.v.cellW, g.v.cellH, term.v.cellW, term.v.cellH)
  	}
  }
@@ -125,10 +108,9 @@ index 17fd966..eb48660 100644
 +	}
 +}
 diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
-index 89d31e8..b9d91e2 100644
 --- a/plugins/terminal/paint.go
 +++ b/plugins/terminal/paint.go
-@@ -613,11 +613,19 @@ func (v *view) draw(p *ui.Painter, r ui.Rect) {
+@@ -642,11 +642,19 @@
  	if h := v.hover; h.on() && h.row < len(v.lines) {
  		v.drawDeco(p, deco{h.x0, h.x1, vt.UnderlineSingle, v.linkColor(&v.lines[h.row], h)}, ox, oy+float32(h.row)*ch, cw, ch, base)
  	}
@@ -149,7 +131,7 @@ index 89d31e8..b9d91e2 100644
  		}
  	}
  	if block && v.cursor.Y < len(v.lines) {
-@@ -642,7 +650,6 @@ func (v *view) draw(p *ui.Painter, r ui.Rect) {
+@@ -671,7 +679,6 @@
  	if v.preedit != "" && v.focused {
  		v.drawPreedit(p, ox, oy, cw, ch, base)
  	}

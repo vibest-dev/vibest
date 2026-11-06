@@ -1,6 +1,5 @@
 diff --git a/plugins/terminal/input_owner_test.go b/plugins/terminal/input_owner_test.go
 new file mode 100644
-index 0000000..8c5a3cc
 --- /dev/null
 +++ b/plugins/terminal/input_owner_test.go
 @@ -0,0 +1,137 @@
@@ -142,10 +141,9 @@ index 0000000..8c5a3cc
 +	}
 +}
 diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
-index 6925bec..21ca1f9 100644
 --- a/plugins/terminal/paint.go
 +++ b/plugins/terminal/paint.go
-@@ -150,7 +150,7 @@ func (v *view) paint(p *ui.Painter, r ui.Rect) {
+@@ -154,7 +154,7 @@
  		t.term.SetMode(vt.ModeSyncOutput, false)
  		t.held = false
  	}
@@ -154,7 +152,7 @@ index 6925bec..21ca1f9 100644
  	if !held {
  		t.rs.BeginUpdate(t.term)
  	}
-@@ -184,6 +184,14 @@ func (v *view) paint(p *ui.Painter, r ui.Rect) {
+@@ -188,6 +188,14 @@
  	}
  	rs.Clean()
  	v.draw(p, r)
@@ -170,10 +168,9 @@ index 6925bec..21ca1f9 100644
  
  // resolved is a cell's style with its colors resolved.
 diff --git a/plugins/terminal/paste.go b/plugins/terminal/paste.go
-index 03ea381..fac0352 100644
 --- a/plugins/terminal/paste.go
 +++ b/plugins/terminal/paste.go
-@@ -280,9 +280,11 @@ func (t *Terminal) sendReply(p []byte) {
+@@ -280,9 +280,11 @@
  		if len(p) == 0 {
  			status = PasteSent
  		}
@@ -187,7 +184,7 @@ index 03ea381..fac0352 100644
  	}
  }
  
-@@ -316,7 +318,11 @@ func (t *Terminal) dropFiles(paths []string) {
+@@ -316,7 +318,11 @@
  	items := d.Items()
  	first, _ := items[0].Read(transfer.FileList)
  	items[0] = transfer.NewItem(transfer.Bytes(transfer.FileList, first), transfer.Bytes(transfer.URIList, first), text)
@@ -201,10 +198,9 @@ index 03ea381..fac0352 100644
  
  // quoting is how a shell takes a path as one argument, whatever it holds.
 diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
-index 4a8b958..fce382c 100644
 --- a/plugins/terminal/terminal.go
 +++ b/plugins/terminal/terminal.go
-@@ -97,6 +97,24 @@ type Options struct {
+@@ -103,6 +103,24 @@
  	// shows, for the other end to answer a program's questions about them
  	// (Terminal.UseTheme).
  	Conn io.ReadWriteCloser
@@ -229,7 +225,7 @@ index 4a8b958..fce382c 100644
  	// ResizeByConn leaves the size of the screen to whoever reads Conn:
  	// the view tells Conn the size it fits, with its Resize, and the
  	// screen takes a size only as Terminal.Resize sets it. A client of a
-@@ -469,13 +487,14 @@ type Terminal struct {
+@@ -508,13 +526,14 @@
  	quoting quoting
  
  	// mu guards the emulator, which the reader changes and frames read.
@@ -246,12 +242,12 @@ index 4a8b958..fce382c 100644
 +	asked     gridSize // what the view last asked Conn for, with ResizeByConn
 +	events    events
 +	closed    bool
-+	hasOutput bool     // output was parsed, not merely returned by Conn.Read
++	hasOutput bool
 +	clipOut   []string // what programs copied, for the view to write
- 	// clipForward are reads of the clipboard for a Mirror to pass on, with
- 	// ClipboardForward: whether each is of the primary selection. The
- 	// first Mirror to frame takes them, as one terminal answers a read.
-@@ -555,6 +574,11 @@ func New(opts Options) (*Terminal, error) {
+ 	// prompt is guarded by mu too; shellDir is immutable after New and removed
+ 	// once the program exits, including a terminal closed before it starts.
+ 	prompt   promptTracker
+@@ -599,6 +618,11 @@
  	}
  	opts.Font.Features = append([]string(nil), opts.Font.Features...)
  	t := &Terminal{opts: opts, done: make(chan struct{})}
@@ -263,9 +259,9 @@ index 4a8b958..fce382c 100644
  	t.binds = keybinds(&opts)
  	t.size = gridSize{80, 24, 8, 16}
  	var err error
-@@ -780,6 +804,10 @@ func (t *Terminal) write(p []byte) {
- 	var title string
- 	if t.term != nil {
+@@ -842,6 +866,10 @@
+ 			t.prompt.feed(p)
+ 		}
  		t.term.Write(p)
 +		t.hasOutput = t.hasOutput || len(p) > 0
 +		if len(p) > 0 && t.opts.OnOutput != nil {
@@ -274,10 +270,11 @@ index 4a8b958..fce382c 100644
  		ev, t.events = t.events, events{}
  		if ev.title {
  			title = t.term.Title()
-@@ -1060,6 +1088,22 @@ func (t *Terminal) ClearScreen() bool {
+@@ -1138,6 +1166,22 @@
+ 
  // ClearScrollback clears the scrollback, leaving the screen as it is.
  func (t *Terminal) ClearScrollback() { t.write([]byte("\x1b[3J")) }
- 
++
 +// CancelInput drops queued bytes, deferred paste/clipboard captures and local
 +// composition. Call on the UI thread when logical input ownership changes;
 +// captured writers must also reject an already-dequeued stale entry.
@@ -293,11 +290,10 @@ index 4a8b958..fce382c 100644
 +		v.reads, v.clipPrompt, v.clipOpen = nil, nil, false
 +	}
 +}
-+
+ 
  // Close closes the terminal: the program is hung up (SIGHUP), or Conn
  // closed, and the terminal frees its memory. A view of it then shows
- // nothing.
-@@ -1304,17 +1348,27 @@ func unhex(c byte) (byte, bool) {
+@@ -1395,17 +1439,27 @@
  // inputQueue writes what is typed to the program in order, from a
  // goroutine of its own: a program that does not read its input must not
  // block the reader, which answers its queries.
@@ -331,7 +327,7 @@ index 4a8b958..fce382c 100644
  }
  
  func (q *inputQueue) init() {
-@@ -1327,21 +1381,42 @@ func (q *inputQueue) push(p []byte) { q.pushDone(p, nil) }
+@@ -1418,21 +1472,42 @@
  
  // pushDone queues p, and done to run once it is written, on the queue's
  // goroutine.
@@ -363,9 +359,10 @@ index 4a8b958..fce382c 100644
 +		q.bytes += len(p)
 +		q.queue = append(q.queue, queued{writer: writer, p: p, done: done})
  		q.cond.Signal()
-+		return true
- 	}
+-	}
 -	q.mu.Unlock()
++		return true
++	}
 +	return false
  }
  
@@ -378,7 +375,7 @@ index 4a8b958..fce382c 100644
  	q.cond.Broadcast()
  	q.mu.Unlock()
  }
-@@ -1358,13 +1433,32 @@ func (q *inputQueue) run(w io.Writer) {
+@@ -1449,13 +1524,32 @@
  			return
  		}
  		item := q.queue[0]

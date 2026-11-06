@@ -1,17 +1,19 @@
+diff --git a/ui/input.go b/ui/input.go
 --- a/ui/input.go
 +++ b/ui/input.go
-@@ -108,6 +108,11 @@
- 		// Keys let go of elsewhere never come back up here.
+@@ -153,6 +153,10 @@
  		rt.modsChanged(0)
  		clear(rt.byPosition)
-+		// Local drags will not receive a release; cancel, never drop.
+ 		rt.releaseKeys()
 +		if d := rt.drag; d != nil && !d.native {
 +			rt.dragCancel()
 +			rt.drag = nil
 +		}
  		if p := rt.pressed; p != nil {
- 			// The release will not come: an element taking its input
- 			// gets one now.
+ 			x, y := p.local(rt.pointerX, rt.pointerY)
+ 			rt.endPress(p.input, x, y)
+diff --git a/ui/dragdrop_blur_test.go b/ui/dragdrop_blur_test.go
+new file mode 100644
 --- /dev/null
 +++ b/ui/dragdrop_blur_test.go
 @@ -0,0 +1,55 @@

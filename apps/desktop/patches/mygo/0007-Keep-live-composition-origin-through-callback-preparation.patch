@@ -1,3 +1,4 @@
+diff --git a/internal/darwin/surface_input.go b/internal/darwin/surface_input.go
 --- a/internal/darwin/surface_input.go
 +++ b/internal/darwin/surface_input.go
 @@ -133,8 +133,11 @@
@@ -13,6 +14,8 @@
  }
  
  func (s *surface) setMarkedText(text string, selected, replacement nsRange) {
+diff --git a/internal/darwin/surface_input_owner_test.go b/internal/darwin/surface_input_owner_test.go
+new file mode 100644
 --- /dev/null
 +++ b/internal/darwin/surface_input_owner_test.go
 @@ -0,0 +1,107 @@
@@ -88,7 +91,7 @@
 +						return false
 +					}
 +					sent = append(sent, e)
-+					return false
++					return e.Kind == platform.TextComposition
 +				}}}
 +				if update {
 +					s.setMarkedText(payload+"候", nsRange{Location: 1}, nsRange{Location: nsNotFound})

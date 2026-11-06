@@ -1,6 +1,5 @@
 diff --git a/plugins/terminal/prepare_paste_test.go b/plugins/terminal/prepare_paste_test.go
 new file mode 100644
-index 0000000..59348c9
 --- /dev/null
 +++ b/plugins/terminal/prepare_paste_test.go
 @@ -0,0 +1,59 @@
@@ -64,10 +63,9 @@ index 0000000..59348c9
 +	}
 +}
 diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
-index 5c51fea..4a4ceff 100644
 --- a/plugins/terminal/terminal.go
 +++ b/plugins/terminal/terminal.go
-@@ -266,6 +266,10 @@ type Options struct {
+@@ -275,6 +275,10 @@
  	// the clipboard's files or image (d.Files, transfer.PNG) for a remote
  	// program, then pastes their paths with Paste.
  	OnPaste func(d transfer.Data) bool
@@ -79,10 +77,9 @@ index 5c51fea..4a4ceff 100644
  	// offering. It runs on the UI thread; true suppresses the default paste.
  	OnDropFiles func(paths []string) bool
 diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
-index 2adbdae..c363961 100644
 --- a/plugins/terminal/view.go
 +++ b/plugins/terminal/view.go
-@@ -924,15 +924,22 @@ func (v *view) copied(text string, by CopySource) {
+@@ -989,15 +989,22 @@
  // read: it reads what was read here.
  func (v *view) paste() bool {
  	t := v.t
@@ -108,10 +105,9 @@ index 2adbdae..c363961 100644
  		}
  	case t.readsClipboard():
 diff --git a/ui/headless.go b/ui/headless.go
-index 7b9f32c..5ce9c9f 100644
 --- a/ui/headless.go
 +++ b/ui/headless.go
-@@ -33,10 +33,11 @@ type headless struct {
+@@ -33,10 +33,11 @@
  	rtl       bool
  	clipboard string
  	// clipboardData is what WriteClipboardData copied, with its formats.
@@ -127,7 +123,7 @@ index 7b9f32c..5ce9c9f 100644
  	// escapes counts the Escapes nothing handled.
  	escapes int
  	openErr error
-@@ -121,7 +122,10 @@ func (h *headless) readClipboardData(formats []transfer.Format) transfer.Data {
+@@ -132,7 +133,10 @@
  		d = transfer.TextData(h.clipboard)
  	}
  	if formats == nil {
@@ -139,7 +135,7 @@ index 7b9f32c..5ce9c9f 100644
  	}
  	var reps []transfer.Representation
  	for _, f := range formats {
-@@ -141,7 +145,12 @@ func (h *headless) writeClipboardData(d transfer.Data) {
+@@ -152,7 +156,12 @@
  	h.clipboard = string(b)
  }
  
@@ -153,7 +149,7 @@ index 7b9f32c..5ce9c9f 100644
  
  func (h *headless) startDataDrag(d transfer.Data, local any, o transfer.DragOptions, x, y float32) error {
  	h.dragData, h.dragLocal, h.dragOptions = d.Snapshot(), local, o
-@@ -768,6 +777,11 @@ func (t *Tester) SetClipboard(s string) { t.h.clipboard, t.h.clipboardData = s,
+@@ -1021,6 +1030,11 @@
  // another app copies HTML.
  func (t *Tester) ClipboardData() transfer.Data { return t.h.readClipboardData(nil) }
  

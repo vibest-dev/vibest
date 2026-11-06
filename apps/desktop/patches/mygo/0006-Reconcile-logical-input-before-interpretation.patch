@@ -1,10 +1,12 @@
+diff --git a/ui/element.go b/ui/element.go
 --- a/ui/element.go
 +++ b/ui/element.go
-@@ -332,13 +332,14 @@
+@@ -443,14 +443,15 @@
  
  	// Input the element takes itself (HandleInput), and where the caret of
  	// the text it takes is (TextCaret).
 -	inputFn     func(InputEvent) bool
+-	observeFn   func(InputEvent) // the input in it (ObserveInput)
 -	textClient  TextInputClient
 -	caret       Rect
 -	textSession uint64
@@ -12,6 +14,7 @@
 -	noIME       bool // InputMethod(false)
 -	copyData    func(parts []SelectedText) transfer.Data
 +	inputFn      func(InputEvent) bool
++	observeFn    func(InputEvent) // the input in it (ObserveInput)
 +	textClient   TextInputClient
 +	caret        Rect
 +	textSession  uint64
@@ -22,13 +25,15 @@
  
  	// Content.
  	spans    []Span // of a RichText
+diff --git a/ui/context.go b/ui/context.go
 --- a/ui/context.go
 +++ b/ui/context.go
-@@ -628,13 +628,14 @@
+@@ -881,14 +881,15 @@
  
  	// input, caret and takesText are those of the last frame's element
  	// (HandleInput, TextCaret).
 -	input       func(InputEvent) bool
+-	observe     func(InputEvent) // ObserveInput
 -	textClient  TextInputClient
 -	textAdapter *textInputAdapter
 -	caret       Rect
@@ -36,6 +41,7 @@
 -	takesText   bool
 -	noIME       bool
 +	input        func(InputEvent) bool
++	observe      func(InputEvent) // ObserveInput
 +	textClient   TextInputClient
 +	textAdapter  *textInputAdapter
 +	caret        Rect
@@ -46,19 +52,21 @@
  	// copyData is what a Selectable container's selection copies as
  	// (CopyData).
  	copyData func(parts []SelectedText) transfer.Data
+diff --git a/ui/runtime.go b/ui/runtime.go
 --- a/ui/runtime.go
 +++ b/ui/runtime.go
-@@ -1014,6 +1014,7 @@
- 	s.role = e.role
+@@ -1400,6 +1400,7 @@
+ 	s.role, s.focusHighlights = e.role, e.focusHighlights
  	s.input, s.caret, s.takesText, s.noIME = e.inputFn, e.caret, e.takesText, e.noIME
  	s.textSession = e.textSession
 +	s.prepareInput = e.prepareInput
- 	s.copyData = e.copyData
- 	if s.textClient != e.textClient {
- 		if s.textAdapter != nil {
+ 	if s.observe = e.observeFn; s.observe != nil {
+ 		rt.observers++
+ 	}
+diff --git a/ui/handler.go b/ui/handler.go
 --- a/ui/handler.go
 +++ b/ui/handler.go
-@@ -104,6 +104,10 @@
+@@ -187,6 +187,10 @@
  	return e
  }
  
@@ -69,6 +77,7 @@
  // TextInputSession identifies the logical text owner without changing widget focus
  // or pointer identity. A changed key cancels only the previous composition.
  func (e *node) TextInputSession(key any) *node {
+diff --git a/ui/input_prepare.go b/ui/input_prepare.go
 --- a/ui/input_prepare.go
 +++ b/ui/input_prepare.go
 @@ -2,10 +2,21 @@
@@ -94,17 +103,16 @@
  		return
  	}
  	if h, ok := rt.host.(*windowHost); ok {
+diff --git a/ui/input.go b/ui/input.go
 --- a/ui/input.go
 +++ b/ui/input.go
-@@ -12,13 +12,16 @@
- // an element takes files dragged over or dropped at the event's position.
+@@ -14,11 +14,14 @@
+ // the key pressed or the composition (platform.WindowHandler.SurfaceEvent).
  func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
  	if ev.Kind == platform.SurfacePrepareInput {
 -		return !rt.inFrame && (rt.activationPending || len(rt.keys) > 0)
 +		return rt.needsInputFrame()
  	}
- 	// Drain completed activation before the next physical intent or terminal
- 	// entry, including menu commands/commits that never call native keyDown.
  	switch ev.Kind {
  	case platform.PointerDown, platform.KeyPressed, platform.TextInput, platform.TextComposition, platform.SurfaceCommand:
  		rt.prepareInputFrame()
@@ -112,11 +120,12 @@
 +	if ev.Session != 0 && ev.Session != rt.ime.state.Session {
 +		return true
  	}
- 	if ev.Kind != platform.SurfaceFrame {
- 		// Whatever the event changes, the next frame builds anew.
+ 	if ev.Kind == platform.SurfaceCommandEnabled {
+ 		// A menu asking about its item changes nothing.
+diff --git a/internal/platform/surface.go b/internal/platform/surface.go
 --- a/internal/platform/surface.go
 +++ b/internal/platform/surface.go
-@@ -259,7 +259,10 @@
+@@ -379,7 +379,10 @@
  
  // SurfaceEvent is input on a Surface, or a change of it.
  type SurfaceEvent struct {
@@ -128,9 +137,10 @@
  	// X and Y locate the pointer in DIPs relative to the surface.
  	X, Y float64
  	// Button is 0 for the primary button, 1 the secondary, 2 the middle.
+diff --git a/internal/darwin/surface.go b/internal/darwin/surface.go
 --- a/internal/darwin/surface.go
 +++ b/internal/darwin/surface.go
-@@ -130,10 +130,11 @@
+@@ -172,10 +172,11 @@
  
  	// input is the state of the text input with the keyboard; marked is
  	// the input method's composition and markedSel its selection in it.
@@ -138,24 +148,24 @@
 -	marked    string
 -	markedSel nsRange
 -	keyDown   bool // in interpretKeyEvents: text typed with the key
++	keySession uint64
 +	input      platform.TextInputState
 +	marked     string
 +	markedSel  nsRange
-+	keyDown    bool   // in interpretKeyEvents: text typed with the key
-+	keySession uint64 // captured before interpretation, not inferred by its callbacks
- 
- 	// Accessibility: whether the content describes its frames, the last
- 	// tree, the elements of its nodes and those at the top (an NSArray).
-@@ -721,7 +722,7 @@
- 		return method(name+":", func(self id, _ objc.SEL, sender id) {
- 			if s := b().surfaceOf(self); s != nil {
++	keyDown    bool // in interpretKeyEvents: text typed with the key
+ 	// refused: the content left the composition set in
+ 	// interpretKeyEvents, given up once it returns.
+ 	refused bool
+@@ -1125,7 +1126,7 @@
+ 				ev := send(s.w.b.app, "currentEvent")
+ 				repeat := ev != 0 && sendInt(ev, "type") == 10 && sendBool(ev, "isARepeat") // NSEventTypeKeyDown
  				s.prepareInput()
--				s.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name})
-+				s.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name, Session: s.input.Session})
+-				s.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name, Repeat: repeat})
++				s.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name, Repeat: repeat, Session: s.input.Session})
  			}
  		})
  	}
-@@ -892,6 +893,7 @@
+@@ -1333,6 +1334,7 @@
  				return
  			}
  			s.prepareInput()
@@ -163,34 +173,25 @@
  			mods := eventMods(ev)
  			text := s.input.Active && mods&(platform.ModSuper|platform.ModCtrl) == 0
  			ime := text && !s.input.NoInputMethod
-@@ -900,20 +902,26 @@
+@@ -1341,7 +1343,7 @@
  			// giving the composition up, as GTK's and IMM32's filtering
  			// keeps them on Linux and Windows.
  			if !ime || !s.hasMarkedText() {
--				s.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: eventKey(ev), PhysicalKey: physicalKey(ev), Mods: mods, Repeat: sendBool(ev, "isARepeat")})
-+				s.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: eventKey(ev), PhysicalKey: physicalKey(ev), Mods: mods, Repeat: sendBool(ev, "isARepeat"), Session: session})
+-				s.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: eventKey(ev), PhysicalKey: physicalKey(ev), Code: eventKeyCode(ev), Mods: mods, Repeat: sendBool(ev, "isARepeat")})
++				s.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: eventKey(ev), PhysicalKey: physicalKey(ev), Code: eventKeyCode(ev), Mods: mods, Repeat: sendBool(ev, "isARepeat"), Session: session})
  			}
  			// Input methods see the key while a text input has the focus;
  			// they answer with insertText: or setMarkedText:.
- 			if ime {
-+				s.keySession = session
- 				s.keyDown = true
- 				send(self, "interpretKeyEvents:", uintptr(nsArray(ev)))
- 				s.keyDown = false
-+				s.keySession = 0
- 			} else if text {
-+				s.keySession = session
-+				s.keyDown = true
- 				// Input methods off: the key types the characters of the
- 				// layout, as winit's keys do without them.
+@@ -1349,6 +1351,8 @@
+ 			// for press and hold's accents to replace, as a terminal's
+ 			// input, which takes text itself (no Client): the accents
+ 			// menu, holding the repeats back, would type nothing there.
++			s.keySession, s.keyDown = session, true
++			defer func() { s.keySession, s.keyDown = 0, false }()
+ 			if ime && s.input.Client == nil && sendBool(ev, "isARepeat") && !s.hasMarkedText() {
  				if t := typedChars(stringOf(send(ev, "characters"))); t != "" {
  					s.insertText(t, nsRange{Location: nsNotFound})
- 				}
-+				s.keyDown = false
-+				s.keySession = 0
- 			}
- 		}),
- 		method("keyUp:", func(self id, _ objc.SEL, ev id) {
+diff --git a/internal/darwin/surface_input.go b/internal/darwin/surface_input.go
 --- a/internal/darwin/surface_input.go
 +++ b/internal/darwin/surface_input.go
 @@ -125,15 +125,27 @@
@@ -224,7 +225,7 @@
  	if replacement.Location != nsNotFound {
  		ev.Replace = true
  		ev.From, ev.To = s.textRange(replacement)
-@@ -143,21 +155,21 @@
+@@ -158,21 +170,21 @@
  }
  
  func (s *surface) insertText(text string, replacement nsRange) {
@@ -250,7 +251,7 @@
  	}
  	if text != "" || ev.Replace {
  		s.send(ev)
-@@ -187,7 +199,7 @@
+@@ -202,7 +214,7 @@
  	}
  	if s.marked != "" {
  		s.marked = ""
@@ -259,27 +260,26 @@
  	}
  }
  
+diff --git a/ui/api_gen.go b/ui/api_gen.go
 --- a/ui/api_gen.go
 +++ b/ui/api_gen.go
-@@ -4833,6 +4833,18 @@
- 	return _node.PointerPosition()
- }
- 
-+// PrepareInput requests an existing surface frame before input when the focused
-+// element's model changed. The query runs outside View and must not reenter UI.
+@@ -6824,6 +6824,14 @@
+ // primary button, unless it is disabled. A press of another button, as a
+ // right-click's, is no press here, as CSS's :active and drags on the web
+ // have it: PressedButton tells which button presses the element.
 +func (_handle Element) PrepareInput(changed func() bool) Element {
 +	_node := _handle.node()
 +	if _node == nil {
 +		return Element{}
 +	}
-+	_ctx := _node.c
-+	_ = _ctx
 +	return wrapElement(_node.PrepareInput(changed))
 +}
 +
- // Pressed reports whether the element is being pressed with the pointer,
- // unless it is disabled.
  func (_handle Element) Pressed() bool {
+ 	_node := _handle.node()
+ 	if _node == nil {
+diff --git a/ui/input_owner_prepare_test.go b/ui/input_owner_prepare_test.go
+new file mode 100644
 --- /dev/null
 +++ b/ui/input_owner_prepare_test.go
 @@ -0,0 +1,67 @@
@@ -350,3 +350,11 @@
 +		t.Fatal("fresh untagged common entry dropped instead of preparing its owner")
 +	}
 +}
+diff --git a/ui/layoutcache_test.go b/ui/layoutcache_test.go
+--- a/ui/layoutcache_test.go
++++ b/ui/layoutcache_test.go
+@@ -458,3 +458,3 @@
+-		"inputFn observeFn textClient caret textSession takesText noIME copyData webView maximizeButton fit gray objectPos dismissed rotate label widget role " +
++		"inputFn observeFn textClient caret textSession prepareInput takesText noIME copyData webView maximizeButton fit gray objectPos dismissed rotate label widget role " +
+ 		"checked expanded busy current autoComplete orient tip highlighted focusHighlights keepOpen accValue accRange hasRange accFill accStep barInset scrollBase hideScrollbars keepScrollbars barsFrom snap snapAlign " +
+ 		"listRow rowIndex rowsOf focusGroup groupSelects segment activeDescendant nameFrom nameJoin labelledBy focusTo " +

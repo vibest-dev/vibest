@@ -1,6 +1,5 @@
 diff --git a/plugins/terminal/automatic_input_test.go b/plugins/terminal/automatic_input_test.go
 new file mode 100644
-index 0000000..fbc51b6
 --- /dev/null
 +++ b/plugins/terminal/automatic_input_test.go
 @@ -0,0 +1,57 @@
@@ -62,10 +61,9 @@ index 0000000..fbc51b6
 +	}
 +}
 diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
-index 4a4ceff..c80647c 100644
 --- a/plugins/terminal/terminal.go
 +++ b/plugins/terminal/terminal.go
-@@ -604,7 +604,7 @@ func New(opts Options) (*Terminal, error) {
+@@ -648,7 +648,7 @@
  	t.term, err = vt.NewTerminal(80, 24, vt.Effects{
  		WritePTY: func(p []byte) {
  			if !t.replying {
@@ -74,7 +72,7 @@ index 4a4ceff..c80647c 100644
  				return
  			}
  			t.replying = false
-@@ -999,7 +999,7 @@ func (t *Terminal) schemeChanged(old, theme *Theme) {
+@@ -1072,7 +1072,7 @@
  	if theme.dark() {
  		n = 1
  	}
@@ -83,7 +81,7 @@ index 4a4ceff..c80647c 100644
  }
  
  // SetTheme changes the colors, as Options.Theme and DarkTheme.
-@@ -1385,9 +1385,14 @@ type inputQueue struct {
+@@ -1476,9 +1476,14 @@
  
  // queued is input to write, and what to run once it is written.
  type queued struct {
@@ -101,7 +99,7 @@ index 4a4ceff..c80647c 100644
  }
  
  func (q *inputQueue) init() {
-@@ -1411,7 +1416,23 @@ func (q *inputQueue) pushDone(p []byte, done func()) bool {
+@@ -1502,7 +1507,23 @@
  	return q.pushOwned(p, done, writer)
  }
  
@@ -125,7 +123,7 @@ index 4a4ceff..c80647c 100644
  	q.mu.Lock()
  	defer q.mu.Unlock()
  	q.init()
-@@ -1429,7 +1450,7 @@ func (q *inputQueue) pushOwned(p []byte, done func(), writer io.Writer) bool {
+@@ -1520,7 +1541,7 @@
  			}
  		}
  		q.bytes += len(p)
@@ -134,7 +132,7 @@ index 4a4ceff..c80647c 100644
  		q.cond.Signal()
  		return true
  	}
-@@ -1466,7 +1487,13 @@ func (q *inputQueue) run(w io.Writer) {
+@@ -1557,7 +1578,13 @@
  			writer = item.writer
  		}
  		if len(item.p) > 0 || item.writer != nil {

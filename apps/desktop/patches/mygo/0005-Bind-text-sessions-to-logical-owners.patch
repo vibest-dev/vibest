@@ -1,16 +1,19 @@
+diff --git a/ui/element.go b/ui/element.go
 --- a/ui/element.go
 +++ b/ui/element.go
-@@ -332,12 +332,13 @@
+@@ -443,13 +443,14 @@
  
  	// Input the element takes itself (HandleInput), and where the caret of
  	// the text it takes is (TextCaret).
 -	inputFn    func(InputEvent) bool
+-	observeFn  func(InputEvent) // the input in it (ObserveInput)
 -	textClient TextInputClient
 -	caret      Rect
 -	takesText  bool
 -	noIME      bool // InputMethod(false)
 -	copyData   func(parts []SelectedText) transfer.Data
 +	inputFn     func(InputEvent) bool
++	observeFn   func(InputEvent) // the input in it (ObserveInput)
 +	textClient  TextInputClient
 +	caret       Rect
 +	textSession uint64
@@ -20,9 +23,10 @@
  
  	// Content.
  	spans    []Span // of a RichText
+diff --git a/ui/context.go b/ui/context.go
 --- a/ui/context.go
 +++ b/ui/context.go
-@@ -632,6 +632,7 @@
+@@ -886,6 +886,7 @@
  	textClient  TextInputClient
  	textAdapter *textInputAdapter
  	caret       Rect
@@ -30,19 +34,21 @@
  	takesText   bool
  	noIME       bool
  	// copyData is what a Selectable container's selection copies as
+diff --git a/ui/runtime.go b/ui/runtime.go
 --- a/ui/runtime.go
 +++ b/ui/runtime.go
-@@ -1013,6 +1013,7 @@
+@@ -1399,6 +1399,7 @@
  	s.webView = e.webView
- 	s.role = e.role
+ 	s.role, s.focusHighlights = e.role, e.focusHighlights
  	s.input, s.caret, s.takesText, s.noIME = e.inputFn, e.caret, e.takesText, e.noIME
 +	s.textSession = e.textSession
- 	s.copyData = e.copyData
- 	if s.textClient != e.textClient {
- 		if s.textAdapter != nil {
+ 	if s.observe = e.observeFn; s.observe != nil {
+ 		rt.observers++
+ 	}
+diff --git a/ui/handler.go b/ui/handler.go
 --- a/ui/handler.go
 +++ b/ui/handler.go
-@@ -104,6 +104,13 @@
+@@ -187,6 +187,13 @@
  	return e
  }
  
@@ -56,19 +62,20 @@
  // InputMethod sets whether the system's input methods compose text for the
  // element while it has the keyboard focus, as they do by default for one
  // that takes text (HandleTextInput, TextCaret). Turned off, keys type the
-@@ -137,6 +144,9 @@
+@@ -233,6 +240,9 @@
  	ev.X, ev.Y = s.local(rt.pointerX, rt.pointerY)
  	ev.Time = rt.now()
  	ev.Session = s.id
 +	if s.textSession != 0 {
 +		ev.Session = s.textSession
 +	}
- 	if ev.Kind == InputScroll {
- 		ev.DX, ev.DY = s.vector(rt.pointerX, rt.pointerY, ev.DX, ev.DY)
- 	}
+ 	switch ev.Kind {
+ 	case InputPointerDown, InputPointerUp, InputPointerMove:
+ 		ev.Pointer, ev.Pressure = rt.pointerType, rt.pressure
+diff --git a/ui/input.go b/ui/input.go
 --- a/ui/input.go
 +++ b/ui/input.go
-@@ -965,6 +965,9 @@
+@@ -1399,6 +1399,9 @@
  	}
  	if t.Active {
  		t.Session = rt.focused
@@ -78,9 +85,10 @@
  	}
  	if t != rt.ime.state {
  		if t.Client != rt.ime.state.Client {
+diff --git a/ui/api_gen.go b/ui/api_gen.go
 --- a/ui/api_gen.go
 +++ b/ui/api_gen.go
-@@ -5486,6 +5486,18 @@
+@@ -7825,6 +7825,18 @@
  	return wrapElement(_node.TextColor(c))
  }
  
@@ -99,6 +107,8 @@
  // TextRanges styles runs of a text input's text, in the frames that call
  // it. Ranges may overlap and nest, as the attributes of an attributed
  // string do: where they do, each of Color and Weight is that of the last
+diff --git a/ui/text_input_session_test.go b/ui/text_input_session_test.go
+new file mode 100644
 --- /dev/null
 +++ b/ui/text_input_session_test.go
 @@ -0,0 +1,43 @@
@@ -145,3 +155,11 @@
 +		t.Fatal("new owner cannot compose")
 +	}
 +}
+diff --git a/ui/layoutcache_test.go b/ui/layoutcache_test.go
+--- a/ui/layoutcache_test.go
++++ b/ui/layoutcache_test.go
+@@ -458,3 +458,3 @@
+-		"inputFn observeFn textClient caret takesText noIME copyData webView maximizeButton fit gray objectPos dismissed rotate label widget role " +
++		"inputFn observeFn textClient caret textSession takesText noIME copyData webView maximizeButton fit gray objectPos dismissed rotate label widget role " +
+ 		"checked expanded busy current autoComplete orient tip highlighted focusHighlights keepOpen accValue accRange hasRange accFill accStep barInset scrollBase hideScrollbars keepScrollbars barsFrom snap snapAlign " +
+ 		"listRow rowIndex rowsOf focusGroup groupSelects segment activeDescendant nameFrom nameJoin labelledBy focusTo " +

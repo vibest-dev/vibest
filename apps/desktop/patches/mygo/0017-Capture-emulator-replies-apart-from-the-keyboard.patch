@@ -1,8 +1,7 @@
 diff --git a/plugins/terminal/automatic_input_test.go b/plugins/terminal/automatic_input_test.go
-index fbc51b6..5d2064e 100644
 --- a/plugins/terminal/automatic_input_test.go
 +++ b/plugins/terminal/automatic_input_test.go
-@@ -55,3 +55,24 @@ func TestEmulatorRepliesFallBackToWriteWithoutAutomaticWriter(t *testing.T) {
+@@ -55,3 +55,24 @@
  		t.Fatalf("got %q", out.String())
  	}
  }
@@ -28,10 +27,9 @@ index fbc51b6..5d2064e 100644
 +	}
 +}
 diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
-index c80647c..8b3110c 100644
 --- a/plugins/terminal/terminal.go
 +++ b/plugins/terminal/terminal.go
-@@ -101,7 +101,8 @@ type Options struct {
+@@ -107,7 +107,8 @@
  	// A nil writer discards that entry. A captured writer may return
  	// ErrInputCanceled to discard stale input without closing the queue.
  	// It can run under the terminal lock and must not call Terminal methods.
@@ -41,7 +39,7 @@ index c80647c..8b3110c 100644
  	// InputLimit is the largest captured input payload; zero keeps 1 MiB.
  	InputLimit int
  	// OnInputError reports rejected capacity or fatal writes. It may run under
-@@ -593,7 +594,7 @@ func New(opts Options) (*Terminal, error) {
+@@ -637,7 +638,7 @@
  	}
  	opts.Font.Features = append([]string(nil), opts.Font.Features...)
  	t := &Terminal{opts: opts, done: make(chan struct{})}
@@ -50,7 +48,7 @@ index c80647c..8b3110c 100644
  	t.in.limit = 1 << 20
  	if opts.InputLimit > 0 {
  		t.in.limit = min(t.in.limit, opts.InputLimit)
-@@ -1373,14 +1374,15 @@ var ErrInputCanceled = errors.New("terminal: captured input canceled")
+@@ -1464,14 +1465,15 @@
  var ErrInputFull = errors.New("terminal: input capacity exceeded; rejected input was not replayed, earlier parts may have been sent")
  
  type inputQueue struct {
@@ -74,7 +72,7 @@ index c80647c..8b3110c 100644
  }
  
  // queued is input to write, and what to run once it is written.
-@@ -1418,7 +1420,12 @@ func (q *inputQueue) pushDone(p []byte, done func()) bool {
+@@ -1509,7 +1511,12 @@
  
  func (q *inputQueue) pushAutomatic(p []byte) bool {
  	var writer io.Writer

@@ -1,10 +1,10 @@
 module vibest-desktop
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/ebitengine/purego v0.11.1
-	github.com/egoist/mygo v0.6.0
+	github.com/egoist/mygo v0.7.5-0.20261106112742-9092c954015a
 	golang.org/x/text v0.43.0
 )
 
