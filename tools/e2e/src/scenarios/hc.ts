@@ -6,7 +6,7 @@ import { expect, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { ask, delegatingModel, piDir, project } from "./inbox.ts"
 
 type Entry = { id: string; agent: string; status: string; turnState: string }
-type Sample = { at: number; status: string; turnState: string }
+type Sample = { at: number; end: number; status: string; turnState: string }
 type HcListed = { address: string; name?: string | null; state: string }
 type HcTerminal = {
   address: string
@@ -103,8 +103,10 @@ const checks: ReadonlyArray<Check> = [
         const sampler = (async () => {
           while (sampling) {
             const at = Date.now()
-            for (const e of await w.json<Array<Entry>>(["ls"], { cwd: repo }).catch(() => [] as Array<Entry>))
-              samples.set(e.id, [...(samples.get(e.id) ?? []), { at, status: e.status, turnState: e.turnState }])
+            const listed = await w.json<Array<Entry>>(["ls"], { cwd: repo }).catch(() => [] as Array<Entry>)
+            const end = Date.now()
+            for (const e of listed)
+              samples.set(e.id, [...(samples.get(e.id) ?? []), { at, end, status: e.status, turnState: e.turnState }])
             await Bun.sleep(100)
           }
         })()
@@ -163,7 +165,7 @@ const checks: ReadonlyArray<Check> = [
         for (const marker of ["one", "two"]) {
           const turn = model.answered.find((t) => t.marker === marker)
           expect(turn !== undefined, `the model never answered the subagent's ${marker} task`)
-          const during = subSeen.filter((x) => x.at > turn!.from + 500 && x.at < turn!.to)
+          const during = subSeen.filter((x) => x.at > turn!.from + 500 && x.end < turn!.to)
           expect(
             during.length > 0 && during.every((x) => x.status === "working"),
             `the subagent was not shown working while the model held its ${marker} answer (${turn!.from % 100_000}-${turn!.to % 100_000}): ${shown(sub)}`,
