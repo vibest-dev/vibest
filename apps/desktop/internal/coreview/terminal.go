@@ -18,6 +18,8 @@ type Terminal struct {
 	Viewer     *core.Viewer
 	keyboard   *core.Keyboard
 	fitted     atomic.Bool
+	shown      atomic.Bool
+	draw       atomic.Pointer[func()]
 	visible    func() bool
 	frameOwner core.Owner
 	mode       atomic.Uint32
@@ -32,6 +34,7 @@ func New(v *core.Viewer, k *core.Keyboard, opts terminal.Options) (*Terminal, er
 	opts.TextInputReady = t.InputReady
 	output := opts.OnOutput
 	opts.OnOutput = func(p []byte) {
+		before := t.mode.Load()
 		scan := append(t.modeTail, p...)
 		if bytes.Contains(scan, []byte("\x1b[?9001h")) {
 			t.mode.Store(2)
@@ -39,6 +42,11 @@ func New(v *core.Viewer, k *core.Keyboard, opts terminal.Options) (*Terminal, er
 			t.mode.Store(1)
 		}
 		t.modeTail = append([]byte(nil), scan[max(0, len(scan)-7):]...)
+		if t.mode.Load() != before && t.shown.Load() {
+			if draw := t.draw.Load(); draw != nil {
+				(*draw)()
+			}
+		}
 		if output != nil {
 			output(p)
 		}
@@ -85,7 +93,10 @@ func New(v *core.Viewer, k *core.Keyboard, opts terminal.Options) (*Terminal, er
 func (t *Terminal) Select() { t.fitted.Store(false); t.keyboard.Select(t.Viewer); t.VT.CancelInput() }
 func (t *Terminal) Cancel() { t.fitted.Store(false); t.keyboard.Deselect(t.Viewer); t.VT.CancelInput() }
 
-func (t *Terminal) SetVisible(shown bool) { t.VT.SetVisible(shown) }
+func (t *Terminal) SetVisible(shown bool) {
+	t.shown.Store(shown)
+	t.VT.SetVisible(shown)
+}
 
 func (t *Terminal) Fitted() bool { return t.fitted.Load() && t.visible != nil && t.visible() }
 
@@ -110,6 +121,8 @@ func (t *Terminal) InputError() error {
 	return nil
 }
 func (t *Terminal) View(c *ui.Context) ui.Element {
+	draw := c.Services().Invalidate
+	t.draw.Store(&draw)
 	e := terminal.View(c, t.VT)
 	bounds := ui.Local(e, "input-bounds", func() ui.Handle { return ui.Handle{} })
 	e.Bind(bounds)

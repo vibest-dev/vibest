@@ -118,3 +118,22 @@ func TestCoreOutputIdenticalTitleEventsDoNotRequestFrames(t *testing.T) {
 		t.Fatalf("hidden terminal sidebar status=%q", status)
 	}
 }
+
+func TestCoreOutputInputModeChangeUpdatesVisibleReadiness(t *testing.T) {
+	a, _, tt := coreActivityUI(t)
+	view := readyCorePane(t, a, tt, "a")
+	for range 10 {
+		tt.Frame()
+		time.Sleep(5 * time.Millisecond)
+	}
+	if tt.FramePending() {
+		t.Fatal("fixture did not settle")
+	}
+	view.VT.Feed([]byte("\x1b[?9001h"))
+	if view.InputError() == nil {
+		t.Fatal("unsupported input mode was not parsed")
+	}
+	if !tt.FramePending() {
+		t.Fatal("changed input-readiness notice did not request a frame")
+	}
+}
