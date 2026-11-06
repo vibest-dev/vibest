@@ -180,6 +180,7 @@ describe("envelope", () => {
     assert.isFalse(isUsageLimitError("model_not_found"))
     assert.isFalse(isUsageLimitError("model_not_found: usage limit"))
     assert.isFalse(isUsageLimitError("server_error: too many requests"))
+    assert.isFalse(isUsageLimitError("server_error: the assistant said rate limit"))
     assert.isFalse(isUsageLimitError("aborted"))
     assert.isFalse(isUsageLimitError(undefined))
     assert.strictEqual(outcome("t", undefined), 'Agent "t" finished')
@@ -1430,9 +1431,10 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       assert.deepInclude(turnEndFrom(harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1), {
         error: "boom: why",
       })
-      assert.deepInclude(turnEndFrom(harnesses.get("cursor"), { text: "x", conversation_id: "--flag" }, 1), {
-        conversationId: undefined,
-      })
+      for (const bad of ["--flag", "-f", "--yolo", "--force", "a b", ""])
+        assert.deepInclude(turnEndFrom(harnesses.get("cursor"), { text: "x", conversation_id: bad }, 1), {
+          conversationId: undefined,
+        })
       assert.isUndefined(turnEndOf(harnesses.get("claude"), "general", "{", 1))
     }),
   )

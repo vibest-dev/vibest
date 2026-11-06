@@ -14,6 +14,7 @@ import {
   makeRepository,
   processEnds,
   settled,
+  sh,
   tempDirectory,
   testLayer,
   type TestOptions,
@@ -47,7 +48,7 @@ const workingSession = Effect.gen(function* () {
   const row = (yield* db.getSession(id))!
   const worktree = yield* db.sessionDirectory(row.id)
   if (worktree === undefined) return yield* Effect.die(`spawned ${id} has no worktree path`)
-  return { id, pane, sessions, db, herdr, worktree, rules: yield* systemPromptFile(id) }
+  return { id, repo, pane, sessions, db, herdr, worktree, rules: yield* systemPromptFile(id) }
 })
 
 const idleSession = Effect.gen(function* () {
@@ -85,17 +86,19 @@ const removeTimingCwd = (sessions: Sessions["Service"], id: string) =>
 
 describe.concurrent("vibest rm: process proof", () => {
   test(
-    "the terminal's close is recorded; no process works in the worktree: stopped, worktree and files removed",
+    "the terminal's close is recorded; no process works in the worktree: stopped, worktree and files removed, the branch kept; a second rm does nothing",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const fake = yield* FakeProcesses
-      const { id, sessions, db, worktree, rules } = yield* idleSession
+      const { id, repo, sessions, db, worktree, rules } = yield* idleSession
+      yield* sh(worktree, "switch", "-q", "-c", "feat/x")
       const out = yield* sessions.remove(id)
       assert.deepInclude(out, {
         processes: "exited",
         pane: "closed",
         workspace: "none",
         worktree: "removed",
+        branch: "feat/x",
         reasons: [],
       })
       assert.deepStrictEqual(yield* fake.probed, [], "the runtime's close is the process proof: vibestd probes no PID")
@@ -105,6 +108,8 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.match(worktree.split("/").at(-1)!, /^[0-9a-f]{4}$/, "a 4-hex worktree name, not the session id")
       assert.isFalse(yield* fs.exists(worktree))
       assert.isFalse(yield* fs.exists(rules))
+      assert.strictEqual(yield* sh(repo, "branch", "--list", "feat/x"), "feat/x")
+      assert.deepInclude(yield* sessions.remove(id), { worktree: "gone", pane: "none", workspace: "none" })
     }),
   )
 
@@ -148,7 +153,7 @@ describe.concurrent("vibest rm: process proof", () => {
   )
 
   test(
-    "a close the runtime fails: the terminal is kept and nothing proven; a terminal already gone counts as closed",
+    "a close the runtime fails: the terminal is kept, nothing proven and the session not stopped, and a retry finishes; a terminal already gone counts as closed",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const a = yield* idleSession
@@ -159,6 +164,8 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.deepInclude(yield* Fiber.join(removing), { processes: "unknown", pane: "kept", worktree: "kept" })
       assert.isTrue(HashMap.has(yield* a.herdr.panes, a.pane))
       assert.deepStrictEqual(yield* processEnds(a.id), [])
+      assert.isNull((yield* a.db.getSession(a.id))!.exitedAt)
+      assert.deepInclude(yield* a.sessions.remove(a.id), { pane: "closed", worktree: "removed" })
 
       const b = yield* idleSession
       const closeByHand = b.herdr.runtime.close({ machine: "local", id: b.pane })
