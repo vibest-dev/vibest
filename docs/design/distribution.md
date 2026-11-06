@@ -22,7 +22,13 @@ package (bun does at times), it prints the exact command that adds it.
 `vibest update` upgrades an npm install with the package manager that owns the binary's real path, not the first
 npm on PATH: bun's global directory, or an npm prefix (`<prefix>/lib/node_modules/@vibest/…`, as under fnm, mise,
 nvm and Homebrew), whose own npm is taken to be `<prefix>/bin/npm`. bun is also given the platform package, which
-it may skip. install.sh is read whole before it runs, so a cut-off download never runs half a script. An install
+it may skip. install.sh is read whole before it runs, so a cut-off download never runs half a script.
+Before it installs, `vibest update` fetches the new version into a temporary directory (install.sh with
+`VIBEST_INSTALL` and `VIBEST_BIN` there, or the package manager with `--prefix` or `--cwd`), checks that it reports the
+version asked for, and has it run `vibest daemon import-check` against this `VIBEST_HOME`; when any of that fails,
+nothing is installed, vibestd is left running and the message says why and what to do. The install then asks for
+that exact version, not the `beta` tag, so what is installed is what was tried; this fetches the release twice. When
+the vibestd step fails after the install, the message also gives the command that puts the version before back. An install
 already current goes on to the vibestd and agent steps, which also covers an upgrade made with npm or bun directly.
 `update` and `doctor` report more than one `vibest` on PATH (one per real file, in PATH order): the first as the
 one that runs, the others with the command that removes them. The user's own `vibest`, `vibest status` and

@@ -4,11 +4,14 @@ import {
   claimHeaders,
   cliHeaders,
   connect,
+  described,
   hookCall,
+  importCheck,
   type VibestClient,
   probe,
   protocolHeaders,
   readPing,
+  runCaptured,
   startDaemon,
   withVibest,
 } from "@vibest/client/client"
@@ -54,7 +57,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, RpcClientError as ClientError } from "effect/rpc"
 
 import { herdrCommands } from "./herdr-plugin.ts"
-import { type ReplaceFailed, replaceDaemon, compareVersions, versionOf } from "./replace.ts"
+import { type ReplaceFailed, replaceAnyway, replaceDaemon, compareVersions, versionOf } from "./replace.ts"
 export { compareVersions }
 import { LaunchFailed } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
@@ -1050,13 +1053,25 @@ export const ownerOf = (real: string) => {
   return npm ? ({ kind: "npm", prefix: npm[1]! } as const) : undefined
 }
 
-export const upgradeCommand = (real: string, platform = `${process.platform}-${process.arch}`) => {
+export const upgradeCommand = (real: string, version: string, platform = `${process.platform}-${process.arch}`) => {
   const owner = ownerOf(real)
   return owner?.kind === "bun"
-    ? ["bun", "add", "-g", "@vibest/cli@beta", `@vibest/cli-${platform}@beta`]
+    ? ["bun", "add", "-g", `@vibest/cli@${version}`, `@vibest/cli-${platform}@${version}`]
     : owner?.kind === "npm"
-      ? [`${owner.prefix}/bin/npm`, "install", "-g", "--prefix", owner.prefix, "@vibest/cli@beta"]
-      : ["npm", "install", "-g", "@vibest/cli@beta"]
+      ? [`${owner.prefix}/bin/npm`, "install", "-g", "--prefix", owner.prefix, `@vibest/cli@${version}`]
+      : ["npm", "install", "-g", `@vibest/cli@${version}`]
+}
+
+export const stageCommand = (
+  real: string,
+  dir: string,
+  version: string,
+  platform = `${process.platform}-${process.arch}`,
+) => {
+  const owner = ownerOf(real)
+  return owner?.kind === "bun"
+    ? ["bun", "add", "--cwd", dir, `@vibest/cli@${version}`, `@vibest/cli-${platform}@${version}`]
+    : [owner?.kind === "npm" ? `${owner.prefix}/bin/npm` : "npm", "install", "--prefix", dir, `@vibest/cli@${version}`]
 }
 
 export const removeCommand = (link: string, real: string) => {
@@ -1307,6 +1322,7 @@ const update = Command.make(
         version: VERSION,
         command: self,
       }
+      let back: string | undefined
       if (method === undefined)
         yield* Console.log(
           `this vibest (${self.join(" ")}) was not installed by npm or install.sh; nothing to install.`,
@@ -1321,21 +1337,50 @@ const update = Command.make(
         else {
           yield* Console.log(`vibest ${latest} is available (this is ${VERSION}).`)
           const fs = yield* FileSystem.FileSystem
-          const pm = upgradeCommand(yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!)))
-          const installer =
-            method.kind === "npm"
-              ? runInherit(pm)
-              : runInherit(
-                  ["sh", "-c", 'script=$(curl -fsSL "$0/install.sh") && printf \'%s\\n\' "$script" | sh', releases],
-                  { VIBEST_INSTALL: method.share, VIBEST_DOWNLOAD_URL: releases },
-                )
-          yield* installer.pipe(
+          const real = yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!))
+          const installSh = (env: Record<string, string>) =>
+            [
+              ["sh", "-c", 'script=$(curl -fsSL "$0/install.sh") && printf \'%s\\n\' "$script" | sh', releases],
+              { VIBEST_DOWNLOAD_URL: releases, ...env },
+            ] as const
+          const cannot = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-update-" })
+              const [argv, env] =
+                method.kind === "npm"
+                  ? [stageCommand(real, dir, latest), {}]
+                  : installSh({ VIBEST_INSTALL: `${dir}/share`, VIBEST_BIN: `${dir}/bin` })
+              const staged = [method.kind === "npm" ? `${dir}/node_modules/.bin/vibest` : `${dir}/bin/vibest`]
+              const fetched = yield* runCaptured(argv, Duration.minutes(5), env)
+              if (fetched !== undefined)
+                return `it could not be fetched to try it first (${argv.join(" ")}: ${fetched})`
+              const reported = yield* versionOf(staged)
+              if (reported !== latest) return `the vibest fetched to try it reports ${reported}, not ${latest}`
+              return yield* importCheck(staged)
+            }),
+          )
+          if (cannot !== undefined) {
+            const running = Option.getOrUndefined(yield* readPing(layout.socket))
+            const kept = running
+              ? `${described(running.version, running)} was not stopped and keeps working`
+              : "no vibestd was running, and none was started"
+            return yield* new UpdateError({
+              message: `vibest ${latest} cannot take over: ${cannot}. Nothing was installed: vibest ${VERSION} stays, and ${kept}. ${running && /SchemaMismatch/.test(cannot) ? replaceAnyway(layout.socket, running.pid, "vibest update") : "Once that is fixed, run vibest update again"}`,
+            })
+          }
+          const [installArgv, installEnv] =
+            method.kind === "npm" ? [upgradeCommand(real, latest), {}] : installSh({ VIBEST_INSTALL: method.share })
+          yield* runInherit(installArgv, installEnv).pipe(
             Effect.mapError((e) => new UpdateError({ message: `${e.message}; vibestd not attempted` })),
           )
           target = {
             version: latest,
             command: method.kind === "curl" ? [`${method.share}/versions/${latest}/bin/vibest`] : self,
           }
+          back =
+            method.kind === "npm"
+              ? upgradeCommand(real, VERSION).map(shellQuote).join(" ")
+              : `ln -sfn ${shellQuote(self[0]!)} "$(cat ${shellQuote(`${method.share}/bin`)} 2>/dev/null || echo ~/.local/bin)/vibest"`
         }
       }
       for (const f of yield* extraVibests)
@@ -1352,7 +1397,10 @@ const update = Command.make(
           : plan.action === "restart"
             ? yield* replaceForUpdate(target)
             : undefined
-      if (failed !== undefined) return yield* new UpdateError({ message: `vibest ${target.version}: ${failed}` })
+      if (failed !== undefined)
+        return yield* new UpdateError({
+          message: `vibest ${target.version}: ${failed}${back === undefined ? "" : `. To go back to vibest ${VERSION} instead: ${back}`}`,
+        })
       const agents = yield* restartAgents(target.version, yes, "vibest update")
       if (agents !== undefined) return yield* new UpdateError({ message: agents })
     }),
