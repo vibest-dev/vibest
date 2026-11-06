@@ -548,7 +548,7 @@ const checks: ReadonlyArray<Check> = [
         )
         const peek = await w.vibest(["peek", sub.slice(0, 12)], { cwd: repo })
         expect(
-          peek.code === 0 && /\S/.test(peek.stdout),
+          peek.code === 0 && peek.stdout.includes("done-ids"),
           `vibest peek ${sub.slice(0, 12)} exited ${peek.code}: ${peek.stderr}${peek.stdout}`,
         )
         const few = await w.ok(["peek", sub, "--lines", "3"], { cwd: repo })

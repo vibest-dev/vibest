@@ -208,7 +208,7 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "Peek asks the runtime for at most 500 lines; an exited session has no terminal to read",
+    "Peek returns the runtime's terminal text and asks for at most 500 lines; an exited session has no terminal to read",
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime
@@ -217,6 +217,7 @@ describe("vibest.sock", () => {
       const c = asCli(raw, repo)
       const { id } = yield* c.Spawn({ harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      assert.deepStrictEqual(yield* c.Peek({ id }), { text: "pane tail" })
       yield* c.Peek({ id, lines: 100_000 })
       assert.deepInclude((yield* herdr.callsTo("read")).at(-1), { lines: 500 })
       yield* db.updateSession(id, { exitedAt: 1 })
