@@ -5,10 +5,12 @@
   "license": "MIT",
   "type": "module",
   "exports": {
+    "./scripts/*": "./scripts/*.ts",
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast"
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.scripts.json",
+    "contract": "bun scripts/contract.ts"
   },
   "dependencies": {
     "@vibest/schema": "workspace:*",
