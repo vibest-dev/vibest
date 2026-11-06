@@ -49,6 +49,7 @@
     "@vibest/plugin": "workspace:*",
     "@vibest/plugin-harness-choice": "workspace:*",
     "@vibest/protocol": "workspace:*",
+    "@vibest/runtime-hc": "workspace:*",
     "@vibest/runtime-herdr": "workspace:*",
     "@vibest/schema": "workspace:*",
     "@vibest/server": "workspace:*",

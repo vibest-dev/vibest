@@ -1,4 +1,3 @@
-// Tests run under Bun (`pnpm run test`): `#platform` resolves through the "bun" condition to the Bun layers.
 import { defineConfig } from "vitest/config"
 
 export default defineConfig({
@@ -9,6 +8,8 @@ export default defineConfig({
       "apps/vibest-herdr/test/**/*.test.ts",
       "packages/integration/claude/test/**/*.test.ts",
       "packages/effect-herdr-sdk/test/**/*.test.ts",
+      "packages/effect-hc-sdk/test/**/*.test.ts",
+      "packages/runtime-hc/test/**/*.test.ts",
       "packages/integration/pi/test/**/*.test.ts",
       "packages/integration/cursor/test/**/*.test.ts",
       "packages/core/src/**/*.test.ts",
@@ -16,7 +17,6 @@ export default defineConfig({
       "tools/oxlint/**/*.test.mjs",
       "tools/check/**/*.test.ts",
     ],
-    // Within a file, concurrent tests share one worker. 5s is too tight once several git or bun tests overlap.
     fileParallelism: true,
     maxConcurrency: 8,
     testTimeout: 30_000,

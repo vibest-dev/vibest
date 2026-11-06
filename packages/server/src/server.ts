@@ -919,6 +919,14 @@ export const handlers = VibestRpcs.toLayer(
               )
               if (env && Object.keys(env).length > 0) mainEnv.set(projectId, { sessionId: saved.sessionId, env })
               else mainEnv.delete(projectId)
+              const rt = Option.getOrUndefined(yield* runtimes.route(kind).pipe(Effect.option))
+              if (rt?.present !== undefined)
+                yield* rt
+                  .present(
+                    { machine: machineOf(machine).id, id: terminal },
+                    { mainSession: saved.sessionId, projectId },
+                  )
+                  .pipe(Effect.ignore)
               return { ...saved, runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }) }
             }),
           )
