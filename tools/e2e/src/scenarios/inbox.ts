@@ -489,8 +489,24 @@ const checks: ReadonlyArray<Check> = [
           old.status === 409 && (old.body as { action?: string }).action === "vibest update",
           `an older protocol's poll answered ${old.status}: ${JSON.stringify(old.body)}`,
         )
-        process.kill(stopped!, "SIGCONT")
+        const ps = (pid: number) =>
+          Bun.spawnSync(["ps", "-o", "stat=,pgid=,tpgid=", "-p", String(pid)])
+            .stdout.toString()
+            .trim()
+            .split(/\s+/)
+        const [, pgid, tpgid] = ps(stopped!)
+        if (pgid === tpgid) process.kill(stopped!, "SIGCONT")
+        else await c.typeIn("fg")
+        const resumed = stopped!
         stopped = undefined
+        await until(
+          "the main agent running in the foreground again",
+          () => {
+            const [stat, pgid, tpgid] = ps(resumed)
+            return !stat?.startsWith("T") && pgid === tpgid
+          },
+          15_000,
+        )
 
         const restart = await w.tty(["daemon", "restart"], "y\n", {
           cwd: c.repo,
