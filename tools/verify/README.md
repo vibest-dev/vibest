@@ -8,7 +8,8 @@ pnpm verify          # everything
 pnpm verify daemon integration   # install as a user, then only these areas of E2E checks
 ```
 
-In order, stopping at the first failure:
+In order. A failed build, typecheck, test, pack or install stops the run; a failed E2E leg does not stop the other
+leg, and the run fails at the end naming each failed leg:
 
 1. `pnpm run build`, `pnpm run typecheck`, `pnpm run test` (skipped when areas are given).
 2. Each way a user installs vibest, into a temp directory, with nothing from this checkout:
