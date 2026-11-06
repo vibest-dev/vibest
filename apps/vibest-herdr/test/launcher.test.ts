@@ -3,8 +3,9 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-// bin/vibest.cjs, the npm entry point: finds the platform package's binary, passes arguments, stdio and the exit status through.
 import { assert, it } from "@effect/vitest"
+
+const withoutPnpmShimNodePathToTheRealPlatformPackage = { NODE_PATH: "" }
 
 const launcher = path.join(import.meta.dirname, "..", "bin", "vibest.cjs")
 
@@ -23,14 +24,12 @@ it("bin/vibest.cjs runs @vibest/cli-<platform>-<arch>/bin/vibest with the argume
     await fs.mkdir(cli, { recursive: true })
     await fs.copyFile(launcher, path.join(cli, "vibest.cjs"))
     await fs.writeFile(path.join(cli, "..", "package.json"), JSON.stringify({ version: "0.0.0-test" }))
-    // pnpm's bin shims export NODE_PATH (its hoisted store, which links the workspace's real platform package): drop it.
     const run = () =>
       childProcess.spawnSync("node", [path.join(cli, "vibest.cjs"), "a b", "--x"], {
         encoding: "utf8",
-        env: { ...process.env, NODE_PATH: "" },
+        env: { ...process.env, ...withoutPnpmShimNodePathToTheRealPlatformPackage },
       })
 
-    // The platform package is not installed.
     const missing = run()
     assert.strictEqual(missing.status, 1)
     assert.include(missing.stderr, `vibest: no binary for ${process.platform}-${process.arch}`)
@@ -47,7 +46,6 @@ it("bin/vibest.cjs runs @vibest/cli-<platform>-<arch>/bin/vibest with the argume
 
     await fs.writeFile(binary, `#!/bin/sh\nkill -TERM $$\n`)
     assert.strictEqual(run().signal, "SIGTERM")
-    // Node ignores SIGPIPE, so the launcher exits as a shell would report it.
     await fs.writeFile(binary, `#!/bin/sh\nkill -PIPE $$\n`)
     assert.strictEqual(run().status, 128 + os.constants.signals.SIGPIPE)
   } finally {

@@ -54,7 +54,6 @@ const fake = (over: Partial<HerdrDaemon> = {}): HerdrDaemon => ({
   ...over,
 })
 
-/** What the popup shows: lines written before the read, then the command's result. */
 const shown = (verb: Verb, context: PluginContext, daemon: HerdrDaemon, lines: ReadonlyArray<string> = []) =>
   Effect.gen(function* () {
     const written: Array<string> = []
@@ -461,7 +460,6 @@ describe("herdr plugin package", () => {
         const cwd = `${home}/plugin`
         yield* fs.makeDirectory(cwd)
         const env = { HOME: home, VIBEST_HOME: `${home}/vibest` }
-        // `subscriptions` starts a vibestd for this home: stopped however the test ends, or it outlives its temp home.
         yield* Effect.addFinalizer(() => TestClock.withLive(stopRecorded(`${home}/vibest/vibestd.pid`)))
         const missing = yield* runVibest(cwd, env, ["herdr", "startup"])
         assert.strictEqual(missing.code, 1, missing.stderr)

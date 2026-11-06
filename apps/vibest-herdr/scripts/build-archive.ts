@@ -1,6 +1,3 @@
-// The release archive install.sh downloads: `bun scripts/build-archive.ts <platform>-<arch> [outdir]` writes
-// <outdir>/vibest-<platform>-<arch>.tar.gz (default dist/release) holding bin/vibest, built for that platform,
-// harnesses/ (the plugins it finds beside its bin/), and herdr-plugin/ (not linked; the user links it).
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"

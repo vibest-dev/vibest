@@ -21,11 +21,6 @@ import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
 import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
-// `vibest` command line (SPEC §12.1): one-shot calls, the only way agents use vibest. Who calls comes from the environment:
-// VIBEST_SESSION_ID set means an agent (a coordinator or a session); unset, the command line (cli).
-// That is a claim any same-user process can make, so vibestd's checks stop mistakes, not attackers (SPEC §13).
-// Agent commands print one JSON document on stdout; errors are one `Tag: message` line on stderr and exit 1.
-// Nothing waits for a session: results reach the coordinator by themselves, `vibest result` shows the latest one.
 import { CALLER_ENV, ambientHerdr, callerMachine, callerTerminal } from "@vibest/runtime-herdr/caller"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
@@ -57,26 +52,18 @@ import { LaunchFailed } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { Forbidden, type Ping, VERSION } from "@vibest/protocol/rpc"
 
-/** A prompt, message or entry that is empty or only whitespace. */
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
 
-/** Who runs this command. `agent`: VIBEST_SESSION_ID is set, which never starts vibestd (it may run inside a sandbox). */
 const caller = Effect.gen(function* () {
   const path = yield* Path.Path
   const repositoryRoot = path.resolve(".")
   const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID"))) || undefined
   const agentName = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT")))
-  // A coordinator's shell sends its working directory as cwd, not as identity. A session does not: the server rejects it.
-  const claim: Claim = sessionId
-    ? { _tag: "session", sessionId, ...(agentName === "coordinator" ? { repositoryRoot } : {}) }
-    : { _tag: "cli", repositoryRoot }
+  const coordinatorCwd = agentName === "coordinator" ? { repositoryRoot } : {}
+  const claim: Claim = sessionId ? { _tag: "session", sessionId, ...coordinatorCwd } : { _tag: "cli", repositoryRoot }
   return { claim, agent: sessionId !== undefined }
 })
 
-/**
- * vibestd and coordinators are started by the user: an agent's would run inside its sandbox. Updates change the user's
- * own setup. Checked before anything else; the pre-tool guard leaves these commands to it.
- */
 export const userOnly = (command: string) =>
   Effect.flatMap(caller, (c) =>
     c.agent
@@ -89,17 +76,9 @@ export const userOnly = (command: string) =>
       : Effect.void,
   )
 
-/** Run `f` on a connection as the caller. Herdr location is a payload on the methods that need it, not connection state. */
 const vibest = <A, E, R>(f: (client: VibestClient, agent: boolean) => Effect.Effect<A, E, R>) =>
   Effect.flatMap(caller, (c) => withVibest(c.claim, (client) => f(client, c.agent), { start: !c.agent }))
 
-/**
- * A call whose answer can be lost after vibestd acted on it (`vibest send`, `vibest run`). It carries one request id per
- * invocation; cut off on its connection (`RpcClientError`: dropped, vibestd killed or handing off) it is sent once more
- * with the same id once vibestd answers Ping, and vibestd answers the repeat as it answered the first. Only while the
- * vibestd it reaches knows request ids (Ping `requests`): an older one would act on a repeat twice. An answer vibestd
- * gave, a refusal included, is never retried.
- */
 const requested = <A, E, R>(
   f: (client: VibestClient, request: string | undefined) => Effect.Effect<A, E | ClientError.RpcClientError, R>,
 ) =>
@@ -108,13 +87,12 @@ const requested = <A, E, R>(
     const socket = (yield* Layout).socket
     const request = crypto.randomUUID()
     let known = false
-    /** `lost`: the first try's error, failed again when the vibestd now answering does not know request ids. */
-    const call = (lost?: ClientError.RpcClientError) =>
+    const call = (firstError?: ClientError.RpcClientError) =>
       withVibest(
         c.claim,
         (client, ping) => {
           known = ping.capabilities?.requests === true
-          return lost !== undefined && !known ? Effect.fail(lost) : f(client, known ? request : undefined)
+          return firstError !== undefined && !known ? Effect.fail(firstError) : f(client, known ? request : undefined)
         },
         { start: !c.agent },
       )
@@ -130,7 +108,6 @@ const requested = <A, E, R>(
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 const json = (value: unknown) => Console.log(encodeJson(value))
 
-/** Literal text, or `-` for stdin up to EOF. Never expanded: no `@file`, no variables. Empty text is refused. */
 const input = (value: string, what: string) =>
   Effect.gen(function* () {
     const text = value === "-" ? yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin)) : value
@@ -162,7 +139,6 @@ const daemon = (host: Daemon.Host) =>
         Flag.withDescription("Run vibestd in this process"),
         Flag.withDefault(false),
       ),
-      // The new vibestd of a handoff, started by the old one (Daemon.Handoff): it waits for the old one's lock.
       handoff: Flag.Boolean("import").pipe(Flag.withHidden, Flag.withDefault(false)),
     },
     ({ foreground, handoff }) =>
@@ -170,8 +146,6 @@ const daemon = (host: Daemon.Host) =>
         Effect.andThen(
           Effect.gen(function* () {
             if (foreground) {
-              // The previous vibestd's in-memory main agent --env values: read once, then gone from this process's
-              // environment, so nothing this vibestd starts inherits them.
               const raw = process.env[Daemon.HANDOFF_ENV]
               delete process.env[Daemon.HANDOFF_ENV]
               const mainEnv: Daemon.MainEnv | undefined = handoff && raw ? new Map(JSON.parse(raw)) : undefined
@@ -188,9 +162,7 @@ const daemon = (host: Daemon.Host) =>
     Command.withSubcommands([
       Command.make("restart", {}, () =>
         userOnly("daemon restart").pipe(
-          // A no on the terminal is the user's answer, not a failure; anything else that leaves vibestd as it was fails.
           Effect.andThen(Effect.flatMap(VibestCommand, (command) => replaceDaemon({ version: VERSION, command }))),
-          // The agents still on another integration than this vibestd's, asked about once, as `vibest update` does.
           Effect.andThen(restartAgents(VERSION, false, "vibest daemon restart")),
           Effect.flatMap((failed) =>
             failed === undefined ? Effect.void : Effect.fail(new UpdateError({ message: failed })),
@@ -205,7 +177,6 @@ const daemon = (host: Daemon.Host) =>
           "Replace the running vibestd with this vibest, after a yes on a terminal; agents keep running and queued messages are kept, but unfinished daemon operations may refuse the restart. Then offers to restart the agents on another integration in place, with their conversations",
         ),
       ),
-      // Internal: whether this vibest can open the running vibestd's database (Daemon.Handoff runs it first).
       Command.make("import-check", {}, () =>
         userOnly("daemon import-check").pipe(Effect.andThen(Daemon.checkImport(host))),
       ),
@@ -256,7 +227,6 @@ const run = Command.make(
       const machine = yield* callerMachine(Option.getOrUndefined(o.session))
       const spawned = yield* requested((client, request) =>
         client.Spawn({
-          // Left out for a vibestd that does not know request ids.
           ...(request === undefined ? {} : { request }),
           harness: o.harness === "auto" ? undefined : o.harness,
           prompt,
@@ -277,13 +247,6 @@ const run = Command.make(
   ),
 )
 
-/**
- * One main agent per project: `start` runs when no other terminal runs the project's main agent, or once the user
- * answered y and vibestd stopped that one's harness (its terminal and shell stay; `start` then resumes the same
- * conversation here, or a new one for another harness). A no, no answer within two minutes, EOF, a non-interactive
- * terminal, or a stop that did not finish starts nothing and changes nothing (vibestd's `Project.CoordinatorSession`
- * refuses a second one too).
- */
 export const soleMainAgent = <A, E, R>(
   client: Pick<VibestClient, "Project.RunningCoordinator" | "Project.StopCoordinator">,
   terminal: string,
@@ -313,11 +276,6 @@ export const soleMainAgent = <A, E, R>(
     return yield* start
   })
 
-/**
- * `vibest` in the user's shell, before anything starts: the directory's project (`Project.Open`). A checkout that moved
- * is asked about: y or Enter moves the project here, n makes a new one; anything else, no answer, EOF or a
- * non-interactive terminal starts nothing and changes nothing.
- */
 export const openProject = (client: Pick<VibestClient, "Project.Open">) =>
   Effect.gen(function* () {
     const opened = yield* client["Project.Open"]({}).pipe(
@@ -346,10 +304,8 @@ export const openProject = (client: Pick<VibestClient, "Project.Open">) =>
     return opened
   })
 
-/** Replaces this process (from #platform). */
 export type Exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => void
 
-/** `vibest [--new] [--harness <h>]`: the flags of the command line's own command, which opens the project's main agent. */
 const mainFlags = {
   fresh: Flag.Boolean("new").pipe(
     Flag.withDescription("Start a new conversation with the main agent instead of reopening the current one"),
@@ -378,16 +334,9 @@ const mainFlags = {
     ),
     Flag.optional,
   ),
-  // Typed by Launch into the shell it opened in the repository's parent workspace: run in place without asking herdr,
-  // which does not report a just-created workspace as the parent (asking would open another one, without end).
   inParent: Flag.String("in-parent").pipe(Flag.withHidden, Flag.optional),
 }
 
-/**
- * The project's main agent, here (architecture.md D4): scheduling and `agent.start` in vibestd choose its harness,
- * provider and model; this command only places it. In the repository's parent workspace this pane becomes the main
- * Agent; below the root its shell runs `vibest` again from the root; elsewhere a tab in the parent workspace does.
- */
 const startMain =
   (exec: Exec) =>
   (o: {
@@ -402,25 +351,20 @@ const startMain =
     readonly inParent: Option.Option<string>
   }) =>
     Effect.gen(function* () {
-      // Before anything this command starts (including vibestd). Only the command Launch typed reads the value.
       const carried = process.env[Launch.MAIN_ENV]
       delete process.env[Launch.MAIN_ENV]
       yield* userOnly("")
-      // Once, in the user's shell: the run again at the root (--in-parent) is the same command.
       if (Option.isNone(o.inParent)) yield* updateNotice
       const path = yield* Path.Path
       const fs = yield* FileSystem.FileSystem
       const cwd = path.resolve(".")
-      // A linked worktree starts at its main checkout. A directory of repositories is itself the Project.
       const { root } = yield* projectRoot(cwd)
-      // The first run, in the user's shell: a checkout that moved is moved (or a new project made) before anything starts.
       if (Option.isNone(o.inParent)) yield* withVibest((yield* caller).claim, openProject)
       const harness = Option.getOrUndefined(o.harness)
       const provider = Option.getOrUndefined(o.provider)
       const model = Option.getOrUndefined(o.model)
       const runtimeKind = Option.getOrUndefined(o.runtime)
       const env = Option.getOrElse(o.env, (): Record<string, string> => ({}))
-      /** This command again, run at the root. */
       const again = [
         ...(yield* VibestCommand),
         ...(harness ? ["--harness", harness] : []),
@@ -430,33 +374,27 @@ const startMain =
         ...Object.entries(env).flatMap(([k, v]) => ["--env", `${k}=${v}`]),
         ...(o.fresh ? ["--new"] : []),
       ]
-      // The command Launch typed says which repository's parent workspace it is in; the flag spares herdr the question.
       const marked = Option.contains(o.inParent, root)
       const here = marked ? undefined : yield* ambientHerdr
       const machine = yield* callerMachine(Option.getOrUndefined(o.session))
-      // Inside herdr the main agent starts in this pane, wherever it is. Outside herdr it needs a herdr pane: one is opened.
       const inPlace = marked || here !== undefined
       if (inPlace) {
-        // This pane is the main agent's, in the ambient herdr session; --session names another session whose panes that session cannot see.
         if (Option.isSome(o.session))
           return yield* new LaunchFailed({
             message: `--session ${o.session.value} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
           })
-        // Below the root, continue in this process. Typing `cd && vibest --env` would put the values in the shell history.
         if ((yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
         const terminal = yield* callerTerminal
         if (terminal === undefined)
           return yield* new LaunchFailed({
             message: "this pane's herdr session could not be named; run vibest outside herdr",
           })
-        // The main agent's own `vibest` commands never start vibestd (they may run in its harness's sandbox): start it here.
         if (!(yield* probe((yield* Layout).socket))) yield* startDaemon
         const claim = (yield* caller).claim
         const chosen = yield* withVibest(claim, (client) =>
           client["Project.StartMain"]({ harness, provider, model, runtime: runtimeKind }),
         )
         if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`main agent: ${describeSpawn(chosen)}`)
-        // Only the start that execs asks vibestd for the session, so `--new` replaces it once.
         const passed = Launch.commandEnv(env, marked, carried)
         const session = withVibest(claim, (client) =>
           Effect.gen(function* () {
@@ -472,9 +410,7 @@ const startMain =
                 provider: chosen.provider,
                 model: chosen.model,
                 routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
-                // This process execs the harness: its PID is the harness's, which a move to another terminal signals.
                 pid: process.pid,
-                // Held in vibestd's memory only, for this harness's restart in place (vibest update).
                 ...(Object.keys(passed).length > 0 ? { env: passed } : {}),
               }),
             )
@@ -490,8 +426,6 @@ const startMain =
         }).pipe(Effect.provide(Harness.layer))
         return yield* Effect.sync(() => exec(main.file, main.args, { ...passed, ...main.env }))
       }
-      // Elsewhere: a terminal in the parent workspace whose shell runs this command again. Inside herdr that terminal is
-      // the runtime's to focus; outside, attach to it (like `cao launch`).
       const inHerdr = here !== undefined
       const opened = yield* withVibest((yield* caller).claim, (client) =>
         client.Launch({
@@ -529,7 +463,6 @@ const status = Command.make("status", {}, () =>
     yield* updateNotice
     const layout = yield* Layout
     const info = yield* Daemon.readDaemonInfo(layout.daemonInfo)
-    // No caller and no start: anyone may ask, and asking never starts vibestd. Protocol is reported, not required.
     const ping = yield* connect(layout.socket).pipe(
       Effect.flatMap((client) => client.Ping(undefined)),
       Effect.timeout("1 second"),
@@ -540,8 +473,6 @@ const status = Command.make("status", {}, () =>
       client: { version: VERSION, command: yield* VibestCommand },
       daemon: Option.match(ping, {
         onNone: () => ({ status: "not running", socket: layout.socket }),
-        // pid / instance / command / startedAt: what the vibestd that answered says; null from one too old to say.
-        // recordedPid: vibestd.pid's, not verified to be that vibestd.
         onSome: (p) => ({
           status: "running",
           pid: p.pid ?? null,
@@ -564,7 +495,6 @@ const status = Command.make("status", {}, () =>
   ),
 )
 
-/** A session as the user reads it: its `name` (the wire and database name) is its `title`. */
 const titled = <S extends { readonly name: string }>({ name, ...rest }: S) => ({ title: name, ...rest })
 
 const result = Command.make("result", { id }, (o) =>
@@ -626,12 +556,10 @@ const ls = Command.make(
     ),
   },
   (o) =>
-    // The coordinator lists its project's sessions. The command line lists the project of this directory, or every
-    // session when it is not one (`all`: the request asks for them). `--all` includes exited ones.
     Effect.gen(function* () {
       const cwd = (yield* Path.Path).resolve(".")
-      const located = yield* projectRoot(cwd).pipe(Effect.option)
-      yield* vibest((client) => client.List({ stopped: o.all, ...(Option.isNone(located) ? { all: true } : {}) })).pipe(
+      const outsideProject = Option.isNone(yield* projectRoot(cwd).pipe(Effect.option))
+      yield* vibest((client) => client.List({ stopped: o.all, ...(outsideProject ? { all: true } : {}) })).pipe(
         Effect.map((sessions) => sessions.map(titled)),
         Effect.flatMap(json),
       )
@@ -723,8 +651,6 @@ const harness = Command.make("harness").pipe(
   ]),
 )
 
-// ---- project ----
-
 const project = Command.make("project").pipe(
   Command.withDescription(
     "This repository's project folder (VIBEST_PROJECT_DIR for agents): preferences.md, docs/, memories/ and artifacts/, read and written with file tools",
@@ -772,8 +698,6 @@ const project = Command.make("project").pipe(
   ]),
 )
 
-// ---- local tools ----
-
 const plugins = Command.make("plugins", {}, () => vibest((client) => client.Plugins().pipe(Effect.flatMap(json)))).pipe(
   Command.withDescription(
     "List the plugins vibestd loaded (from ~/.vibest/plugins and vibest.json) with their hook counters since it started",
@@ -792,10 +716,6 @@ const nonempty = (name: string) =>
     }),
   )
 
-/**
- * A harness hook's event, sent to vibestd as it came (`hookCall`: a timeout and one retry), with the session's headers
- * and its conversation id when the adapter reads one from `raw`. Does not start vibestd; writes no file.
- */
 const notify = (
   adapter: HarnessAdapter,
   sessionId: string,
@@ -814,11 +734,6 @@ const notify = (
     yield* hookCall(layout.socket, headers, send)
   }).pipe(Effect.ignore)
 
-/**
- * A harness plugin's turn-end bridge (`vibest integration stop --harness <h>`, Cursor's): its adapter's `turnEnd` reads
- * the event. Missing identity, a non-object, or an event the adapter ignores sends nothing. Failures exit 0. Writes
- * OSC 7501 idle (runtime-port.md §5) and sends the event as `TurnEnd`; vibestd keeps the turn end and writes the result.
- */
 export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
   Effect.gen(function* () {
     const agent = yield* nonempty("VIBEST_AGENT")
@@ -830,11 +745,6 @@ export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
     yield* notify(adapter, sessionId, raw, (client) => client.TurnEnd({ sessionId, harness: adapter.id, event: raw }))
   }).pipe(Effect.ignore)
 
-/**
- * A harness plugin's user-prompt bridge (`vibest integration prompt --harness <h>`): its adapter's `userPrompt` reads the
- * event. The main agent, a nested agent, or text that is not the user typing sends nothing. Failures exit 0. Sends the
- * event as `Prompt` (vibestd notes the turn start and records the round), then OSC 7501 working.
- */
 export const integrationPrompt = (adapter: HarnessAdapter, raw: string) =>
   Effect.gen(function* () {
     const agent = yield* nonempty("VIBEST_AGENT")
@@ -873,12 +783,10 @@ const prompt = Command.make("prompt", { harness: hookHarness }, (o) =>
   ),
 )
 
-// Any failure exits non-zero, which the hook script turns into a refusal.
 const guard = Command.make("guard", { harness: hookHarness }, (o) =>
   Effect.gen(function* () {
     const { guardAnswer } = (yield* Harnesses).get(o.harness)
     if (!guardAnswer) return yield* Effect.fail(new Error(`${o.harness} has no pre-tool hook`))
-    // No VIBEST_AGENT fails: the hook refuses.
     const agent = yield* Config.String("VIBEST_AGENT")
     const answer = guardAnswer(
       yield* Guard.check(agent, yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin))),
@@ -891,10 +799,6 @@ const guard = Command.make("guard", { harness: hookHarness }, (o) =>
   ),
 )
 
-/**
- * The main agent's start after a restart (`vibest update`, a move): vibestd types it into the main agent's own shell once
- * its harness has ended. It never starts vibestd and waits through a handoff (for a moment nothing answers).
- */
 const integrationStart = (exec: Exec) =>
   Command.make("start", { id }, (o) =>
     Effect.gen(function* () {
@@ -934,8 +838,6 @@ const integration = (exec: Exec) =>
     Command.withSubcommands([guard, prompt, stop, integrationStart(exec)]),
   )
 
-/** herdr's own integration line per harness: herdr knows an agent's status only through it. */
-/** One finding: ok, a problem with the command that fixes it, or a note. */
 type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }
 const MARKS = { ok: "✓", problem: "✗", note: "·" } as const
 
@@ -945,7 +847,6 @@ const doctor = Command.make("doctor", {}, () =>
     const sections: Array<{ readonly title: string; readonly findings: ReadonlyArray<Finding> }> = []
     const width = Math.max(...HARNESS_IDS.map((h) => h.length))
 
-    // The coding agents vibest starts.
     const harnesses = yield* Effect.forEach(
       HARNESS_IDS,
       (h) =>
@@ -965,7 +866,6 @@ const doctor = Command.make("doctor", {}, () =>
     if (installs.length > 0) sections.push({ title: "vibest on PATH", findings: installs })
     const usable = HARNESS_IDS.filter((_, i) => harnesses[i]!.mark === "ok")
 
-    // vibestd: the background service. Runtimes and plugins are loaded there, so doctor starts it when it is not running.
     const daemon: Array<Finding> = []
     let ping = Option.getOrUndefined(yield* readPing(layout.socket))
     if (ping === undefined) {
@@ -1002,7 +902,6 @@ const doctor = Command.make("doctor", {}, () =>
           Effect.scoped,
           Effect.option,
         )
-      // Runtimes: where agents run (herdr, …). Each one checks what it needs for the coding agents above.
       const runtimes = yield* ask((c) => c["Runtimes.Doctor"]({ harnesses: usable }))
       if (Option.isNone(runtimes) || runtimes.value.length === 0)
         sections.push({
@@ -1029,7 +928,6 @@ const doctor = Command.make("doctor", {}, () =>
         if (findings.length === 0) findings.push({ mark: "ok", text: "online" })
         sections.push({ title: `Runtime: ${r.name} (where agents run)`, findings })
       }
-      // Plugins.
       const loaded = yield* ask((c) => c.Plugins())
       sections.push({
         title: "Plugins",
@@ -1081,42 +979,25 @@ const doctor = Command.make("doctor", {}, () =>
   ),
 )
 
-/** `vibest update` failed: the latest version could not be read, or its installer failed. */
 export class UpdateError extends Schema.TaggedError<UpdateError>()("UpdateError", { message: Schema.String }) {}
 
-/** A full semver version (`1.2.3`, `-pre.1`, `+build`), what `compareVersions` takes. */
 export const isSemver = (v: string) =>
   /^\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/.test(v)
 
-/** Where install.sh and the release archives are: the latest GitHub release of this repository. */
 const RELEASES = "https://github.com/vibest-dev/vibest/releases/latest/download"
 
-/**
- * How this vibest was installed. npm: its launcher (bin/vibest.cjs) sets VIBEST_HARNESSES. install.sh: the binary runs from
- * `<share>/versions/<version>/bin/vibest`. Anything else (a build, `bun main.ts`) has nothing to update.
- */
 export const installMethod = (self: ReadonlyArray<string>, harnesses: string | undefined) => {
   if (harnesses) return { kind: "npm" } as const
   const m = self.length === 1 ? /^(.+)\/versions\/[^/]+\/bin\/vibest$/.exec(self[0]!) : null
   return m ? ({ kind: "curl", share: m[1]! } as const) : undefined
 }
 
-/**
- * Which package manager owns the vibest at `real` (a real path, links resolved): bun's global directory, or an npm
- * prefix (`<prefix>/lib/node_modules/@vibest/…`: npm under fnm, mise, nvm, Homebrew). Undefined: neither, as far as
- * the path shows.
- */
 export const ownerOf = (real: string) => {
   if (real.includes("/.bun/install/global/node_modules/")) return { kind: "bun" } as const
   const npm = /^(.+)\/lib\/node_modules\/@vibest\//.exec(real)
   return npm ? ({ kind: "npm", prefix: npm[1]! } as const) : undefined
 }
 
-/**
- * The command that upgrades the npm-installed vibest whose binary is at `real`, with the package manager that owns it
- * (not the first npm on PATH). bun is also given the platform package: it may skip an optional dependency.
- * ponytail: an npm prefix's own npm is taken to be `<prefix>/bin/npm`, as fnm, mise, nvm and Homebrew lay it out.
- */
 export const upgradeCommand = (real: string, platform = `${process.platform}-${process.arch}`) => {
   const owner = ownerOf(real)
   return owner?.kind === "bun"
@@ -1126,7 +1007,6 @@ export const upgradeCommand = (real: string, platform = `${process.platform}-${p
       : ["npm", "install", "-g", "@vibest/cli@beta"]
 }
 
-/** The command that removes the vibest on PATH at `link` (real path `real`). */
 export const removeCommand = (link: string, real: string) => {
   const owner = ownerOf(real)
   return owner?.kind === "bun"
@@ -1136,10 +1016,6 @@ export const removeCommand = (link: string, real: string) => {
       : `rm ${shellQuote(link)}`
 }
 
-/**
- * More than one `vibest` on PATH (one per real file, in PATH order): each with the version it reports, the first as the
- * one that runs, the others with how to remove them. Empty when there is one or none.
- */
 const extraVibests = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const dirs = (Option.getOrUndefined(yield* Config.option(Config.String("PATH"))) ?? "").split(":").filter(Boolean)
@@ -1166,13 +1042,11 @@ const extraVibests = Effect.gen(function* () {
   )
 })
 
-/** The latest version: the `beta` tag on the npm registry (npm_config_registry), or the release's `version` file. */
 const latestVersion = (
   url: string,
   read: (body: HttpClientResponse.HttpClientResponse) => Effect.Effect<string, unknown>,
 ) =>
   HttpClient.get(url).pipe(
-    // Nothing published there yet (a local build installed from a tarball): say so, not a raw HTTP error.
     Effect.filterOrFail(
       (r) => r.status !== 404,
       () => new Error(`no vibest release is published there yet; this vibest ${VERSION} stays as it is`),
@@ -1195,14 +1069,8 @@ const npmLatest = Effect.gen(function* () {
   )
 })
 
-/** How often the user's own commands look for a newer vibest; a failed look waits as long. */
 const UPDATE_CHECK_EVERY = Duration.hours(24)
 
-/**
- * One line on stderr when a newer vibest is out: on the user's own `vibest`, `vibest status` and `vibest doctor`, never an
- * agent's. Reads the registry (or the release) at most once a day, cached in $VIBEST_HOME/update-check.json, and waits
- * at most 2 s for it; any failure says nothing. VIBEST_NO_UPDATE_CHECK=1 turns it off.
- */
 const updateNotice = Effect.gen(function* () {
   if (Option.isSome(yield* Config.option(Config.String("VIBEST_AGENT")))) return
   if (Option.isSome(yield* Config.option(Config.String("VIBEST_NO_UPDATE_CHECK")))) return
@@ -1235,7 +1103,6 @@ const updateNotice = Effect.gen(function* () {
     yield* Console.error(`vibest ${latest} is available (this is ${VERSION}); update with: vibest update`)
 }).pipe(Effect.ignore)
 
-/** `argv` with the terminal's stdio and `env` added; fails unless it exits 0. */
 const runInherit = (argv: ReadonlyArray<string>, env: Record<string, string> = {}) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -1253,7 +1120,6 @@ const runInherit = (argv: ReadonlyArray<string>, env: Record<string, string> = {
     if (code !== 0) return yield* new UpdateError({ message: `${argv.join(" ")} exited with ${code}` })
   })
 
-/** What a replacement that did not happen left of vibestd, for the user and for whoever reads the exit status. */
 const LEFT: Record<ReplaceFailed["outcome"], string> = {
   declined: "vibestd not replaced: you declined; it still runs the vibest it was started with",
   busy: "vibestd not replaced: it refused to stop (see above); it still runs the vibest it was started with",
@@ -1262,10 +1128,6 @@ const LEFT: Record<ReplaceFailed["outcome"], string> = {
   other: "vibestd was asked to stop, and another vibestd answers now, not the vibest asked for",
 }
 
-/**
- * Replace vibestd during update. Only a no on the terminal leaves update successful. Any other outcome is said at once (a
- * later step may fail) and returned, so the update fails (non-zero) once the rest is done. Nothing is retried.
- */
 const replaceForUpdate = (target: { readonly version: string; readonly command: ReadonlyArray<string> }) =>
   replaceDaemon(target).pipe(
     Effect.as(undefined),
@@ -1276,10 +1138,6 @@ const replaceForUpdate = (target: { readonly version: string; readonly command: 
     ),
   )
 
-/**
- * What `vibest update` does with the running vibestd, from its Ping (as herdr's restart policy): keep it when it already
- * is this protocol, version and binary; hand it off when it can; otherwise replace it (Daemon.Stop, then a new start).
- */
 export const daemonPlan = (
   ping: Ping | undefined,
   target: { readonly version: string; readonly command: ReadonlyArray<string> },
@@ -1300,13 +1158,8 @@ export const daemonPlan = (
             reason: `vibestd ${ping.version} cannot hand itself over, so it is stopped and ${target.version} started`,
           } as const)
 
-/** How long `vibest update` watches for the new vibestd after a handoff was accepted. */
 const HANDOFF_WATCH = Duration.seconds(45)
 
-/**
- * The handoff (Daemon.Handoff): the old vibestd checks the new vibest, drains, starts it and lets it take over. The outcome
- * is what Ping shows afterwards, said as herdr says it, with the command to run next. Undefined when the new one runs.
- */
 const handoffDaemon = (old: Ping, target: { readonly version: string; readonly command: ReadonlyArray<string> }) =>
   Effect.gen(function* () {
     const layout = yield* Layout
@@ -1321,7 +1174,6 @@ const handoffDaemon = (old: Ping, target: { readonly version: string; readonly c
     ).pipe(Effect.scoped, Effect.exit)
     if (Exit.isFailure(reply)) {
       const e = Option.getOrUndefined(Cause.findErrorOption(reply.cause)) as { readonly message?: string } | undefined
-      // Refused or lost: Ping says which.
       const still = Option.getOrUndefined(yield* readPing(layout.socket))
       if (still?.instance === old.instance)
         return `the handoff did not happen (${e?.message ?? "no reply"}); the old vibestd ${old.version} still runs. Next: vibest update`
@@ -1344,11 +1196,6 @@ const handoffDaemon = (old: Ping, target: { readonly version: string; readonly c
     return `vibestd ${after.version} (instance ${after.instance ?? "unknown"}) answers, not the new ${target.version}. Next: vibest update`
   })
 
-/**
- * The agents still on an old integration: asked once on a terminal (or `--yes`), then handed to vibestd, which restarts
- * them in place once this process has exited: this `vibest update` may run inside one of them (the main agent's shell),
- * and ending that harness would end it too. Returns why the step failed, if it did.
- */
 const restartAgents = (version: string, yes: boolean, command: "vibest update" | "vibest daemon restart") =>
   Effect.gen(function* () {
     const cwd = (yield* Path.Path).resolve(".")
@@ -1398,14 +1245,12 @@ const update = Command.make(
   },
   ({ yes }) =>
     Effect.gen(function* () {
-      // The user, or the project's main agent from its own shell: its integration is the one an update replaces.
-      if (Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT"))) !== Guard.COORDINATOR)
-        yield* userOnly("update")
+      const isMainAgent =
+        Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT"))) === Guard.COORDINATOR
+      if (!isMainAgent) yield* userOnly("update")
       const self = yield* VibestCommand
       const method = installMethod(self, Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))))
       const layout = yield* Layout
-      // 1. Install, the way this vibest was installed. One already current (or not installed by either) does only the
-      // steps after it, which also covers an upgrade made with npm or bun directly.
       let target: { readonly version: string; readonly command: ReadonlyArray<string> } = {
         version: VERSION,
         command: self,
@@ -1423,10 +1268,8 @@ const update = Command.make(
         if (compareVersions(VERSION, latest) >= 0) yield* Console.log(`vibest is already up to date (v${VERSION}).`)
         else {
           yield* Console.log(`vibest ${latest} is available (this is ${VERSION}).`)
-          // The package manager that owns this binary, from its real path.
           const fs = yield* FileSystem.FileSystem
           const pm = upgradeCommand(yield* fs.realPath(self[0]!).pipe(Effect.orElseSucceed(() => self[0]!)))
-          // install.sh of the release, read whole before it runs (a cut-off download must not run half a script), into this install.
           const installer =
             method.kind === "npm"
               ? runInherit(pm)
@@ -1437,22 +1280,18 @@ const update = Command.make(
           yield* installer.pipe(
             Effect.mapError((e) => new UpdateError({ message: `${e.message}; vibestd not attempted` })),
           )
-          // install.sh puts each version in a directory of its own: the new vibest is there, not at this one's path.
           target = {
             version: latest,
             command: method.kind === "curl" ? [`${method.share}/versions/${latest}/bin/vibest`] : self,
           }
         }
       }
-      // More than one vibest on PATH: which one runs, and how to remove the others.
       for (const f of yield* extraVibests)
         yield* Console.log(
           `${f.mark === "problem" ? "warning: " : ""}${f.text}${f.fix ? `; remove it with: ${f.fix}` : ""}`,
         )
-      // 2. vibestd, from its Ping: keep, hand off or restart; the plan and its reason first.
       const running = Option.getOrUndefined(yield* readPing(layout.socket))
       const plan = daemonPlan(running, target)
-      // Nothing runs: nothing to plan, and no agent to restart.
       if (plan.action === "none") return
       yield* Console.log(`vibestd: ${plan.action}. ${plan.reason}.`)
       const failed =
@@ -1462,7 +1301,6 @@ const update = Command.make(
             ? yield* replaceForUpdate(target)
             : undefined
       if (failed !== undefined) return yield* new UpdateError({ message: `vibest ${target.version}: ${failed}` })
-      // 3. The agents still on the old integration, asked about once.
       const agents = yield* restartAgents(target.version, yes, "vibest update")
       if (agents !== undefined) return yield* new UpdateError({ message: agents })
     }),
@@ -1501,7 +1339,6 @@ export const command = (host: Daemon.Host, exec: Exec) =>
     ]),
   )
 
-/** A failure as one `Tag: message` line on stderr; the CLI's own usage errors were already printed with the help. */
 export const printFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.tapCause((cause) => {
@@ -1516,7 +1353,6 @@ export const printFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     }),
   )
 
-/** Exit codes: 0 done, 1 the command failed, 2 bad usage, 130 interrupted. */
 export const teardown: Runtime.Teardown = (exit, onExit) => {
   if (Exit.isSuccess(exit)) return onExit(0)
   if (Cause.hasInterruptsOnly(exit.cause)) return onExit(130)

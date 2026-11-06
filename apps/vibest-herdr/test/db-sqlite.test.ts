@@ -1,7 +1,6 @@
 import fs from "node:fs/promises"
 
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-// What vibest relies on from SQLite and @effect/sql-sqlite-bun: file mode, WAL synchronous, the write lock.
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db, SQL_NAMES } from "@vibest/core/db"
@@ -22,6 +21,8 @@ const modes = (file: string) =>
     return { db: yield* modeOf(file), wal: yield* modeOf(`${file}-wal`), shm: yield* modeOf(`${file}-shm`) }
   })
 
+const SQLITE_SYNCHRONOUS_NORMAL = 1
+
 describe("SQLite", () => {
   it.effect("a writable database is WAL with synchronous NORMAL", () =>
     Effect.gen(function* () {
@@ -29,8 +30,10 @@ describe("SQLite", () => {
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         assert.strictEqual((yield* sql<{ journalMode: string }>`PRAGMA journal_mode`)[0]?.journalMode, "wal")
-        // SQLite reports NORMAL as 1.
-        assert.strictEqual((yield* sql<{ synchronous: number }>`PRAGMA synchronous`)[0]?.synchronous, 1)
+        assert.strictEqual(
+          (yield* sql<{ synchronous: number }>`PRAGMA synchronous`)[0]?.synchronous,
+          SQLITE_SYNCHRONOUS_NORMAL,
+        )
       }).pipe(Effect.provide(database(file)))
     }).pipe(Effect.provide(Platform.services)),
   )
@@ -38,22 +41,18 @@ describe("SQLite", () => {
   it.effect("vibest.db and its wal and shm are mode 0600, including files that were looser", () =>
     Effect.gen(function* () {
       const file = `${yield* tempDirectory("vibest-sqlite-mode-")}/vibest.db`
-      // The modes are read while the connection is open: closing the last connection may delete -wal and -shm
-      // (SQLite's default, as on Linux), or keep them (Apple's system SQLite).
-      const openModes = modes(file).pipe(Effect.provide(database(file)))
-      assert.deepStrictEqual(yield* openModes, { db: 0o600, wal: 0o600, shm: 0o600 })
-      // A connection held open through the second open: no other connection is the last to close, so SQLite neither
-      // deletes nor recreates -wal and -shm, and only privateDatabase's chmod can bring the looser files back to 0600.
+      const modesWhileOpen = modes(file).pipe(Effect.provide(database(file)))
+      assert.deepStrictEqual(yield* modesWhileOpen, { db: 0o600, wal: 0o600, shm: 0o600 })
       yield* Effect.gen(function* () {
-        const holder = Context.get(
+        const heldOpenSoSqliteNeitherDeletesNorRecreatesWal = Context.get(
           yield* Layer.build(SqliteClient.layer({ filename: file, ...SQL_NAMES })),
           SqlClient.SqlClient,
         )
-        yield* holder`SELECT count(*) AS n FROM sqlite_master`
+        yield* heldOpenSoSqliteNeitherDeletesNorRecreatesWal`SELECT count(*) AS n FROM sqlite_master`
         yield* Effect.promise(() =>
           Promise.all([file, `${file}-wal`, `${file}-shm`].map((path) => fs.chmod(path, 0o644))),
         )
-        assert.deepStrictEqual(yield* openModes, { db: 0o600, wal: 0o600, shm: 0o600 })
+        assert.deepStrictEqual(yield* modesWhileOpen, { db: 0o600, wal: 0o600, shm: 0o600 })
       }).pipe(Effect.scoped)
     }).pipe(Effect.provide(Platform.services)),
   )
@@ -67,18 +66,15 @@ describe("SQLite", () => {
         assert.strictEqual((yield* sql<{ timeout: number }>`PRAGMA busy_timeout`)[0]?.timeout, 5000)
       }).pipe(Effect.provide(Platform.sqlite(pragmaFile)))
 
-      // A short timeout so the second writer fails here instead of after the library default of 5 seconds.
-      // The body only waits: BEGIN IMMEDIATE already holds the write lock, so the other transaction cannot start.
       const file = `${dir}/lock.db`
-      // The holder opens through Platform.sqlite, so this half covers the connection vibest itself opens.
-      const a = Context.get(yield* Layer.build(Platform.sqlite(file)), SqlClient.SqlClient)
-      const b = Context.get(
+      const vibestsOwnConnection = Context.get(yield* Layer.build(Platform.sqlite(file)), SqlClient.SqlClient)
+      const writerThatTimesOutFast = Context.get(
         yield* Layer.build(SqliteClient.layer({ filename: file, busyTimeout: "50 millis", ...SQL_NAMES })),
         SqlClient.SqlClient,
       )
       const gate = yield* Deferred.make<void>()
       const started = yield* Deferred.make<void>()
-      const holder = yield* a
+      const holder = yield* vibestsOwnConnection
         .withTransaction(
           Effect.gen(function* () {
             yield* Deferred.succeed(started, undefined)
@@ -87,8 +83,10 @@ describe("SQLite", () => {
         )
         .pipe(Effect.forkChild)
       yield* Deferred.await(started)
-      assert.strictEqual((yield* b<{ n: number }>`SELECT 1 AS n`)[0]?.n, 1)
-      const exit = yield* b.withTransaction(b`SELECT 1 AS n`).pipe(Effect.exit)
+      assert.strictEqual((yield* writerThatTimesOutFast<{ n: number }>`SELECT 1 AS n`)[0]?.n, 1)
+      const exit = yield* writerThatTimesOutFast
+        .withTransaction(writerThatTimesOutFast`SELECT 1 AS n`)
+        .pipe(Effect.exit)
       yield* Deferred.succeed(gate, undefined)
       yield* Fiber.join(holder)
       assert.isTrue(Exit.isFailure(exit))
@@ -138,8 +136,8 @@ describe("SQLite", () => {
     Effect.gen(function* () {
       const file = `${yield* tempDirectory("vibest-sqlite-project-")}/vibest.db`
       const open = database(file)
-      // The file exists before the two opens: two empty opens at once fail with SQLITE_CANTOPEN.
-      yield* Effect.void.pipe(Effect.provide(open))
+      const createFileBeforeConcurrentOpens = Effect.void.pipe(Effect.provide(open))
+      yield* createFileBeforeConcurrentOpens
       const dir = `${file}-repo`
       const create = Effect.gen(function* () {
         return yield* (yield* Db).createProject(dir, [{ path: `${dir}/app`, remote: "git@example.com:a.git" }])
@@ -177,8 +175,8 @@ describe("a vibestd restart", () => {
         return ids
       }).pipe(Effect.provide(database(file)))
       const statuses = yield* Effect.gen(function* () {
-        // Inbox.layer runs this at start with the harnesses whose adapter polls.
-        yield* (yield* Db).recoverDelivering(["claude"], () => "")
+        const harnessesWhoseAdapterPollsAsInboxLayerPasses = ["claude"] as const
+        yield* (yield* Db).recoverDelivering(harnessesWhoseAdapterPollsAsInboxLayerPasses, () => "")
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox ORDER BY id`
       }).pipe(Effect.provide(database(file)))

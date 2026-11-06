@@ -1,6 +1,3 @@
-// Write vibest's plugin for each harness into <outdir>/<harness> (default this package's harnesses/, which npm ships):
-// what vibest starts each harness with (`--plugin-dir`, `pi -e`), including its dereferenced `skills/` directory. The
-// binary finds it through VIBEST_HARNESSES, which bin/vibest.cjs sets.
 import fs from "node:fs"
 import path from "node:path"
 

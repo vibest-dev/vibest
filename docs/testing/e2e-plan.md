@@ -24,6 +24,10 @@ vibest writes nothing into the user's `~/.vibest`, harness config (`~/.claude`, 
 | Pi 1.4.0            | `~/.pi/agent/auth.json` | a temp `PI_CODING_AGENT_DIR` has no login, enough for the install checks                                            |
 | Cursor 2026.10.22   | subscription (keychain) | stays logged in with a temp `CURSOR_CONFIG_DIR`; its transcripts still go to the real `~/.cursor/projects`          |
 
+A test that starts the built vibestd itself (`test/plugin-binary.test.ts`) asks it over its socket, never through the
+`vibest` CLI: the CLI starts a vibestd of its own when a Ping is slow and would leave a second, untracked one behind. It
+gives vibestd a `PATH` of the system directories only, so vibestd does not poll the harnesses the user installed.
+
 ## 2. Layers
 
 **L0, already automated, no keys.** `pnpm test`; `HERDR_LIVE=1 pnpm test` inside a herdr pane (the two live files);

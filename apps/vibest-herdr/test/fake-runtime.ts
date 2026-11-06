@@ -1,8 +1,4 @@
 import { Runtime as R } from "@vibest/plugin"
-// In-memory Runtime (the plugin API of runtime-port.md §3): what the herdr product's tests drive. Terminals are
-// pane-style ids (`ws2:p3`); an agent's harness is started by `open` (the argv is recorded, not run), and the state
-// machine is the tests' to drive (`updateAgent`, `endTurn`). `open`'s env carries VIBEST_SESSION_ID, so a test may
-// address an agent by its session id as well as by its terminal id.
 import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref, Stream } from "effect"
 
 type Runtime = R.Runtime
@@ -11,36 +7,25 @@ type RuntimeError = R.RuntimeError
 type RuntimeEvent = R.RuntimeEvent
 type AgentState = R.AgentState
 
-/** The kind the fake registers as: the herdr product's tests model herdr. */
 export const KIND = "herdr"
 
 export interface FakeAgent {
-  /** The vibest session id this terminal's agent serves, from `open`'s env: how tests address it. */
   readonly vibestSession?: string
-  /** The harness conversation id the runtime's own record names (a test sets it; herdr knows it from the agent). */
   readonly session?: string
   readonly status: AgentState
   readonly seq: number
-  /** false: the pane is still there but the harness process exited. */
   readonly alive: boolean
-  /** false: accept `send` and leave seq and status unchanged. */
   readonly registerPrompt?: boolean
 }
 
 export interface FakeRuntimeOptions {
-  /** `send` with text does not register (exercises the confirm path). */
   readonly promptsIgnored?: boolean
-  /** `open` fails with this RuntimeError code. */
   readonly startError?: string
-  /** The interrupt key does not stop a working agent (exercises the interrupt timeout). */
   readonly interruptIgnored?: boolean
-  /** `events` carries state and exited changes; off (the default), it stays silent and tests drive each check. */
   readonly statusEvents?: boolean
-  /** No `run`: a usage-limit move closes the agent's terminal and opens the next one (a runtime without the member). */
   readonly noRun?: boolean
 }
 
-/** What a test can read back: one entry per runtime call, in the API's own shapes. */
 export interface RuntimeCalls {
   readonly open: {
     readonly project: string
@@ -88,29 +73,18 @@ export class FakeRuntime extends Context.Service<
   {
     readonly runtime: Runtime
     readonly callsTo: <M extends keyof RuntimeCalls>(method: M) => Effect.Effect<ReadonlyArray<RuntimeCalls[M]>>
-    /** How many runtime calls have been made. */
     readonly callCount: Effect.Effect<number>
-    /** The terminal `open` gave the session (its VIBEST_SESSION_ID), if any. */
     readonly terminalOf: (session: string) => Effect.Effect<Terminal | undefined>
-    /** The agent at a terminal or session id: its state and the terminal it runs in, as the tests read it. */
     readonly agent: (
       target: string,
     ) => Effect.Effect<{ readonly terminal: string; readonly agent: FakeAgent } | undefined>
-    /** Update an agent by its terminal id or its session id. */
     readonly updateAgent: (target: string, f: (agent: FakeAgent) => FakeAgent) => Effect.Effect<void>
-    /** The agent goes idle with a new state sequence, as a finished turn. */
     readonly endTurn: (target: string) => Effect.Effect<void>
-    /** A workspace open at the repository's main checkout `root`, or at its linked worktree `path`. */
     readonly addWorkspace: (id: string, root: string, path?: string) => Effect.Effect<void>
-    /** A terminal someone else opened in `workspaceId`, with its shell in `cwd`. */
     readonly addPane: (paneId: string, workspaceId: string, cwd: string) => Effect.Effect<void>
-    /** A live idle agent at a terminal the test names (a coordinator's terminal, never one `open` made). */
     readonly seedAgent: (terminal: string) => Effect.Effect<void>
-    /** Open terminals: id → workspace and cwd. */
     readonly panes: Effect.Effect<HashMap.HashMap<string, { readonly workspaceId: string; readonly cwd: string }>>
-    /** Every workspace the fake knows, open or not. */
     readonly workspaceState: Effect.Effect<ReadonlyArray<WorkspaceState>>
-    /** Hold the next call to `method` (on `target`, a terminal or session id, if given) until `release`. A code fails it. */
     readonly hold: (
       method: HoldMethod,
       target?: string,
@@ -119,11 +93,8 @@ export class FakeRuntime extends Context.Service<
       readonly reached: Effect.Effect<void>
       readonly release: (code?: string) => Effect.Effect<void>
     }>
-    /** Whether the runtime answers (default yes). No: every call fails `unreachable`, as for a session that is not running. */
     readonly reachable: Ref.Ref<boolean>
-    /** What the harness's integration does once a harness `open` started is up (testLayer: report it ready to vibestd). */
     readonly onStarted: Ref.Ref<(session: string) => Effect.Effect<void>>
-    /** The next `n` texts are accepted without moving the agent, so confirm times out. */
     readonly skipPromptUpdates: Ref.Ref<number>
     readonly events: PubSub.PubSub<RuntimeEvent>
   }
@@ -147,7 +118,6 @@ export class FakeRuntime extends Context.Service<
         message: string = code,
       ) => Effect.fail(new R.RuntimeError({ code, message: `${method}: ${message}` }))
 
-      /** The terminal id of a terminal or session id, as `open`'s env recorded. */
       const resolve = (target: string) =>
         Ref.get(agents).pipe(
           Effect.map(
@@ -179,7 +149,6 @@ export class FakeRuntime extends Context.Service<
 
       const awaitHold = (method: HoldMethod, target: string | undefined) =>
         Effect.gen(function* () {
-          // A session-id hold follows its agent: matched against the terminal it runs in NOW (a move changes it).
           const follows = Option.flatMap(HashMap.get(yield* Ref.get(holds), method), (hold) =>
             hold.raw === undefined ? Option.none<string>() : Option.some(hold.raw),
           )
@@ -194,7 +163,6 @@ export class FakeRuntime extends Context.Service<
                   (moving !== undefined && target === moving),
               ),
             )
-            // `skip` lets a call through: the hold starts at the next matching one.
             if (Option.isSome(hit) && hit.value.skip > 0)
               return [
                 Option.none<Hold>(),
@@ -210,7 +178,6 @@ export class FakeRuntime extends Context.Service<
               onSome: (hold) =>
                 Deferred.succeed(hold.reached, undefined).pipe(
                   Effect.andThen(Deferred.await(hold.release)),
-                  // A release may name a whole message (a usage-limit text), not one of the five codes: that fails `failed` with it verbatim.
                   Effect.flatMap((code) => {
                     const codes = ["not_found", "busy", "unreachable", "incompatible", "failed"] as const
                     return code === undefined
@@ -244,7 +211,6 @@ export class FakeRuntime extends Context.Service<
       const addPane = (paneId: string, workspaceId: string, cwd: string) =>
         Effect.gen(function* () {
           yield* Ref.update(panes, (map) => HashMap.set(map, paneId, { workspaceId, cwd }))
-          // A pane id handed out again is not the old pane: whatever runs there now is not the agent that died in it.
           yield* Ref.update(agents, (map) => HashMap.remove(map, paneId))
         })
 
@@ -256,7 +222,6 @@ export class FakeRuntime extends Context.Service<
           return out
         })
 
-      /** The project's workspace: one open at `root`, else the workspace of a terminal whose cwd is `root` (a multi-repository project directory). */
       const workspaceAt = (root: string) =>
         Effect.gen(function* () {
           const grouped = Option.map(
@@ -268,7 +233,6 @@ export class FakeRuntime extends Context.Service<
           return at === undefined ? undefined : at[1].workspaceId
         })
 
-      /** Close `id` and drop its terminals. Does not cascade to a repository group; `close` does that. */
       const shutWorkspace = (id: string) =>
         Effect.gen(function* () {
           const workspace = HashMap.get(yield* Ref.get(workspaces), id)
@@ -291,12 +255,10 @@ export class FakeRuntime extends Context.Service<
             onSome: Effect.succeed,
           })
           if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail(method, "not_found")
-          // An agent whose process is gone is no agent the runtime can name (herdr keeps the record; `state` has no answer).
           if (!agent.alive) return yield* fail(method, "not_found")
           return agent
         })
 
-      // The terminal's shell starts `argv` again: the agent recorded there is alive and idle, and its integration reports.
       const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
         call(
           "run",
@@ -317,7 +279,6 @@ export class FakeRuntime extends Context.Service<
         ...(options.noRun ? {} : { run }),
         status: () => Effect.succeed({ status: "online" as const }),
         open: (machine, input) =>
-          // `open`'s hold target is the vibest session id from the env: a terminal id does not exist yet.
           call(
             "open",
             {
@@ -333,7 +294,6 @@ export class FakeRuntime extends Context.Service<
             input.env.VIBEST_SESSION_ID,
             Effect.gen(function* () {
               if (options.startError) return yield* fail("open", "failed", options.startError)
-              // Kept with the project's others: beside `near`, else in the workspace on the project, else a new one there.
               const near = input.near === undefined ? Option.none() : HashMap.get(yield* Ref.get(panes), input.near.id)
               const grouped = Option.isSome(near)
                 ? Option.some(near.value.workspaceId)
@@ -355,12 +315,10 @@ export class FakeRuntime extends Context.Service<
               }
               yield* addPane(paneId, workspaceId, input.cwd)
               const session = input.env.VIBEST_SESSION_ID
-              // A resume moves the named agent to the new terminal, as herdr's agent name does: the old pane keeps no record.
               const prior =
                 session === undefined
                   ? undefined
                   : HashMap.toEntries(yield* Ref.get(agents)).find(([, agent]) => agent.vibestSession === session)?.[1]
-              // A terminal running vibest itself is a live coordinator working in it; its registration names it later.
               const coordinator = session === undefined && input.argv.some((part) => part.includes("vibest"))
               const started: FakeAgent = {
                 ...prior,
@@ -393,7 +351,6 @@ export class FakeRuntime extends Context.Service<
             terminal.id,
             Effect.gen(function* () {
               const agent = yield* agentOf("send", terminal)
-              // `skipPromptUpdates` counts texts, never key presses (an Enter is not a prompt).
               if (
                 input.text !== undefined &&
                 !options.promptsIgnored &&
@@ -424,8 +381,6 @@ export class FakeRuntime extends Context.Service<
             terminal.id,
             Effect.gen(function* () {
               if (!HashMap.has(yield* Ref.get(panes), terminal.id)) return yield* fail("process", "not_found")
-              // A recorded agent that died left its pane at the shell; a pane with no agent of ours at all is a
-              // terminal reused for something else: a program runs there, unnamed.
               const record = HashMap.get(yield* Ref.get(agents), terminal.id)
               if (Option.isSome(record)) return { running: record.value.alive }
               return { running: true }
@@ -433,7 +388,6 @@ export class FakeRuntime extends Context.Service<
           ),
         events: Stream.fromPubSub(events),
         session: (terminal) =>
-          // The record outlives the process (herdr keeps it): the id is read even after the harness exited.
           call(
             "session",
             { terminal: terminal.id },
@@ -454,7 +408,6 @@ export class FakeRuntime extends Context.Service<
             "state",
             { terminal: terminal.id },
             terminal.id,
-            // An agent whose process is gone is no agent the runtime can name: herdr keeps the record, but `state` has no answer.
             agentOf("state", terminal).pipe(Effect.map((agent) => agent.status)),
           ),
         close: (terminal) =>
@@ -466,7 +419,6 @@ export class FakeRuntime extends Context.Service<
               const closing = HashMap.get(yield* Ref.get(panes), terminal.id)
               if (Option.isNone(closing)) return yield* fail("close", "not_found")
               yield* Ref.update(panes, (map) => HashMap.remove(map, terminal.id))
-              // The last pane takes its workspace with it. A main checkout's workspace also takes its linked worktrees' workspaces.
               const gone = [terminal.id]
               if (
                 Option.isSome(closing) &&
@@ -545,7 +497,6 @@ export class FakeRuntime extends Context.Service<
         ),
         hold: (method, target, skip = 0) =>
           Effect.gen(function* () {
-            // Both forms match: the raw string (a session id, as `open` reports it) and the terminal it names now.
             const resolved = target === undefined ? undefined : ((yield* resolve(target)) ?? target)
             const reached = yield* Deferred.make<void>()
             const release = yield* Deferred.make<string | undefined>()

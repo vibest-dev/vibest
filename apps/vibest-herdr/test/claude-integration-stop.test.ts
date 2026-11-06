@@ -1,5 +1,3 @@
-// `vibest integration stop` / `prompt`: a harness plugin's turn-end and prompt bridges, which only send the event to vibestd.
-// Isolated HOME, fake socket, no live daemon.
 import net from "node:net"
 
 import { assert, layer } from "@effect/vitest"
@@ -23,7 +21,6 @@ const stopAt = (home: string, env: Record<string, string>, raw: string) =>
     TestClock.withLive,
   )
 
-/** `answer` false: the request is read and the connection dropped (`"drop"`) or left unanswered (`"hang"`). */
 const listen = (sock: string, lines: string[], answer: (n: number) => true | "drop" | "hang" = () => true) => {
   const server = net.createServer((socket) => {
     let buf = ""
@@ -131,41 +128,41 @@ layer(Platform.services)("claude integration stop", (it) => {
     }),
   )
 
-  it.effect("only a connection that could not be made is tried again: not a dropped one, not an unanswered one", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path
-      const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
-      // No socket yet (ENOENT): the retry reaches a vibestd that starts listening within the retry delay.
-      const late = yield* tempDirectory("l-")
-      const retried: string[] = []
-      const sending = yield* Effect.forkChild(stopAt(late, worker, JSON.stringify(event)))
-      yield* TestClock.withLive(Effect.sleep("100 millis"))
-      yield* listen(path.join(late, "vibest.sock"), retried)
-      yield* Fiber.join(sending)
-      assert.deepStrictEqual(
-        rpc(retried).map((r) => r.method),
-        ["TurnEnd"],
-      )
-      // Read, then the connection dropped: vibestd may have handled it, so it is not sent again.
-      const dropped = yield* tempDirectory("d-")
-      const seen: string[] = []
-      yield* listen(path.join(dropped, "vibest.sock"), seen, (n) => (n === 1 ? "drop" : true))
-      yield* stopAt(dropped, worker, JSON.stringify(event))
-      assert.deepStrictEqual(
-        rpc(seen).map((r) => r.method),
-        ["TurnEnd"],
-      )
-      const hung = yield* tempDirectory("h-")
-      const once: string[] = []
-      yield* listen(path.join(hung, "vibest.sock"), once, () => "hang")
-      const started = Date.now()
-      yield* stopAt(hung, worker, JSON.stringify(event))
-      assert.isAtLeast(Date.now() - started, Duration.toMillis(HOOK_TIMEOUT) - 100)
-      assert.deepStrictEqual(
-        rpc(once).map((r) => r.method),
-        ["TurnEnd"],
-      )
-    }),
+  it.effect(
+    "only a connection that could not be made is tried again: a dropped or unanswered one may have been handled, so it is not",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path
+        const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
+        const late = yield* tempDirectory("l-")
+        const retried: string[] = []
+        const sending = yield* Effect.forkChild(stopAt(late, worker, JSON.stringify(event)))
+        yield* TestClock.withLive(Effect.sleep("100 millis"))
+        yield* listen(path.join(late, "vibest.sock"), retried)
+        yield* Fiber.join(sending)
+        assert.deepStrictEqual(
+          rpc(retried).map((r) => r.method),
+          ["TurnEnd"],
+        )
+        const dropped = yield* tempDirectory("d-")
+        const seen: string[] = []
+        yield* listen(path.join(dropped, "vibest.sock"), seen, (n) => (n === 1 ? "drop" : true))
+        yield* stopAt(dropped, worker, JSON.stringify(event))
+        assert.deepStrictEqual(
+          rpc(seen).map((r) => r.method),
+          ["TurnEnd"],
+        )
+        const hung = yield* tempDirectory("h-")
+        const once: string[] = []
+        yield* listen(path.join(hung, "vibest.sock"), once, () => "hang")
+        const started = Date.now()
+        yield* stopAt(hung, worker, JSON.stringify(event))
+        assert.isAtLeast(Date.now() - started, Duration.toMillis(HOOK_TIMEOUT) - 100)
+        assert.deepStrictEqual(
+          rpc(once).map((r) => r.method),
+          ["TurnEnd"],
+        )
+      }),
   )
 
   it.effect("a coordinator's turn end writes no result file and sends nothing", () =>

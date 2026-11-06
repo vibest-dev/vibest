@@ -18,7 +18,6 @@ describe("keyedLock", () => {
       )
       yield* Effect.yieldNow
       const second = yield* Effect.forkChild(locks.withLock(1)(Effect.sync(() => order.push("second"))))
-      // Another key does not wait.
       yield* locks.withLock(2)(Effect.sync(() => order.push("other key")))
       yield* Effect.yieldNow
       assert.strictEqual(locks.size(), 1)
@@ -31,7 +30,7 @@ describe("keyedLock", () => {
     }),
   )
 
-  it.effect("an interrupted waiter and a failed holder leave no entry", () =>
+  it.effect("a waiter interrupted while it waits and a failed holder leave no entry", () =>
     Effect.gen(function* () {
       const locks = keyedLock<string>()
       const holding = yield* Deferred.make<void>()
@@ -40,7 +39,6 @@ describe("keyedLock", () => {
         locks.withLock("a")(Deferred.succeed(holding, undefined).pipe(Effect.andThen(Deferred.await(gate)))),
       )
       yield* Deferred.await(holding)
-      // Covers interruption while waiting only; the window between the permit and the end of `restore` is the semaphore's own.
       const waiter = yield* Effect.forkChild(locks.withLock("a")(Effect.void))
       yield* Effect.yieldNow
       yield* Fiber.interrupt(waiter)

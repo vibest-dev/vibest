@@ -5,8 +5,6 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
 import { Command } from "effect/cli"
 
-// Entry point of `vibest` / vibestd: the one place (besides src/platform) that picks the product, through `#platform`.
-// The terminal runtime comes from the builtin runtime plugin (runtime-port.md §2), not a layer here.
 import * as Platform from "#platform"
 
 import * as Cli from "./cli.ts"
