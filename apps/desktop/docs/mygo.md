@@ -105,11 +105,11 @@ was observed at the first resized grid and the complete command echoed once.
 ## Limits and visible changes
 
 - Upstream scrollbars are now hover/drag-only and occupy a wider inset strip.
-- The complete upstream terminal and Darwin suites pass. The full upstream UI
-  suite has one known mismatch: TestPopoverMenuButtonKeysInOneFrame. Our
-  required chronological input preparation processes Enter before a following
-  Down, so Down can reopen the now-focused menu button rather than remaining in
-  the old menu's event batch. This is not a fully green upstream UI suite.
+- Patch 0004 also adapts TestPopoverMenuButtonKeysInOneFrame to its chronological
+  preparation rule: Enter chooses the highlighted item and closes the menu, then
+  Down reaches the restored button focus and reopens the menu. The assertion
+  preserves the chosen item and pinned state checks and requires the reopened
+  menu. The full patched upstream UI, terminal and Darwin suites pass.
 - Native IME candidate selection, physical Option/dead keys and held-key repeat,
   native Finder/image paste, file drop, editors and packaged distribution were
   not exercised by the native smoke demo. Their software regressions are not

@@ -444,6 +444,23 @@ new file mode 100644
 +		rt.runFrame()
 +	}
 +}
+diff --git a/ui/popovermenu_test.go b/ui/popovermenu_test.go
+--- a/ui/popovermenu_test.go
++++ b/ui/popovermenu_test.go
+@@ -817,10 +817,11 @@
+ 	}
+ 
+-	// Enter chooses the item highlighted before the Down after it.
++	// Chronological preparation applies Enter before Down, so Down reaches
++	// the restored button focus and reopens its menu.
+ 	tt.Click("Actions")
+ 	keys(KeyDown)
+ 	keys(KeyEnter, KeyDown)
+-	if !slices.Equal(a.chosen, []string{"Open"}) || !a.pinned || menuShows(tt) {
++	if !slices.Equal(a.chosen, []string{"Open"}) || !a.pinned || !menuShows(tt) {
+ 		t.Errorf("Enter and Down: chose %q, pinned %v, menu shows %v", a.chosen, a.pinned, menuShows(tt))
+ 	}
+ }
 diff --git a/ui/preedit_owner_test.go b/ui/preedit_owner_test.go
 new file mode 100644
 --- /dev/null
