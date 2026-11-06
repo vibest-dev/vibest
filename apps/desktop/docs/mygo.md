@@ -111,8 +111,14 @@ millisecond input-to-display latency is claimed.
 
 Patch **0020** keeps MyGo's menu placement, focus and keys, and lets the app paint the card.
 `SetMenuPresentation(PopoverMenus)` draws context menus, menu buttons and text-field
-editing menus in the window. A press outside that card does not reach the control
-under it. The app menu bar is unchanged.
+editing menus in the window. The app menu bar is unchanged.
+
+Two behaviours differ from MyGo's own drawn menus, on purpose. A press outside the
+card closes the menu and does not reach the control under the pointer. A right-click
+while a menu is open does the same: it closes the menu and does not reach the row, so
+the menu does not move to that point on the same press. The layer that takes the press
+also covers the menu button, so `Tester.Click` refuses it as covered; `ClickAt` is the
+press that closes the menu.
 
 ## App migration
 

@@ -51,9 +51,10 @@ func paintMenuPanel(c *ui.Context, panel ui.Element, info ui.MenuPaint) {
 	} else {
 		panel.Background(th.Surface)
 	}
-	if info.Level > 0 {
-		panel.MarginStart(menuSubmenuGap)
-	} else {
+	switch {
+	case info.Level > 0:
+		panel.MarginStart(menuSubmenuGap + menuInset + 1)
+	case info.Below || menuPointerGap(info):
 		panel.Margin(menuAnchorGap, 0, 0, 0)
 	}
 	if !menuAnimates(c, info) {
@@ -70,6 +71,10 @@ func paintMenuPanel(c *ui.Context, panel ui.Element, info ui.MenuPaint) {
 		Enter:        from,
 		ExitDuration: -1,
 	})
+}
+
+func menuPointerGap(info ui.MenuPaint) bool {
+	return info.Edit || menuInstantTrigger(info)
 }
 
 func menuAnimates(c *ui.Context, info ui.MenuPaint) bool {

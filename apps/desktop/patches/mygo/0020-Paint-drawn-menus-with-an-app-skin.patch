@@ -245,3 +245,92 @@ diff --git a/ui/layout.go b/ui/layout.go
  // attachedAt returns where c, w×h and a child of e whose padding box is
  // pw×ph, goes relative to e, attached to t, the box of its target.
  // It notes the anchors it puts together (AttachedAnchors), and puts the
+diff --git a/ui/popovermenu_test.go b/ui/popovermenu_test.go
+--- a/ui/popovermenu_test.go
++++ b/ui/popovermenu_test.go
+@@ -122,7 +122,12 @@
+ 		t.Errorf("Open does not show its shortcut %q: %q", keys, tt.Texts())
+ 	}
+ 
+-	// A right-click elsewhere on the row opens it there.
++	// A right-click while the menu shows closes it. The layer takes the
++	// press, so the row does not move the menu on that press.
++	tt.RightClickAt(x+250, y)
++	if menuShows(tt) {
++		t.Error("a right-click outside the card left the menu open")
++	}
+ 	tt.RightClickAt(x+250, y)
+ 	if open, _ := tt.Find("Open"); !menuShows(tt) || open.X+open.W > x+250 {
+ 		t.Errorf("a right-click at %v puts the menu at %+v", x+250, open)
+@@ -641,8 +646,10 @@
+ 	if !menuShows(tt) {
+ 		t.Fatal("the menu closed after it opened")
+ 	}
+-	// The button pressed again closes it, giving the focus back.
+-	tt.Click("Actions")
++	// The button pressed again closes it, giving the focus back. The
++	// layer covers the button, so Click refuses; the press still lands.
++	b, _ = tt.Find("Actions")
++	tt.ClickAt(b.X+b.W/2, b.Y+b.H/2)
+ 	if menuShows(tt) {
+ 		t.Error("pressing the button again left the menu open")
+ 	}
+@@ -859,11 +866,12 @@
+ 		t.Errorf("clicking Date: sort %q, menu shows %v", a.sort, menuShows(tt))
+ 	}
+ 
+-	// A press outside closes it, and goes on to what is under the pointer.
++	// A press outside closes the menu and does not reach Edit.
+ 	tt.Click("Actions")
+-	tt.Click("Edit")
+-	if menuShows(tt) || !tt.Focused("Edit") {
+-		t.Errorf("a press on Edit: menu shows %v, Edit focused %v", menuShows(tt), tt.Focused("Edit"))
++	edit, _ := tt.Find("Edit")
++	tt.ClickAt(edit.X+edit.W/2, edit.Y+edit.H/2)
++	if menuShows(tt) || tt.Focused("Edit") {
++		t.Errorf("a press outside: menu shows %v, Edit focused %v", menuShows(tt), tt.Focused("Edit"))
+ 	}
+ }
+ 
+diff --git a/ui/menupresentation_test.go b/ui/menupresentation_test.go
+--- a/ui/menupresentation_test.go
++++ b/ui/menupresentation_test.go
+@@ -102,8 +102,10 @@
+ 	tt := coreNewTester(view, 400, 300)
+ 	tt.Click("Actions")
+ 	wantDrawn(t, tt, "Duplicate")
+-	// Pressed again, the button closes its menu.
+-	tt.Click("Actions")
++	// Pressed again, the button closes its menu. The layer covers the
++	// button, so Click refuses; the press still lands.
++	b, _ := tt.Find("Actions")
++	tt.ClickAt(b.X+b.W/2, b.Y+b.H/2)
+ 	if tt.HasText("Duplicate") {
+ 		t.Fatal("a second press left the menu open")
+ 	}
+diff --git a/ui/menubase_test.go b/ui/menubase_test.go
+--- a/ui/menubase_test.go
++++ b/ui/menubase_test.go
+@@ -197,9 +197,11 @@
+ 	if !a.pinned || a.open {
+ 		t.Errorf("clicking Pinned: pinned %v, open %v", a.pinned, a.open)
+ 	}
+-	// A press on the button closes it, as one outside does.
+-	tt.Click("Actions")
++	// A press on the button closes it, as one outside does. The layer
++	// covers the button, so Click refuses; the press still lands.
+ 	tt.Click("Actions")
++	b, _ := tt.Find("Actions")
++	tt.ClickAt(b.X+b.W/2, b.Y+b.H/2)
+ 	if a.open || menuShows(tt) {
+ 		t.Error("the button pressed again left the menu open")
+ 	}
+@@ -211,7 +213,7 @@
+ 	// The view opens it too, below the button, and closes it.
+ 	a.open = true
+ 	tt.Frame()
+-	b, _ := tt.Find("Actions")
++	b, _ = tt.Find("Actions")
+ 	if o, ok := tt.Find("Open"); !ok || o.Y < b.Y+b.H {
+ 		t.Errorf("opened by the view: Open at %+v, the button at %+v", o, b)
+ 	}

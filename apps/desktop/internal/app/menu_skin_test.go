@@ -144,6 +144,74 @@ func TestMenuTerminalAndTextOpenAtOnce(t *testing.T) {
 	}
 }
 
+func TestMenuSubmenuGap(t *testing.T) {
+	tt := ui.NewTester(submenuGapView, 420, 300)
+	tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+	if err := tt.RightClick("Row"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(0, ui.KeyDown)
+	tt.Key(0, ui.KeyRight)
+	parent, ok := tt.Find("vibest-menu")
+	sub, okSub := tt.Find("vibest-submenu")
+	if !ok || !okSub {
+		t.Fatalf("cards parent %v submenu %v", ok, okSub)
+	}
+	gap := sub.X - (parent.X + parent.W)
+	if math.Abs(float64(gap-menuSubmenuGap)) > 1 {
+		t.Fatalf("submenu gap %v, want %v (parent %+v sub %+v)", gap, menuSubmenuGap, parent, sub)
+	}
+}
+
+func TestMenuPointerGap(t *testing.T) {
+	tt := ui.NewTester(pointerGapView, 420, 480)
+	tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+	check := func(name string, gap float32) {
+		t.Helper()
+		r, ok := tt.Find(name)
+		if !ok {
+			t.Fatal(name)
+		}
+		x, y := r.X+r.W/2, r.Y+r.H/2
+		tt.RightClickAt(x, y)
+		menu, ok := tt.Find("vibest-menu")
+		if !ok {
+			t.Fatalf("%s: no menu", name)
+		}
+		if math.Abs(float64(menu.X-x)) > 1.5 || math.Abs(float64(menu.Y-(y+gap))) > 1.5 {
+			t.Fatalf("%s: menu at %v,%v, click %v,%v, want gap %v", name, menu.X, menu.Y, x, y, gap)
+		}
+		tt.Key(0, ui.KeyEscape)
+	}
+	check("Row", 0)
+	check("Terminal", menuAnchorGap)
+	check("Field", menuAnchorGap)
+}
+
+func submenuGapView(c *ui.Context) {
+	installMenuSkin(c)
+	ui.Box(c).Fill().Background(c.Theme().Background).Children(func() {
+		row := ui.Box(c).Size(80, 24).Absolute().Left(16).Top(16).Label("Row")
+		row.ContextMenu(func(m *ui.Menu) {
+			m.Submenu("More", func(m *ui.Menu) { m.Item("Inside") })
+		})
+	})
+}
+
+func pointerGapView(c *ui.Context) {
+	installMenuSkin(c)
+	ui.Box(c).Fill().Background(c.Theme().Background).Children(func() {
+		ui.Box(c).Size(100, 28).Absolute().Left(24).Top(24).Label("Row").ContextMenu(func(m *ui.Menu) {
+			m.Item("Stay")
+		})
+		ui.Box(c).Size(120, 28).Absolute().Left(24).Top(80).Label("Terminal").ContextMenu(func(m *ui.Menu) {
+			m.Item("Copy")
+		})
+		text := "hello"
+		ui.TextInput(c, &text).Width(160).Absolute().Left(24).Top(140).Label("Field")
+	})
+}
+
 type menuFix struct {
 	chosen string
 	hits   int
@@ -203,6 +271,8 @@ func installMenuSkin(c *ui.Context) {
 		panel(p, info)
 		if info.Level == 0 {
 			p.Label("vibest-menu")
+		} else {
+			p.Label("vibest-submenu")
 		}
 	}
 	c.SetMenuPainter(skin)
