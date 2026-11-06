@@ -107,6 +107,13 @@ suites, make test, make vet, pnpm typecheck and pnpm test pass. Native re-show
 and typed x echo were verified by screenshots and Core readback; no
 millisecond input-to-display latency is claimed.
 
+## Drawn menus
+
+Patch **0020** keeps MyGo's menu placement, focus and keys, and lets the app paint the card.
+`SetMenuPresentation(PopoverMenus)` draws context menus, menu buttons and text-field
+editing menus in the window. A press outside that card does not reach the control
+under it. The app menu bar is unchanged.
+
 ## App migration
 
 The app already used checked Element values, stable Handles for retained identity

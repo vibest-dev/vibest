@@ -1,0 +1,247 @@
+diff --git a/ui/menu.go b/ui/menu.go
+--- a/ui/menu.go
++++ b/ui/menu.go
+@@ -346,6 +346,9 @@
+ 	// drawn is the menu drawn in the window that shows (PopoverMenu,
+ 	// PopoverMenuButton), nil while none does.
+ 	drawn *drawnMenu
++	// paint is the app's look for menus drawn in the window, when its
++	// panel is set (SetMenuPainter).
++	paint MenuPainter
+ }
+ 
+ // shownMenu is a context menu built for the element id. commands are the
+diff --git a/ui/popovermenu.go b/ui/popovermenu.go
+--- a/ui/popovermenu.go
++++ b/ui/popovermenu.go
+@@ -286,6 +286,9 @@
+ 	m.built = m.built[:0]
+ 	var root *node
+ 	coreOverlay(c, func() {
++		// A press outside the menu hits this layer, not the window under it.
++		back := coreBox(c).Absolute().Left(0).Top(0).Right(0).Bottom(0)
++		back.flags |= flagClickable
+ 		// A context menu goes at the point where it opened, which follows
+ 		// the element as it moves.
+ 		anchor := m.Trigger
+@@ -843,6 +846,10 @@
+ 	open := true
+ 	m := &menuParts{Trigger: e, c: c, open: &open, s: &d.menu, level: -1}
+ 	var chosen *platform.MenuItem
++	if c.rt.menu.paint.Panel != nil {
++		paintDrawnMenu(m, d, e, pm, run, build, &open)
++		return
++	}
+ 	style := func(panel *node) {
+ 		panel.widget = "PopoverMenu"
+ 		panel.MinWidth(t.Space(45)).Padding(t.Space(1)).Radius(t.Radius+2).Background(t.Background).Border(1, t.Border)
+diff --git a/ui/api_gen.go b/ui/api_gen.go
+--- a/ui/api_gen.go
++++ b/ui/api_gen.go
+@@ -577,6 +577,16 @@
+ 		return
+ 	}
+ 	_ctx.SetMenuPresentation(p)
++}
++
++// SetMenuPainter sets the look of menus drawn in the window
++// (PopoverMenus). The toolkit still places, keys and dismisses them.
++func (_handle *Context) SetMenuPainter(p MenuPainter) {
++	_ctx := _handle.build()
++	if _ctx == nil {
++		return
++	}
++	_ctx.SetMenuPainter(p)
+ }
+ 
+ // SetTheme makes the frame use t, for the window's root and the widgets
+diff --git a/ui/menupaint.go b/ui/menupaint.go
+new file mode 100644
+--- /dev/null
++++ b/ui/menupaint.go
+@@ -0,0 +1,141 @@
++package ui
++
++import (
++	"slices"
++
++	"github.com/egoist/mygo/internal/platform"
++)
++
++// MenuPainter is an app's look for menus drawn in the window
++// (SetMenuPresentation). The toolkit still places the menu, moves the
++// highlight, and dismisses it (MenuBase).
++type MenuPainter struct {
++	// Panel styles the menu card. Level is 0 for the menu and 1 for a
++	// submenu, and so on.
++	Panel func(panel Element, info MenuPaint)
++	// Item styles one row. The row already reports Highlighted, Clicked
++	// and Disabled, and assistive technology already knows its name.
++	Item func(row Element, it MenuPaintItem)
++	// Separator is a line between items, drawn into the panel.
++	Separator func()
++}
++
++// MenuPaint describes the menu Panel is styling.
++type MenuPaint struct {
++	// Edit is the editing menu of a text input or selectable text.
++	Edit bool
++	// Below is a menu button's menu, opening under the button.
++	Below bool
++	// Level is 0 for the menu and greater for a submenu.
++	Level int
++	// TriggerLabel and TriggerWidget name the element the menu opened on.
++	TriggerLabel  string
++	TriggerWidget string
++}
++
++// MenuPaintItem is one entry of a menu the window draws.
++type MenuPaintItem struct {
++	ID       int
++	Label    string
++	Shortcut string
++	Tooltip  string
++	Enabled  bool
++	Checked  bool
++	Radio    bool
++	Submenu  bool
++	// Marks is set when this menu reserves a column for check marks.
++	Marks bool
++}
++
++// SetMenuPainter sets the look of menus drawn in the window. It stays
++// until set again. A zero Panel keeps the theme's menu look.
++func (c *context) SetMenuPainter(p MenuPainter) {
++	c.rt.menu.paint = p
++}
++
++func paintDrawnMenu(m *menuParts, d *drawnMenu, e *node, pm *platform.Menu, run *menuRun, build func(*Menu), open *bool) {
++	rt := m.c.rt
++	paint := rt.menu.paint
++	var chosen *platform.MenuItem
++	info := MenuPaint{Edit: d.edit, Below: d.menu.below, TriggerLabel: e.label, TriggerWidget: e.widget}
++	var items func(list []*platform.MenuItem, level int)
++	items = func(list []*platform.MenuItem, level int) {
++		marks := slices.ContainsFunc(list, func(it *platform.MenuItem) bool {
++			return it.Visible && (it.Type == platform.MenuItemCheckbox || it.Type == platform.MenuItemRadio)
++		})
++		for _, it := range list {
++			if !it.Visible {
++				continue
++			}
++			if it.Type == platform.MenuItemSeparator {
++				if paint.Separator != nil {
++					paint.Separator()
++				}
++				continue
++			}
++			row := paintedMenuRow(m, it)
++			if paint.Item != nil {
++				paint.Item(wrapElement(row), menuPaintItem(it, marks))
++			}
++			if sub := it.Submenu; it.Type == platform.MenuItemSubmenu && sub != nil {
++				subItems := sub.Items
++				next := level + 1
++				m.Submenu(row, func(panel *node) {
++					info.Level = next
++					paint.Panel(wrapElement(panel), info)
++					items(subItems, next)
++				})
++			} else if row.Clicked() {
++				chosen = it
++			}
++		}
++	}
++	m.Popup(func(panel *node) {
++		info.Level = 0
++		paint.Panel(wrapElement(panel), info)
++		items(pm.Items, 0)
++	})
++	if !*open {
++		rt.menu.drawn = nil
++	} else if d.menu.below {
++		e.expanded = true
++	}
++	if chosen != nil {
++		rt.drawnChoice(d, run, build, chosen)
++	}
++}
++
++func paintedMenuRow(m *menuParts, it *platform.MenuItem) *node {
++	sub := it.Type == platform.MenuItemSubmenu && it.Submenu != nil
++	var row *node
++	switch {
++	case sub:
++		row = m.SubmenuItem()
++	case it.Type == platform.MenuItemCheckbox:
++		row = m.CheckItem(it.Checked)
++	case it.Type == platform.MenuItemRadio:
++		row = m.RadioItem(it.Checked)
++	default:
++		row = m.Item()
++	}
++	row.Label(it.Label).Disabled(!it.Enabled)
++	if it.ToolTip != "" {
++		row.Tooltip(it.ToolTip)
++	}
++	row.keyShortcuts = shortcutText(it.Accelerator)
++	return row
++}
++
++func menuPaintItem(it *platform.MenuItem, marks bool) MenuPaintItem {
++	return MenuPaintItem{
++		ID:       it.ID,
++		Label:    it.Label,
++		Shortcut: shortcutText(it.Accelerator),
++		Tooltip:  it.ToolTip,
++		Enabled:  it.Enabled,
++		Checked:  it.Checked,
++		Radio:    it.Type == platform.MenuItemRadio,
++		Submenu:  it.Type == platform.MenuItemSubmenu && it.Submenu != nil,
++		Marks:    marks,
++	}
++}
+diff --git a/ui/layout.go b/ui/layout.go
+--- a/ui/layout.go
++++ b/ui/layout.go
+@@ -1315,9 +1315,40 @@
+ 			continue
+ 		}
+ 		c.x, c.y = attachedAt(c, ov, laidOutVisualBox(c.popover), pw, ph, c.w, c.h)
++		// Placement runs after transitions and would drop an entrance
++		// slide. Put that offset back, on the side this frame chose.
++		dx, dy := menuEnterShift(c)
++		c.x += dx
++		c.y += dy
+ 	}
+ }
+ 
++// menuEnterShift is how far c still has to travel for a Flip entrance.
++// Zero unless that entrance fades in.
++func menuEnterShift(c *node) (float32, float32) {
++	rt := c.c.rt
++	if rt.trans == nil {
++		return 0, 0
++	}
++	r := rt.trans[c.id]
++	if r == nil || r.t.Enter == nil || !r.t.Enter.Flip || r.target.alpha <= 0 {
++		return 0, 0
++	}
++	remain := float32(1 - r.shown.alpha/r.target.alpha)
++	if remain == 0 {
++		return 0, 0
++	}
++	m := r.t.Enter
++	dx, dy := m.X, m.Y
++	if c.flips&flipAcross != 0 {
++		dx = -dx
++	}
++	if c.flips&flipDown != 0 {
++		dy = -dy
++	}
++	return dx * remain, dy * remain
++}
++
+ // attachedAt returns where c, w×h and a child of e whose padding box is
+ // pw×ph, goes relative to e, attached to t, the box of its target.
+ // It notes the anchors it puts together (AttachedAnchors), and puts the
