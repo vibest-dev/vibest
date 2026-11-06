@@ -2,7 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
-import { USED_METHODS } from "effect-hc-sdk"
+import { USED_METHODS } from "effect-herdr-core-sdk"
 
 const src = path.join(import.meta.dirname, "..", "src")
 const code = fs
@@ -19,7 +19,7 @@ const called = [
 ].sort()
 
 describe("USED_METHODS", () => {
-  it("lists exactly the hc methods runtime-hc calls", () => {
+  it("lists exactly the hc methods runtime-herdr-core calls", () => {
     assert.isAbove(called.length, 0)
     assert.deepStrictEqual([...USED_METHODS].sort(), called)
   })

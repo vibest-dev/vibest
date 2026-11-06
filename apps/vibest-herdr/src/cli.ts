@@ -24,8 +24,8 @@ import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
 import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
-import * as HcCaller from "@vibest/runtime-hc/caller"
-import { KIND as HC_KIND } from "@vibest/runtime-hc/terminal-runtime"
+import * as HcCaller from "@vibest/runtime-herdr-core/caller"
+import { KIND as HC_KIND } from "@vibest/runtime-herdr-core/terminal-runtime"
 import {
   CALLER_ENV as HERDR_CALLER_ENV,
   ambientHerdr,

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
-import { HcError, type HcShape } from "effect-hc-sdk"
+import { HcError, type HcShape } from "effect-herdr-core-sdk"
 
 import { make, terminalName } from "../src/terminal-runtime.ts"
 
