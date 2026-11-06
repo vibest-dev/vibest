@@ -301,7 +301,7 @@ func (a *App) paneShowing(address string) string {
 }
 
 func (a *App) sessionOpen(g vibest.Group, r vibest.Row) {
-	address, ok := r.Session.CoreAddress()
+	address, ok := a.sessionAddress(r.Session)
 	if !ok {
 		a.navigationNote = r.Session.Name + " runs in " + r.Session.Runtime + "; only herdr-core terminals open here"
 		return
@@ -408,7 +408,7 @@ func (a *App) focusedAddress() string {
 func (a *App) sessionRow(c *ui.Context, g vibest.Group, r vibest.Row, focused string) {
 	th := a.th
 	s := r.Session
-	address, inCore := s.CoreAddress()
+	address, inCore := a.sessionAddress(s)
 	on := inCore && address == focused
 	ui.Row(c).FillWidth().Padding(0, 0, 0, th.GroupIndent*float32(r.Depth+1)).Children(func() {
 		b := a.rowButton(c, "session/"+s.ID, on).Grow(1).MinWidth(0).Label("session: " + s.Name)
