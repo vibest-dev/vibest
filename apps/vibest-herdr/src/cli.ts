@@ -751,8 +751,8 @@ export const integrationPrompt = (adapter: HarnessAdapter, raw: string) =>
     const sessionId = yield* nonempty("VIBEST_SESSION_ID")
     if (!agent || !sessionId) return
     if (promptOf(adapter, agent, raw) === undefined) return
-    yield* notify(adapter, sessionId, raw, (client) => client.Prompt({ sessionId, harness: adapter.id, event: raw }))
     yield* writeTerminalStatus("working")
+    yield* notify(adapter, sessionId, raw, (client) => client.Prompt({ sessionId, harness: adapter.id, event: raw }))
   }).pipe(Effect.ignore)
 
 const hookHarness = Flag.Literals("harness", HARNESS_IDS).pipe(Flag.withDescription("The harness whose hook this is"))

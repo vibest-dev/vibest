@@ -60,6 +60,16 @@ check skips on a provider other than `anthropic`, which vibest does not give a C
 | G4  | a refusing `run` hook blocks `vibest run` with its reason, before any pane or worktree | script  | non-zero exit, reason printed, no worktree, no herdr pane |
 | G5  | a routing plugin picks the harness for `run`                                           | runtime |                                                           |
 
+## Terminal reports
+
+| ID  | Capability                                                        | Method | Pass when                                                                                                           |
+| --- | ----------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------- |
+| T1  | Native Claude/Pi OSC 7501 and shipped Cursor hooks in isolated HC | script | Native working/blocked/resume/done/abort, unchanged results, Cursor working/idle only; raw evidence, no visible OSC |
+
+T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG state/config/runtime directories; it never contacts the
+user's herdr-core or changes harness configuration outside that temporary root. Coordinator coverage awaits
+`feat/runtime-hc` caller detection; the exact follow-up check is in [runtime-port.md](../design/runtime-port.md#terminal-status-ownership).
+
 ## Harnesses and models (harness adapters)
 
 | ID  | Capability                                                                                                | Method | Pass when                                                           |
