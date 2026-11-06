@@ -38,12 +38,10 @@ const hook = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void,
   Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) })
 const write = (id: string, f: (e: AgentStartBefore) => void) => hook(id, (e) => Effect.sync(() => f(e)))
 
-const MODELS_THE_HARNESS_LISTS_FOR_PLUGIN_ROUTES = ["claude-haiku-5-5", "a", "b", "two", "after", "m"]
+const HARNESS_MODELS = ["claude-haiku-5-5", "a", "b", "two", "after", "m"]
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
-  it.effect(name, () =>
-    program.pipe(Effect.provide(testLayer({ models: MODELS_THE_HARNESS_LISTS_FOR_PLUGIN_ROUTES, ...options }))),
-  )
+  it.effect(name, () => program.pipe(Effect.provide(testLayer({ models: HARNESS_MODELS, ...options }))))
 
 const sessionRowsAndRuntimeOpens = Effect.gen(function* () {
   const db = yield* Db
@@ -155,7 +153,7 @@ describe("plugins: spawn hook", () => {
   )
 
   const stuckHookEntered = { value: false }
-  const pastTheUninterruptibleSleepSoTheScopeCanClose = "1 minute"
+  const pastUninterruptibleSleep = "1 minute"
   for (const [label, stuck] of [
     ["never", Effect.never],
     ["a promise that never settles", Effect.promise(() => new Promise<void>(() => {}))],
@@ -177,7 +175,7 @@ describe("plugins: spawn hook", () => {
         assert.strictEqual(error._tag, "AgentRefused")
         assert.deepInclude(error, { plugin: "stuck", reason: "plugin stuck timed out after 5s" })
         assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
-        yield* TestClock.adjust(pastTheUninterruptibleSleepSoTheScopeCanClose)
+        yield* TestClock.adjust(pastUninterruptibleSleep)
       }),
       {
         plugins: [
@@ -397,7 +395,7 @@ describe("plugins: spawn hook", () => {
   )
 })
 
-const vibestHomeInsidePackageResolvingRepoDeps = Effect.gen(function* () {
+const packageHome = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const base = path.join(import.meta.dirname, ".tmp")
@@ -459,7 +457,7 @@ describe("plugins: loading", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
-        const dir = yield* vibestHomeInsidePackageResolvingRepoDeps
+        const dir = yield* packageHome
         const plugins = path.join(dir, "plugins")
         yield* fs.writeFileString(path.join(plugins, "b.ts"), source("b", "from-b"))
         yield* fs.writeFileString(path.join(plugins, "a.ts"), source("a", "from-a"))

@@ -166,9 +166,9 @@ const untaken = (w: World, id: string) =>
 
 const nothingMoreComesWithin = (ms: number) => Bun.sleep(ms)
 
-const triesToHitTheKillWindow = 5
+const killWindowTries = 5
 
-const writeOnlyTheArchiveMark = (w: World, sub: string) => {
+const writeArchiveMark = (w: World, sub: string) => {
   const db = new Database(path.join(w.vibestHome, "vibest.db"))
   try {
     db.query("UPDATE session SET ended_at = ? WHERE id = ?").run(Date.now(), sub)
@@ -388,7 +388,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         p.model.release()
         let sub = ""
-        for (let attempt = 1; sub === "" && attempt <= triesToHitTheKillWindow; attempt++) {
+        for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
           expect(daemon !== undefined, "no vibestd pid")
           const id = await p.runSub(`t${attempt}`)
@@ -449,7 +449,7 @@ const checks: ReadonlyArray<Check> = [
         expect(daemon !== undefined, "no vibestd pid")
         process.kill(daemon!, "SIGKILL")
         await until("vibestd gone", () => !alive(daemon!), 10_000)
-        writeOnlyTheArchiveMark(w, sub)
+        writeArchiveMark(w, sub)
         await p.startDaemon()
         const ended = () =>
           row<{ reason: string }>(
@@ -490,7 +490,7 @@ const checks: ReadonlyArray<Check> = [
             id,
           )
         let sub = ""
-        for (let attempt = 1; sub === "" && attempt <= triesToHitTheKillWindow; attempt++) {
+        for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
           expect(daemon !== undefined, "no vibestd pid")
           const id = await p.runSub(`a${attempt}`, "--archive-on-completion")

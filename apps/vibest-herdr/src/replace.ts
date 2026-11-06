@@ -42,9 +42,7 @@ const REFUSALS = [
 type Refusal = InstanceType<(typeof REFUSALS)[number]>
 const isRefusal = (e: unknown): e is Refusal => REFUSALS.some((c) => e instanceof c)
 type StopError = Effect.Error<ReturnType<VibestClient["Daemon.Stop"]>>
-const _stopFailsOnlyWithRefusalOrTransport: [Exclude<StopError, Refusal | RpcClientError.RpcClientError>] extends [
-  never,
-]
+const _stopErrorsClassified: [Exclude<StopError, Refusal | RpcClientError.RpcClientError>] extends [never]
   ? true
   : never = true
 

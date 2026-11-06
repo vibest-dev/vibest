@@ -13,7 +13,7 @@ const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>, out: Array<s
   })
 const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 
-const clientWithMainAgentInW1p1RecordingCalls = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped") => {
+const recordingClient = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped") => {
   const calls: Array<string> = []
   const client = {
     "Project.RunningCoordinator": () =>
@@ -27,11 +27,11 @@ const clientWithMainAgentInW1p1RecordingCalls = (stop: "stopped" | "running" | "
         return stop === "unsupported" ? { result: stop, reason: "it runs on another machine" } : { result: stop }
       }),
   } as unknown as Parameters<typeof soleMainAgent>[0]
-  const startStandsForCoordinatorSessionAndExec = Effect.sync(() => {
+  const start = Effect.sync(() => {
     calls.push("start")
     return "started"
   })
-  return { calls, run: soleMainAgent(client, "w1:p2", startStandsForCoordinatorSessionAndExec) }
+  return { calls, run: soleMainAgent(client, "w1:p2", start) }
 }
 
 describe("soleMainAgent while the main agent runs in another terminal: only a y whose stop finished starts; anything else starts nothing and never asks to stop (or, after a failed stop, to start)", () => {
@@ -43,7 +43,7 @@ describe("soleMainAgent while the main agent runs in another terminal: only a y 
   ] as const)
     it.effect(`${name}: fails naming where it runs, starts nothing, stops nothing`, () =>
       Effect.gen(function* () {
-        const f = clientWithMainAgentInW1p1RecordingCalls()
+        const f = recordingClient()
         const exit = yield* Effect.exit(f.run)
         assert.isTrue(Exit.isFailure(exit))
         assert.include(String(exit), "the main agent (claude) runs in herdr terminal w1:p1")
@@ -53,7 +53,7 @@ describe("soleMainAgent while the main agent runs in another terminal: only a y 
 
   it.effect("no answer within two minutes: fails, starts nothing, stops nothing", () =>
     Effect.gen(function* () {
-      const f = clientWithMainAgentInW1p1RecordingCalls()
+      const f = recordingClient()
       const fiber = yield* Effect.forkChild(Effect.exit(f.run))
       yield* TestClock.adjust("2 minutes")
       assert.isTrue(Exit.isFailure(yield* Fiber.join(fiber)))
@@ -64,7 +64,7 @@ describe("soleMainAgent while the main agent runs in another terminal: only a y 
   it.effect("y: asks to move it here, stops it, then starts", () => {
     const out: Array<string> = []
     return Effect.gen(function* () {
-      const f = clientWithMainAgentInW1p1RecordingCalls("stopped")
+      const f = recordingClient("stopped")
       assert.strictEqual(yield* f.run, "started")
       assert.deepStrictEqual(f.calls, ["RunningCoordinator", "StopCoordinator", "start"])
       assert.include(
@@ -77,7 +77,7 @@ describe("soleMainAgent while the main agent runs in another terminal: only a y 
   it.effect("y but the stop did not finish (running) or the main agent moved meanwhile: fails, starts nothing", () =>
     Effect.gen(function* () {
       for (const result of ["running", "moved"] as const) {
-        const f = clientWithMainAgentInW1p1RecordingCalls(result)
+        const f = recordingClient(result)
         const exit = yield* Effect.exit(f.run)
         assert.isTrue(Exit.isFailure(exit), result)
         assert.deepStrictEqual(f.calls, ["RunningCoordinator", "StopCoordinator"], result)
@@ -87,7 +87,7 @@ describe("soleMainAgent while the main agent runs in another terminal: only a y 
 
   it.effect("y but it cannot be moved from here: fails saying why, not that it did not exit; starts nothing", () =>
     Effect.gen(function* () {
-      const f = clientWithMainAgentInW1p1RecordingCalls("unsupported")
+      const f = recordingClient("unsupported")
       const exit = yield* Effect.exit(f.run)
       assert.isTrue(Exit.isFailure(exit))
       assert.include(String(exit), "cannot be moved from here: it runs on another machine. Exit it there first")

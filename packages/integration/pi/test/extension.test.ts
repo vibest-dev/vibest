@@ -183,7 +183,7 @@ describe("pi-vibest", () => {
   )
 
   it.effect(
-    "Coordinator: a vibestd that stops ends the subscription on its side; the next vibestd's rows still arrive, until the session shuts down",
+    "Coordinator: a vibestd that stops ends the subscription on its side; the next vibestd's rows still arrive until the session shuts down, and none once vibestd sees the closed connection",
     () =>
       Effect.gen(function* () {
         const db = yield* Db
@@ -243,9 +243,9 @@ describe("pi-vibest", () => {
         yield* until(contents, (c) => c.length === 2)
         assert.deepStrictEqual(yield* contents, ["first", "second"])
         assert.deepStrictEqual(notes, [])
-        const untilVibestdSeesTheClosedConnection = TestClock.withLive(Effect.sleep("500 millis"))
+        const closeSeen = TestClock.withLive(Effect.sleep("500 millis"))
         yield* s.emit("session_shutdown")
-        yield* untilVibestdSeesTheClosedConnection
+        yield* closeSeen
         yield* report("after shutdown")
         yield* TestClock.withLive(Effect.sleep("3 seconds"))
         assert.deepStrictEqual(yield* contents, ["first", "second"])

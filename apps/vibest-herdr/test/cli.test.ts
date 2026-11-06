@@ -38,7 +38,7 @@ const TIMEOUT = 30_000
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(served)), TIMEOUT)
 
-const mainAgentMayUpdateFromItsOwnShell = (agent: string, args: ReadonlyArray<string>) =>
+const coordinatorUpdate = (agent: string, args: ReadonlyArray<string>) =>
   agent === "coordinator" && args[0] === "update"
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
@@ -409,7 +409,7 @@ describe("vibest CLI", () => {
 
 describe("vibest CLI without vibestd", () => {
   it.effect(
-    "an agent's vibest does not start vibestd (it would run in the agent's sandbox); it says to ask the user",
+    "an agent's vibest does not start vibestd (it would run in the agent's sandbox); it says to ask the user; the main agent may still run update from its own shell",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -434,7 +434,7 @@ describe("vibest CLI without vibestd", () => {
           { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
         ]
           .flatMap((env) => commands.map((args) => ({ env, args })))
-          .filter(({ env, args }) => !mainAgentMayUpdateFromItsOwnShell(env.VIBEST_AGENT, args))
+          .filter(({ env, args }) => !coordinatorUpdate(env.VIBEST_AGENT, args))
         yield* Effect.forEach(
           runs,
           ({ env, args }) =>

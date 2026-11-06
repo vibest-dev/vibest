@@ -59,7 +59,7 @@ const idleSession = Effect.gen(function* () {
   return w
 })
 
-const removeMovingVirtualTimePastPolling = (sessions: Sessions["Service"], id: string) =>
+const removeAdvancingClock = (sessions: Sessions["Service"], id: string) =>
   Effect.gen(function* () {
     const fiber = yield* Effect.forkChild(sessions.remove(id))
     yield* untilVirtual(
@@ -137,8 +137,8 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.isTrue(row.metadata.archived)
       assert.isTrue(row.metadata.removed)
       assert.isTrue(yield* fs.exists(worktree))
-      const newVibestdWithOnlyTheRow = yield* Sessions.make({ maxSessions: undefined })
-      assert.deepInclude(yield* newVibestdWithOnlyTheRow.remove(id), {
+      const freshSessions = yield* Sessions.make({ maxSessions: undefined })
+      assert.deepInclude(yield* freshSessions.remove(id), {
         processes: "exited",
         pane: "closed",
         worktree: "removed",
@@ -161,8 +161,8 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.deepStrictEqual(yield* processEnds(a.id), [])
 
       const b = yield* idleSession
-      const closedByHandBeforeRm = b.herdr.runtime.close({ machine: "local", id: b.pane })
-      yield* closedByHandBeforeRm
+      const closeByHand = b.herdr.runtime.close({ machine: "local", id: b.pane })
+      yield* closeByHand
       const gone = yield* b.sessions.remove(b.id)
       assert.deepInclude(gone, { processes: "exited", pane: "closed", worktree: "removed" })
       assert.isNotNull((yield* b.db.getSession(b.id))!.exitedAt)
@@ -213,7 +213,7 @@ describe.concurrent("vibest rm: process proof", () => {
       const fake = yield* FakeProcesses
       const { id, sessions, db, herdr, worktree, rules } = yield* idleSession
       yield* fake.setCwdUsers([4242])
-      const out = (yield* removeMovingVirtualTimePastPolling(sessions, id))!
+      const out = (yield* removeAdvancingClock(sessions, id))!
       assert.deepInclude(out, { processes: "alive", pane: "closed", worktree: "kept" })
       assert.include(out.reasons.join("\n"), "process 4242 has its working directory in it")
       assert.isNull((yield* db.getSession(id))!.exitedAt)
@@ -290,7 +290,7 @@ describe.concurrent("vibest rm: process proof", () => {
       const fake = yield* FakeProcesses
       const { id, sessions, worktree } = yield* idleSession
       yield* fake.holdCwd()
-      const out = (yield* removeMovingVirtualTimePastPolling(sessions, id))!
+      const out = (yield* removeAdvancingClock(sessions, id))!
       assert.deepInclude(out, {
         processes: "unknown",
         worktree: "kept",
@@ -350,7 +350,7 @@ describe.concurrent("vibest rm: process proof", () => {
     "an interrupt that does not take within 10 s still closes the session's own terminal",
     Effect.gen(function* () {
       const { id, pane, sessions, db, herdr } = yield* workingSession
-      const out = (yield* removeMovingVirtualTimePastPolling(sessions, id))!
+      const out = (yield* removeAdvancingClock(sessions, id))!
       assert.deepInclude(out, { processes: "exited", pane: "closed" })
       assert.include(
         out.reasons.join("\n"),
@@ -364,8 +364,8 @@ describe.concurrent("vibest rm: process proof", () => {
 })
 
 describe.concurrent("Processes", () => {
-  const lsofNulFieldsNlSet = (...fields: ReadonlyArray<string>) => `${fields.join("\0")}\0\n`
-  const record = (pid: number, cwd: string) => lsofNulFieldsNlSet(`p${pid}`) + lsofNulFieldsNlSet("fcwd", `n${cwd}`)
+  const lsofSet = (...fields: ReadonlyArray<string>) => `${fields.join("\0")}\0\n`
+  const record = (pid: number, cwd: string) => lsofSet(`p${pid}`) + lsofSet("fcwd", `n${cwd}`)
   const ok = (stdout: string) => ({ exitCode: 0, stdout, stderr: "" })
   const self = 7
   const dirs = ["/private/w/abcd", "/w/abcd"]
@@ -414,13 +414,13 @@ describe.concurrent("Processes", () => {
 
   it("a record it does not expect makes the listing unknown", () => {
     for (const odd of [
-      lsofNulFieldsNlSet("p101", "cbash") + lsofNulFieldsNlSet("fcwd", "n/x"),
-      lsofNulFieldsNlSet("p101") + lsofNulFieldsNlSet("ftxt", "n/x"),
-      lsofNulFieldsNlSet("p101"),
-      lsofNulFieldsNlSet("p0") + lsofNulFieldsNlSet("fcwd", "n/x"),
-      lsofNulFieldsNlSet("p1x") + lsofNulFieldsNlSet("fcwd", "n/x"),
+      lsofSet("p101", "cbash") + lsofSet("fcwd", "n/x"),
+      lsofSet("p101") + lsofSet("ftxt", "n/x"),
+      lsofSet("p101"),
+      lsofSet("p0") + lsofSet("fcwd", "n/x"),
+      lsofSet("p1x") + lsofSet("fcwd", "n/x"),
       "p101\n",
-      lsofNulFieldsNlSet("p101") + record(102, "/x"),
+      lsofSet("p101") + record(102, "/x"),
     ])
       assert.isUndefined(cwdHolders(ok(record(self, "/home") + odd), self, dirs), JSON.stringify(odd))
   })

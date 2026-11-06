@@ -23,7 +23,7 @@ import * as HerdrBun from "effect-herdr-sdk/bun"
 
 import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
 
-const stdioUnrefsStdinAfterRead = Layer.effect(
+const unrefStdio = Layer.effect(
   Stdio.Stdio,
   Effect.map(Stdio.Stdio, (bun) =>
     Stdio.make({
@@ -46,7 +46,7 @@ const user = Layer.succeed(UserPlatform, {
 
 export const services = Layer.mergeAll(
   BunServices.layer,
-  stdioUnrefsStdinAfterRead,
+  unrefStdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector, (endpoint) => BunSocket.makeNet({ path: endpoint })),
   user,

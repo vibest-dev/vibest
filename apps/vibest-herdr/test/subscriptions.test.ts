@@ -97,7 +97,7 @@ const fakeMachine = (options: {
       HttpClientResponse.fromWeb(request, new Response(JSON.stringify(hit.body), { status: hit.status })),
     )
   })
-  const fakesProvidedInsidePlatformServicesSoTheyWin = Layer.mergeAll(
+  const fakes = Layer.mergeAll(
     Subscriptions.layer,
     harnessLayer(options.installed),
     Layer.succeed(Keychain, { password: (service) => Effect.succeed(options.passwords?.[service]) }),
@@ -106,7 +106,7 @@ const fakeMachine = (options: {
   )
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provide(fakesProvidedInsidePlatformServicesSoTheyWin),
+      Effect.provide(fakes),
       Effect.provide(Platform.services),
       Effect.provide(Logger.layer([Logger.make((entry) => void logs.push(entry.message))])),
       Effect.provide(
@@ -115,7 +115,7 @@ const fakeMachine = (options: {
         ),
       ),
     )
-  return { spawned, requests, logs, layer: fakesProvidedInsidePlatformServicesSoTheyWin, provide }
+  return { spawned, requests, logs, layer: fakes, provide }
 }
 
 const served = Server.layer.pipe(

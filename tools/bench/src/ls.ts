@@ -12,7 +12,7 @@ const sizes = [200, 1000]
 const runs = 20
 const idleMs = 15_000
 const cpuMs = 60_000
-const UNREGISTERED_RUNTIME_SO_NONE_IS_CALLED = "bench"
+const BENCH_RUNTIME = "bench"
 
 const quantile = (xs: ReadonlyArray<number>, p: number) => {
   const s = [...xs].sort((a, b) => a - b)
@@ -92,7 +92,7 @@ const seed = (file: string, directory: string, n: number) =>
           provider: null,
           model: null,
           harnessSessionId: null,
-          runtime: UNREGISTERED_RUNTIME_SO_NONE_IS_CALLED,
+          runtime: BENCH_RUNTIME,
           address: { machine: "bench", id: `b${i}` },
           status: "unknown",
           startedAt: now,

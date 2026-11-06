@@ -51,11 +51,11 @@ const readSessions = (): ReadonlyArray<ListedSession> | undefined => {
   }
 }
 
-const signalsOnlyItsOwnGroup = (pid: number) => pid > 1
+const signalablePid = (pid: number) => pid > 1
 
 const livePid = (child: ReturnType<typeof childProcess.spawn> | undefined) => {
   const pid = child?.pid
-  return child?.exitCode === null && child?.signalCode === null && pid !== undefined && signalsOnlyItsOwnGroup(pid)
+  return child?.exitCode === null && child?.signalCode === null && pid !== undefined && signalablePid(pid)
     ? pid
     : undefined
 }
@@ -97,13 +97,13 @@ const socketOf = (name: string) => {
 
 const layer = HerdrPool.layer.pipe(Layer.provideMerge(Platform.services))
 
-const attemptsForALoadedFullSuite = 200
+const loadedSuiteAttempts = 200
 
 const waitFor = <A, E, R>(
   read: Effect.Effect<A, E, R>,
   ready: (value: A) => boolean,
   label: string,
-  attempts = attemptsForALoadedFullSuite,
+  attempts = loadedSuiteAttempts,
 ) =>
   Effect.gen(function* () {
     let last = ""
@@ -155,7 +155,7 @@ type Scripted = (method: string, params: Record<string, unknown>) => Effect.Effe
 const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = Stream.empty) =>
   Effect.gen(function* () {
     const calls: Array<{ readonly method: string; readonly params: Record<string, unknown> }> = []
-    const resentOnRetryLikeTheRealClient = ((method: string, params: Record<string, unknown>) =>
+    const resendingCall = ((method: string, params: Record<string, unknown>) =>
       Effect.suspend(() => {
         calls.push({ method, params })
         return answer(method, params)
@@ -163,7 +163,7 @@ const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = St
     const client: HerdrShape = {
       socketPath: "/nowhere",
       subscribe: () => pushed,
-      call: resentOnRetryLikeTheRealClient,
+      call: resendingCall,
     }
     const pool = HerdrPool.of({
       resolve: () => Effect.succeed("s"),
@@ -570,10 +570,10 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 "the submitted prompt ran, printing VBT_SUBMITS that the typed text does not contain",
                 coldPiStartupAttempts,
               )
-              const oldSubagentTerminalOnThisPane = TerminalRuntime.terminalOf(name, paneId, "vbt-gone-00000000")
+              const oldTerminal = TerminalRuntime.terminalOf(name, paneId, "vbt-gone-00000000")
               if (runtime.state !== undefined)
-                assert.strictEqual((yield* Effect.flip(runtime.state(oldSubagentTerminalOnThisPane))).code, "not_found")
-              assert.strictEqual((yield* Effect.flip(runtime.close(oldSubagentTerminalOnThisPane))).code, "failed")
+                assert.strictEqual((yield* Effect.flip(runtime.state(oldTerminal))).code, "not_found")
+              assert.strictEqual((yield* Effect.flip(runtime.close(oldTerminal))).code, "failed")
               assert.isTrue(Exit.isSuccess(yield* Effect.exit(herdr.call("pane.get", { pane_id: paneId }))))
             }).pipe(
               Effect.ensuring(
@@ -598,8 +598,8 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
               .open({ id: "local" }, { project: cwd, cwd, argv, env: vars, label: "harness" })
               .pipe(Effect.provide(env))
           return Effect.gen(function* () {
-            const shellsToPassPaneP9 = 10
-            for (let i = 0; i < shellsToPassPaneP9; i++) yield* open(["/bin/sh"])
+            const shellsPastP9 = 10
+            for (let i = 0; i < shellsPastP9; i++) yield* open(["/bin/sh"])
             const terminal = yield* open(barePiArgv, {
               VIBEST_SESSION_ID: "ab12cd34-5678-4abc-8def-0123456789ab",
             })

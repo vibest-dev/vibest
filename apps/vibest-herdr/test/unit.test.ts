@@ -1030,58 +1030,60 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("a hot foreign WAL is refused without checkpointing the database or WAL", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const dir = yield* tempDirectory("vibest-schema-hot-")
-      const file = yield* fileAt(dir, "hot.db")
-      const ready = yield* fileAt(dir, "ready")
-      const maker = yield* fileAt(dir, "maker.ts")
-      const keepDbReachableSoBunGcCannotCheckpointTheWal = "setInterval(() => db, 1000)"
-      yield* fs.writeFileString(
-        maker,
-        [
-          'import { Database } from "bun:sqlite"',
-          'import { writeFileSync } from "node:fs"',
-          "const db = new Database(process.argv[2])",
-          'db.exec("PRAGMA journal_mode = WAL")',
-          'db.exec("BEGIN")',
-          'db.exec("CREATE TABLE other (id INTEGER PRIMARY KEY, note TEXT)")',
-          "db.exec(\"INSERT INTO other VALUES (1, 'keep-me')\")",
-          'for (let i = 0; i < 400; i++) db.run("INSERT INTO other (note) VALUES (?)", ["x".repeat(80)])',
-          'db.exec("PRAGMA user_version = 1")',
-          'db.exec("COMMIT")',
-          "writeFileSync(process.argv[3], 'ok')",
-          keepDbReachableSoBunGcCannotCheckpointTheWal,
-          "",
-        ].join("\n"),
-      )
-      const proc = Bun.spawn(["bun", maker, file, ready], { stdout: "pipe", stderr: "pipe" })
-      yield* Effect.gen(function* () {
-        for (let i = 0; i < 50; i++) {
-          if (yield* fs.exists(ready)) return
-          yield* Effect.promise(() => Bun.sleep(20))
-        }
-        proc.kill()
-        return yield* Effect.die("hot wal helper did not start")
-      })
-      proc.kill(9)
-      yield* Effect.promise(() => proc.exited)
-      const dbBefore = yield* fs.readFile(file)
-      const walBefore = yield* fs.readFile(`${file}-wal`)
-      assert.isTrue(walBefore.length > 0)
-      const pretty = yield* refusal(file)
-      assert.include(pretty, "SchemaMismatch")
-      assert.include(pretty, "application_id 0x0, v1")
-      assert.deepStrictEqual(yield* fs.readFile(file), dbBefore)
-      assert.deepStrictEqual(yield* fs.readFile(`${file}-wal`), walBefore)
-      const reader = new Database(file, { readonly: true })
-      assert.strictEqual(
-        (reader.query("SELECT note FROM other WHERE id = 1").get() as { note: string } | null)?.note,
-        "keep-me",
-      )
-      reader.close()
-    }).pipe(Effect.provide(Platform.services)),
+  it.effect(
+    "a hot foreign WAL is refused without checkpointing the database or WAL (the writer keeps its db reachable: Bun's GC would checkpoint it)",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const dir = yield* tempDirectory("vibest-schema-hot-")
+        const file = yield* fileAt(dir, "hot.db")
+        const ready = yield* fileAt(dir, "ready")
+        const maker = yield* fileAt(dir, "maker.ts")
+        const keepDbAlive = "setInterval(() => db, 1000)"
+        yield* fs.writeFileString(
+          maker,
+          [
+            'import { Database } from "bun:sqlite"',
+            'import { writeFileSync } from "node:fs"',
+            "const db = new Database(process.argv[2])",
+            'db.exec("PRAGMA journal_mode = WAL")',
+            'db.exec("BEGIN")',
+            'db.exec("CREATE TABLE other (id INTEGER PRIMARY KEY, note TEXT)")',
+            "db.exec(\"INSERT INTO other VALUES (1, 'keep-me')\")",
+            'for (let i = 0; i < 400; i++) db.run("INSERT INTO other (note) VALUES (?)", ["x".repeat(80)])',
+            'db.exec("PRAGMA user_version = 1")',
+            'db.exec("COMMIT")',
+            "writeFileSync(process.argv[3], 'ok')",
+            keepDbAlive,
+            "",
+          ].join("\n"),
+        )
+        const proc = Bun.spawn(["bun", maker, file, ready], { stdout: "pipe", stderr: "pipe" })
+        yield* Effect.gen(function* () {
+          for (let i = 0; i < 50; i++) {
+            if (yield* fs.exists(ready)) return
+            yield* Effect.promise(() => Bun.sleep(20))
+          }
+          proc.kill()
+          return yield* Effect.die("hot wal helper did not start")
+        })
+        proc.kill(9)
+        yield* Effect.promise(() => proc.exited)
+        const dbBefore = yield* fs.readFile(file)
+        const walBefore = yield* fs.readFile(`${file}-wal`)
+        assert.isTrue(walBefore.length > 0)
+        const pretty = yield* refusal(file)
+        assert.include(pretty, "SchemaMismatch")
+        assert.include(pretty, "application_id 0x0, v1")
+        assert.deepStrictEqual(yield* fs.readFile(file), dbBefore)
+        assert.deepStrictEqual(yield* fs.readFile(`${file}-wal`), walBefore)
+        const reader = new Database(file, { readonly: true })
+        assert.strictEqual(
+          (reader.query("SELECT note FROM other WHERE id = 1").get() as { note: string } | null)?.note,
+          "keep-me",
+        )
+        reader.close()
+      }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect("two empty opens both initialize", () =>
@@ -1154,13 +1156,13 @@ describe("HarnessAdapter", () => {
     assert.deepStrictEqual(ADAPTERS.cursor.launchArgs({ ...input, resume: true, sessionId: "c-1" }).slice(0, 1), [
       "--resume=c-1",
     ])
-    const dashLeadingIdStaysInsideOneArgument = ADAPTERS.cursor.launchArgs({
+    const dashLeadingArgs = ADAPTERS.cursor.launchArgs({
       ...input,
       resume: true,
       sessionId: "--yolo",
     })
-    assert.strictEqual(dashLeadingIdStaysInsideOneArgument[0], "--resume=--yolo")
-    assert.notInclude(dashLeadingIdStaysInsideOneArgument, "--yolo")
+    assert.strictEqual(dashLeadingArgs[0], "--resume=--yolo")
+    assert.notInclude(dashLeadingArgs, "--yolo")
     assert.deepStrictEqual(ADAPTERS.pi.launchArgs({ ...input, resume: true }), ADAPTERS.pi.launchArgs(input))
   })
 
@@ -1625,8 +1627,8 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
           const moved = path.join(dir, "b", "repo")
           yield* fs.makeDirectory(path.dirname(moved))
           yield* fs.rename(repo, moved)
-          const stopsWhileRecordingTheMove = { ...db, moveProject: () => Effect.die("vibestd stopped") }
-          assert.isTrue(Exit.isFailure(yield* Effect.exit(resolve(moved, true, stopsWhileRecordingTheMove))))
+          const dyingDb = { ...db, moveProject: () => Effect.die("vibestd stopped") }
+          assert.isTrue(Exit.isFailure(yield* Effect.exit(resolve(moved, true, dyingDb))))
           assert.strictEqual(yield* sh(ours, "rev-parse", "--show-toplevel"), yield* fs.realPath(ours))
           assert.strictEqual(yield* db.projectDirectory(first.id), repo)
           assert.strictEqual((yield* Effect.flip(resolve(moved)))._tag, "ProjectMoved")
@@ -1762,9 +1764,9 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         )
         assert.strictEqual(placed.env.VIBEST_PROJECT_ID, "07e40000-07e4-407e-807e-07e4000007e4")
         assert.strictEqual(placed.env.VIBEST_RUNTIME, '{"runtime":"herdr"}')
-        const beforeClaudeWroteTheSession = yield* run("claude", "s1", "abcd1234-abcd-4abc-8abc-abcd1234abcd")
-        assert.notInclude(beforeClaudeWroteTheSession.args, "--resume")
-        assert.notInclude(beforeClaudeWroteTheSession.args, "--session-id")
+        const unwritten = yield* run("claude", "s1", "abcd1234-abcd-4abc-8abc-abcd1234abcd")
+        assert.notInclude(unwritten.args, "--resume")
+        assert.notInclude(unwritten.args, "--session-id")
         const transcript = path.join(claudeDir, "projects", repo.replace(/[^a-zA-Z0-9]/g, "-"), "s1.jsonl")
         yield* fs.makeDirectory(path.dirname(transcript), { recursive: true })
         yield* fs.writeFileString(transcript, "{}\n")
@@ -1952,9 +1954,9 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       const wt = yield* addWorktree(repo)
       assert.sameMembers(yield* copyIncluded(repo, wt), ["committed.env", "shared.dat"])
       assert.strictEqual(yield* sh(wt, "status", "--porcelain", "--untracked-files=all"), "")
-      const absoluteExcludesFileAppliesInBoth = `${yield* tempDirectory("vibest-excludes-")}/excludes`
-      yield* fs.writeFileString(absoluteExcludesFileAppliesInBoth, "abs.dat\n")
-      yield* sh(repo, "config", "core.excludesFile", absoluteExcludesFileAppliesInBoth)
+      const absoluteExcludes = `${yield* tempDirectory("vibest-excludes-")}/excludes`
+      yield* fs.writeFileString(absoluteExcludes, "abs.dat\n")
+      yield* sh(repo, "config", "core.excludesFile", absoluteExcludes)
       const wt2 = yield* addWorktree(repo)
       assert.sameMembers(yield* copyIncluded(repo, wt2), ["committed.env", "shared.dat", "abs.dat"])
       assert.strictEqual(yield* sh(wt2, "status", "--porcelain", "--untracked-files=all"), "")
@@ -2100,8 +2102,8 @@ describe("pure", () => {
           Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
           Effect.provide(Platform.services),
         )
-      const legacyOmoHomeIsIgnored = yield* layout({ HOME: "/h", OMO_HOME: "/old" })
-      assert.deepInclude(legacyOmoHomeIsIgnored, {
+      const withOmoHome = yield* layout({ HOME: "/h", OMO_HOME: "/old" })
+      assert.deepInclude(withOmoHome, {
         home: "/h/.vibest",
         database: "/h/.vibest/vibest.db",
         socket: "/h/.vibest/vibest.sock",
@@ -2122,10 +2124,9 @@ describe("pure", () => {
   })
 
   it("claude startup menus: Down until the accept option is under ❯, then Enter, once", () => {
-    const trustDialogPreselectsNoExit =
-      "Do you trust the files in this folder?\n\n ❯ 1. No, exit\n   2. Yes, I trust this folder\n"
+    const trustDialog = "Do you trust the files in this folder?\n\n ❯ 1. No, exit\n   2. Yes, I trust this folder\n"
     const moved = "Do you trust the files in this folder?\n\n   1. No, exit\n ❯ 2. Yes, I trust this folder\n"
-    assert.deepStrictEqual(claudeMenuKey(trustDialogPreselectsNoExit, []), { menu: "trust", key: "down" })
+    assert.deepStrictEqual(claudeMenuKey(trustDialog, []), { menu: "trust", key: "down" })
     assert.deepStrictEqual(claudeMenuKey(moved, []), { menu: "trust", key: "enter" })
     assert.strictEqual(claudeMenuKey(moved, ["trust"]), undefined)
     assert.strictEqual(claudeMenuKey("❯ ready", []), undefined)

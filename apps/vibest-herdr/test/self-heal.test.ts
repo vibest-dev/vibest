@@ -27,9 +27,9 @@ const typed = (text: string, terminal = true) =>
   })
 
 const main = path.join(path.dirname(import.meta.dirname), "src", "main.ts")
-const vibestFromSourceAsVibestdReportsItsArgv = [process.execPath, main]
+const sourceArgv = [process.execPath, main]
 
-const tempHomeWithoutInheritedAgentRolesRestoredAfter = (home: string) =>
+const isolatedHome = (home: string) =>
   Effect.acquireRelease(
     Effect.sync(() => {
       const saved = {
@@ -118,9 +118,9 @@ const fakeVibestd = (
       }),
   )
 
-const twoReplacementsWithoutRetrySoAHangStillFails = 120_000
+const REPLACE_TIMEOUT_MS = 120_000
 
-const fixtureDeadlinesForTheProducts55sAnd15s: Timing = { reply: Duration.millis(400), observe: Duration.millis(400) }
+const fixtureTiming: Timing = { reply: Duration.millis(400), observe: Duration.millis(400) }
 
 layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
   "self-healing: vibest replaces a vibestd for the user on an interactive terminal, in a temp VIBEST_HOME",
@@ -131,19 +131,16 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-          yield* tempHomeWithoutInheritedAgentRolesRestoredAfter(layout.home)
+          yield* isolatedHome(layout.home)
           const ping = Effect.map(readPing(layout.socket), Option.getOrThrow)
-          const replace = (
-            stdio: Layer.Layer<Stdio.Stdio>,
-            target = { version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv },
-          ) =>
+          const replace = (stdio: Layer.Layer<Stdio.Stdio>, target = { version: VERSION, command: sourceArgv }) =>
             replaceDaemon(target).pipe(
               Effect.provide(stdio),
               Effect.flip,
               Effect.map((e) => e.message),
             )
           yield* Effect.gen(function* () {
-            yield* startDaemon.pipe(Effect.provideService(VibestCommand, vibestFromSourceAsVibestdReportsItsArgv))
+            yield* startDaemon.pipe(Effect.provideService(VibestCommand, sourceArgv))
             const old = yield* ping
             const info = yield* recordedInfo(layout.daemonInfo, old.instance)
             assert.deepStrictEqual(
@@ -151,22 +148,20 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
               [info.pid, info.instance, info.command, info.startedAt],
             )
             assert.match(old.instance!, /^[0-9a-f-]{36}$/)
-            assert.deepStrictEqual(old.command, vibestFromSourceAsVibestdReportsItsArgv)
+            assert.deepStrictEqual(old.command, sourceArgv)
 
             assert.match(yield* replace(typed("y\n", false)), /needs a yes on a terminal; nothing was stopped/)
             assert.match(yield* replace(typed("n\n")), /not confirmed; nothing was stopped/)
             assert.match(yield* replace(typed("")), /not confirmed; nothing was stopped/)
             assert.match(
-              yield* replace(typed("y\n"), { version: "9.9.9", command: vibestFromSourceAsVibestdReportsItsArgv }),
+              yield* replace(typed("y\n"), { version: "9.9.9", command: sourceArgv }),
               new RegExp(`reports ${VERSION.replaceAll(".", "\\.")}, not 9\\.9\\.9; vibestd was not stopped`),
             )
             assert.strictEqual((yield* ping).instance, old.instance)
-            yield* replaceDaemon({ version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv }).pipe(
-              Effect.provide(typed("y\n")),
-            )
+            yield* replaceDaemon({ version: VERSION, command: sourceArgv }).pipe(Effect.provide(typed("y\n")))
             const next = yield* ping
             assert.notStrictEqual(next.instance, old.instance)
-            assert.deepInclude(next, { version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv })
+            assert.deepInclude(next, { version: VERSION, command: sourceArgv })
             yield* Effect.sleep("50 millis").pipe(
               Effect.repeat({ until: () => Platform.liveness(old.pid!) === "exited", times: 100 }),
             )
@@ -186,7 +181,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
             Effect.provideService(Layout, layout),
           )
         }),
-      { timeout: twoReplacementsWithoutRetrySoAHangStillFails },
+      { timeout: REPLACE_TIMEOUT_MS },
     )
 
     it.effect("an vibestd from before Daemon.Stop is never asked to stop: the user gets the manual steps", () =>
@@ -197,7 +192,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
         )
         const message = yield* replaceDaemon({
           version: VERSION,
-          command: vibestFromSourceAsVibestdReportsItsArgv,
+          command: sourceArgv,
         }).pipe(
           Effect.provide(typed("y\n")),
           Effect.provideService(Layout, layout),
@@ -215,7 +210,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
       () =>
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-          yield* tempHomeWithoutInheritedAgentRolesRestoredAfter(layout.home)
+          yield* isolatedHome(layout.home)
           const old = yield* fakeVibestd(
             layout.socket,
             { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
@@ -225,13 +220,11 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
             },
           )
           yield* Effect.gen(function* () {
-            yield* replaceDaemon({ version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv }).pipe(
-              Effect.provide(typed("y\n")),
-            )
+            yield* replaceDaemon({ version: VERSION, command: sourceArgv }).pipe(Effect.provide(typed("y\n")))
             assert.include(old.methods, "Daemon.Stop")
             const next = yield* pingOf(layout.socket)
             assert.notStrictEqual(next.instance, "old-instance")
-            assert.deepInclude(next, { version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv })
+            assert.deepInclude(next, { version: VERSION, command: sourceArgv })
           }).pipe(
             Effect.ensuring(Effect.ignore(stopRecorded(layout.daemonInfo))),
             TestClock.withLive,
@@ -341,11 +334,11 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
             )
             const failed = yield* replaceDaemon({
               version: VERSION,
-              command: vibestFromSourceAsVibestdReportsItsArgv,
+              command: sourceArgv,
             }).pipe(
               Effect.provide(typed("y\n")),
               Effect.provideService(Layout, layout),
-              Effect.provideService(VibestCommand, vibestFromSourceAsVibestdReportsItsArgv),
+              Effect.provideService(VibestCommand, sourceArgv),
               Effect.flip,
               TestClock.withLive,
             )
@@ -390,11 +383,11 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
           )
           const failed = yield* replaceDaemon({
             version: VERSION,
-            command: vibestFromSourceAsVibestdReportsItsArgv,
+            command: sourceArgv,
           }).pipe(
             Effect.provide(typed("y\n")),
             Effect.provideService(Layout, layout),
-            Effect.provideService(VibestCommand, vibestFromSourceAsVibestdReportsItsArgv),
+            Effect.provideService(VibestCommand, sourceArgv),
             Effect.flip,
             TestClock.withLive,
           )
@@ -404,7 +397,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
       60_000,
     )
 
-    const stopRepliesThisVibestCannotDecode = [
+    const undecodableStopReplies = [
       [
         "an unknown refusal",
         {
@@ -427,9 +420,9 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
       "a reply to Stop vibest cannot read is no refusal: vibest watches Ping, and an vibestd still answering is left and reported, with one Stop and nothing started",
       () =>
         Effect.gen(function* () {
-          for (const [what, reply] of stopRepliesThisVibestCannotDecode) {
+          for (const [what, reply] of undecodableStopReplies) {
             const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-            yield* tempHomeWithoutInheritedAgentRolesRestoredAfter(layout.home)
+            yield* isolatedHome(layout.home)
             const old = yield* fakeVibestd(
               layout.socket,
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
@@ -437,10 +430,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
                 sock.write(JSON.stringify({ jsonrpc: "2.0", id, ...reply }) + "\n")
               },
             )
-            const exit = yield* replaceDaemon(
-              { version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv },
-              fixtureDeadlinesForTheProducts55sAnd15s,
-            ).pipe(
+            const exit = yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
               Effect.provide(typed("y\n")),
               Effect.provideService(Layout, layout),
               Effect.exit,
@@ -468,9 +458,9 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
       "a reply to Stop vibest cannot read, and vibestd goes: vibest sees it gone, starts the new vibestd and checks it",
       () =>
         Effect.gen(function* () {
-          for (const [what, reply] of stopRepliesThisVibestCannotDecode) {
+          for (const [what, reply] of undecodableStopReplies) {
             const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-            yield* tempHomeWithoutInheritedAgentRolesRestoredAfter(layout.home)
+            yield* isolatedHome(layout.home)
             const old = yield* fakeVibestd(
               layout.socket,
               { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
@@ -480,14 +470,14 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
               },
             )
             yield* Effect.gen(function* () {
-              yield* replaceDaemon(
-                { version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv },
-                fixtureDeadlinesForTheProducts55sAnd15s,
-              ).pipe(Effect.provide(typed("y\n")), Effect.timeout("30 seconds"))
+              yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
+                Effect.provide(typed("y\n")),
+                Effect.timeout("30 seconds"),
+              )
               assert.strictEqual(old.methods.filter((m) => m === "Daemon.Stop").length, 1, what)
               const next = yield* pingOf(layout.socket)
               assert.notStrictEqual(next.instance, "old-instance", what)
-              assert.deepInclude(next, { version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv })
+              assert.deepInclude(next, { version: VERSION, command: sourceArgv })
             }).pipe(
               Effect.ensuring(Effect.ignore(stopRecorded(layout.daemonInfo))),
               TestClock.withLive,
@@ -503,16 +493,13 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
       () =>
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-          yield* tempHomeWithoutInheritedAgentRolesRestoredAfter(layout.home)
+          yield* isolatedHome(layout.home)
           const old = yield* fakeVibestd(
             layout.socket,
             { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
             () => {},
           )
-          const failed = yield* replaceDaemon(
-            { version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv },
-            fixtureDeadlinesForTheProducts55sAnd15s,
-          ).pipe(
+          const failed = yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
             Effect.provide(typed("y\n")),
             Effect.provideService(Layout, layout),
             Effect.flip,
@@ -536,7 +523,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
       () =>
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-          yield* tempHomeWithoutInheritedAgentRolesRestoredAfter(layout.home)
+          yield* isolatedHome(layout.home)
           const old = yield* fakeVibestd(
             layout.socket,
             { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
@@ -544,10 +531,11 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
               server.close()
             },
           )
-          const replacing = yield* replaceDaemon(
-            { version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv },
-            fixtureDeadlinesForTheProducts55sAnd15s,
-          ).pipe(Effect.provide(typed("y\n")), Effect.provideService(Layout, layout), Effect.forkChild)
+          const replacing = yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
+            Effect.provide(typed("y\n")),
+            Effect.provideService(Layout, layout),
+            Effect.forkChild,
+          )
           yield* Effect.sleep("50 millis").pipe(
             Effect.repeat({ until: () => old.methods.includes("Daemon.Stop"), times: 100 }),
           )
@@ -566,7 +554,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
       () =>
         Effect.gen(function* () {
           const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-          yield* tempHomeWithoutInheritedAgentRolesRestoredAfter(layout.home)
+          yield* isolatedHome(layout.home)
           const old = yield* fakeVibestd(
             layout.socket,
             { version: VERSION, protocol: PROTOCOL, instance: "old-instance", runtimeSessions: [], runtimes: [] },
@@ -575,14 +563,14 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
             },
           )
           yield* Effect.gen(function* () {
-            yield* replaceDaemon(
-              { version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv },
-              fixtureDeadlinesForTheProducts55sAnd15s,
-            ).pipe(Effect.provide(typed("y\n")), Effect.timeout("30 seconds"))
+            yield* replaceDaemon({ version: VERSION, command: sourceArgv }, fixtureTiming).pipe(
+              Effect.provide(typed("y\n")),
+              Effect.timeout("30 seconds"),
+            )
             assert.strictEqual(old.methods.filter((m) => m === "Daemon.Stop").length, 1)
             const next = yield* pingOf(layout.socket)
             assert.notStrictEqual(next.instance, "old-instance")
-            assert.deepInclude(next, { version: VERSION, command: vibestFromSourceAsVibestdReportsItsArgv })
+            assert.deepInclude(next, { version: VERSION, command: sourceArgv })
           }).pipe(
             Effect.ensuring(Effect.ignore(stopRecorded(layout.daemonInfo))),
             TestClock.withLive,

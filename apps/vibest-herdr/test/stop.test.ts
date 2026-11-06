@@ -64,7 +64,7 @@ const errorOf = <A, E>(exit: Exit.Exit<A, E>) =>
 const tagOf = <A, E extends { readonly _tag: string }>(exit: Exit.Exit<A, E>) =>
   errorOf(exit)?._tag ?? (Exit.isSuccess(exit) ? "success" : "defect")
 
-const stopFromCliAcceptedOrBlockersOrTag = (repo: string) =>
+const stopFromCli = (repo: string) =>
   Effect.gen(function* () {
     const exit = yield* Effect.exit((yield* cli(repo))["Daemon.Stop"]({ instance: INSTANCE }))
     if (Exit.isSuccess(exit)) return "accepted" as const
@@ -77,15 +77,15 @@ const draining = Effect.flatMap(Drain, (d) => until(d.phase, (p) => p === "drain
 const stopOnceIdle = (repo: string) =>
   Effect.gen(function* () {
     yield* until((yield* Drain).pending, (p) => p.length === 0)
-    return yield* joinMovingVirtualTimeForTheDrain(yield* Effect.forkScoped(stopFromCliAcceptedOrBlockersOrTag(repo)))
+    return yield* joinAdvancingClock(yield* Effect.forkScoped(stopFromCli(repo)))
   })
-const joinMovingVirtualTimeForTheDrain = <A, E>(stopping: Fiber.Fiber<A, E>) =>
+const joinAdvancingClock = <A, E>(stopping: Fiber.Fiber<A, E>) =>
   untilVirtual(
     Effect.sync(() => stopping.pollUnsafe()),
     (exit) => exit !== undefined,
   ).pipe(Effect.andThen(Fiber.join(stopping)))
 
-const idleMainAgentInWCp1WithWorkingWorker = (repo: string, harness: "pi" | "claude") =>
+const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
   Effect.gen(function* () {
     const db = yield* Db
     const herdr = yield* FakeRuntime
@@ -112,7 +112,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     "the command line only, for this vibestd's instance; once accepted, no change is admitted, settlement included",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { c } = yield* idleMainAgentInWCp1WithWorkingWorker(repo, "claude")
+      const { c } = yield* idleMainWithWorker(repo, "claude")
       const raw = yield* client
       assert.strictEqual(
         tagOf(yield* Effect.exit(authed(raw, cliHeaders(repo))["Daemon.Stop"]({ instance: "another" }))),
@@ -141,7 +141,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
         ),
         "DaemonStopping",
       )
-      assert.strictEqual(yield* stopFromCliAcceptedOrBlockersOrTag(repo), "DaemonStopping")
+      assert.strictEqual(yield* stopFromCli(repo), "DaemonStopping")
       assert.isAbove((yield* user.List({})).length, 0, "reads still answer")
     }),
   )
@@ -150,7 +150,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     "working agents, a busy main agent, an open subscription and queued messages neither block nor change",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, herdr, c, worker } = yield* idleMainAgentInWCp1WithWorkingWorker(repo, "pi")
+      const { db, herdr, c, worker } = yield* idleMainWithWorker(repo, "pi")
       yield* herdr.updateAgent("wC:p1", (a) => ({ ...a, status: "working" }))
       const user = yield* cli(repo)
       yield* user.Send({ id: worker, message: "keep the exact task" })
@@ -178,13 +178,13 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const held = yield* herdr.hold("open")
       const { id } = yield* user.Spawn({ harness: "pi", prompt: "work" })
       yield* held.reached
-      const stopping = yield* Effect.forkScoped(stopFromCliAcceptedOrBlockersOrTag(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       assert.strictEqual(
         tagOf(yield* Effect.exit(user.Send({ id: "00000000-0000-4000-8000-000000000000", message: "x" }))),
         "DaemonStopping",
       )
-      const refused = yield* joinMovingVirtualTimeForTheDrain(stopping)
+      const refused = yield* joinAdvancingClock(stopping)
       assert.include(JSON.stringify(refused), `spawn ${id}`)
       assert.strictEqual(yield* (yield* Drain).phase, "open")
       assert.isFalse(yield* shutdownDone)
@@ -202,7 +202,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const held = yield* herdr.hold("open")
       yield* (yield* cli(repo)).Spawn({ harness: "pi", prompt: "work" })
       yield* held.reached
-      const stopping = yield* Effect.forkScoped(stopFromCliAcceptedOrBlockersOrTag(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       yield* held.release()
       assert.strictEqual(yield* Fiber.join(stopping), "accepted")
@@ -217,7 +217,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const raw = yield* client
       const { id } = yield* (yield* cli(repo)).Spawn({ harness: "pi", prompt: "work" })
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("work") === true))
-      const stopping = yield* Effect.forkScoped(stopFromCliAcceptedOrBlockersOrTag(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       const piExtensionHook = (call: "Prompt" | "TurnEnd", event: object) =>
         Effect.forkScoped(
@@ -233,7 +233,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       })
       assert.strictEqual(tagOf(yield* Fiber.join(ended)), "success")
       const prompted = yield* piExtensionHook("Prompt", { type: "input", text: "work", source: "interactive" })
-      assert.strictEqual(yield* joinMovingVirtualTimeForTheDrain(stopping), "accepted")
+      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
       assert.strictEqual(tagOf(yield* Fiber.join(prompted)), "success")
       assert.include(yield* resultText(id), "done")
     }),
@@ -244,7 +244,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     "a Send and a Pi arrival deferred by the drain wake after a refused Stop, with nothing failed",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, herdr, c, worker } = yield* idleMainAgentInWCp1WithWorkingWorker(repo, "pi")
+      const { db, herdr, c, worker } = yield* idleMainWithWorker(repo, "pi")
       const sessions = yield* Sessions
       const drain = yield* Drain
       yield* herdr.endTurn(worker)
@@ -262,7 +262,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       )
       yield* until(db.latestInbox(worker, "result"), (r) => r?.status === "delivered")
       const leave = drain.track("held short operation")
-      const stopping = yield* Effect.forkScoped(stopFromCliAcceptedOrBlockersOrTag(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       yield* sessions.send(worker, "after reopen")
       yield* (yield* Inbox).enqueue({
@@ -271,7 +271,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
         message: "arrival while draining",
         details: {},
       })
-      assert.isArray(yield* joinMovingVirtualTimeForTheDrain(stopping))
+      assert.isArray(yield* joinAdvancingClock(stopping))
       yield* leave
       yield* until(db.inboxWithStatus(worker, "delivered"), (rows) => rows.some((r) => r.message === "after reopen"))
       yield* until(
@@ -287,19 +287,19 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     "a delivered row stays counted until its completion work is done",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, worker, projectId } = yield* idleMainAgentInWCp1WithWorkingWorker(repo, "pi")
+      const { db, worker, projectId } = yield* idleMainWithWorker(repo, "pi")
       const inbox = Context.get(yield* Layer.build(Layer.fresh(Inbox.layer)), Inbox)
       const stream = yield* Effect.forkScoped(Stream.runDrain(inbox.stream(projectId)))
       const row = yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "completion", details: {} })
       yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "delivered")
-      const stopping = yield* Effect.forkScoped(stopFromCliAcceptedOrBlockersOrTag(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       assert.include(yield* (yield* Drain).pending, `completion inbox ${row.id}`)
       assert.isFalse(yield* shutdownDone)
       const consequence = yield* inbox.delivered
       assert.strictEqual(consequence.row.id, row.id)
       yield* consequence.done
-      assert.strictEqual(yield* joinMovingVirtualTimeForTheDrain(stopping), "accepted")
+      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
       yield* Fiber.interrupt(stream)
     }),
   )
@@ -319,9 +319,9 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const held = yield* (yield* FakeProcesses).holdCwd()
       const removing = yield* Effect.forkScoped(sessions.remove(id))
       yield* held.reached
-      const stopping = yield* Effect.forkScoped(stopFromCliAcceptedOrBlockersOrTag(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
-      assert.include(JSON.stringify(yield* joinMovingVirtualTimeForTheDrain(stopping)), `session ${id}`)
+      assert.include(JSON.stringify(yield* joinAdvancingClock(stopping)), `session ${id}`)
       assert.isUndefined(removing.pollUnsafe())
       yield* held.release()
       yield* Fiber.join(removing)
@@ -333,7 +333,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     "a Pi batch on the wire blocks until its ACK; the drained close fails nothing",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, sessionId, worker, projectId } = yield* idleMainAgentInWCp1WithWorkingWorker(repo, "pi")
+      const { db, sessionId, worker, projectId } = yield* idleMainWithWorker(repo, "pi")
       const layout = yield* Layout
       const socket = yield* Effect.acquireRelease(
         Effect.promise(
@@ -358,12 +358,12 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       socket.write(JSON.stringify({ jsonrpc: "2.0", id: "s", method: "Inbox.Subscribe", params: null, headers }) + "\n")
       yield* (yield* Inbox).enqueue({ sessionId: worker, kind: "report", message: "held", details: {} })
       yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "sending")
-      const stopping = yield* Effect.forkScoped(stopFromCliAcceptedOrBlockersOrTag(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       assert.isFalse(yield* shutdownDone)
       socket.write(JSON.stringify({ jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: "s" } }) + "\n")
       yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "delivered")
-      assert.strictEqual(yield* joinMovingVirtualTimeForTheDrain(stopping), "accepted")
+      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
       socket.destroy()
       assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, "delivered")
     }),
@@ -373,16 +373,16 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
     "a Claude ack settles a batch already leased while the Stop drains",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, worker, projectId } = yield* idleMainAgentInWCp1WithWorkingWorker(repo, "claude")
+      const { db, worker, projectId } = yield* idleMainWithWorker(repo, "claude")
       const inbox = yield* Inbox
       yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "ack", details: {} })
       const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
-      const stopping = yield* Effect.forkScoped(stopFromCliAcceptedOrBlockersOrTag(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [], "a poll while draining hands out nothing new")
       assert.deepStrictEqual(yield* inbox.ack(projectId, polled.ids), polled.ids)
       assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, "delivered")
-      assert.strictEqual(yield* joinMovingVirtualTimeForTheDrain(stopping), "accepted")
+      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
     }),
   )
 
@@ -392,7 +392,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const repo = yield* makeRepository
       const drain = yield* Drain
       const leave = drain.track("still running")
-      const stopping = yield* Effect.forkScoped(stopFromCliAcceptedOrBlockersOrTag(repo))
+      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       yield* Fiber.interrupt(stopping)
       yield* until(drain.phase, (phase) => phase === "open")
