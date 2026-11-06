@@ -222,6 +222,26 @@ export type InboxMessage = typeof InboxMessage.Type
 
 export const SessionStatusInfo = Schema.Struct({ ...SessionInfo.fields, result: Schema.NullOr(InboxMessage) })
 
+export const ProjectRow = Schema.Struct({
+  id: Schema.String,
+  directory: Schema.NullOr(Schema.String),
+  entrySessionId: Schema.NullOr(Schema.String),
+})
+export type ProjectRow = typeof ProjectRow.Type
+
+export const WatchSession = Schema.Struct({ ...SessionInfo.fields, parentId: Schema.NullOr(Schema.String) })
+export type WatchSession = typeof WatchSession.Type
+
+export const WatchEvent = Schema.Union([
+  Schema.TaggedStruct("Snapshot", { projects: Schema.Array(ProjectRow), sessions: Schema.Array(WatchSession) }),
+  Schema.TaggedStruct("Project", { project: ProjectRow }),
+  Schema.TaggedStruct("Session", { session: WatchSession }),
+  Schema.TaggedStruct("SessionEnded", { id: Schema.String, projectId: Schema.String }),
+])
+export type WatchEvent = typeof WatchEvent.Type
+
+export class WatchLagged extends Schema.TaggedError<WatchLagged>()("WatchLagged", { message: Schema.String }) {}
+
 export class VibestRpcs extends RpcGroup.make(
   Rpc.make("Ping", { success: PingResult }),
   scoped(
@@ -356,6 +376,7 @@ export class VibestRpcs extends RpcGroup.make(
     ),
   ),
   scoped(Rpc.make("Inbox.Subscribe", { success: Schema.String, error: Schema.Union([Forbidden]), stream: true })),
+  scoped(Rpc.make("Watch", { success: WatchEvent, error: Schema.Union([Forbidden, WatchLagged]), stream: true })),
   protocol(
     admitted(
       Rpc.make("TurnEnd", {
@@ -557,3 +578,43 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
 ) {}
+
+export const ACCESS = {
+  Ping: "open",
+  Plugins: "open",
+  "Runtimes.Doctor": "open",
+  Subscriptions: "open",
+  Republish: "open",
+  TurnEnd: "open",
+  Prompt: "open",
+  CoordinatorSessionReady: "open",
+  Report: "session",
+  Spawn: "agent",
+  Launch: "agent",
+  List: "agent",
+  Get: "agent",
+  "Inbox.Subscribe": "coordinator",
+  Watch: "cli",
+  "Project.Open": "cli",
+  "Project.CoordinatorSession": "agent",
+  "Project.StartMain": "agent",
+  "Project.RunningCoordinator": "agent",
+  "Project.StopCoordinator": "agent",
+  "Project.Info": "agent",
+  "Project.Search": "agent",
+  Send: "owner",
+  Interrupt: "owner",
+  Peek: "owner",
+  Remove: "owner",
+  "Daemon.Stop": "cli",
+  "Daemon.Handoff": "cli",
+  "Session.Start": "self",
+  "Session.Ready": "self",
+  "Agents.Outdated": "cli",
+  "Agents.Restart": "cli",
+} as const satisfies Record<
+  RpcGroup.Rpcs<typeof VibestRpcs>["_tag"],
+  "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self"
+>
+
+export const CAPABILITIES = { http: true, handoff: true, requests: true, watch: true } as const

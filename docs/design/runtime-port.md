@@ -107,6 +107,45 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 - Ready for input: `state` idle, else the adapter's ready pattern on `read()`. A process that exits before its turn
   ends loses the round, as today.
 
+### Terminal status ownership
+
+One terminal has one status writer: a harness with native OSC 7501 support owns its reports.
+Pi added native reporting in 1.1.0 (upstream #10607, commit `503c60552`): working for runs/compaction, blocked for
+dialogs/login, done on success, error on failure, idle at startup/abort. Its renderer owns permission/question/auth
+kinds and restores the prior state when a dialog closes. Vibest writes no Pi status and leaves its supported
+`PI_PROGRAM_STATUS=0|1` override alone. Older Pis have no fallback status writer.
+Pi UI widget kinds describe how a prompt is drawn, not why it blocks, so vibest never maps them to permission,
+question or auth; an unknown blocked reason would omit kind, and native reports are left unchanged.
+
+Cursor writes working before its prompt RPC and idle for accepted response/stop hooks. Its public hook API has
+no paired permission/question/auth waits, so it never writes blocked. Guard denials remain permission decisions,
+not evidence that a human is being asked. Cursor idle relies on `afterAgentResponse` firing every turn.
+
+Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
+and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,
+and `error`. Successful `done` is intentionally not normalized to `idle`: both are non-working; herdr-app uses
+the distinction for its unseen mark. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` disables this native reporting too.
+Live-checked on Claude Code 2.1.318 and 2.1.319; older versions have no guaranteed coverage or fallback writer.
+
+`pnpm e2e T1` launches the built integrations in real Claude and Pi with held fake models, through a test-only
+runtime plugin into its own herdr-core, and exercises the shipped Cursor hook script in a real PTY. Its HOME,
+HC_SESSION, HC_SOCKET and XDG directories are under the test root. The fixture is not a shipped runtime adapter:
+it tests terminal reports, not exit-event recovery. Raw output and timestamped input/output captures stay in
+evidence files, never the runner terminal. Claude ignores keys at its first dialog draw; the check waits for
+visible dialog text, pauses, reads it again, then answers only the scratch action.
+
+Coordinator coverage is blocked until `feat/runtime-hc` merges: the CLI caller detector still requires herdr
+identity even when a different runtime opened its terminal. Do not forge that identity in E2E. Once native HC
+caller detection lands, add this check: launch a real Claude and Pi coordinator through built `vibest --harness
+<harness> --runtime hc --headless` in the isolated core; hold its fake model and assert native working, complete
+it and assert native done, then start another turn and interrupt it to assert idle, with the loaded vibest
+integration and no competing OSC writer. This is independent of worker result coverage. In the same follow-up,
+remove Cursor's coordinator exclusion from terminal status reporting and verify working/idle there; terminal
+status must not inherit the coordinator exclusion used for result reporting.
+
+The fake HTTP 401 authentication_error check records Claude's actual retry/working classification; it does not
+claim that every provider 401 opens an auth dialog.
+
 ## 6. Machines
 
 ```

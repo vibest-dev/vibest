@@ -75,7 +75,7 @@ describe("vibest.sock", () => {
       const ping = yield* raw.Ping()
       assert.strictEqual(ping.protocol, PROTOCOL)
       assert.strictEqual(ping.version, VERSION)
-      assert.deepStrictEqual(ping.capabilities, { http: true, handoff: true, requests: true })
+      assert.deepStrictEqual(ping.capabilities, { http: true, handoff: true, requests: true, watch: true })
       const rejected = yield* Effect.exit(raw.List({}))
       assert.strictEqual(failureTag(rejected), "ProtocolRejected")
       const said = String(Exit.isFailure(rejected) && Cause.pretty(rejected.cause))
@@ -479,6 +479,7 @@ describe("vibest.sock", () => {
         ["List", c.List({ stopped: true })],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
+        ["Watch", Stream.runDrain(c.Watch(undefined))],
         [
           "Project.CoordinatorSession",
           c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" }),
