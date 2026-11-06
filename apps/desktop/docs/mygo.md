@@ -87,6 +87,13 @@ MYGO_GHOSTTY_VT="$VT" go -C third_party/mygo test ./plugins/terminal ./ui ./inte
 MYGO_GHOSTTY_VT="$VT" go test -tags 'corevt corequeue coreapp' -race ./internal/core ./internal/coreview ./internal/app -count=1 -timeout 900s
 ```
 
+A fresh clone at 52f967b passed the desktop Turbo build/typecheck/test graph with
+an empty HOME, GOPATH, GOMODCACHE and GOCACHE and an explicitly verified
+MYGO_GHOSTTY_VT: seven successful tasks, zero cached, 2m29s. Starting with the
+owner's Go 1.27.2 printed “requires go >= 1.27.3; switching to go1.27.3”. The
+go.mod minimum and default GOTOOLCHAIN=auto suffice; no manual Go upgrade or
+separate toolchain directive is required.
+
 The complete tagged Core/App race lane passes. It covers input during resize,
 focused/unfocused automatic replies, queued replies surviving cancellation,
 composition ownership, file paste and Core discovery. The isolated demo uses
