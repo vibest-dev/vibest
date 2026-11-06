@@ -30,7 +30,7 @@ const stamp = () =>
       ),
     ),
   )
-let realBefore: Promise<Array<string>> | undefined
+const realBefore = stamp()
 
 const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
 
@@ -92,8 +92,6 @@ const checks: ReadonlyArray<Check> = [
     title:
       "the plugins ship with vibest: one directory per harness; `integration` has only the hooks' guard, prompt and stop and a main agent's restart start, nothing to install",
     run: async (w) => {
-      realBefore ??= stamp()
-      await realBefore
       for (const file of [
         "pi/extension.mjs",
         "claude/.claude-plugin/plugin.json",
@@ -432,7 +430,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I6",
     title: "the user's own harness config files did not change",
     run: async () => {
-      const before = await (realBefore ??= stamp())
+      const before = await realBefore
       const after = await stamp()
       before.forEach((b, i) => expect(b === after[i], `changed: ${b} → ${after[i]}`))
     },
