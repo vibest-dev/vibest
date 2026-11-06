@@ -51,13 +51,6 @@ func (a *App) machineByID(id string) *machine {
 	return nil
 }
 
-func noticeID(machine, pane string) string {
-	if machine == "" {
-		return pane
-	}
-	return machine + "/" + pane
-}
-
 func (a *App) ShowNotice(id string) {
 	machine, pane, ok := strings.Cut(id, "/")
 	if !ok {

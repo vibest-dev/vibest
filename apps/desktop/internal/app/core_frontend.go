@@ -638,57 +638,8 @@ func (a *App) coreCloseGroup(workspace, tab string) {
 	}
 	a.coreClose(ids)
 }
-func (a *App) coreMovePane(id, workspace, tab string) {
-	a.coreEditAndFollow(id, func(l *core.Layout) error { _, err := l.MovePane(id, workspace, tab); return err })
-}
 func (a *App) coreRename(id, label string) {
 	a.coreEdit(func(l *core.Layout) error { return l.Rename(id, label) })
-}
-func (a *App) coreMoveWorkspace(id string, index int) {
-	a.coreEdit(func(l *core.Layout) error {
-		machine := ""
-		from := -1
-		for i, w := range l.Workspaces {
-			if w.ID == id {
-				machine = w.Machine
-				from = i
-				break
-			}
-		}
-		if from < 0 {
-			return errors.New("workspace not found")
-		}
-		visible, original := []string{}, 0
-		for i, w := range l.Workspaces {
-			if w.Machine != machine {
-				continue
-			}
-			if i < from {
-				original++
-			}
-			if w.ID != id {
-				visible = append(visible, w.ID)
-			}
-		}
-		to := index
-		if to > original {
-			to--
-		}
-		to = max(0, min(to, len(visible)))
-		target := len(l.Workspaces) - 1
-		if to < len(visible) {
-			for i, w := range l.Workspaces {
-				if w.ID == visible[to] {
-					target = i
-					if from < i {
-						target--
-					}
-					break
-				}
-			}
-		}
-		return l.MoveWorkspace(id, target)
-	})
 }
 func (a *App) coreMoveTab(id string, index int) {
 	a.coreEdit(func(l *core.Layout) error {

@@ -153,12 +153,6 @@ func (c *Client) Close() error {
 
 func (c *Client) Done() <-chan struct{} { return c.done }
 
-func (c *Client) Err() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.err
-}
-
 func headers(method, repository string) [][2]string {
 	if method == "Ping" {
 		return [][2]string{}

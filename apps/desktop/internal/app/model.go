@@ -4,13 +4,10 @@ import (
 	"errors"
 	"sync"
 	"vibest-desktop/internal/core"
-	"vibest-desktop/internal/presentation"
 
 	"time"
 
 	"vibest-desktop/internal/chrome"
-
-	"vibest-desktop/internal/sidebar"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/terminal"
@@ -240,34 +237,6 @@ func (a *App) RenamePane(id, label string) {
 	a.coreRename(id, label)
 }
 
-func (a *App) MoveWorkspace(id string, index int) {
-	a.coreMoveWorkspace(id, index)
-}
-
-func (a *App) ApplyWorkspaceShift(workspaces []presentation.Workspace, s sidebar.Shift) {
-	if !s.OK {
-		return
-	}
-	if len(s.IDs) > 1 {
-		before := ""
-		if !s.End && s.Index >= 0 && s.Index < len(workspaces) {
-			before = workspaces[s.Index].ID
-		}
-		ids := append([]string(nil), s.IDs...)
-		a.coreEdit(func(l *core.Layout) error {
-			return l.MoveWorkspaceBlock(ids, before)
-		})
-		return
-	}
-	if len(s.IDs) == 1 {
-		index := s.Index
-		if s.End {
-			index = len(workspaces)
-		}
-		a.MoveWorkspace(s.IDs[0], index)
-	}
-}
-
 func (a *App) MoveTab(id string, index int) {
 	a.coreMoveTab(id, index)
 }
@@ -283,14 +252,6 @@ func (a *App) ZoomPaneMode(id, mode string) {
 		}
 		return s.ToggleZoom(l, id)
 	})
-}
-
-func (a *App) SwapPane(focused, target string) {
-	a.coreEdit(func(l *core.Layout) error { return l.SwapPanes(focused, target) })
-}
-
-func (a *App) MovePaneNewTab(id, workspaceID string) {
-	a.coreMovePane(id, workspaceID, "")
 }
 
 func (a *App) MovePaneNewWorkspace(id string) {
@@ -313,18 +274,6 @@ func (a *App) MovePaneNewWorkspace(id string) {
 		l.AddWorkspace("", cwd, machine, copy)
 		return nil
 	})
-}
-
-func (a *App) MovePaneToTab(id, tabID string) {
-	workspace := ""
-	for _, w := range a.coreState.Layout.Workspaces {
-		for _, t := range w.Tabs {
-			if t.ID == tabID {
-				workspace = w.ID
-			}
-		}
-	}
-	a.coreMovePane(id, workspace, tabID)
 }
 
 func (a *App) EditScrollback(id string) {

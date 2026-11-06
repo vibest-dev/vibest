@@ -63,13 +63,6 @@ func (f *fakeGit) run(ctx context.Context, s *core.Session, cwd string, args []s
 	}
 	return nil, fmt.Errorf("unexpected Git argv%v", args)
 }
-func fakeGitApp(t *testing.T) (*App, *coreAppFixture, *fakeGit) {
-	t.Helper()
-	a, f := newCoreAppFixtureWith(t, coreActivitySeed)
-	g := &fakeGit{}
-	coreAppAct(a, func() { a.gitExec = g.run })
-	return a, f, g
-}
 func TestGitCommandsAreBoundedArgvAndNeverForced(t *testing.T) {
 	g := &fakeGit{}
 	info, e := inspectRepository(context.Background(), g.run, nil, "/inert/repo")

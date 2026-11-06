@@ -412,14 +412,6 @@ func TestPaneStyleTabSwitchWaitsForTheSettledShell(t *testing.T) {
 	noCoreData(t, f)
 }
 
-func play(tt *ui.Tester, d time.Duration) {
-	for waited := time.Duration(0); waited < d; waited += styleFrame {
-		tt.Advance(styleFrame)
-		time.Sleep(styleFrame)
-	}
-	tt.Frame()
-}
-
 func TestPaneStyleResizeFollowsTheSettledShell(t *testing.T) {
 	for _, toggles := range []int{1, 2, 5} {
 		t.Run(fmt.Sprint(toggles), func(t *testing.T) {
