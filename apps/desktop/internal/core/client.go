@@ -56,7 +56,7 @@ func (e *Mismatch) Error() string {
 	if e.Reason != "" {
 		return fmt.Sprintf("herdr-core refused protocol generation %d (%s); this app needs herdr-core %s", PinnedGeneration, e.Reason, PinnedVersion)
 	}
-	return fmt.Sprintf("herdr-core %s (generation %d) does not match the herdr-core %s (generation %d) this app was built for; run herdr-core %s", e.Version, e.Generation, PinnedVersion, PinnedGeneration, PinnedVersion)
+	return fmt.Sprintf("herdr-core %s speaks protocol generation %d; this app needs generation %d (herdr-core %s)", e.Version, e.Generation, PinnedGeneration, PinnedVersion)
 }
 
 var requiredMethods = []string{"terminal.run", "terminal.get", "terminal.attach", "terminal.kill", "events.subscribe", "doc.get", "doc.set", "machine.list"}
@@ -148,7 +148,7 @@ func Connect(ctx context.Context, conn net.Conn) (*Client, error) {
 	if err := json.Unmarshal(reply.Result, &h); err != nil {
 		return nil, err
 	}
-	if h.Generation != PinnedGeneration || h.Version != PinnedVersion {
+	if h.Generation != PinnedGeneration {
 		return nil, &Mismatch{Version: h.Version, Generation: h.Generation}
 	}
 	if !h.Framed || h.Core.ID == "" {

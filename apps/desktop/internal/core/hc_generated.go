@@ -3,13 +3,14 @@ package core
 import "encoding/json"
 
 const (
-	PinnedVersion    = "0.1.13"
+	PinnedVersion    = "0.1.18"
 	PinnedGeneration = 1
 )
 
 type HelloParams struct {
 	CallsYou   *string   `json:"calls_you,omitempty"`
 	Core       *CoreInfo `json:"core,omitempty"`
+	Features   []string  `json:"features,omitempty"`
 	Framed     bool      `json:"framed,omitempty"`
 	Generation *uint32   `json:"generation,omitempty"`
 }
@@ -19,6 +20,7 @@ type TerminalRunParams struct {
 	Caller        *string           `json:"caller,omitempty"`
 	CWD           *string           `json:"cwd,omitempty"`
 	DieWithParent bool              `json:"die_with_parent,omitempty"`
+	Display       *Display          `json:"display,omitempty"`
 	Env           map[string]string `json:"env,omitempty"`
 	Keep          bool              `json:"keep,omitempty"`
 	Labels        map[string]string `json:"labels,omitempty"`
@@ -30,6 +32,7 @@ type TerminalRunParams struct {
 	OutliveParent bool              `json:"outlive_parent,omitempty"`
 	Parent        *string           `json:"parent,omitempty"`
 	Rm            bool              `json:"rm,omitempty"`
+	Size          *InitialSize      `json:"size,omitempty"`
 	Timeout       *float64          `json:"timeout,omitempty"`
 	Wait          bool              `json:"wait,omitempty"`
 }
@@ -50,14 +53,15 @@ type TerminalLabelParams struct {
 }
 
 type TerminalAttachParams struct {
-	Caller   *string `json:"caller,omitempty"`
-	Cols     uint16  `json:"cols"`
-	Display  Display `json:"display,omitempty"`
-	History  uint    `json:"history,omitempty"`
-	Observe  bool    `json:"observe,omitempty"`
-	Resumed  bool    `json:"resumed,omitempty"`
-	Rows     uint16  `json:"rows"`
-	Terminal string  `json:"terminal"`
+	Caller              *string `json:"caller,omitempty"`
+	Cols                uint16  `json:"cols"`
+	Display             Display `json:"display,omitempty"`
+	History             uint    `json:"history,omitempty"`
+	Observe             bool    `json:"observe,omitempty"`
+	ResizeNotifications bool    `json:"resize_notifications,omitempty"`
+	Resumed             bool    `json:"resumed,omitempty"`
+	Rows                uint16  `json:"rows"`
+	Terminal            string  `json:"terminal"`
 }
 
 type MachineExecParams struct {
@@ -92,8 +96,10 @@ type MachineListParams struct {
 }
 
 type AttachResult struct {
-	Channel  uint32   `json:"channel"`
-	Terminal Terminal `json:"terminal"`
+	AutomaticInput      bool     `json:"automatic_input"`
+	Channel             uint32   `json:"channel"`
+	ResizeNotifications bool     `json:"resize_notifications"`
+	Terminal            Terminal `json:"terminal"`
 }
 
 type CoreInfo struct {
@@ -109,8 +115,8 @@ type Display struct {
 }
 
 type DocGetResult struct {
-	Value   json.RawMessage `json:"value"`
-	Version uint64          `json:"version"`
+	DocSetResult
+	Value json.RawMessage `json:"value"`
 }
 
 type DocSetResult struct {
@@ -150,14 +156,18 @@ type HelloResult struct {
 	Version    string   `json:"version"`
 }
 
+type InitialSize struct {
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+}
+
 type MachineListResult struct {
 	Machines []MachineView `json:"machines"`
 }
 
 type MachineView struct {
+	CoreInfo
 	Host      string  `json:"host"`
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
 	Session   *string `json:"session"`
 	SinceMS   *uint64 `json:"since_ms"`
 	State     string  `json:"state"`
@@ -170,9 +180,8 @@ type MachineView struct {
 
 type RunResult struct {
 	Terminal
-	FirstMessage *FirstMessage `json:"first_message"`
-	Output       *string       `json:"output"`
-	Wait         *WaitResult   `json:"wait"`
+	Output *string     `json:"output"`
+	Wait   *WaitResult `json:"wait"`
 }
 
 type Status struct {
@@ -199,6 +208,7 @@ type Terminal struct {
 	DieWithParent bool              `json:"die_with_parent"`
 	ExitCode      *int32            `json:"exit_code"`
 	FinishedMS    *uint64           `json:"finished_ms"`
+	FirstMessage  *FirstMessage     `json:"first_message"`
 	Foreground    *Foreground       `json:"foreground"`
 	Identity      string            `json:"identity"`
 	Keep          bool              `json:"keep"`

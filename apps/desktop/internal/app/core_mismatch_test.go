@@ -16,7 +16,7 @@ func TestCoreVersionMismatchWaitsForRetry(t *testing.T) {
 	var dials atomic.Int32
 	a.dialCore = func(context.Context, string) (*core.Client, error) {
 		dials.Add(1)
-		return nil, &core.Mismatch{Version: "0.2.0", Generation: core.PinnedGeneration}
+		return nil, &core.Mismatch{Version: "0.2.0", Generation: core.PinnedGeneration + 1}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

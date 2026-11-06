@@ -2,7 +2,7 @@
 
 Source: reherdr `feat/project-view` 4e0a802 (github.com/iamdin/reherdr), imported without its code comments.
 
-> Status: the app runs on **herdr-core 0.1.13** and vibestd. Every check is a software one (fakes, MyGo's software renderer); real Core, native input (IME, clipboard, drop, editors) and an installed app are not qualified yet.
+> Status: the app runs on herdr-core protocol generation 1 (types generated from **herdr-core 0.1.18**) and vibestd; any core of that generation is accepted. Every check is a software one (fakes, MyGo's software renderer); real Core, native input (IME, clipboard, drop, editors) and an installed app are not qualified yet.
 
 A native macOS frontend built with [MyGo](https://github.com/egoist/mygo). Vibest owns its workspace/tab/split document and window-local navigation; Core owns terminals, programs and remote routing. Not affiliated with herdr.
 

@@ -238,7 +238,7 @@ func (g *generator) embedded(name string) (string, []field) {
 		mine := g.components[name]["properties"].(map[string]any)
 		all := true
 		for k, v := range props {
-			if !reflect.DeepEqual(mine[k], v) {
+			if !reflect.DeepEqual(undescribed(mine[k]), undescribed(v)) {
 				all = false
 				break
 			}
@@ -258,6 +258,20 @@ func (g *generator) embedded(name string) (string, []field) {
 		}
 	}
 	return best, rest
+}
+
+func undescribed(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return v
+	}
+	out := map[string]any{}
+	for k, x := range m {
+		if k != "description" {
+			out[k] = x
+		}
+	}
+	return out
 }
 
 func generate(doc document, p pin) ([]byte, error) {
