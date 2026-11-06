@@ -5,10 +5,17 @@ import path from "node:path"
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { runtimeContract } from "@vibest/plugin/testing"
 import { Effect, Ref, type Scope, Stream } from "effect"
-import { Hc } from "effect-hc-sdk"
+import { Hc, SocketConnector } from "effect-hc-sdk"
 import * as HcBun from "effect-hc-sdk/bun"
 
-import { KIND, LABEL, make, PRESENT_MAIN_SESSION, PRESENT_PROJECT_ID } from "../src/terminal-runtime.ts"
+import {
+  KIND,
+  LABEL,
+  make,
+  parseTerminalId,
+  PRESENT_MAIN_SESSION,
+  PRESENT_PROJECT_ID,
+} from "../src/terminal-runtime.ts"
 
 const hcOnPath = childProcess.spawnSync("hc", ["--version"], { stdio: "ignore" }).status === 0
 
@@ -47,8 +54,10 @@ const withRuntime = <A, E>(
   body: (runtime: Effect.Success<ReturnType<typeof make>>, hc: Hc["Service"]) => Effect.Effect<A, E, Scope.Scope>,
 ) =>
   Effect.gen(function* () {
-    const hc = yield* Hc.make(socketPath)
-    const runtime = yield* make({ hc, scope: yield* Effect.scope })
+    const connector = yield* SocketConnector
+    const connect = (at: string) => Effect.runSync(Hc.make(at).pipe(Effect.provideService(SocketConnector, connector)))
+    const hc = connect(socketPath)
+    const runtime = yield* make({ connect, socket: socketPath, scope: yield* Effect.scope })
     return yield* body(runtime, hc)
   }).pipe(Effect.scoped, Effect.provide(HcBun.layer))
 
@@ -94,7 +103,7 @@ describe.skipIf(!hcOnPath)("runtime-hc against an isolated herdr-core", () => {
             "cat did not echo the text",
           )
           assert.notInclude(screen, "<hc")
-          const record = yield* hc.call("terminal.get", { terminal: child.id })
+          const record = yield* hc.call("terminal.get", { terminal: parseTerminalId(child.id, socketPath).address })
           assert.isNotNull(record.parent ?? null)
           assert.isFalse(record.notify ?? false)
           assert.isFalse(record.die_with_parent ?? false)
@@ -116,10 +125,11 @@ describe.skipIf(!hcOnPath)("runtime-hc against an isolated herdr-core", () => {
             { id: "local" },
             { project: cwd, cwd, argv: [], env: { VBT_KEEP: marker }, label: "keep" },
           )
-          const pid = (yield* hc.call("terminal.get", { terminal: terminal.id })).pid
+          const pid = (yield* hc.call("terminal.get", { terminal: parseTerminalId(terminal.id, socketPath).address }))
+            .pid
           yield* runtime.send(terminal, { text: "kill -9 $$" })
           yield* until(
-            hc.call("terminal.get", { terminal: terminal.id }),
+            hc.call("terminal.get", { terminal: parseTerminalId(terminal.id, socketPath).address }),
             (t) => t.state === "live" && typeof t.pid === "number" && t.pid !== pid,
             "the core did not replace the killed shell",
           )
@@ -151,7 +161,8 @@ describe.skipIf(!hcOnPath)("runtime-hc against an isolated herdr-core", () => {
           yield* Effect.sleep("300 millis")
           const main = yield* runtime.open({ id: "local" }, { project: cwd, cwd, argv: [], env: {}, label: "main" })
           yield* runtime.present!(main, { [PRESENT_MAIN_SESSION]: "session-1", [PRESENT_PROJECT_ID]: "project-1" })
-          const labels = (yield* hc.call("terminal.get", { terminal: main.id })).labels
+          const labels = (yield* hc.call("terminal.get", { terminal: parseTerminalId(main.id, socketPath).address }))
+            .labels
           assert.deepInclude(labels, {
             [LABEL.runtime]: KIND,
             [LABEL.project]: "project-1",

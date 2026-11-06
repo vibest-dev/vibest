@@ -4,13 +4,15 @@
 
 ## Which core
 
-vibestd talks to one core: `HC_SOCKET`, else `$XDG_RUNTIME_DIR/herdr-core/<session>.sock`, else `${XDG_STATE_HOME:-$HOME/.local/state}/herdr-core/<session>/<session>.sock`, with `<session>` from `HC_SESSION` (default `default`), as hc resolves it. The `socket` key of the core's `config.toml` is not read. vibest never starts the core; `status` says `offline` and names `hc server start`. Remote machines (`on`, `machine/t7`) are not used yet: every terminal is on the core's own machine.
+A terminal's vibest id names its core: `<address>@<socket path>`, for example `t3@/run/user/501/herdr-core/default.sock`, so every call on a terminal goes to the core that holds it. A new terminal goes to the core of the terminal it is opened near (a subagent's parent), else to vibestd's own core: `HC_SOCKET`, else `$XDG_RUNTIME_DIR/herdr-core/<session>.sock`, else `${XDG_STATE_HOME:-$HOME/.local/state}/herdr-core/<session>/<session>.sock`, with `<session>` from `HC_SESSION` (default `default`), as hc resolves it. The `socket` key of the core's `config.toml` is not read. vibest never starts a core; `status` asks vibestd's own core and, when none answers, says `offline` and names `hc server start`. Remote machines (`on`, `machine/t7`) are not used yet: every terminal is on its core's own machine.
 
-Each call opens its own connection in plain mode (one JSON-RPC message per line). One more connection holds `events.subscribe` filtered by `vibest.runtime=hc`; it is re-made every 2 s after a loss, and each new subscription after the first publishes `reset`. A `missed` notice drops the connection so the next subscription starts from a fresh snapshot.
+`vibest` run inside an hc terminal knows it from `HC_TERMINAL_ID` (the terminal's address) and `HC_TERMINAL_SOCKET` (its core), which the core sets in every terminal: it starts the main agent in place, in that terminal on that core, with runtime `hc` (unless `--runtime` names another), as it does in a herdr pane. A `vibest` run outside any terminal with `--runtime hc` opens the main agent's terminal on vibestd's own core.
+
+Each call opens its own connection in plain mode (one JSON-RPC message per line). A core is followed from the first call on one of its terminals: one more connection holds `events.subscribe` filtered by `vibest.runtime=hc`; it is re-made every 2 s after a loss, and each new subscription of a core after its first publishes `reset`. A `missed` notice drops the connection so the next subscription starts from a fresh snapshot.
 
 ## Terminals
 
-- A terminal's vibest id is its hc name: `s-<30 hex>` from `VIBEST_SESSION_ID`, else `vbt-<28 hex>`. `open` sets `VIBEST_RUNTIME` to `{"runtime":"hc","machine":…,"terminal":<name>}` in the terminal's environment, so a main agent typed into it by `Launch` (`--in-parent`) knows its terminal and runtime without any `HC_*` variable.
+- A terminal vibest opens is named `s-<30 hex>` from `VIBEST_SESSION_ID`, else `vbt-<28 hex>`, so `hc ls` shows which session it holds; vibest itself uses its address.
 - `open` runs the machine's shell (`keep: true`) and types the argv into it with `terminal.send`, so the shell stays after the program (runtime-boundary rule 4) and `run` types the next program into the same shell. `terminal.send` waits until nobody typed for about 3 s, so each prompt takes at least that long.
 - A kept terminal whose program is lost (a signal death, a core crash) gets a shell with the same environment (the runtime-hc test kills the shell with `kill -9` and reads the variable back).
 - Exits come from events: `finished`, `removed`, `lost`, and a `foreground` change back to an interactive shell (`sh`, `bash`, `zsh`, `fish`, `dash`, `ksh`, `tcsh`, `nu`, with no script argument) after a program ran. A harness that is itself a shell script would look like a shell; none is.
@@ -22,5 +24,5 @@ Each call opens its own connection in plain mode (one JSON-RPC message per line)
 So vibest agents show in herdr-app too (its `docs/labels.md` and the model of spaces, tabs and terminals):
 
 - Every terminal: `vibest.runtime=hc`; a subagent also `vibest.project=<project id>` and `vibest.session=<session id>` from its environment.
-- A main agent's terminal: when vibestd records it (`Project.CoordinatorSession`), it calls `present` with `mainSession` and `projectId`, and runtime-hc labels the terminal `vibest.project`, `vibest.session`, `herdr.space=<project id>` and `herdr.tab=<main session id>`. Other `present` calls change nothing.
+- A main agent's terminal: when vibestd records it (`Project.CoordinatorSession`), it calls `present` with `mainSession` and `projectId`, and runtime-hc labels the terminal `vibest.runtime`, `vibest.project`, `vibest.session`, `herdr.space=<project id>` and `herdr.tab=<main session id>`. Other `present` calls change nothing.
 - A subagent opened near another terminal (the main agent's, or a `--peer`'s) is started with `parent` set to it, `outlive_parent` (it keeps running when the main agent's program ends) and `no_notify` (the core types no notes into the parent). Without a terminal to start near, `no_parent`. Delivery, parents and results stay vibest's own.

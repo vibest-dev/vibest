@@ -16,9 +16,9 @@ type HcTerminal = {
   labels: Record<string, string>
 }
 
-const isolatedCore = async (w: World, piAgentDir: string) => {
-  const dirs = { state: path.join(w.root, "hc-state"), config: path.join(w.root, "hc-config") }
-  const zdot = path.join(w.root, "zdotdir-hc")
+const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
+  const dirs = { state: path.join(w.root, `${tag}-state`), config: path.join(w.root, `${tag}-config`) }
+  const zdot = path.join(w.root, `zdotdir-${tag}`)
   for (const dir of [...Object.values(dirs), zdot]) await fs.mkdir(dir, { recursive: true })
   const env = {
     XDG_STATE_HOME: dirs.state,
@@ -36,6 +36,7 @@ const isolatedCore = async (w: World, piAgentDir: string) => {
       expect(listed.code === 0, `hc ls: ${listed.stderr}`)
       return (JSON.parse(listed.stdout) as { terminals: Array<HcListed> }).terminals
     },
+    hc,
     get: async (terminal: string) => JSON.parse((await hc("get", terminal, "--json")).stdout) as HcTerminal,
     screens: async () => {
       const listed = JSON.parse((await hc("ls", "--all", "--json")).stdout) as { terminals: Array<HcListed> }
@@ -47,6 +48,8 @@ const isolatedCore = async (w: World, piAgentDir: string) => {
     stop: () => hc("server", "stop"),
   }
 }
+
+const addressOf = (id: string) => id.slice(0, id.indexOf("@"))
 
 const configureRuntime = async (w: World, runtime: string | undefined) => {
   const file = path.join(w.vibestHome, "vibest.json")
@@ -68,7 +71,7 @@ const checks: ReadonlyArray<Check> = [
       await w.stopDaemon()
       const piAgentDir = await piDir(w, "pi-hc", model.url)
       const env = `PI_CODING_AGENT_DIR=${piAgentDir}`
-      const core = await isolatedCore(w, piAgentDir)
+      const core = await isolatedCore(w, piAgentDir, "hc")
       const restore = await configureRuntime(w, "hc")
       try {
         const repo = await project(w, "hc")
@@ -109,7 +112,7 @@ const checks: ReadonlyArray<Check> = [
         const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, main)?.p
         const mainAt = runtimeOf(main)
         expect(mainAt.kind === "hc", `the main agent runs in ${JSON.stringify(mainAt)}, not hc`)
-        const mainTerminal = await core.get(mainAt.id!)
+        const mainTerminal = await core.get(addressOf(mainAt.id!))
         expect(
           mainTerminal.labels["herdr.space"] === projectId &&
             mainTerminal.labels["herdr.tab"] === main &&
@@ -121,7 +124,7 @@ const checks: ReadonlyArray<Check> = [
         const sub = model.sessionId()
         const subAt = runtimeOf(sub)
         expect(subAt.kind === "hc", `the subagent ${sub} runs in ${JSON.stringify(subAt)}, not hc`)
-        const subTerminal = await core.get(subAt.id!)
+        const subTerminal = await core.get(addressOf(subAt.id!))
         expect(
           subTerminal.parent === mainTerminal.address &&
             subTerminal.notify === false &&
@@ -139,6 +142,66 @@ const checks: ReadonlyArray<Check> = [
         model.stop()
         await w.stopDaemon()
         await restore()
+        await core.stop()
+      }
+    },
+  },
+  {
+    id: "S34",
+    title:
+      "herdr-core runtime: `vibest --runtime hc` typed into a terminal of the user's own core starts the main agent in place, in that terminal on that core, and labels it for herdr-app",
+    run: async (w) => {
+      for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = delegatingModel("pi")
+      w.ownRuntimes.add("hc")
+      await w.stopDaemon()
+      const piAgentDir = await piDir(w, "pi-hc-here", model.url)
+      const core = await isolatedCore(w, piAgentDir, "hc-here")
+      try {
+        const repo = await project(w, "hc-here")
+        const opened = await core.hc("run", "--bg", "--keep", "--name", "users-own", "--json")
+        expect(opened.code === 0, `hc run: ${opened.stderr}${opened.stdout}`)
+        const users = await core.get("users-own")
+        const typed = await core.hc(
+          "send",
+          "users-own",
+          `cd ${repo} && vibest --harness pi --runtime hc --env PI_CODING_AGENT_DIR=${piAgentDir}`,
+        )
+        expect(typed.code === 0, `hc send: ${typed.stderr}`)
+        let main = ""
+        await until(
+          "the main agent in vibest ls",
+          async () => {
+            main = (await w.json<Array<Entry>>(["ls"], { cwd: repo })).find((e) => e.agent === "main")?.id ?? ""
+            return main !== ""
+          },
+          90_000,
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}\nterminals:\n${await core.screens()}`)
+        })
+        const at = JSON.parse(
+          row<{ runtime: string }>(w, `SELECT runtime FROM ${SESSIONS} s WHERE id = ?`, main)?.runtime ?? "{}",
+        ) as { kind?: string; id?: string }
+        expect(
+          at.kind === "hc" && at.id === `${users.address}@${w.hcSocket}`,
+          `the main agent runs in ${JSON.stringify(at)}, not in ${users.address} on ${w.hcSocket}`,
+        )
+        const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, main)?.p
+        await until(
+          "herdr-app labels on the user's terminal",
+          async () => {
+            const labels = (await core.get("users-own")).labels
+            return (
+              labels["vibest.runtime"] === "hc" && labels["herdr.space"] === projectId && labels["herdr.tab"] === main
+            )
+          },
+          30_000,
+        )
+        const all = await core.terminals()
+        expect(all.length === 1, `vibest opened terminals of its own: ${JSON.stringify(all)}`)
+      } finally {
+        model.stop()
+        await w.stopDaemon()
         await core.stop()
       }
     },

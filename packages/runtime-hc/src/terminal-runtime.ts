@@ -2,7 +2,7 @@ import type * as VibestPlugin from "@vibest/plugin"
 import { Runtime as RuntimeApi } from "@vibest/plugin"
 import { ID, randomId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
-import { Duration, Effect, PubSub, Ref, Schedule, type Scope, Stream } from "effect"
+import { Duration, Effect, PubSub, Schedule, type Scope, Stream } from "effect"
 import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-hc-sdk"
 
 export type Machine = VibestPlugin.Runtime.Machine
@@ -38,7 +38,12 @@ export const terminalName = (env: Readonly<Record<string, string>>) => {
     : `vbt-${randomId().replaceAll("-", "").slice(0, 28)}`
 }
 
-export const runtimeEnv = (machine: string, name: string) => JSON.stringify({ runtime: KIND, machine, terminal: name })
+export const terminalId = (socket: string, address: string) => `${address}@${socket}`
+
+export const parseTerminalId = (id: string, fallbackSocket: string) => {
+  const at = id.indexOf("@")
+  return at < 0 ? { socket: fallbackSocket, address: id } : { socket: id.slice(at + 1), address: id.slice(0, at) }
+}
 
 const NOT_FOUND_KINDS = new Set(["not_found", "finished", "machine_unknown"])
 
@@ -61,30 +66,35 @@ const RESUBSCRIBE = Schedule.spaced("2 seconds")
 
 const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
 
-export const make = (deps: { readonly hc: HcShape; readonly scope: Scope.Scope }): Effect.Effect<Runtime> =>
+type Core = { readonly hc: HcShape; readonly busy: Set<string> }
+
+export const make = (deps: {
+  readonly connect: (socketPath: string) => HcShape
+  readonly socket: string
+  readonly scope: Scope.Scope
+}): Effect.Effect<Runtime> =>
   Effect.gen(function* () {
-    const { hc, scope } = deps
+    const { connect, scope } = deps
     const events = yield* PubSub.unbounded<RuntimeEvent>()
-    const names = new Map<string, string>()
-    const busy = new Set<string>()
-    const subscribed = yield* Ref.make(false)
+    const cores = new Map<string, Core>()
+    const followed = new Set<string>()
+    const home = connect(deps.socket)
 
-    const terminalOf = (address: string): Terminal => ({ machine: "local", id: names.get(address) ?? address })
-    const track = (t: api.Terminal) => {
-      if (t.name !== null && t.name !== undefined) names.set(t.address, t.name)
-      if (t.state === "live" && t.foreground && !atShell(t.foreground)) busy.add(t.address)
+    const exited = (socket: string, core: Core, address: string) => {
+      core.busy.delete(address)
+      return PubSub.publish(events, { type: "exited", terminal: { machine: "local", id: terminalId(socket, address) } })
     }
-    const exited = (address: string) => {
-      busy.delete(address)
-      return PubSub.publish(events, { type: "exited", terminal: terminalOf(address) })
+    const track = (core: Core, t: api.Terminal) => {
+      if (t.state === "live" && t.foreground && !atShell(t.foreground)) core.busy.add(t.address)
     }
 
-    const onNotice = (notice: Notice): Effect.Effect<void, HcFailure> => {
+    const onNotice = (socket: string, core: Core, notice: Notice): Effect.Effect<void, HcFailure> => {
       if (notice._tag === "Subscribed")
         return Effect.gen(function* () {
-          busy.clear()
-          for (const t of notice.result.terminals) track(t)
-          if (yield* Ref.getAndSet(subscribed, true)) yield* PubSub.publish(events, { type: "reset", machine: "local" })
+          core.busy.clear()
+          for (const t of notice.result.terminals) track(core, t)
+          if (followed.has(socket)) yield* PubSub.publish(events, { type: "reset", machine: "local" })
+          followed.add(socket)
         })
       if (notice._tag === "Notification")
         return notice.method === "missed"
@@ -92,34 +102,50 @@ export const make = (deps: { readonly hc: HcShape; readonly scope: Scope.Scope }
           : Effect.void
       const { type, terminal, data } = notice.event
       if (type === "created") {
-        track(data as api.Terminal)
+        track(core, data as api.Terminal)
         return Effect.void
       }
-      if (type === "removed") return exited(terminal).pipe(Effect.ensuring(Effect.sync(() => names.delete(terminal))))
-      if (EXIT_EVENTS.has(type)) return exited(terminal)
+      if (EXIT_EVENTS.has(type)) return exited(socket, core, terminal)
       if (type === "foreground") {
         if (!atShell(data as api.Foreground)) {
-          busy.add(terminal)
+          core.busy.add(terminal)
           return Effect.void
         }
-        return busy.has(terminal) ? exited(terminal) : Effect.void
+        return core.busy.has(terminal) ? exited(socket, core, terminal) : Effect.void
       }
       return Effect.void
     }
 
-    yield* hc
-      .subscribe({ labels: { [LABEL.runtime]: KIND } })
-      .pipe(
-        Stream.runForEach(onNotice),
+    const follow = (socket: string, core: Core) =>
+      core.hc.subscribe({ labels: { [LABEL.runtime]: KIND } }).pipe(
+        Stream.runForEach((notice) => onNotice(socket, core, notice)),
         Effect.andThen(Effect.fail({ message: "the event stream ended" })),
         Effect.retry(RESUBSCRIBE),
-        Effect.forkIn(scope),
       )
 
-    const get = (terminal: Terminal) => failWith(hc.call("terminal.get", { terminal: terminal.id }))
+    const coreAt = (socket: string) =>
+      Effect.gen(function* () {
+        const known = cores.get(socket)
+        if (known !== undefined) return known
+        const core: Core = { hc: socket === deps.socket ? home : connect(socket), busy: new Set() }
+        cores.set(socket, core)
+        yield* follow(socket, core).pipe(Effect.ensuring(Effect.sync(() => cores.delete(socket))), Effect.forkIn(scope))
+        return core
+      })
+
+    const reach = (terminal: Terminal) =>
+      Effect.gen(function* () {
+        const { socket, address } = parseTerminalId(terminal.id, deps.socket)
+        return { hc: (yield* coreAt(socket)).hc, socket, address }
+      })
+
+    const get = (terminal: Terminal) =>
+      reach(terminal).pipe(
+        Effect.flatMap(({ hc, address }) => failWith(hc.call("terminal.get", { terminal: address }))),
+      )
 
     const status: Runtime["status"] = () =>
-      hc.hello.pipe(
+      home.hello.pipe(
         Effect.as({ status: "online" as const }),
         Effect.catch((e) =>
           Effect.succeed(
@@ -127,25 +153,29 @@ export const make = (deps: { readonly hc: HcShape; readonly scope: Scope.Scope }
               ? { status: "blocked" as const, reason: e.message }
               : {
                   status: "offline" as const,
-                  reason: `no herdr-core answers at ${hc.socketPath} (start one with hc server start)`,
+                  reason: `no herdr-core answers at ${home.socketPath} (start one with hc server start)`,
                 },
           ),
         ),
       )
 
-    const typeLine = (name: string, argv: ReadonlyArray<string>) =>
-      failWith(hc.call("terminal.send", { terminal: name, text: argv.map(shellQuote).join(" ") })).pipe(Effect.asVoid)
+    const typeLine = (hc: HcShape, address: string, argv: ReadonlyArray<string>) =>
+      failWith(hc.call("terminal.send", { terminal: address, text: argv.map(shellQuote).join(" ") })).pipe(
+        Effect.asVoid,
+      )
 
     const open: Runtime["open"] = (machine, input) =>
       Effect.gen(function* () {
-        const name = terminalName(input.env)
+        const near = input.near !== undefined ? parseTerminalId(input.near.id, deps.socket) : undefined
+        const socket = near?.socket ?? deps.socket
+        const { hc } = yield* coreAt(socket)
         const project = input.env["VIBEST_PROJECT_ID"]
         const session = input.env["VIBEST_SESSION_ID"]
-        yield* failWith(
+        const started = yield* failWith(
           hc.call("terminal.run", {
-            name,
+            name: terminalName(input.env),
             cwd: input.cwd,
-            env: { ...input.env, VIBEST_RUNTIME: runtimeEnv(machine.id, name) },
+            env: { ...input.env },
             labels: {
               [LABEL.runtime]: KIND,
               ...(project !== undefined ? { [LABEL.project]: project } : {}),
@@ -153,24 +183,30 @@ export const make = (deps: { readonly hc: HcShape; readonly scope: Scope.Scope }
             },
             keep: true,
             no_notify: true,
-            ...(input.near !== undefined ? { parent: input.near.id, outlive_parent: true } : { no_parent: true }),
+            ...(near !== undefined ? { parent: near.address, outlive_parent: true } : { no_parent: true }),
           }),
         )
-        const terminal: Terminal = { machine: machine.id, id: name }
+        const terminal: Terminal = { machine: machine.id, id: terminalId(socket, started.address) }
         if (input.argv.length > 0)
-          yield* typeLine(name, input.argv).pipe(Effect.tapError(() => close(terminal).pipe(Effect.ignore)))
+          yield* typeLine(hc, started.address, input.argv).pipe(
+            Effect.tapError(() => close(terminal).pipe(Effect.ignore)),
+          )
         return terminal
       })
 
     const send: Runtime["send"] = (terminal, { text, keys }) =>
       Effect.gen(function* () {
-        if (text !== undefined) yield* failWith(hc.call("terminal.send", { terminal: terminal.id, text }))
+        const { hc, address } = yield* reach(terminal)
+        if (text !== undefined) yield* failWith(hc.call("terminal.send", { terminal: address, text }))
         if (keys !== undefined && keys.length > 0)
-          yield* failWith(hc.call("terminal.keys", { terminal: terminal.id, keys: [...keys] }))
+          yield* failWith(hc.call("terminal.keys", { terminal: address, keys: [...keys] }))
       })
 
     const read: Runtime["read"] = (terminal, lines) =>
-      failWith(hc.call("terminal.read", { terminal: terminal.id, lines })).pipe(Effect.map((r) => r.text))
+      reach(terminal).pipe(
+        Effect.flatMap(({ hc, address }) => failWith(hc.call("terminal.read", { terminal: address, lines }))),
+        Effect.map((r) => r.text),
+      )
 
     const process: Runtime["process"] = (terminal) =>
       get(terminal).pipe(
@@ -185,9 +221,10 @@ export const make = (deps: { readonly hc: HcShape; readonly scope: Scope.Scope }
 
     const close: Runtime["close"] = (terminal) =>
       Effect.gen(function* () {
-        const t = yield* get(terminal)
-        if (t.state === "live") yield* failWith(hc.call("terminal.kill", { terminal: terminal.id }))
-        yield* failWith(hc.call("terminal.rm", { terminal: terminal.id }))
+        const { hc, address } = yield* reach(terminal)
+        const t = yield* failWith(hc.call("terminal.get", { terminal: address }))
+        if (t.state === "live") yield* failWith(hc.call("terminal.kill", { terminal: address }))
+        yield* failWith(hc.call("terminal.rm", { terminal: address }))
       }).pipe(
         Effect.catchIf(
           (e) => e.code === "not_found",
@@ -197,6 +234,7 @@ export const make = (deps: { readonly hc: HcShape; readonly scope: Scope.Scope }
 
     const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
       Effect.gen(function* () {
+        const { hc, address } = yield* reach(terminal)
         const idle = yield* get(terminal).pipe(
           Effect.flatMap((t) =>
             t.state === "live"
@@ -213,24 +251,30 @@ export const make = (deps: { readonly hc: HcShape; readonly scope: Scope.Scope }
             code: "busy",
             message: `terminal ${terminal.id} did not come back to its shell within ${Duration.format(SHELL_WAIT)}`,
           })
-        yield* typeLine(terminal.id, argv)
+        yield* typeLine(hc, address, argv)
       })
 
     const present: Runtime["present"] = (terminal, info) => {
       const main = info[PRESENT_MAIN_SESSION]
       const project = info[PRESENT_PROJECT_ID]
       if (main === undefined || main === "" || project === undefined || project === "") return Effect.void
-      return failWith(
-        hc.call("terminal.label", {
-          terminal: terminal.id,
-          labels: {
-            [LABEL.project]: project,
-            [LABEL.session]: main,
-            [LABEL.space]: project,
-            [LABEL.tab]: main,
-          },
-        }),
-      ).pipe(Effect.asVoid)
+      return reach(terminal).pipe(
+        Effect.flatMap(({ hc, address }) =>
+          failWith(
+            hc.call("terminal.label", {
+              terminal: address,
+              labels: {
+                [LABEL.runtime]: KIND,
+                [LABEL.project]: project,
+                [LABEL.session]: main,
+                [LABEL.space]: project,
+                [LABEL.tab]: main,
+              },
+            }),
+          ),
+        ),
+        Effect.asVoid,
+      )
     }
 
     return {
