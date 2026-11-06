@@ -9,7 +9,7 @@ import (
 	"slices"
 )
 
-const LayoutDocument = "reherdr-layout"
+const LayoutDocument = "vibest-desktop-layout"
 const LayoutSchema = 1
 
 type Layout struct {
