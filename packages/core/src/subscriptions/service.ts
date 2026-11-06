@@ -153,7 +153,10 @@ const usageOf = (
   error?: string,
 ): Usage =>
   Option.match(result, {
-    onNone: () => ({ error: error ?? "usage endpoint failed" }),
+    onNone: () => {
+      const usageError = "usage endpoint failed"
+      return { error: error === undefined ? usageError : `${error}; ${usageError}` }
+    },
     onSome: (r) => {
       if (r.status !== 200) {
         const usageError = `usage endpoint answered ${r.status}`
