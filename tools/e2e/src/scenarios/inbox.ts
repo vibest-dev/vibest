@@ -323,7 +323,7 @@ const checks: ReadonlyArray<Check> = [
         await until(
           "the main agent's turn on the cmmid result ended",
           async () =>
-            (await transcript(w, c!.repo))
+            (await transcript(w, c!.repo, c!.config))
               .slice(midAt)
               .some((e) => e.type === "system" && e.raw.includes('"subtype":"turn_duration"')),
           180_000,
