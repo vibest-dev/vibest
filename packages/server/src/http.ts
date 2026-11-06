@@ -1,19 +1,3 @@
-// vibestd's HTTP API (`vibest-http.sock`, beside vibest.sock): what a harness integration that can only make HTTP requests
-// calls (the Claude plugin's `$.http.fetch`). Every route is `POST /<route>` with a JSON body, answered at once. The caller is
-// a session, named by the shared session headers (@vibest/protocol `sessionHeaders`); the transport is not part of it.
-// Paths carry no version: the only one is PROTOCOL in the `vibest-protocol` header, as for RPC.
-//
-//   /inbox/poll                  → { ids, line, text }  the main agent's next batch, each row leased (Inbox.poll)
-//   /inbox/ack { ids, release? } → { acked }            delivered, or given back (Inbox.ack); a settlement, so still
-//                                                       taken while stopping
-//   /hooks/<harness>/turn-end    → 204                  the adapter's turnEnd: kept, then the result (TurnEnd); a
-//                                                       settlement, so still taken while stopping
-//   /hooks/<harness>/prompt      → 204                  the adapter's userPrompt: the round starts (Prompt); a settlement
-//   /hooks/<harness>/guard       → { deny? }            Guard.check with the session's own agent
-//
-// Errors are `{ error }`: 409 another protocol (with @vibest/protocol `ProtocolMismatch`: protocol, version, message,
-// action), 404 no such session or route, 403 another project, another harness than the session's, or a poll from what is
-// not a main agent whose harness polls, 503 vibestd is stopping.
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import * as Guard from "@vibest/core/guard"
@@ -60,7 +44,6 @@ const AckBody = Schema.fromJsonString(
 )
 const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Schema.Int) }))
 
-/** The request handler, transport aside: the HTTP server below and the tests call it. */
 export const make = Effect.gen(function* () {
   const db = yield* Db
   const inbox = yield* Inbox
@@ -70,10 +53,8 @@ export const make = Effect.gen(function* () {
   const layout = yield* Layout
   const header = (headers: Headers.Headers, name: string) => Option.getOrUndefined(Headers.get(headers, name))
 
-  /** The calling session, checked: its row, else the reply that refuses the request. */
   const identify = (headers: Headers.Headers) =>
     Effect.gen(function* () {
-      // Before the protocol check: an agent left on an old integration is recorded as such.
       yield* noteIntegration(db, (name) => header(headers, name))
       const protocol = header(headers, PROTOCOL_HEADER)
       if (protocol !== String(PROTOCOL)) {
@@ -91,18 +72,15 @@ export const make = Effect.gen(function* () {
       const project = header(headers, PROJECT_HEADER)
       if (project !== row.projectId)
         return failure(403, `session ${row.id} is not in project ${project ?? "(no vibest-project-id)"}`)
-      // A process of another harness under this session id (an old main agent after a switch) changes nothing.
       const harness = header(headers, HARNESS_HEADER)
       if (harness !== row.harness)
         return failure(403, `session ${row.id} runs ${row.harness}, not ${harness ?? "(no vibest-harness)"}`)
-      // Kept in the session's row, written only when it changed; vibestd holds nothing per session in memory.
       const conversation = header(headers, HARNESS_SESSION_HEADER)
       if (conversation && (yield* db.noteHarnessSession(row.id, conversation)))
         yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
       return row
     })
 
-  /** Counted while it runs; refused (503) once a Daemon.Stop drains, except a settlement of work already handed out. */
   const admitted = <R>(label: string, settlement: boolean, body: Effect.Effect<Reply, never, R>) =>
     Effect.acquireUseRelease(
       drain.admit(label, settlement),
@@ -127,9 +105,7 @@ export const make = Effect.gen(function* () {
           Effect.map(inbox.ack(who.projectId, body.value.ids, body.value.release), (acked) => ok({ acked })),
         )
       }
-      // The integration, once at the harness's start: it takes input now (rpc.ts Session.Ready).
       if (request.path === "/session/ready") {
-        // `pid`: the harness's own process, which a restart signals.
         const pid = Option.getOrUndefined(
           yield* Schema.decodeUnknownEffect(ReadyBody)(request.body).pipe(Effect.option),
         )?.pid
@@ -153,7 +129,6 @@ export const make = Effect.gen(function* () {
           true,
           Hooks.prompt(sessions, adapter, who, request.body).pipe(Effect.as(ok())),
         )
-      // The guard reads the session's project folder as its terminal's VIBEST_PROJECT_DIR; vibestd has none.
       const own = { VIBEST_PROJECT_DIR: layout.project(who.projectId) }
       return yield* Guard.check(who.agent, request.body).pipe(
         Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: own }), { asPrimary: true })),
@@ -167,7 +142,6 @@ export const make = Effect.gen(function* () {
   return handle
 })
 
-/** Serve `make` on the HttpServer provided (a unix socket, from #platform). */
 export const layer = Layer.unwrap(
   Effect.map(make, (handle) =>
     HttpServer.serve(
@@ -176,7 +150,6 @@ export const layer = Layer.unwrap(
         if (request.method !== "POST") return HttpServerResponse.jsonUnsafe({ error: "POST only" }, { status: 405 })
         const body = yield* request.text.pipe(Effect.orElseSucceed(() => ""))
         const reply = yield* handle({
-          // The path alone, whether the server reports it with or without scheme and host.
           path: request.url.replace(/^[a-z]+:\/\/[^/]*/, "").split("?")[0] ?? "",
           headers: request.headers,
           body,

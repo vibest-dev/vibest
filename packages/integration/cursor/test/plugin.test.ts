@@ -6,7 +6,6 @@ import { afterAll, assert, describe, it } from "vitest"
 
 import { files } from "../src/plugin.ts"
 
-// The plugin written out, and a fake `vibest` on PATH that records its argv and stdin and answers as told.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-cursor-"))
 for (const [name, text] of Object.entries(files)) {
   fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
@@ -22,7 +21,6 @@ fs.writeFileSync(
 )
 afterAll(() => fs.rmSync(dir, { recursive: true, force: true }))
 
-/** One hook as hooks.json declares it, run from the plugin root as Cursor runs it. */
 const run = (event: string, env: Record<string, string>, stdin = "{}") => {
   fs.rmSync(calls, { force: true })
   const hooks = JSON.parse(files["hooks/hooks.json"]!).hooks as Record<string, Array<{ command: string }>>

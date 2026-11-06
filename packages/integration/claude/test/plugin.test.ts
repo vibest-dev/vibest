@@ -1,5 +1,3 @@
-// The Claude plugin as it ships: built by scripts/build.ts into a temp dir, its module found through
-// hooks/hooks.json and imported from there. Only the native host beneath it is fake (no Claude, no vibestd).
 import childProcess from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
@@ -94,7 +92,6 @@ const host = (env: Record<string, string> = COORDINATOR) => {
       },
     },
     ui: { invalidate: () => void (state.redraws += 1), status: (t: string | undefined) => void statuses.push(t) },
-    // A command's parent is Claude Code itself.
     process: { run: async () => ({ exitCode: 0, stdout: "4242\n", stderr: "" }) },
     clock: {
       every: (ms: number, fn: () => void) => {
@@ -132,11 +129,9 @@ const host = (env: Record<string, string> = COORDINATOR) => {
       await settle()
       return r
     },
-    /** What the prompt.submit hook passes on for `text` from `origin`. */
     prompt: (text: string, origin: object) => hooks["prompt.submit"]!($, { text, origin }, pass),
     turnComplete: (event: object) => hooks["turn.complete"]!($, event, pass),
     preTool: (event: object) => hooks["tool.call"]!($, event, pass),
-    /** Fire every pending clock.after of `ms`. */
     fire: async (ms: number) => {
       for (const t of after.filter((t) => t.ms === ms && !t.cancelled)) {
         t.cancelled = true
@@ -169,7 +164,6 @@ describe("Claude plugin requests", () => {
   it("every request goes to $VIBEST_HOME/vibest-http.sock with the session's headers and the current conversation", async () => {
     const h = host()
     await h.start()
-    // First that the harness takes input (rpc.ts Session.Ready), then the main agent's first poll.
     const [ready, poll] = h.requests
     assert.strictEqual(ready!.url, "http://vibestd/session/ready")
     assert.deepStrictEqual(ready!.body, { pid: 4242 }, "with Claude Code's own pid, which a restart signals")
@@ -187,7 +181,6 @@ describe("Claude plugin requests", () => {
       "vibest-runtime": '{"runtime":"herdr"}',
       "vibest-plugin-version": version,
     })
-    // After /clear: the same clock, the new conversation.
     h.state.conversation = "c2"
     await h.tick()
     assert.strictEqual(h.requests.at(-1)!.headers["vibest-harness-session-id"], "c2")
@@ -259,7 +252,6 @@ describe("Claude plugin inbox", () => {
     assert.deepStrictEqual((own as { context: string[] }).context, ["full A"])
     await h.draw()
     assert.deepStrictEqual(h.submitted.at(-1), "Notice: x")
-    // The person's own prompt with the same text gets nothing.
     assert.notProperty(await h.prompt("Notice: x", { kind: "composer" }), "context")
     assert.deepStrictEqual(((await h.prompt("Notice: x", ownSubmit)) as { context: string[] }).context, ["full B"])
     await h.tick()

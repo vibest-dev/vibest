@@ -2,7 +2,6 @@ import net from "node:net"
 
 import { type ExtensionAPI, UserMessageComponent } from "@earendil-works/pi-coding-agent"
 import { TuiAltScreen } from "@earendil-works/pi-tui"
-// The Pi extension against a fake ExtensionAPI and a real vibestd (vibest's RPC server over the fake herdr).
 import { assert, describe, it } from "@effect/vitest"
 import * as Platform from "@vibest/cli/platform/bun"
 import {
@@ -30,19 +29,16 @@ import { vi } from "vitest"
 import { extension, services, skillsDir } from "../src/extension.ts"
 import { Pi } from "../src/pi.ts"
 
-/**
- * Every value stored by a real `Ref.set` call through the `effect` barrel in any source module this test file loads (the
- * extension and vibestd alike), recorded after it is stored: the extension marks a session reported this way.
- */
-const stored = vi.hoisted(() => [] as Array<unknown>)
+const valuesStoredByRefSet = vi.hoisted(() => [] as Array<unknown>)
 vi.mock("effect", async (importOriginal) => {
   const effect = await importOriginal<typeof import("effect")>()
   const set = effect.Function.dual(2, <A>(self: Ref.Ref<A>, value: A) =>
-    effect.Effect.tap(effect.Ref.set(self, value), () => effect.Effect.sync(() => void stored.push(value))),
+    effect.Effect.tap(effect.Ref.set(self, value), () =>
+      effect.Effect.sync(() => void valuesStoredByRefSet.push(value)),
+    ),
   )
   return { ...effect, Ref: { ...effect.Ref, set } }
 })
-// Pi's own module when Pi loads the extension; the extension takes only this class from it at runtime.
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   UserMessageComponent: class {
     render() {
@@ -63,14 +59,12 @@ const test = <E>(
   timeout?: number,
 ) => it.effect(name, () => program.pipe(Effect.scoped, Effect.provide(served)), timeout)
 
-/** A Pi session: what the extension registered, and a way to fire events at it the way Pi does (awaiting each handler). */
 const session = (env: Record<string, string>) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const handlers = new Map<string, Array<(e: unknown, ctx: unknown) => unknown>>()
     const messages: Array<{ message: unknown; options: unknown }> = []
     const renderers: Array<unknown> = []
-    // Only what the extension calls: anything else (registerMcpServer) is not there and would throw.
     const fake: Pick<ExtensionAPI, "sendMessage" | "registerToolRenderer"> & {
       on: (event: string, handler: (e: unknown, ctx: unknown) => unknown) => () => void
     } = {
@@ -89,7 +83,6 @@ const session = (env: Record<string, string>) =>
     const emit = (event: string, e: unknown = {}, ctx: unknown = {}) =>
       Effect.promise(async () => {
         const results = []
-        // Pi always hands a session manager; a test's context names only what it is about.
         const full = { sessionManager: { getSessionId: () => "pi-session" }, ...(ctx as object) }
         for (const h of handlers.get(event) ?? []) results.push(await h(e, full))
         return results
@@ -102,19 +95,16 @@ const session = (env: Record<string, string>) =>
     return { handlers, messages, renderers, emit }
   })
 
-/** The compact user-message hook's lease on Pi's shared prototypes, while some session holds it. */
 const lease = () =>
   Object.getOwnPropertyDescriptor(UserMessageComponent.prototype, "vibestCompactUserMessagesLease")?.value
 const tuiStart = { mode: "tui", hasUI: true, sessionManager: { getSessionId: () => "s" }, ui: { notify: () => {} } }
 
-/** A turn ending in a Pi session with this id; `notes` collects what the extension tells the user. */
 const turnEnd = (mode: string, sessionId: string, notes: Array<string> = []) => ({
   mode,
   sessionManager: { getSessionId: () => sessionId },
   ui: { notify: (message: string) => void notes.push(message) },
 })
 
-/** A cli client of the test vibestd for the repository the extension reports from (its working directory). */
 const cli = Effect.gen(function* () {
   const root = (yield* Path.Path).resolve(".")
   return authed(yield* connect((yield* Layout).socket), cliHeaders(root))
@@ -160,7 +150,6 @@ describe("pi-vibest", () => {
           details: {},
         })
         const notes: Array<string> = []
-        // A start it should not attempt could only run this missing fixture, never an installed vibestd.
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: coord.sessionId,
@@ -248,17 +237,15 @@ describe("pi-vibest", () => {
         const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
         yield* report("first")
         yield* until(contents, (c) => c.length === 1)
-        // `vibest daemon restart`: this vibestd closes (interrupting the stream it serves), the next one listens.
         yield* Scope.close(first, Exit.void)
         yield* Layer.build(vibestd)
         yield* report("second")
         yield* until(contents, (c) => c.length === 2)
         assert.deepStrictEqual(yield* contents, ["first", "second"])
         assert.deepStrictEqual(notes, [])
-        // The session's own end does stop it: a later row stays pending. (One arriving before vibestd sees the closed
-        // connection is claimed by the closing stream and ends failed; the wait keeps this check off that edge.)
+        const untilVibestdSeesTheClosedConnection = TestClock.withLive(Effect.sleep("500 millis"))
         yield* s.emit("session_shutdown")
-        yield* TestClock.withLive(Effect.sleep("500 millis"))
+        yield* untilVibestdSeesTheClosedConnection
         yield* report("after shutdown")
         yield* TestClock.withLive(Effect.sleep("3 seconds"))
         assert.deepStrictEqual(yield* contents, ["first", "second"])
@@ -299,14 +286,12 @@ describe("pi-vibest", () => {
             yield* s.emit("resources_discover", { type: "resources_discover", cwd: "/", reason: "startup" }),
             [{ skillPaths: [skillsDir] }],
           )
-          // A print / RPC child of the coordinator takes no lease.
           yield* s.emit("session_start", { reason: "startup" }, { ...tuiStart, mode: "rpc" })
           assert.isUndefined(lease())
           yield* s.emit("session_start", { reason: "startup" }, tuiStart)
           const held = lease()
           assert.isDefined(held)
           assert.notStrictEqual(UserMessageComponent.prototype.render, render)
-          // /new in the same runtime keeps one lease.
           yield* s.emit("session_start", { reason: "new" }, tuiStart)
           assert.strictEqual(lease().owners.size, 1)
           yield* s.emit("session_shutdown")
@@ -403,7 +388,6 @@ describe("pi-vibest", () => {
         yield* s.emit("tool_call", { toolName: "bash", input: { command: "git diff | head" } }, { cwd: "/" }),
         [undefined],
       )
-      // vibest as VIBEST_COMMAND spells it (from source); any command but a named denial runs (vibest checks its own callers).
       const bash = (command: string) => s.emit("tool_call", { toolName: "bash", input: { command } }, { cwd: "/" })
       assert.deepStrictEqual(yield* bash("/usr/bin/bun /src/main.ts run pi 'Fix it.\nKeep $HOME as text.'"), [
         undefined,
@@ -431,7 +415,6 @@ describe("pi-vibest", () => {
       const start = { systemPromptOptions: { sections: { ponytail: "be lazy" } as Record<string, string> } }
       yield* s.emit("before_agent_start", start)
       assert.deepStrictEqual(start.systemPromptOptions.sections, {})
-      // Only the TUI session takes the rows (a Pi child in print mode inherits VIBEST_AGENT).
       yield* s.emit("session_start", { reason: "startup" }, { mode: "rpc" })
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.deepStrictEqual(s.messages, [])
@@ -452,7 +435,6 @@ describe("pi-vibest", () => {
         (n) => n === 2,
       )
       assert.deepStrictEqual(s.messages, [
-        // display: false — the model gets the payload; the TUI shows the Coordinator's reply, not the raw row.
         {
           message: { customType: "vibest", content: "<agent-result>one</agent-result>", display: false },
           options: { triggerTurn: true, deliverAs: "followUp" },
@@ -622,20 +604,16 @@ describe("pi-vibest", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const c = yield* cli
-      // Over the wire: no session to reopen yet (null), and this launch's id for VIBEST_SESSION_ID.
       const launched = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
       assert.isNull(launched.harnessSessionId)
       const saved = savedSession(launched.sessionId)
-      // This process is the Pi `vibest` exec'd.
       const env = {
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: launched.sessionId,
         VIBEST_LAUNCH_PID: String(process.pid),
         VIBEST_COMMAND: '["vibest"]',
       }
-      // A Pi nested in the Coordinator inherits its environment, even a TUI one (in tmux, say): another process.
       const s = yield* session(env)
-      // Startup, reload, print, and RPC do not report. The same pause already used for a non-TUI turn covers these too.
       yield* s.emit("agent_end", { messages: [] }, turnEnd("rpc", "child"))
       yield* s.emit("agent_end", { messages: [] }, turnEnd("print", "child"))
       yield* s.emit("session_start", { type: "session_start", reason: "startup" }, turnEnd("tui", "s-startup"))
@@ -644,21 +622,20 @@ describe("pi-vibest", () => {
       yield* s.emit("session_start", { type: "session_start", reason: "new" }, turnEnd("print", "s-print"))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.isNull(yield* saved)
-      assert.isFalse(["child", "s-startup", "s-reload", "s-rpc", "s-print"].some((id) => stored.includes(id)))
-      // The first startup turn still reports on agent_end, and only once vibestd has answered.
+      assert.isFalse(
+        ["child", "s-startup", "s-reload", "s-rpc", "s-print"].some((id) => valuesStoredByRefSet.includes(id)),
+      )
       const s1 = `s1:${launched.sessionId}`
       yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", s1))
       yield* until(
-        Effect.sync(() => stored.includes(s1)),
+        Effect.sync(() => valuesStoredByRefSet.includes(s1)),
         Boolean,
       )
       assert.strictEqual(yield* saved, s1)
-      // Once sent, the same id is not sent again.
       yield* db.reportCoordinatorSession(launched.sessionId, "pi", "other")
       yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", s1))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(yield* saved, "other")
-      // /new, /resume, /fork report before any following agent_end. The saved id is that report's completion.
       yield* s.emit("session_start", { type: "session_start", reason: "new" }, turnEnd("tui", "s-new"))
       yield* until(saved, (id) => id === "s-new")
       yield* s.emit("session_start", { type: "session_start", reason: "resume" }, turnEnd("tui", "s-resume"))
@@ -666,10 +643,9 @@ describe("pi-vibest", () => {
       yield* s.emit("session_start", { type: "session_start", reason: "fork" }, turnEnd("tui", "s-fork"))
       yield* until(saved, (id) => id === "s-fork")
       yield* until(
-        Effect.sync(() => stored.includes("s-fork")),
+        Effect.sync(() => valuesStoredByRefSet.includes("s-fork")),
         Boolean,
       )
-      // The next start reopens it. A later agent_end does not report again while this conversation is still the main agent.
       assert.strictEqual(
         (yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })).harnessSessionId,
         "s-fork",
@@ -677,7 +653,6 @@ describe("pi-vibest", () => {
       yield* db.reportCoordinatorSession(launched.sessionId, "pi", "kept")
       yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
-      // `vibest --new` ends that conversation. savedSession only reads the current main agent, so the old id is gone.
       const renewed = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: true, terminal: "test/p1" })
       assert.notStrictEqual(renewed.sessionId, launched.sessionId)
       assert.isNull(renewed.harnessSessionId)
@@ -693,7 +668,6 @@ describe("pi-vibest", () => {
       const c = yield* cli
       const launched = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
       const saved = savedSession(launched.sessionId)
-      // vibestd behind a proxy that holds the first request until released; vibestd still gets it when the sender gave up.
       const home = yield* tempDirectory("pi-vibest-slow-")
       const first = {
         held: [] as Array<string | Buffer>,
@@ -730,10 +704,8 @@ describe("pi-vibest", () => {
         Effect.sync(() => first.held.length > 0),
         Boolean,
       )
-      // `/new` in the TUI; the next turn reports s2, which vibestd applies first.
       yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s2", notes))
       yield* until(saved, (id) => id === "s2")
-      // The first send timed out: unknown, not failed.
       yield* until(
         Effect.sync(() => notes.length === 1),
         Boolean,
@@ -745,7 +717,6 @@ describe("pi-vibest", () => {
         Effect.sync(() => first.answered),
         Boolean,
       )
-      // Last report wins, including one that was held and arrived after a newer turn.
       assert.strictEqual(yield* saved, "s1")
     }),
     15000,
@@ -755,7 +726,6 @@ describe("pi-vibest", () => {
     "Coordinator: the turn never waits for the report; vibestd hanging or gone ends in a warning, and the next turn tries again",
     Effect.gen(function* () {
       const path = yield* Path.Path
-      // A socket that accepts and never answers, and one with nothing behind it.
       const hanging = yield* tempDirectory("pi-vibest-hang-")
       const server = net.createServer(() => {})
       yield* Effect.acquireRelease(

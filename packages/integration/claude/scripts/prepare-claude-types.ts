@@ -1,8 +1,3 @@
-// Local typecheck cache for the pinned Claude Code declarations. Not shipped, not committed.
-// Source: https://github.com/anthropics/claude-code/blob/2eff7a8d21c80be48904f62ebdea36d945d7b504/mods/types/claude-code.d.ts
-// Upstream LICENSE.md: © Anthropic PBC. All rights reserved. Commercial terms. This script does not assert a right to redistribute those bytes.
-// The file's "Written by Claude Code 2.1.277" header is stale and does not date the pin.
-// A verified cache is reused, including one placed there by hand. Otherwise the pinned URL is fetched. No other lookup.
 import crypto from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
@@ -28,7 +23,6 @@ const readIfVerified = (file: string, expected: string): Uint8Array | undefined 
   return sha256(bytes) === expected ? bytes : undefined
 }
 
-/** Verified cache is reused. Anything else is replaced from the pinned URL, or the call fails. */
 export const prepareClaudeTypes = async (options: PrepareClaudeTypes): Promise<"reused" | "acquired"> => {
   const expected = options.expectedSha256
   if (readIfVerified(options.cachePath, expected)) return "reused"

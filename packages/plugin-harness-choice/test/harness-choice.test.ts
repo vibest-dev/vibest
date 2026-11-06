@@ -1,5 +1,3 @@
-// The default harness choice (architecture.md §9), run against its own hooks: a fake context records what it
-// registers, and each test calls the hook on an event the way vibestd's plugin host does (one event, mutated in place).
 import { assert, describe, it } from "@effect/vitest"
 import type { AgentStartBefore, Context, SubscriptionSnapshot } from "@vibest/plugin"
 import { Effect } from "effect"
@@ -8,7 +6,6 @@ import { harnessChoicePlugin } from "../src/index.ts"
 
 type StartHook = (event: AgentStartBefore) => Effect.Effect<void, unknown>
 
-/** The plugin's `start.before` callback, set up in a scope of its own. */
 const startHook = Effect.gen(function* () {
   let hook: StartHook | undefined
   const context = {
@@ -24,7 +21,6 @@ const startHook = Effect.gen(function* () {
   return hook
 })
 
-/** Fake preflight output: every harness usable, in HARNESS_IDS order. */
 const harnesses = [
   { harness: "pi", available: true },
   { harness: "claude", available: true },
@@ -71,7 +67,6 @@ describe("harness choice", () => {
   it.effect("rerouting off a limited harness drops the model named for it", () =>
     Effect.gen(function* () {
       const hook = yield* startHook
-      // A model the new harness does not list would fail preflight: the reroute starts on the new harness's default.
       const event = start({ harness: "claude", model: "claude-opus-5-5", subscriptions: [limitedClaude] })
       yield* hook(event)
       assert.strictEqual(event.harness, "pi")

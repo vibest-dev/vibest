@@ -16,9 +16,19 @@ vibestd's unix socket `<VIBEST_HOME>/vibest-http.sock`; the plugin runs no `vibe
   one short line (`<Type> Agent "<title>" completed (<id>) · +N more`) and its full text. The line is submitted with
   `$.prompt.submit` from the AbovePrompt `ui.render` hook, one batch per draw, and this module's own `prompt.submit`
   hook attaches the full text as context. An accepted submit is acked by row id (`/inbox/ack`) on the next tick; a
-  `drop` puts the batch back at the front of the queue.
+  `drop` puts the batch back at the front of the queue. The submit has to come from inside a hook's call stack: a
+  submit from a clock callback would skip this module's own `prompt.submit` hook as re-entry. The module remembers the
+  row ids it has taken, so a batch handed out again after its lease ran out or vibestd restarted is not shown twice:
+  in a batch that mixes taken rows with new ones, the taken ones are acked and the new ones given back, so they come
+  alone. Full texts wait for `prompt.submit` for at most the last 100 lines. A one-line notice is its own full text and
+  is not attached again. Using the AbovePrompt render hook as a place to submit from is undocumented; E2E covers it.
 
 Reports (turn end, prompt) retry in the background after 1, 2, 4, 8, 15 and 30 s while vibestd does not take them.
+A failed report never blocks or continues a stopped turn. Five failed polls in a row put "vibestd unreachable" on the
+status line. `Session.Ready` goes with Claude Code's own pid, read as the `$PPID` of a command the module runs, since
+a restart signals that process. A failed hook is skipped unless its handler answers, so outside vibest every listener
+answers with a pass. The tool arguments sent to the guard are the `tool.call` input without its reserved keys
+(`tool`, `tool_use_id`, `consent`, `agentId`).
 
 Every request carries the session headers from `@vibest/protocol` `sessionHeaders`: protocol, `VIBEST_SESSION_ID`,
 `VIBEST_PROJECT_ID`, the current Claude session id, `VIBEST_AGENT`, `VIBEST_HARNESS`, the cwd, `VIBEST_RUNTIME` and the
@@ -44,6 +54,9 @@ The plugin directory holds exactly:
 - `hooks/register.mjs`, generated: a single ES module with no imports. It bundles `src/plugin.ts` with the header
   helper it imports from `@vibest/protocol`; the build inlines the package version as `VIBEST_PLUGIN_VERSION`. Prebuilt JS is a delivery choice; Claude Code can also load TypeScript hooks modules.
 - `README.md` and `LICENSE`.
+
+`$.plugin` has no version, so the build inlines it. Bun writes each module's path relative to the working directory
+into the bundle, so the build pins the working directory and the bytes do not vary.
 
 The generated files are ignored by Git. `test/distribution.test.ts` packs this package and checks the extracted files.
 

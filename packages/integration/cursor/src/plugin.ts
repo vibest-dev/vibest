@@ -1,10 +1,5 @@
-// @vibest/cursor: the Cursor CLI plugin, as files. vibest writes them into its own home and starts cursor-agent with
-// `--plugin-dir <that directory>`; nothing is installed into Cursor. scripts/build.ts writes the same files for npm.
-// Facts from cursor-agent 2026.10.22: a plugin directory's `hooks/hooks.json` runs like ~/.cursor/hooks.json, with the
-// plugin root as the hook's working directory; `afterAgentResponse` carries the reply as `text`, `stop` only a status.
 import pkg from "../package.json" with { type: "json" }
 
-/** The hook script: only a vibest agent (VIBEST_AGENT, set in the pane vibest starts) is checked or reported. */
 export const HOOK = `#!/bin/sh
 # @vibest/cursor ${pkg.version}: \`vibest integration guard\` before a tool call, \`vibest integration prompt\` when the user submits, \`vibest integration stop\` at a turn end.
 # The vibest vibestd started this agent with (VIBEST_COMMAND, a JSON argv), not the first vibest on PATH. A value this
@@ -49,14 +44,12 @@ exit 0
 
 const hook = (action: string) => ({ command: `sh ./hooks/vibest.sh ${action}` })
 
-/** Every file of the plugin, by its path inside the plugin directory. */
 export const files: Readonly<Record<string, string>> = {
   ".cursor-plugin/plugin.json": `${JSON.stringify({ name: "vibest", version: pkg.version, description: pkg.description }, null, 2)}\n`,
   "hooks/hooks.json": `${JSON.stringify(
     {
       version: 1,
       hooks: {
-        // A crash, timeout or missing answer refuses the call; Cursor otherwise lets it through.
         preToolUse: [{ ...hook("guard"), failClosed: true }],
         beforeSubmitPrompt: [hook("prompt")],
         afterAgentResponse: [hook("stop")],

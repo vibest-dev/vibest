@@ -1,42 +1,15 @@
-/**
- * The Claude Code hooks module of VIBEST, bundled to hooks/register.mjs by scripts/build.ts. Everything it says to
- * vibest goes over vibestd's HTTP socket (`$VIBEST_HOME/vibest-http.sock`, packages/server/src/http.ts) with the shared
- * session headers (@vibest/protocol `sessionHeaders`): no `vibest` process, no files.
- *
- * - `turn.complete`, `prompt.submit` and `tool.call` for every VIBEST session (VIBEST_AGENT and VIBEST_SESSION_ID set):
- *   the turn end, the person's prompt and the tool guard. turn.complete fires for every main-loop turn end (reason
- *   answer, aborted, refusal or error; Stop fires for no Esc) and carries no API error kind.
- * - The main agent's inbox (VIBEST_AGENT=coordinator): a poll every POLL_MS only queues what vibestd hands out. The
- *   AbovePrompt render hook submits one queued batch per draw as its one line; this module's own prompt.submit hook
- *   attaches the batch's full text as context to that line. (A submit from outside a hook's call stack, as a clock
- *   callback is, would skip this module's own prompt.submit hook as re-entry.) The batch is acked on the next poll. A
- *   batch that mixes rows already taken with new ones (handed out again after a lease ran out or vibestd restarted):
- *   the taken ones are acked and the new ones given back, so they come alone and no text is shown twice.
- *
- * /clear fires session.end with the old conversation and no new session.start; the clock keeps running and
- * `$.session.id()` answers the new conversation, so nothing stops on session.end and every request sends the current id.
- *
- * Types: `import type` from `claude-code`. The declarations are a local ignored cache, not a vendored file.
- * Pin: anthropics/claude-code 2eff7a8d21c80be48904f62ebdea36d945d7b504 (mods/types/claude-code.d.ts).
- * The AbovePrompt render hook as a place to submit from is undocumented; E2E covers it.
- */
 import { ACK_ROUTE, hookRoute, isPolled, POLL_ROUTE, type Polled, sessionHeaders } from "@vibest/protocol/protocol"
 import type { EngineInterface, On, Register } from "claude-code"
 
-/** This plugin's version, inlined by scripts/build.ts (Claude Code's `$.plugin` has no version). */
 declare const VIBEST_PLUGIN_VERSION: string
 
 export const POLL_MS = 1000
-/** Consecutive failed polls before the status line says vibestd is unreachable. */
 export const POLL_FAILURES_SHOWN = 5
-/** One guard try; then the next after these pauses; then the call is refused. */
 export const GUARD_TRY_MS = 2000
 export const GUARD_BACKOFF_MS = [100, 300, 900] as const
-/** A turn end or prompt that did not get through is tried again after these pauses (about a minute in all). */
 export const REPORT_BACKOFF_MS = [1000, 2000, 4000, 8000, 15_000, 30_000] as const
 export const REPORT_TRY_MS = 10_000
 export const UNREACHABLE = "vibestd unreachable; the tool call is refused."
-/** At most this many lines keep their full text waiting for the prompt.submit hook. */
 export const FULL_MAX = 100
 
 type Reply = { readonly status: number; readonly body: unknown }
@@ -49,14 +22,8 @@ type Env =
   | "VIBEST_HOME"
   | "HOME"
 
-/**
- * Every native call this module makes, bound to one hook's `$`. Claude Code statically checks a hooks module: `$` may
- * be passed only to a top-level function declaration of the same file, so the helpers inside `register` get these
- * callbacks, never `$` itself.
- */
 function nativeHost($: EngineInterface) {
   return {
-    // The loader wants a literal name at each $.env.get, so the variables a module reads can be listed.
     env: (name: Env) => {
       switch (name) {
         case "VIBEST_AGENT":
@@ -85,8 +52,7 @@ function nativeHost($: EngineInterface) {
     every: (ms: number, fn: () => void) => $.clock.every(ms, fn),
     after: (ms: number, fn: () => void) => $.clock.after(ms, fn),
     status: (text: string | undefined) => $.ui.status(text),
-    // A command this process runs has it as its parent: Claude Code's own pid, which a restart signals.
-    pid: async () => {
+    claudeCodePid: async () => {
       const pid = Number((await $.process.run(["sh", "-c", 'echo "$PPID"'])).stdout.trim())
       return Number.isInteger(pid) && pid > 1 ? pid : undefined
     },
@@ -95,13 +61,11 @@ function nativeHost($: EngineInterface) {
 
 type Host = ReturnType<typeof nativeHost>
 
-/** Keys a tool.call input carries beside the tool's own arguments (ToolCallReserved and AgentLoop). */
-const RESERVED = new Set(["tool", "tool_use_id", "consent", "agentId"])
-/** Tool arguments on a tool.call input: every field except the reserved ones. */
+const TOOL_CALL_RESERVED_KEYS = new Set(["tool", "tool_use_id", "consent", "agentId"])
 const toolInput = (event: object): Record<string, unknown> => {
   const input: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(event)) {
-    if (!RESERVED.has(key)) input[key] = value
+    if (!TOOL_CALL_RESERVED_KEYS.has(key)) input[key] = value
   }
   return input
 }
@@ -134,12 +98,7 @@ const errorOf = (body: unknown) =>
     ? (body as { error: string }).error
     : undefined
 
-// A top-level function declaration: Claude Code's loader accepts `register` in no other shape.
 export function register(on: On, _options?: unknown) {
-  // The main agent's inbox, this module only. `queue`: batches polled, not yet submitted. `seen`: ids taken (queued or
-  // submitted), so a batch handed out again after its lease ran out is not shown twice. `full`: per line, the full
-  // texts waiting for the prompt.submit hook, oldest first. `unacked`: submitted, acked on the next poll. `release`: new
-  // rows of a mixed batch, given back on the next ack.
   const queue: Array<Polled> = []
   const seen = new Set<number>()
   const full = new Map<string, Array<string>>()
@@ -151,7 +110,6 @@ export function register(on: On, _options?: unknown) {
   let mismatched = false
   let timer: { cancel: () => void } | undefined
 
-  /** The session's identity from its environment, or undefined outside VIBEST. */
   const identity = async (host: Host) => {
     const agent = await host.env("VIBEST_AGENT")
     const sessionId = await host.env("VIBEST_SESSION_ID")
@@ -160,7 +118,6 @@ export function register(on: On, _options?: unknown) {
     return { agent, sessionId, socket: `${home}/vibest-http.sock` }
   }
 
-  /** One request to vibestd. Throws when nothing answered (no socket, connection refused, timeout). */
   const post = async (host: Host, path: string, body: unknown, ms: number): Promise<Reply> => {
     const who = await identity(host)
     if (!who) throw new Error("not an VIBEST session")
@@ -180,7 +137,6 @@ export function register(on: On, _options?: unknown) {
       host.after,
     )
     const reply = { status: r.status, body: parse(r.text) }
-    // Another protocol: vibestd says what to run. Shown until a request goes through again.
     if (reply.status === 409) {
       mismatched = true
       host.status(`VIBEST: ${errorOf(reply.body) ?? "vibest was updated; run vibest update"}`)
@@ -191,16 +147,13 @@ export function register(on: On, _options?: unknown) {
     return reply
   }
 
-  /** Report `body` to `path`; when vibestd does not take it, again after each REPORT_BACKOFF_MS pause. Never throws. */
   const report = async (host: Host, path: string, body: unknown) => {
     const attempt = async (n: number): Promise<void> => {
       let retry = true
       try {
         const r = await post(host, path, body, REPORT_TRY_MS)
         retry = r.status >= 500
-      } catch {
-        // Nothing answered: try again.
-      }
+      } catch {}
       const pause = REPORT_BACKOFF_MS[n]
       if (retry && pause !== undefined) host.after(pause, () => void attempt(n + 1))
     }
@@ -225,7 +178,6 @@ export function register(on: On, _options?: unknown) {
       failures = 0
       const batch = r.body
       if (batch.ids.length === 0) return
-      // Taken before (still queued here, or submitted and its ack lost): acked once submitted.
       const queued = (id: number) => queue.some((b) => b.ids.includes(id))
       for (const id of batch.ids) if (seen.has(id) && !queued(id) && !unacked.includes(id)) unacked.push(id)
       const fresh = batch.ids.filter((id) => !seen.has(id))
@@ -245,7 +197,6 @@ export function register(on: On, _options?: unknown) {
     }
   }
 
-  /** Keep `text` for the prompt.submit hook under `line`; the oldest lines go past FULL_MAX. */
   const keep = (line: string, text: string) => {
     const list = full.get(line)
     if (list) list.push(text)
@@ -261,9 +212,8 @@ export function register(on: On, _options?: unknown) {
 
   on("session.start", async ($, e, next) => {
     const host = nativeHost($)
-    // The harness takes input now: vibestd waits for this before it hands it a turn (rpc.ts Session.Ready).
     if (await identity(host).catch(() => undefined)) {
-      const pid = await host.pid().catch(() => undefined)
+      const pid = await host.claudeCodePid().catch(() => undefined)
       void report(host, "/session/ready", pid === undefined ? {} : { pid })
     }
     if (timer === undefined && (await identity(host))?.agent === "coordinator") {
@@ -273,7 +223,6 @@ export function register(on: On, _options?: unknown) {
     return next(e)
   })
 
-  // One batch per draw, submitted from inside this hook so this module's own prompt.submit hook sees it. Draws nothing.
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const batch = queue[0]
     if (batch !== undefined && !draining) {
@@ -281,7 +230,6 @@ export function register(on: On, _options?: unknown) {
       draining = true
       queue.shift()
       keep(batch.line, batch.text)
-      // Started here, inside the hook; its answer is handled when it comes, without holding the draw.
       host.submit(batch.line).then(
         (r) => {
           draining = false
@@ -302,8 +250,6 @@ export function register(on: On, _options?: unknown) {
     return next(e)
   })
 
-  // Side effect only. A failed report still returns next(e): never block or continue a stopped turn. A subagent's turn
-  // (agentId set) is not the session's; the main agent's has no result (its conversation id goes with every poll).
   on("turn.complete", async ($, event, next) => {
     if (event.agentId === undefined) {
       const host = nativeHost($)
@@ -320,15 +266,12 @@ export function register(on: On, _options?: unknown) {
     return next(event)
   })
 
-  // This module's own submit (a polled batch's line): its full text goes with it as context. Anything else is reported;
-  // vibestd keeps only what the person submitted (origin composer or bridge), and never the main agent's.
   on("prompt.submit", async ($, event, next) => {
     const host = nativeHost($)
     if (event.origin.kind === "plugin" && event.origin.name === host.plugin()) {
       const list = full.get(event.text)
       const text = list?.shift()
       if (list?.length === 0) full.delete(event.text)
-      // A one-line notice is its own full text: the prompt already holds it, so it is not sent a second time.
       if (text === undefined || event.text.trimEnd().endsWith(text.trim())) return next(event)
       return next({ ...event, context: [...(event.context ?? []), text] })
     }
@@ -354,15 +297,12 @@ export function register(on: On, _options?: unknown) {
           return typeof deny === "string" ? { deny } : next(event)
         }
         if (r.status < 500) return { deny: `vibest refused the tool call: ${errorOf(r.body) ?? `status ${r.status}`}` }
-      } catch {
-        // Nothing answered in time: try again.
-      }
+      } catch {}
       const pause = GUARD_BACKOFF_MS[n]
       if (pause === undefined) return { deny: UNREACHABLE }
       await new Promise<void>((resolve) => host.after(pause, resolve))
     }
   }).catch(async ($, event, next) => {
-    // A failed hook is skipped unless this handler answers. Outside VIBEST that skip must stay a pass.
     try {
       if (!(await nativeHost($).env("VIBEST_AGENT"))) return undefined
     } catch {

@@ -59,9 +59,6 @@ import {
 } from "@vibest/protocol/rpc"
 import { HARNESS_IDS, LaunchFailed, NoHarnessChosen, type AgentStatus } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
-// vibestd's side of the RPC contract (SPEC §7): handlers over Sessions / Inbox / Project, served on a SocketServer
-// (the unix socket comes from #platform). Caller and protocol are request headers, checked by middleware before the
-// handler effect runs. Middleware must not call client.annotate: a later request on the same socket starts clean.
 import { Clock, Context, Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -73,7 +70,6 @@ import * as Hooks from "./hooks.ts"
 const placeOf = (kind: string, address: RuntimeAddress) =>
   address.id !== "" ? `${kind} terminal ${address.id}` : `${kind} (no terminal)`
 
-/** The project's coordinator row is still the one StopCoordinator was asked to stop. */
 const sameCoordinator = (
   current: { readonly runtime: string | null; readonly address: RuntimeAddress | null } | undefined,
   runtime: string,
@@ -89,7 +85,6 @@ const sameCoordinator = (
   )
 }
 
-/** `vibest ls` shows at most this many characters of a task; the ellipsis is the last of them. `Get` is uncut. */
 const LS_TASK = 500
 const taskForLs = (task: string | null) =>
   task !== null && task.length > LS_TASK ? `${task.slice(0, LS_TASK - 1)}…` : task
@@ -118,7 +113,6 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
   latest: brief?.latest ?? null,
 })
 
-/** A Project's main agent as `vibest ls` shows it, with its live status read from the runtime (`mainStatus`). */
 const mainInfo = (m: CoordinatorRow, status: AgentStatus): SessionInfo => ({
   id: m.id,
   name: "main",
@@ -143,10 +137,6 @@ const mainInfo = (m: CoordinatorRow, status: AgentStatus): SessionInfo => ({
   latest: null,
 })
 
-/**
- * The main agent's live status: what its runtime reports at its terminal (§3 `state`), else what its process state
- * says (`coordinatorIdle`'s fallback). `unknown` when the runtime cannot tell.
- */
 const mainStatus = (h: Runtime, terminal: Terminal): Effect.Effect<AgentStatus> =>
   Effect.gen(function* () {
     const seen = yield* agentState(h, terminal).pipe(Effect.option)
@@ -157,12 +147,6 @@ const mainStatus = (h: Runtime, terminal: Terminal): Effect.Effect<AgentStatus> 
     )
   })
 
-/**
- * Who may call each method (SPEC §7). `open`: protocol only, no caller. `session`: a non-coordinator session only.
- * `agent`: a coordinator's or the command line's. `coordinator`: a coordinator only. `owner`: a coordinator of the
- * session's project, or the command line. `self`: a subagent's own terminal for its own id, or the command line at the
- * project's root for its main agent (its start after a restart). The table must list every method.
- */
 const ACCESS = {
   Ping: "open",
   Plugins: "open",
@@ -202,30 +186,20 @@ const ACCESS = {
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyof Access]
 
-/** Default session name: the prompt's first line, shortened. */
-const nameFrom = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
+const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
-/** Ping's `capabilities`: the additive features this vibestd has (rpc.ts PingResult). */
 export const CAPABILITIES = { http: true, handoff: true, requests: true } as const
 
-/** This vibestd's identity for Ping, set by Daemon.run; empty on a server a test runs without one. */
 export const Identity = Context.Reference<DaemonIdentity>("vibest/DaemonIdentity", { defaultValue: () => ({}) })
 
-/** Completed when a Daemon.Stop is accepted; Daemon.run waits for it, then closes the server, the lock last. */
 export const Shutdown = Context.Reference<Deferred.Deferred<void>>("vibest/DaemonShutdown", {
   defaultValue: () => Deferred.makeUnsafe<void>(),
 })
 
-/**
- * Each project's main agent `vibest --env` values, in this vibestd's memory only (never stored, logged or sent as
- * telemetry): Session.Start hands them back for a restart in place. A handoff passes them to the next vibestd in its
- * process environment (VIBEST_HANDOFF_ENV), which `vibest daemon --import` reads and removes before anything starts.
- */
 export type MainEnv = Map<string, { readonly sessionId: string; readonly env: Readonly<Record<string, string>> }>
 export const MainEnv = Context.Reference<MainEnv>("vibest/MainEnv", { defaultValue: () => new Map() })
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
-/** `--env KEY=VALUE` taken off a command that is about to be typed. The pairs belong on the pane, not in its history. */
 const envOffArgv = (argv: ReadonlyArray<string>) => {
   const command: Array<string> = []
   const env: Record<string, string> = {}
@@ -245,17 +219,10 @@ const envOffArgv = (argv: ReadonlyArray<string>) => {
   return { command, env }
 }
 
-/** A bounded wait for daemon operations to drain, never for agents to finish their tasks. */
 export const DRAIN_TIMEOUT = Duration.seconds(5)
 
-/**
- * A harness hook's turn start or end records what the agent already did: a settlement, still taken while a Stop drains.
- * Refused, a spawn's first turn would never show its pickup proof (its launch then holds the drain open), and a turn
- * end would lose its result.
- */
 const SETTLEMENTS: ReadonlySet<string> = new Set(["TurnEnd", "Prompt"])
 
-/** Changes are counted until they end, failed or interrupted ones too; refused while a Stop drains, except settlements. Only at the RPC entry. */
 export const AdmissionLive = Layer.effect(
   Admission,
   Effect.gen(function* () {
@@ -272,10 +239,6 @@ export const AdmissionLive = Layer.effect(
 
 const header = (headers: Headers.Headers, name: string) => Headers.get(headers, name)
 
-/**
- * The harness's conversation id from a session's request, latest wins (a /clear changes it); only from the session's own
- * harness, so an old process of another harness under this id changes nothing.
- */
 const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id: string; harness: string }) =>
   Effect.gen(function* () {
     const conversation = Option.getOrUndefined(header(headers, HARNESS_SESSION_HEADER))
@@ -284,10 +247,6 @@ const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
   })
 
-/**
- * An open method's session headers (a hook's TurnEnd or Prompt, no caller check): the conversation id is kept when
- * they name this session and its project.
- */
 const noteOpen = (db: Db["Service"], headers: Headers.Headers, sessionId: string) =>
   Effect.gen(function* () {
     if (Option.getOrUndefined(header(headers, SESSION_HEADER)) !== sessionId) return
@@ -296,7 +255,6 @@ const noteOpen = (db: Db["Service"], headers: Headers.Headers, sessionId: string
       yield* noteConversation(db, headers, row)
   })
 
-/** Missing, mixed, or malformed caller headers. Never becomes cli. */
 const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: string) =>
   Effect.gen(function* () {
     const kind = header(headers, CALLER_HEADER)
@@ -318,8 +276,6 @@ const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: stri
         return yield* bad(`${method} has an empty repository`)
       const row = yield* db.sessionIdentity(sessionId.value)
       if (!row) return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
-      // A session's environment names its project (VIBEST_PROJECT_ID); one that names another is not this session.
-      // One that names none is refused, as over HTTP.
       const project = header(headers, PROJECT_HEADER)
       if (project._tag === "None")
         return yield* bad(`${method} claims session ${row.id} without ${PROJECT_HEADER} (VIBEST_PROJECT_ID)`)
@@ -340,11 +296,6 @@ const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: stri
     return yield* bad(`${method} has caller ${kind.value}; expected cli or session`)
   })
 
-/**
- * The integration version and protocol a session's request carries (`vibest-plugin-version`, `vibest-protocol`), recorded
- * on its row whether or not the protocol matches: `vibest update` restarts the agents whose integration is not its own.
- * Requests without a plugin version (the vibest CLI an agent runs) record nothing.
- */
 export const noteIntegration = (db: Db["Service"], read: (name: string) => string | undefined): Effect.Effect<void> =>
   Effect.gen(function* () {
     const sessionId = read(SESSION_HEADER)
@@ -421,10 +372,6 @@ export const handlers = VibestRpcs.toLayer(
     const harnesses = yield* Harnesses
     const files = yield* Effect.context<FileSystem.FileSystem | Path.Path | Layout>()
 
-    /**
-     * A hook's turn event for session `sessionId` of `harness`: an unknown id, or another harness than the session's (an
-     * old process after a switch), changes nothing.
-     */
     const hook = <E>(
       sessionId: string,
       harness: string,
@@ -438,7 +385,6 @@ export const handlers = VibestRpcs.toLayer(
         yield* run(row)
       }).pipe(Effect.provideContext(files), Effect.orDie)
 
-    /** A coordinator's or the command line's request; a session's is refused. */
     const agent = (method: MethodOf<"agent" | "owner">) =>
       Effect.gen(function* () {
         const c = yield* Caller
@@ -450,7 +396,6 @@ export const handlers = VibestRpcs.toLayer(
         return c
       })
 
-    /** A request that may manage the session `input` names (`resolveSession`): its project's coordinator, or the command line. Its full id. */
     const managed = (method: MethodOf<"owner">, input: string) =>
       Effect.gen(function* () {
         const c = yield* agent(method)
@@ -465,7 +410,6 @@ export const handlers = VibestRpcs.toLayer(
         return id
       })
 
-    /** The project root of a directory, with its repositories. A platform failure is a defect; not being a project is `NotInRepository`. */
     const atProject = (directory: string) =>
       locateProject(directory).pipe(
         Effect.catchIf(
@@ -473,16 +417,9 @@ export const handlers = VibestRpcs.toLayer(
           (error) => Effect.die(error),
         ),
       )
-    /** The project of a directory, found or created (`resolveProject`). */
     const resolveAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => resolveProject(db, at)))
-    /** The project of a directory, if there is one; reads only. */
     const findAt = (directory: string) => atProject(directory).pipe(Effect.flatMap((at) => db.projectAt(at.root)))
 
-    /**
-     * The caller's project, its id and directory: the coordinator's own, or the cli directory's (a multi-repository
-     * project or a main checkout, found or created). A coordinator whose project has no directory is placed by its
-     * working directory, which must be in its own project.
-     */
     const projectOf = (c: Extract<CallerShape, { _tag: "Cli" | "Coordinator" }>, method: string) =>
       Effect.gen(function* () {
         if (c._tag === "Cli") return yield* resolveAt(c.repositoryRoot)
@@ -499,27 +436,19 @@ export const handlers = VibestRpcs.toLayer(
         return here
       })
 
-    /** The request's project (`projectOf`). */
     const scope = (method: MethodOf<"agent">) => agent(method).pipe(Effect.flatMap((c) => projectOf(c, method)))
 
-    /** The machine a caller names: `local` unless it says more (`RuntimeMachine`), opaque `target` included. */
     const machineOf = (machine: { readonly id: string; readonly target?: string | undefined } | undefined): Machine =>
       machine === undefined
         ? { id: "local" }
         : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
-    /** One project's main-agent changes at a time: the running check and the launch (CoordinatorSession), and the stop. */
     const projectLocked = keyedLock<string>()
 
-    /**
-     * The project's main agent alive (idle or busy) in a terminal other than `terminal`, or null. Fails open: null when
-     * the runtime cannot be reached or cannot tell.
-     */
     const runningCoordinator = (projectId: string, terminal: string) =>
       Effect.gen(function* () {
         const coord = yield* db.coordinatorOf(projectId)
         if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
         if (coord.address.id === terminal) return null
-        // A restart (`vibest update`) is between its harnesses there: running, though the runtime sees none right now.
         if (!restarting.has(coord.id)) {
           const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
           if (Option.isNone(h)) return null
@@ -533,15 +462,8 @@ export const handlers = VibestRpcs.toLayer(
           address: encodeAddress(coord.address),
         }
       })
-    /** The one runtime loaded, when exactly one is: CoordinatorSession defaults to it. */
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
 
-    /**
-     * Stop admitting changes, let the admitted ones and the daemon's own operations finish, then run `before` (a handoff
-     * starts the new vibestd here) and accept once nothing is running and no claimed delivery is unsettled. Agents keep
-     * running; pending Messages stay in sqlite for the next vibestd. A refused or cut-off stop, or a failing `before`,
-     * opens again; an accepted one never does.
-     */
     const stopOnce = <E, R>(instance: string, method: string, before: Effect.Effect<void, E, R>) =>
       Effect.gen(function* () {
         if (!(yield* drain.begin)) return yield* new DaemonStopping({ method })
@@ -557,7 +479,6 @@ export const handlers = VibestRpcs.toLayer(
           return last
         })
         return yield* Effect.gen(function* () {
-          // Looked at again when an admitted operation leaves (`live.drain`) or a delivery settles (`inbox.status`).
           const none = blockers.pipe(
             Effect.map((pending) => (pending.length === 0 ? Option.some(true) : Option.none())),
           )
@@ -583,7 +504,6 @@ export const handlers = VibestRpcs.toLayer(
         }).pipe(Effect.ensuring(drain.reopen))
       })
 
-    /** The user's command line only. */
     const cliOnly = (method: MethodOf<"cli">) =>
       Effect.flatMap(Caller, (c) =>
         c._tag === "Cli"
@@ -591,10 +511,6 @@ export const handlers = VibestRpcs.toLayer(
           : Effect.fail(new Forbidden({ method, message: `only the user runs ${method}` })),
       )
 
-    /**
-     * Session `id` itself (`self`): its own harness's integration, or the user's command line at the root of the project
-     * whose main agent `id` is (its start after a restart). The main agent's row, or undefined for its own integration.
-     */
     const self = (method: MethodOf<"self">, id: string) =>
       Effect.gen(function* () {
         const c = yield* Caller
@@ -636,14 +552,12 @@ export const handlers = VibestRpcs.toLayer(
               method: "Spawn",
               message: `${input.agent} is reserved for the main agent (vibest)`,
             })
-          // The main agent starts sessions in its own project wherever its shell is, e.g. inside one repository of a
-          // multi-repository Project. Its working directory only counts for a project without a directory.
           const project = yield* projectOf(c, "Spawn")
           return yield* sessions.spawn({
             machine: machineOf(input.machine),
             root: project.directory,
             projectId: project.id,
-            name: input.name ?? nameFrom(input.prompt),
+            name: input.name ?? defaultSessionName(input.prompt),
             prompt: input.prompt,
             harness: input.harness,
             provider: input.provider,
@@ -687,9 +601,6 @@ export const handlers = VibestRpcs.toLayer(
           const { command, env } = envOffArgv(argv)
           const passed = Object.keys(env).length > 0 ? env : undefined
           const at = machineOf(machine)
-          // The runtime is chosen as a start chooses one (§4): the choice chain — the caller's `vibest --runtime` stands,
-          // else the running coordinator's, else the configured one — never a silent pick. The harness that same chain
-          // routes is this command's own to choose, in the pane it opens.
           const current = yield* db.coordinatorOf(id)
           const decision = yield* plugins.start({
             project: root,
@@ -719,7 +630,6 @@ export const handlers = VibestRpcs.toLayer(
             label: "vibest",
             home: layout.home,
             focus,
-            // One variable a shell rc does not set, not the names themselves: rc can export those and would win.
             ...(passed !== undefined ? { env: { [Launch.MAIN_ENV]: JSON.stringify(passed) } } : {}),
           })
           const run = rt.run
@@ -753,15 +663,15 @@ export const handlers = VibestRpcs.toLayer(
       Remove: ({ id: input, keepWorktree }) =>
         managed("Remove", input).pipe(
           Effect.flatMap((id) =>
-            sessions.remove(id, { keepWorktree }).pipe(
-              // Unreachable is the protocol's own error; any other runtime refusal is a server bug.
-              // `id` is the resolved session, not the prefix the caller typed.
-              Effect.catchTag("RuntimeError", (e) =>
-                e.code === "unreachable"
-                  ? Effect.fail(new RuntimeUnreachable({ session: id, message: e.message }))
-                  : Effect.die(e),
+            sessions
+              .remove(id, { keepWorktree })
+              .pipe(
+                Effect.catchTag("RuntimeError", (e) =>
+                  e.code === "unreachable"
+                    ? Effect.fail(new RuntimeUnreachable({ session: id, message: e.message }))
+                    : Effect.die(e),
+                ),
               ),
-            ),
           ),
           Effect.map((out) => out ?? null),
         ),
@@ -769,8 +679,6 @@ export const handlers = VibestRpcs.toLayer(
       List: ({ stopped, all }) =>
         Effect.gen(function* () {
           const c = yield* agent("List")
-          // A cli in a project sees that project, including its main agent. `all`: every project (`stop` in none). Not a
-          // Project and not `all`: no sessions of this directory to show.
           const projectId =
             c._tag === "Coordinator"
               ? c.projectId
@@ -786,7 +694,6 @@ export const handlers = VibestRpcs.toLayer(
             stopped: stopped === true,
           })
           const briefs = yield* db.sessionBriefs(rows.map((row) => row.id))
-          // The main agents first, with how they were routed; one with no place is not running.
           const mains = projectId === undefined ? yield* db.coordinators : [yield* db.coordinatorOf(projectId)]
           return [
             ...(yield* Effect.forEach(mains, (m) =>
@@ -858,7 +765,6 @@ export const handlers = VibestRpcs.toLayer(
           }),
         ),
 
-      // The same code as the HTTP hook routes (hooks.ts). A failed write dies: the caller sees a failure, not a retry.
       TurnEnd: ({ sessionId, harness, event }, { headers }) =>
         hook(sessionId, harness, headers, (who) => Hooks.turnEnd(db, harnesses.get(harness), who, event)),
 
@@ -867,7 +773,6 @@ export const handlers = VibestRpcs.toLayer(
 
       "Project.StartMain": ({ harness, provider, model, runtime }) =>
         Effect.gen(function* () {
-          // Scheduling sees the project directory.
           const { id, directory: root } = yield* scope("Project.StartMain")
           const current = yield* db.coordinatorOf(id)
           const decision = yield* plugins.start({
@@ -891,7 +796,6 @@ export const handlers = VibestRpcs.toLayer(
               harness: decision.harness,
               message: `unknown harness ${decision.harness} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})`,
             })
-          // The runtime choice is checked like the harness's (§4): online on the machine, else the start refuses.
           if (decision.runtime === undefined)
             return yield* new NoRuntime({ message: "no terminal runtime was chosen for the main agent" })
           const rt = yield* runtimes.route(decision.runtime)
@@ -934,8 +838,6 @@ export const handlers = VibestRpcs.toLayer(
               method: "Project.CoordinatorSession",
               message: "Project.CoordinatorSession needs the runtime the main agent runs in",
             })
-          // One main agent per project: every start goes through here, so a second one is refused here. The check and the
-          // launch hold the project's lock, as a stop does, so two starts at once cannot both pass.
           return yield* projectLocked.withLock(projectId)(
             Effect.gen(function* () {
               const running = yield* runningCoordinator(projectId, terminal)
@@ -970,7 +872,6 @@ export const handlers = VibestRpcs.toLayer(
               const place = coord?.address
               if (!coord?.runtime || !place || place.id === "" || !sameCoordinator(coord, runtime, address))
                 return { result: "moved" as const }
-              // ponytail: refused, not waited for; the restart's next harness starts there in seconds.
               if (restarting.has(coord.id))
                 return {
                   result: "unsupported" as const,
@@ -1028,9 +929,6 @@ export const handlers = VibestRpcs.toLayer(
       "Project.Info": () => scope("Project.Info").pipe(Effect.flatMap(project.info)),
       "Project.Search": (input) => scope("Project.Search").pipe(Effect.flatMap((s) => project.search(s, input))),
 
-      // Stop admitting changes, let the admitted ones and the daemon's own operations finish, and accept once nothing is
-      // running and no claimed delivery is unsettled. Agents keep running; pending Messages stay in sqlite for the next
-      // vibestd. A refused or cut-off Stop opens again; an accepted one never does.
       "Daemon.Stop": ({ instance }) =>
         Effect.gen(function* () {
           const c = yield* Caller
@@ -1044,14 +942,12 @@ export const handlers = VibestRpcs.toLayer(
           return yield* stopOnce(instance, "Daemon.Stop", Effect.void)
         }),
 
-      // A handoff (vibest update): Stop's drain, with the new vibestd started in between, waiting for this one's lock.
       "Daemon.Handoff": ({ instance, command }) =>
         Effect.gen(function* () {
           yield* cliOnly("Daemon.Handoff")
           if (instance !== identity.instance)
             return yield* new WrongInstance({ expected: instance, actual: identity.instance ?? null })
           const quoted = command.map(shellQuote).join(" ")
-          // The new vibest must be able to open this database before anything stops; it only reads it.
           const checked = yield* spawner
             .spawn(ChildProcess.make(command[0]!, [...command.slice(1), "daemon", "import-check"], { stdin: "ignore" }))
             .pipe(
@@ -1084,7 +980,6 @@ export const handlers = VibestRpcs.toLayer(
   }),
 )
 
-/** The RPC server on whatever SocketServer is provided. */
 export const layer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(Layer.mergeAll(handlers, AdmissionLive)),
   Layer.provide(CallerGateLive),

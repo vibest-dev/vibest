@@ -1,15 +1,9 @@
-// Compact user messages for the vibest coordinator's interactive Pi TUI.
-// Notices for the adapted MIT sources are in THIRD_PARTY_NOTICES.md.
-// No unlicensed tripplyons code is included.
 import { UserMessageComponent } from "@earendil-works/pi-coding-agent"
 import { TuiAltScreen } from "@earendil-works/pi-tui"
 
 type Render = (this: unknown, width: number) => string[]
 type Paint = (this: unknown) => void
 
-// One lease per patch of the shared Pi prototypes. It lives on UserMessageComponent.prototype only while our wrappers are
-// installed and owned, so overlapping extension instances of this module share one patch. `by` is this module's factory:
-// a lease from another module evaluation (after /reload) is never joined.
 type Lease = {
   by: typeof compactUserMessages
   owners: Set<object>
@@ -87,7 +81,6 @@ export default function compactUserMessages(pi: {
   on(event: string, handler: (event?: unknown, ctx?: { mode?: string; hasUI?: boolean }) => void): unknown
 }) {
   const owner = {}
-  // The prototypes' methods as this instance first found them. A later install refuses when they changed.
   let nativeRender: Render | undefined
   let nativePaint: Paint | undefined
   let release: (() => void) | null = null
@@ -126,7 +119,6 @@ export default function compactUserMessages(pi: {
         paintOriginal: paint,
         active: true,
       }
-      // Publish the lease first, so no installed wrapper is ever without an owner.
       writeLease(message, next)
       try {
         message.render = next.render

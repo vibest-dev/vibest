@@ -1,4 +1,3 @@
-// Write the plugin's files (src/plugin.ts) into <outdir>, default this package (prepack). Generated and ignored by Git.
 import fs from "node:fs"
 import path from "node:path"
 import url from "node:url"
