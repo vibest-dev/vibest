@@ -5,52 +5,76 @@ import (
 	"testing"
 
 	"vibest-desktop/internal/core"
-	"vibest-desktop/internal/project"
+	"vibest-desktop/internal/vibest"
+	"vibest-desktop/internal/vibest/vibestfake"
 )
 
-func TestProjectSidebarGroupsAndOpensTerminal(t *testing.T) {
-	name := func(s string) *string { return &s }
-	kind := "permission"
-	a, _, tt := coreActivityUIWith(t, func(f *coreAppFixture) {
-		f.projects = project.File{Schema: 1, Projects: []project.Project{{ID: "p1", Name: "Shipping", Core: "app-fixture", CWD: "/proj"}}}
-		f.layout.Workspaces[1].Project = "p1"
-		set := func(addr, n string, st *core.Status, labels map[string]string) {
-			r := f.terminals[addr]
-			r.Name, r.Status, r.Labels = name(n), st, labels
-			f.terminals[addr] = r
-		}
-		in := map[string]string{project.Label("p1"): "1"}
-		set("a", "alpha", &core.Status{State: "working"}, in)
-		set("b", "beta", &core.Status{State: "blocked", Kind: &kind}, in)
-		set("d", "delta", &core.Status{State: "idle"}, nil)
-	})
-	awaitCoreApp(t, a, func() bool { return len(a.projects.Projects) == 1 })
+func vibestSession(id, name, project, status, address string, parent *string, created float64) vibest.Session {
+	return vibest.Session{ID: id, Name: name, Harness: "pi", ProjectID: project, Status: status, Runtime: "hc", Address: vibest.Address{Machine: "local", ID: address}, ParentID: parent, CreatedAt: created}
+}
+
+func applyVibest(a *App, e vibest.Event) {
+	a.mu.Lock()
+	a.vibestModel.Apply(e)
+	a.mu.Unlock()
+	a.invalidate()
+}
+
+func shippingSnapshot(sessions ...vibest.Session) vibest.Event {
+	dir, main := "/code/Shipping", "main"
+	return vibest.Event{Tag: "Snapshot", Projects: []vibest.Project{{ID: "p1", Directory: &dir, EntrySessionID: &main}}, Sessions: sessions}
+}
+
+func TestProjectSidebarShowsTheMainAgentWithItsSubagentsNested(t *testing.T) {
+	a, f, tt := coreActivityUI(t)
+	main := "main"
+	herdr := vibestSession("h", "in-herdr", "p1", "idle", "ws1:p3", nil, 3)
+	herdr.Runtime = "herdr"
+	applyVibest(a, shippingSnapshot(
+		vibestSession("main", "lead", "p1", "working", "a", nil, 1),
+		vibestSession("sub", "reviewer", "p1", "blocked", "b", &main, 2),
+		herdr,
+	))
 	tt.Frame()
-	for _, s := range []string{"Projects", "Shipping", "1 waiting", "1 working", "Needs permission", "alpha", "beta", "Unassigned", "delta"} {
+	for _, s := range []string{"Projects", "Shipping", "1 waiting", "1 working", "lead", "reviewer", "Waiting for you", "in-herdr"} {
 		if !tt.HasText(s) {
 			t.Fatalf("%q not shown in %v", s, tt.Texts())
 		}
 	}
-	if find(t, tt, "beta").Y >= find(t, tt, "alpha").Y {
-		t.Fatal("waiting terminal does not sort first")
+	lead, reviewer, other := find(t, tt, "lead"), find(t, tt, "reviewer"), find(t, tt, "in-herdr")
+	if !(lead.Y < reviewer.Y && reviewer.Y < other.Y) || reviewer.X <= lead.X || other.X != lead.X {
+		t.Fatalf("lead %v reviewer %v in-herdr %v", lead, reviewer, other)
 	}
-	if err := tt.Click("delta"); err != nil {
+	if err := tt.Click("reviewer"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if a.coreSelection.Pane != "d" {
-		t.Fatalf("click selected pane %q, want d", a.coreSelection.Pane)
+	if a.coreSelection.Pane != "b" {
+		t.Fatalf("click selected pane %q, want b", a.coreSelection.Pane)
+	}
+	if err := tt.Click("in-herdr"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.coreSelection.Pane != "b" || a.navigationNote != "in-herdr runs in herdr; only herdr-core terminals open here" {
+		t.Fatalf("pane %q note %q", a.coreSelection.Pane, a.navigationNote)
+	}
+	applyVibest(a, vibest.Event{Tag: "SessionEnded", ID: "sub", ProjectID: "p1"})
+	tt.Frame()
+	if tt.HasText("reviewer") || tt.HasText("1 waiting") {
+		t.Fatalf("ended session still shown: %v", tt.Texts())
+	}
+	if len(f.otherDocs) != 0 {
+		t.Fatalf("documents written besides the layout: %v", f.otherDocs)
 	}
 }
 
-func TestProjectOwnsWorkspaceAndCreatesItsTerminals(t *testing.T) {
+func TestProjectOwnsWorkspaceAndOpensItsSessionsAndTerminals(t *testing.T) {
 	a, f, tt := coreActivityUIWith(t, func(f *coreAppFixture) {
-		f.projects = project.File{Schema: 1, Projects: []project.Project{{ID: "p1", Name: "Shipping", Core: "app-fixture", CWD: "/proj"}}}
 		f.layout.Workspaces[1].Project = "p1"
-		n := "echo"
-		f.terminals["e"] = core.Terminal{Address: "e", Name: &n, State: "live", Cols: 80, Rows: 24, Labels: map[string]string{project.Label("p1"): "1"}}
+		f.terminals["e"] = core.Terminal{Address: "e", State: "live", Cols: 80, Rows: 24}
 	})
-	awaitCoreApp(t, a, func() bool { return len(a.projects.Projects) == 1 })
+	applyVibest(a, shippingSnapshot(vibestSession("main", "echo", "p1", "idle", "e", nil, 1)))
 	tt.Frame()
 	tabs := func() int {
 		for _, w := range a.coreState.Layout.Workspaces {
@@ -77,6 +101,9 @@ func TestProjectOwnsWorkspaceAndCreatesItsTerminals(t *testing.T) {
 		t.Fatal(err)
 	}
 	awaitCoreApp(t, a, func() bool { return tabs() == 2 })
+	if a.paneShowing("e") == "" {
+		t.Fatal("the session's terminal is not in a pane")
+	}
 	if err := tt.Click("New terminal in Shipping"); err != nil {
 		t.Fatal(err)
 	}
@@ -91,16 +118,20 @@ func TestProjectOwnsWorkspaceAndCreatesItsTerminals(t *testing.T) {
 		Labels map[string]string
 	}
 	json.Unmarshal(runs[0], &got)
-	if got.CWD != "/proj" || !got.Keep || got.Labels[project.Label("p1")] != "1" {
+	if got.CWD != "/code/Shipping" || !got.Keep || got.Labels["vibest.project"] != "p1" {
 		t.Fatalf("run params %s", runs[0])
 	}
 }
 
-func TestNewProjectFromOneFolderPick(t *testing.T) {
-	a, f, tt := coreActivityUIWith(t, nil)
-	var start string
+func TestNewProjectOpensTheFolderInVibest(t *testing.T) {
+	a, f, tt := coreActivityUI(t)
+	recorded := vibestfake.Load(t, "project-open.ndjson")
+	server := vibestfake.Serve(t, recorded[:2], recorded[4:6])
+	a.mu.Lock()
+	a.vibestSocket = server.Path
+	a.mu.Unlock()
 	var pick func(string)
-	a.folderPicker = func(s string, run func(string)) bool { start, pick = s, run; return true }
+	a.folderPicker = func(_ string, run func(string)) bool { pick = run; return true }
 	if err := tt.Click("New project"); err != nil {
 		t.Fatal(err)
 	}
@@ -108,16 +139,25 @@ func TestNewProjectFromOneFolderPick(t *testing.T) {
 		t.Fatal("the folder chooser was not offered")
 	}
 	a.mu.Lock()
-	pick("/work/shiny/")
+	pick("/fixture/repo/")
 	a.mu.Unlock()
-	awaitCoreApp(t, a, func() bool { return len(a.projects.Projects) == 1 })
-	p := a.projects.Projects[0]
-	if p.Name != "shiny" || p.CWD != "/work/shiny" || p.Core != "app-fixture" {
-		t.Fatalf("project %+v (chooser started at %q)", p, start)
+	awaitCoreApp(t, a, func() bool { return len(a.vibestModel.Projects) == 1 })
+	tt.Frame()
+	if !tt.HasText("repo") {
+		t.Fatalf("opened project not shown: %v", tt.Texts())
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if doc, ok := f.projects.(project.File); !ok || len(doc.Projects) != 1 {
-		t.Fatalf("document not written: %+v", f.projects)
+	if err := tt.Click("New project"); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	pick("/fixture/plain")
+	a.mu.Unlock()
+	awaitCoreApp(t, a, func() bool { return a.vibestNote != "" })
+	tt.Frame()
+	if !tt.HasText("Not a git checkout or a folder of git checkouts") {
+		t.Fatalf("NotInRepository not shown: %v", tt.Texts())
+	}
+	if len(f.otherDocs) != 0 {
+		t.Fatalf("documents written besides the layout: %v", f.otherDocs)
 	}
 }

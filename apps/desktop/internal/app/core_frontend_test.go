@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 	"vibest-desktop/internal/core"
-	"vibest-desktop/internal/project"
 )
 
 type coreAppFrame struct {
@@ -52,7 +51,7 @@ type coreAppFixture struct {
 	attachData map[string]string
 	exec       func(string, []string) ([]byte, error)
 	execResult any
-	projects   any
+	otherDocs  []string
 }
 
 func (f *coreAppFixture) send(ch uint32, p []byte) {
@@ -127,8 +126,8 @@ func (f *coreAppFixture) serve() {
 		case "doc.get":
 			var args struct{ Name string }
 			json.Unmarshal(req.Params, &args)
-			if args.Name == project.Document {
-				result = map[string]any{"value": f.projects, "version": 1}
+			if args.Name != core.LayoutDocument {
+				result = map[string]any{"value": nil, "version": 0}
 				break
 			}
 			result = map[string]any{"value": f.layout, "version": f.version}
@@ -191,11 +190,9 @@ func (f *coreAppFixture) serve() {
 				Version uint64
 			}
 			json.Unmarshal(req.Params, &args)
-			if args.Name == project.Document {
-				var doc project.File
-				json.Unmarshal(args.Value, &doc)
-				f.projects = doc
-				result = map[string]any{"version": 2}
+			if args.Name != core.LayoutDocument {
+				f.otherDocs = append(f.otherDocs, args.Name)
+				result = map[string]any{"version": 1}
 				break
 			}
 			if args.Name != core.LayoutDocument || args.Version != f.version {

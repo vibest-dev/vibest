@@ -55,7 +55,7 @@ type coreNotice struct {
 }
 
 func newCoreWindow() coreWindow {
-	return coreWindow{coreAttached: map[string]core.TerminalRef{}, coreBounds: map[string]ui.Rect{}, coreViews: map[string]*coreview.Terminal{}, coreLoading: map[string]bool{}, coreErrors: map[string]string{}, coreRetry: make(chan struct{}, 1), coreFocusWake: make(chan struct{}, 1), coreNotices: make(chan coreNotice, 8), dialCore: core.Dial}
+	return coreWindow{coreAttached: map[string]core.TerminalRef{}, coreBounds: map[string]ui.Rect{}, coreViews: map[string]*coreview.Terminal{}, coreLoading: map[string]bool{}, coreErrors: map[string]string{}, coreRetry: make(chan struct{}, 1), coreFocusWake: make(chan struct{}, 1), coreNotices: make(chan coreNotice, 8), dialCore: core.Dial, projectWindow: newProjectWindow()}
 }
 
 func (a *App) Run(ctx context.Context) {
@@ -187,10 +187,6 @@ func (a *App) coreApply(s *core.Session) {
 	a.coreChrome()
 	a.coreFocus()
 	a.checkTabDrag()
-	if freshSource || state.DocEpoch != a.projectEpoch {
-		a.projectEpoch = state.DocEpoch
-		a.projectReload()
-	}
 }
 
 func (a *App) coreChrome() {
