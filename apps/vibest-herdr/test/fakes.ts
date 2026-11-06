@@ -538,7 +538,7 @@ export const settled = Effect.gen(function* () {
 })
 
 export const untilVirtual = <A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) =>
-  poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust("500 millis"))), 200, "untilVirtual")
+  poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust("100 millis"))), 1000, "untilVirtual")
 
 export const pingOf = (socket: string) =>
   Effect.gen(function* () {

@@ -1060,12 +1060,10 @@ describe("Db", () => {
         )
         const proc = Bun.spawn(["bun", maker, file, ready], { stdout: "pipe", stderr: "pipe" })
         yield* Effect.gen(function* () {
-          for (let i = 0; i < 50; i++) {
-            if (yield* fs.exists(ready)) return
+          while (!(yield* fs.exists(ready))) {
+            if (proc.exitCode !== null) return yield* Effect.die("hot wal helper exited before it was ready")
             yield* Effect.promise(() => Bun.sleep(20))
           }
-          proc.kill()
-          return yield* Effect.die("hot wal helper did not start")
         })
         proc.kill(9)
         yield* Effect.promise(() => proc.exited)

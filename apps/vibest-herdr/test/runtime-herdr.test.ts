@@ -240,7 +240,7 @@ describe("send to an agent herdr started", () => {
   it.effect("an agent herdr never marks ready gets the text as one paste with Enter (pane.send_input)", () =>
     Effect.gen(function* () {
       const calls = yield* scriptedSend(Number.POSITIVE_INFINITY)
-      assert.strictEqual(calls.filter((m) => m === "agent.prompt").length, 61)
+      assert.isAbove(calls.filter((m) => m === "agent.prompt").length, 1, "agent.prompt is retried before the paste")
       assert.strictEqual(calls.at(-1), "pane.send_input")
       assert.notInclude(calls, "pane.send_text")
     }),

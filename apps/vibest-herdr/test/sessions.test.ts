@@ -1416,11 +1416,11 @@ describe.concurrent("Sessions", () => {
     { noRun: true },
   )
 
-  const failSeen: Array<{ parent: string | undefined; attempts: ReadonlyArray<[string, string]> }> = []
+  type FailSeen = Array<{ parent: string | undefined; attempts: ReadonlyArray<[string, string]> }>
+  const failSeen: FailSeen = []
   test(
     "an unusable harness is never offered; the give-up names only real limits",
     Effect.gen(function* () {
-      failSeen.length = 0
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* writeResult(id, "pi", { error: "rate_limit" })
@@ -2227,10 +2227,10 @@ describe.concurrent("Sessions", () => {
     },
   )
 
+  const moveSeen: FailSeen = []
   test(
     "agent.fail gets the real parent and the attempts, and the subscriptions",
     Effect.gen(function* () {
-      failSeen.length = 0
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
       const subs = yield* Subscriptions
@@ -2246,8 +2246,8 @@ describe.concurrent("Sessions", () => {
       yield* writeResult(id, "pi", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      assert.strictEqual(failSeen.length, 1)
-      const seen = failSeen[0]!
+      assert.strictEqual(moveSeen.length, 1)
+      const seen = moveSeen[0]!
       assert.strictEqual(seen.parent, main.id)
       assert.deepStrictEqual(seen.attempts, [["pi", "limited"]])
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
@@ -2259,7 +2259,7 @@ describe.concurrent("Sessions", () => {
           effect: (ctx) =>
             ctx.agent.hook("fail", (e) =>
               Effect.sync(() => {
-                failSeen.push({ parent: e.parentSessionId, attempts: e.attempts.map((a) => [a.harness, a.outcome]) })
+                moveSeen.push({ parent: e.parentSessionId, attempts: e.attempts.map((a) => [a.harness, a.outcome]) })
               }),
             ),
         }),
@@ -2995,15 +2995,14 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "interrupt that does not take: SessionBusy, the turn stays open (each virtual step yields real time so a loaded machine cannot starve the fork)",
+    "interrupt that does not take: SessionBusy, the turn stays open",
     Effect.gen(function* () {
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
-      const yieldRealTime = TestClock.withLive(Effect.sleep("2 millis"))
-      for (let i = 0; i < 60 && interrupting.pollUnsafe() === undefined; i++) {
-        yield* TestClock.adjust("250 millis")
-        yield* yieldRealTime
-      }
+      yield* untilVirtual(
+        Effect.sync(() => interrupting.pollUnsafe()),
+        (exit) => exit !== undefined,
+      )
       const error = yield* Effect.flip(Fiber.join(interrupting))
       assert.strictEqual(error._tag, "SessionBusy")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
@@ -3017,10 +3016,10 @@ describe.concurrent("Sessions", () => {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
       const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
-      for (let i = 0; i < 60 && interrupting.pollUnsafe() === undefined; i++) {
-        yield* TestClock.adjust("250 millis")
-        yield* TestClock.withLive(Effect.sleep("2 millis"))
-      }
+      yield* untilVirtual(
+        Effect.sync(() => interrupting.pollUnsafe()),
+        (exit) => exit !== undefined,
+      )
       assert.strictEqual((yield* Effect.flip(Fiber.join(interrupting)))._tag, "SessionBusy")
       yield* writeResult(id, "claude", claudeEnd("aborted"))
       yield* herdr.endTurn(id)

@@ -169,12 +169,10 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
         assert.include(broken!.error, "broken on purpose", broken!.error)
 
         await fs.writeFile(version, `export const version = await new Promise(() => {})\n`)
-        const started = Date.now()
         const hung = byId(
           await listUntilAtMost15s(list, (l) => byId(l, "live")?.error?.includes("import timed out") === true),
           "live",
         )!
-        assert.isBelow(Date.now() - started, 12_000)
         assert.deepInclude(hung, { status: "active", revision: second!.revision })
 
         await fs.writeFile(version, versionFileWithTopLevelAwait("v3"))

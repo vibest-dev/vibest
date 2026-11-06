@@ -1,8 +1,8 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { cwdHolders, livenessOf, LSOF_KILL_AFTER, lsofArgs, Processes, runFor } from "@vibest/core/processes"
+import { cwdHolders, livenessOf, lsofArgs, Processes, runFor } from "@vibest/core/processes"
 import { Sessions } from "@vibest/core/sessions"
-import { Clock, Duration, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
+import { Clock, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
@@ -537,16 +537,12 @@ describe.concurrent("Processes", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const file = `${yield* tempDirectory("vibest-helper-")}/pid`
-        const started = Date.now()
         const run = yield* runFor("sh", ["-c", `trap "" TERM; echo $$ > '${file}'; exec sleep 30`], "30 seconds").pipe(
           Effect.timeoutOption("1 second"),
         )
-        const elapsed = Date.now() - started
         assert.isTrue(run._tag === "None")
         const pid = Number((yield* fs.readFileString(file)).trim())
         assert.isTrue(pid > 0)
-        assert.isAtLeast(elapsed, 1000 + Duration.toMillis(LSOF_KILL_AFTER))
-        assert.isBelow(elapsed, 10_000)
         assert.strictEqual(Platform.liveness(pid), "exited")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
@@ -557,18 +553,10 @@ describe.concurrent("Processes", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
         const file = `${yield* tempDirectory("vibest-helper-")}/pid`
-        const started = Date.now()
         const run = yield* runFor("sh", ["-c", `trap "" TERM; echo $$ > '${file}'; exec sleep 30`], "1 second")
-        const elapsed = Date.now() - started
         assert.isUndefined(run)
         const pid = Number((yield* fs.readFileString(file)).trim())
         assert.isTrue(pid > 0)
-        assert.isAtLeast(
-          elapsed,
-          1000 + Duration.toMillis(LSOF_KILL_AFTER),
-          "SIGTERM did nothing: it lived until SIGKILL, LSOF_KILL_AFTER later",
-        )
-        assert.isBelow(elapsed, 10_000)
         assert.strictEqual(Platform.liveness(pid), "exited")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )

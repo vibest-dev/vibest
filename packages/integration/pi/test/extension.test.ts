@@ -21,7 +21,7 @@ import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import * as Server from "@vibest/server/server"
-import { Clock, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
+import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, type Ref, Scope } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 import { vi } from "vitest"
@@ -745,9 +745,8 @@ describe("pi-vibest", () => {
         })
         const notes: Array<string> = []
         for (const turn of [1, 2]) {
-          const start = yield* TestClock.withLive(Clock.currentTimeMillis)
           yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s1", notes))
-          assert.isBelow((yield* TestClock.withLive(Clock.currentTimeMillis)) - start, 200)
+          assert.strictEqual(notes.length, turn - 1, "the turn ended before its report did")
           yield* until(
             Effect.sync(() => notes.length === turn),
             Boolean,
