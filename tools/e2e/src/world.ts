@@ -112,7 +112,13 @@ export class World {
   env(extra: Record<string, string | undefined> = {}): Record<string, string> {
     const env: Record<string, string | undefined> = {}
     for (const [k, v] of Object.entries(process.env))
-      if (!k.startsWith("VIBEST_") && !k.startsWith("HERDR_") && !k.startsWith("HC_") && k !== "PI_PACKAGE_DIR")
+      if (
+        !k.startsWith("VIBEST_") &&
+        !k.startsWith("HERDR_") &&
+        !k.startsWith("HC_") &&
+        k !== "PI_PACKAGE_DIR" &&
+        k !== "CLAUDE_CODE_CHILD_SESSION"
+      )
         env[k] = v
     Object.assign(
       env,
