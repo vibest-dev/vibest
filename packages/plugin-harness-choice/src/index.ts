@@ -1,4 +1,11 @@
-import { AgentRefused, isLimited, Plugin, type HarnessOption, type SubscriptionSnapshot } from "@vibest/plugin"
+import {
+  AgentRefused,
+  exhaustedText,
+  isLimited,
+  Plugin,
+  type HarnessOption,
+  type SubscriptionSnapshot,
+} from "@vibest/plugin"
 import { Effect } from "effect"
 
 const fullest = (row: SubscriptionSnapshot) => row.limits.reduce((max, l) => Math.max(max, l.percent), -1)
@@ -49,9 +56,6 @@ const whyNot = (harnesses: ReadonlyArray<HarnessOption>, subscriptions: Readonly
     })
     .join(", ")
 
-const resetOf = (resetTime: number | null) =>
-  resetTime === null ? "no reset time" : `resets ${new Date(resetTime).toISOString()}`
-
 const blocked = (
   harnesses: ReadonlyArray<HarnessOption>,
   subscriptions: ReadonlyArray<SubscriptionSnapshot>,
@@ -63,11 +67,8 @@ const blocked = (
   const text = rowsOf(subscriptions, harness)
     .filter((row) => (provider === undefined || row.provider === provider) && isLimited(row))
     .map((row) => {
-      const limits = row.limits
-        .filter((limit) => limit.status === "limited")
-        .map((limit) => `${limit.window} limit exhausted, ${resetOf(limit.resetTime)}`)
-        .join("; ")
-      return `${row.provider === "" ? harness : `${harness}/${row.provider}`}: ${limits}`
+      const who = row.provider === "" ? harness : `${harness}/${row.provider}`
+      return `${who}: ${exhaustedText(row.limits)}`
     })
     .join("; ")
   return text === "" ? `${harness}: unavailable` : text

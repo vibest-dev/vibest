@@ -1,6 +1,6 @@
 import type * as VibestPlugin from "@vibest/plugin"
-import { isLimited, stillLimited } from "@vibest/plugin"
-import type { Subscription, SubscriptionLimit } from "@vibest/schema/subscription"
+import { exhaustedText, isLimited, stillLimited } from "@vibest/plugin"
+import type { Subscription } from "@vibest/schema/subscription"
 import { Cause, Clock, Context, Crypto, Effect, Exit, FileSystem, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -24,15 +24,6 @@ export interface LimitMove {
   ) => Effect.Effect<boolean>
 }
 
-const resetOf = (resetTime: number | null) =>
-  resetTime === null ? "no reset time" : `resets ${new Date(resetTime).toISOString()}`
-
-const exhaustedLimits = (limits: ReadonlyArray<SubscriptionLimit>) =>
-  limits
-    .filter((limit) => limit.status === "limited")
-    .map((limit) => `${limit.window} limit exhausted, ${resetOf(limit.resetTime)}`)
-    .join("; ")
-
 const limitFailure = (
   rows: ReadonlyArray<Subscription>,
   harness: string,
@@ -43,7 +34,7 @@ const limitFailure = (
     .filter((row) => row.harness === harness && (provider === undefined || row.provider === provider) && isLimited(row))
     .map((row) => {
       const who = row.provider === "" ? harness : `${harness}/${row.provider}`
-      return `${who}: ${exhaustedLimits(row.limits)}`
+      return `${who}: ${exhaustedText(row.limits)}`
     })
     .join("; ")
   const named = provider === undefined || provider === "" ? harness : `${harness}/${provider}`
