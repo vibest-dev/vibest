@@ -303,8 +303,15 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         expect((await listed(zero))?.pane_id === subPane, `the subagent's pane changed: ${subPane}`)
-        await until("the main agent restarted", () => main()?.pid != null && main()?.pid !== before.pid, 120_000)
-        const after = main()
+        let after: ReturnType<typeof main>
+        await until(
+          "the main agent restarted on this integration",
+          () => {
+            after = main()
+            return after?.pid != null && after.pid !== before.pid && after.version !== old && after.version !== null
+          },
+          120_000,
+        )
         expect(after?.id === before.id, `the main agent's session changed: ${before.id} -> ${after?.id}`)
         expect(
           after?.harness_session_id === before.harness_session_id,
@@ -447,7 +454,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "U4",
     title:
-      "vibest update run by a Claude main agent itself (fake model): the CLI hands the restart to vibestd and returns; vibestd restarts it in its pane on the same conversation and its inbox gets the continue notice",
+      "vibest update run by a Claude main agent itself (fake model): the CLI hands the restart to vibestd and returns; vibestd restarts it in its pane on the same conversation, its inbox gets the continue notice and that turn ends with a reply, and vibest update runs once",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const session = `${w.herdrSession}-cupdate`
@@ -455,9 +462,18 @@ const checks: ReadonlyArray<Check> = [
       const UPDATE = "Run vibest update --yes now."
       const NOTICE =
         "vibest update is done and restarted this agent; do not run it again, continue the interrupted work."
+      let updates = 0
+      let noticed = false
       const model = fakeAnthropic((r) => {
         const last = text(lastUser(r))
-        if (last.includes(UPDATE)) return { tool: "Bash", input: { command: "vibest update --yes" } }
+        if (last.includes(UPDATE)) {
+          if (r.tools.length > 0) updates++
+          return { tool: "Bash", input: { command: "vibest update --yes" } }
+        }
+        if (last.includes(NOTICE)) {
+          noticed = true
+          return "CONTINUED"
+        }
         return last.includes('"tool_result"') ? "UPDATED" : "ok"
       })
       try {
@@ -555,6 +571,12 @@ const checks: ReadonlyArray<Check> = [
           () => model.requests.slice(asked() + 1).some((r) => text(lastUser(r)).includes(NOTICE)),
           180_000,
         ).catch(failWith)
+        await until(
+          "the turn on the continue notice ended with its reply",
+          async () => noticed && /⏺ CONTINUED\s+\S.*· done/.test(await screen()),
+          120_000,
+        ).catch(failWith)
+        expect(updates === 1, `vibest update was asked for ${updates} times`)
         expect(main()?.pid !== null && alive(main()!.pid!), "the restarted main agent is not running")
       } finally {
         model.stop()
