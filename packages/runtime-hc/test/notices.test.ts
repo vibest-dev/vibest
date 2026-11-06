@@ -159,6 +159,14 @@ const live = <A, E>(
 
 describe("runtime-hc against a fake core", () => {
   live(
+    "setting the runtime up touches no core: builtins activate before vibestd listens",
+    Effect.gen(function* () {
+      const core = yield* fakeCore
+      assert.deepStrictEqual(yield* Ref.get(core.calls), [])
+    }),
+  )
+
+  live(
     "the status a program reports over OSC 7501 is the agent's state: working, then idle when done",
     Effect.gen(function* () {
       const core = yield* fakeCore
