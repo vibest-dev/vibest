@@ -675,7 +675,9 @@ rebuilds the rest in order inside a batch; a failing new revision falls back to 
 retried until it changes; an activation latch gates entry points; builtin plugins activate while vibestd's
 layers are built, before it listens, so a request that routes to a builtin runtime never finds it unregistered
 (user plugins activate afterwards, in the background; a runtime a user plugin registers can still be missing for
-a request admitted before that); triggers are configuration changes, module
+a request admitted before that). A builtin plugin's setup must not do I/O (it connects lazily, as `runtime-herdr`
+does), because every builtin setup runs before vibestd listens and a slow one would push startup past the
+client's `DAEMON_START_TIMEOUT` of 10 s; triggers are configuration changes, module
 file changes, and a daily update tick, debounced by 100 ms; npm plugins install into the vibest home and
 activate after local ones.
 
