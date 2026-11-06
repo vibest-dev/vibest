@@ -34,6 +34,22 @@ const target = () => {
 }
 export const { binary, compiled, harnesses } = target()
 
+export const buildVersion = (
+  JSON.parse(fs.readFileSync(path.join(checkout, "apps/vibest-herdr/package.json"), "utf8")) as { version: string }
+).version
+
+const releaseStandIn = () =>
+  Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: (req) => {
+      const at = new URL(req.url).pathname
+      if (at.endsWith("/@vibest/cli/beta")) return Response.json({ version: buildVersion })
+      if (at.endsWith("/version")) return new Response(`${buildVersion}\n`)
+      return new Response("not found", { status: 404 })
+    },
+  })
+
 export interface Ran {
   readonly code: number
   readonly stdout: string
@@ -58,6 +74,7 @@ export class World {
   readonly origin: string
   readonly log: Array<{ readonly argv: ReadonlyArray<string>; readonly cwd: string; readonly result: Ran }> = []
   private readonly started: Array<ReturnType<typeof Bun.spawn>> = []
+  private readonly releases = releaseStandIn()
   readonly herdrSession: string
 
   private constructor(readonly root: string) {
@@ -107,6 +124,8 @@ export class World {
         GIT_COMMITTER_NAME: "e2e",
         GIT_COMMITTER_EMAIL: "e2e@example.invalid",
         GIT_CONFIG_GLOBAL: "/dev/null",
+        npm_config_registry: `http://127.0.0.1:${this.releases.port}`,
+        VIBEST_DOWNLOAD_URL: `http://127.0.0.1:${this.releases.port}`,
       },
       extra,
     )
@@ -235,6 +254,7 @@ export class World {
     }
     for (const p of this.started) if (p.exitCode === null) p.kill()
     await Promise.all(this.started.map((p) => p.exited))
+    this.releases.stop(true)
   }
 }
 

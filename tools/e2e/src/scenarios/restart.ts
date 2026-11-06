@@ -8,6 +8,7 @@ import {
   agentName,
   alive,
   binary,
+  compiled,
   expect,
   harnesses,
   herdr,
@@ -81,7 +82,7 @@ const fakeModel = () => {
 const oldInstall = async (w: World, name: string) => {
   const old = path.join(w.root, `${name}-old`)
   await fs.mkdir(path.join(old, "bin"), { recursive: true })
-  await fs.copyFile(binary, path.join(old, "bin", "vibest"))
+  await fs.copyFile(compiled, path.join(old, "bin", "vibest"))
   await fs.chmod(path.join(old, "bin", "vibest"), 0o755)
   await fs.cp(harnesses, path.join(old, "harnesses"), { recursive: true })
   const patch = async (file: string, from: RegExp, to: string) => {
@@ -415,7 +416,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       const old = path.join(w.root, "handoff-old", "bin", "vibest")
       await fs.mkdir(path.dirname(old), { recursive: true })
-      await fs.copyFile(binary, old)
+      await fs.copyFile(compiled, old)
       await fs.chmod(old, 0o755)
       await w.stopDaemon()
       const started = await w.run(w.repository, [old, "daemon"])
