@@ -174,18 +174,7 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
       return yield* decodeResult(method, found.value.result)
     }).pipe(Effect.scoped)
 
-  const hello = call("hello", { generation: GENERATION }).pipe(
-    Effect.catchIf(
-      (e): e is HcError => e._tag === "HcError" && e.kind === "unsupported_generation",
-      (e) =>
-        Effect.fail(
-          new HcGenerationMismatch({
-            socketPath,
-            expected: GENERATION,
-            message: `${e.message}${e.hint ? ` (${e.hint})` : ""}: update vibest`,
-          }),
-        ),
-    ),
+  const hello = call("hello", {}).pipe(
     Effect.flatMap((r): Effect.Effect<ResultOf<"hello">, HcIncompatible> => {
       const core = `herdr-core ${r.version}`
       if (r.generation > GENERATION)
