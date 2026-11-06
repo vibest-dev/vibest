@@ -1,0 +1,329 @@
+diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
+--- a/plugins/terminal/terminal.go
++++ b/plugins/terminal/terminal.go
+@@ -604,6 +604,11 @@
+ 	held      bool
+ 	heldSince time.Time
+ 
++	hidden      atomic.Bool
++	drawnCursor vt.Cursor
++	drawnColors vt.Colors
++	drawnImages uint64
++
+ 	draw     atomic.Pointer[func()] // asks for a frame of the view
+ 	done     chan struct{}
+ 	doneOnce sync.Once
+@@ -881,6 +886,7 @@
+ 	t.mu.Lock()
+ 	var ev events
+ 	var title string
++	var changed bool
+ 	if t.term != nil {
+ 		if t.opts.ShellIntegration {
+ 			t.prompt.feed(p)
+@@ -894,10 +900,39 @@
+ 		if ev.title {
+ 			title = t.term.Title()
+ 		}
++		if !t.hidden.Load() {
++			changed = t.outputChanged()
++		}
+ 	}
+ 	t.mu.Unlock()
+ 	t.fire(ev, title)
+-	t.redraw()
++	if changed && !t.hidden.Load() {
++		t.redraw()
++	}
++}
++
++// SetVisible controls output-driven frame requests, not parsing or callbacks.
++// Terminals are visible by default. Hosts hiding a retained View must call
++// SetVisible(false); showing it again requests its accumulated state at once.
++func (t *Terminal) SetVisible(visible bool) {
++	if t.hidden.Swap(!visible) && visible {
++		t.redraw()
++	}
++}
++
++// outputChanged updates the shared snapshot without cleaning its dirty rows.
++// t.mu is held; paint alone consumes the pending changes.
++func (t *Terminal) outputChanged() bool {
++	t.rmu.Lock()
++	defer t.rmu.Unlock()
++	if t.held || t.rs == nil {
++		return false
++	}
++	if err := t.rs.Update(t.term); err != nil {
++		return true
++	}
++	return t.rs.Dirty() != vt.Clean || t.rs.Cursor() != t.drawnCursor ||
++		t.rs.Colors() != t.drawnColors || t.term.GraphicsGeneration() != t.drawnImages
+ }
+ 
+ func (t *Terminal) fire(ev events, title string) {
+@@ -1410,6 +1445,9 @@
+ 	if held && t.rs != nil {
+ 		t.rs.Update(t.term)
+ 		t.heldSince = time.Now()
++		if !t.hidden.Load() {
++			t.redraw() // Let the view schedule the synchronized-output timeout.
++		}
+ 	}
+ 	t.held = held
+ 	t.rmu.Unlock()
+diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
+--- a/plugins/terminal/paint.go
++++ b/plugins/terminal/paint.go
+@@ -165,6 +165,7 @@
+ 	v.matches, v.matchBuf = t.viewportMatches(v.matches, v.matchBuf, tc, tr)
+ 	if !held {
+ 		v.readImages(t.term)
++		t.drawnImages = t.term.GraphicsGeneration()
+ 	}
+ 	t.mu.Unlock()
+ 	rs := t.rs
+@@ -174,6 +175,7 @@
+ 	colors := rs.Colors()
+ 	full := rs.Dirty() == vt.Full || colors != v.colors || contrast != v.contrast
+ 	v.colors, v.contrast, v.cursor = colors, contrast, rs.Cursor()
++	t.drawnColors, t.drawnCursor = colors, v.cursor
+ 	cols, rows := rs.Size()
+ 	if len(v.lines) != rows {
+ 		v.lines = append(v.lines[:0], make([]rowCache, rows)...)
+diff --git a/plugins/terminal/internal/vt/images.go b/plugins/terminal/internal/vt/images.go
+--- a/plugins/terminal/internal/vt/images.go
++++ b/plugins/terminal/internal/vt/images.go
+@@ -14,6 +14,7 @@
+ 	dataKittyGraphics = 30
+ 
+ 	kittyPlacementIterator = 1
++	kittyGeneration        = 2
+ 
+ 	imageWidth      = 3
+ 	imageHeight     = 4
+@@ -111,6 +112,15 @@
+ 	return g
+ }
+ 
++// GraphicsGeneration changes when image storage or placements change.
++func (t *Terminal) GraphicsGeneration() uint64 {
++	var generation uint64
++	if g := t.graphics(); g != 0 {
++		call(fnKittyGet, g, kittyGeneration, uintptr(unsafe.Pointer(&generation)))
++	}
++	return generation
++}
++
+ // Placements calls fn with each placement of the screen that shows.
+ func (t *Terminal) Placements(fn func(Placement)) {
+ 	g := t.graphics()
+diff --git a/plugins/terminal/internal/vt/lib.go b/plugins/terminal/internal/vt/lib.go
+--- a/plugins/terminal/internal/vt/lib.go
++++ b/plugins/terminal/internal/vt/lib.go
+@@ -340,6 +340,7 @@
+ 	{"GhosttyRenderStateRowData", "RAW", rowDataRaw},
+ 	{"GhosttyKittyGraphicsPlacementData", "Z", placementZ},
+ 	{"GhosttyKittyGraphicsImageData", "GENERATION", imageGeneration},
++	{"GhosttyKittyGraphicsData", "GENERATION", kittyGeneration},
+ 	{"GhosttyKittyImageFormat", "GRAY", int64(ImageGray)},
+ 	{"GhosttySysOption", "DECODE_PNG", sysDecodePNG},
+ 	{"GhosttyCellWide", "SPACER_HEAD", int64(SpacerHead)},
+diff --git a/plugins/terminal/output_test.go b/plugins/terminal/output_test.go
+new file mode 100644
+--- /dev/null
++++ b/plugins/terminal/output_test.go
+@@ -0,0 +1,193 @@
++package terminal
++
++import (
++	"bytes"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"github.com/egoist/mygo/ui"
++)
++
++func outputFixture(t *testing.T, opts Options) (*Terminal, *ui.Tester, *atomic.Int64) {
++	t.Helper()
++	loadLib(t)
++	opts.Conn = newPipe()
++	opts.NoBlink = true
++	term, err := New(opts)
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { term.Close() })
++	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
++	term.Feed([]byte("\x1b[?25lsettled"))
++	for range 3 {
++		tt.Frame()
++	}
++	count := &atomic.Int64{}
++	original := term.draw.Load()
++	draw := func() { count.Add(1); (*original)() }
++	term.draw.Store(&draw)
++	return term, tt, count
++}
++
++func outputVisible(t *testing.T, term *Terminal, visible bool) {
++	t.Helper()
++	setter, ok := any(term).(interface{ SetVisible(bool) })
++	if !ok {
++		t.Fatal("Terminal cannot suppress hidden output frames")
++	}
++	setter.SetVisible(visible)
++}
++
++func TestOutputIdenticalTitlesDoNotRequestFrames(t *testing.T) {
++	titles, bells, notifications := 0, 0, 0
++	term, tt, frames := outputFixture(t, Options{
++		OnTitle:  func(string) { titles++ },
++		OnBell:   func() { bells++ },
++		OnNotify: func(string, string) { notifications++ },
++	})
++	for range 100 {
++		term.Feed([]byte("\x1b]2;same title\x07"))
++	}
++	if got := frames.Load(); got != 0 {
++		t.Fatalf("identical titles requested %d frames", got)
++	}
++	term.Feed([]byte("\a\x1b]9;notice\x07"))
++	if titles == 0 || bells != 1 || notifications != 1 {
++		t.Fatalf("lost callbacks: titles=%d bells=%d notifications=%d", titles, bells, notifications)
++	}
++	if frames.Load() != 0 {
++		t.Fatal("nonvisual callbacks requested a terminal frame")
++	}
++	term.Feed([]byte("\rnew text"))
++	term.Feed([]byte("\x1b]2;same title\x07"))
++	tt.Frame()
++	if !strings.Contains(term.Text(), "new text") {
++		t.Fatal("query consumed dirty text")
++	}
++}
++
++func TestOutputHiddenParsesAndReshowsImmediately(t *testing.T) {
++	term, tt, frames := outputFixture(t, Options{})
++	outputVisible(t, term, false)
++	for range 100 {
++		term.Feed([]byte("\rhidden output"))
++	}
++	if frames.Load() != 0 {
++		t.Fatalf("hidden output requested %d frames", frames.Load())
++	}
++	if !strings.Contains(term.Text(), "hidden output") {
++		t.Fatal("hidden output was not parsed")
++	}
++	outputVisible(t, term, true)
++	if frames.Load() != 1 {
++		t.Fatal("re-show did not immediately request a frame")
++	}
++	tt.Frame()
++	frames.Store(0)
++	term.Feed([]byte("\x1b]2;same title\x07"))
++	if frames.Load() != 0 {
++		t.Fatal("paint did not consume pending changes")
++	}
++	term.Feed([]byte("typed echo"))
++	if frames.Load() != 1 {
++		t.Fatal("typed echo did not request a frame immediately")
++	}
++}
++
++func TestOutputDrawableChangesRequestFrames(t *testing.T) {
++	for _, tc := range []struct{ name, sequence string }{
++		{"cursor move", "\x1b[?25h\x1b[3;4H"},
++		{"cursor shape", "\x1b[?25h\x1b[5 q"},
++		{"palette", "\x1b]4;1;rgb:12/34/56\x07"},
++		{"background", "\x1b]11;rgb:12/34/56\x07"},
++		{"image", kittyImage(7, 2, 2, ui.RGB(255, 0, 0), ",C=1")},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			term, tt, frames := outputFixture(t, Options{})
++			term.Feed([]byte(tc.sequence))
++			if frames.Load() == 0 {
++				t.Fatal("drawable change did not request a frame")
++			}
++			tt.Frame()
++			frames.Store(0)
++			term.Feed([]byte("\x1b]2;noop\x07"))
++			if frames.Load() != 0 {
++				t.Fatal("drawn change still requests frames")
++			}
++		})
++	}
++}
++
++func TestOutputImageReplacementAndDeletionRequestFrames(t *testing.T) {
++	term, tt, frames := outputFixture(t, Options{})
++	for _, seq := range []string{kittyImage(7, 2, 2, ui.RGB(255, 0, 0), ",C=1"), kittyImage(7, 2, 2, ui.RGB(0, 0, 255), ",C=1"), "\x1b_Ga=d,d=I,i=7,q=2\x1b\\"} {
++		frames.Store(0)
++		term.Feed([]byte(seq))
++		if frames.Load() == 0 {
++			t.Fatal("image mutation did not request a frame")
++		}
++		tt.Frame()
++	}
++}
++
++func TestOutputSynchronizedTimeoutStillRequestsFrame(t *testing.T) {
++	term, tt, frames := outputFixture(t, Options{})
++	term.Feed([]byte("\x1b[?2026hheld"))
++	if frames.Load() == 0 {
++		t.Fatal("hold did not request its timeout setup frame")
++	}
++	tt.Frame()
++	frames.Store(0)
++	for range 10 {
++		term.Feed([]byte("more"))
++	}
++	if frames.Load() != 0 {
++		t.Fatal("held output requested unchanged frames")
++	}
++	term.mu.Lock()
++	term.rmu.Lock()
++	term.heldSince = time.Now().Add(-2 * time.Second)
++	term.rmu.Unlock()
++	term.mu.Unlock()
++	tt.Advance(2 * time.Second)
++	term.mu.Lock()
++	held := term.held
++	term.mu.Unlock()
++	if held {
++		t.Fatal("held output never drew after timeout")
++	}
++}
++
++func TestOutputQueriesPreserveDirtyRowsAndSelection(t *testing.T) {
++	term, tt, frames := outputFixture(t, Options{})
++	before := bytes.Clone(tt.Image().Pix)
++	term.Feed([]byte("\rnew text"))
++	for range 10 {
++		term.Feed([]byte("\x1b]2;noop\x07"))
++	}
++	tt.Frame()
++	if bytes.Equal(before, tt.Image().Pix) {
++		t.Fatal("queries consumed dirty rows before paint")
++	}
++	before = bytes.Clone(tt.Image().Pix)
++	x, y := cellCenter(term, 0, 0)
++	tt.Press(x-2, y)
++	x, y = cellCenter(term, 4, 0)
++	tt.Move(x+2, y)
++	tt.Release(x+2, y)
++	if bytes.Equal(before, tt.Image().Pix) {
++		t.Fatal("selection did not draw")
++	}
++	term.Feed([]byte("\x1b[1;1H"))
++	tt.Frame()
++	frames.Store(0)
++	for range 10 {
++		term.Feed([]byte("\x1b[1;1H"))
++	}
++	if frames.Load() != 0 {
++		t.Fatal("unchanged cursor requested frames")
++	}
++}
