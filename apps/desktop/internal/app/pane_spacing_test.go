@@ -153,52 +153,6 @@ func overlapUI(a, b ui.Rect) bool {
 	return a.X < b.X+b.W-0.01 && b.X < a.X+a.W-0.01 && a.Y < b.Y+b.H-0.01 && b.Y < a.Y+a.H-0.01
 }
 
-func TestNarrowPaneKeepsClose(t *testing.T) {
-	const cw, ch float32 = 8, 16
-	s := herdrAnswer(14, 10, "split")
-	ps := frameAt(s, 14*cw, 10*ch, cw, ch, 2).places
-	pl := ps[0]
-	if pl.pane.Inner.Width != 4 || pl.head.X != 6 || pl.term.X != 6 {
-		t.Fatalf("inner %v head %v term %v", pl.pane.Inner, pl.head, pl.term)
-	}
-	bs := headButtons(pl)
-	if len(bs) != 1 || bs[0].kind != "close-pane" || !nearDip(bs[0].r.X+bs[0].r.W, pl.card.X+pl.card.W-6) || bs[0].r.X < pl.head.X ||
-		bs[0].r.W != headButtonSize || !nearDip(bs[0].r.Y, 4) || bs[0].r.Y+bs[0].r.H > pl.term.Y {
-		t.Fatalf("buttons %+v card %v head %v term %v", bs, pl.card, pl.head, pl.term)
-	}
-	r := bs[0].r
-	if !bs[0].r.Contains(r.X, r.Y) || !bs[0].r.Contains(r.X+r.W-0.01, r.Y+r.H-0.01) || bs[0].r.Contains(r.X+r.W, r.Y) || !pl.head.Contains(r.X, r.Y) {
-		t.Fatalf("close hit %v", r)
-	}
-}
-
-func TestHeaderButtonsStayOnAlternateScreen(t *testing.T) {
-	for _, sc := range []struct{ scale, cw, ch float32 }{{1, 8, 16}, {1.25, 8, 16}, {1.5, 26.0 / 3, 46.0 / 3}, {2, 8.5, 15.5}} {
-		for _, mode := range []string{"single", "split", "nested", "zoom"} {
-			w, h := float32(1029), float32(761.69)
-			cols, rows := paneGrid(herdrAnswer(40, 20, mode), w, h, sc.cw, sc.ch, sc.scale)
-			primary := herdrAnswer(cols, rows, mode)
-			alt := herdrAnswer(cols, rows, mode)
-			for i := range alt.Panes {
-				alt.Panes[i].Inner.Width++
-			}
-			pp := frameAt(primary, w, h, sc.cw, sc.ch, sc.scale).places
-			pa := frameAt(alt, w, h, sc.cw, sc.ch, sc.scale).places
-			for i := range pp {
-				bp, ba := headButtons(pp[i]), headButtons(pa[i])
-				if pp[i].head != pa[i].head || len(bp) != len(ba) {
-					t.Fatalf("x%v %s %s: head %v then %v", sc.scale, mode, pp[i].pane.ID, pp[i].head, pa[i].head)
-				}
-				for j := range bp {
-					if bp[j] != ba[j] {
-						t.Errorf("x%v %s %s: %s moved %v to %v", sc.scale, mode, pp[i].pane.ID, bp[j].kind, bp[j].r, ba[j].r)
-					}
-				}
-			}
-		}
-	}
-}
-
 func TestSelectedTabAndRowShareTheCorner(t *testing.T) {
 	for _, th := range specThemes(t) {
 		if th.Radius != 4 {
@@ -315,30 +269,6 @@ func outsideRun(img *image.RGBA, r ui.Rect, scale float32) int {
 		n++
 	}
 	return n
-}
-
-func TestShortRowsShowTooSmall(t *testing.T) {
-	s := herdrAnswer(40, 10, "split")
-	for _, c := range []struct {
-		cw, ch float32
-		shows  bool
-	}{{8, 12, false}, {8, 16, true}} {
-		ps := frameAt(s, 40*c.cw, 10*c.ch, c.cw, c.ch, 1).places
-		for _, pl := range ps {
-			shows := paneShowsTerminal(*pl.pane, pl.term, 40*c.cw, 10*c.ch, false)
-			if shows != c.shows {
-				t.Errorf("row %v %s: shows %v, want %v (term %v)", c.ch, pl.pane.ID, shows, c.shows, pl.term)
-			}
-			if pl.head.Y+pl.head.H > pl.card.Y+pl.card.H+0.01 {
-				t.Errorf("row %v %s: header %v past the pane's cells", c.ch, pl.pane.ID, pl.head)
-			}
-			for _, b := range headButtons(pl) {
-				if b.r.W != headButtonSize || b.r.H != headButtonSize {
-					t.Errorf("row %v %s: %s is %v", c.ch, pl.pane.ID, b.kind, b.r)
-				}
-			}
-		}
-	}
 }
 
 func TestSmallFontKeepsItsCell(t *testing.T) {

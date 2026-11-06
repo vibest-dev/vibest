@@ -15,14 +15,15 @@ import (
 
 	"reflect"
 	"vibest-desktop/internal/chrome"
-	"vibest-desktop/internal/herdr"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/terminal"
 	"github.com/egoist/mygo/ui"
 )
 
-func themedCoreApp(t *testing.T, dir string) (*App, *coreAppFixture, *ui.Tester, herdr.Rect) {
+type paneRect struct{ X, Y, Width, Height int }
+
+func themedCoreApp(t *testing.T, dir string) (*App, *coreAppFixture, *ui.Tester, paneRect) {
 	t.Helper()
 	if os.Getenv("MYGO_GHOSTTY_VT") == "" {
 		t.Fatal("explicit verified software VT required")
@@ -44,9 +45,9 @@ func themedCoreApp(t *testing.T, dir string) (*App, *coreAppFixture, *ui.Tester,
 	coreOutput(t, a, f, tt, "a", "\x1b[2J\x1b[1;2H")
 	coreOutput(t, a, f, tt, "b", "\x1b[2J\x1b[H")
 	r := find(t, tt, "Panes")
-	return a, f, tt, herdr.Rect{X: int(r.X), Y: int(r.Y), Width: int(r.W), Height: int(r.H)}
+	return a, f, tt, paneRect{X: int(r.X), Y: int(r.Y), Width: int(r.W), Height: int(r.H)}
 }
-func themedApp(t *testing.T, dir string) (*App, *ui.Tester, herdr.Rect) {
+func themedApp(t *testing.T, dir string) (*App, *ui.Tester, paneRect) {
 	a, _, tt, r := themedCoreApp(t, dir)
 	return a, tt, r
 }
@@ -67,7 +68,7 @@ func shot(t *testing.T, tt *ui.Tester, name string) {
 	}
 }
 
-func look(t *testing.T, app *App, tt *ui.Tester, panes herdr.Rect, th *chrome.Theme) {
+func look(t *testing.T, app *App, tt *ui.Tester, panes paneRect, th *chrome.Theme) {
 	t.Helper()
 	img := tt.Image()
 	ps := corePaneGeometries(t, app, tt)
