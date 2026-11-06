@@ -45,8 +45,9 @@ class PreparationTest(unittest.TestCase):
         self.bin.mkdir()
         go = self.bin / "go"
         go.write_text("#!/usr/bin/env python3\n"
-                      "import pathlib, sys\n"
+                      "import os, pathlib, sys, time\n"
                       "assert sys.argv[1:] == ['mod', 'download', '-json', 'example.com/mygo@v0.0.1']\n"
+                      "time.sleep(float(os.environ.get('FAKE_GO_DELAY', '0')))\n"
                       "for p in (pathlib.Path.cwd(), *pathlib.Path.cwd().parents):\n"
                       "    if (p / 'go.mod').exists():\n"
                       "        assert 'replace ' not in (p / 'go.mod').read_text()\n"
@@ -79,6 +80,26 @@ class PreparationTest(unittest.TestCase):
                       + ("*/old) echo 'test: restoration failed' >&2; exit 74;;\n" if restore else "")
                       + "esac\nexec /bin/mv \"$@\"\n")
         mv.chmod(0o755)
+
+    def test_runs_started_together_all_succeed(self):
+        env = dict(self.env, FAKE_GO_DELAY="0.5")
+        runs = [subprocess.Popen(["sh", "scripts/patch-mygo.sh"], cwd=self.root, env=env, text=True,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT) for _ in range(3)]
+        outputs = [r.communicate(timeout=20)[0] for r in runs]
+        for r, out in zip(runs, outputs):
+            self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(sum("made third_party/mygo" in out for out in outputs), 1, outputs)
+        self.assertIn("// patched", (self.output / "source.go").read_text())
+        self.assertFalse((self.root / "third_party/.mygo.lock").exists())
+
+    def test_lock_of_a_dead_process_is_taken_over(self):
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        lock = self.root / "third_party/.mygo.lock"
+        lock.mkdir(parents=True)
+        (lock / f"pid.{dead.pid}").touch()
+        self.assertIn("made third_party/mygo", self.prepare())
+        self.assertFalse(lock.exists())
 
     def test_first_idempotent_and_changed_inputs(self):
         self.assertIn("made third_party/mygo", self.prepare())

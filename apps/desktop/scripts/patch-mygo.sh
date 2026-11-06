@@ -16,6 +16,23 @@ set -- patches/mygo/*.patch
 [ -f "$1" ] || die "no patches in patches/mygo"
 inputs=$({ echo "$MODULE@$VERSION $SUM"; cat "$@"; } | sum)
 
+mkdir -p "$(dirname "$DIR")"
+LOCK=$ROOT/third_party/.mygo.lock
+tmp=
+trap 'rm -rf "$tmp"; [ ! -f "$LOCK/pid.$$" ] || rm -rf "$LOCK"' EXIT
+waited=0
+until mkdir "$LOCK" 2>/dev/null; do
+	holder=$(cd "$LOCK" 2>/dev/null && ls pid.* 2>/dev/null | sed -n 's/^pid\.//p' | head -n 1) || holder=
+	if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+		rm "$LOCK/pid.$holder" 2>/dev/null && rmdir "$LOCK" 2>/dev/null
+		continue
+	fi
+	[ $waited -lt 6000 ] || die "$LOCK is held by process ${holder:-unknown}; remove it if no preparation is running"
+	sleep 0.1
+	waited=$((waited + 1))
+done
+: >"$LOCK/pid.$$"
+
 old=
 [ ! -L "$DIR" ] || die "$DIR is a symlink; move it away"
 if [ -e "$DIR" ]; then
@@ -31,9 +48,7 @@ if [ -e "$DIR" ]; then
 	old=$DIR
 fi
 
-mkdir -p "$(dirname "$DIR")"
 tmp=$(mktemp -d "$ROOT/third_party/.mygo.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT
 echo 'module patch-mygo-download' >"$tmp/go.mod"
 json=$(cd "$tmp" && GOFLAGS= GOWORK=off go mod download -json "$MODULE@$VERSION") || die "cannot download $MODULE@$VERSION"
 src=$(printf '%s\n' "$json" | sed -n 's/^[[:space:]]*"Dir": "\(.*\)",$/\1/p')
