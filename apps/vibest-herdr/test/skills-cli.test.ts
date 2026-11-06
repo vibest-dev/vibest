@@ -3,7 +3,6 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-// Builtin skills: the invocations they print, and how each harness plugin ships and exposes them.
 import { assert, describe, it } from "@effect/vitest"
 import { type CoordinatorInput, HARNESS_IDS, type LaunchInput } from "@vibest/core/harness"
 import { BUILTIN as ADAPTERS } from "@vibest/core/harnesses"
@@ -20,8 +19,7 @@ const skillFiles = () =>
     .map((entry) => path.join(skills, entry.name, "SKILL.md"))
     .sort()
 
-/** A line's `vibest …` commands: a fence line, or each backtick span. */
-const commandsOn = (line: string) => {
+const vibestCommandsOnFenceLineOrBacktickSpans = (line: string) => {
   const spans = [...line.matchAll(/`([^`\n]+)`/g)]
     .map((match) => match[1]!.trim())
     .filter((span) => span.startsWith("vibest "))
@@ -57,7 +55,7 @@ const coordinator = (pluginDir: string): CoordinatorInput => ({
 const frontmatterField = (file: string, key: string) =>
   new RegExp(`^${key}:\\s*(.+)\\s*$`, "m").exec(fs.readFileSync(file, "utf8"))?.[1]
 
-describe("builtin skills", () => {
+describe("builtin skills: the invocations they print, and how each harness plugin ships and exposes them", () => {
   it("no skill uses the removed --access, and a session later vibest send-ed was not started with --archive-on-completion", () => {
     const errors: Array<string> = []
     for (const file of skillFiles()) {
@@ -71,7 +69,7 @@ describe("builtin skills", () => {
         const line = lines[index] ?? ""
         const at = `${rel}:${index + 1}`
         if (line.includes("--access")) errors.push(`${at}: --access`)
-        for (const command of commandsOn(line)) {
+        for (const command of vibestCommandsOnFenceLineOrBacktickSpans(line)) {
           if (command.startsWith("vibest run ")) archive = /(?:^|\s)--archive-on-completion(?:\s|$)/.test(command)
           const send = /^vibest send\s+(<[^>]+>)/.exec(command)
           if (!send?.[1]) continue

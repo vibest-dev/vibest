@@ -1,4 +1,3 @@
-// The project folder (SPEC §5.4): info names its paths, search reads docs, memories and artifacts.
 import { assert, describe, it } from "@effect/vitest"
 import { Layout } from "@vibest/core/paths"
 import { Project, type ProjectScope } from "@vibest/core/project"
@@ -10,8 +9,9 @@ import { tempDirectory } from "./fakes.ts"
 
 const scope: ProjectScope = { id: "0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b" }
 
-/** A Project service over a fresh temp VIBEST_HOME. */
-const withProject = <A, E>(program: Effect.Effect<A, E, Project | Layout | FileSystem.FileSystem | Path.Path>) =>
+const withProjectInTempHome = <A, E>(
+  program: Effect.Effect<A, E, Project | Layout | FileSystem.FileSystem | Path.Path>,
+) =>
   Effect.gen(function* () {
     const home = yield* tempDirectory("vibest-project-")
     const layout = Layer.succeed(Layout, yield* Layout.make(home))
@@ -19,8 +19,8 @@ const withProject = <A, E>(program: Effect.Effect<A, E, Project | Layout | FileS
   })
 
 describe("Project", () => {
-  it.effect("info names the folder and its subfolders; search reads their text files", () =>
-    withProject(
+  it.effect("info names the folder and its subfolders; search reads their text files and skips a .sh", () =>
+    withProjectInTempHome(
       Effect.gen(function* () {
         const project = yield* Project
         const layout = yield* Layout
@@ -35,7 +35,6 @@ describe("Project", () => {
         yield* write("docs/b/deep.md", "---\ndescription: deep doc\n---\nNeedle here")
         yield* write("docs/a.txt", "first line\nno match")
         yield* write("artifacts/w1-notes.md", "needle in artifacts")
-        // Not a text file vibest reads.
         yield* write("docs/skip.sh", "needle")
 
         assert.deepStrictEqual(yield* project.search(scope, { query: "NEEDLE" }), [

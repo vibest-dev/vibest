@@ -1,13 +1,9 @@
-// `vibest` starting the main agent while the project's main agent runs in another terminal: it asks to move it here.
-// Only a y whose stop finished starts; a no, no answer, EOF, a non-interactive terminal, or a stop that did not finish
-// starts nothing and never asks vibestd to stop it (or, after a failed stop, to start).
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit, Fiber, Sink, Stdio, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import { soleMainAgent } from "../src/cli.ts"
 
-/** Stdio on a terminal or not, with `stdin`; what was printed lands in `out`. */
 const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>, out: Array<string> = []) =>
   Stdio.layerTest({
     stdinIsTerminal: Effect.succeed(terminal),
@@ -17,8 +13,7 @@ const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>, out: Array<s
   })
 const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 
-/** A client whose main agent runs in herdr terminal w1:p1; it records every call. `start` stands for CoordinatorSession and exec. */
-const fake = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped") => {
+const clientWithMainAgentInW1p1RecordingCalls = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped") => {
   const calls: Array<string> = []
   const client = {
     "Project.RunningCoordinator": () =>
@@ -32,14 +27,14 @@ const fake = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped")
         return stop === "unsupported" ? { result: stop, reason: "it runs on another machine" } : { result: stop }
       }),
   } as unknown as Parameters<typeof soleMainAgent>[0]
-  const start = Effect.sync(() => {
+  const startStandsForCoordinatorSessionAndExec = Effect.sync(() => {
     calls.push("start")
     return "started"
   })
-  return { calls, run: soleMainAgent(client, "w1:p2", start) }
+  return { calls, run: soleMainAgent(client, "w1:p2", startStandsForCoordinatorSessionAndExec) }
 }
 
-describe("soleMainAgent", () => {
+describe("soleMainAgent while the main agent runs in another terminal: only a y whose stop finished starts; anything else starts nothing and never asks to stop (or, after a failed stop, to start)", () => {
   for (const [name, terminal, stdin] of [
     ["N", true, typed("n\n")],
     ["empty", true, typed("\n")],
@@ -48,7 +43,7 @@ describe("soleMainAgent", () => {
   ] as const)
     it.effect(`${name}: fails naming where it runs, starts nothing, stops nothing`, () =>
       Effect.gen(function* () {
-        const f = fake()
+        const f = clientWithMainAgentInW1p1RecordingCalls()
         const exit = yield* Effect.exit(f.run)
         assert.isTrue(Exit.isFailure(exit))
         assert.include(String(exit), "the main agent (claude) runs in herdr terminal w1:p1")
@@ -58,7 +53,7 @@ describe("soleMainAgent", () => {
 
   it.effect("no answer within two minutes: fails, starts nothing, stops nothing", () =>
     Effect.gen(function* () {
-      const f = fake()
+      const f = clientWithMainAgentInW1p1RecordingCalls()
       const fiber = yield* Effect.forkChild(Effect.exit(f.run))
       yield* TestClock.adjust("2 minutes")
       assert.isTrue(Exit.isFailure(yield* Fiber.join(fiber)))
@@ -69,7 +64,7 @@ describe("soleMainAgent", () => {
   it.effect("y: asks to move it here, stops it, then starts", () => {
     const out: Array<string> = []
     return Effect.gen(function* () {
-      const f = fake("stopped")
+      const f = clientWithMainAgentInW1p1RecordingCalls("stopped")
       assert.strictEqual(yield* f.run, "started")
       assert.deepStrictEqual(f.calls, ["RunningCoordinator", "StopCoordinator", "start"])
       assert.include(
@@ -82,7 +77,7 @@ describe("soleMainAgent", () => {
   it.effect("y but the stop did not finish (running) or the main agent moved meanwhile: fails, starts nothing", () =>
     Effect.gen(function* () {
       for (const result of ["running", "moved"] as const) {
-        const f = fake(result)
+        const f = clientWithMainAgentInW1p1RecordingCalls(result)
         const exit = yield* Effect.exit(f.run)
         assert.isTrue(Exit.isFailure(exit), result)
         assert.deepStrictEqual(f.calls, ["RunningCoordinator", "StopCoordinator"], result)
@@ -92,7 +87,7 @@ describe("soleMainAgent", () => {
 
   it.effect("y but it cannot be moved from here: fails saying why, not that it did not exit; starts nothing", () =>
     Effect.gen(function* () {
-      const f = fake("unsupported")
+      const f = clientWithMainAgentInW1p1RecordingCalls("unsupported")
       const exit = yield* Effect.exit(f.run)
       assert.isTrue(Exit.isFailure(exit))
       assert.include(String(exit), "cannot be moved from here: it runs on another machine. Exit it there first")

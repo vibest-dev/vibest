@@ -1,7 +1,5 @@
 import net from "node:net"
 
-// vibest.sock end to end (SPEC §7, §11): the RPC server on a real unix socket over the fake herdr, driven by the real
-// client and by a raw JSON-RPC line the way a hook sends it.
 import { assert, describe, it } from "@effect/vitest"
 import { SocketConnector } from "@vibest/client/client"
 import { cliHeaders, connect, incompatibleDaemon, protocolHeaders, withVibest } from "@vibest/client/client"
@@ -57,7 +55,6 @@ const test = <E>(
 
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 const asCli = (raw: Effect.Success<typeof client>, repositoryRoot: string) => authed(raw, cliHeaders(repositoryRoot))
-/** A session as its environment names it: with its project id (VIBEST_PROJECT_ID), which vibestd requires. */
 const asSession = (raw: Effect.Success<typeof client>, sessionId: string, repositoryRoot?: string) =>
   Effect.gen(function* () {
     const row = yield* (yield* Db).sessionIdentity(sessionId)
@@ -81,11 +78,11 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(ping.capabilities, { http: true, handoff: true, requests: true })
       const rejected = yield* Effect.exit(raw.List({}))
       assert.strictEqual(failureTag(rejected), "ProtocolRejected")
-      // Says what happened and what to run: a caller without the header predates it, so it is told to restart.
       const said = String(Exit.isFailure(rejected) && Cause.pretty(rejected.cause))
       assert.include(
         said,
         `this agent runs an older vibest (protocol none), vibestd runs ${VERSION} (protocol ${PROTOCOL}); run ${MISMATCH_ACTION} to restart this agent on it`,
+        "a caller without the protocol header predates it, so it is told to restart",
       )
       const newer = yield* Effect.exit(raw.List({}, { headers: { "vibest-protocol": String(PROTOCOL + 1) } }))
       assert.include(
@@ -125,17 +122,15 @@ describe("vibest.sock", () => {
       assert.include(short.message, "at least 8")
       assert.strictEqual((yield* Effect.flip(c.Get({ id: "nothing!" })))._tag, "NoSuchSession")
       assert.deepStrictEqual(yield* c.Send({ id: id.slice(0, 12), message: "more" }), { id })
-      // `--peer` takes a prefix too.
       const peer = yield* c.Spawn({ harness: "pi", prompt: "beside it", peer: id.slice(0, 10) })
-      assert.strictEqual(yield* db.sessionDirectory(peer.id), yield* db.sessionDirectory(id))
-      // Another id with the same first 8 characters: those 8 no longer name one session.
-      const twin = `${id.slice(0, 8)}-0000-4000-8000-000000000000`
+      assert.strictEqual(yield* db.sessionDirectory(peer.id), yield* db.sessionDirectory(id), "--peer takes a prefix")
+      const twinWithSameFirst8 = `${id.slice(0, 8)}-0000-4000-8000-000000000000`
       const row = (yield* db.getSession(id))!
-      yield* db.insertSession({ ...row, id: twin }, row.projectId)
+      yield* db.insertSession({ ...row, id: twinWithSameFirst8 }, row.projectId)
       const ambiguous = yield* Effect.flip(c.Get({ id: id.slice(0, 8) }))
       assert.strictEqual(ambiguous._tag, "AmbiguousSession")
       assert.include(ambiguous.message, id)
-      assert.include(ambiguous.message, twin)
+      assert.include(ambiguous.message, twinWithSameFirst8)
       assert.strictEqual((yield* c.Get({ id: id.slice(0, 12) })).id, id)
     }),
   )
@@ -155,9 +150,12 @@ describe("vibest.sock", () => {
         (yield* db.listSessions()).map((w) => w.id),
         [first.id],
       )
-      // The repeat's reserved worktree directory went again: one directory beside the session's.
       const worktree = (yield* db.sessionDirectory(first.id))!
-      assert.deepStrictEqual(yield* fs.readDirectory(path.dirname(worktree)), [path.basename(worktree)])
+      assert.deepStrictEqual(
+        yield* fs.readDirectory(path.dirname(worktree)),
+        [path.basename(worktree)],
+        "the repeat's reserved worktree directory went again",
+      )
       yield* until(db.getSession(first.id), (w) => w?.turnState === "open")
       const queued = (request: string) =>
         sql<{ n: number }>`SELECT count(*) AS n FROM event WHERE type = 'inbox.queued'
@@ -237,9 +235,8 @@ describe("vibest.sock", () => {
       assert.strictEqual(after?.status, "completed")
       assert.strictEqual(after?.summary, "fixed it")
       assert.isNumber(after?.endedAt)
-      // A follow-up (delivered at once: the turn is over) is not the task.
       yield* c.Send({ id, message: "follow up" })
-      assert.strictEqual((yield* c.List({})).find((w) => w.id === id)!.task, cut)
+      assert.strictEqual((yield* c.List({})).find((w) => w.id === id)!.task, cut, "a follow-up is not the task")
       assert.strictEqual((yield* c.Get({ id })).task, prompt)
     }),
   )
@@ -294,12 +291,15 @@ describe("vibest.sock", () => {
         failureTag(yield* Effect.exit(bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }))),
         "ProtocolRejected",
       )
-      // An integration's call names its version, which is recorded even when its protocol is refused.
       yield* bare.TurnEnd(
         { sessionId: id, harness: "pi", event: "{}" },
         { headers: sessionHeaders({ sessionId: id, pluginVersion: "1.2.3" }) },
       )
-      assert.deepStrictEqual((yield* db.getSession(id))?.metadata.integration, { version: "1.2.3", protocol: PROTOCOL })
+      assert.deepStrictEqual(
+        (yield* db.getSession(id))?.metadata.integration,
+        { version: "1.2.3", protocol: PROTOCOL },
+        "an integration's version is recorded even when its protocol is refused",
+      )
       const old = { ...sessionHeaders({ sessionId: id, pluginVersion: "1.0.0" }), "vibest-protocol": "1" }
       assert.strictEqual(
         failureTag(yield* Effect.exit(bare.TurnEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: old }))),
@@ -313,13 +313,12 @@ describe("vibest.sock", () => {
         ),
         "NoSuchSession",
       )
-      // A known session without its project id is refused, as over HTTP.
       assert.strictEqual(
         failureTag(yield* Effect.exit(bare.Report({ message: "x" }, { headers: sessionHeaders({ sessionId: id }) }))),
         "InvalidCaller",
+        "a known session without its project id is refused, as over HTTP",
       )
 
-      // The harness's conversation id rides on a session's calls: kept from the session's own harness (pi) alone.
       const projectId = String((yield* db.sessionIdentity(id))!.projectId)
       const as = (harness: string, harnessSessionId: string) =>
         authed(raw, sessionHeaders({ sessionId: id, projectId, harness, harnessSessionId }))
@@ -327,7 +326,6 @@ describe("vibest.sock", () => {
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
       yield* as("claude", "other").Report({ message: "two" })
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
-      // An open hook call (TurnEnd) carries it too.
       yield* raw.TurnEnd(
         { sessionId: id, harness: "pi", event: "{}" },
         { headers: sessionHeaders({ sessionId: id, projectId, harness: "pi", harnessSessionId: "pi-2" }) },
@@ -355,7 +353,6 @@ describe("vibest.sock", () => {
       for (const call of refused) assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden")
       assert.strictEqual(failureTag(yield* Effect.exit(Stream.runDrain(w["Inbox.Subscribe"](undefined)))), "Forbidden")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
-      // The refused launch rotated nothing: the Coordinator's launch id and report watermark still hold.
       yield* raw.CoordinatorSessionReady(
         { sessionId: launch.sessionId, harness: "claude", harnessSessionId: "stale" },
         { headers: protocolHeaders() },
@@ -419,8 +416,11 @@ describe("vibest.sock", () => {
         (yield* db.pendingInbox(id)).map((r) => r.message),
         ["from its own Coordinator", "from the user"],
       )
-      // Past the ownership check, the user's command line archives it even while it works.
-      assert.strictEqual(failureTag(yield* Effect.exit(user.Remove({ id }))), "success")
+      assert.strictEqual(
+        failureTag(yield* Effect.exit(user.Remove({ id }))),
+        "success",
+        "the user's command line archives it even while it works",
+      )
     }),
   )
 
@@ -443,7 +443,6 @@ describe("vibest.sock", () => {
       const { id } = yield* a.Spawn({ harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       type Client = Effect.Success<typeof client>
-      // Every method but Hello and the open ones, called the same way by each caller.
       const protectedCalls = (
         c: Client,
       ): ReadonlyArray<readonly [string, Effect.Effect<unknown, { readonly _tag: string }>]> => [
@@ -469,7 +468,6 @@ describe("vibest.sock", () => {
         ["Report", c.Report({ message: "x" })],
         ["Daemon.Stop", c["Daemon.Stop"]({ instance: "x" })],
         ["Daemon.Handoff", c["Daemon.Handoff"]({ instance: "x", command: ["vibest"] })],
-        // Another session's start or report: a session speaks only for itself.
         ["Session.Start", c["Session.Start"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
         ["Session.Ready", c["Session.Ready"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
         ["Agents.Outdated", c["Agents.Outdated"]()],
@@ -482,13 +480,11 @@ describe("vibest.sock", () => {
       for (const [method, call] of protectedCalls(w).filter(([m]) => m !== "Report"))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
 
-      // A main agent's integration reports its own harness ready; a subagent's its own.
       yield* a["Session.Ready"]({ id: (yield* db.coordinatorOf((yield* db.getSession(id))!.projectId))!.id })
       yield* w["Session.Ready"]({ id, pid: 4242 })
       assert.isDefined(yield* db.readyAt(id))
       assert.strictEqual((yield* db.getSession(id))!.metadata.pid, 4242)
 
-      // Another project's coordinator can read a session, not manage it, and does not list it.
       const b = yield* asCoordinator(yield* makeRepository, "p2")
       assert.deepInclude(yield* b.Get({ id }), { id, agent: "general" })
       assert.strictEqual((yield* b.List({}))[0]?.agent, "main")
@@ -509,7 +505,6 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
 
-      // Ping is exempt. The other caller-less methods need protocol and ignore caller headers.
       assert.strictEqual((yield* bare.Ping()).version, VERSION)
       assert.strictEqual((yield* bare.Ping()).protocol, PROTOCOL)
       yield* bare.Plugins(undefined, { headers: protocolHeaders() })
@@ -563,7 +558,6 @@ describe("vibest.sock", () => {
           }),
         )
 
-      // Busy: queued, nothing typed into the running turn.
       yield* sendAndHangUp("while busy")
       assert.deepStrictEqual(
         (yield* db.pendingInbox(id)).map((r) => r.message),
@@ -576,7 +570,6 @@ describe("vibest.sock", () => {
       yield* sessions.check(id)
       assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "while busy")
 
-      // Idle: delivered by vibestd although the connection that sent it is already closed.
       yield* writeResult(id, "pi", { text: "status: completed" }, 2000)
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -595,7 +588,6 @@ describe("vibest.sock", () => {
       const db = yield* Db
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
-      // Cursor reports its session only through herdr; this one exits before it did, so it cannot be resumed.
       const { id } = yield* c.Spawn({ harness: "cursor", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       yield* writeResult(id, "cursor", { text: "status: completed" })
@@ -627,7 +619,6 @@ describe("vibest.sock", () => {
         place: `herdr terminal ${opened.terminal}`,
         attach: ["fake", "attach"],
       })
-      // The command runs with the pane's shell kept behind it: a failing `vibest` shows its error and the pane stays.
       assert.deepStrictEqual(yield* herdr.callsTo("open"), [
         {
           project: root,
@@ -640,7 +631,6 @@ describe("vibest.sock", () => {
           focus: true,
         },
       ])
-      // The shell is open first; the runtime then types the command. vibestd never sends text itself.
       assert.deepStrictEqual(yield* herdr.callsTo("run"), [
         {
           terminal: opened.terminal,
@@ -672,7 +662,6 @@ describe("vibest.sock", () => {
       assert.strictEqual(open.env.MAIN_PROBE, undefined)
       assert.deepStrictEqual(JSON.parse(open.env.VIBEST_MAIN_ENV!), { MAIN_PROBE: secret })
       assert.strictEqual(open.env.VIBEST_HOME, layout.home)
-      // Nothing is parked: a start that does not itself pass --env does not receive the pairs.
       const started = yield* c["Project.CoordinatorSession"]({
         harness: "pi",
         fresh: false,
@@ -771,12 +760,10 @@ describe("vibest.sock", () => {
       assert.isNull(first.harnessSessionId)
       yield* c.CoordinatorSessionReady({ sessionId: first.sessionId, harness: "claude", harnessSessionId: "c1" })
       yield* until(savedSession(first.sessionId), (id) => id === "c1")
-      // Another harness's report does not count. The same id is reused on relaunch.
       yield* c.CoordinatorSessionReady({ sessionId: first.sessionId, harness: "pi", harnessSessionId: "x0" })
       const second = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
       assert.strictEqual(second.sessionId, first.sessionId)
       assert.strictEqual(second.harnessSessionId, "c1")
-      // `--new` ends this conversation and starts another. The last report wins on the new one.
       const fresh = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: true, terminal: "test/p1" })
       assert.notStrictEqual(fresh.sessionId, first.sessionId)
       assert.isNull(fresh.harnessSessionId)
@@ -805,7 +792,6 @@ describe("vibest.sock", () => {
       const row = (yield* db.coordinatorOf(project))!
       assert.strictEqual(row.address?.id, "test/p1")
       assert.strictEqual(row.harnessId, "claude")
-      // Its own terminal may start it again; another one may once it exited.
       yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
       yield* herdr.updateAgent("test/p1", (a) => ({ ...a, alive: false }))
       const moved = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p2" })
@@ -862,8 +848,7 @@ describe("vibest.sock", () => {
         ] as const)
           assert.strictEqual((yield* refused(harness, fresh, provider, available, plugin))._tag, "HarnessUnavailable")
       }
-      // A refused launch does not call CoordinatorSession, so the saved conversation stands. A claude report no longer matches.
-      assert.strictEqual(yield* savedSession(pi.sessionId), "x1")
+      assert.strictEqual(yield* savedSession(pi.sessionId), "x1", "a refused launch leaves the saved conversation")
       yield* c.CoordinatorSessionReady({ sessionId: pi.sessionId, harness: "claude", harnessSessionId: "c2" })
       yield* c.CoordinatorSessionReady({ sessionId: pi.sessionId, harness: "pi", harnessSessionId: "x2" })
       assert.strictEqual(yield* savedSession(pi.sessionId), "x2")
@@ -901,7 +886,6 @@ describe("vibest.sock", () => {
         address: { machine: "local", id: "w1:p9" },
       })
       yield* herdr.seedAgent("w1:p9")
-      // Busy while the rows arrive (each queued row is offered at once), then idle.
       yield* herdr.updateAgent("w1:p9", (a) => ({ ...a, status: "working" }))
       const project = (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.projectId
       const row = (sessionId: string, message: string) => ({ sessionId, kind: "result" as const, message, details: {} })
@@ -922,9 +906,8 @@ describe("vibest.sock", () => {
         ["one\n\ntwo"],
       )
 
-      // The prompt made the pane busy: nothing more until it is idle again.
       yield* Effect.void
-      assert.strictEqual((yield* db.coordinatorPending(project)).length, 1)
+      assert.strictEqual((yield* db.coordinatorPending(project)).length, 1, "the prompt made the pane busy")
       yield* herdr.endTurn("w1:p9")
       yield* inbox.deliver(project)
       assert.deepStrictEqual(yield* db.coordinatorPending(project), [])
@@ -1029,8 +1012,8 @@ describe("vibest.sock", () => {
         message: "back",
         details: {},
       })
-      // Handed out elsewhere before the subscription opens: nothing pending for it.
-      assert.deepStrictEqual(yield* db.claim([row.id]), [row.id])
+      const claimedElsewhereBeforeSubscribe = yield* db.claim([row.id])
+      assert.deepStrictEqual(claimedElsewhereBeforeSubscribe, [row.id])
       const c = yield* asSession(yield* client, coord.sessionId)
       const received = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.take(1), Stream.runCollect, Effect.forkChild)
       yield* settled
@@ -1313,17 +1296,19 @@ describe("vibest.sock", () => {
       assert.strictEqual(failureTag(refused), "IncompatibleDaemon")
       assert.match(String(Exit.isFailure(refused) && Cause.pretty(refused.cause)), new RegExp(`protocol ${PROTOCOL}`))
       assert.match(String(Exit.isFailure(refused) && Cause.pretty(refused.cause)), /vibest daemon/)
-      // Both sides, as far as each is known; the legacy vibestd's PID is not, and is never guessed from vibestd.pid.
       const said = String(Exit.isFailure(refused) && Cause.pretty(refused.cause))
-      assert.include(said, "vibestd 0.0.0 (pid unknown, command unknown)")
+      assert.include(
+        said,
+        "vibestd 0.0.0 (pid unknown, command unknown)",
+        "a legacy pid is never guessed from vibestd.pid",
+      )
       assert.include(said, `vibest ${VERSION} (`)
       assert.include(said, "kill -TERM <pid>")
       assert.include(said, "vibestd is older (0.0.0); run vibest update")
-      // An older build of the same package version (protocol 2, its Ping without `runtimes`): told plainly, never a SchemaError.
-      const older = yield* serve({ protocol: 2, version: VERSION, runtimeSessions: [] })
+      const olderBuildWithoutRuntimes = yield* serve({ protocol: 2, version: VERSION, runtimeSessions: [] })
       const olderRefused = yield* Effect.exit(
         withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.die("must not call"), { start: false }).pipe(
-          Effect.provideService(Layout, older.layout),
+          Effect.provideService(Layout, olderBuildWithoutRuntimes.layout),
         ),
       )
       assert.strictEqual(failureTag(olderRefused), "IncompatibleDaemon")
@@ -1464,10 +1449,8 @@ describe("vibest.sock", () => {
       const pane = "w1:coord"
       yield* herdr.seedAgent(pane)
       yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: pane })
-      // Something else in the foreground of its shell: the runtime reports the main agent busy.
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "working" }))
       assert.deepInclude((yield* c.List({}))[0], { agent: "main", status: "working" })
-      // Back at its shell: `state` reports idle now (§3), a live status of its own.
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "idle" }))
       assert.deepInclude((yield* c.List({}))[0], { agent: "main", status: "idle" })
     }),

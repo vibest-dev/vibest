@@ -1,4 +1,3 @@
-// Subscription polls and `vibest subscriptions`. CLIs, the keychain and HTTP are fakes: nothing here touches the network.
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Harness, HarnessUnavailable } from "@vibest/core/harness"
@@ -68,11 +67,10 @@ const harnessLayer = (installed: ReadonlyArray<string>) =>
     models: () => Effect.die("unused"),
   })
 
-/** One fake machine. `hang` names commands (`claude auth status --json`) that never exit. */
-const world = (options: {
+const fakeMachine = (options: {
   readonly installed: ReadonlyArray<string>
   readonly commands: Readonly<Record<string, string>>
-  readonly hang?: ReadonlyArray<string>
+  readonly commandsThatNeverExit?: ReadonlyArray<string>
   readonly passwords?: Readonly<Record<string, string>>
   readonly http?: Readonly<Record<string, { readonly status: number; readonly body: unknown }>>
   readonly home: string
@@ -80,7 +78,7 @@ const world = (options: {
   const spawned: Array<Spawned> = []
   const requests: Array<{ readonly url: string; readonly authorization: string | undefined }> = []
   const logs: Array<unknown> = []
-  const hanging = new Set(options.hang ?? [])
+  const hanging = new Set(options.commandsThatNeverExit ?? [])
   const spawner = ChildProcessSpawner.make((command) => {
     if (command._tag !== "StandardCommand") return Effect.die("piped")
     const id = [command.command, ...command.args].join(" ")
@@ -99,8 +97,7 @@ const world = (options: {
       HttpClientResponse.fromWeb(request, new Response(JSON.stringify(hit.body), { status: hit.status })),
     )
   })
-  // The fake spawner is inside Platform.services so it wins: poll must not run the real CLIs.
-  const layer = Layer.mergeAll(
+  const fakesProvidedInsidePlatformServicesSoTheyWin = Layer.mergeAll(
     Subscriptions.layer,
     harnessLayer(options.installed),
     Layer.succeed(Keychain, { password: (service) => Effect.succeed(options.passwords?.[service]) }),
@@ -109,7 +106,7 @@ const world = (options: {
   )
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
-      Effect.provide(layer),
+      Effect.provide(fakesProvidedInsidePlatformServicesSoTheyWin),
       Effect.provide(Platform.services),
       Effect.provide(Logger.layer([Logger.make((entry) => void logs.push(entry.message))])),
       Effect.provide(
@@ -118,7 +115,7 @@ const world = (options: {
         ),
       ),
     )
-  return { spawned, requests, logs, layer, provide }
+  return { spawned, requests, logs, layer: fakesProvidedInsidePlatformServicesSoTheyWin, provide }
 }
 
 const served = Server.layer.pipe(
@@ -132,7 +129,7 @@ const home = Effect.gen(function* () {
   return yield* fs.makeTempDirectoryScoped({ prefix: "vibest-subs-" })
 }).pipe(Effect.provide(Platform.services), Effect.orDie)
 
-describe("subscriptions", () => {
+describe("subscription polls and vibest subscriptions over fake CLIs, keychain and HTTP: nothing touches the network", () => {
   it("the macOS keychain read is security find-generic-password -w", () => {
     assert.deepStrictEqual(
       [...securityArgs(CLAUDE_CREDENTIALS)],
@@ -180,7 +177,7 @@ describe("subscriptions", () => {
           reason: "credentials_not_configured",
         }),
       }
-      const fake = world({
+      const fake = fakeMachine({
         installed: ["claude", "cursor", "pi"],
         commands,
         home: dir,
@@ -244,7 +241,7 @@ describe("subscriptions", () => {
   it.effect("a usage response replaces plugin limits; a hung CLI and a non-200 do not", () =>
     Effect.gen(function* () {
       const dir = yield* home
-      const fresh = world({
+      const fresh = fakeMachine({
         installed: ["claude", "cursor"],
         home: dir,
         commands: {
@@ -291,7 +288,7 @@ describe("subscriptions", () => {
       assert.notInclude(JSON.stringify({ logs: fresh.logs, listed }), CLAUDE_SECRET)
       assert.notInclude(JSON.stringify(listed), CURSOR_SECRET)
 
-      const denied = world({
+      const denied = fakeMachine({
         installed: ["claude"],
         home: dir,
         commands: { "claude auth status --json": claudeStatus },
@@ -315,11 +312,11 @@ describe("subscriptions", () => {
       assert.strictEqual(kept.limits[0]?.percent, 9)
       assert.notInclude(JSON.stringify(kept) + JSON.stringify(denied.logs), CLAUDE_SECRET)
 
-      const hung = world({
+      const hung = fakeMachine({
         installed: ["claude"],
         home: dir,
         commands: {},
-        hang: ["claude auth status --json"],
+        commandsThatNeverExit: ["claude auth status --json"],
       })
       const row = yield* hung.provide(
         Effect.gen(function* () {
@@ -341,7 +338,7 @@ describe("subscriptions", () => {
   )
 
   const loggedOut = (dir: string) =>
-    world({
+    fakeMachine({
       installed: ["claude"],
       home: dir,
       commands: { "claude auth status --json": JSON.stringify({ loggedIn: false }) },

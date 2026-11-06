@@ -1,6 +1,3 @@
-// vibest rm's process proof (SPEC §8.6a): the runtime's close ends the session's terminal (its processes with it), the
-// close is recorded on the row, and the worktree goes only once no process still works in it. The fake runtime and fake
-// lsof, real git.
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { cwdHolders, livenessOf, LSOF_KILL_AFTER, lsofArgs, Processes, runFor } from "@vibest/core/processes"
@@ -31,7 +28,6 @@ import {
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer(options))))
 
-/** A session in its first turn, and the terminal its agent runs in. */
 const workingSession = Effect.gen(function* () {
   const sessions = yield* Sessions
   const db = yield* Db
@@ -54,7 +50,6 @@ const workingSession = Effect.gen(function* () {
   return { id, pane, sessions, db, herdr, worktree, rules: yield* systemPromptFile(id) }
 })
 
-/** A session whose first turn is over, and the terminal its agent runs in. */
 const idleSession = Effect.gen(function* () {
   const w = yield* workingSession
   const { id, sessions, herdr } = w
@@ -64,8 +59,7 @@ const idleSession = Effect.gen(function* () {
   return w
 })
 
-/** remove, with virtual time moved past the signal-0 and cwd polling (they sleep between checks). */
-const removeWaiting = (sessions: Sessions["Service"], id: string) =>
+const removeMovingVirtualTimePastPolling = (sessions: Sessions["Service"], id: string) =>
   Effect.gen(function* () {
     const fiber = yield* Effect.forkChild(sessions.remove(id))
     yield* untilVirtual(
@@ -75,7 +69,6 @@ const removeWaiting = (sessions: Sessions["Service"], id: string) =>
     return yield* Fiber.join(fiber)
   })
 
-/** remove, timed in virtual time from its first cwd listing to its outcome. */
 const removeTimingCwd = (sessions: Sessions["Service"], id: string) =>
   Effect.gen(function* () {
     const held = yield* (yield* FakeProcesses).holdCwd()
@@ -105,13 +98,11 @@ describe.concurrent("vibest rm: process proof", () => {
         worktree: "removed",
         reasons: [],
       })
-      // The runtime's close is the process proof now: vibestd never probes a PID itself.
-      assert.deepStrictEqual(yield* fake.probed, [])
+      assert.deepStrictEqual(yield* fake.probed, [], "the runtime's close is the process proof: vibestd probes no PID")
       const row = (yield* db.getSession(id))!
       assert.isNotNull(row.exitedAt)
       assert.deepStrictEqual(yield* processEnds(id), ["archived"])
-      // A 4-hex name under the repository's directory, not the session id.
-      assert.match(worktree.split("/").at(-1)!, /^[0-9a-f]{4}$/)
+      assert.match(worktree.split("/").at(-1)!, /^[0-9a-f]{4}$/, "a 4-hex worktree name, not the session id")
       assert.isFalse(yield* fs.exists(worktree))
       assert.isFalse(yield* fs.exists(rules))
     }),
@@ -136,8 +127,8 @@ describe.concurrent("vibest rm: process proof", () => {
       const held = yield* herdr.hold("close")
       const removing = yield* Effect.forkChild(Effect.flip(sessions.remove(id)))
       yield* held.reached
-      // The runtime closed the terminal, but the connection broke before its reply.
-      yield* herdr.runtime.close({ machine: "local", id: pane })
+      const closedButReplyLost = herdr.runtime.close({ machine: "local", id: pane })
+      yield* closedButReplyLost
       yield* held.release("unreachable")
       assert.strictEqual((yield* Fiber.join(removing))._tag, "RuntimeUnreachable")
       const row = (yield* db.getSession(id))!
@@ -146,9 +137,12 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.isTrue(row.metadata.archived)
       assert.isTrue(row.metadata.removed)
       assert.isTrue(yield* fs.exists(worktree))
-      // A new vibestd: nothing in memory, the row has the record.
-      const restarted = yield* Sessions.make({ maxSessions: undefined })
-      assert.deepInclude(yield* restarted.remove(id), { processes: "exited", pane: "closed", worktree: "removed" })
+      const newVibestdWithOnlyTheRow = yield* Sessions.make({ maxSessions: undefined })
+      assert.deepInclude(yield* newVibestdWithOnlyTheRow.remove(id), {
+        processes: "exited",
+        pane: "closed",
+        worktree: "removed",
+      })
       assert.isNotNull((yield* db.getSession(id))!.exitedAt)
     }),
   )
@@ -166,9 +160,9 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.isTrue(HashMap.has(yield* a.herdr.panes, a.pane))
       assert.deepStrictEqual(yield* processEnds(a.id), [])
 
-      // Closed by hand before vibest rm: the runtime has no such terminal, so it is already gone by the close contract.
       const b = yield* idleSession
-      yield* b.herdr.runtime.close({ machine: "local", id: b.pane })
+      const closedByHandBeforeRm = b.herdr.runtime.close({ machine: "local", id: b.pane })
+      yield* closedByHandBeforeRm
       const gone = yield* b.sessions.remove(b.id)
       assert.deepInclude(gone, { processes: "exited", pane: "closed", worktree: "removed" })
       assert.isNotNull((yield* b.db.getSession(b.id))!.exitedAt)
@@ -181,33 +175,33 @@ describe.concurrent("vibest rm: process proof", () => {
     "worktree already gone: its rules file is removed once its processes are proven exited, and the report stays",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      /** The session's worktree deleted outside vibest, and its result and rules files with recognizable contents. */
-      const seeded = (w: Effect.Success<typeof idleSession>) =>
+      const worktreeDeletedOutsideVibest = (w: Effect.Success<typeof idleSession>) =>
         Effect.gen(function* () {
           yield* fs.remove(w.worktree, { recursive: true })
           yield* writeResult(w.id, "pi", { text: `result of ${w.id}` })
           yield* fs.writeFileString(w.rules, `rules of ${w.id}`)
         })
 
-      // Its terminal closed by hand: the close contract already proved its processes gone, so the rules file goes. The
-      // report's own check has already seen the exit, so there is no terminal left to close.
-      // The reported turn end is an event, not a file, so archive does not drop it.
-      const reported = (id: string) => eventsOf(id, "turn.reported").pipe(Effect.map((rows) => rows.at(-1)?.data.text))
+      const reportedTurnEndEvent = (id: string) =>
+        eventsOf(id, "turn.reported").pipe(Effect.map((rows) => rows.at(-1)?.data.text))
       const a = yield* idleSession
       yield* a.herdr.runtime.close({ machine: "local", id: a.pane })
-      yield* seeded(a)
+      yield* worktreeDeletedOutsideVibest(a)
       yield* until(a.db.getSession(a.id), (row) => row?.exitedAt !== null)
       yield* settled
-      assert.deepInclude(yield* a.sessions.remove(a.id), { processes: "exited", pane: "none", worktree: "gone" })
-      assert.strictEqual(yield* reported(a.id), `result of ${a.id}`)
+      assert.deepInclude(
+        yield* a.sessions.remove(a.id),
+        { processes: "exited", pane: "none", worktree: "gone" },
+        "closed by hand: the check already saw the exit, so no terminal is left to close",
+      )
+      assert.strictEqual(yield* reportedTurnEndEvent(a.id), `result of ${a.id}`)
       assert.isFalse(yield* fs.exists(a.rules))
 
-      // Its terminal closed by vibest rm and no process in it: the rules file goes as well.
       const b = yield* idleSession
-      yield* seeded(b)
+      yield* worktreeDeletedOutsideVibest(b)
       yield* settled
       assert.deepInclude(yield* b.sessions.remove(b.id), { processes: "exited", pane: "closed", worktree: "gone" })
-      assert.strictEqual(yield* reported(b.id), `result of ${b.id}`)
+      assert.strictEqual(yield* reportedTurnEndEvent(b.id), `result of ${b.id}`)
       assert.isFalse(yield* fs.exists(b.rules))
     }),
   )
@@ -219,7 +213,7 @@ describe.concurrent("vibest rm: process proof", () => {
       const fake = yield* FakeProcesses
       const { id, sessions, db, herdr, worktree, rules } = yield* idleSession
       yield* fake.setCwdUsers([4242])
-      const out = (yield* removeWaiting(sessions, id))!
+      const out = (yield* removeMovingVirtualTimePastPolling(sessions, id))!
       assert.deepInclude(out, { processes: "alive", pane: "closed", worktree: "kept" })
       assert.include(out.reasons.join("\n"), "process 4242 has its working directory in it")
       assert.isNull((yield* db.getSession(id))!.exitedAt)
@@ -253,11 +247,13 @@ describe.concurrent("vibest rm: process proof", () => {
         worktree: "kept",
         reasons: ["worktree kept: process 4242 has its working directory in it"],
       })
-      // One listing, no waiting for the process to leave. (Elapsed virtual time is not asserted: the test moves it in
-      // steps while git runs, more of them under load.)
-      assert.strictEqual((yield* fake.cwdListings) - before, 1)
-      // An unclear listing keeps it too.
-      yield* fake.setCwdUsers(undefined)
+      assert.strictEqual(
+        (yield* fake.cwdListings) - before,
+        1,
+        "one listing, no waiting for the process to leave (elapsed virtual time grows with git under load)",
+      )
+      const unclearListing = undefined
+      yield* fake.setCwdUsers(unclearListing)
       assert.deepInclude(yield* b.sessions.remove(b.id), {
         worktree: "kept",
         reasons: [
@@ -294,7 +290,7 @@ describe.concurrent("vibest rm: process proof", () => {
       const fake = yield* FakeProcesses
       const { id, sessions, worktree } = yield* idleSession
       yield* fake.holdCwd()
-      const out = (yield* removeWaiting(sessions, id))!
+      const out = (yield* removeMovingVirtualTimePastPolling(sessions, id))!
       assert.deepInclude(out, {
         processes: "unknown",
         worktree: "kept",
@@ -338,10 +334,10 @@ describe.concurrent("vibest rm: process proof", () => {
       const out = (yield* sessions.remove(id))!
       assert.deepInclude(out, { processes: "exited", pane: "closed", worktree: "removed" })
       assert.deepStrictEqual(out.reasons, [`${id} was working: interrupted, then its terminal closed`])
-      // Exactly one key press goes to the pane: the interrupt (the spawn's prompt text is a send of its own).
       assert.lengthOf(
         (yield* herdr.callsTo("send")).filter((c: { keys?: ReadonlyArray<string> }) => c.keys),
         1,
+        "one key press, the interrupt; the spawn's prompt text is a send without keys",
       )
       const row = (yield* db.getSession(id))!
       assert.deepInclude(row, { status: "unknown", turnState: "interrupted" })
@@ -354,7 +350,7 @@ describe.concurrent("vibest rm: process proof", () => {
     "an interrupt that does not take within 10 s still closes the session's own terminal",
     Effect.gen(function* () {
       const { id, pane, sessions, db, herdr } = yield* workingSession
-      const out = (yield* removeWaiting(sessions, id))!
+      const out = (yield* removeMovingVirtualTimePastPolling(sessions, id))!
       assert.deepInclude(out, { processes: "exited", pane: "closed" })
       assert.include(
         out.reasons.join("\n"),
@@ -368,9 +364,8 @@ describe.concurrent("vibest rm: process proof", () => {
 })
 
 describe.concurrent("Processes", () => {
-  // lsof -Fpn0: every field ends in NUL, every process or file set in NL.
-  const set = (...fields: ReadonlyArray<string>) => `${fields.join("\0")}\0\n`
-  const record = (pid: number, cwd: string) => set(`p${pid}`) + set("fcwd", `n${cwd}`)
+  const lsofNulFieldsNlSet = (...fields: ReadonlyArray<string>) => `${fields.join("\0")}\0\n`
+  const record = (pid: number, cwd: string) => lsofNulFieldsNlSet(`p${pid}`) + lsofNulFieldsNlSet("fcwd", `n${cwd}`)
   const ok = (stdout: string) => ({ exitCode: 0, stdout, stderr: "" })
   const self = 7
   const dirs = ["/private/w/abcd", "/w/abcd"]
@@ -419,13 +414,13 @@ describe.concurrent("Processes", () => {
 
   it("a record it does not expect makes the listing unknown", () => {
     for (const odd of [
-      set("p101", "cbash") + set("fcwd", "n/x"),
-      set("p101") + set("ftxt", "n/x"),
-      set("p101"),
-      set("p0") + set("fcwd", "n/x"),
-      set("p1x") + set("fcwd", "n/x"),
+      lsofNulFieldsNlSet("p101", "cbash") + lsofNulFieldsNlSet("fcwd", "n/x"),
+      lsofNulFieldsNlSet("p101") + lsofNulFieldsNlSet("ftxt", "n/x"),
+      lsofNulFieldsNlSet("p101"),
+      lsofNulFieldsNlSet("p0") + lsofNulFieldsNlSet("fcwd", "n/x"),
+      lsofNulFieldsNlSet("p1x") + lsofNulFieldsNlSet("fcwd", "n/x"),
       "p101\n",
-      set("p101") + record(102, "/x"),
+      lsofNulFieldsNlSet("p101") + record(102, "/x"),
     ])
       assert.isUndefined(cwdHolders(ok(record(self, "/home") + odd), self, dirs), JSON.stringify(odd))
   })
@@ -441,8 +436,7 @@ describe.concurrent("Processes", () => {
         cwdHolders(ok(record(self, "/home") + record(42, odd) + record(101, "/w/abcd")), self, dirs),
         odd,
       )
-    // The canary's own cwd unreadable too.
-    assert.isUndefined(cwdHolders(ok(record(self, "/home (stat: x)")), self, dirs))
+    assert.isUndefined(cwdHolders(ok(record(self, "/home (stat: x)")), self, dirs), "the canary's own cwd unreadable")
   })
 
   it("an escaped or deleted cwd counts when it could be the target", () => {
@@ -483,9 +477,8 @@ describe.concurrent("Processes", () => {
       }),
     )
 
-    // Only a child this test starts is probed or listed (lsof -p <its pid>), never anyone else's processes.
     it.effect(
-      "an owned child, through the production layer: alive, then exited once it ended and was reaped; lsof's real NUL format names its cwd with a tab and a newline",
+      "an owned child (the only process probed or listed, lsof -p <its pid>), through the production layer: alive, then exited once it ended and was reaped; lsof's real NUL format names its cwd with a tab and a newline",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
@@ -493,7 +486,6 @@ describe.concurrent("Processes", () => {
           const dir = `${yield* tempDirectory("vibest-cwd-")}/a\tb\nc`
           yield* fs.makeDirectory(dir)
           const child = yield* spawner.spawn(ChildProcess.make("sleep", ["30"], { cwd: dir }))
-          // Only this child is ever ended, however the test goes.
           yield* Effect.addFinalizer(() => child.kill().pipe(Effect.ignore))
           const pid = Number(child.pid)
           const processes = yield* Effect.gen(function* () {
@@ -521,13 +513,16 @@ describe.concurrent("Processes", () => {
             [pid],
             JSON.stringify(stdout),
           )
-          // lsof escapes the tab and newline (\\t, \\n): past the first escape the name could be anything, so a directory
-          // that shares its literal prefix counts too; one that differs before it does not.
-          assert.include(stdout, "a\\tb\\nc")
-          assert.deepStrictEqual(cwdHolders({ exitCode, stdout, stderr: "" }, pid, [`${real}x`]), [pid])
+          assert.include(stdout, "a\\tb\\nc", "lsof escapes the tab and newline")
+          assert.deepStrictEqual(
+            cwdHolders({ exitCode, stdout, stderr: "" }, pid, [`${real}x`]),
+            [pid],
+            "past the first escape the name could be anything: a directory sharing the literal prefix counts",
+          )
           assert.deepStrictEqual(
             cwdHolders({ exitCode, stdout, stderr: "" }, pid, [`${real.slice(0, -"a\tb\nc".length)}z`]),
             [],
+            "a directory that differs before the first escape does not count",
           )
           yield* child.kill()
           yield* child.exitCode.pipe(Effect.ignore, Effect.timeout("5 seconds"))
@@ -536,9 +531,8 @@ describe.concurrent("Processes", () => {
     )
   })
 
-  // The helper here is an owned shell that ignores SIGTERM, standing in for a stuck lsof. Real time.
   it.live(
-    "a run cut off by an outer timeout (the 10 s cwd wait): its helper's group is ended and reaped before the timeout returns",
+    "a run (an owned shell ignoring SIGTERM, standing in for a stuck lsof) cut off by an outer timeout (the 10 s cwd wait): its helper's group is ended and reaped before the timeout returns",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -569,8 +563,11 @@ describe.concurrent("Processes", () => {
         assert.isUndefined(run)
         const pid = Number((yield* fs.readFileString(file)).trim())
         assert.isTrue(pid > 0)
-        // SIGTERM did nothing: it lived until SIGKILL, LSOF_KILL_AFTER later.
-        assert.isAtLeast(elapsed, 1000 + Duration.toMillis(LSOF_KILL_AFTER))
+        assert.isAtLeast(
+          elapsed,
+          1000 + Duration.toMillis(LSOF_KILL_AFTER),
+          "SIGTERM did nothing: it lived until SIGKILL, LSOF_KILL_AFTER later",
+        )
         assert.isBelow(elapsed, 10_000)
         assert.strictEqual(Platform.liveness(pid), "exited")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
