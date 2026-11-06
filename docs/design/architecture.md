@@ -672,7 +672,10 @@ time).
 
 **Registry and supervisor:** identity `(id, revision)`; reactivation keeps the longest unchanged prefix and
 rebuilds the rest in order inside a batch; a failing new revision falls back to the previous one and is not
-retried until it changes; an activation latch gates entry points; triggers are configuration changes, module
+retried until it changes; an activation latch gates entry points; builtin plugins activate while vibestd's
+layers are built, before it listens, so a request that routes to a builtin runtime never finds it unregistered
+(user plugins activate afterwards, in the background; a runtime a user plugin registers can still be missing for
+a request admitted before that); triggers are configuration changes, module
 file changes, and a daily update tick, debounced by 100 ms; npm plugins install into the vibest home and
 activate after local ones.
 
