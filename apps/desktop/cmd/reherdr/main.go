@@ -70,6 +70,13 @@ func main() {
 			SetAppearance: func(s string) { mygo.Theme.SetSource(mygo.ThemeSource(s)) },
 			SetMenu:       mygo.App.SetMenu,
 			SetWindowDark: func(dark bool) { app.SetWindowDark(win, dark) },
+			SetVibrancy: func(on bool) {
+				material := mygo.VibrancyNone
+				if on && !mygo.Theme.Preferences().ReduceTransparency {
+					material = mygo.VibrancyUnderWindow
+				}
+				win.SetVibrancy(material)
+			},
 		})
 		win.OnFocus(func() { client.Focus(true) })
 		win.OnBlur(func() { client.Focus(false) })

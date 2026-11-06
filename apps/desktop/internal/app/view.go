@@ -122,6 +122,9 @@ func (a *App) View(c *ui.Context) {
 	a.checkTabDrag()
 	a.coreFocus()
 	th := a.theme(c.Theme().Dark)
+	if a.themes.settings.Translucent && c.Vibrancy() {
+		th = th.Glass()
+	}
 	if th != a.th {
 		a.th = th
 		a.syncNative()

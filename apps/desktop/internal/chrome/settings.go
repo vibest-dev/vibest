@@ -16,6 +16,7 @@ type Settings struct {
 	SidebarHidden bool    `json:"sidebar_hidden,omitempty"`
 	SidebarWidth  float32 `json:"sidebar_width,omitempty"`
 	PaneStyle     string  `json:"pane_style,omitempty"`
+	Translucent   bool    `json:"translucent,omitempty"`
 }
 
 func DefaultSettings() Settings {

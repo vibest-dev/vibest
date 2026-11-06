@@ -67,10 +67,10 @@ func (a *App) syncNative() {
 }
 
 func (a *App) nativeLoop(kick <-chan struct{}, h Host) {
-	look, dark, first := "", false, true
+	look, dark, glass, first := "", false, false, true
 	for range kick {
 		a.mu.Lock()
-		m, wantLook, wantDark := a.appMenu(), a.wantAppearance(), a.th.Dark
+		m, wantLook, wantDark, wantGlass := a.appMenu(), a.wantAppearance(), a.th.Dark, a.themes.settings.Translucent
 		a.mu.Unlock()
 		if h.SetMenu != nil {
 			h.SetMenu(m)
@@ -81,7 +81,10 @@ func (a *App) nativeLoop(kick <-chan struct{}, h Host) {
 		if h.SetWindowDark != nil && (first || wantDark != dark) {
 			h.SetWindowDark(wantDark)
 		}
-		look, dark, first = wantLook, wantDark, false
+		if h.SetVibrancy != nil && (first || wantGlass != glass) {
+			h.SetVibrancy(wantGlass)
+		}
+		look, dark, glass, first = wantLook, wantDark, wantGlass, false
 	}
 }
 
@@ -129,6 +132,13 @@ func (a *App) chooseTheme(name string, dark bool) {
 func (a *App) followSystem(on bool) {
 	a.themes.settings.FollowSystem = on
 	a.saveThemes()
+}
+
+func (a *App) setTranslucent(on bool) {
+	a.themes.settings.Translucent = on
+	a.saveSettings()
+	a.syncNative()
+	a.invalidate()
 }
 
 func (a *App) saveThemes() {
@@ -195,6 +205,8 @@ func (a *App) themeItems() []themeItem {
 	return append(items,
 		themeItem{},
 		themeItem{label: "Follow System Appearance", checked: s.FollowSystem, do: func() { a.followSystem(!a.themes.settings.FollowSystem) }},
+		themeItem{},
+		themeItem{label: "Translucent Window", checked: s.Translucent, do: func() { a.setTranslucent(!a.themes.settings.Translucent) }},
 	)
 }
 

@@ -169,11 +169,39 @@ uses `Accent` while the window is focused. A single visible pane, including
 zoom, has no tint; neither do popup or too-small surfaces. This is visual
 only: it adds no backend focus or input-routing actions.
 
+## Translucent window
+
+Theme > Translucent Window (`"translucent": true` in `settings.json`, off by
+default) puts macOS's under-window material behind the window. The colour model
+is Monocode Native's (`crates/monocode-gpui`, `theme.rs`): translucency is an
+alpha on surfaces, never on ink, and every grey is the theme's `Foreground` at
+a fixed alpha, so greys keep their contrast over whatever shows through.
+
+| Role                                      | Translucent value                                                                                                 |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `Background`, `Sidebar`, `TabBar` (shell) | the theme's colour at 81%                                                                                         |
+| `Container.Background` (pane)             | `Background` at 28%                                                                                               |
+| `Border`, `SidebarBorder`                 | ink 8%                                                                                                            |
+| `Divider`                                 | ink 10%                                                                                                           |
+| row and tab states                        | base text ink 55%; hover fill ink 7%; selected fill ink 10% with ink text; selected in an unfocused window ink 7% |
+
+`Surface` (menus, cards), the accent and status colours and the terminal
+colours stay as the theme has them. Terminal panes stay opaque: MyGo's
+`terminal.Options.Transparent` is fixed when a terminal view is made, so
+switching it would remake every view. The translucent theme is used only while
+the window shows its material: with the setting off, under macOS's Reduce
+Transparency (read when the setting changes) or where MyGo reports no
+vibrancy, every surface is the opaque audited value, exactly as before.
+
+The opaque built-ins are not derived from the model: their audited greys are
+warm or cool tints (Paper's `Secondary` `#8C8A80` over `#F5F4F0`) that no single
+alpha of their `Foreground` reproduces within rounding, so they keep their hex
+values and only the translucent theme uses ink alphas.
+
 ## What a theme does not do
 
-The window is opaque. There is no glass, vibrancy, or translucency. A
-translucent role in the audited values is stored as the opaque color it
-showed on its surface.
+Unless Translucent Window is on, the window is opaque. A translucent role in
+the audited values is stored as the opaque color it showed on its surface.
 
 - **Layout.** Only the sidebar-left layout is supported. There is no title
   bar strip, no details panel, and no tab indicator bar.

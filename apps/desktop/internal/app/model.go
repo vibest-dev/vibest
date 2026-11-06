@@ -120,6 +120,7 @@ type Host struct {
 	SetAppearance func(string)
 	SetMenu       func(*mygo.Menu)
 	SetWindowDark func(bool)
+	SetVibrancy   func(bool)
 }
 
 func (a *App) Attach(h Host) {
@@ -137,7 +138,7 @@ func (a *App) Attach(h Host) {
 		a.notify = h.Notify
 	}
 	a.mu.Lock()
-	if a.native == nil && (h.SetMenu != nil || h.SetAppearance != nil || h.SetWindowDark != nil) {
+	if a.native == nil && (h.SetMenu != nil || h.SetAppearance != nil || h.SetWindowDark != nil || h.SetVibrancy != nil) {
 		a.native = make(chan struct{}, 1)
 		go a.nativeLoop(a.native, h)
 	}
