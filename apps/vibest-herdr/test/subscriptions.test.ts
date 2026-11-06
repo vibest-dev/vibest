@@ -136,6 +136,10 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       const path = yield* Path.Path
       const dir = yield* home
       yield* fs.makeDirectory(path.join(dir, "Library", "Keychains"), { recursive: true })
+      yield* fs.writeFileString(
+        path.join(dir, "Library", "Keychains", "login.keychain-db"),
+        "fake keychain; no real CLI",
+      )
       const agent = path.join(dir, ".pi", "agent")
       yield* fs.makeDirectory(agent, { recursive: true })
       yield* fs.writeFileString(
@@ -233,6 +237,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       const dir = yield* home
       const fs = yield* FileSystem.FileSystem
       yield* fs.makeDirectory(`${dir}/Library/Keychains`, { recursive: true })
+      yield* fs.writeFileString(`${dir}/Library/Keychains/login.keychain-db`, "fake keychain; no real CLI")
       const fresh = fakeMachine({
         installed: ["claude", "cursor"],
         home: dir,
@@ -329,10 +334,14 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("Cursor subscription probes skip a macOS HOME without Library/Keychains before spawning", () =>
+  it.effect("Cursor subscription probes skip an empty macOS Keychains directory before spawning", () =>
     Effect.gen(function* () {
       if (process.platform !== "darwin") return
-      const fake = fakeMachine({ installed: ["cursor"], home: yield* home, commands: {} })
+      const dir = yield* home
+      yield* Effect.flatMap(FileSystem.FileSystem, (fs) =>
+        fs.makeDirectory(`${dir}/Library/Keychains`, { recursive: true }),
+      ).pipe(Effect.provide(Platform.services))
+      const fake = fakeMachine({ installed: ["cursor"], home: dir, commands: {} })
       const rows = yield* fake.provide(
         Effect.gen(function* () {
           const subs = yield* Subscriptions

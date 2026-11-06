@@ -79,8 +79,9 @@ seen). From push: `status: rejected`.
 Token: macOS keychain items `cursor-access-token`, `cursor-refresh-token` (`~/.cursor/cli-config.json` holds
 only `authInfo` without tokens). Linux location unverified.
 
-On macOS, both Cursor model discovery and subscription probes check for `HOME/Library/Keychains` before
-starting its CLI. A missing directory reports Cursor unavailable rather than starting its default-keychain
+On macOS, both Cursor model discovery and subscription probes require a regular file at
+`HOME/Library/Keychains/login.keychain-db` before starting its CLI. An empty Keychains directory is not enough.
+A missing login keychain reports Cursor unavailable rather than starting its default-keychain
 write probe, which can open a system dialog even for `--version`. Child commands keep the inherited environment
 and use the checked HOME. This does not create, unlock or change a keychain, and does not detect a locked
 keychain or a process outside the login security session.

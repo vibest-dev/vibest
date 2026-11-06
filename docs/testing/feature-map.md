@@ -95,11 +95,14 @@ the typed prompt lands in the middle of the scripted hook sequence. I5 is the re
 | H1  | `harness list`: binary, on PATH, default model, per harness                                               | script | one entry per harness (Claude, Pi, Cursor); a missing CLI says so   |
 | H2  | `harness models <harness>` / `models`                                                                     | script | non-empty list for each installed harness; a missing one is skipped |
 | H3  | `doctor`: grouped (coding agents, herdr, vibestd, plugins), a fix line under each problem, then a verdict | script | one agent line per harness; a herdr line per usable harness         |
-| H4  | Cursor discovery and subscription probes under a temporary macOS HOME                                     | script | no Cursor process starts; the missing keychain directory is named   |
+| H4  | Cursor discovery and subscription probes under a temporary macOS HOME                                     | script | no Cursor starts with an empty Keychains directory; SSH is cleared  |
 
-On macOS, Cursor model discovery and subscription probes refuse a HOME without `Library/Keychains`.
-This also keeps T1's daemon and harness-choice plugin from starting real Cursor behind its hook fixture.
-H4 puts a sentinel CLI on PATH and fails if it runs. Direct Cursor commands in the E2E World check HOME too.
+On macOS, Cursor model discovery and subscription probes require `Library/Keychains/login.keychain-db`
+to be a regular file under HOME; an empty Keychains directory is refused. This also keeps T1's daemon
+and harness-choice plugin from starting real Cursor behind its hook fixture. H4 puts a sentinel CLI on PATH
+and fails if it runs. Direct Cursor commands in the E2E World check the login keychain file too.
+When a World changes HOME (including T1), it removes the inherited SSH session indicators; H4 checks
+this in a spawned process. The release-artifacts installation check clears them for its temporary HOME too.
 H2 records its install method, binary, HOME, PATH and Cursor path in `H2-environment.json`; the curl and npm
 verify legs keep the login HOME and isolate `VIBEST_HOME` and harness configuration instead.
 

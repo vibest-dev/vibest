@@ -17,16 +17,16 @@ export const cursorEnvironment = (home: string) =>
     if (platform !== "darwin") return undefined
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const keychains = path.join(home, "Library", "Keychains")
+    const keychain = path.join(home, "Library", "Keychains", "login.keychain-db")
     const present =
       home !== "" &&
-      (yield* fs.stat(keychains).pipe(
-        Effect.map((info) => info.type === "Directory"),
+      (yield* fs.stat(keychain).pipe(
+        Effect.map((info) => info.type === "File"),
         Effect.orElseSucceed(() => false),
       ))
     return present
       ? undefined
-      : `Cursor is disabled: HOME has no Library/Keychains directory (${home || "unset"}); use the macOS login home to avoid Cursor's keychain probe dialog`
+      : `Cursor is disabled: HOME has no login keychain file (${keychain}); use the macOS login home to avoid Cursor's keychain probe dialog`
   })
 
 export const cursor: HarnessAdapter = {

@@ -19,14 +19,28 @@ const checks: ReadonlyArray<Check> = [
       const home = path.join(w.root, "cursor-home")
       const bin = path.join(w.root, "cursor-bin")
       const marker = path.join(w.root, "cursor-started")
-      await fs.mkdir(home)
+      await fs.mkdir(path.join(home, "Library", "Keychains"), { recursive: true })
       await fs.mkdir(bin)
       const node = Bun.which("node")
       if (node) await fs.symlink(await fs.realpath(node), path.join(bin, "node"))
       await fs.writeFile(path.join(bin, "cursor-agent"), `#!/bin/sh\nprintf started > "${marker}"\nexit 99\n`, {
         mode: 0o700,
       })
-      const env = { HOME: home, PATH: bin + ":/usr/bin:/bin" }
+      const env = {
+        HOME: home,
+        PATH: bin + ":/usr/bin:/bin",
+        SSH_CLIENT: "e2e",
+        SSH_CONNECTION: "e2e",
+        SSH_TTY: "e2e",
+        SSH2_CLIENT: "e2e",
+        SSH2_TTY: "e2e",
+      }
+      const ssh = await w.run(
+        home,
+        ["sh", "-c", 'test -z "${SSH_CLIENT}${SSH_CONNECTION}${SSH_TTY}${SSH2_CLIENT}${SSH2_TTY}"'],
+        { env },
+      )
+      expect(ssh.code === 0, "temporary HOME inherited SSH session variables")
       await w.stopDaemon()
       try {
         const models = await w.json<Models>(["harness", "models", "cursor"], { env })
@@ -44,7 +58,7 @@ const checks: ReadonlyArray<Check> = [
           (error) => String(error),
         )
         expect(refused.includes("Refusing to start Cursor"), refused)
-        expect(!(await Bun.file(marker).exists()), "Cursor started with HOME lacking Library/Keychains")
+        expect(!(await Bun.file(marker).exists()), "Cursor started with an empty Library/Keychains directory")
       } finally {
         await w.stopDaemon()
       }
@@ -82,11 +96,11 @@ const checks: ReadonlyArray<Check> = [
             HOME: env.HOME,
             PATH: env.PATH,
             cursor: Bun.which("cursor-agent", { PATH: env.PATH }),
-            keychains:
+            loginKeychain:
               !!env.HOME &&
               (await fs
-                .stat(path.join(env.HOME, "Library/Keychains"))
-                .then((s) => s.isDirectory())
+                .stat(path.join(env.HOME, "Library/Keychains/login.keychain-db"))
+                .then((s) => s.isFile())
                 .catch(() => false)),
           },
           null,

@@ -1098,6 +1098,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       const home = yield* tempDirectory("model-home-")
       const fs = yield* FileSystem.FileSystem
       yield* fs.makeDirectory(`${home}/Library/Keychains`, { recursive: true })
+      yield* fs.writeFileString(`${home}/Library/Keychains/login.keychain-db`, "fake keychain; no real CLI")
       const cwds: Array<string | undefined> = []
       const spawner = ChildProcessSpawner.make((command) =>
         Effect.suspend(() => {
@@ -1122,7 +1123,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
     }),
   )
 
-  it.effect("Cursor discovery never starts a process with HOME lacking Library/Keychains on macOS", () =>
+  it.effect("Cursor discovery refuses missing and empty Keychains directories on macOS", () =>
     Effect.gen(function* () {
       if (process.platform !== "darwin") return
       const home = yield* tempDirectory("cursor-home-")
@@ -1131,7 +1132,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         if (command._tag === "StandardCommand") commands.push(command.command)
         return Effect.fail(PlatformError.badArgument({ module: "test", method: "spawn" }))
       })
-      yield* Effect.gen(function* () {
+      const check = Effect.gen(function* () {
         const harness = yield* Harness.make()
         const error = yield* Effect.flip(harness.models("cursor", null))
         assert.include(error.message, "Library/Keychains")
@@ -1141,6 +1142,10 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ HOME: home }), { asPrimary: true })),
       )
+      yield* check
+      const fs = yield* FileSystem.FileSystem
+      yield* fs.makeDirectory(`${home}/Library/Keychains`, { recursive: true })
+      yield* check
       assert.deepStrictEqual(commands, [])
     }),
   )
