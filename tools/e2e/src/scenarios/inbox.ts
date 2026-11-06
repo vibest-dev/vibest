@@ -14,8 +14,9 @@ const text = (m: Message | undefined) =>
 export const ask = (task: string) =>
   `Do not run any tool. Reply with exactly two lines: the first is "done-${task}", the second is "status: completed".`
 
-export const delegatingModel = (sub: string) => {
+export const delegatingModel = (sub: string, options: { readonly heldMs?: number } = {}) => {
   const seen: Array<string> = []
+  const answered: Array<{ readonly marker: string; readonly from: number; readonly to: number }> = []
   let sessionId = ""
   let calls = 0
   const chunk = (o: object) =>
@@ -68,10 +69,23 @@ export const delegatingModel = (sub: string) => {
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
       seen.push(`${messages.at(-1)?.role}: ${text(messages.at(-1))}`)
-      return new Response(answer(messages.at(-1)), { headers: { "content-type": "text/event-stream" } })
+      const last = messages.at(-1)
+      const marker = /done-(\w+)/.exec(text(last))?.[1]
+      if (options.heldMs !== undefined && last?.role === "user") {
+        const from = Date.now()
+        await Bun.sleep(options.heldMs)
+        if (marker !== undefined && !text(last).includes("<agent-")) answered.push({ marker, from, to: Date.now() })
+      }
+      return new Response(answer(last), { headers: { "content-type": "text/event-stream" } })
     },
   })
-  return { seen, sessionId: () => sessionId, url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
+  return {
+    seen,
+    answered,
+    sessionId: () => sessionId,
+    url: `http://127.0.0.1:${server.port}/v1`,
+    stop: () => server.stop(true),
+  }
 }
 
 export const heldModel = () => {
@@ -439,7 +453,18 @@ const checks: ReadonlyArray<Check> = [
         await w.ok(["send", a, "--", ask("cmmid")], { cwd: c.repo })
         await until("the cmmid result queued while the main agent's turn runs", () => results() > queued, 180_000)
         await fs.writeFile(go, "")
-        await c.result(a, "Answer probe alpha", "cmmid", before)
+        const mid = await c.result(a, "Answer probe alpha", "cmmid", before)
+        const midAt = mid.findIndex(
+          (e) => e.type === "attachment" && e.raw.includes("hook_additional_context") && e.raw.includes("done-cmmid"),
+        )
+        await until(
+          "the main agent's turn on the cmmid result ended",
+          async () =>
+            (await transcript(w, c!.repo))
+              .slice(midAt)
+              .some((e) => e.type === "system" && e.raw.includes('"subtype":"turn_duration"')),
+          180_000,
+        )
 
         stopped = await c.claudePid()
         expect(stopped !== undefined, "no claude process in the main agent's pane")

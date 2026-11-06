@@ -1,4 +1,4 @@
-import { Config, Effect, FileSystem, Option, Schema } from "effect"
+import { Config, Effect, FileSystem, Option } from "effect"
 
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
@@ -94,15 +94,14 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   }
 })
 
-export const inParent = (argv: ReadonlyArray<string>, root: string) => [...argv, "--in-parent", root]
-
-const LaunchedIn = Schema.fromJsonString(Schema.Struct({ runtime: Schema.String, terminal: Schema.String }))
-
-export const launchedIn = Config.option(Config.String("VIBEST_RUNTIME")).pipe(
-  Effect.map((raw) =>
-    Option.getOrUndefined(Option.flatMap(raw, (value) => Schema.decodeUnknownOption(LaunchedIn)(value))),
-  ),
-)
+export const inParent = (argv: ReadonlyArray<string>, root: string, runtime: string) => {
+  const rest: Array<string> = []
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--runtime") i++
+    else if (!argv[i]!.startsWith("--runtime=")) rest.push(argv[i]!)
+  }
+  return [...rest, "--runtime", runtime, "--in-parent", root]
+}
 
 export const MAIN_ENV = "VIBEST_MAIN_ENV"
 

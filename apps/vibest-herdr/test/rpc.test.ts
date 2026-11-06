@@ -263,6 +263,32 @@ describe("vibest.sock", () => {
   )
 
   test(
+    "Project.CoordinatorSession answers and frees the project when the runtime's present never returns",
+    Effect.gen(function* () {
+      const runtime = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const held = yield* runtime.hold("present")
+      const launch = yield* c["Project.CoordinatorSession"]({
+        harness: "claude",
+        fresh: false,
+        terminal: "test/p1",
+      }).pipe(Effect.forkChild)
+      yield* held.reached
+      yield* TestClock.adjust(Server.PRESENT_TIMEOUT)
+      const saved = yield* Fiber.join(launch)
+      assert.isString(saved.sessionId)
+      const again = yield* c["Project.CoordinatorSession"]({
+        harness: "claude",
+        fresh: false,
+        terminal: "test/p1",
+      }).pipe(Effect.forkChild)
+      yield* TestClock.adjust(Server.PRESENT_TIMEOUT)
+      assert.strictEqual((yield* Fiber.join(again)).sessionId, saved.sessionId)
+    }),
+  )
+
+  test(
     "a session reports only as itself; an unknown session is refused; a coordinator cannot report",
     Effect.gen(function* () {
       const db = yield* Db
@@ -635,7 +661,7 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(yield* herdr.callsTo("run"), [
         {
           terminal: opened.terminal,
-          argv: ["/bin/vibest", "--harness", "pi", "--model", "it's", "--in-parent", root],
+          argv: ["/bin/vibest", "--harness", "pi", "--model", "it's", "--runtime", "herdr", "--in-parent", root],
         },
       ])
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])

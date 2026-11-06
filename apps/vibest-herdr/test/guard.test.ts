@@ -1,7 +1,9 @@
 import { assert, describe, it, layer } from "@effect/vitest"
+import { daemonEnv } from "@vibest/client/client"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
 import { coordinator, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
+import * as Launch from "@vibest/core/launch"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Forbidden } from "@vibest/protocol/rpc"
 import { LaunchFailed } from "@vibest/schema/session"
@@ -683,6 +685,65 @@ describe("wizard entry", () => {
       }),
     15_000,
   )
+})
+
+describe("where vibest starts the main agent", () => {
+  const hcTerminal = "t4@/run/hc/default.sock"
+  it("a pane vibestd opened trusts the runtime vibestd typed: herdr, even with a stale HC_TERMINAL_ID", () => {
+    assert.deepStrictEqual(Cli.mainPlace({ marked: true, runtime: "herdr", hcTerminal, herdrPane: true }), {
+      in: "caller",
+    })
+    assert.deepStrictEqual(Cli.mainPlace({ marked: true, runtime: "herdr", hcTerminal, herdrPane: false }), {
+      in: "caller",
+    })
+    assert.deepStrictEqual(Cli.mainPlace({ marked: true, runtime: "hc", hcTerminal, herdrPane: true }), {
+      in: "hc",
+      terminal: hcTerminal,
+    })
+    assert.strictEqual(
+      Cli.mainPlace({ marked: true, runtime: "hc", hcTerminal: undefined, herdrPane: true }).in,
+      "refused",
+    )
+  })
+  it("a terminal with both herdr's and herdr-core's variables is refused unless --runtime says which", () => {
+    assert.strictEqual(Cli.mainPlace({ marked: false, runtime: undefined, hcTerminal, herdrPane: true }).in, "refused")
+    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: "herdr", hcTerminal, herdrPane: true }), {
+      in: "caller",
+    })
+    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: "hc", hcTerminal, herdrPane: true }), {
+      in: "hc",
+      terminal: hcTerminal,
+    })
+    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: undefined, hcTerminal, herdrPane: false }), {
+      in: "hc",
+      terminal: hcTerminal,
+    })
+    assert.deepStrictEqual(
+      Cli.mainPlace({ marked: false, runtime: undefined, hcTerminal: undefined, herdrPane: false }),
+      { in: "launch" },
+    )
+  })
+  it("Launch types the runtime it chose, once, before --in-parent", () => {
+    assert.deepStrictEqual(Launch.inParent(["/bin/vibest", "--runtime", "hc", "--harness", "pi"], "/r", "herdr"), [
+      "/bin/vibest",
+      "--harness",
+      "pi",
+      "--runtime",
+      "herdr",
+      "--in-parent",
+      "/r",
+    ])
+  })
+  it("vibestd is started without the caller's terminal variables", () => {
+    const callerEnv = ["HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"]
+    assert.deepStrictEqual(daemonEnv(callerEnv, { KEPT: "1" }), {
+      HERDR_PANE_ID: undefined,
+      HERDR_SOCKET_PATH: undefined,
+      HC_TERMINAL_ID: undefined,
+      HC_TERMINAL_SOCKET: undefined,
+      KEPT: "1",
+    })
+  })
 })
 
 describe("vibest --session inside herdr", () => {

@@ -15,7 +15,8 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   id: "runtime-hc",
   effect: (context) =>
     Effect.gen(function* () {
-      const hc = yield* defaultSocketPath().pipe(Effect.flatMap(Hc.make), Effect.provide(platform), Effect.orDie)
-      yield* context.runtime.register(yield* make({ hc, scope: yield* Effect.scope }))
+      const socket = yield* defaultSocketPath().pipe(Effect.provide(platform), Effect.orDie)
+      const connect = (socketPath: string) => Effect.runSync(Hc.make(socketPath).pipe(Effect.provide(platform)))
+      yield* context.runtime.register(yield* make({ connect, socket, scope: yield* Effect.scope }))
     }),
 })
