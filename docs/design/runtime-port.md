@@ -119,13 +119,13 @@ question or auth; an unknown blocked reason would omit kind, and native reports 
 
 Cursor writes working before its prompt RPC and idle for accepted response/stop hooks. Its public hook API has
 no paired permission/question/auth waits, so it never writes blocked. Guard denials remain permission decisions,
-not evidence that a human is being asked.
+not evidence that a human is being asked. Cursor idle relies on `afterAgentResponse` firing every turn.
 
 Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
 and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,
 and `error`. Successful `done` is intentionally not normalized to `idle`: both are non-working; herdr-app uses
 the distinction for its unseen mark. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` disables this native reporting too.
-The live check covers Claude Code 2.1.318; older versions have no guaranteed coverage or fallback writer.
+Live-checked on Claude Code 2.1.318 and 2.1.319; older versions have no guaranteed coverage or fallback writer.
 
 `pnpm e2e T1` launches the built integrations in real Claude and Pi with held fake models, through a test-only
 runtime plugin into its own herdr-core, and exercises the shipped Cursor hook script in a real PTY. Its HOME,
@@ -139,7 +139,9 @@ identity even when a different runtime opened its terminal. Do not forge that id
 caller detection lands, add this check: launch a real Claude and Pi coordinator through built `vibest --harness
 <harness> --runtime hc --headless` in the isolated core; hold its fake model and assert native working, complete
 it and assert native done, then start another turn and interrupt it to assert idle, with the loaded vibest
-integration and no competing OSC writer. This is independent of worker result coverage.
+integration and no competing OSC writer. This is independent of worker result coverage. In the same follow-up,
+remove Cursor's coordinator exclusion from terminal status reporting and verify working/idle there; terminal
+status must not inherit the coordinator exclusion used for result reporting.
 
 The fake HTTP 401 authentication_error check records Claude's actual retry/working classification; it does not
 claim that every provider 401 opens an auth dialog.

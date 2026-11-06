@@ -308,6 +308,23 @@ const checks: ReadonlyArray<Check> = [
             JSON.stringify(await w.json(["result", launched.id], { env })).includes("native-status-completed"),
           30_000,
         )
+        const conversation = row<{ conversation: string }>(
+          w,
+          "SELECT json_extract(data, '$.resume') AS conversation FROM event WHERE session_id = ? AND type = 'process.start' ORDER BY at DESC LIMIT 1",
+          launched.id,
+        )!.conversation
+        await visible("native-status-completed")
+        await hc("send", terminal, "/clear")
+        await until(
+          "clear removes the previous answer",
+          async () => !(await hc("read", terminal)).includes("native-status-completed"),
+          30_000,
+        )
+        await visible("/clear")
+        await status("clear after done", "idle")
+        await hc("send", terminal, "/resume " + conversation)
+        await visible("native-status-completed")
+        await status("resumed conversation", "idle")
         await hc("send", terminal, "Start another turn and wait for the model.")
         await until("second held request", () => model.waiting.length === 1, 30_000)
         await status("next turn", "working")
@@ -348,16 +365,6 @@ const checks: ReadonlyArray<Check> = [
         await Bun.sleep(1000)
         await hc("keys", terminal, "esc")
         await status("dismissed question", "idle")
-        const conversation = row<{ conversation: string }>(
-          w,
-          "SELECT json_extract(data, '$.resume') AS conversation FROM event WHERE session_id = ? AND type = 'process.start' ORDER BY at DESC LIMIT 1",
-          launched.id,
-        )!.conversation
-        await hc("send", terminal, "/clear")
-        await status("clear", "idle")
-        await hc("send", terminal, "/resume " + conversation)
-        await visible("native-status-completed")
-        await status("resumed conversation", "idle")
         await hc("send", terminal, "Hold the model while vibestd is down.")
         await until("model held during daemon outage", () => model.waiting.length === 1, 30_000)
         await w.stopDaemon()
@@ -515,7 +522,7 @@ const checks: ReadonlyArray<Check> = [
         )
         model.stop()
         await w.stopDaemon()
-        await hc("server", "stop")
+        await hc("server", "stop").catch((error) => console.error("Failed to stop isolated herdr-core:", error))
         await fs.cp(path.join(w.root, "status-output"), path.join(evidence, "T1-pty"), { recursive: true })
         await fs.rm(plugin)
       }

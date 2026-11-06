@@ -359,13 +359,7 @@ layer(Platform.services)("claude integration stop", (it) => {
         const raw = JSON.stringify(
           stop ? { hook_event_name: "afterAgentResponse" } : { hook_event_name: "beforeSubmitPrompt", prompt: "go" },
         )
-        for (const env of [
-          {},
-          { VIBEST_AGENT: "general" },
-          { VIBEST_SESSION_ID: "w1" },
-          { ...worker, VIBEST_AGENT: "coordinator" },
-        ])
-          yield* invoke(stop, raw, env)
+        for (const env of [{}, { VIBEST_AGENT: "general" }, { VIBEST_SESSION_ID: "w1" }]) yield* invoke(stop, raw, env)
       }
       assert.deepStrictEqual(statusReports, [])
       assert.strictEqual(rpc(lines).length, 2)
