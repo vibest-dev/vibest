@@ -252,27 +252,41 @@ const checks: ReadonlyArray<Check> = [
         const r = await w.run(repo, argv)
         expect(r.code === 0, `${argv.join(" ")}: ${r.stderr}`)
       }
+      const daemonLog = path.join(w.vibestHome, "vibestd.log")
+      const logFrom = (await fs.readFile(daemonLog, "utf8").catch(() => "")).length
       await withSession(
         w,
         "cursor",
         [],
         HERDR_TASK,
         async ({ id }) => {
+          const rerouted = /harness "cursor" → "(\w+)"/.exec(
+            (await fs.readFile(daemonLog, "utf8").catch(() => "")).slice(logFrom),
+          )
+          if (rerouted) throw new Skip(`harness-choice routed cursor to ${rerouted[1]} (cursor unavailable or limited)`)
           await until(
             "the session's result",
             async () => ["completed", "failed"].includes((await turnState(w, id, repo)) ?? ""),
             240_000,
           )
+          const message = (await latest(w, id, repo))?.message ?? ""
+          expect((await turnState(w, id, repo)) === "completed", `the turn did not complete: ${message}`)
           const worktree = await fs.realpath((await listed(w, id, repo))!.worktree)
           expect(!(await Bun.file(path.join(worktree, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
           const transcripts = path.join(w.home, ".cursor", "projects", worktree.slice(1).replace(/[^a-zA-Z0-9]/g, "-"))
-          const calls = (await fs.readdir(transcripts, { recursive: true }).catch(() => [] as Array<string>))
-            .filter((f) => f.endsWith(".jsonl"))
-            .map((f) => fs.readFile(path.join(transcripts, f), "utf8"))
-          const tried = (await Promise.all(calls)).some((t) => /"tool_use".*herdr pane list/.test(t))
+          const files = (await fs.readdir(transcripts, { recursive: true }).catch(() => [] as Array<string>)).filter(
+            (f) => f.endsWith(".jsonl"),
+          )
+          expect(files.length > 0, `no Cursor transcript in ${transcripts}`)
+          const tried = (await Promise.all(files.map((f) => fs.readFile(path.join(transcripts, f), "utf8")))).some(
+            (t) => /"tool_use".*herdr pane list/.test(t),
+          )
           await fs.writeFile(path.join(evidence, "I5-herdr-call.json"), `${JSON.stringify({ tried, transcripts })}\n`)
-          const message = (await latest(w, id, repo))?.message ?? ""
-          expect(/<harness>cursor<\/harness>/.test(message) && (!tried || /pong/.test(message)), message)
+          expect(/<status>completed<\/status>/.test(message), message)
+          expect(
+            /<harness>cursor<\/harness>/.test(message) && /<result>[\s\S]*\bpong\b[\s\S]*<\/result>/.test(message),
+            message,
+          )
           expect(await Bun.file(projectHookLog).exists(), "the project's own sessionStart hook did not run")
         },
         { cwd: repo },
