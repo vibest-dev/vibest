@@ -16,7 +16,7 @@ of this change. The module checksum is pinned in patches/mygo/BASE.
 
 ## Patch inventory
 
-All patches were ported; none could be dropped as upstream-equivalent. Each named
+The original 18 patches were ported; none could be dropped as upstream-equivalent. Each named
 regression passes with the full stack. Negative checks physically move the patch
 out, run make setup, retain its test hunks as a temporary test-only patch,
 and run the named test before restoring the patch and rerunning setup and tests.
@@ -52,8 +52,53 @@ Terminal-free contract; that assertion was added to its existing cursor test.
 | 0017  | Ported                                                                                                                   | TestEmulatorRepliesUseTheirOwnCaptureWithoutTheKeyboard: API, no separate automatic capture                                         |
 | 0018  | Ported                                                                                                                   | TestCancelingInputKeepsQueuedEmulatorReplies: runtime, only the following human-input marker remains                                |
 
+Patch **0019** adds output-only visibility control and drawable-change detection.
+Its six TestOutput regressions pass both with this patch stack and with 0019
+alone over the official pin (Go overlay; no earlier patches). Removing 0019,
+preparing with make setup and retaining only its tests makes identical titles
+request 100 frames, held output request unchanged frames, and unchanged cursor
+commands request frames. The hidden-output test also detects the missing
+SetVisible API. Restoring 0019 and preparing again passes under the race detector.
+
 The app currently uses Terminal, not Grid. Removing the unused Grid extension is
 a separate dependency-removal decision, not evidence that upstream implements it.
+
+## Output frame requests
+
+Terminal.SetVisible controls only output-driven invalidation; it never suspends
+the reader, parsing, automatic replies or callbacks. It defaults to visible for
+existing MyGo callers. Desktop starts attached viewers hidden and supplies the
+selected tab and zoom state independently of keyboard focus: every on-screen
+split remains visible, including unfocused splits. Showing a retained terminal
+requests its accumulated state immediately. Changes to Core input-mode
+classification also invalidate the shown view: the input-readiness notice and
+fitted keyboard ownership can change without dirty VT cells. No output clock or input delay is
+introduced.
+
+Under the existing VT and render-state locks, 0019 updates the render snapshot
+without consuming dirty rows, then checks dirty state, cursor, colors and Kitty
+graphics generation against the last paint. Only paint cleans those changes.
+Starting synchronized output still requests the frame that schedules the existing
+one-second timeout; subsequent held output does not request unchanged frames.
+Clipboard service requests and terminal lifecycle invalidation are unchanged.
+
+Core 0.1.18 emits a title event for every identical OSC title. The app still
+applies each Core snapshot and its side effects, but requests a window frame only
+when that snapshot changed. A changed title or sidebar status therefore still
+redraws, even for a hidden terminal. The regression restores unconditional event
+invalidation through a Go overlay and observes 20 frames for 20 identical events;
+the changed code observes none.
+
+Isolated demo measurements with MYGO_FRAME_STATS=all, the same hc 0.1.18 Core and
+10-second samples: hidden 60 Hz output fell from 59.8 to 0 frames/s; repeated
+identical titles fell from 59.0 to 0; a visible 60 Hz spinner remained live at
+48.6 before and 60.0 after. Cursor blinking was disabled by the workloads. These
+are window-frame counts, not presentation latency or a visible-output speedup.
+The visible trial used more CPU (7.2% before, 9.2% after), so this is not evidence
+of a visible-output CPU improvement. Full terminal/VT and tagged desktop race
+suites, make test, make vet, pnpm typecheck and pnpm test pass. Native re-show
+and typed x echo were verified by screenshots and Core readback; no
+millisecond input-to-display latency is claimed.
 
 ## App migration
 
@@ -83,7 +128,7 @@ alone does not run them. Run their families explicitly:
 
 ```sh
 make setup
-MYGO_GHOSTTY_VT="$VT" go -C third_party/mygo test ./plugins/terminal ./ui ./internal/darwin -run 'Test(Grid|Captured|EmulatorReplies|CancelingInput|NativeInputResolves|CommitEntryResolves|NativePrepareBefore|NativeCommitResolves|TextSessionLoss|ModalReplacement|CustomTextOwner|LogicalOwnerPreparation|OutsideCompositionEntry|BlurCancelsLocal|LayoutInputs)' -count=1
+MYGO_GHOSTTY_VT="$VT" go -C third_party/mygo test ./plugins/terminal ./ui ./internal/darwin -run 'Test(Output|Grid|Captured|EmulatorReplies|CancelingInput|NativeInputResolves|CommitEntryResolves|NativePrepareBefore|NativeCommitResolves|TextSessionLoss|ModalReplacement|CustomTextOwner|LogicalOwnerPreparation|OutsideCompositionEntry|BlurCancelsLocal|LayoutInputs)' -count=1
 MYGO_GHOSTTY_VT="$VT" go test -tags 'corevt corequeue coreapp' -race ./internal/core ./internal/coreview ./internal/app -count=1 -timeout 900s
 ```
 
