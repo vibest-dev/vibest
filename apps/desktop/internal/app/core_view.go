@@ -31,7 +31,7 @@ func (a *App) corePanes(c *ui.Context) {
 	root := a.coreState.Layout.Tab(a.coreSelection.Tab)
 	if root == nil {
 		ui.Column(c).Grow(1).FillWidth().Center().Gap(chrome.Step8).Label("empty-core-layout").Children(func() {
-			ui.Text(c, "No Reherdr workspaces in this Core").TextColor(a.th.Secondary)
+			ui.Text(c, "No workspaces in this Core").TextColor(a.th.Secondary)
 			if ui.PrimaryButton(c, "New workspace").Clicked() {
 				a.NewWorkspace()
 			}
