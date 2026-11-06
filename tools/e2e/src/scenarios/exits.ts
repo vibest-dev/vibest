@@ -1,9 +1,12 @@
-// What vibestd learns with no poll (feature-map S21 to S25): an exit the runtime pushes, a stop of vibestd itself in the
+// What vibestd learns with no poll (feature-map S21 to S32): an exit the runtime pushes, a stop of vibestd itself in the
 // middle of a turn or of a delivery, and a herdr server that hands over to a new one. Pi subagents and a Pi main agent
 // on the fake model of inbox.ts; vibestd, herdr and Pi are the real ones.
+import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
+import net from "node:net"
 import path from "node:path"
 
+import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
 import type { Check } from "../check.ts"
 import { alive, expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, heldModel, piDir, project } from "./inbox.ts"
@@ -32,10 +35,10 @@ const piProject = async (w: World, name: string) => {
     timeoutMs: 90_000,
   })
   const q = <A>(sql: string, ...args: Array<string | number>) => row<A>(w, sql, ...args)
-  const runSub = async (task: string) =>
+  const runSub = async (task: string, ...flags: Array<string>) =>
     (
       JSON.parse(
-        await w.ok(["run", "pi", "--session", session, "--env", pi, "--", ask(task)], {
+        await w.ok(["run", "pi", "--session", session, "--env", pi, ...flags, "--", ask(task)], {
           cwd: repo,
           env,
           timeoutMs: 90_000,
@@ -141,6 +144,34 @@ const killedMidTurn = async (
     throw e
   }
 }
+
+/** One JSON-RPC call on a unix socket, as the vibest client makes it: its result, or a thrown error. */
+const rpc = (socket: string, method: string, params: object, headers: ReadonlyArray<[string, string]>) =>
+  new Promise<unknown>((resolve, reject) => {
+    let buf = ""
+    const sock = net.createConnection(socket, () =>
+      sock.write(JSON.stringify({ jsonrpc: "2.0", id: "1", method, params, headers }) + "\n"),
+    )
+    sock.on("data", (chunk) => {
+      buf += chunk.toString()
+      const nl = buf.indexOf("\n")
+      if (nl < 0) return
+      const reply = JSON.parse(buf.slice(0, nl)) as { result?: unknown; error?: unknown }
+      sock.destroy()
+      if ("error" in reply) reject(new Error(`${method}: ${JSON.stringify(reply.error)}`))
+      else resolve(reply.result)
+    })
+    sock.on("error", reject)
+  })
+
+/** Session `id`'s task was never handed over: no `inbox.status` for it. */
+const untaken = (w: World, id: string) =>
+  row<{ n: number }>(
+    w,
+    `SELECT count(*) AS n FROM inbox i WHERE i.recipient_session_id = ? AND i.kind = 'task'
+      AND NOT EXISTS (SELECT 1 FROM event e WHERE e.inbox_id = i.id AND e.type = 'inbox.status')`,
+    id,
+  )?.n === 1
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -294,6 +325,249 @@ const checks: ReadonlyArray<Check> = [
         const message = ask("after")
         await p.vibestSend(kept, message)
         await until("the send delivered", () => p.sendRow(kept, message)?.status === "delivered", 30_000)
+      } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S28",
+    title:
+      "vibestd killed (kill -9) while a subagent's start has no terminal yet: the next vibestd ends it launch_failed with one notice; its worktree is removed, or kept with the reason when the harness's tab survived",
+    run: async (w) => {
+      const p = await piProject(w, "s28")
+      try {
+        const daemon = await w.daemonPid()
+        expect(daemon !== undefined, "no vibestd pid")
+        const sub = await p.runSub("cut")
+        // `vibest run` answers once the row is stored; the start then makes the worktree and opens the terminal.
+        const startTerminal = () =>
+          row<{ t: string; ended: number }>(
+            w,
+            `SELECT json_extract(e.data, '$.terminal') AS t,
+              EXISTS (SELECT 1 FROM event x WHERE x.process_id = e.id AND x.type = 'process.end') AS ended
+            FROM event e WHERE e.session_id = ? AND e.type = 'process.start' ORDER BY e.id DESC LIMIT 1`,
+            sub,
+          )
+        const now = startTerminal()
+        expect(now?.t === "" && now.ended === 0, `the start already has a terminal: ${JSON.stringify(now)}`)
+        process.kill(daemon!, "SIGKILL")
+        await until("vibestd gone", () => !alive(daemon!), 10_000)
+        const worktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", sub)?.d ?? ""
+        expect(worktree !== "", `no worktree recorded for ${sub}`)
+        await p.startDaemon()
+        await until("the cut-off start's notice", () => p.notices(sub, "never finished starting") === 1, 30_000)
+        const end = row<{ reason: string }>(
+          w,
+          "SELECT json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ? AND type = 'process.end'",
+          sub,
+        )
+        expect(end?.reason === "launch_failed", `its process ended ${end?.reason}`)
+        const text =
+          row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", sub)
+            ?.c ?? ""
+        const kept = await fs.stat(worktree).then(
+          () => true,
+          () => false,
+        )
+        expect(
+          kept ? text.includes("has its working directory in it") : text.includes("its worktree was removed"),
+          `worktree ${kept ? "kept" : "removed"}, notice: ${text}`,
+        )
+        // Nothing more comes for it.
+        await Bun.sleep(2_000)
+        expect(p.notices(sub, "never finished starting") === 1, "more than one notice")
+      } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S29",
+    title:
+      "vibestd killed (kill -9) while a subagent's first turn waits for its harness to be ready (the task not handed over): the next vibestd types the task once, as that turn's input, and one completed result reaches the main agent",
+    run: async (w) => {
+      const p = await piProject(w, "s29")
+      try {
+        p.model.release()
+        // The window is the first look for the harness's ready report: a try that misses it (the task linked before
+        // the kill) is not this case, so the next subagent tries again.
+        let sub = ""
+        for (let attempt = 1; sub === "" && attempt <= 5; attempt++) {
+          const daemon = await w.daemonPid()
+          expect(daemon !== undefined, "no vibestd pid")
+          const id = await p.runSub(`t${attempt}`)
+          const opened = () =>
+            row<{ n: number }>(w, "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'turn.start'", id)
+              ?.n === 1
+          for (const deadline = Date.now() + 60_000; !opened(); await Bun.sleep(1))
+            expect(Date.now() < deadline, `${id}: its first turn never opened`)
+          process.kill(daemon!, "SIGKILL")
+          await until("vibestd gone", () => !alive(daemon!), 10_000)
+          if (untaken(w, id)) sub = id
+          await p.startDaemon()
+          if (sub === "") await until(`${id} idle`, () => p.idle(id), 60_000)
+        }
+        expect(sub !== "", "every try handed the task over before vibestd was killed")
+        const task = `t${row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE recipient_session_id = ? AND kind = 'task'", sub)?.c.match(/done-t(\d+)/)?.[1]}`
+        await until(
+          "one completed result",
+          () => p.results(sub) === 1 && p.lastEnd(sub)?.status === "completed",
+          60_000,
+        )
+        await until(
+          "the result delivered to the main agent",
+          () =>
+            row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE sender_session_id = ? AND kind = 'result'", sub)
+              ?.s === "delivered",
+          30_000,
+        )
+        // Nothing more comes for it.
+        await Bun.sleep(3_000)
+        expect(p.model.asked(task) === 1, `the task was asked ${p.model.asked(task)} times`)
+        expect(p.results(sub) === 1, `${p.results(sub)} results`)
+        const input = row<{ n: number }>(
+          w,
+          `SELECT count(*) AS n FROM event e JOIN inbox i ON i.id = e.inbox_id
+            WHERE e.session_id = ? AND e.type = 'inbox.status' AND i.kind = 'task' AND e.turn_id IS NOT NULL`,
+          sub,
+        )?.n
+        expect(input === 1, `the task is the input of ${input} turns`)
+      } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S30",
+    title:
+      "an archive cut off after its mark (vibestd killed with the session's ended_at set, its tab still open): the next vibestd closes the tab and ends the process archived, keeping the worktree; vibest archive then removes it",
+    run: async (w) => {
+      const p = await piProject(w, "s30")
+      try {
+        p.model.release()
+        const sub = await p.runSub("archived")
+        await until("the subagent idle", () => p.idle(sub), 90_000)
+        const pane = p.pane(sub)
+        const worktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", sub)?.d ?? ""
+        expect(pane !== "" && worktree !== "", `no pane or worktree recorded for ${sub}`)
+        const daemon = await w.daemonPid()
+        expect(daemon !== undefined, "no vibestd pid")
+        process.kill(daemon!, "SIGKILL")
+        await until("vibestd gone", () => !alive(daemon!), 10_000)
+        // What `vibest archive` stores first (its mark), before it closes anything.
+        const db = new Database(path.join(w.vibestHome, "vibest.db"))
+        try {
+          db.query("UPDATE session SET ended_at = ? WHERE id = ?").run(Date.now(), sub)
+        } finally {
+          db.close()
+        }
+        await p.startDaemon()
+        const ended = () =>
+          row<{ reason: string }>(
+            w,
+            "SELECT json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ? AND type = 'process.end'",
+            sub,
+          )?.reason
+        await until("its process ended", () => ended() !== undefined, 30_000)
+        expect(ended() === "archived", `its process ended ${ended()}`)
+        const panes = (await herdr(p.socket, "pane.list", {})).panes as Array<{ pane_id: string }>
+        expect(!panes.some((x) => x.pane_id === pane), `pane ${pane} is still open`)
+        const exists = () =>
+          fs.stat(worktree).then(
+            () => true,
+            () => false,
+          )
+        expect(await exists(), `the worktree ${worktree} was removed`)
+        expect(p.notices(sub, "") === 0, "a notice for a clean finish")
+        await w.ok(["archive", sub], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
+        expect(!(await exists()), `vibest archive kept the worktree ${worktree}`)
+      } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S31",
+    title:
+      "vibest run --archive-on-completion, vibestd killed (kill -9) after the completed result was delivered and before the archive: the next vibestd archives it once, with no notice",
+    run: async (w) => {
+      const p = await piProject(w, "s31")
+      try {
+        const state = (id: string) =>
+          row<{ status: string | null; ended: number | null }>(
+            w,
+            `SELECT (SELECT status FROM inbox WHERE sender_session_id = s.id AND kind = 'result' ORDER BY id DESC LIMIT 1)
+              AS status, s.ended_at AS ended FROM session s WHERE s.id = ?`,
+            id,
+          )
+        // The window is from the result's delivery to the archive's mark: a try that misses it (archived before the
+        // kill) is not this case, so the next subagent tries again.
+        let sub = ""
+        for (let attempt = 1; sub === "" && attempt <= 5; attempt++) {
+          const daemon = await w.daemonPid()
+          expect(daemon !== undefined, "no vibestd pid")
+          const id = await p.runSub(`a${attempt}`, "--archive-on-completion")
+          await until(`${id} held`, () => p.model.held() > 0, 60_000)
+          p.model.releaseOne()
+          for (const deadline = Date.now() + 60_000; state(id)?.status !== "delivered"; await Bun.sleep(1))
+            expect(Date.now() < deadline, `${id}: its result was never delivered`)
+          process.kill(daemon!, "SIGKILL")
+          await until("vibestd gone", () => !alive(daemon!), 10_000)
+          if (state(id)?.ended === null) sub = id
+          await p.startDaemon()
+        }
+        expect(sub !== "", "every try archived the session before vibestd was killed")
+        await until("archived", () => state(sub)?.ended !== null, 30_000)
+        const ends = () =>
+          row<{ n: number; reason: string }>(
+            w,
+            "SELECT count(*) AS n, json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ? AND type = 'process.end'",
+            sub,
+          )
+        await until("its process ended", () => ends()?.n === 1, 30_000)
+        await Bun.sleep(2_000)
+        expect(ends()?.n === 1 && ends()?.reason === "archived", `its process ends: ${JSON.stringify(ends())}`)
+        expect(p.notices(sub, "") === 0, "a notice for a clean archive")
+      } finally {
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S32",
+    title:
+      "Send repeated over vibest.sock with one request id (as vibest send retries a lost answer): the same answer, one row, one delivery, the task asked once and one result",
+    run: async (w) => {
+      const p = await piProject(w, "s32")
+      try {
+        p.model.release()
+        const sub = await p.runSub("first")
+        await until("idle", () => p.idle(sub), 60_000)
+        const message = ask("again")
+        const send = () =>
+          rpc(path.join(w.vibestHome, "vibest.sock"), "Send", { id: sub, message, request: "e2e-request-1" }, [
+            ["vibest-protocol", String(PROTOCOL)],
+            ["vibest-caller", "cli"],
+            ["vibest-repository", p.repo],
+          ])
+        const first = await send()
+        const second = await send()
+        expect(
+          JSON.stringify(first) === JSON.stringify(second) && JSON.stringify(first).includes(sub),
+          `answers ${JSON.stringify(first)} and ${JSON.stringify(second)}`,
+        )
+        await until("delivered", () => p.sendRow(sub, message)?.status === "delivered", 30_000)
+        await until("its result", () => p.results(sub) === 2 && p.idle(sub), 60_000)
+        await Bun.sleep(2_000)
+        const rows = row<{ n: number }>(
+          w,
+          "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND kind = 'send'",
+          sub,
+        )?.n
+        expect(rows === 1, `${rows} send rows`)
+        expect(p.model.asked("again") === 1, `the message was asked ${p.model.asked("again")} times`)
+        expect(p.results(sub) === 2, `${p.results(sub)} results for two turns`)
       } finally {
         await p.close()
       }

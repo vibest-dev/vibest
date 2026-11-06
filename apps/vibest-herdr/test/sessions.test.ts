@@ -1,6 +1,7 @@
 // Session state machine against a fake herdr (SPEC §15: "State machine response to event sequences").
 // `it.effect` runs on TestClock: time stands still unless a test moves it, so polls and timeouts only fire on purpose.
 import { assert, describe, it } from "@effect/vitest"
+import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import type { HarnessId } from "@vibest/core/harness"
@@ -48,6 +49,7 @@ import {
   resultText,
   systemPromptFile,
   projectOf,
+  processEnds,
 } from "./fakes.ts"
 
 /** Which harness an `open` argv starts: its binary, first. */
@@ -2024,6 +2026,12 @@ describe.concurrent("Sessions", () => {
       yield* until(herdr.callsTo("send"), (calls) => calls.length > 0)
       assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "do it")
       assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
+      // The move handed the task over: it is the open turn's input.
+      const sql = yield* SqlClient.SqlClient
+      const [round] = yield* sql<{
+        input: string
+      }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(Effect.orDie)
+      assert.strictEqual(round!.input, "do it")
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude"],
@@ -2154,10 +2162,11 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a remembered limit is forgotten once the login's row was refreshed after it and reads fine",
+    "a login limited in this round is not tried again in it, even when its row reads free; a later round may use it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const subs = yield* Subscriptions
+      const sql = yield* SqlClient.SqlClient
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
@@ -2168,22 +2177,38 @@ describe.concurrent("Sessions", () => {
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), provider: "openai" })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
-      // pi/openai goes bad and the session moves to claude, remembering pi/openai limited.
+      const free = [{ window: "5h", percent: 5, status: "available" as const, resetTime: null }]
+      const limitedEnds = sql<{ harness: string; provider: string | null }>`SELECT
+          json_extract(ps.data, '$.harness') AS harness, json_extract(ps.data, '$.provider') AS provider
+        FROM event pe JOIN event ps ON ps.id = pe.process_id
+        WHERE pe.session_id = ${id} AND pe.type = 'process.end' AND json_extract(pe.data, '$.reason') = 'limited'
+        ORDER BY pe.id`.pipe(Effect.orDie)
+      // pi/openai hits its limit and the session moves to claude.
       yield* subs.report({ harness: "pi", provider: "openai", limits: [limited] })
       yield* TestClock.adjust("10 seconds")
       yield* writeResult(id, "pi", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
-      // The row is refreshed after the limit and no longer limited: claude's limit moves back to it, not to nothing.
+      // Its row is refreshed after the limit and reads free, yet it hit a limit in this round: claude's limit ends the
+      // round instead of going back to it.
       yield* TestClock.adjust("10 seconds")
-      yield* subs.report({
-        harness: "pi",
-        provider: "openai",
-        limits: [{ window: "5h", percent: 5, status: "available", resetTime: null }],
-      })
-      // A generic limit payload on a claude row: this tests the harness move. Claude's plugin reports no error kind
-      // (turn.complete has none), so a real Claude limit is a failed result, not this move.
+      yield* subs.report({ harness: "pi", provider: "openai", limits: free })
+      yield* writeResult(id, "claude", { error: "rate_limit" })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      assert.deepInclude(yield* db.getSession(id), { harnessId: "claude", turnState: "failed" })
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "no harness left")
+      assert.deepStrictEqual(
+        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
+        ["pi", "claude"],
+      )
+      assert.deepStrictEqual(yield* limitedEnds, [{ harness: "pi", provider: "openai" }])
+      // A later message is a new round: the free reading lets claude's next limit move back to pi/openai.
+      yield* TestClock.adjust("10 seconds")
+      yield* sessions.send(id, "next")
+      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      yield* TestClock.adjust("10 seconds")
       yield* writeResult(id, "claude", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -2192,11 +2217,26 @@ describe.concurrent("Sessions", () => {
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude", "pi"],
       )
-      const args = (yield* herdr.callsTo("open")).at(-1)!.argv
-      // Pi refuses --provider without --model: the login is recorded on the session, Pi starts on its default.
-      assert.notInclude(args, "--provider")
+      assert.deepStrictEqual(yield* limitedEnds, [
+        { harness: "pi", provider: "openai" },
+        { harness: "claude", provider: null },
+      ])
     }),
-    { noRun: true },
+    {
+      noRun: true,
+      plugins: [
+        Plugin.define({
+          id: "two-logins",
+          effect: (ctx) =>
+            ctx.agent.hook("fail", (e) =>
+              Effect.sync(() => {
+                // Trusts the usage rows: whichever of the two logins the session is not on.
+                e.move = e.harness === "pi" ? { harness: "claude" } : { harness: "pi", provider: "openai" }
+              }),
+            ),
+        }),
+      ],
+    },
   )
 
   test(
@@ -4119,5 +4159,279 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       assert.isFalse(yield* archived(w.db, w.id))
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
+  )
+})
+
+/** The next vibestd over the same database, its reconcile done: what a stop left behind is found once. */
+const nextVibestd = (done: Effect.Effect<boolean, never, TestServices>) =>
+  Effect.gen(function* () {
+    const next = yield* Sessions.make({ maxSessions: undefined })
+    yield* until(done, (yes) => yes)
+    yield* until(next.inMemory, (m) => m.locks === 0)
+  })
+
+/**
+ * The stopped vibestd's start, held at `open` while `body` runs: its `process.start` has no terminal yet. Released
+ * (failing) afterwards, so its launch, which nothing can interrupt, ends before the test's layer closes.
+ */
+const heldAtOpen = <A, E, R, R2>(
+  target: string | undefined,
+  start: Effect.Effect<unknown, never, R2>,
+  body: Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const held = yield* (yield* FakeRuntime).hold("open", target)
+    yield* start
+    yield* held.reached
+    return yield* body.pipe(Effect.ensuring(held.release("unreachable")))
+  })
+
+describe.concurrent("after a vibestd stop", () => {
+  /** A spawn held at `open` (its worktree made) while `body` runs with its id. */
+  const cutOffSpawn = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      const repo = yield* makeRepository
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
+      const spawned = yield* Deferred.make<string>()
+      return yield* heldAtOpen(
+        undefined,
+        Effect.flatMap(Sessions, (sessions) =>
+          spawnInput(repo).pipe(
+            Effect.flatMap(sessions.spawn),
+            Effect.flatMap(({ id }) => Deferred.succeed(spawned, id)),
+            Effect.orDie,
+          ),
+        ),
+        Effect.flatMap(Deferred.await(spawned), body),
+      )
+    })
+
+  test(
+    "a spawn cut off before its terminal ends launch_failed, its worktree removed, with one notice",
+    cutOffSpawn((id) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const db = yield* Db
+        const worktree = yield* sessionWorktree(id)
+        assert.isTrue(yield* fs.exists(worktree))
+        yield* nextVibestd(Effect.map(sqlNotices(id), (n) => n.length > 0))
+        assert.deepStrictEqual(yield* processEnds(id), ["launch_failed"])
+        assert.isFalse(yield* fs.exists(worktree))
+        assert.deepStrictEqual(yield* sqlNotices(id), [
+          `${id} never finished starting (vibestd stopped while it started); its worktree was removed.`,
+        ])
+        assert.deepInclude(yield* db.getSession(id), { startedAt: null, status: "unknown" })
+      }),
+    ),
+  )
+
+  test(
+    "a spawn cut off before its terminal keeps its worktree while a process works in it, and names it",
+    cutOffSpawn((id) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        yield* (yield* FakeProcesses).setCwdUsers([4242])
+        yield* nextVibestd(Effect.map(sqlNotices(id), (n) => n.length > 0))
+        assert.deepStrictEqual(yield* processEnds(id), ["launch_failed"])
+        assert.isTrue(yield* fs.exists(yield* sessionWorktree(id)))
+        const [text] = yield* sqlNotices(id)
+        assert.include(text!, "never finished starting (vibestd stopped while it started)")
+        assert.include(text!, "process 4242 has its working directory in it")
+      }),
+    ),
+  )
+
+  test(
+    "a resume cut off before its terminal falls back to its previous start and keeps its worktree",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* idleSession(yield* makeRepository)
+      const before = (yield* db.getSession(id))!
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      yield* heldAtOpen(
+        id,
+        sessions.send(id, "next").pipe(Effect.orDie),
+        Effect.gen(function* () {
+          assert.isNull((yield* db.getSession(id))!.startedAt)
+          const cutOff = (texts: ReadonlyArray<string>) => texts.find((t) => t.includes("never finished starting"))
+          yield* nextVibestd(Effect.map(sqlNotices(id), (n) => cutOff(n) !== undefined))
+          assert.deepStrictEqual(yield* processEnds(id), ["exited", "launch_failed"])
+          const after = (yield* db.getSession(id))!
+          assert.deepStrictEqual([after.address, after.startedAt], [before.address, before.startedAt])
+          assert.isTrue(yield* fs.exists(yield* sessionWorktree(id)))
+          assert.strictEqual(
+            cutOff(yield* sqlNotices(id)),
+            `${id} never finished starting (vibestd stopped while it started).`,
+          )
+        }),
+      )
+    }),
+    { hooked: ["pi"] },
+  )
+
+  /**
+   * A spawn the stopped vibestd left waiting for its harness to be ready (its first look at the terminal held): its
+   * first turn is open, the task not handed over. `body` runs with its id; afterwards that look fails, so the stopped
+   * vibestd's launch ends before the test's layer closes.
+   */
+  const waitingForReady = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db
+      const repo = yield* makeRepository
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
+      const opening = yield* herdr.hold("open")
+      const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
+      yield* opening.reached
+      const looking = yield* herdr.hold("state", id)
+      yield* opening.release()
+      yield* looking.reached
+      return yield* body(id).pipe(Effect.ensuring(looking.release("unreachable")))
+    })
+
+  const turnInputs = (id: string) =>
+    Effect.flatMap(SqlClient.SqlClient, (sql) =>
+      sql<{ input: string; status: string }>`SELECT input, status FROM ${sql.literal(TURNS)} m
+        WHERE session_id = ${id} ORDER BY id`.pipe(Effect.orDie),
+    )
+  const typed = (text: string) =>
+    Effect.map(
+      Effect.flatMap(FakeRuntime, (herdr) => herdr.callsTo("send")),
+      (calls) => calls.filter((c) => c.text === text).length,
+    )
+
+  test(
+    "a first turn waiting for its harness to be ready has not taken its task",
+    waitingForReady((id) =>
+      Effect.gen(function* () {
+        const db = yield* Db
+        assert.isFalse(yield* db.turnTaken(id))
+        assert.strictEqual(yield* db.untakenTask(id), "do it")
+        assert.deepStrictEqual(yield* turnInputs(id), [{ input: "", status: "working" }])
+        assert.strictEqual(yield* typed("do it"), 0)
+      }),
+    ),
+  )
+
+  test(
+    "a task never handed over is handed over once by the next vibestd, as its open turn's input",
+    waitingForReady((id) =>
+      Effect.gen(function* () {
+        const db = yield* Db
+        yield* nextVibestd(Effect.map(typed("do it"), (n) => n === 1))
+        assert.deepStrictEqual(yield* turnInputs(id), [{ input: "do it", status: "working" }])
+        assert.isUndefined(yield* db.untakenTask(id))
+        assert.isTrue(yield* db.turnTaken(id))
+      }),
+    ),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "a first turn ended before its handover (vibestd stopped in its ready wait) leaves the task for the next vibestd",
+    waitingForReady((id) =>
+      Effect.gen(function* () {
+        const db = yield* Db
+        // What a SIGTERM during awaitReady writes: the turn ends not_started, the task unlinked.
+        yield* db.updateSession(id, { turnState: "not_started" })
+        assert.strictEqual(yield* db.untakenTask(id), "do it")
+        yield* nextVibestd(Effect.map(typed("do it"), (n) => n === 1))
+        assert.deepStrictEqual(yield* turnInputs(id), [
+          { input: "", status: "not_started" },
+          { input: "do it", status: "working" },
+        ])
+        assert.isUndefined(yield* db.untakenTask(id))
+      }),
+    ),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "a task handed over at reconcile that does not start ends the turn not_started and is not handed over again",
+    waitingForReady((id) =>
+      Effect.gen(function* () {
+        const herdr = yield* FakeRuntime
+        // The paste and its one re-paste are taken without the agent moving.
+        yield* Ref.set(herdr.skipPromptUpdates, 2)
+        const next = yield* Sessions.make({ maxSessions: undefined })
+        yield* untilVirtual(turnInputs(id), (turns) => turns[0]?.status === "not_started")
+        assert.strictEqual(yield* typed("do it"), 2)
+        assert.isTrue((yield* sqlNotices(id)).some((t) => t.startsWith("task_not_started")))
+        yield* next.check(id)
+        yield* until(next.inMemory, (m) => m.locks === 0)
+        assert.strictEqual(yield* typed("do it"), 2)
+        assert.strictEqual((yield* turnInputs(id)).length, 1)
+      }),
+    ),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "an archive cut off after its mark: the next vibestd closes its terminal and ends its process, once; the worktree stays",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const herdr = yield* FakeRuntime
+      const { id, row, db } = yield* idleSession(yield* makeRepository)
+      // `vibest archive` marked it, then vibestd stopped before its terminal closed.
+      yield* db.updateSession(id, { metadata: { ...row.metadata, archived: true, removed: true } })
+      const closes = Effect.map(herdr.callsTo("close"), (calls) => calls.filter((c) => c.terminal === row.address.id))
+      yield* nextVibestd(Effect.map(processEnds(id), (ends) => ends.length > 0))
+      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
+      assert.strictEqual((yield* closes).length, 1)
+      assert.isTrue(yield* fs.exists(yield* sessionWorktree(id)))
+      assert.deepStrictEqual(yield* sqlNotices(id), [])
+      // A later reconcile finds nothing left to finish.
+      yield* (yield* Bus).observe({ type: "live.reset", runtime: RUNTIME, machine: "local" })
+      yield* settled
+      assert.strictEqual((yield* closes).length, 1)
+      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
+    }),
+    { hooked: ["pi"] },
+  )
+
+  /** An idle `--archive-on-completion` session whose completed result was delivered, its archive cut off by a stop. */
+  const deliveredNotArchived = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const w = yield* idleSession(yield* makeRepository)
+    yield* sql`UPDATE session SET archive_on_completion = 1 WHERE id = ${w.id}`.pipe(Effect.orDie)
+    const result = (yield* w.db.latestInbox(w.id, "result"))!
+    assert.strictEqual(result.details.status, "completed")
+    yield* w.db.setInboxStatus([result.id], "delivered")
+    return w
+  })
+
+  test(
+    "a session whose completed result was delivered before its archive is archived by the next vibestd, with no notice",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const { id, db } = yield* deliveredNotArchived
+      const worktree = yield* sessionWorktree(id)
+      yield* nextVibestd(Effect.map(db.getSession(id), (w) => !!w?.metadata.archived && w.exitedAt !== null))
+      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
+      assert.isFalse(yield* fs.exists(worktree))
+      assert.deepStrictEqual(yield* sqlNotices(id), [])
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "a session with archive-on-completion that has a message pending is left to it by the next vibestd",
+    Effect.gen(function* () {
+      const { id, db } = yield* deliveredNotArchived
+      const sent = (yield* db.insertSend(id, "more"))!
+      yield* nextVibestd(Effect.map(db.inboxWithStatus(id, "pending"), (rows) => !rows.some((r) => r.id === sent.id)))
+      yield* settled
+      assert.isUndefined((yield* db.getSession(id))!.metadata.archived)
+    }),
+    { hooked: ["pi"] },
   )
 })

@@ -165,6 +165,8 @@ export interface SpawnInput {
   readonly archive?: boolean | undefined
   /** The session that asked for it (the main agent); undefined for the user's own `vibest run`. */
   readonly parentSessionId?: string | undefined
+  /** The caller's request id: a repeat of it answers the session the first try made. */
+  readonly request?: string | undefined
 }
 
 export interface Spawned extends Routing {
@@ -192,7 +194,7 @@ export class Sessions extends Context.Service<
       Scope.Scope
     >
     /** Queue a message; vibestd delivers it once the session is idle (SPEC §8.4). Returns once the message is stored. */
-    readonly send: (id: string, message: string) => Effect.Effect<void, NoSuchSession>
+    readonly send: (id: string, message: string, request?: string) => Effect.Effect<void, NoSuchSession>
     /** Interrupt the running turn and keep the session (terminal, worktree, conversation) for follow-ups (SPEC §8.6). */
     readonly interrupt: (
       id: string,
@@ -666,16 +668,25 @@ export class Sessions extends Context.Service<
 
       // ---- spawn ----
 
-      /** The first turn, once the terminal exists: the system prompt in front where the harness has no flag for it, else the text alone. */
+      /**
+       * Hand the session its task as its first turn: the system prompt in front where the harness has no flag for it,
+       * else the text alone. The task is linked to the turn right before its text goes (`linkTask`).
+       */
+      const handTask = (h: Runtime, session: SessionRow, terminal: Terminal, task: string) =>
+        Effect.gen(function* () {
+          const first = harnesses.get(session.harnessId).systemPromptInPrompt
+            ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${task}`
+            : task
+          const notStarted = yield* prompt(h, session, terminal, first, db.linkTask(session.id))
+          if (notStarted) yield* notice(session, notStarted)
+        })
+
+      /** The first turn, once the terminal exists. */
       const afterOpen = (h: Runtime, session: SessionRow, terminal: Terminal, root: string, firstPrompt: string) =>
         Effect.gen(function* () {
           // Labelled as soon as it is live (§3 `present`), the same way `resume` and `recount` relabel it.
           yield* show(h, session, terminal, root)
-          const first = harnesses.get(session.harnessId).systemPromptInPrompt
-            ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${firstPrompt}`
-            : firstPrompt
-          const notStarted = yield* prompt(h, session, terminal, first)
-          if (notStarted) yield* notice(session, notStarted)
+          yield* handTask(h, session, terminal, firstPrompt)
         })
 
       const { launch, resume, republish, recount, openTerminal, show, locate } = sessionPlacement({
@@ -900,17 +911,25 @@ export class Sessions extends Context.Service<
               cwd,
               decision.prompt,
               input.parentSessionId,
+              input.request,
             )
-            if (!inserted) {
-              // The directory this spawn reserved goes again (still empty: nothing was started in it).
-              if (shared === undefined) yield* fs.remove(cwd, { recursive: true }).pipe(Effect.ignore)
+            // The directory this spawn reserved goes again (still empty: nothing was started in it).
+            const unreserve =
+              shared === undefined ? fs.remove(cwd, { recursive: true }).pipe(Effect.ignore) : Effect.void
+            if (inserted === false) {
+              yield* unreserve
               return yield* new LimitReached({ limit: options.maxSessions! })
             }
-            return (yield* db.getSession(id))!
+            // A repeat of a spawn whose first try made its session: that one is the answer.
+            if (inserted !== true) {
+              yield* unreserve
+              return { before: inserted }
+            }
+            return { row: (yield* db.getSession(id))! }
           })
         // `--peer`: under the directory's lock, which an archive holds while it decides whether that directory goes,
         // so no archive (of the named session or of any other session in it) removes what this one is about to share.
-        const row =
+        const admitted =
           input.peer === undefined
             ? yield* admit(undefined)
             : yield* locks.withLock(directoryLock((yield* db.sessionDirectory(input.peer)) ?? ""))(
@@ -920,6 +939,19 @@ export class Sessions extends Context.Service<
                   return yield* admit(shared)
                 }),
               )
+        if ("before" in admitted) {
+          const { before } = admitted
+          return {
+            id: before.id,
+            harness: before.harness as HarnessId,
+            provider: before.provider,
+            model: before.model,
+            runtime: before.runtime,
+            decidedBy: before.routing?.decidedBy ?? {},
+            trace: before.routing?.trace ?? [],
+          }
+        }
+        const row = admitted.row
         // The launch holds the lock before spawn returns, so no check sees the row as an abandoned `starting` one.
         const held = yield* Deferred.make<void>()
         yield* Effect.uninterruptible(
@@ -940,6 +972,30 @@ export class Sessions extends Context.Service<
         yield* Deferred.await(held)
         return { id, harness: harnessId, provider, model, runtime: runtimeKind, ...routing }
       }, Effect.provideContext(platform))
+
+      /**
+       * A start cut off before its terminal was recorded, its process already ended `launch_failed`. A spawn (no terminal
+       * ever) is undone as a failed launch is: its worktree goes when nothing can be lost (Remove.release), and its
+       * reserved directory when still empty. A resume or move only falls back to its previous start. One notice says so.
+       */
+      const undoCutOffStart = (h: Runtime, session: SessionRow) =>
+        Effect.gen(function* () {
+          const what = `${session.id} never finished starting (vibestd stopped while it started)`
+          if (yield* db.hadTerminal(session.id)) return yield* notice(session, `${what}.`)
+          const ended = yield* getRow(session.id)
+          const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(session.id)) ?? ""))(
+            removal.release({ h, session: ended, terminal: undefined, keepWorktree: false, reasons: [] }),
+          )
+          let kept = out.worktree === "kept" ? out.reasons.join("; ") : undefined
+          if (
+            kept !== undefined &&
+            (yield* fs.readDirectory(out.path).pipe(Effect.orElseSucceed(() => ["?"]))).length === 0
+          ) {
+            yield* fs.remove(out.path, { recursive: true }).pipe(Effect.ignore)
+            kept = undefined
+          }
+          yield* notice(session, kept === undefined ? `${what}; its worktree was removed.` : `${what}; ${kept}.`)
+        })
 
       const check = Effect.fn("Sessions.check")(function* (id: string) {
         const session = yield* db.getSession(id)
@@ -968,16 +1024,20 @@ export class Sessions extends Context.Service<
         if (state === "working" || state === "blocked") yield* Ref.set(r.sawWorking, true)
         if ((yield* collectResult(h, session)) !== "none") return
         if (seen === "absent" || (state === undefined && !(yield* alive(h, terminal)))) {
-          if (session.startedAt === null) {
-            // vibestd died mid-spawn (SPEC §5.5 spawn).
-            yield* notice(session, `${id} never finished starting (vibestd restarted during spawn).`)
-          } else if (open)
+          // A start vibestd stopped in before its terminal was recorded ends as a failed start does (SPEC §5.5 spawn).
+          const cutOff = session.startedAt === null
+          if (open && !cutOff)
             yield* finish(session, "failed", "", "the session exited (its terminal is gone or its process with it)")
           // The runtime has no agent for it any more: its status is unknown, and the project workspace's live count no longer includes it.
           if (session.exitedAt === null) {
-            yield* db.updateSession(id, { status: "unknown", exitedAt: yield* Clock.currentTimeMillis })
+            yield* db.updateSession(id, {
+              status: "unknown",
+              exitedAt: yield* Clock.currentTimeMillis,
+              ...(cutOff ? { end: "launch_failed" as const } : {}),
+            })
             yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
           }
+          if (cutOff) yield* undoCutOffStart(h, session)
           yield* dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
           return
         }
@@ -989,6 +1049,12 @@ export class Sessions extends Context.Service<
         }
 
         const s = state ?? "unknown"
+        // A task never handed over (vibestd stopped between its terminal and its text): handed over now, once. A miss
+        // ends the turn not_started, so it is not tried again.
+        if (s !== "working" && s !== "blocked" && session.startedAt !== null) {
+          const task = yield* db.untakenTask(id)
+          if (task !== undefined) return yield* handTask(h, session, terminal, task)
+        }
         if (!open) {
           if (s !== "working" && s !== "blocked") yield* deliverQueued(h, session, terminal)
           return
@@ -1090,14 +1156,16 @@ export class Sessions extends Context.Service<
       })
 
       /** Queue the message; its stored `inbox.queued` starts the delivery (`delivered`), so the caller may go away. */
-      const send = (id: string, message: string) =>
+      const send = (id: string, message: string, request?: string) =>
         Effect.gen(function* () {
           const session = yield* getRow(id)
+          // A repeat of a request that already queued its row was accepted, whatever became of the session since.
+          if (request !== undefined && (yield* db.queuedBy(id, request))) return
           const worktree = yield* worktreeOf(session)
           if (session.metadata.archived || session.metadata.removed || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
             return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
           // Archived since the read above (vibest run --archive-on-completion decides under the session's lock, not this one): refused, never accepted.
-          const row = yield* db.insertSend(id, message)
+          const row = yield* db.insertSend(id, message, request)
           if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
         })
 
@@ -1439,25 +1507,68 @@ export class Sessions extends Context.Service<
       }
 
       /**
+       * Finish an archive a vibestd stop cut off after its mark (`vibest archive` §8.6a): close its terminal and end its
+       * process. Its worktree stays (whether `--keep-worktree` was asked is not stored); `vibest archive` again removes
+       * it. A notice only when its processes are not proven gone.
+       */
+      const finishArchive = (id: string) =>
+        locked(id)(
+          Effect.gen(function* () {
+            const session = yield* getRow(id)
+            if (!(session.metadata.archived || session.metadata.removed) || session.exitedAt !== null) return
+            const h = yield* live(session)
+            const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(id)) ?? ""))(
+              removal.release({ h, session, terminal: session.address, keepWorktree: true, reasons: [] }),
+            )
+            yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
+            if (out.processes !== "exited")
+              yield* notice(
+                session,
+                `${id} was being archived when vibestd stopped: its terminal was ${out.pane === "kept" ? "not closed" : "closed"}, but its processes are ${out.processes === "alive" ? "still working in its worktree" : "not confirmed gone"}; run vibest archive ${id} again to check.`,
+              )
+          }),
+        ).pipe(logged(`archive ${id}`), Effect.provideContext(platform))
+
+      /**
        * One check of each live session in `where` (all, or one runtime's), then one delivery try for each project with
        * main-agent rows waiting. Only at start, when a runtime registers, and when one comes back (`live.reset`): what
        * no event reported in between (an exit while vibestd was down, a runtime registered late) is found here once.
        */
       const reconcile = (where: "all" | { readonly runtime: string; readonly machine?: string }) =>
         Effect.gen(function* () {
-          const rows = (yield* db.listSessions()).filter(
+          const here = (yield* db.listSessions()).filter(
             (row) =>
-              !row.metadata.archived &&
-              !row.metadata.removed &&
-              (row.exitedAt === null || row.turnState === "open") &&
-              (where === "all" ||
-                (row.runtime === where.runtime &&
-                  (where.machine === undefined || row.address.machine === where.machine))),
+              where === "all" ||
+              (row.runtime === where.runtime && (where.machine === undefined || row.address.machine === where.machine)),
           )
+          const rows = here.filter(
+            (row) =>
+              !row.metadata.archived && !row.metadata.removed && (row.exitedAt === null || row.turnState === "open"),
+          )
+          // Archived, its process still running in its terminal: an archive a stop cut off after its mark.
+          const archiving = here.filter(
+            (row) => (row.metadata.archived || row.metadata.removed) && row.exitedAt === null && row.address.id !== "",
+          )
+          yield* Effect.forEach(archiving, (row) => finishArchive(row.id), { concurrency: 8, discard: true })
           yield* Effect.log(
             `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,
           )
           yield* Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: 8, discard: true })
+          // `--archive-on-completion` whose delivered result's archive a stop cut off: its latest result looked at once
+          // (archiveDelivered re-reads every condition under the session's lock). A runtime not registered yet is
+          // looked at by the reconcile its registration runs.
+          yield* Effect.forEach(
+            rows.filter((row) => row.metadata.archive),
+            (row) =>
+              Effect.all([db.latestInbox(row.id, "result"), live(row).pipe(Effect.option)]).pipe(
+                Effect.flatMap(([latest, routed]) =>
+                  latest === undefined || Option.isNone(routed) ? Effect.void : archiveDelivered(latest),
+                ),
+                logged(`archive ${row.id}`),
+                Effect.provideContext(platform),
+              ),
+            { concurrency: 8, discard: true },
+          )
           for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
         })
 

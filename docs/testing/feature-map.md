@@ -38,6 +38,7 @@ check skips on a provider other than `anthropic`, which vibest does not give a C
 | U2  | `vibest update` hands vibestd over and restarts an old Pi main agent mid-turn in its own terminal                                                         | script  | same session, conversation and terminal; new harness pid; the turn gets `continue`; results still arrive |
 | U5  | a usage-limit move ends only the limited harness and runs the next one in the same pane                                                                   | script  | same pane and session; old pid gone; one round completes on the next login                               |
 | U6  | `vibest daemon restart` onto another vibest offers the agents on an old integration and restarts them in place                                            | script  | same pane and conversation; new harness pid; integration version updated                                 |
+| U8  | a usage-limit move tries each login at most once per round, whatever its usage reading says                                                               | script  | one failed result "no harness left"; no third start in the pane                                          |
 | D9  | `vibest update` from the registry                                                                                                                         | agent   | needs a published newer beta; the agent checks the prompt, the confirmation and the replaced daemon      |
 
 ## Project store
@@ -130,3 +131,8 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S25 | herdr hands over to a new server: the reset reconcile runs; a later close is seen within 2 s; send works          | exits: `tools/e2e` S25                                          |
 | S26 | latency of 10 send rounds and 10 pane closes: turn end to delivery p95 ≤ 1500 ms, close to exit ≤ 1000 ms         | inbox: `tools/e2e` S26                                          |
 | S27 | archive with a process working in the worktree: one look within 3 s, worktree kept, the reason names it           | exits: `tools/e2e` S27                                          |
+| S28 | vibestd killed before a spawn opened its terminal: `launch_failed`, one notice, worktree removed (or kept, named) | exits: `tools/e2e` S28                                          |
+| S29 | vibestd killed before the first task was handed over: the next vibestd types it once; one result                  | exits: `tools/e2e` S29                                          |
+| S30 | archive cut off after its mark: the next vibestd closes its tab, ends it `archived`, keeps the worktree           | exits: `tools/e2e` S30                                          |
+| S31 | vibestd killed between a delivered result and `--archive-on-completion`: archived once, no notice                 | exits: `tools/e2e` S31                                          |
+| S32 | Send repeated with one request id: the same answer, one row, one delivery, one result                             | exits: `tools/e2e` S32                                          |

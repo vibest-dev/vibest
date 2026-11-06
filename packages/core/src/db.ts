@@ -121,6 +121,16 @@ export type CoordinatorRow = typeof CoordinatorRow.Type
 
 export type NewInboxRow = Omit<InboxRow, "id" | "status" | "createdAt">
 
+/** The session an earlier try of the same spawn request made, with its first process's choice. */
+export type SpawnedBefore = {
+  readonly id: string
+  readonly harness: string
+  readonly provider: string | undefined
+  readonly model: string | undefined
+  readonly runtime: string
+  readonly routing: typeof Routing.Type | undefined
+}
+
 /** A repository of a project as `project_repository` keeps it: its main checkout's realpath and raw origin. */
 export type RepositoryRow = { readonly path: string; readonly remote: string | undefined }
 
@@ -709,6 +719,33 @@ const make = Effect.gen(function* () {
     inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind = 'send' AND m.status = ${storedStatus(status)}`)
   const entryOf = (projectIdValue: string) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
 
+  /** The row request `request` queued for session `sessionId` (its `inbox.queued` data), if any. */
+  const queuedBy = (sessionId: string, request: string) =>
+    sql<{ id: number }>`SELECT inbox_id AS id FROM event WHERE session_id = ${sessionId} AND type = 'inbox.queued'
+        AND json_extract(data, '$.request') = ${request} LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
+
+  /** The session spawn request `request` made in project `project`, with its first process's choice. */
+  const spawnedBy = (project: string, request: string) =>
+    sql<{ id: string; data: string }>`SELECT s.id, p.data FROM session s
+        JOIN event q ON q.session_id = s.id AND q.type = 'inbox.queued'
+        JOIN inbox i ON i.id = q.inbox_id AND i.kind = 'task'
+        JOIN event p ON p.id = (SELECT min(id) FROM event WHERE session_id = s.id AND type = 'process.start')
+      WHERE s.project_id = ${project} AND json_extract(q.data, '$.request') = ${request} LIMIT 1`.pipe(
+      Effect.map((rows) => {
+        const found = rows[0]
+        if (found === undefined) return undefined
+        const start = JSON.parse(found.data) as ProcessStart
+        return {
+          id: found.id,
+          harness: start.harness,
+          provider: start.provider,
+          model: start.model,
+          runtime: start.runtime,
+          routing: start.routing as typeof Routing.Type | undefined,
+        }
+      }),
+    )
+
   /** The open turn of `sessionId`: its latest `turn.start` with no `turn.end`. */
   const openTurn = (sessionId: string) =>
     sql<{ id: number }>`SELECT t.id FROM event t WHERE t.id = (SELECT max(id) FROM event WHERE session_id = ${sessionId}
@@ -759,6 +796,8 @@ const make = Effect.gen(function* () {
     readonly content: string
     readonly resultEventId?: number
     readonly status: string
+    /** The caller's request id (`vibest send`, `vibest run`), kept in its `inbox.queued` so a repeat finds it. */
+    readonly request?: string | undefined
   }) =>
     Effect.gen(function* () {
       const [inserted] = yield* sql<{ id: number }>`INSERT INTO inbox ${sql.insert({
@@ -772,8 +811,14 @@ const make = Effect.gen(function* () {
       const id = inserted!.id
       const at = yield* now
       const sessionId = row.recipient ?? row.sender!
-      yield* append({ sessionId, type: "inbox.queued", inboxId: id, at, data: {} })
-      // A task's delivery is the first turn that takes it (`linkTask`).
+      yield* append({
+        sessionId,
+        type: "inbox.queued",
+        inboxId: id,
+        at,
+        data: row.request === undefined ? {} : { request: row.request },
+      })
+      // A task's delivery is the turn it is handed into (`linkTask`).
       if (row.status !== "pending" && row.kind !== "task")
         yield* append({
           sessionId,
@@ -785,7 +830,7 @@ const make = Effect.gen(function* () {
       return id
     })
 
-  /** A delivered task no turn took yet becomes the input of `turnId`, the turn that just started on it. */
+  /** A delivered task no turn took yet becomes the input of `turnId`, the turn it is handed into. */
   const linkTask = (sessionId: string, turnId: number, at: number) =>
     Effect.gen(function* () {
       const [task] = yield* sql<{ id: number }>`SELECT i.id FROM inbox i WHERE i.recipient_session_id = ${sessionId}
@@ -892,7 +937,7 @@ const make = Effect.gen(function* () {
    * them. A result row points at the `turn.end` it reports: `end` when the caller is closing the turn, else one made
    * from `details` (status, error).
    */
-  const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number) =>
+  const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number, request?: string) =>
     Effect.gen(function* () {
       if (row.kind === "send") {
         const id = yield* insertInboxSql({
@@ -901,6 +946,7 @@ const make = Effect.gen(function* () {
           sender: null,
           content: row.message,
           status: "pending",
+          request,
         })
         return (yield* inboxIn([id]))[0]!
       }
@@ -1013,14 +1059,13 @@ const make = Effect.gen(function* () {
         if (open !== undefined) {
           if (patch.turnPromptedAt !== undefined) prompted.set(open, at)
         } else {
-          const turnId = yield* append({
+          yield* append({
             sessionId: id,
             type: "turn.start",
             processId: (yield* anySession(id))!.current?.id,
             at,
             data: {},
           })
-          yield* linkTask(id, turnId, at)
         }
       } else if (patch.turnState !== undefined && patch.turnState !== "none" && current.turnState === "open") {
         const open = yield* openTurn(id)
@@ -1186,6 +1231,14 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
+    /** Whether session `id` ever had a terminal (a `process.start` with one): false for a spawn cut off before it opened. */
+    hadTerminal: (id: string) =>
+      sql<{ one: number }>`SELECT 1 AS one FROM event WHERE session_id = ${id} AND type = 'process.start'
+        AND json_extract(data, '$.terminal') != '' LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
+
     /**
      * The other sessions still live (not archived) that work in session `id`'s directory on the same machine: while
      * there is one, that directory stays.
@@ -1224,9 +1277,15 @@ const make = Effect.gen(function* () {
       cwd = "",
       task?: string,
       parentSessionId?: string,
-    ) =>
+      request?: string,
+    ): Effect.Effect<boolean | SpawnedBefore> =>
       tx(
         Effect.gen(function* () {
+          // A repeat of a spawn that already made its session: that session, nothing inserted.
+          if (request !== undefined) {
+            const before = yield* spawnedBy(project, request)
+            if (before !== undefined) return before
+          }
           if (max !== undefined) {
             const n = (yield* selectRaw([notMain, sql`a.ended_at IS NULL`], running)).length
             if (n >= max) return false
@@ -1290,6 +1349,7 @@ const make = Effect.gen(function* () {
               sender: parentSessionId ?? null,
               content: task,
               status: "delivered",
+              request,
             })
           if (row.turnState !== "none") {
             const turnId = yield* append({
@@ -1633,14 +1693,24 @@ const make = Effect.gen(function* () {
     insertInbox: (row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie),
 
     /** A Message to the subagent, unless it is archived (undefined then). One transaction, so `archiveIfNoPending` sees it or it sees the tombstone. */
-    insertSend: (sessionId: string, message: string) =>
+    insertSend: (sessionId: string, message: string, request?: string) =>
       tx(
         Effect.gen(function* () {
+          // A repeat of a request that already queued its row: that row, before the archive check (it was accepted).
+          const before = request === undefined ? undefined : yield* queuedBy(sessionId, request)
+          if (before !== undefined) return (yield* inboxIn([before]))[0]
           const s = yield* findSession(sessionId)
           if (s === undefined || s.metadata.archived || s.metadata.removed) return undefined
-          return yield* insertInboxRow({ sessionId, kind: "send", message, details: {} })
+          return yield* insertInboxRow({ sessionId, kind: "send", message, details: {} }, undefined, undefined, request)
         }),
       ).pipe(Effect.orDie),
+
+    /** Whether request `request` already queued a row for session `sessionId`. */
+    queuedBy: (sessionId: string, request: string) =>
+      queuedBy(sessionId, request).pipe(
+        Effect.map((id) => id !== undefined),
+        Effect.orDie,
+      ),
 
     /** End the subagent (`stopped`) unless a Message to it is pending; false then. One transaction with `insertSend`'s. */
     archiveIfNoPending: (id: string) =>
@@ -1655,6 +1725,34 @@ const make = Effect.gen(function* () {
 
     closeTurn: (id: string, end: TurnState, patch: SessionPatch) =>
       tx(updateSession(id, { turnState: end, ...patch })).pipe(Effect.orDie),
+
+    /**
+     * Session `id`'s task becomes the input of its open turn: called right before its text is handed over, so a task
+     * with no `inbox.status` was certainly never typed. Nothing once it is linked, or with no open turn.
+     */
+    linkTask: (id: string) =>
+      tx(
+        Effect.gen(function* () {
+          const turn = yield* openTurn(id)
+          if (turn !== undefined) yield* linkTask(id, turn, yield* now)
+        }),
+      ).pipe(Effect.orDie),
+
+    /**
+     * Session `id`'s task when it was never handed over (no `inbox.status`) and no turn of it that took an input (typed,
+     * or rows delivered into it) has ended. A turn that ended before its handover (vibestd stopped in `awaitReady`)
+     * took nothing.
+     */
+    untakenTask: (id: string) =>
+      sql<{ content: string }>`SELECT i.content FROM inbox i WHERE i.recipient_session_id = ${id} AND i.kind = 'task'
+          AND NOT EXISTS (SELECT 1 FROM event e WHERE e.inbox_id = i.id AND e.type = 'inbox.status')
+          AND NOT EXISTS (SELECT 1 FROM event te JOIN event t ON t.id = te.turn_id
+            WHERE te.session_id = ${id} AND te.type = 'turn.end' AND (json_extract(t.data, '$.typed') IS NOT NULL
+              OR EXISTS (SELECT 1 FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status')))
+        LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]?.content),
+        Effect.orDie,
+      ),
 
     /**
      * Whether session `id`'s open turn was taken up, from what is stored (so after a vibestd restart too): it was typed,
@@ -1678,6 +1776,15 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows[0]?.at ?? undefined),
         Effect.orDie,
       ),
+
+    /** The logins whose process ended on a usage limit at or after `at`, oldest first (repeats included). */
+    limitedSince: (sessionId: string, at: number) =>
+      sql<{ harness: string; provider: string | null }>`SELECT json_extract(ps.data, '$.harness') AS harness,
+          json_extract(ps.data, '$.provider') AS provider
+        FROM event pe JOIN event ps ON ps.id = pe.process_id
+        WHERE pe.session_id = ${sessionId} AND pe.type = 'process.end' AND json_extract(pe.data, '$.reason') = 'limited'
+          AND pe.at >= ${at}
+        ORDER BY pe.id`.pipe(Effect.orDie),
 
     /**
      * What a usage-limit move can resend for a session, and the parent that asked for it. `working` is the open

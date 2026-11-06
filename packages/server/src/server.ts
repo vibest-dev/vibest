@@ -206,7 +206,7 @@ type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyo
 const nameFrom = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
 /** Ping's `capabilities`: the additive features this vibestd has (rpc.ts PingResult). */
-export const CAPABILITIES = { http: true, handoff: true } as const
+export const CAPABILITIES = { http: true, handoff: true, requests: true } as const
 
 /** This vibestd's identity for Ping, set by Daemon.run; empty on a server a test runs without one. */
 export const Identity = Context.Reference<DaemonIdentity>("vibest/DaemonIdentity", { defaultValue: () => ({}) })
@@ -653,6 +653,7 @@ export const handlers = VibestRpcs.toLayer(
             peer: input.peer === undefined ? undefined : yield* db.resolveSession(input.peer),
             archive: input.archive,
             parentSessionId: c._tag === "Coordinator" ? c.sessionId : undefined,
+            request: input.request,
           })
         }),
 
@@ -741,8 +742,10 @@ export const handlers = VibestRpcs.toLayer(
           }
         }),
 
-      Send: ({ id: input, message }) =>
-        managed("Send", input).pipe(Effect.flatMap((id) => sessions.send(id, message).pipe(Effect.as({ id })))),
+      Send: ({ id: input, message, request }) =>
+        managed("Send", input).pipe(
+          Effect.flatMap((id) => sessions.send(id, message, request).pipe(Effect.as({ id }))),
+        ),
       Interrupt: ({ id: input }) =>
         managed("Interrupt", input).pipe(
           Effect.flatMap((id) => sessions.interrupt(id).pipe(Effect.map((out) => ({ id, ...out })))),

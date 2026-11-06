@@ -283,6 +283,8 @@ export class VibestRpcs extends RpcGroup.make(
           peer: Schema.optional(Schema.String),
           /** Archive the session once a completed result reached the coordinator. */
           archive: Schema.optional(Schema.Boolean),
+          /** The caller's id for this request (Ping `requests`): a repeat with the same id answers the first spawn. */
+          request: Schema.optional(Schema.String),
         },
         success: Schema.Struct({
           id: Schema.String,
@@ -357,7 +359,8 @@ export class VibestRpcs extends RpcGroup.make(
     admitted(
       Rpc.make("Send", {
         /** `id`: a session id, or a unique prefix of at least 8 characters; the answer names the full id. */
-        payload: { id: Schema.String, message: Schema.String },
+        /** `request`: the caller's id for this request (Ping `requests`); a repeat with the same id queues nothing more. */
+        payload: { id: Schema.String, message: Schema.String, request: Schema.optional(Schema.String) },
         success: Schema.Struct({ id: Schema.String }),
         error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
       }),

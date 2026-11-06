@@ -304,7 +304,8 @@ export const startDaemon = Effect.gen(function* () {
  */
 export const withVibest = <A, E, R>(
   claim: Claim,
-  f: (client: VibestClient) => Effect.Effect<A, E, R>,
+  /** `ping`: what the answering vibestd said before the call (its capabilities). */
+  f: (client: VibestClient, ping: Ping) => Effect.Effect<A, E, R>,
   options?: { readonly start?: boolean },
 ) =>
   Effect.gen(function* () {
@@ -327,7 +328,7 @@ export const withVibest = <A, E, R>(
     const incompatible = incompatibleDaemon(layout.socket, ping, yield* VibestCommand)
     if (incompatible) return yield* incompatible
     return yield* RpcClient.withHeaders(
-      connect(layout.socket).pipe(Effect.flatMap((client) => f(client))),
+      connect(layout.socket).pipe(Effect.flatMap((client) => f(client, ping))),
       yield* claimHeaders(claim),
     )
   }).pipe(Effect.scoped)

@@ -45,7 +45,10 @@ export const limitMoveBox = (): {
 } => ({ move: { rerun: () => Effect.die("limit move not wired") as Effect.Effect<boolean> } })
 
 export const sessionMove = (deps: {
-  readonly db: Pick<Db["Service"], "getSession" | "updateSession" | "rescheduleSource" | "endProcess">
+  readonly db: Pick<
+    Db["Service"],
+    "getSession" | "updateSession" | "rescheduleSource" | "endProcess" | "linkTask" | "latestRoundAt" | "limitedSince"
+  >
   readonly plugins: Plugins["Service"]
   readonly subscriptions: Subscriptions["Service"]
   readonly harness: Harness["Service"]
@@ -226,15 +229,27 @@ export const sessionMove = (deps: {
       Effect.provideService(Harness, harness),
       Effect.provideService(Harnesses, harnesses),
     )
+    // The logins that hit a limit in this round (since the last turn start or end, else since the session began),
+    // the one that started this move included: each is tried at most once per round, whatever its usage row says.
+    const roundStart = (yield* db.latestRoundAt(session.id)) ?? 0
+    const thisRound = [
+      ...(yield* db.limitedSince(session.id, roundStart)).map((l) => ({
+        harness: l.harness,
+        provider: l.provider ?? "",
+      })),
+      { harness: session.harnessId, provider: provider ?? "" },
+    ]
     // A choice the chain already ruled out (an unknown harness, a login that already hit its limit, or one this move
     // already skipped) ends the move: re-asking the same plugins the same question cannot change the answer. A limit
-    // whose login's own row was refreshed after it and says it is free again no longer rules anything out.
+    // from an earlier round whose login's own row was refreshed after it and says it is free again no longer rules
+    // anything out.
     const ruledOut = (
       move: { harness: string | undefined; provider?: string | undefined } | undefined,
       rows: ReadonlyArray<Subscription>,
     ) => {
       if (move === undefined || !isHarnessId(move.harness ?? "")) return true
       const provider = move.provider ?? ""
+      if (thisRound.some((l) => l.harness === move.harness && l.provider === provider)) return true
       return attempts().some(
         (a) =>
           a.harness === move.harness &&
@@ -385,7 +400,9 @@ export const sessionMove = (deps: {
       const text = harnesses.get(row.harnessId).systemPromptInPrompt
         ? `${yield* deps.systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
         : next.prompt
-      const prompted = yield* deps.prompt(h, row, terminal, text, Effect.void, { keepRound: true }).pipe(Effect.exit)
+      const prompted = yield* deps
+        .prompt(h, row, terminal, text, db.linkTask(row.id), { keepRound: true })
+        .pipe(Effect.exit)
       // A reason is the runtime taking the text and the turn never starting. Same as a failed prompt: try the next one.
       // The round stays working; the next harness prompts it again.
       if (Exit.isFailure(prompted) || prompted.value !== undefined) {
