@@ -1,6 +1,6 @@
 {
   "name": "Vibest",
-  "main": "./cmd/reherdr",
+  "main": "./cmd/vibest-desktop",
   "identifier": "dev.vibest.desktop",
   "macos": { "minimumSystemVersion": "13.0" }
 }

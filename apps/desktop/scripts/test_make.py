@@ -11,7 +11,7 @@ import unittest
 
 class MakeTest(unittest.TestCase):
     def setUp(self):
-        temp = tempfile.TemporaryDirectory(prefix="test-reherdr-make-")
+        temp = tempfile.TemporaryDirectory(prefix="test-vibest-desktop-make-")
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
         shutil.copyfile(Path(__file__).resolve().parents[1] / "Makefile", self.root / "Makefile")
@@ -29,7 +29,7 @@ lines = log.read_text().splitlines()
 assert lines.count('setup-start') == lines.count('setup-done') == 1, lines
 with log.open('a') as f: f.write(json.dumps([pathlib.Path(sys.argv[0]).name, *sys.argv[1:]]) + chr(10))
 if sys.argv[1:2] == ['build']:
-    app = pathlib.Path('build/reherdr')
+    app = pathlib.Path('build/vibest-desktop')
     app.write_text('#!/bin/sh' + chr(10) + 'exec go app '+chr(34)+'$@'+chr(34)+chr(10))
     app.chmod(0o755)
 if sys.argv[1:] == ['test', './...'] and os.environ.get('FAIL_TEST'): sys.exit(19)
@@ -56,7 +56,7 @@ if sys.argv[1:] == ['test', './...'] and os.environ.get('FAIL_TEST'): sys.exit(1
         self.assertEqual(lines[:2], ["setup-start", "setup-done"])
         commands = [json.loads(line) for line in lines[2:]]
         self.assertCountEqual(commands, [
-            ["go", "build", "-o", "build/reherdr", "./cmd/reherdr"],
+            ["go", "build", "-o", "build/vibest-desktop", "./cmd/vibest-desktop"],
             ["python3", "scripts/test_patch_mygo.py"],
             ["python3", "scripts/test_make.py"],
             ["go", "test", "./..."],

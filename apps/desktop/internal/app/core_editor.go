@@ -114,7 +114,7 @@ func (a *App) openEditorBound(id string, s *core.Session, ref core.TerminalRef, 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if text != nil {
-			file, err := os.CreateTemp("", "reherdr-scrollback-*.txt")
+			file, err := os.CreateTemp("", "vibest-desktop-scrollback-*.txt")
 			if err != nil {
 				a.coreNote(s, err.Error())
 				return

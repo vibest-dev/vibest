@@ -1,6 +1,6 @@
 # vibest desktop (`apps/desktop`)
 
-Imported as a plain copy of reherdr `feat/project-view` 4e0a802 (github.com/iamdin/reherdr). Its history and the reasoning in its code comments stay readable there; the copy here carries no comments (`.agents/rules/no-comments.md`).
+Source: reherdr `feat/project-view` 4e0a802 (github.com/iamdin/reherdr), imported without its code comments.
 
 > Status: the app runs on **herdr-core 0.1.13** and vibestd. Every check is a software one (fakes, MyGo's software renderer); real Core, native input (IME, clipboard, drop, editors) and an installed app are not qualified yet.
 
@@ -11,7 +11,7 @@ Requires Go (the version in `go.mod`), Make, Python 3, Git and macOS 13+. MyGo r
 ## Build and checks
 
 ```sh
-make build    # build/reherdr
+make build    # build/vibest-desktop
 make setup    # prepare the tracked patches for IDE/bare Go commands
 make package  # local ad-hoc signed .app only; does not install or launch
 make test     # software suite; needs the verified MyGo libghostty-vt (below)

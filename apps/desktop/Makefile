@@ -16,7 +16,7 @@ build vet test package run: | setup
 
 build:
 	mkdir -p build
-	go build -o build/reherdr ./cmd/reherdr
+	go build -o build/vibest-desktop ./cmd/vibest-desktop
 
 vet:
 	go vet ./...
@@ -35,5 +35,5 @@ package:
 	go run github.com/egoist/mygo/cmd/mygo build -sign - -skip-notarize -skip-dmg -o out .
 
 run: build
-	./build/reherdr $(ARGS)
+	./build/vibest-desktop $(ARGS)
 endif
