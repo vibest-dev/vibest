@@ -138,7 +138,9 @@ The gesture captures machine, connection, epoch, boot, workspace and source tab
 on pointer-down. A stable element-local payload and latched invalidation prevent
 MyGo's per-frame Drag refresh from rebinding it, including after source removal
 or a temporary context change. A removed pressed source is retained as one
-inert zero-sized element so MyGo 0.6 can retire its local drag on release.
+inert zero-sized element with an inert input handler so MyGo can retire its local
+drag on release. Removing the handler in newer MyGo ends the press before its
+release; keeping it prevents the abandoned value drag from blocking a fresh one.
 Style and sidebar presentation changes wait for that release, preserving the
 source's original parent identity; snapshots and drop validation remain live.
 Completed gesture state is cleared before requested presentation resumes.

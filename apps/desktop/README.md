@@ -2,11 +2,13 @@
 
 Source: reherdr `feat/project-view` 4e0a802 (github.com/iamdin/reherdr), imported without its code comments.
 
-> Status: the app runs on herdr-core protocol generation 1 (types generated from **herdr-core 0.1.18**) and vibestd; any core of that generation is accepted. Every check is a software one (fakes, MyGo's software renderer); real Core, native input (IME, clipboard, drop, editors) and an installed app are not qualified yet.
+> Status: the app runs on herdr-core protocol generation 1 (types generated from **herdr-core 0.1.18**) and vibestd; any core of that generation is accepted. Software checks cover input ownership and rendering. An isolated hc 0.1.18/native-window smoke demo verified app-started Core, terminal creation, typed input and typing during resize. Native IME, clipboard/drop, editors and an installed app remain unqualified; see [limits](docs/mygo.md#limits-and-visible-changes).
 
 A native macOS frontend built with [MyGo](https://github.com/egoist/mygo). Vibest owns its workspace/tab/split document and window-local navigation; Core owns terminals, programs and remote routing. Not affiliated with herdr.
 
-Requires Go (the version in `go.mod`), Make, Python 3, Git and macOS 13+. MyGo remains official v0.6.0 with the original eight patches plus tracked patches 0009 (input ownership), 0010 (VT rendering), 0011 (terminal-menu extension), 0012 (owned navigation batches/native text eligibility), 0013 (window-owned right-click and menu-clear admission), 0014 (captured local file/image paste), 0015 (capture before clipboard-provider acquisition, with an eager software-provider fixture), 0016 (emulator replies sent through `AutomaticWriter`, so they go to Core as AUTOMATIC_INPUT), 0017 (`CaptureAutomaticInput`, so a terminal without the keyboard still answers its program), and 0018 (`CancelInput` keeps queued emulator replies, so a focus change does not lose an answer a program waits for). No earlier patches are changed. No fork, dependency upgrade or Ghostty update is included.
+Requires Go 1.27.3 or newer, Make, Python 3, Git and macOS 13+. MyGo is official main commit `9092c954015a9be5c48d7f5ee5929d41c0924ab3`, pinned as `v0.7.5-0.20261106112742-9092c954015a`. The latest tag when selected, v0.7.4, lacked the held-letter repeat fix (PR 1374); this commit includes it and Option-as-Meta PR 1004. The libghostty-vt source and binary checksum are unchanged.
+
+All 18 downstream patches remain: 0001–0003 (Grid rendering and separate cursor), 0004–0007 (native activation and composition ownership), 0008 (blur-time drag cancellation), 0009 (captured input queue and paint proof), 0010 (font smoothing and wide cursor), 0011 (menu extension), 0012 (owned semantic batches), 0013 (window-owned right-click/menu clear), 0014 (file-paste ownership), 0015 (capture before clipboard access), and 0016–0018 (automatic replies, keyboard-independent capture and retention on input cancellation). Each was ported and deletion-tested; none is fully supplied by this upstream version. See the [per-patch evidence and migration notes](docs/mygo.md), including the distinction between missing-API and runtime negative tests.
 
 ## Build and checks
 
@@ -15,7 +17,7 @@ make build    # build/vibest-desktop
 make setup    # prepare the tracked patches for IDE/bare Go commands
 make package  # local ad-hoc signed .app only; does not install or launch
 make test     # software suite; needs the verified MyGo libghostty-vt (below)
-make vet      # go vet and gofmt -l
+make vet      # MyGo lifetime vet (includes go vet), generated types and gofmt -l
 ```
 
 From the repository root these run as `pnpm build`, `pnpm typecheck` and `pnpm test` (package `@vibest/desktop`). On another OS than macOS every target prints `apps/desktop: macOS only, skipped` and succeeds.
@@ -33,7 +35,7 @@ python3 scripts/test_patch_mygo.py
 python3 scripts/test_make.py
 ```
 
-Core activity/navigation software fixtures in the default App suite require `MYGO_GHOSTTY_VT` to name an explicitly checksum-verified, unchanged MyGo0.6 library. The extra VT, queue and App lanes are behind build tags:
+Core activity/navigation software fixtures in the default App suite require `MYGO_GHOSTTY_VT` to name an explicitly checksum-verified libghostty-vt library (the same binary as before the MyGo upgrade). The extra VT, queue and App lanes are behind build tags:
 
 ```sh
 MYGO_GHOSTTY_VT="$VT" go test -tags 'corevt corequeue' -race ./internal/core -count=1 -timeout 90s
