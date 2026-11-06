@@ -13,6 +13,7 @@ export default defineConfig({
       "packages/integration/pi/test/**/*.test.ts",
       "packages/integration/cursor/test/**/*.test.ts",
       "packages/core/src/**/*.test.ts",
+      "packages/core/test/**/*.test.ts",
       "packages/plugin-harness-choice/test/**/*.test.ts",
       "tools/oxlint/**/*.test.mjs",
       "tools/check/**/*.test.ts",

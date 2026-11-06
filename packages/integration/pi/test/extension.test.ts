@@ -62,6 +62,31 @@ const test = <E>(
 const session = (env: Record<string, string>) =>
   Effect.gen(function* () {
     const layout = yield* Layout
+    const fs = yield* FileSystem.FileSystem
+    const statuses: Array<string> = []
+    const unused = Effect.die("unexpected tty operation")
+    const file: FileSystem.File = {
+      [FileSystem.FileTypeId]: FileSystem.FileTypeId,
+      stat: unused,
+      seek: () => unused,
+      sync: unused,
+      read: () => unused,
+      readAlloc: () => unused,
+      truncate: () => unused,
+      writeAll: () => unused,
+      write: (bytes: Uint8Array) =>
+        Effect.sync(() => {
+          statuses.push(new TextDecoder().decode(bytes))
+          return bytes.length
+        }),
+    }
+    const noTty = Layer.succeed(
+      FileSystem.FileSystem,
+      FileSystem.makeNoop({
+        ...fs,
+        open: (path, options) => (path === "/dev/tty" ? Effect.succeed(file) : fs.open(path, options)),
+      }),
+    )
     const handlers = new Map<string, Array<(e: unknown, ctx: unknown) => unknown>>()
     const messages: Array<{ message: unknown; options: unknown }> = []
     const renderers: Array<unknown> = []
@@ -90,9 +115,11 @@ const session = (env: Record<string, string>) =>
     const config = ConfigProvider.layer(
       ConfigProvider.fromUnknown({ HOME: layout.home, VIBEST_HOME: layout.home, ...env }),
     )
-    yield* Effect.promise(() => Pi.runMain(api, extension.pipe(Layer.provide(services), Layer.provide(config))))
+    yield* Effect.promise(() =>
+      Pi.runMain(api, extension.pipe(Layer.provide(Layer.merge(services, noTty)), Layer.provide(config))),
+    )
     yield* Effect.addFinalizer(() => emit("session_shutdown"))
-    return { handlers, messages, renderers, emit }
+    return { handlers, messages, renderers, statuses, emit }
   })
 
 const lease = () =>
@@ -111,6 +138,29 @@ const cli = Effect.gen(function* () {
 })
 
 describe("pi-vibest", () => {
+  test(
+    "Pi owns all terminal reports; vibest never writes a competing status",
+    Effect.gen(function* () {
+      for (const agent of ["general", "coordinator"]) {
+        const s = yield* session({ VIBEST_AGENT: agent, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" })
+        for (const mode of ["tui", "rpc", "print", "json"]) {
+          const ctx = { ...tuiStart, mode, isIdle: () => true }
+          yield* s.emit("session_start", { reason: "startup" }, ctx)
+          yield* s.emit("input", { source: "interactive", text: "hello" }, ctx)
+          yield* s.emit("agent_start", {}, ctx)
+          for (const kind of ["confirm", "select", "input", "editor", "custom"]) {
+            yield* s.emit("ui_prompt_start", { reason: "ui_prompt", kind }, ctx)
+            yield* s.emit("ui_prompt_end", { reason: "ui_prompt", kind }, ctx)
+          }
+          yield* s.emit("agent_end", { messages: [] }, ctx)
+          yield* s.emit("agent_settled", { aborted: false }, ctx)
+          yield* s.emit("agent_settled", { aborted: true }, ctx)
+        }
+        assert.deepStrictEqual(s.statuses, [])
+      }
+    }),
+  )
+
   it.effect(
     "Coordinator: while no vibestd answers it waits without starting one, then subscribes to the next vibestd",
     () =>
