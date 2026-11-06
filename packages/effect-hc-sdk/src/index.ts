@@ -1,0 +1,5 @@
+export * from "./hc.js"
+export { SocketConnector } from "./socket-connector.js"
+export { DEFAULT_SESSION, defaultSocketPath } from "./socket-path.js"
+export * as api from "./generated/api.js"
+export { GENERATION, METHODS, VERSION } from "./generated/api.js"

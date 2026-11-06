@@ -59,10 +59,13 @@ export class World {
   readonly log: Array<{ readonly argv: ReadonlyArray<string>; readonly cwd: string; readonly result: Ran }> = []
   private readonly started: Array<ReturnType<typeof Bun.spawn>> = []
   readonly herdrSession: string
+  readonly hcSocket: string
+  readonly ownRuntimes = new Set<string>()
 
   private constructor(readonly root: string) {
     this.vibestHome = path.join(root, "vibest")
     this.herdrSession = path.basename(root)
+    this.hcSocket = path.join(root, "hc.sock")
     this.config = {
       pi: path.join(root, "pi-agent"),
       claude: path.join(root, "claude"),
@@ -92,7 +95,8 @@ export class World {
   env(extra: Record<string, string | undefined> = {}): Record<string, string> {
     const env: Record<string, string | undefined> = {}
     for (const [k, v] of Object.entries(process.env))
-      if (!k.startsWith("VIBEST_") && !k.startsWith("HERDR_") && k !== "PI_PACKAGE_DIR") env[k] = v
+      if (!k.startsWith("VIBEST_") && !k.startsWith("HERDR_") && !k.startsWith("HC_") && k !== "PI_PACKAGE_DIR")
+        env[k] = v
     Object.assign(
       env,
       {
@@ -102,6 +106,7 @@ export class World {
         CURSOR_CONFIG_DIR: this.config.cursor,
         PATH: [path.dirname(binary), path.join(this.home, ".local", "bin"), process.env.PATH].join(":"),
         TMPDIR: path.join(this.root, "tmp"),
+        HC_SOCKET: this.hcSocket,
         GIT_AUTHOR_NAME: "e2e",
         GIT_AUTHOR_EMAIL: "e2e@example.invalid",
         GIT_COMMITTER_NAME: "e2e",
@@ -161,7 +166,9 @@ export class World {
         runtime: string | null
       }>
       return rows.flatMap((r) => {
-        const terminal = (JSON.parse(r.runtime ?? "{}") as { id?: string }).id ?? ""
+        const runtime = JSON.parse(r.runtime ?? "{}") as { kind?: string; id?: string }
+        if (runtime.kind !== undefined && this.ownRuntimes.has(runtime.kind)) return []
+        const terminal = runtime.id ?? ""
         const session = terminal.split("/")[0] ?? ""
         return session === "" || session === this.herdrSession || session.startsWith(`${this.herdrSession}-`)
           ? []

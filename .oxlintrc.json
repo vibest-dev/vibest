@@ -12,5 +12,11 @@
     "eslint/no-unused-vars": "error",
     "eslint/no-unused-expressions": ["error", { "allowTernary": true }]
   },
-  "ignorePatterns": ["dist", "node_modules", ".cache", "packages/effect-herdr-sdk/src/generated"]
+  "ignorePatterns": [
+    "dist",
+    "node_modules",
+    ".cache",
+    "packages/effect-herdr-sdk/src/generated",
+    "packages/effect-hc-sdk/src/generated"
+  ]
 }

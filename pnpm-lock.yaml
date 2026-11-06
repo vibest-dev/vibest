@@ -242,6 +242,9 @@ importers:
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@vibest/runtime-hc':
+        specifier: workspace:*
+        version: link:../../packages/runtime-hc
       '@vibest/runtime-herdr':
         specifier: workspace:*
         version: link:../../packages/runtime-herdr
@@ -295,6 +298,16 @@ importers:
       effect:
         specifier: 4.0.2
         version: 4.0.2
+
+  packages/effect-hc-sdk:
+    dependencies:
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+    devDependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
 
   packages/effect-herdr-sdk:
     dependencies:
@@ -371,6 +384,28 @@ importers:
       effect:
         specifier: 4.0.2
         version: 4.0.2
+
+  packages/runtime-hc:
+    dependencies:
+      '@effect/platform-node-shared':
+        specifier: 4.0.2
+        version: 4.0.2(effect@4.0.2)
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../plugin
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../schema
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+      effect-hc-sdk:
+        specifier: workspace:*
+        version: link:../effect-hc-sdk
+    devDependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
 
   packages/runtime-herdr:
     dependencies:

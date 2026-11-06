@@ -8,6 +8,8 @@ export default defineConfig({
       "apps/vibest-herdr/test/**/*.test.ts",
       "packages/integration/claude/test/**/*.test.ts",
       "packages/effect-herdr-sdk/test/**/*.test.ts",
+      "packages/effect-hc-sdk/test/**/*.test.ts",
+      "packages/runtime-hc/test/**/*.test.ts",
       "packages/integration/pi/test/**/*.test.ts",
       "packages/integration/cursor/test/**/*.test.ts",
       "packages/core/src/**/*.test.ts",

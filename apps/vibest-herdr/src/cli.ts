@@ -21,7 +21,15 @@ import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
 import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
-import { CALLER_ENV, ambientHerdr, callerMachine, callerTerminal } from "@vibest/runtime-herdr/caller"
+import * as HcCaller from "@vibest/runtime-hc/caller"
+import { KIND as HC_KIND } from "@vibest/runtime-hc/terminal-runtime"
+import {
+  CALLER_ENV as HERDR_CALLER_ENV,
+  ambientHerdr,
+  callerMachine,
+  callerTerminal,
+  inPane,
+} from "@vibest/runtime-herdr/caller"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
@@ -51,6 +59,8 @@ export { compareVersions }
 import { LaunchFailed } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { Forbidden, type Ping, VERSION } from "@vibest/protocol/rpc"
+
+const CALLER_ENV = [...HERDR_CALLER_ENV, ...HcCaller.CALLER_ENV]
 
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
 
@@ -337,6 +347,35 @@ const mainFlags = {
   inParent: Flag.String("in-parent").pipe(Flag.withHidden, Flag.optional),
 }
 
+export type MainPlace =
+  | { readonly in: "hc"; readonly terminal: string }
+  | { readonly in: "caller" }
+  | { readonly in: "launch" }
+  | { readonly in: "refused"; readonly message: string }
+
+export const mainPlace = (o: {
+  readonly marked: boolean
+  readonly runtime: string | undefined
+  readonly hcTerminal: string | undefined
+  readonly herdrPane: boolean
+}): MainPlace => {
+  if (o.marked) {
+    if (o.runtime !== HC_KIND) return { in: "caller" }
+    return o.hcTerminal !== undefined
+      ? { in: "hc", terminal: o.hcTerminal }
+      : { in: "refused", message: "vibestd opened this terminal in herdr-core, but it carries no HC_TERMINAL_ID" }
+  }
+  if (o.runtime === undefined && o.hcTerminal !== undefined && o.herdrPane)
+    return {
+      in: "refused",
+      message:
+        "this terminal carries both herdr-core's HC_TERMINAL_ID and herdr's HERDR_PANE_ID, so vibest cannot tell which one runs it; say which with --runtime hc or --runtime herdr",
+    }
+  if ((o.runtime === undefined || o.runtime === HC_KIND) && o.hcTerminal !== undefined)
+    return { in: "hc", terminal: o.hcTerminal }
+  return o.herdrPane ? { in: "caller" } : { in: "launch" }
+}
+
 const startMain =
   (exec: Exec) =>
   (o: {
@@ -375,16 +414,24 @@ const startMain =
         ...(o.fresh ? ["--new"] : []),
       ]
       const marked = Option.contains(o.inParent, root)
-      const here = marked ? undefined : yield* ambientHerdr
+      const place = mainPlace({
+        marked,
+        runtime: runtimeKind,
+        hcTerminal: yield* HcCaller.callerTerminal,
+        herdrPane: yield* inPane,
+      })
+      if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
+      const inHc = place.in === "hc" ? place.terminal : undefined
+      const here = !marked && place.in === "caller" ? yield* ambientHerdr : undefined
       const machine = yield* callerMachine(Option.getOrUndefined(o.session))
-      const inPlace = marked || here !== undefined
+      const inPlace = marked || inHc !== undefined || here !== undefined
       if (inPlace) {
         if (Option.isSome(o.session))
           return yield* new LaunchFailed({
             message: `--session ${o.session.value} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
           })
         if ((yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
-        const terminal = yield* callerTerminal
+        const terminal = inHc ?? (yield* callerTerminal)
         if (terminal === undefined)
           return yield* new LaunchFailed({
             message: "this pane's herdr session could not be named; run vibest outside herdr",
@@ -392,7 +439,12 @@ const startMain =
         if (!(yield* probe((yield* Layout).socket))) yield* startDaemon
         const claim = (yield* caller).claim
         const chosen = yield* withVibest(claim, (client) =>
-          client["Project.StartMain"]({ harness, provider, model, runtime: runtimeKind }),
+          client["Project.StartMain"]({
+            harness,
+            provider,
+            model,
+            runtime: inHc !== undefined ? HC_KIND : runtimeKind,
+          }),
         )
         if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`main agent: ${describeSpawn(chosen)}`)
         const passed = Launch.commandEnv(env, marked, carried)

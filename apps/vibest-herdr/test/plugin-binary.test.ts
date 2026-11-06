@@ -33,7 +33,12 @@ export default Plugin.define({ id: "bundled", effect: (ctx) => ("ownCopy" in E ?
 }
 
 const userEnv = (home: string) => {
-  const env: Record<string, string | undefined> = { ...process.env, VIBEST_HOME: home, PATH: "/usr/bin:/bin" }
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    VIBEST_HOME: home,
+    PATH: "/usr/bin:/bin",
+    HC_SOCKET: path.join(home, "hc.sock"),
+  }
   delete env.VIBEST_SESSION_ID
   delete env.VIBEST_AGENT
   return env
