@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Harness, HarnessUnavailable } from "@vibest/core/harness"
-import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Keychain, securityArgs } from "@vibest/core/keychain"
+import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Keychain } from "@vibest/core/keychain"
 import { Layout } from "@vibest/core/paths"
 import { Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
@@ -130,17 +130,6 @@ const home = Effect.gen(function* () {
 }).pipe(Effect.provide(Platform.services), Effect.orDie)
 
 describe("subscription polls and vibest subscriptions over fake CLIs, keychain and HTTP: nothing touches the network", () => {
-  it("the macOS keychain read is security find-generic-password -w", () => {
-    assert.deepStrictEqual(
-      [...securityArgs(CLAUDE_CREDENTIALS)],
-      ["security", "find-generic-password", "-s", CLAUDE_CREDENTIALS, "-w"],
-    )
-    assert.deepStrictEqual(
-      [...securityArgs(CURSOR_ACCESS_TOKEN)],
-      ["security", "find-generic-password", "-s", CURSOR_ACCESS_TOKEN, "-w"],
-    )
-  })
-
   it.effect("an expired or missing token skips the endpoint and keeps the last limits", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

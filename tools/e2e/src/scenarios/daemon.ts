@@ -52,6 +52,7 @@ const checks: ReadonlyArray<Check> = [
     id: "D3",
     title: "a foreground vibestd while one runs does not take over: it says so and exits; the first keeps running",
     run: async (w) => {
+      await w.ok(["daemon"])
       const before = (await running(w)).pid
       const r = await w.run(w.repository, [binary, "daemon", "--foreground"], { timeoutMs: 15_000 })
       expect(
@@ -65,6 +66,7 @@ const checks: ReadonlyArray<Check> = [
     id: "D4",
     title: "daemon restart when idle replaces vibestd",
     run: async (w) => {
+      await w.ok(["daemon"])
       const before = (await running(w)).pid!
       {
         const r = await w.tty(["daemon", "restart"], "y\n")

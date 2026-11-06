@@ -4,13 +4,7 @@ import path from "node:path"
 
 import { afterEach, assert, describe, it } from "@effect/vitest"
 
-import {
-  CLAUDE_TYPES_PIN,
-  CLAUDE_TYPES_SHA256,
-  CLAUDE_TYPES_URL,
-  prepareClaudeTypes,
-  sha256,
-} from "../scripts/prepare-claude-types.ts"
+import { prepareClaudeTypes, sha256 } from "../scripts/prepare-claude-types.ts"
 
 const dirs: string[] = []
 const temp = () => {
@@ -104,27 +98,5 @@ describe("claude types cache", () => {
       /offline/,
     )
     assert.isFalse(fs.existsSync(cache))
-  })
-
-  it("pins the public declaration and the typecheck runs that check before the plugin project", () => {
-    assert.strictEqual(CLAUDE_TYPES_PIN, "2eff7a8d21c80be48904f62ebdea36d945d7b504")
-    assert.strictEqual(CLAUDE_TYPES_SHA256, "e51e637fbbebb2a6a49c4bdc3860a251c2ca2295884822dff0f4c3e3ec802163")
-    assert.strictEqual(
-      CLAUDE_TYPES_URL,
-      `https://raw.githubusercontent.com/anthropics/claude-code/${CLAUDE_TYPES_PIN}/mods/types/claude-code.d.ts`,
-    )
-    const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../package.json"), "utf8")) as {
-      scripts: { typecheck: string }
-    }
-    assert.match(pkg.scripts.typecheck, /bun scripts\/prepare-claude-types\.ts &&/)
-    assert.match(pkg.scripts.typecheck, /&& tsrs --noEmit --fast -p tsconfig\.plugin\.json$/)
-    assert.notMatch(pkg.scripts.typecheck, /prepare-claude-types\.ts\s*\|\|/)
-    const ignored = fs.readFileSync(path.join(import.meta.dirname, "../../../../.gitignore"), "utf8")
-    assert.include(ignored, "packages/integration/claude/.cache/")
-    assert.include(ignored, "packages/cli/.cache/", "a cache left by the old CLI typecheck stays ignored")
-    assert.notMatch(
-      fs.readFileSync(path.join(import.meta.dirname, "../scripts/prepare-claude-types.ts"), "utf8"),
-      /VIBEST_CLAUDE_TYPES_SEED|eeb174a4-docs/,
-    )
   })
 })

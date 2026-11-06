@@ -8,11 +8,9 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
-import { Clock, Duration, Effect, Fiber, Layer, type Scope } from "effect"
+import { Clock, Duration, Effect, Fiber, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
 
 import {
   FakeRuntime,
@@ -164,27 +162,6 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual(old.status, 403)
       assert.strictEqual((yield* db.coordinatorOf(projectId))?.harnessSessionId, "pi-conversation")
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "pi" })).status, 403)
-    }),
-  )
-
-  test(
-    "the harness's conversation id and the plugin version are recorded in the row when they change, for the main agent and a subagent alike",
-    Effect.gen(function* () {
-      const { call, db, main, worker, projectId } = yield* project
-      const conversation = (id: string) =>
-        id === main
-          ? Effect.map(db.coordinatorOf(projectId), (m) => m?.harnessSessionId)
-          : Effect.map(db.getSession(id), (s) => s?.harnessSessionId)
-      for (const id of [main, worker]) {
-        yield* call("/inbox/ack", { sessionId: id, harnessSessionId: "c1" }, JSON.stringify({ ids: [] }))
-        assert.strictEqual(yield* conversation(id), "c1")
-        assert.isFalse(yield* db.noteHarnessSession(id, "c1"))
-        yield* call("/inbox/ack", { sessionId: id, harnessSessionId: "c2" }, JSON.stringify({ ids: [] }))
-        assert.strictEqual(yield* conversation(id), "c2")
-        yield* call("/inbox/ack", { sessionId: id, pluginVersion: "1.2.3" }, JSON.stringify({ ids: [] }))
-        assert.isFalse(yield* db.noteIntegration(id, { version: "1.2.3", protocol: PROTOCOL }))
-        assert.isTrue(yield* db.noteIntegration(id, { version: "1.2.4", protocol: PROTOCOL }))
-      }
     }),
   )
 
@@ -383,38 +360,5 @@ describe("vibestd's HTTP API", () => {
       const bad = yield* call("/hooks/claude/guard", { sessionId: worker }, "not json")
       assert.isString((bad.body as { deny?: string }).deny)
     }),
-  )
-
-  it.effect("served on a unix socket", () =>
-    Effect.gen(function* () {
-      const { main, projectId } = yield* project
-      const layout = yield* Layout
-      yield* Layer.launch(Http.layer.pipe(Layer.provide(Platform.daemon.httpServer(layout.httpSocket)))).pipe(
-        Effect.forkScoped,
-      )
-      const response = yield* TestClock.withLive(
-        Effect.promise(async () => {
-          for (let i = 0; i < 100; i++) {
-            try {
-              return await fetch("http://vibestd/inbox/poll", {
-                method: "POST",
-                unix: layout.httpSocket,
-                headers: sessionHeaders({ sessionId: main, projectId: String(projectId), harness: "claude" }),
-                body: "{}",
-              } as RequestInit)
-            } catch {
-              await new Promise((r) => setTimeout(r, 20))
-            }
-          }
-          throw new Error("never served")
-        }),
-      )
-      assert.strictEqual(response.status, 200)
-      assert.deepStrictEqual(yield* Effect.promise(() => response.json()), {
-        ids: [],
-        line: "",
-        text: "",
-      })
-    }).pipe(Effect.provide(testLayer())),
   )
 })

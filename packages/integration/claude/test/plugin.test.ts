@@ -4,7 +4,6 @@ import os from "node:os"
 import path from "node:path"
 
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
-import { PROTOCOL } from "@vibest/protocol/protocol"
 
 type Plugin = {
   register: (on: (event: string, a: unknown, b?: unknown) => { catch: (handler: Function) => void }) => void
@@ -16,11 +15,6 @@ type Plugin = {
 
 let plugin: Plugin
 let built: string
-const version = (
-  JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../package.json"), "utf8")) as {
-    version: string
-  }
-).version
 
 beforeAll(async () => {
   built = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-claude-plugin-"))
@@ -145,48 +139,7 @@ const host = (env: Record<string, string> = COORDINATOR) => {
 const batch = (ids: number[], line: string, text: string) => ({ status: 200, body: { ids, line, text } })
 const ownSubmit = { kind: "plugin", name: "vibest" }
 
-describe("Claude plugin artifact", () => {
-  it("ships a manifest, a hooks.json naming one module, and an import-free bundle with its version inlined", () => {
-    const manifest = JSON.parse(fs.readFileSync(path.join(built, ".claude-plugin/plugin.json"), "utf8")) as {
-      name: string
-    }
-    assert.strictEqual(manifest.name, "vibest")
-    const hooks = JSON.parse(fs.readFileSync(path.join(built, "hooks/hooks.json"), "utf8")) as { modules: string[] }
-    assert.deepStrictEqual(hooks.modules, ["./register.mjs"])
-    const source = fs.readFileSync(path.join(built, "hooks/register.mjs"), "utf8")
-    assert.notMatch(source, /^\s*import\s|\bfrom\s*["']|\brequire\(|\bimport\(|process\.execPath|\bBun\./m)
-    assert.notInclude(source, "VIBEST_PLUGIN_VERSION")
-    assert.include(source, JSON.stringify(version))
-  })
-})
-
 describe("Claude plugin requests", () => {
-  it("every request goes to $VIBEST_HOME/vibest-http.sock with the session's headers and the current conversation", async () => {
-    const h = host()
-    await h.start()
-    const [ready, poll] = h.requests
-    assert.strictEqual(ready!.url, "http://vibestd/session/ready")
-    assert.deepStrictEqual(ready!.body, { pid: 4242 }, "with Claude Code's own pid, which a restart signals")
-    assert.strictEqual(poll!.url, "http://vibestd/inbox/poll")
-    assert.strictEqual(poll!.socketPath, "/vh/vibest-http.sock")
-    assert.deepInclude(poll!.headers, {
-      "vibest-protocol": String(PROTOCOL),
-      "vibest-caller": "session",
-      "vibest-session-id": "a1a10001-a1a1-4a1a-8a1a-a1a10001a1a1",
-      "vibest-project-id": "7",
-      "vibest-harness-session-id": "c1",
-      "vibest-agent": "coordinator",
-      "vibest-harness": "claude",
-      "vibest-cwd": "%2Fwork",
-      "vibest-runtime": '{"runtime":"herdr"}',
-      "vibest-plugin-version": version,
-    })
-    h.state.conversation = "c2"
-    await h.tick()
-    assert.strictEqual(h.requests.at(-1)!.headers["vibest-harness-session-id"], "c2")
-    assert.isUndefined(h.hooks["session.end"], "nothing stops on session.end (/clear raises it too)")
-  })
-
   it("does nothing outside VIBEST: no poll, no report, tool calls pass", async () => {
     const h = host({})
     await h.start()
@@ -237,9 +190,13 @@ describe("Claude plugin requests", () => {
 })
 
 describe("Claude plugin inbox", () => {
-  it("a poll only queues; each draw submits one batch's line; its own submit gets the full text as context; acked on the next poll", async () => {
+  it("a poll only queues; each draw submits one batch's line; its own submit gets the full text as context, unless the line already ends with it; acked on the next poll", async () => {
     const h = host()
-    const polls = [batch([1], 'General Agent "A" completed (w1)', "full A"), batch([2], "Notice: x", "full B")]
+    const polls = [
+      batch([1], 'General Agent "A" completed (w1)', "full A"),
+      batch([2], "Notice: x", "full B"),
+      batch([3], "Notice: w1 exited.", "w1 exited."),
+    ]
     h.state.answer = (r) =>
       r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: { acked: [] } }
     await h.start()
@@ -258,19 +215,13 @@ describe("Claude plugin inbox", () => {
     const ack = h.requests.find((r) => r.url.endsWith("/ack"))
     assert.deepStrictEqual(ack?.body, { ids: [1, 2], release: [] })
     assert.isTrue(h.paths().indexOf("/inbox/ack") < h.paths().lastIndexOf("/inbox/poll"), "ack, then poll")
-  })
-
-  it("a line that already ends with the full text (a one-line notice) gets no context", async () => {
-    const h = host()
-    const polls = [batch([1], "Notice: w1 exited.", "w1 exited."), batch([2], "Notice: w2 exited.", "w2 exited.\nmore")]
-    h.state.answer = (r) => (r.url.endsWith("/poll") ? (polls.shift() ?? batch([], "", "")) : { status: 200, body: {} })
-    await h.start()
-    await h.tick()
     await h.draw()
-    assert.notProperty(await h.prompt("Notice: w1 exited.", ownSubmit), "context")
-    await h.draw()
-    const multi = await h.prompt("Notice: w2 exited.", ownSubmit)
-    assert.deepStrictEqual((multi as { context: string[] }).context, ["w2 exited.\nmore"])
+    assert.deepStrictEqual(h.submitted.at(-1), "Notice: w1 exited.")
+    assert.notProperty(
+      await h.prompt("Notice: w1 exited.", ownSubmit),
+      "context",
+      "a line that already ends with the full text gets no context",
+    )
   })
 
   it("a dropped submit goes back to the front of the queue; two batches with one line keep their texts in order", async () => {

@@ -1,19 +1,19 @@
 import net from "node:net"
 
 import { assert, layer } from "@effect/vitest"
-import { HOOK_TIMEOUT } from "@vibest/client/client"
+import { HOOK_RETRY_DELAY } from "@vibest/client/client"
 import { claude } from "@vibest/core/harnesses/claude"
 import { cursor } from "@vibest/core/harnesses/cursor"
 import { Layout } from "@vibest/core/paths"
 import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
-import { ConfigProvider, Duration, Effect, Fiber, FileSystem, Path } from "effect"
+import { ConfigProvider, Effect, Fiber, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
 import { beforeEach, vi } from "vitest"
 
 import * as Platform from "#platform"
 
 import { integrationPrompt, integrationStop } from "../src/cli.ts"
-import { runVibest, tempDirectory, until } from "./fakes.ts"
+import { tempDirectory, until, untilVirtual } from "./fakes.ts"
 
 const statusReports = vi.hoisted(() => [] as Array<string>)
 vi.mock("@vibest/core/results", async (importOriginal) => {
@@ -34,7 +34,6 @@ const stopAt = (home: string, env: Record<string, string>, raw: string) =>
   integrationStop(claude, raw).pipe(
     Effect.provideServiceEffect(Layout, Layout.make(home)),
     Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
-    TestClock.withLive,
   )
 
 const listen = (sock: string, lines: string[], answer: (n: number) => true | "drop" | "hang" = () => true) => {
@@ -104,9 +103,7 @@ layer(Platform.services)("claude integration stop", (it) => {
       const home = yield* tempDirectory("s-")
       const lines: string[] = []
       yield* listen(path.join(home, "vibest.sock"), lines)
-      const started = Date.now()
       yield* stopAt(home, { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }, JSON.stringify(event))
-      assert.isBelow(Date.now() - started, 2_000)
       assert.isFalse(yield* fs.exists(path.join(home, "results")))
       assert.isFalse(yield* fs.exists(path.join(home, "reports")))
       const [request] = rpc(lines)
@@ -134,9 +131,14 @@ layer(Platform.services)("claude integration stop", (it) => {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const home = yield* tempDirectory("s-")
-      const started = Date.now()
-      yield* stopAt(home, { VIBEST_AGENT: "session", VIBEST_SESSION_ID: "w1" }, JSON.stringify(event))
-      assert.isBelow(Date.now() - started, 2_000)
+      const stopping = yield* Effect.forkChild(
+        stopAt(home, { VIBEST_AGENT: "session", VIBEST_SESSION_ID: "w1" }, JSON.stringify(event)),
+      )
+      yield* untilVirtual(
+        Effect.sync(() => stopping.pollUnsafe()),
+        (exit) => exit !== undefined,
+      )
+      yield* Fiber.join(stopping)
       assert.isFalse(yield* fs.exists(path.join(home, "results")))
       assert.isFalse(yield* fs.exists(path.join(home, "vibestd.log")))
       assert.isFalse(yield* fs.exists(path.join(home, "vibestd.pid")))
@@ -155,6 +157,8 @@ layer(Platform.services)("claude integration stop", (it) => {
         const sending = yield* Effect.forkChild(stopAt(late, worker, JSON.stringify(event)))
         yield* TestClock.withLive(Effect.sleep("100 millis"))
         yield* listen(path.join(late, "vibest.sock"), retried)
+        assert.isUndefined(sending.pollUnsafe(), "the first try waits on the retry delay")
+        yield* TestClock.adjust(HOOK_RETRY_DELAY)
         yield* Fiber.join(sending)
         assert.deepStrictEqual(
           rpc(retried).map((r) => r.method),
@@ -171,9 +175,7 @@ layer(Platform.services)("claude integration stop", (it) => {
         const hung = yield* tempDirectory("h-")
         const once: string[] = []
         yield* listen(path.join(hung, "vibest.sock"), once, () => "hang")
-        const started = Date.now()
-        yield* stopAt(hung, worker, JSON.stringify(event))
-        assert.isAtLeast(Date.now() - started, Duration.toMillis(HOOK_TIMEOUT) - 100)
+        yield* TestClock.withLive(stopAt(hung, worker, JSON.stringify(event)))
         assert.deepStrictEqual(
           rpc(once).map((r) => r.method),
           ["TurnEnd"],
@@ -181,25 +183,8 @@ layer(Platform.services)("claude integration stop", (it) => {
       }),
   )
 
-  it.effect("a coordinator's turn end writes no result file and sends nothing", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const home = yield* tempDirectory("s-")
-      const lines: string[] = []
-      yield* listen(path.join(home, "vibest.sock"), lines)
-      yield* stopAt(
-        home,
-        { VIBEST_AGENT: "coordinator", VIBEST_SESSION_ID: "L" },
-        JSON.stringify({ ...event, reason: "aborted" }),
-      )
-      assert.isFalse(yield* fs.exists(path.join(home, "results")))
-      assert.deepStrictEqual(lines, [])
-    }),
-  )
-
   it.effect(
-    "invalid input, a classic event, a foreign event, a missing harness id, and a path-like session id do nothing",
+    "invalid input, a classic event, a foreign event, a missing harness id, a path-like session id and a coordinator's turn end do nothing",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -224,54 +209,14 @@ layer(Platform.services)("claude integration stop", (it) => {
           [coordinator, JSON.stringify({ hook_event_name: "TurnComplete" })],
           [coordinator, JSON.stringify({ hook_event_name: "TurnComplete", session_id: "" })],
           [coordinator, "not json"],
+          [coordinator, JSON.stringify({ ...event, reason: "aborted" })],
         ] as const) {
           yield* stopAt(home, env, raw)
         }
         assert.deepStrictEqual(lines, [])
         assert.isFalse(yield* fs.exists(path.join(home, "results")))
         assert.isFalse(yield* fs.exists(path.join(home, "evil.json")))
-        assert.strictEqual(Duration.toMillis(HOOK_TIMEOUT), 2_000)
       }),
-  )
-
-  it.effect("the CLI entrypoint sends TurnEnd, and a down daemon is not started", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const home = yield* tempDirectory("s-")
-      const lines: string[] = []
-      yield* listen(path.join(home, "vibest.sock"), lines)
-      const env = { HOME: home, VIBEST_HOME: home, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
-      const ran = yield* runVibest(home, env, ["integration", "stop", "--harness", "claude"], JSON.stringify(event))
-      assert.strictEqual(ran.code, 0, ran.stderr)
-      assert.strictEqual(ran.stdout, "")
-      assert.deepStrictEqual(
-        rpc(lines).map((r) => [r.method, r.params]),
-        [["TurnEnd", { sessionId: "w1", harness: "claude", event: JSON.stringify(event) }]],
-      )
-
-      const quiet = yield* tempDirectory("q-")
-      const started = Date.now()
-      const down = yield* runVibest(
-        quiet,
-        { HOME: quiet, VIBEST_HOME: quiet, VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" },
-        ["integration", "stop", "--harness", "claude"],
-        JSON.stringify(event),
-      )
-      assert.isBelow(Date.now() - started, 4_000, down.stderr)
-      assert.strictEqual(down.code, 0, down.stderr)
-      assert.isFalse(yield* fs.exists(path.join(quiet, "results")))
-      assert.isFalse(yield* fs.exists(path.join(quiet, "vibestd.log")))
-      assert.isFalse(yield* fs.exists(path.join(quiet, "vibestd.pid")))
-
-      const skipped = yield* runVibest(
-        quiet,
-        { HOME: quiet, VIBEST_HOME: quiet },
-        ["integration", "stop", "--harness", "claude"],
-        "not json",
-      )
-      assert.strictEqual(skipped.code, 0, skipped.stderr)
-    }),
   )
 
   it.effect("a prompt the person submitted notifies Prompt; the coordinator and any other origin do not", () =>

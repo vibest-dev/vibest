@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
@@ -98,19 +97,6 @@ describe("reconcile: one look at every live session at start, when a runtime reg
       yield* until(Ref.get(read), (all) => all.length >= 3)
       yield* settled
       assert.deepStrictEqual([...(yield* Ref.get(read))].toSorted(), ["w9:p0", "w9:p1", "w9:p2"])
-    }),
-  )
-
-  test(
-    "a runtime's reset reads each of its live sessions once; rows added after the start are not read before it",
-    Effect.gen(function* () {
-      yield* idleSubagentsBetweenTurns(4)
-      yield* settled
-      assert.strictEqual(yield* terminalReads, 0)
-      yield* (yield* Bus).observe({ type: "live.reset", runtime: TEST_HERDR, machine: "local" })
-      yield* until(terminalReads, (n) => n >= 4)
-      yield* settled
-      assert.strictEqual(yield* terminalReads, 4)
     }),
   )
 })

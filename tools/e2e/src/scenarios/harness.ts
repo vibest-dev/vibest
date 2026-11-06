@@ -39,8 +39,6 @@ const checks: ReadonlyArray<Check> = [
           `${h}: ${JSON.stringify(r).slice(0, 400)}`,
         )
       }
-      const missing = HARNESSES.filter((h) => !installed.includes(h))
-      if (missing.length) throw new Skip(`checked ${installed.join(", ")}; not on PATH: ${missing.join(", ")}`)
     },
   },
   {

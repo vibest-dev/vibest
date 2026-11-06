@@ -38,6 +38,10 @@ const checks: ReadonlyArray<Check> = [
     id: "G2",
     title: "editing a plugin reloads it without restarting vibestd",
     run: async (w) => {
+      await write(path.join(w.vibestHome, "plugins", "home.ts"), plugin("home"))
+      await until("the plugin loaded", async () =>
+        (await list(w)).some((p) => p.id === "home" && p.status === "active"),
+      )
       const pid = await w.daemonPid()
       await write(path.join(w.vibestHome, "plugins", "home.ts"), plugin("home-v2"))
       await until("the edited plugin loaded", async () =>
@@ -50,15 +54,21 @@ const checks: ReadonlyArray<Check> = [
     id: "G3",
     title: "a plugin that fails to load is reported; the others stay active",
     run: async (w) => {
+      const steady = path.join(w.vibestHome, "plugins", "steady.ts")
+      await write(steady, plugin("steady"))
+      await until("the steady plugin loaded", async () =>
+        (await list(w)).some((p) => p.id === "steady" && p.status === "active"),
+      )
       await write(path.join(w.vibestHome, "plugins", "broken.ts"), "export default 42\n")
       await until("the failure reported", async () => {
         const all = await list(w)
         return (
           all.some((p) => p.status === "failed" && p.source.endsWith("broken.ts")) &&
-          all.some((p) => p.id === "home-v2" && p.status === "active")
+          all.some((p) => p.id === "steady" && p.status === "active")
         )
       })
       await fs.rm(path.join(w.vibestHome, "plugins", "broken.ts"))
+      await fs.rm(steady)
     },
   },
   {

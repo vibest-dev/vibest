@@ -52,8 +52,6 @@ import { FakeRuntime, type FakeRuntimeOptions } from "./fake-runtime.ts"
 
 export { FakeRuntime }
 
-export const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-
 export const TEST_HERDR = "herdr"
 
 export const authed = <C extends object>(client: C, headers: Record<string, string>): C =>
@@ -115,54 +113,6 @@ export const nextTurnStart = (subscription: PubSub.Subscription<EngineEvent>, id
   )
 
 export const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
-
-export const processChain = (dir: string, layers: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
-    const argv: Array<string> = []
-    for (const layer of layers) {
-      if (layer === "sh") {
-        argv.push("sh", "-c", '"$@"; exit $?', "sh")
-        continue
-      }
-      const name = layer.replace(/^launch:/, "")
-      const link = path.join(dir, name)
-      if (!(yield* fs.exists(link))) yield* fs.symlink(process.execPath, link)
-      argv.push(link, "-e", RUN_NEXT, FILLER_ARG, layer === name ? "child" : "launch")
-    }
-    return argv
-  }).pipe(Effect.orDie)
-
-const FILLER_ARG = "-"
-
-const RUN_NEXT = `const [mode, command, ...args] = process.argv.slice(process.argv.findIndex((a) => a === "child" || a === "launch"))
-if (mode === "launch") process.env.VIBEST_LAUNCH_PID = String(process.pid)
-process.exitCode = require("node:child_process").spawnSync(command, args, { stdio: "inherit" }).status ?? 1`
-
-export const runHookOutput = (
-  file: string,
-  input: string,
-  env: Record<string, string>,
-  action = "stop",
-  via: ReadonlyArray<string> = [],
-) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const PATH = yield* Config.String("PATH")
-    const [command, ...args] = [...via, "sh", file, action]
-    const handle = yield* spawner.spawn(
-      ChildProcess.make("sh", yield* withStdin(input, command!, args), {
-        env: { PATH, ...env },
-        extendEnv: false,
-        stdin: "ignore",
-      }),
-    )
-    const [stdout, code] = yield* Effect.all([Stream.mkString(Stream.decodeText(handle.stdout)), handle.exitCode], {
-      concurrency: 2,
-    })
-    return { stdout, code }
-  }).pipe(Effect.scoped)
 
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
@@ -539,7 +489,7 @@ export const settled = Effect.gen(function* () {
 })
 
 export const untilVirtual = <A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) =>
-  poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust("500 millis"))), 200, "untilVirtual")
+  poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust("100 millis"))), 1000, "untilVirtual")
 
 export const pingOf = (socket: string) =>
   Effect.gen(function* () {

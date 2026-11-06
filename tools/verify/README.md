@@ -8,7 +8,8 @@ pnpm verify          # everything
 pnpm verify daemon integration   # install as a user, then only these areas of E2E checks
 ```
 
-In order, stopping at the first failure:
+In order. A failed build, typecheck, test, pack or install stops the run; a failed E2E leg does not stop the other
+leg, and the run fails at the end naming each failed leg:
 
 1. `pnpm run build`, `pnpm run typecheck`, `pnpm run test` (skipped when areas are given).
 2. Each way a user installs vibest, into a temp directory, with nothing from this checkout:
@@ -21,7 +22,7 @@ In order, stopping at the first failure:
 4. Prints, by name, the feature-map checks marked `agent` or `runtime`: no script proves them, so an agent does, with
    evidence.
 
-Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `guard`, `update`.
+Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `update`, `start`, `inbox`, `exits`, `restart`.
 
 Nothing is published: no GitHub Release, no npm package, nothing in `~/.local`.
 

@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { alive, binary, checkout, compiled, expect, harnesses, method, until, type World } from "../world.ts"
+import { alive, buildVersion, checkout, compiled, expect, harnesses, method, until, type World } from "../world.ts"
 
 const userVersion = (w: World, v?: number) => {
   const db = new Database(path.join(w.vibestHome, "vibest.db"))
@@ -30,85 +30,22 @@ const putMovedDatabaseBack = async (w: World) => {
   for (const f of DATABASE_FILES) await fs.rename(file(`${f}.old`), file(f)).catch(() => undefined)
 }
 
-const writeTried = (dir: string) =>
-  `mkdir -p ${dir} && printf '#!/bin/sh\\necho vibest v999.0.0\\n' > ${dir}/vibest && chmod +x ${dir}/vibest`
-
 const out = (r: { stdout: string; stderr: string }) => `${r.stdout}${r.stderr}`.replace(/\r/g, "")
 
 const checks: ReadonlyArray<Check> = [
   {
     id: "U1",
     title:
-      "update installs the newer version the way vibest was installed (install.sh or npm); a build installs nothing",
+      "update reads the latest version where vibest was installed from (npm's registry or the GitHub release) and installs nothing when it is this version; a build installs nothing",
     run: async (w) => {
       await w.stopDaemon()
-      const log = path.join(w.root, "update.log")
-      const server = Bun.serve({
-        port: 0,
-        hostname: "127.0.0.1",
-        fetch: (req) => {
-          const url = new URL(req.url).pathname
-          if (url === "/version") return new Response("999.0.0\n")
-          if (url === "/@vibest/cli/beta") return Response.json({ name: "@vibest/cli", version: "999.0.0" })
-          if (url === "/install.sh")
-            return new Response(
-              `echo "install.sh VIBEST_INSTALL=$VIBEST_INSTALL VIBEST_DOWNLOAD_URL=$VIBEST_DOWNLOAD_URL" >> '${log}'\n` +
-                `if [ -n "\${VIBEST_BIN:-}" ]; then ${writeTried('"$VIBEST_BIN"')}; fi\n`,
-            )
-          return new Response("not found", { status: 404 })
-        },
-      })
-      try {
-        const origin = `http://127.0.0.1:${server.port}`
-        const argRecordingPmStubs = path.join(w.root, "update-bin")
-        await fs.mkdir(argRecordingPmStubs, { recursive: true })
-        for (const pm of ["npm", "bun"])
-          await fs.writeFile(
-            path.join(argRecordingPmStubs, pm),
-            `#!/bin/sh\necho "${pm} $*" >> '${log}'\ncase "$2" in --prefix|--cwd) ${writeTried('"$3/node_modules/.bin"')} ;; esac\n`,
-            { mode: 0o755 },
-          )
-        const r = await w.vibest(["update"], {
-          env: {
-            VIBEST_DOWNLOAD_URL: origin,
-            npm_config_registry: origin,
-            PATH: `${argRecordingPmStubs}:${w.env().PATH}`,
-          },
-          timeoutMs: 60_000,
-        })
-        const ran = await fs.readFile(log, "utf8").catch(() => "")
-        if (method === "build") {
-          expect(
-            r.code === 0 && /was not installed by npm or install\.sh; nothing to install/.test(r.stdout),
-            `exit ${r.code}: ${r.stdout}${r.stderr}`,
-          )
-          expect(ran === "", `an installer ran: ${ran}`)
-          return
-        }
-        expect(
-          r.code === 0 && r.stdout.includes("vibest 999.0.0 is available"),
-          `exit ${r.code}: ${r.stdout}${r.stderr}`,
-        )
-        const [tried, installed, ...more] = ran.split("\n").filter(Boolean)
-        expect(more.length === 0 && tried !== undefined && installed !== undefined, `ran: ${ran}`)
-        if (method === "npm")
-          expect(
-            /^npm install --prefix \S+ @vibest\/cli@999\.0\.0$/.test(tried!) &&
-              installed === "npm install -g @vibest/cli@999.0.0",
-            `ran: ${ran}`,
-          )
-        else {
-          const installDir = path.dirname(path.dirname(path.dirname(path.dirname(await fs.realpath(binary)))))
-          expect(
-            /^install\.sh VIBEST_INSTALL=\S+ VIBEST_DOWNLOAD_URL=/.test(tried!) &&
-              !tried!.startsWith(`install.sh VIBEST_INSTALL=${installDir} `) &&
-              installed === `install.sh VIBEST_INSTALL=${installDir} VIBEST_DOWNLOAD_URL=${origin}`,
-            `ran: ${ran}`,
-          )
-        }
-      } finally {
-        await server.stop(true)
-      }
+      const r = await w.vibest(["update"], { timeoutMs: 60_000 })
+      const said = `exit ${r.code}: ${r.stdout}${r.stderr}`
+      if (method === "build")
+        expect(r.code === 0 && /was not installed by npm or install\.sh; nothing to install/.test(r.stdout), said)
+      else expect(r.code === 0 && r.stdout.includes(`vibest is already up to date (v${buildVersion})`), said)
+      const version = await w.ok(["--version"])
+      expect(version.trim() === `vibest v${buildVersion}`, `vibest --version after update: ${version}`)
     },
   },
   {

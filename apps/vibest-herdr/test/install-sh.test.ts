@@ -7,7 +7,7 @@ import { assert, it } from "@effect/vitest"
 
 const script = path.join(import.meta.dirname, "..", "install.sh")
 
-const target = process.platform === "darwin" ? "darwin-arm64" : "linux-x64"
+const target = `${process.platform}-${process.arch}`
 
 it("install.sh keeps the new version, the one before it, and a version directory a running process uses", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-install-"))

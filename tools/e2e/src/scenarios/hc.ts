@@ -2,8 +2,9 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { ask, delegatingModel, piDir } from "../fake-model.ts"
 import { expect, row, SESSIONS, Skip, until, type World } from "../world.ts"
-import { ask, delegatingModel, piDir, project } from "./inbox.ts"
+import { project } from "./inbox.ts"
 
 type Entry = { id: string; agent: string; status: string; turnState: string }
 type Sample = { at: number; end: number; status: string; turnState: string }

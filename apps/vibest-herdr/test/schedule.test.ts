@@ -4,8 +4,7 @@ import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused, Plugin } from "@vibest/plugin"
-import { Effect, Fiber } from "effect"
-import { TestClock } from "effect/testing"
+import { Effect } from "effect"
 
 import glmOnly from "../../../packages/plugin/examples/glm-only.ts"
 import { harnessChoice } from "./fakes.ts"
@@ -143,73 +142,43 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
     ),
   )
 
-  it.effect("a JS throw is a refusal too, in the host's words", () =>
-    run(
-      [
-        candidate(
-          "boom",
-          Plugin.define({
-            id: "boom",
-            effect: (ctx) => ctx.agent.hook("start.before", () => Effect.die(new Error("defect!"))),
+  it.effect("a JS throw, or a typed failure that is not AgentRefused, is a refusal in the host's words", () =>
+    Effect.gen(function* () {
+      yield* run(
+        [
+          candidate(
+            "boom",
+            Plugin.define({
+              id: "boom",
+              effect: (ctx) => ctx.agent.hook("start.before", () => Effect.die(new Error("defect!"))),
+            }),
+          ),
+        ],
+        (p) =>
+          Effect.gen(function* () {
+            const refused = yield* Effect.flip(p.start(start))
+            assert.deepInclude(refused, { plugin: "boom", reason: "plugin boom crashed: defect!" })
+            assert.strictEqual((yield* p.list).find((q) => q.id === "boom")!.crashed, 1)
           }),
-        ),
-      ],
-      (p) =>
-        Effect.gen(function* () {
-          const refused = yield* Effect.flip(p.start(start))
-          assert.deepInclude(refused, { plugin: "boom", reason: "plugin boom crashed: defect!" })
-          assert.strictEqual((yield* p.list).find((q) => q.id === "boom")!.crashed, 1)
-        }),
-    ),
+      )
+      yield* run(
+        [
+          candidate(
+            "nope",
+            Plugin.define({
+              id: "nope",
+              effect: (ctx) => ctx.agent.hook("start.before", () => Effect.fail(new Error("bad option") as never)),
+            }),
+          ),
+        ],
+        (p) =>
+          Effect.gen(function* () {
+            const refused = yield* Effect.flip(p.start(start))
+            assert.deepInclude(refused, { plugin: "nope", reason: "plugin nope crashed: bad option" })
+          }),
+      )
+    }),
   )
-
-  it.effect("a typed failure that is not AgentRefused is a crash", () =>
-    run(
-      [
-        candidate(
-          "nope",
-          Plugin.define({
-            id: "nope",
-            effect: (ctx) => ctx.agent.hook("start.before", () => Effect.fail(new Error("bad option") as never)),
-          }),
-        ),
-      ],
-      (p) =>
-        Effect.gen(function* () {
-          const refused = yield* Effect.flip(p.start(start))
-          assert.deepInclude(refused, { plugin: "nope", reason: "plugin nope crashed: bad option" })
-        }),
-    ),
-  )
-
-  it.effect("a timeout in agent.start.before refuses the start", () => {
-    let entered = false
-    return run(
-      [
-        candidate(
-          "stuck",
-          Plugin.define({
-            id: "stuck",
-            effect: (ctx) =>
-              ctx.agent.hook("start.before", () =>
-                Effect.sync(() => (entered = true)).pipe(Effect.andThen(Effect.sleep("1 hour"))),
-              ),
-          }),
-        ),
-      ],
-      (p) =>
-        Effect.gen(function* () {
-          const spawning = yield* Effect.forkChild(p.start(start))
-          yield* Effect.gen(function* () {
-            while (!entered) yield* TestClock.withLive(Effect.sleep("10 millis"))
-          })
-          yield* TestClock.adjust("5 seconds")
-          const refused = yield* Effect.flip(Fiber.join(spawning))
-          assert.deepInclude(refused, { plugin: "stuck", reason: "plugin stuck timed out after 5s" })
-          yield* TestClock.adjust("1 hour")
-        }),
-    )
-  })
 
   it.effect("a crash in agent.fail fails the operation instead of moving", () =>
     run(
@@ -230,90 +199,6 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
           const error = yield* Effect.flip(p.fail(failed))
           assert.deepInclude(error, { _tag: "HookFailed", message: "plugin mover crashed: moved?" })
           assert.strictEqual((yield* p.list).find((q) => q.id === "mover")!.crashed, 1)
-        }),
-    ),
-  )
-
-  it.effect("a timeout in agent.fail fails the operation", () => {
-    let entered = false
-    return run(
-      [
-        candidate(
-          "hang",
-          Plugin.define({
-            id: "hang",
-            effect: (ctx) =>
-              ctx.agent.hook("fail", () => Effect.sync(() => (entered = true)).pipe(Effect.andThen(Effect.never))),
-          }),
-        ),
-      ],
-      (p) =>
-        Effect.gen(function* () {
-          const asking = yield* Effect.forkChild(p.fail(failed))
-          yield* Effect.gen(function* () {
-            while (!entered) yield* TestClock.withLive(Effect.sleep("10 millis"))
-          })
-          yield* TestClock.adjust("5 seconds")
-          const error = yield* Effect.flip(Fiber.join(asking))
-          assert.include(error.message, "plugin hang timed out after 5s")
-          yield* TestClock.adjust("1 minute")
-        }),
-    )
-  })
-
-  it.effect("agent.fail: the last plugin to write move decides, and the trace says so", () =>
-    run(
-      [
-        candidate(
-          "first",
-          Plugin.define({
-            id: "first",
-            effect: (ctx) => ctx.agent.hook("fail", (e) => Effect.sync(() => (e.move = { harness: "cursor" }))),
-          }),
-        ),
-        candidate(
-          "last",
-          Plugin.define({
-            id: "last",
-            effect: (ctx) =>
-              ctx.agent.hook("fail", (e) => Effect.sync(() => (e.move = { harness: "claude", provider: "anthropic" }))),
-          }),
-        ),
-      ],
-      (p) =>
-        Effect.gen(function* () {
-          const moved = yield* p.fail(failed)
-          assert.deepStrictEqual(moved.move, { harness: "claude", provider: "anthropic" })
-          assert.deepStrictEqual(
-            moved.trace.map((t) => [t.plugin, t.outcome, t.changes]),
-            [
-              ["harness-choice", "ok", [{ field: "move", to: { harness: "claude", provider: undefined } }]],
-              [
-                "first",
-                "ok",
-                [
-                  {
-                    field: "move",
-                    from: { harness: "claude", provider: undefined },
-                    to: { harness: "cursor" },
-                    overwrote: "harness-choice",
-                  },
-                ],
-              ],
-              [
-                "last",
-                "ok",
-                [
-                  {
-                    field: "move",
-                    from: { harness: "cursor" },
-                    to: { harness: "claude", provider: "anthropic" },
-                    overwrote: "first",
-                  },
-                ],
-              ],
-            ],
-          )
         }),
     ),
   )

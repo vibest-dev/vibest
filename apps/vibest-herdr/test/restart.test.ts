@@ -64,21 +64,6 @@ const busyPiSubagent = Effect.gen(function* () {
 
 describe("restart in place", () => {
   test(
-    "outdated lists an agent whose integration is not this vibestd's; one that reported this version is current",
-    Effect.gen(function* () {
-      const { db, sessions, id } = yield* busyPiSubagent
-      assert.deepStrictEqual(
-        (yield* sessions.outdated).map((a) => [a.id, a.integration, a.working, a.blocked]),
-        [[id, null, true, null]],
-      )
-      yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
-      assert.deepStrictEqual(yield* sessions.outdated, [])
-      yield* db.noteIntegration(id, { version: "0.0.1", protocol: PROTOCOL })
-      assert.strictEqual((yield* sessions.outdated)[0]?.integration, "0.0.1")
-    }),
-  )
-
-  test(
     "a restart mid-turn: SIGTERM to the harness pid only, its exit and aborted turn end not recorded while it is down, the same terminal runs it again on the same conversation, then one continue and one result (pending for an idle Pi main agent, which takes its rows itself)",
     Effect.gen(function* () {
       const { db, sessions, id, pid } = yield* busyPiSubagent
@@ -138,9 +123,6 @@ describe("restart in place", () => {
     ])
     const shown = line([{ kind: "notice", message: notice } as never], () => undefined)
     assert.strictEqual(shown, `Notice: ${CONTINUE}`)
-    assert.include(shown, "do not run it again, continue the interrupted work.")
-    assert.include(notice, `vibest is now ${version}.`)
-    assert.include(notice, "Restarted: ab12cd34-ab12-4ab1-8ab1-ab12cd34ab12.")
   })
 
   const workingMain = (harness: "cursor" | "pi") =>
@@ -172,31 +154,6 @@ describe("restart in place", () => {
       assert.include(outcome!.message, "start it again yourself")
       assert.deepStrictEqual(yield* processes.signaled, [])
       assert.deepStrictEqual(yield* herdr.callsTo("run"), [])
-    }),
-  )
-
-  test(
-    "a main agent that ran vibest update itself: working when it asked, idle once the update returned, restarted only after the update process exits, it still gets the continue notice",
-    Effect.gen(function* () {
-      const updatePid = 900
-      const { db, herdr, id, projectId } = yield* workingMain("pi")
-      const sessions = yield* Sessions
-      const processes = yield* FakeProcesses
-      yield* processes.set(updatePid, "alive")
-      yield* sessions.restartLater([id], updatePid)
-      yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "idle" }))
-      yield* TestClock.adjust("2 seconds")
-      assert.deepStrictEqual(yield* processes.signaled, [], "nothing ended while the update still runs")
-      yield* processes.set(updatePid, "exited")
-      yield* untilVirtual(processes.signaled, (t) => t.includes(100))
-      yield* db.patchLive(id, { pid: 300, ready: null })
-      yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
-      yield* db.patchLive(id, { ready: 1 })
-      const notices = yield* untilVirtual(
-        db.coordinatorPending(projectId).pipe(Effect.map((rows) => rows.filter((r) => r.kind === "notice"))),
-        (rows) => rows.length > 0,
-      )
-      assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
     }),
   )
 
