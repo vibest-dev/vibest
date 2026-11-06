@@ -107,6 +107,18 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 - Ready for input: `state` idle, else the adapter's ready pattern on `read()`. A process that exits before its turn
   ends loses the round, as today.
 
+### Terminal status ownership
+
+Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
+and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,
+and `error`. Successful `done` is intentionally not normalized to `idle`: both are non-working; herdr-app uses
+the distinction for its unseen mark. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` disables this native reporting too.
+The live check covers Claude Code 2.1.318; older versions have no guaranteed coverage or fallback writer.
+
+`pnpm e2e T1` launches the built integration in a real Claude with a held fake model, through a test-only runtime
+plugin into its own herdr-core. Its HOME, HC_SESSION, HC_SOCKET and XDG directories are under the test root.
+The fixture is not a shipped runtime adapter: it tests terminal reports, not exit-event recovery.
+
 ## 6. Machines
 
 ```

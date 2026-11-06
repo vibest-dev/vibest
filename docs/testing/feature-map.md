@@ -60,6 +60,15 @@ check skips on a provider other than `anthropic`, which vibest does not give a C
 | G4  | a refusing `run` hook blocks `vibest run` with its reason, before any pane or worktree | script  | non-zero exit, reason printed, no worktree, no herdr pane |
 | G5  | a routing plugin picks the harness for `run`                                           | runtime |                                                           |
 
+## Terminal reports
+
+| ID  | Capability                                                         | Method | Pass when                                                                                                           |
+| --- | ------------------------------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------- |
+| T1  | Native Claude OSC 7501 in an isolated herdr-core with a fake model | script | Held response is working, successful turn is done with an unchanged vibest result, Esc is idle; no visible OSC text |
+
+T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG state/config/runtime directories; it never contacts the
+user's herdr-core or changes harness configuration outside that temporary root.
+
 ## Harnesses and models (harness adapters)
 
 | ID  | Capability                                                                                                | Method | Pass when                                                           |

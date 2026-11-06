@@ -12,6 +12,7 @@ import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
 import restart from "./scenarios/restart.ts"
 import start from "./scenarios/start.ts"
+import terminalStatus from "./scenarios/terminal-status.ts"
 import update from "./scenarios/update.ts"
 import { binary, checkout, harnesses, redact, Skip, World } from "./world.ts"
 
@@ -27,6 +28,7 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   inbox,
   exits,
   restart,
+  "terminal-status": terminalStatus,
 }
 const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check })))
 const strict = process.argv.includes("--strict")
