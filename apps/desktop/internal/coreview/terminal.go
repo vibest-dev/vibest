@@ -77,12 +77,15 @@ func New(v *core.Viewer, k *core.Keyboard, opts terminal.Options) (*Terminal, er
 		return nil, err
 	}
 	t.VT = vt
+	t.SetVisible(false)
 	vt.Resize(int(v.Terminal.Cols), int(v.Terminal.Rows))
 	close(conn.ready)
 	return t, nil
 }
 func (t *Terminal) Select() { t.fitted.Store(false); t.keyboard.Select(t.Viewer); t.VT.CancelInput() }
 func (t *Terminal) Cancel() { t.fitted.Store(false); t.keyboard.Deselect(t.Viewer); t.VT.CancelInput() }
+
+func (t *Terminal) SetVisible(shown bool) { t.VT.SetVisible(shown) }
 
 func (t *Terminal) Fitted() bool { return t.fitted.Load() && t.visible != nil && t.visible() }
 

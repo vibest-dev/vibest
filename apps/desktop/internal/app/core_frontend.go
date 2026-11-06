@@ -116,11 +116,11 @@ func (a *App) Run(ctx context.Context) {
 					active = false
 				case <-s.Changes():
 					a.mu.Lock()
-					if a.coreSession == s {
-						a.coreApply(s)
-					}
+					changed := a.coreApply(s)
 					a.mu.Unlock()
-					a.invalidate()
+					if changed {
+						a.invalidate()
+					}
 				case note := <-a.coreNotices:
 					a.mu.Lock()
 					if note.session == s {
@@ -161,9 +161,9 @@ func (a *App) Run(ctx context.Context) {
 	}
 }
 
-func (a *App) coreApply(s *core.Session) {
+func (a *App) coreApply(s *core.Session) bool {
 	if a.coreSession != s {
-		return
+		return false
 	}
 	state := s.State()
 	freshSource := a.coreSource != s
@@ -207,6 +207,7 @@ func (a *App) coreApply(s *core.Session) {
 	a.coreChrome()
 	a.coreFocus()
 	a.checkTabDrag()
+	return freshSource || !reflect.DeepEqual(previous, state)
 }
 
 func (a *App) coreChrome() {
@@ -344,6 +345,18 @@ func (a *App) coreSelect(v *coreview.Terminal) {
 	poke(a.coreFocusWake)
 }
 func (a *App) coreFocus() {
+	tab := a.coreState.Layout.Tab(a.coreSelection.Tab)
+	for id, view := range a.coreViews {
+		shown := false
+		if a.snap != nil && !a.windowClosed && tab != nil {
+			walkCorePanes(tab.Root, func(p *core.Pane) {
+				if p.ID == id && (a.coreSelection.Zoom == "" || a.coreSelection.Zoom == id) {
+					shown = true
+				}
+			})
+		}
+		view.SetVisible(shown)
+	}
 	var v *coreview.Terminal
 	if !a.corePending && !a.coreBlocked && a.connected && a.windowFocused && !a.windowClosed && a.dialog == nil && a.nativeDialog == nil {
 		if n := a.coreCapture; n == nil || !n.awaitProgram {
