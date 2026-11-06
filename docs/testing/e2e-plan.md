@@ -170,3 +170,9 @@ Each node layer of a process chain gets a `-` filler argument, which Bun running
 every test its own `TMPDIR`. Plugin-loading tests make their `VIBEST_HOME` under `apps/vibest-herdr/test/.tmp`, inside
 the package, so plugin files resolve `@vibest/plugin` and `effect`; the reload tests load plugins with Node's `require`
 after evicting its cache, bypassing Vitest's module cache.
+
+`pnpm test` runs Vitest under Bun, so `#platform` resolves through the `bun` condition (`vitest.config.ts`) to the Bun
+layers. Concurrent tests of one file share a worker, and Vitest's 5 s default is too tight once several git or Bun tests
+overlap, so the timeout is 30 s. `vitest.setup.ts` drops `PI_PACKAGE_DIR`: a Pi install directory the parent exported
+may be gone when a child starts, and a test that starts `pi` would then read version 0.0.0 and exit before herdr sees
+it; the install beside `pi` is the one to use.
