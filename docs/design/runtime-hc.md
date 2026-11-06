@@ -8,7 +8,7 @@ A terminal's vibest id names its core: `<address>@<socket path>`, for example `t
 
 `vibest` run inside an hc terminal knows it from `HC_TERMINAL_ID` (the terminal's address) and `HC_TERMINAL_SOCKET` (its core), which the core sets in every terminal: it starts the main agent in place, in that terminal on that core, with runtime `hc` (unless `--runtime` names another), as it does in a herdr pane. A `vibest` run outside any terminal with `--runtime hc` opens the main agent's terminal on vibestd's own core.
 
-Each call opens its own connection in plain mode (one JSON-RPC message per line). A core is followed from the first call on one of its terminals: one more connection holds `events.subscribe` filtered by `vibest.runtime=hc`; it is re-made every 2 s after a loss, and each new subscription of a core after its first publishes `reset`. A `missed` notice drops the connection so the next subscription starts from a fresh snapshot.
+Each call opens its own connection in plain mode (one JSON-RPC message per line). A core is followed from the first call on one of its terminals: one more connection holds `events.subscribe` filtered by `vibest.runtime=hc`; after a loss it is re-made after 0.5 s, then twice as long each time it fails again, at most 30 s apart; after 8 failures in a row (about 90 s) vibestd stops following that core until the next call on one of its terminals. Each new subscription of a core after its first publishes `reset`, so sessions are checked against what was missed. A `missed` notice drops the connection so the next subscription starts from a fresh snapshot.
 
 ## Terminals
 

@@ -62,7 +62,10 @@ const failWith = <A, R>(effect: Effect.Effect<A, HcFailure, R>) => effect.pipe(E
 
 const SHELL_WAIT = Duration.seconds(30)
 const SHELL_POLL = Schedule.spaced("300 millis")
-const RESUBSCRIBE = Schedule.spaced("2 seconds")
+export const FOLLOW_ATTEMPTS = 8
+
+export const followBackoff = (failures: number) =>
+  Duration.millis(Math.min(500 * 2 ** Math.max(failures - 1, 0), 30_000))
 
 const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
 
@@ -117,11 +120,26 @@ export const make = (deps: {
     }
 
     const follow = (socket: string, core: Core) =>
-      core.hc.subscribe({ labels: { [LABEL.runtime]: KIND } }).pipe(
-        Stream.runForEach((notice) => onNotice(socket, core, notice)),
-        Effect.andThen(Effect.fail({ message: "the event stream ended" })),
-        Effect.retry(RESUBSCRIBE),
-      )
+      Effect.gen(function* () {
+        let failures = 0
+        while (failures < FOLLOW_ATTEMPTS) {
+          let subscribed = false
+          yield* core.hc.subscribe({ labels: { [LABEL.runtime]: KIND } }).pipe(
+            Stream.runForEach((notice) =>
+              onNotice(socket, core, notice).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    if (notice._tag === "Subscribed") subscribed = true
+                  }),
+                ),
+              ),
+            ),
+            Effect.ignore,
+          )
+          failures = subscribed ? 1 : failures + 1
+          yield* Effect.sleep(followBackoff(failures))
+        }
+      })
 
     const coreAt = (socket: string) =>
       Effect.gen(function* () {
