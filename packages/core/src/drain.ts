@@ -1,5 +1,3 @@
-// Planned shutdown (Daemon.Stop) tracks daemon operations, not agent lifetimes: agents keep running and pending
-// Messages stay in sqlite for the next vibestd. Work deferred while draining wakes once a refused Stop reopens.
 import { Context, Deferred, Effect, Layer } from "effect"
 
 import { Bus } from "./bus.ts"
@@ -12,7 +10,6 @@ const make = Effect.gen(function* () {
   const track = (label: string) => {
     const token = {}
     active.set(token, label)
-    // Each release is published, so a Stop waiting for the set to empty looks again (`live.drain`).
     return Effect.suspend(() => (active.delete(token) ? bus.observe({ type: "live.drain" }) : Effect.void))
   }
   const enter = (label: string, settlement: boolean): Effect.Effect<Effect.Effect<void>> =>
@@ -22,9 +19,7 @@ const make = Effect.gen(function* () {
         : Deferred.await(reopened).pipe(Effect.andThen(enter(label, settlement))),
     )
   return {
-    /** Count already-admitted work handed to a queue or fork, with no gap in the accounting. Returns its release. */
     track,
-    /** Run `body` counted; while draining it waits for a reopen, unless it settles work already started (`settlement`). */
     work: <A, E, R>(label: string, body: Effect.Effect<A, E, R>, settlement = false) =>
       Effect.uninterruptibleMask((restore) =>
         Effect.acquireUseRelease(
@@ -33,7 +28,6 @@ const make = Effect.gen(function* () {
           (leave) => leave,
         ),
       ),
-    /** At the RPC entry: the release when admitted now, else undefined (refused, never waits). */
     admit: (label: string, settlement = false) =>
       Effect.sync(() => (phase === "open" || (settlement && phase === "draining") ? track(label) : undefined)),
     begin: Effect.sync(() => {
@@ -59,7 +53,6 @@ const make = Effect.gen(function* () {
   }
 })
 
-/** One per vibestd, shared by the RPC server, Inbox and Sessions. */
 export class Drain extends Context.Service<Drain, Effect.Success<typeof make>>()("vibest/Drain") {
   static readonly layer = Layer.effect(Drain, make)
 }

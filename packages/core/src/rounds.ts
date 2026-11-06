@@ -1,9 +1,4 @@
 import { NoSuchSession, NotReady } from "@vibest/schema/session"
-// The round lifecycle of one session: ending a turn, delivering its queued messages, collecting a hook-written
-// result, and recording a user-typed round (SPEC §8.3, §8.4, §11). Everything here runs under the session's lock,
-// held by `check`, `deliver`, `interrupt` or `remove` in sessions.ts — except `userPrompt`, which stamps the round at
-// hook receipt and takes the lock only to record it. The terminal the row addresses is what everything here talks to
-// (runtime-port.md §3).
 import { Clock, Effect, Exit, Ref } from "effect"
 import type { FileSystem } from "effect"
 
@@ -53,9 +48,7 @@ export const sessionRounds = (deps: {
     readonly get: (id: SessionRow["harnessId"]) => HarnessAdapter
     readonly find: (id: string | null | undefined) => HarnessAdapter | undefined
   }
-  /** The session's in-memory state: the flag set while vibest itself pastes a prompt. */
   readonly track: (id: string) => Effect.Effect<{ readonly prompting: Ref.Ref<boolean> }>
-  /** The session's lock alone, not counted by Drain (a typed prompt records its round). */
   readonly lock: (id: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
   readonly undelivered: (
@@ -72,7 +65,6 @@ export const sessionRounds = (deps: {
     onHandover?: Effect.Effect<void>,
     options?: { readonly keepRound?: boolean },
   ) => Effect.Effect<string | undefined, NotReady | RuntimeError, FileSystem.FileSystem>
-  /** The usage-limit move (move.ts), wired in after the rounds exist. */
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
   const { db, harnesses } = deps
@@ -82,14 +74,11 @@ export const sessionRounds = (deps: {
     end: Extract<TurnState, "completed" | "failed" | "lost">,
     text: string,
     error: string | undefined,
-    /** The reported turn end's time: the turn ends no earlier, so the same report is not taken again. */
     at?: number,
-    /** The `turn.reported` this end consumes. None: an end the harness never reported. */
     reported?: number,
   ) {
     const report = parseReport(text)
     const status: ResultStatus = end === "completed" && !error ? "completed" : "failed"
-    // A failed turn shows its error, so vibest ls says why.
     const summary =
       status === "failed" ? outcome(session.name, error) : (report.summary ?? outcome(session.name, error))
     const worktree = yield* deps.worktreeOf(session)
@@ -97,7 +86,6 @@ export const sessionRounds = (deps: {
     const g = repos ? undefined : yield* gitState(worktree)
     const info = {
       id: session.id,
-      // A session reports as the agent it runs.
       agent: session.agent,
       harness: session.harnessId,
       name: session.name,
@@ -139,10 +127,6 @@ export const sessionRounds = (deps: {
     )
   })
 
-  /**
-   * Queued messages for an idle session: one wake = one delivery, consecutive rows from one sender merged (SPEC §11.1, §11.4).
-   * The batch goes pending → sending (handed to the runtime) → delivered, or failed with the owner told; only its own rows.
-   */
   const deliverQueued = Effect.fn("Sessions.deliverQueued")(function* (
     h: Runtime,
     session: SessionRow,
@@ -172,10 +156,7 @@ export const sessionRounds = (deps: {
         Effect.onExit((exit) =>
           Exit.isSuccess(exit) || claimed.length === 0 ? Effect.void : db.setInboxStatus(claimed, "failed", "sending"),
         ),
-        // The runtime refused or the session never got ready: failed, the owner told.
         Effect.catchTags({
-          // The connection breaking (§ one error type) is not a refusal: before the handover it stays pending for the
-          // next check; after, it may have arrived, so it is not sent again (no blind replay); the owner decides.
           RuntimeError: (e) =>
             e.code === "unreachable"
               ? db.pendingInbox(session.id).pipe(
@@ -194,7 +175,6 @@ export const sessionRounds = (deps: {
                   batch.filter((r) => claimed.includes(r.id)),
                   e.message,
                 ),
-          // ready() throws before the handover claim: an empty claimed list is not a failed delivery.
           NotReady: (e) => {
             const rows = batch.filter((r) => claimed.includes(r.id))
             if (rows.length > 0) return deps.undelivered(session, rows, e.message)
@@ -210,72 +190,45 @@ export const sessionRounds = (deps: {
       )
   })
 
-  /**
-   * Ends the turn if a `turn.reported` is eligible: the current harness, stored after the current process's ready
-   * (`Db.latestReport`'s fence, which also holds across a vibestd restart), and received after the open round's prompt
-   * (or after the last round, when none is open). The `turn.end` stamp is no earlier than the report, so the same
-   * report is not taken twice. `delivered`: the round went to the parent.
-   */
-  const collectResult = Effect.fn("Sessions.collectResult")(function* (
-    /** Undefined: the session has no runtime vibestd can reach; its turn end is still written, a limit move is not made. */
-    h: Runtime | undefined,
-    session: SessionRow,
-  ) {
+  const collectResult = Effect.fn("Sessions.collectResult")(function* (h: Runtime | undefined, session: SessionRow) {
     const terminal = session.address
     const found = yield* db.latestReport(
       session.id,
       harnesses.get(session.harnessId).ready === "integration" ? "ready" : "start",
     )
     if (found === undefined) return "none" as const
-    // A late end from the harness this session just left is not this round. Leave it: the new harness's end replaces it.
     if (found.harness !== session.harnessId) return "none" as const
     if (session.turnState === "open") {
       if (found.at <= session.turnPromptedAt) return "none" as const
     } else {
-      // A turn stopped with no round open is `vibest interrupt`'s own (that turn has no result) or no round of vibest's.
       if (found.interrupted) return "none" as const
       const last = yield* db.latestRoundAt(session.id)
       if (last !== undefined && found.at <= last) return "none" as const
     }
-    // A usage limit moves the session to another harness (agent.fail); the open round stays the one that finishes.
     if (found.error && isUsageLimitError(found.error)) {
       if (h === undefined) return "none" as const
       yield* deps.limitMove.rerun(h, session, terminal.id === "" ? undefined : terminal, "", false, found.error)
       return "delivered" as const
     }
-    // The runtime reported no session id (Cursor): the hook's own conversation id lets the session be resumed.
     if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId && found.conversationId)
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
     yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.at, found.id)
     return "delivered" as const
   })
 
-  /**
-   * RPC `Prompt`: the user typed into this session's terminal while no round was open: that opens one, `inbox_id` null and
-   * the typed text as its input. It ends like any round, with one result to the parent. The main agent is not recorded.
-   * `prompt` holds the lock across the send, which is what fires this hook. That echo is not a round: the flag
-   * around those sends returns at once, so the hook cannot deadlock. Anything else waits for the lock, then records
-   * unless a round is already open.
-   */
   const userPrompt = (id: string, text: string, at?: number) =>
     deps.logged(`prompt ${id}`)(
       Effect.gen(function* () {
         if (text.trim() === "") return
         const session = yield* db.getSession(id)
-        // getSession never returns the running main agent; an ended main conversation does come back, and is not a round either.
         if (!session || session.agent === "main") return
         const { prompting } = yield* deps.track(id)
         if (yield* Ref.get(prompting)) return
-        // Stamped at hook receipt: the lock can be held for seconds (a delivery, an interrupt, a removal), and the
-        // typed turn may already be over when it frees. A later stamp would drop that turn's reported end. `at`: the
-        // caller's stamp at receipt, when it already noted the turn start with it.
         const now = at ?? (yield* Clock.currentTimeMillis)
-        // vibest opens its own rounds before handing text over; their echo, and anything typed during a round, is not a round.
         const record = Effect.gen(function* () {
           const current = yield* db.getSession(id)
           if (!current || current.turnState === "open") return false
           const opened = yield* db.beginUserTurn(id, text, { turnPromptedAt: now, lastActive: now })
-          // A working round showed up after the read. The text is not a second round, and it is not silent.
           if (!opened)
             yield* Effect.logWarning(`prompt ${id}: a round is already open; the typed text was not recorded`)
         })

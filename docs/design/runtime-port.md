@@ -27,7 +27,7 @@ question 3 (§12, §17).
 | Project's terminals kept together (the runtime decides how) | workspace        | session                 | session        |
 | **Terminal** `{ machine, id }`                              | pane             | block                   | block          |
 
-An Agent row stores `runtime { kind, address: Terminal }` (JSON, no DDL).
+An Agent row stores `runtime { kind, address: Terminal }` (JSON, no DDL); equal terminals encode to equal JSON.
 
 ## 3. The interface
 
@@ -57,8 +57,26 @@ How the required members map: herdr `tab.create` (env) + `agent.start`, `pane.se
 Core helpers over the interface, so no plugin writes them: `readFile(machine, path)` (local: the file system; remote:
 `exec` `cat`), and the hidden-terminal `exec`.
 
+herdr behaviour the in-memory fake (`apps/vibest-herdr/test/fake-runtime.ts`) models: an agent's record outlives its
+process, so `session` still answers after the harness exited while `state` answers `not_found`; a pane id handed out
+again is a new pane, not the agent that died in it; a resume moves the named agent to the new terminal; closing the
+last pane closes its workspace, and a main checkout's workspace takes its linked worktrees' workspaces with it.
+
+`RuntimeError.code`: `not_found`, `busy`, `unreachable` (transient, retried), `incompatible` (needs the user),
+`failed` (anything else). `events` carries at least `exited` for each terminal whose program ended or that closed, and
+`reset` when the runtime lost track; core then reads each of its terminals once. `state` answers `not_found` when it
+names no agent in that terminal, which core reads as absent. `run(terminal, argv)` runs a command in an existing
+terminal once its program ended and its shell is back, the counterpart of `open`; without it there is no restart in
+place, and `vibest update` and a usage-limit move leave that terminal's agent for the user to restart. `present` gets
+the keys `agent`, `harness`, `title`, `definition` and `session` for the terminal and `project` and `live` for the
+project's workspace; any other key is the caller's own, and a runtime shows only the keys it knows.
+
 Every runtime plugin passes the shared contract suite (`@vibest/plugin/testing` `runtimeContract`) against a real
-local instance: the required members, then each optional one present.
+local instance: the required members, then each optional one present. It is framework-free and fails with
+`ContractFailure` naming the member and why, so a test file or a CLI check can drive it. `prepare` and `attach` are
+checked as members only, never run. The suite types into the shell `open` started, so a read proves the program ran
+rather than its own echoed command; it follows `events` from the start, so a program that ends on its own is seen
+without a `close`, and `process` on it reports `running: false`, then `not_found` once the terminal is gone.
 
 ## 4. Choosing a runtime
 
@@ -68,7 +86,9 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 - Each Agent gets its runtime in `agent.start.before` (`event.runtime`, beside `machine` and `harness`). The builtin
   plugin: the parent's runtime when it is online on the chosen machine (the subagent opens beside its parent), else
   the configured `runtime`, else herdr, else the only one online. Core checks after the chain: that runtime online on
-  that machine, else refuses with the reason.
+  that machine, else refuses with the reason. A runtime a caller or another plugin already set (`vibest
+  --runtime`, a user plugin) stands. The configured `runtime` is vibest.json's top-level key, read by the product on
+  every start (an edit applies to the next one) and handed to the plugin, which ships with the herdr product.
 - The main Agent: `vibest --runtime <kind>`, else the configured `runtime`, else herdr, else the only one online.
 - None online: refused, listing each runtime and why. vibest never installs a runtime locally.
 
@@ -76,7 +96,9 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 
 - The harness integration (the plugin vibest loads into each CLI agent) writes only OSC 7501 status to its tty. It sends
   each turn start (the user's prompt) and turn end (the result) to vibestd as the harness's raw event: RPC `Prompt` and
-  `TurnEnd` on vibest.sock (a timeout, one retry), or the HTTP hook routes (Claude). vibestd keeps them in memory
+  `TurnEnd` on vibest.sock (2 s per try, one retry 300 ms later, long enough for a vibestd handoff to listen again;
+  only when the connection could not be made at all, since a request that may have been sent may have been handled,
+  and a second turn end would be delivered twice), or the HTTP hook routes (Claude). vibestd keeps them in memory
   (no file) and checks the session: the turn end becomes its `turn.end` event and result row.
 - Core follows each Agent with `events` and `state` when present; it never polls `process`. When a turn ends (state
   idle after working, or the process exited), core takes the reported turn end and delivers the result. A turn end
@@ -118,6 +140,12 @@ vibest machine remove <id>       # forgets it; stops nothing on the machine
   rounds stay open; on `reset` or the next online check core re-reads `process` and `state`, and takes any reported turn end.
 
 Out of scope now: Agents on a remote machine starting their own subagents, load balancing, password ssh.
+
+Core has one machine today, `local` (`core/runtimes.ts`): a runtime that registers or comes back publishes one
+`live.reset` for it, `readFile` reads the local file system (another machine will read through the runtime's `exec`,
+else the hidden-terminal fallback), and `machines[]` lists only `local`. A runtime with several machines publishes one
+reset per machine. Runtime plugins register and unregister one at a time (one supervisor consumer), and a
+registration's events end with its plugin's scope.
 
 ## 8. Order of work
 

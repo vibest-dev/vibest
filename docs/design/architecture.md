@@ -419,7 +419,8 @@ interrupt key and waits 10 s for idle; the Agent and pane stay. `vibest stop <ag
 2. records the pane's shell and foreground PIDs, then closes the pane; if the pane is the last one of a main
    checkout's workspace, it is first moved alone into a new workspace, because closing it would close the
    whole herdr worktree group;
-3. proves exit with signal 0 (every 100 ms, 30 times); `alive` or `unknown` keeps everything and a later
+3. proves exit with signal 0 (every 100 ms, 30 times); `alive` or `unknown` (no PIDs recorded, or signal 0 could
+   not answer) keeps everything and a later
    `vibest stop` checks again;
 4. removes a Workspace made for this Agent only when it is a listed worktree, no pane or process (lsof cwd scan)
    is inside it, `git status` is clean, and HEAD is on a branch or remote ref; `git worktree remove` without
@@ -908,6 +909,20 @@ a round that hit limits on every login it may use fails instead of cycling, and 
 again once its reading is free. A preflight miss, or a start or prompt that fails, is not a limit — the next move
 may use that harness again. A login already limited before start is `agent.start.before`'s to avoid (the builtin
 does), never a move's.
+
+How the move runs (`move.ts`, under the session's lock): a choice the chains already ruled out (an unknown harness,
+a login limited in this round, a harness this move skipped) ends the move, since asking the same plugins again cannot
+change the answer; a limit from an earlier round no longer rules a login out once its own usage row, refreshed after
+it, says it is free. The move stays on the session's own runtime and machine. It ends the old agent before the next
+starts: a refused SIGTERM (sent to the harness pid alone, never its group, which is the terminal's shell) or a failed
+close keeps the session where it was, so no second agent ever runs. With a runtime that can `run` in a terminal the
+next harness starts in the session's own terminal, and the row names it first so what it reports while starting is its
+own; otherwise the terminal closes and a new one opens before the row names the new harness, so a failed placement
+leaves the row on the last live one. `open` failing with code `failed` is the start dying inside the terminal (its
+own limit, a crash) and skips to the next candidate; any other code is a placement refusal and ends the move. A
+prompt the runtime took whose turn never started counts as a failed prompt: the round stays working and the next
+harness prompts it again. Giving up with no terminal of its own (the turn-end path) fails the round but leaves the
+agent running, so check keeps polling it.
 
 The default choice ranks a harness by its emptiest non-limited, non-excluded login (the lowest fullest usage window;
 a login that reported no window scores -1) and starts on that login, so the harness's own default cannot be its limited

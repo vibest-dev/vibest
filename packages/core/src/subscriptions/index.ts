@@ -1,5 +1,3 @@
-// Subscription shape (docs/design/subscriptions.md): what each harness's own sources say about its login and usage
-// windows. Pure functions. Reading the sources is service.ts. The row types are @vibest/schema/subscription's.
 export const record = (u: unknown): Record<string, unknown> | undefined =>
   typeof u === "object" && u !== null && !Array.isArray(u) ? (u as Record<string, unknown>) : undefined
 

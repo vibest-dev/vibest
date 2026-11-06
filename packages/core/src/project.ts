@@ -1,7 +1,4 @@
 import { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
-// The project folder (SPEC §5.4): projects/<project id>/ holds preferences.md (the user edits it) and the fixed
-// subfolders docs/, memories/ and artifacts/. Agents read and write them with their own file tools; vibestd only
-// names the paths and searches the text.
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 
 import { Layout } from "./paths.ts"
@@ -12,7 +9,6 @@ const EXTENSIONS = [".md", ".txt", ".json", ".jsonl"]
 
 const KINDS: ReadonlyArray<ProjectKind> = ["docs", "memories", "artifacts"]
 
-/** Which Project. */
 export interface ProjectScope {
   readonly id: string
 }
@@ -45,7 +41,6 @@ export class Project extends Context.Service<
           artifacts: dir(scope, "artifacts"),
         })
 
-      // ponytail: reads every file per search; an index if projects grow past a few hundred files.
       const search = (scope: ProjectScope, input: typeof ProjectSearchInput.Type) =>
         Effect.gen(function* () {
           const q = input.query.toLowerCase()
