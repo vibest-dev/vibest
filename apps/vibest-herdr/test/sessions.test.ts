@@ -3555,6 +3555,25 @@ describe.concurrent("after a vibestd stop", () => {
     })
 
   test(
+    "a spawn cut off before its terminal ends launch_failed, its worktree removed, with one notice",
+    cutOffSpawn((id) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const db = yield* Db
+        const worktree = yield* sessionWorktree(id)
+        assert.isTrue(yield* fs.exists(worktree))
+        yield* nextVibestd(Effect.map(sqlNotices(id), (n) => n.length > 0))
+        assert.deepStrictEqual(yield* processEnds(id), ["launch_failed"])
+        assert.isFalse(yield* fs.exists(worktree))
+        assert.deepStrictEqual(yield* sqlNotices(id), [
+          `${id} never finished starting (vibestd stopped while it started); its worktree was removed.`,
+        ])
+        assert.deepInclude(yield* db.getSession(id), { startedAt: null, status: "unknown" })
+      }),
+    ),
+  )
+
+  test(
     "a spawn cut off before its terminal keeps its worktree while a process works in it, and names it",
     cutOffSpawn((id) =>
       Effect.gen(function* () {
