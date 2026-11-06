@@ -366,32 +366,3 @@ export const transcript = async (w: World, cwd: string) => {
 }
 
 export const onPath = (bin: string) => Bun.which(bin) !== null
-
-export const knownSessions = async (
-  w: World,
-  sessions: Record<string, string>,
-  directory = w.repository,
-  harness = "claude",
-) => {
-  await w.ok(["ls"])
-  const db = new Database(path.join(w.vibestHome, "vibest.db"))
-  try {
-    const project = crypto.randomUUID()
-    db.run("INSERT INTO project (id) VALUES (?)", [project])
-    for (const [id, agent] of Object.entries(sessions)) {
-      const at = Date.now()
-      db.run(
-        "INSERT INTO session (id, project_id, role, name, machine, directory, created_at) VALUES (?, ?, ?, '', 'local', ?, ?)",
-        [id, project, agent, directory, at],
-      )
-      db.run("INSERT INTO event (at, session_id, type, data) VALUES (?, ?, 'process.start', ?)", [
-        at,
-        id,
-        JSON.stringify({ harness, runtime: "", machine: "local", terminal: "" }),
-      ])
-    }
-    return project
-  } finally {
-    db.close()
-  }
-}

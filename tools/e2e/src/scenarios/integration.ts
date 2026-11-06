@@ -3,20 +3,8 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { claudeEnv, fakeAnthropic, resultText, type Step, subagentFolder } from "../fake-model.ts"
-import {
-  agentModel,
-  agentName,
-  binary,
-  compiled,
-  expect,
-  harnesses,
-  herdr,
-  knownSessions,
-  Skip,
-  until,
-  type World,
-} from "../world.ts"
+import { claudeEnv, fakeAnthropic, fakeOpenAI, piDir, resultText, type Step, subagentFolder } from "../fake-model.ts"
+import { agentModel, agentName, compiled, expect, harnesses, herdr, Skip, until, type World } from "../world.ts"
 import { project as newRepository } from "./inbox.ts"
 
 const userHarnessFiles = [".claude/settings.json", ".cursor/hooks.json", ".pi/agent/settings.json"].map((p) =>
@@ -33,50 +21,17 @@ const stamp = () =>
   )
 let realBefore: Promise<Array<string>> | undefined
 
-const PROMPT =
-  "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Whatever happens, then reply with exactly: pong"
-const untilFile = path.join(import.meta.dirname, "../until-file.py")
-// oxlint-disable-next-line no-control-regex -- the escape character is the ANSI CSI lead; stripping harness output needs it
-const plain = (text: string) => text.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
+const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
 
-const workdir = async (w: World, name: string) => {
-  const dir = path.join(w.root, name)
-  await fs.mkdir(dir, { recursive: true })
-  return dir
-}
-
-const resultMessage = async (w: World, id: string) => {
-  let message = ""
-  await until(`${id}'s result`, async () => (message = (await latest(w, id))?.message ?? "") !== "", 30_000)
-  return message
-}
-
-const untilResult = async <A>(w: World, id: string, run: (marker: string) => Promise<A>) => {
-  const marker = path.join(w.root, `${id}.result`)
-  let done = false
-  const poll = (async () => {
-    while (!done) {
-      if (await latest(w, id).catch(() => undefined)) return fs.writeFile(marker, "")
-      await Bun.sleep(1000)
-    }
-  })()
-  try {
-    return await run(marker)
-  } finally {
-    done = true
-    await poll
-  }
-}
-
-const listed = async (w: World, id: string) =>
-  (await w.json<Array<{ id: string; status: string; turnState: string; worktree: string }>>(["ls"])).find(
+const listed = async (w: World, id: string, cwd = w.repository) =>
+  (await w.json<Array<{ id: string; status: string; turnState: string; worktree: string }>>(["ls"], { cwd })).find(
     (e) => e.id === id,
   )
 const status = async (w: World, id: string) => (await listed(w, id))?.status
-const turnState = async (w: World, id: string) => (await listed(w, id))?.turnState
+const turnState = async (w: World, id: string, cwd = w.repository) => (await listed(w, id, cwd))?.turnState
 
-const latest = async (w: World, id: string) =>
-  (await w.json<{ result?: { id: number; message: string } | null }>(["result", id])).result ?? undefined
+const latest = async (w: World, id: string, cwd = w.repository) =>
+  (await w.json<{ result?: { id: number; message: string } | null }>(["result", id], { cwd })).result ?? undefined
 
 const ends = async (w: World, id: string) =>
   (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).split("\n").flatMap((l) => {
@@ -86,13 +41,15 @@ const ends = async (w: World, id: string) =>
 
 const STORY = "Do not use any tools. Write a very long story, at least 4000 words, about a lighthouse keeper."
 
-const withClaudeSession = async (
+const withSession = async (
   w: World,
+  harness: string,
+  flags: ReadonlyArray<string>,
+  task: string,
   body: (s: { id: string; socket: string }) => Promise<void>,
-  task = STORY,
-  flags: ReadonlyArray<string> = agentModel(),
+  options: { cwd?: string } = {},
 ) => {
-  const session = `${w.herdrSession}-claude`
+  const session = `${w.herdrSession}-${harness}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const zdot = path.join(w.root, "zdotdir")
   await fs.mkdir(zdot, { recursive: true })
@@ -100,13 +57,14 @@ const withClaudeSession = async (
   await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
   let id = ""
   try {
-    const run = await w.ok(["run", "claude", ...flags, "--session", session, "--", task], {
+    const run = await w.ok(["run", harness, ...flags, "--session", session, "--", task], {
       timeoutMs: 120_000,
+      ...options,
     })
     id = (JSON.parse(run) as { id: string }).id
     await body({ id, socket })
   } finally {
-    if (id) await w.vibest(["archive", id], { timeoutMs: 60_000 })
+    if (id) await w.vibest(["archive", id], { timeoutMs: 60_000, ...options })
     await w.stopDaemon()
     if (
       await fs.stat(path.dirname(socket)).then(
@@ -180,180 +138,139 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I3",
     title:
-      "Pi: a real Pi with the built extension (pi -e) refuses an agent's herdr call in process, and its reply lands as the session result",
+      "Pi: vibest run pi (fake model) loads the built extension, which refuses the session's herdr call in process, and the reply lands as the session result",
     run: async (w) => {
-      if (!Bun.which("pi")) throw new Skip("pi not on PATH")
-      const cwd = await workdir(w, "pi-turn")
-      const id = "e2e00003-e2e0-4e2e-8e2e-e2e00003e2e0"
-      const project = await knownSessions(w, { [id]: "general" }, cwd, "pi")
-      const r = await untilResult(w, id, (marker) =>
-        w.run(
-          cwd,
-          [
-            "python3",
-            "-I",
-            untilFile,
-            marker,
-            "180",
-            "pi",
-            "--no-session",
-            "-e",
-            path.join(harnesses, "pi", "extension.mjs"),
-            PROMPT,
-          ],
-          {
-            env: {
-              PI_CODING_AGENT_DIR: undefined,
-              VIBEST_AGENT: "general",
-              VIBEST_SESSION_ID: id,
-              VIBEST_PROJECT_ID: String(project),
-              VIBEST_HARNESS: "pi",
-              VIBEST_COMMAND: JSON.stringify([binary]),
-            },
-            timeoutMs: 240_000,
-          },
-        ),
-      )
-      expect(r.code === 0, `no result within 180s; screen:\n${plain(r.stderr)}`)
-      expect(!(await Bun.file(path.join(cwd, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
-      const message = await resultMessage(w, id)
-      expect(/<harness>pi<\/harness>/.test(message) && /pong/.test(message), message)
+      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const ran = path.join(w.root, "pi-herdr-ran.txt")
+      const results: Array<string> = []
+      const model = fakeOpenAI((who, _dir, done, last) => {
+        if (last !== undefined) results.push(last)
+        if (who !== "pi") return "ok"
+        return done === 0 ? { tool: "bash", input: { command: `herdr pane list > ${ran}` } } : "pong\nstatus: completed"
+      }, {})
+      try {
+        const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-i3", model.url)}`
+        await withSession(w, "pi", ["--env", env], "guard and result", async ({ id }) => {
+          await until("the session's result", async () => (await turnState(w, id)) === "completed", 120_000)
+          expect(
+            results.some((r) => r.includes("Agents must not control herdr")),
+            `the herdr call was not refused: ${JSON.stringify(results)}`,
+          )
+          expect(!(await Bun.file(ran).exists()), "herdr ran: pi-herdr-ran.txt exists")
+          const message = (await latest(w, id))?.message ?? ""
+          expect(/<harness>pi<\/harness>/.test(message) && /pong/.test(message), message)
+        })
+      } finally {
+        model.stop()
+      }
     },
   },
   {
     id: "I4",
     title:
-      "Claude: a real Claude with the built plugin (--plugin-dir) refuses an agent's herdr call, reports its turn end, and the user's installed plugins still load",
+      "Claude: vibest run claude (fake model) loads vibest's plugin beside a plugin the user installed, and its turn end lands as the session result",
     run: async (w) => {
-      if (!Bun.which("claude")) throw new Skip("claude not on PATH")
-      const cwd = await workdir(w, "claude-turn")
-      const id = "e2e00004-e2e0-4e2e-8e2e-e2e00004e2e0"
-      const project = await knownSessions(w, { [id]: "general" }, cwd)
-      const r = await w.run(
-        cwd,
-        [
-          "claude",
-          "-p",
-          "--model",
-          "haiku",
-          "--no-session-persistence",
-          "--plugin-dir",
-          path.join(harnesses, "claude"),
-          "--allowedTools",
-          "Bash",
-          "--output-format",
-          "stream-json",
-          "--verbose",
-          PROMPT,
-        ],
-        {
-          env: {
-            CLAUDE_CONFIG_DIR: undefined,
-            CLAUDECODE: undefined,
-            CLAUDE_CODE_ENTRYPOINT: undefined,
-            VIBEST_AGENT: "general",
-            VIBEST_SESSION_ID: id,
-            VIBEST_PROJECT_ID: String(project),
-            VIBEST_HARNESS: "claude",
-          },
-          timeoutMs: 240_000,
-        },
+      for (const bin of ["claude", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const market = path.join(w.root, "claude-market")
+      const beside = path.join(market, "plugins", "beside")
+      const besideRan = path.join(w.root, "beside-ran")
+      await fs.mkdir(path.join(market, ".claude-plugin"), { recursive: true })
+      await fs.mkdir(path.join(beside, ".claude-plugin"), { recursive: true })
+      await fs.mkdir(path.join(beside, "hooks"), { recursive: true })
+      await fs.writeFile(
+        path.join(market, ".claude-plugin", "marketplace.json"),
+        JSON.stringify({
+          name: "e2e-local",
+          owner: { name: "e2e" },
+          plugins: [{ name: "e2e-beside", source: "./plugins/beside", description: "e2e" }],
+        }),
       )
-      expect(r.code === 0, `claude exited ${r.code}: ${r.stderr}`)
-      const lines = r.stdout
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as Record<string, unknown>)
-      const init = lines.find((l) => l.type === "system" && l.subtype === "init") as
-        | { plugins?: Array<{ name: string }> }
-        | undefined
-      const loaded = (init?.plugins ?? []).map((p) => p.name)
-      const installed = Object.keys(
-        (
-          JSON.parse(
-            await fs.readFile(path.join(w.home, ".claude/plugins/installed_plugins.json"), "utf8").catch(() => "{}"),
-          ) as { plugins?: object }
-        ).plugins ?? {},
+      await fs.writeFile(
+        path.join(beside, ".claude-plugin", "plugin.json"),
+        JSON.stringify({ name: "e2e-beside", version: "1.0.0", description: "e2e" }),
       )
-      expect(loaded.includes("vibest"), `vibest's plugin did not load: ${loaded.join(", ")}`)
-      expect(
-        installed.length === 0 || loaded.length > 1,
-        `only vibest's plugin loaded; installed: ${installed.join(", ")}`,
+      await fs.writeFile(
+        path.join(beside, "hooks", "hooks.json"),
+        JSON.stringify({
+          hooks: { SessionStart: [{ hooks: [{ type: "command", command: `touch '${besideRan}'` }] }] },
+        }),
       )
-      expect(/Agents must not control herdr/.test(r.stdout), "no guard refusal in the transcript")
-      expect(!(await Bun.file(path.join(cwd, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
-      const message = await resultMessage(w, id)
-      expect(/<harness>claude<\/harness>/.test(message) && /pong/.test(message), message)
+      const model = fakeAnthropic((r) =>
+        r.tools.length > 0 && subagentFolder(r.system) !== undefined ? "pong\nstatus: completed" : "ok",
+      )
+      try {
+        const flags = await claudeEnv(w, "beside", model.url)
+        const config = flags[flags.indexOf("--env") + 1]!.slice("CLAUDE_CONFIG_DIR=".length)
+        for (const argv of [
+          ["claude", "plugin", "marketplace", "add", market],
+          ["claude", "plugin", "install", "e2e-beside@e2e-local"],
+        ]) {
+          const r = await w.run(w.root, argv, { env: { CLAUDE_CONFIG_DIR: config } })
+          expect(r.code === 0, `${argv.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
+        }
+        await withSession(w, "claude", flags, "say pong", async ({ id }) => {
+          await until("the session's result", async () => (await turnState(w, id)) === "completed", 120_000)
+          const message = (await latest(w, id))?.message ?? ""
+          expect(/<harness>claude<\/harness>/.test(message) && /pong/.test(message), message)
+          expect(await Bun.file(besideRan).exists(), "the installed plugin's SessionStart hook did not run")
+        })
+      } finally {
+        model.stop()
+      }
     },
   },
   {
     id: "I5",
     title:
-      "Cursor: a real cursor-agent with the built plugin (--plugin-dir) refuses an agent's herdr call, its reply lands as the session result, and the project's own hooks still run",
+      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks; it refuses the session's herdr call and the reply lands as the session result",
     run: async (w) => {
-      if (!Bun.which("cursor-agent", { PATH: w.env().PATH })) throw new Skip("cursor-agent not on PATH")
+      for (const bin of ["cursor-agent", "herdr"])
+        if (!Bun.which(bin, { PATH: w.env().PATH! })) throw new Skip(`${bin} not on PATH`)
       const login = await w.run(w.repository, ["cursor-agent", "status"])
       if (!/Logged in/.test(login.stdout + login.stderr))
         throw new Skip(`cursor-agent is not logged in: ${(login.stdout + login.stderr).trim()}`)
-      const cwd = await workdir(w, "cursor-turn")
+      const repo = await newRepository(w, "cursor-turn")
       const projectHookLog = path.join(w.root, "project-hook.log")
-      await fs.mkdir(path.join(cwd, ".cursor"), { recursive: true })
+      await fs.mkdir(path.join(repo, ".cursor"), { recursive: true })
       await fs.writeFile(
-        path.join(cwd, ".cursor/hooks.json"),
+        path.join(repo, ".cursor/hooks.json"),
         JSON.stringify({
           version: 1,
           hooks: { sessionStart: [{ command: `echo ran >> '${projectHookLog}'; echo {}` }] },
         }),
       )
-      const bin = path.join(w.root, "bin")
-      const calls = path.join(w.root, "vibest-calls.log")
-      await fs.mkdir(bin, { recursive: true })
-      await fs.writeFile(
-        path.join(bin, "vibest"),
-        `#!/bin/sh\nin=$(cat)\nout=$(printf '%s' "$in" | "${binary}" "$@" 2>>"${calls}"); code=$?\nprintf '%s => %s (exit %s) <= %s\\n' "$*" "$out" "$code" "$in" >> "${calls}"\nprintf '%s\\n' "$out"\nexit $code\n`,
-        { mode: 0o755 },
+      for (const argv of [
+        ["git", "add", "."],
+        ["git", "commit", "-q", "-m", "project hooks"],
+      ]) {
+        const r = await w.run(repo, argv)
+        expect(r.code === 0, `${argv.join(" ")}: ${r.stderr}`)
+      }
+      await withSession(
+        w,
+        "cursor",
+        [],
+        HERDR_TASK,
+        async ({ id }) => {
+          await until(
+            "the session's result",
+            async () => ["completed", "failed"].includes((await turnState(w, id, repo)) ?? ""),
+            240_000,
+          )
+          const worktree = await fs.realpath((await listed(w, id, repo))!.worktree)
+          expect(!(await Bun.file(path.join(worktree, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
+          const transcripts = path.join(w.home, ".cursor", "projects", worktree.slice(1).replace(/[^a-zA-Z0-9]/g, "-"))
+          const calls = (await fs.readdir(transcripts, { recursive: true }).catch(() => [] as Array<string>))
+            .filter((f) => f.endsWith(".jsonl"))
+            .map((f) => fs.readFile(path.join(transcripts, f), "utf8"))
+          const tried = (await Promise.all(calls)).some((t) => /"tool_use".*herdr pane list/.test(t))
+          expect(tried, `cursor-agent never called herdr; its transcripts are in ${transcripts}`)
+          const message = (await latest(w, id, repo))?.message ?? ""
+          expect(/<harness>cursor<\/harness>/.test(message) && /pong/.test(message), message)
+          expect(await Bun.file(projectHookLog).exists(), "the project's own sessionStart hook did not run")
+        },
+        { cwd: repo },
       )
-      const id = "e2e00005-e2e0-4e2e-8e2e-e2e00005e2e0"
-      const project = await knownSessions(w, { [id]: "general" }, cwd, "cursor")
-      const r = await untilResult(w, id, (marker) =>
-        w.run(
-          cwd,
-          [
-            "python3",
-            "-I",
-            untilFile,
-            marker,
-            "240",
-            "cursor-agent",
-            "--trust",
-            "--force",
-            "--plugin-dir",
-            path.join(harnesses, "cursor"),
-            PROMPT,
-          ],
-          {
-            env: {
-              VIBEST_AGENT: "general",
-              VIBEST_SESSION_ID: id,
-              VIBEST_PROJECT_ID: String(project),
-              VIBEST_HARNESS: "cursor",
-              VIBEST_COMMAND: JSON.stringify([path.join(bin, "vibest")]),
-              PATH: `${bin}:${w.env().PATH}`,
-            },
-            timeoutMs: 300_000,
-          },
-        ),
-      )
-      const log = await fs.readFile(calls, "utf8").catch(() => "")
-      expect(
-        /^integration guard --harness cursor => .*"permission":"deny".*herdr/m.test(log),
-        `no guard refusal recorded:\n${log}\nscreen:\n${plain(r.stderr)}`,
-      )
-      expect(!(await Bun.file(path.join(cwd, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
-      expect(r.code === 0, `no result within 240s; vibest calls:\n${log}\nscreen:\n${plain(r.stderr)}`)
-      const message = await resultMessage(w, id)
-      expect(/<harness>cursor<\/harness>/.test(message) && /pong/.test(message), message)
-      expect(await Bun.file(projectHookLog).exists(), "the project's own sessionStart hook did not run")
     },
   },
   {
@@ -363,48 +280,43 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const answer = "Do not use tools. Reply with exactly two lines: `status: completed` and `summary: e2e answer`."
-      await withClaudeSession(
-        w,
-        async ({ id, socket }) => {
-          const settled = (want: string) => async () => (await turnState(w, id)) === want
-          await until("the answer's result", settled("completed"), 120_000)
-          const first = await latest(w, id)
-          expect(
-            /<status>completed<\/status>/.test(first?.message ?? "") &&
-              /summary: e2e answer/.test(first?.message ?? ""),
-            `answer result: ${first?.message.slice(0, 500)}`,
-          )
-          const aborted = async () => (await ends(w, id)).filter((e) => e.interrupted).length
+      await withSession(w, "claude", agentModel(), answer, async ({ id, socket }) => {
+        const settled = (want: string) => async () => (await turnState(w, id)) === want
+        await until("the answer's result", settled("completed"), 120_000)
+        const first = await latest(w, id)
+        expect(
+          /<status>completed<\/status>/.test(first?.message ?? "") && /summary: e2e answer/.test(first?.message ?? ""),
+          `answer result: ${first?.message.slice(0, 500)}`,
+        )
+        const aborted = async () => (await ends(w, id)).filter((e) => e.interrupted).length
 
-          await w.ok(["send", id, STORY])
-          await until("the story turn", settled("open"), 60_000)
-          await Bun.sleep(10_000)
-          const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
-            env: { HERDR_SOCKET_PATH: socket },
-          })
-          expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)
-          await until("the interrupted result", settled("failed"), 60_000)
-          const second = await latest(w, id)
-          expect(
-            second !== undefined &&
-              second.id !== first!.id &&
-              second.message.includes("interrupted: the turn was stopped in its terminal (Esc) before it ended"),
-            `Esc result: ${second?.message.slice(0, 500)}`,
-          )
-          expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
+        await w.ok(["send", id, STORY])
+        await until("the story turn", settled("open"), 60_000)
+        await Bun.sleep(10_000)
+        const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
+          env: { HERDR_SOCKET_PATH: socket },
+        })
+        expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)
+        await until("the interrupted result", settled("failed"), 60_000)
+        const second = await latest(w, id)
+        expect(
+          second !== undefined &&
+            second.id !== first!.id &&
+            second.message.includes("interrupted: the turn was stopped in its terminal (Esc) before it ended"),
+          `Esc result: ${second?.message.slice(0, 500)}`,
+        )
+        expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
 
-          await w.ok(["send", id, STORY])
-          await until("the second story turn", settled("open"), 60_000)
-          await Bun.sleep(10_000)
-          await w.ok(["interrupt", id], { timeoutMs: 60_000 })
-          await until("the interrupted turn's turn.complete", async () => (await aborted()) === 2, 30_000)
-          await Bun.sleep(5_000)
-          expect((await turnState(w, id)) === "interrupted", `turn state: ${await turnState(w, id)}`)
-          const third = await latest(w, id)
-          expect(third?.id === second!.id, `a result after vibest interrupt: ${third?.message.slice(0, 500)}`)
-        },
-        answer,
-      )
+        await w.ok(["send", id, STORY])
+        await until("the second story turn", settled("open"), 60_000)
+        await Bun.sleep(10_000)
+        await w.ok(["interrupt", id], { timeoutMs: 60_000 })
+        await until("the interrupted turn's turn.complete", async () => (await aborted()) === 2, 30_000)
+        await Bun.sleep(5_000)
+        expect((await turnState(w, id)) === "interrupted", `turn state: ${await turnState(w, id)}`)
+        const third = await latest(w, id)
+        expect(third?.id === second!.id, `a result after vibest interrupt: ${third?.message.slice(0, 500)}`)
+      })
     },
   },
   {
@@ -412,7 +324,7 @@ const checks: ReadonlyArray<Check> = [
     title: "`vibest peek <id> [--lines N]` prints the session's terminal on demand; an unknown id is refused",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      await withClaudeSession(w, async ({ id }) => {
+      await withSession(w, "claude", agentModel(), STORY, async ({ id }) => {
         await until("the session working", async () => (await status(w, id)) === "working", 120_000)
         let screen = ""
         await until(
@@ -462,57 +374,52 @@ const checks: ReadonlyArray<Check> = [
         return calls(r.tools)[r.results.length]?.step ?? "status: completed\nsummary: guard test"
       })
       try {
-        await withClaudeSession(
-          w,
-          async ({ id, socket }) => {
-            await until("the session's result", async () => (await turnState(w, id)) === "completed", 180_000).catch(
-              (e: Error) => {
-                throw new Error(`${e.message}; the model got ${model.requests.length} requests`)
-              },
-            )
-            const last = model.requests.findLast((r) => subagentFolder(r.system) !== undefined)
-            expect(last !== undefined, "the session never asked the model with its system prompt")
-            const made = calls(last!.tools)
-            const answers = new Map(last!.results.map((x) => [x.tool_use_id, x]))
-            made.forEach((c, i) => {
-              const answer = answers.get(`toolu_${i}`)
-              expect(answer !== undefined, `no answer to ${c.step.tool} ${JSON.stringify(c.step.input)}`)
-              if (c.reason === undefined)
-                expect(
-                  answer!.is_error !== true && resultText(answer!).includes("ok-own"),
-                  `reading its own project folder: ${resultText(answer!)}`,
-                )
-              else
-                expect(
-                  answer!.is_error === true && resultText(answer!).includes(c.reason),
-                  `${c.step.tool} ${JSON.stringify(c.step.input)} answered ${resultText(answer!)}`,
-                )
-            })
-            const leaked = model.requests.flatMap((r) => r.results).filter((x) => resultText(x).includes("lighthouse"))
-            expect(leaked.length === 0, `a refused file's text reached the model: ${JSON.stringify(leaked)}`)
-            expect(!(await Bun.file(ran).exists()), "herdr ran: herdr-ran.txt exists")
-            const message = (await latest(w, id))?.message ?? ""
-            expect(/summary: guard test/.test(message), `the session's result: ${message}`)
-            const pane = (await w.json<Array<{ id: string; address?: { id: string } }>>(["ls"]))
-              .find((e) => e.id === id)
-              ?.address?.id.split("/")[1]
-            const info = (await herdr(socket, "pane.process_info", { pane_id: pane ?? "" })).process_info as {
-              foreground_processes?: Array<{ name: string; argv?: Array<string> | null }>
-            }
-            const argv = (info.foreground_processes ?? []).find((p) =>
-              /claude/.test(`${p.name} ${p.argv?.[0] ?? ""}`),
-            )?.argv
-            expect(argv !== undefined && argv !== null, `no claude in the session's pane: ${JSON.stringify(info)}`)
-            expect(!argv!.includes("--settings"), `claude started with --settings: ${argv!.join(" ")}`)
-            const pluginDir = argv![argv!.indexOf("--plugin-dir") + 1] ?? ""
-            expect(
-              argv!.includes("--plugin-dir") && path.basename(pluginDir) === "claude",
-              `claude started without vibest's plugin: ${argv!.join(" ")}`,
-            )
-          },
-          "guard test",
-          await claudeEnv(w, "guard", model.url),
-        )
+        await withSession(w, "claude", await claudeEnv(w, "guard", model.url), "guard test", async ({ id, socket }) => {
+          await until("the session's result", async () => (await turnState(w, id)) === "completed", 180_000).catch(
+            (e: Error) => {
+              throw new Error(`${e.message}; the model got ${model.requests.length} requests`)
+            },
+          )
+          const last = model.requests.findLast((r) => subagentFolder(r.system) !== undefined)
+          expect(last !== undefined, "the session never asked the model with its system prompt")
+          const made = calls(last!.tools)
+          const answers = new Map(last!.results.map((x) => [x.tool_use_id, x]))
+          made.forEach((c, i) => {
+            const answer = answers.get(`toolu_${i}`)
+            expect(answer !== undefined, `no answer to ${c.step.tool} ${JSON.stringify(c.step.input)}`)
+            if (c.reason === undefined)
+              expect(
+                answer!.is_error !== true && resultText(answer!).includes("ok-own"),
+                `reading its own project folder: ${resultText(answer!)}`,
+              )
+            else
+              expect(
+                answer!.is_error === true && resultText(answer!).includes(c.reason),
+                `${c.step.tool} ${JSON.stringify(c.step.input)} answered ${resultText(answer!)}`,
+              )
+          })
+          const leaked = model.requests.flatMap((r) => r.results).filter((x) => resultText(x).includes("lighthouse"))
+          expect(leaked.length === 0, `a refused file's text reached the model: ${JSON.stringify(leaked)}`)
+          expect(!(await Bun.file(ran).exists()), "herdr ran: herdr-ran.txt exists")
+          const message = (await latest(w, id))?.message ?? ""
+          expect(/summary: guard test/.test(message), `the session's result: ${message}`)
+          const pane = (await w.json<Array<{ id: string; address?: { id: string } }>>(["ls"]))
+            .find((e) => e.id === id)
+            ?.address?.id.split("/")[1]
+          const info = (await herdr(socket, "pane.process_info", { pane_id: pane ?? "" })).process_info as {
+            foreground_processes?: Array<{ name: string; argv?: Array<string> | null }>
+          }
+          const argv = (info.foreground_processes ?? []).find((p) =>
+            /claude/.test(`${p.name} ${p.argv?.[0] ?? ""}`),
+          )?.argv
+          expect(argv !== undefined && argv !== null, `no claude in the session's pane: ${JSON.stringify(info)}`)
+          expect(!argv!.includes("--settings"), `claude started with --settings: ${argv!.join(" ")}`)
+          const pluginDir = argv![argv!.indexOf("--plugin-dir") + 1] ?? ""
+          expect(
+            argv!.includes("--plugin-dir") && path.basename(pluginDir) === "claude",
+            `claude started without vibest's plugin: ${argv!.join(" ")}`,
+          )
+        })
       } finally {
         model.stop()
       }
