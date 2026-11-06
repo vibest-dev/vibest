@@ -2,7 +2,16 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { claudeEnv, fakeAnthropic, fakeOpenAI, piDir, subagentFolder, type Step } from "../fake-model.ts"
+import {
+  ask,
+  claudeEnv,
+  fakeAnthropic,
+  fakeOpenAI,
+  heldModel,
+  piDir,
+  subagentFolder,
+  type Step,
+} from "../fake-model.ts"
 import { expect, row, Skip, until } from "../world.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
@@ -67,7 +76,7 @@ const checks: ReadonlyArray<Check> = [
       "a Pi main agent, a Pi subagent and a Claude subagent (fake models) each write and read artifacts/<who>.md in the project folder with their file tools, without a permission prompt; a write into another project's folder is refused",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const other = path.join(w.vibestHome, "projects", "00000000-0000-4000-8000-000000000000")
+      const other = (await w.json<Info>(["project", "info"], { cwd: await newRepository(w, "files-other") })).directory
       await fs.mkdir(path.join(other, "artifacts"), { recursive: true })
       const results: Record<string, Array<string>> = {}
       const dirs: Record<string, string> = {}
@@ -152,8 +161,9 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "P7",
     title:
-      "a moved checkout: other commands name both places; vibest asks [Y/n], y keeps the project id, its repository path and memories, and repairs vibest's worktree (the answering vibest names a runtime that does not exist, so no harness starts)",
+      "a moved checkout: other commands name both places; vibest asks [Y/n], y keeps the project id, its repository path and memories, and repairs the worktree vibest run made (the answering vibest names a runtime that does not exist, so no harness starts)",
     run: async (w) => {
+      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const sh = async (cwd: string, ...argv: Array<string>) => {
         const r = await w.run(cwd, argv)
         expect(r.code === 0, `${argv.join(" ")}: ${r.stderr}`)
@@ -170,9 +180,38 @@ const checks: ReadonlyArray<Check> = [
       await fs.writeFile(path.join(info.memories, "a.md"), "kept across the move\n")
       const project = row<{ id: string }>(w, "SELECT project_id AS id FROM project_repository WHERE path = ?", old)
       expect(project !== undefined, `no project_repository row for ${old}`)
-      const vibestOwnWorktree = path.join(w.vibestHome, "worktrees", "repo", "p7a1")
-      await fs.mkdir(path.dirname(vibestOwnWorktree), { recursive: true })
-      await sh(old, "git", "worktree", "add", "-q", "--detach", vibestOwnWorktree)
+      const model = heldModel()
+      model.release()
+      const session = `${w.herdrSession}-p7`
+      const zdot = path.join(w.root, "zdotdir-p7")
+      await fs.mkdir(zdot, { recursive: true })
+      let vibestOwnWorktree = ""
+      try {
+        await w.stopDaemon()
+        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        const pi = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-p7", model.url)}`
+        const { id } = JSON.parse(
+          await w.ok(["run", "pi", "--session", session, "--env", pi, "--", ask("p7")], {
+            cwd: old,
+            timeoutMs: 90_000,
+          }),
+        ) as { id: string }
+        await until(
+          "the subagent's result",
+          async () =>
+            (
+              (await w.json<{ result?: { message?: string } | null }>(["result", id], { cwd: old })).result?.message ??
+              ""
+            ).includes("done-p7"),
+          90_000,
+        )
+        vibestOwnWorktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", id)?.d ?? ""
+        expect(vibestOwnWorktree.startsWith(w.vibestHome), `vibest run made no worktree: ${vibestOwnWorktree}`)
+        await w.ok(["archive", id, "--keep-worktree"], { cwd: old, timeoutMs: 60_000 })
+      } finally {
+        model.stop()
+        await dropHerdrSession(w, session)
+      }
 
       await fs.rename(old, path.join(w.root, "p7", "moved"))
       const moved = await fs.realpath(path.join(w.root, "p7", "moved"))

@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
@@ -165,15 +164,6 @@ const untaken = (w: World, id: string) =>
 const nothingMoreComesWithin = (ms: number) => Bun.sleep(ms)
 
 const killWindowTries = 5
-
-const writeArchiveMark = (w: World, sub: string) => {
-  const db = new Database(path.join(w.vibestHome, "vibest.db"))
-  try {
-    db.query("UPDATE session SET ended_at = ? WHERE id = ?").run(Date.now(), sub)
-  } finally {
-    db.close()
-  }
-}
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -433,22 +423,37 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S30",
     title:
-      "an archive cut off after its mark (vibestd killed with the session's ended_at set, its tab still open): the next vibestd closes the tab and ends the process archived, keeping the worktree; vibest archive then removes it",
+      "vibest archive cut off after its mark (vibestd killed with the session's ended_at set, its process not ended): the next vibestd closes the tab and ends the process archived, keeping the worktree; vibest archive then removes it",
     run: async (w) => {
       const p = await piProject(w, "s30")
       try {
         p.model.release()
-        const sub = await p.runSub("archived")
-        await until("the subagent idle", () => p.idle(sub), 90_000)
-        const pane = p.pane(sub)
-        const worktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", sub)?.d ?? ""
-        expect(pane !== "" && worktree !== "", `no pane or worktree recorded for ${sub}`)
-        const daemon = await w.daemonPid()
-        expect(daemon !== undefined, "no vibestd pid")
-        process.kill(daemon!, "SIGKILL")
-        await until("vibestd gone", () => !alive(daemon!), 10_000)
-        writeArchiveMark(w, sub)
-        await p.startDaemon()
+        const marked = (id: string) =>
+          row<{ e: number | null }>(w, "SELECT ended_at AS e FROM session WHERE id = ?", id)?.e != null
+        const processEnded = (id: string) =>
+          row<{ n: number }>(w, "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'process.end'", id)
+            ?.n === 1
+        let sub = ""
+        let pane = ""
+        let worktree = ""
+        for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
+          const id = await p.runSub(`archived${attempt}`)
+          await until(`${id} idle`, () => p.idle(id), 90_000)
+          const tab = p.pane(id)
+          const dir = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", id)?.d ?? ""
+          expect(tab !== "" && dir !== "", `no pane or worktree recorded for ${id}`)
+          const daemon = await w.daemonPid()
+          expect(daemon !== undefined, "no vibestd pid")
+          const archiving = w.vibest(["archive", id], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
+          for (const deadline = Date.now() + 60_000; !marked(id); await Bun.sleep(1))
+            expect(Date.now() < deadline, `${id}: vibest archive never set its mark`)
+          process.kill(daemon!, "SIGKILL")
+          await until("vibestd gone", () => !alive(daemon!), 10_000)
+          await archiving
+          if (!processEnded(id)) [sub, pane, worktree] = [id, tab, dir]
+          await p.startDaemon()
+        }
+        expect(sub !== "", "every try finished the archive before vibestd was killed")
         const ended = () =>
           row<{ reason: string }>(
             w,

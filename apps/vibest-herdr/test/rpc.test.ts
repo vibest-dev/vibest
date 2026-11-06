@@ -107,6 +107,25 @@ describe("vibest.sock", () => {
     }),
   )
 
+  it.effect(
+    "Daemon.Handoff to a vibest whose import check fails (a database it cannot open) refuses before the takeover, and this vibestd keeps serving",
+    () =>
+      Effect.gen(function* () {
+        const raw = yield* client
+        const c = asCli(raw, yield* makeRepository)
+        const instance = (yield* raw.Ping()).instance!
+        const cannotOpen = 'echo "vibest.db is not this vibest\'s schema" >&2; exit 1'
+        const refused = yield* Effect.flip(
+          c["Daemon.Handoff"]({ instance, command: ["sh", "-c", cannotOpen, "newer-vibest"] }),
+        )
+        assert.strictEqual(refused._tag, "LaunchFailed")
+        assert.include(refused.message, "cannot take over this vibestd (vibest.db is not this vibest's schema)")
+        assert.include(refused.message, "it keeps running")
+        assert.strictEqual((yield* raw.Ping()).instance, instance)
+        assert.deepStrictEqual(yield* c.List({}), [])
+      }).pipe(Effect.provide(served()), Effect.provideService(Server.Identity, { instance: "vibestd-before" })),
+  )
+
   test(
     "a session is named by its full id or a unique prefix of 8 or more characters; the answers name the full id",
     Effect.gen(function* () {
