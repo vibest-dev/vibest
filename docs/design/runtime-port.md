@@ -134,7 +134,7 @@ it tests terminal reports, not exit-event recovery. Raw output and timestamped i
 evidence files, never the runner terminal. Claude ignores keys at its first dialog draw; the check waits for
 visible dialog text, pauses, reads it again, then answers only the scratch action.
 
-Coordinator coverage is blocked until `feat/runtime-hc` merges: the CLI caller detector still requires herdr
+Coordinator coverage is blocked until herdr-core caller detection lands: the CLI caller detector still requires herdr
 identity even when a different runtime opened its terminal. Do not forge that identity in E2E. Once native HC
 caller detection lands, add this check: launch a real Claude and Pi coordinator through built `vibest --harness
 <harness> --runtime hc --headless` in the isolated core; hold its fake model and assert native working, complete

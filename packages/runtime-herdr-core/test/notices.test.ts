@@ -16,8 +16,8 @@ import {
   type Scope,
   Stream,
 } from "effect"
-import { Hc, SocketConnector } from "effect-hc-sdk"
-import * as HcBun from "effect-hc-sdk/bun"
+import { Hc, SocketConnector } from "effect-herdr-core-sdk"
+import * as HcBun from "effect-herdr-core-sdk/bun"
 import * as Socket from "effect/socket/Socket"
 
 import { make, terminalId } from "../src/terminal-runtime.ts"
@@ -157,7 +157,7 @@ const live = <A, E>(
 ) =>
   it.live(name, () => body.pipe(Effect.scoped, Effect.provide(Layer.mergeAll(BunServices.layer, HcBun.layer))), 20_000)
 
-describe("runtime-hc against a fake core", () => {
+describe("runtime-herdr-core against a fake core", () => {
   live(
     "setting the runtime up touches no core: builtins activate before vibestd listens",
     Effect.gen(function* () {

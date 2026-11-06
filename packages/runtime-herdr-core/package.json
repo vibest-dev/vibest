@@ -1,5 +1,5 @@
 {
-  "name": "@vibest/runtime-hc",
+  "name": "@vibest/runtime-herdr-core",
   "version": "0.0.1-beta.17",
   "private": true,
   "license": "MIT",
@@ -15,7 +15,7 @@
     "@vibest/plugin": "workspace:*",
     "@vibest/schema": "workspace:*",
     "effect": "catalog:",
-    "effect-hc-sdk": "workspace:*"
+    "effect-herdr-core-sdk": "workspace:*"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:"

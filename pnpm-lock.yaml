@@ -242,12 +242,12 @@ importers:
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
-      '@vibest/runtime-hc':
-        specifier: workspace:*
-        version: link:../../packages/runtime-hc
       '@vibest/runtime-herdr':
         specifier: workspace:*
         version: link:../../packages/runtime-herdr
+      '@vibest/runtime-herdr-core':
+        specifier: workspace:*
+        version: link:../../packages/runtime-herdr-core
       '@vibest/schema':
         specifier: workspace:*
         version: link:../../packages/schema
@@ -299,7 +299,7 @@ importers:
         specifier: 4.0.2
         version: 4.0.2
 
-  packages/effect-hc-sdk:
+  packages/effect-herdr-core-sdk:
     dependencies:
       effect:
         specifier: 4.0.2
@@ -385,28 +385,6 @@ importers:
         specifier: 4.0.2
         version: 4.0.2
 
-  packages/runtime-hc:
-    dependencies:
-      '@effect/platform-node-shared':
-        specifier: 4.0.2
-        version: 4.0.2(effect@4.0.2)
-      '@vibest/plugin':
-        specifier: workspace:*
-        version: link:../plugin
-      '@vibest/schema':
-        specifier: workspace:*
-        version: link:../schema
-      effect:
-        specifier: 4.0.2
-        version: 4.0.2
-      effect-hc-sdk:
-        specifier: workspace:*
-        version: link:../effect-hc-sdk
-    devDependencies:
-      '@effect/platform-bun':
-        specifier: 'catalog:'
-        version: 4.0.2(effect@4.0.2)
-
   packages/runtime-herdr:
     dependencies:
       '@effect/platform-node-shared':
@@ -427,6 +405,28 @@ importers:
       effect-herdr-sdk:
         specifier: workspace:*
         version: link:../effect-herdr-sdk
+
+  packages/runtime-herdr-core:
+    dependencies:
+      '@effect/platform-node-shared':
+        specifier: 4.0.2
+        version: 4.0.2(effect@4.0.2)
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../plugin
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../schema
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+      effect-herdr-core-sdk:
+        specifier: workspace:*
+        version: link:../effect-herdr-core-sdk
+    devDependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
 
   packages/schema:
     dependencies:

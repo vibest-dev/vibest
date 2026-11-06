@@ -3,7 +3,7 @@ import { Runtime as RuntimeApi } from "@vibest/plugin"
 import { ID, shortId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
 import { Deferred, Duration, Effect, PubSub, type Scope, Stream } from "effect"
-import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-hc-sdk"
+import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
 export type Machine = VibestPlugin.Runtime.Machine
 export type Terminal = VibestPlugin.Runtime.Terminal

@@ -2,7 +2,7 @@ import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
 import * as VibestPlugin from "@vibest/plugin"
 import { Effect, Layer } from "effect"
-import { defaultSocketPath, Hc, SocketConnector } from "effect-hc-sdk"
+import { defaultSocketPath, Hc, SocketConnector } from "effect-herdr-core-sdk"
 
 import { make } from "./terminal-runtime.ts"
 
@@ -12,7 +12,7 @@ const platform = Layer.mergeAll(
 )
 
 export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
-  id: "runtime-hc",
+  id: "runtime-herdr-core",
   effect: (context) =>
     Effect.gen(function* () {
       const socket = yield* defaultSocketPath().pipe(Effect.provide(platform), Effect.orDie)

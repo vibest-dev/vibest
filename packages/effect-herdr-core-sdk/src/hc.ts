@@ -90,7 +90,7 @@ export interface HcShape {
   readonly subscribe: (params: ParamsOf<"events.subscribe">) => Stream.Stream<Notice, HcFailure>
 }
 
-export class Hc extends Context.Service<Hc, HcShape>()("effect-hc-sdk/Hc") {
+export class Hc extends Context.Service<Hc, HcShape>()("effect-herdr-core-sdk/Hc") {
   static readonly make = (socketPath: string): Effect.Effect<HcShape, never, SocketConnector> =>
     Effect.map(SocketConnector, (connect) => makeClient(socketPath, connect))
   static readonly layer = (

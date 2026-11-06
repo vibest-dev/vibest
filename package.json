@@ -11,7 +11,7 @@
     "format:check": "oxfmt --check",
     "typecheck": "turbo run typecheck && pnpm run check:runtime && pnpm run lint",
     "test": "bun ./node_modules/vitest/vitest.mjs run",
-    "check:runtime": "! grep -rnE \"@effect/(platform|sql-sqlite)-bun|from \\\"bun:\" packages/schema/src packages/core/src packages/protocol/src packages/server/src packages/client/src packages/integration/claude/src packages/effect-herdr-sdk/src packages/effect-hc-sdk/src tools/verify/src --exclude-dir=platform --exclude=bun.ts",
+    "check:runtime": "! grep -rnE \"@effect/(platform|sql-sqlite)-bun|from \\\"bun:\" packages/schema/src packages/core/src packages/protocol/src packages/server/src packages/client/src packages/integration/claude/src packages/effect-herdr-sdk/src packages/effect-herdr-core-sdk/src tools/verify/src --exclude-dir=platform --exclude=bun.ts",
     "release": "bumpp apps/*/package.json packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json --commit --tag --push",
     "prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
   },
