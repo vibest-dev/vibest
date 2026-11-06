@@ -226,7 +226,7 @@ describe("Db", () => {
       const pretty = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
       assert.match(pretty, /SchemaMismatch/)
       assert.include(pretty, `${file} is not this vibest's schema`)
-      assert.include(pretty, "move it aside to start empty")
+      assert.include(pretty, `for f in ${file} ${file}-wal ${file}-shm; do [ -e "$f" ] && mv "$f" "$f.old"; done`)
     }).pipe(Effect.provide(Platform.services)),
   )
 
@@ -981,7 +981,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a file of the shape before this baseline (version 1 too, no event table) is refused, naming its path and the release's migration script",
+    "a file of the shape before this baseline (version 1 too, no event table) is refused, naming its path and how to move it aside, since vibest never migrates one",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -997,9 +997,9 @@ describe("Db", () => {
         const before = yield* fs.readFile(file)
         const pretty = yield* refusal(file)
         assert.include(pretty, `${file} is from an older vibest`)
-        assert.include(pretty, "migration script given with this release")
-        assert.include(pretty, "move it aside to start empty")
-        assert.notInclude(pretty, "scripts/migrate")
+        assert.include(pretty, "vibest never migrates a database")
+        assert.include(pretty, "the sessions, results and queued messages it holds are lost")
+        assert.notInclude(pretty, "migration script")
         assert.deepStrictEqual(yield* fs.readFile(file), before)
       }).pipe(Effect.provide(Platform.services)),
   )

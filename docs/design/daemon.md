@@ -20,6 +20,11 @@ while it is held and a killed vibestd leaves no stale lock. It is written in pla
 would be unlocked) or unlinked (a contender may have the old inode open); release empties it. A failed `flock` is
 taken as held by another process without reading errno.
 A replacement never signals vibestd and never removes its socket or lock; the outcome is what Ping shows afterwards.
+Before it asks or sends anything, `daemon restart` has the new binary run `vibest daemon import-check` (as a handoff
+does); when that fails, the running vibestd is not stopped and the message names the cause and the steps to go on.
+One socket and one lock leave no way to have the new vibestd answer before the old one stops, so this check is what
+keeps a working vibestd from being stopped for one that cannot open the database; a new vibestd that fails after the
+stop for another reason gets the command that starts the old binary again, when it is another file.
 It sends one `Daemon.Stop` (the same call on every protocol since it was added, so in the running vibestd's
 protocol), never again: only one of vibestd's own refusals, decoded, changes nothing; an accepted, lost or
 undecodable reply, or none, is a hint and Ping decides. A vibestd before 0.0.1-beta.10 refuses while any agent or

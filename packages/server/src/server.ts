@@ -1,4 +1,4 @@
-import { spawnDaemon } from "@vibest/client/client"
+import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -66,7 +66,7 @@ import { HARNESS_IDS, LaunchFailed, NoHarnessChosen, type AgentStatus } from "@v
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Clock, Context, Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Queue, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 
 import * as Hooks from "./hooks.ts"
@@ -1021,20 +1021,9 @@ export const handlers = VibestRpcs.toLayer(
           if (instance !== identity.instance)
             return yield* new WrongInstance({ expected: instance, actual: identity.instance ?? null })
           const quoted = command.map(shellQuote).join(" ")
-          const checked = yield* spawner
-            .spawn(ChildProcess.make(command[0]!, [...command.slice(1), "daemon", "import-check"], { stdin: "ignore" }))
-            .pipe(
-              Effect.flatMap((handle) =>
-                Effect.all(
-                  [Stream.mkString(Stream.decodeText(handle.stderr)), handle.exitCode, Stream.runDrain(handle.stdout)],
-                  { concurrency: "unbounded" },
-                ),
-              ),
-              Effect.map(([output, code]) => (code === 0 ? undefined : output.trim() || `exit ${code}`)),
-              Effect.scoped,
-              Effect.timeoutOrElse({ duration: "15 seconds", orElse: () => Effect.succeed("no answer in 15s") }),
-              Effect.catch((e) => Effect.succeed(e.message)),
-            )
+          const checked = yield* importCheck(command).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          )
           if (checked !== undefined)
             return yield* new LaunchFailed({
               message: `${quoted} cannot take over this vibestd (${checked}); it keeps running`,

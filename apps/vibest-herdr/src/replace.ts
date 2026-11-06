@@ -2,6 +2,7 @@ import {
   cliHeaders,
   connect,
   described,
+  importCheck,
   type VibestClient,
   readPing,
   startDaemon,
@@ -95,6 +96,9 @@ export const versionOf = (argv: ReadonlyArray<string>) =>
     Effect.catch((e) => Effect.succeed(`unreadable (${e.message})`)),
   )
 
+export const replaceAnyway = (socket: string, pid: number | undefined, next: string) =>
+  `To go on anyway: stop vibestd with \`kill -TERM ${pid ?? "<pid in vibestd.pid>"}\`, wait until \`vibest status\` shows it not running on ${socket}, do what is said above, then run: ${next}`
+
 const isTarget = (ping: Ping, old: Ping, target: Target) =>
   ping.instance !== undefined &&
   ping.instance !== old.instance &&
@@ -122,6 +126,12 @@ export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
       return yield* fail(
         "unchanged",
         `\`${quoted(target.command)} --version\` reports ${reported}, not ${target.version}; vibestd was not stopped`,
+      )
+    const cannot = yield* importCheck(target.command)
+    if (cannot !== undefined)
+      return yield* fail(
+        "unchanged",
+        `vibest ${target.version} (${quoted(target.command)}) cannot take over: ${cannot}. ${described(old.version, old)} was not stopped and keeps working.${/SchemaMismatch/.test(cannot) ? ` ${replaceAnyway(layout.socket, old.pid, "vibest daemon")}` : ""}`,
       )
     const samePath = old.command !== undefined && quoted(old.command) === quoted(target.command)
     if (!samePath)
@@ -169,7 +179,10 @@ export const replaceDaemon = (target: Target, timing: Timing = TIMING) =>
       yield* startDaemon.pipe(
         Effect.provideService(VibestCommand, target.command),
         Effect.catchTag("DaemonUnavailable", (e) =>
-          fail("unknown", `the old vibestd stopped answering, but the new one did not come up: ${e.message}`),
+          fail(
+            "unknown",
+            `the old vibestd stopped answering, but the new one did not come up: ${e.message}. ${old.command && !samePath ? `To run the old one again: ${quoted(old.command)} daemon` : `See ${layout.home}/vibestd.log; once that is fixed: vibest daemon`}`,
+          ),
         ),
       )
     const now = Option.getOrUndefined(yield* readPing(layout.socket))
