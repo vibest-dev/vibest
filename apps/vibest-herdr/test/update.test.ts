@@ -10,7 +10,7 @@ import { Effect, FileSystem, Layer } from "effect"
 
 import * as Platform from "#platform"
 
-import { compareVersions, installMethod, isSemver, removeCommand, upgradeCommand } from "../src/cli.ts"
+import { compareVersions, installMethod, isSemver, removeCommand, stageCommand, upgradeCommand } from "../src/cli.ts"
 import { runVibest, tempDirectory } from "./fakes.ts"
 
 describe("vibest update", () => {
@@ -62,26 +62,38 @@ describe("vibest update", () => {
     const bun = "/home/u/.bun/install/global/node_modules/@vibest/cli-darwin-arm64/bin/vibest"
     const fnm =
       "/home/u/.local/state/fnm_multishells/1/lib/node_modules/@vibest/cli/node_modules/@vibest/cli-darwin-arm64/bin/vibest"
-    assert.deepStrictEqual(upgradeCommand(bun, "darwin-arm64"), [
+    assert.deepStrictEqual(upgradeCommand(bun, "2.0.0", "darwin-arm64"), [
       "bun",
       "add",
       "-g",
-      "@vibest/cli@beta",
-      "@vibest/cli-darwin-arm64@beta",
+      "@vibest/cli@2.0.0",
+      "@vibest/cli-darwin-arm64@2.0.0",
     ])
-    assert.deepStrictEqual(upgradeCommand(fnm), [
+    assert.deepStrictEqual(upgradeCommand(fnm, "2.0.0"), [
       "/home/u/.local/state/fnm_multishells/1/bin/npm",
       "install",
       "-g",
       "--prefix",
       "/home/u/.local/state/fnm_multishells/1",
-      "@vibest/cli@beta",
+      "@vibest/cli@2.0.0",
     ])
     assert.deepStrictEqual(
-      upgradeCommand("/x/node_modules/@vibest/cli-linux-x64/bin/vibest"),
-      ["npm", "install", "-g", "@vibest/cli@beta"],
+      upgradeCommand("/x/node_modules/@vibest/cli-linux-x64/bin/vibest", "2.0.0"),
+      ["npm", "install", "-g", "@vibest/cli@2.0.0"],
       "a local npm install, neither as far as the path shows: the npm on PATH",
     )
+    assert.deepStrictEqual(
+      stageCommand(bun, "/t", "2.0.0", "darwin-arm64"),
+      ["bun", "add", "--cwd", "/t", "@vibest/cli@2.0.0", "@vibest/cli-darwin-arm64@2.0.0"],
+      "the version to try first goes to a directory of its own, not the global install",
+    )
+    assert.deepStrictEqual(stageCommand(fnm, "/t", "2.0.0"), [
+      "/home/u/.local/state/fnm_multishells/1/bin/npm",
+      "install",
+      "--prefix",
+      "/t",
+      "@vibest/cli@2.0.0",
+    ])
     assert.strictEqual(
       removeCommand("/home/u/.bun/bin/vibest", "/home/u/.bun/install/global/node_modules/@vibest/cli/bin/vibest.cjs"),
       "bun remove -g @vibest/cli",
@@ -170,8 +182,12 @@ describe("vibest update", () => {
         )
         const port = (registry.address() as { port: number }).port
         yield* fs.makeDirectory(`${home}/bin`)
+        const stagesATriedVersion = `case "$2" in --prefix|--cwd) mkdir -p "$3/node_modules/.bin" && printf '#!/bin/sh\\necho vibest v999.0.0\\n' > "$3/node_modules/.bin/vibest" && chmod +x "$3/node_modules/.bin/vibest" ;; esac\n`
         for (const stub of ["bun", "npm", "vibest"]) {
-          yield* fs.writeFileString(`${home}/bin/${stub}`, `#!/bin/sh\necho "${stub} $*" >> "${home}/pm.log"\n`)
+          yield* fs.writeFileString(
+            `${home}/bin/${stub}`,
+            `#!/bin/sh\necho "${stub} $*" >> "${home}/pm.log"\n${stub === "vibest" ? "" : stagesATriedVersion}`,
+          )
           yield* fs.chmod(`${home}/bin/${stub}`, 0o755)
         }
         const npmLauncherEnv = { VIBEST_HARNESSES: `${home}/harnesses` }
@@ -208,8 +224,8 @@ describe("vibest update", () => {
         assert.include(newer.stdout, `vibest 999.0.0 is available (this is ${VERSION}).`)
         assert.match(
           yield* fs.readFileString(`${home}/pm.log`),
-          /^(bun add -g|npm install -g) @vibest\/cli@beta\n$/,
-          "the harness plugins come with the package: nothing else runs",
+          /^(bun add --cwd \S+ @vibest\/cli@999\.0\.0 \S+|npm install --prefix \S+ @vibest\/cli@999\.0\.0)\n(bun add -g|npm install -g) @vibest\/cli@999\.0\.0\n$/,
+          "the version is tried in a directory of its own first, then installed; the harness plugins come with the package: nothing else runs",
         )
 
         const askedMethods: Array<string> = []
@@ -261,7 +277,7 @@ describe("vibest update", () => {
         )
         assert.match(
           installedOnly.stderr,
-          /\nUpdateError: vibest 999\.0\.0: vibestd not replaced: it still runs the vibest it was started with\n$/,
+          /\nUpdateError: vibest 999\.0\.0: vibestd not replaced: it still runs the vibest it was started with\. To go back to vibest \S+ instead: (bun add -g|npm install -g) @vibest\/cli@\S+\n$/,
         )
         assert.notInclude(askedMethods, "Daemon.Stop", "without a terminal nothing is stopped")
 
@@ -273,8 +289,9 @@ describe("vibest update", () => {
         assert.strictEqual(pmFails.code, 1, pmFails.stdout)
         assert.match(
           pmFails.stderr,
-          /UpdateError: (bun add -g|npm install -g) @vibest\/cli@beta exited with 1; vibestd not attempted\n$/,
+          /UpdateError: vibest 999\.0\.0 cannot take over: it could not be fetched to try it first \((bun add --cwd|npm install --prefix) \S+ @vibest\/cli@999\.0\.0.*: exit 1\)\. Nothing was installed: vibest \S+ stays/,
         )
+        assert.notMatch(yield* fs.readFileString(`${home}/pm.log`), / -g /, "a failed try installs nothing")
         assert.notInclude(pmFails.stderr, "not replaced")
         assert.notInclude(pmFails.stdout, "old version")
 

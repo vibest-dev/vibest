@@ -105,7 +105,7 @@ const pascal = (method: string) =>
 const declare = (name: string, value: Emitted) =>
   `export type ${name} = ${value.ts}\nexport const ${name}: Schema.Codec<${name}> = ${value.schema}\n`
 
-export const emitApi = (doc: OpenRpc, generation: number): string => {
+export const emitApi = (doc: OpenRpc, generation: number, minimum: string): string => {
   const components = Object.entries(doc.components.schemas).map(([name, s]) => declare(name, emit(s)))
   const methods = doc.methods.map((m) => {
     const params = `${pascal(m.name)}Params`
@@ -130,6 +130,7 @@ export const emitApi = (doc: OpenRpc, generation: number): string => {
   return `import { Schema } from "effect"
 
 export const VERSION = ${JSON.stringify(doc.info.version)} as const
+export const MIN_VERSION = ${JSON.stringify(minimum)} as const
 export const GENERATION = ${generation} as const
 
 ${components.join("\n")}

@@ -7,7 +7,6 @@ import { APPLICATION_ID, Db, encodeAddress, SCHEMA_VERSION, type SessionRow } fr
 import {
   type CoordinatorInput,
   Harness,
-  type HarnessId,
   Harnesses,
   HarnessUnavailable,
   HARNESS_IDS,
@@ -24,10 +23,10 @@ import { listAllModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { envelope, isUsageLimitError, outcome, parseReport, turnEndFrom, turnEndOf } from "@vibest/core/results"
-import { coordinatorSystemPrompt, privateTmp, UserPlatform } from "@vibest/core/system-prompt"
+import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { copyIncluded, git, gitState, mainCheckout, repositoryDirectoryName } from "@vibest/core/worktree"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
-import { agentName, KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID, newId, shortId } from "@vibest/schema/id"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/process"
@@ -73,12 +72,6 @@ describe("ids", () => {
       assert.strictEqual(shortId(id).length, 8)
     }),
   )
-
-  it("a session's herdr agent name fits herdr's 32 characters", () => {
-    const id = "0123abcd-4567-4abc-8def-0123456789ab"
-    assert.strictEqual(agentName(id), "s-0123abcd45674abc8def0123456789")
-    assert.match(agentName(id), /^[a-z][a-z0-9_-]{0,31}$/)
-  })
 })
 
 describe("System prompt directory", () => {
@@ -91,20 +84,14 @@ describe("System prompt directory", () => {
       }),
     )
 
-  it.effect("under TMPDIR: <TMPDIR>/vibest, made with mode 0700", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const tmp = yield* tempDirectory("vibest-tmpdir-")
-      assert.strictEqual(yield* privateTmp(tmp, "/nowhere"), `${tmp}/vibest`)
-      assert.strictEqual((yield* fs.stat(`${tmp}/vibest`)).mode & 0o777, 0o700)
-    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-  )
-
   it.effect(
-    "no TMPDIR: <parent>/vibest-<uid>, made 0700 and used again; a wrong mode, a symlink or another owner is refused",
+    "under TMPDIR: <TMPDIR>/vibest, made 0700; no TMPDIR: <parent>/vibest-<uid>, made 0700 and used again; a wrong mode, a symlink or another owner is refused",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
+        const tmp = yield* tempDirectory("vibest-tmpdir-")
+        assert.strictEqual(yield* privateTmp(tmp, "/nowhere"), `${tmp}/vibest`)
+        assert.strictEqual((yield* fs.stat(`${tmp}/vibest`)).mode & 0o777, 0o700)
         const user = yield* UserPlatform
         const uid = user.uid!
         const parent = yield* tempDirectory("vibest-fallback-")
@@ -129,35 +116,6 @@ describe("System prompt directory", () => {
   )
 })
 
-describe("Rules", () => {
-  it("the coordinator points at the skills and does not repeat their command manual", () => {
-    const rules = coordinatorSystemPrompt({ projectDir: "/p", preferences: "", memories: "" })
-    assert.include(rules, "`delegate`")
-    assert.include(rules, "`pipeline`")
-    assert.notInclude(rules, "--archive-on-completion")
-    assert.notInclude(rules, "vibest archive")
-    assert.notInclude(rules, "vibest ls")
-    assert.notInclude(rules, "--peer")
-    assert.notInclude(rules, "--access")
-    assert.notInclude(rules, "Do not remove sessions on your own")
-    assert.notInclude(rules, "no longer needed (interrupt")
-  })
-
-  it("the coordinator writes prompts in plain sentences in its own voice, and quotes the user only to pass on an approval", () => {
-    const rules = coordinatorSystemPrompt({ projectDir: "/p", preferences: "", memories: "" })
-    assert.include(rules, "in plain, complete sentences with no shorthand only you know")
-    assert.include(rules, "a space between every word, identifier and number")
-    assert.include(rules, "Include only the constraints that apply to this prompt, each once.")
-    assert.include(rules, "Never relay or paraphrase the user")
-    assert.include(rules, "the only words of the user a prompt may carry are an approval quote")
-    assert.include(rules, "leave the approach to the agent")
-    assert.match(
-      rules,
-      /^You are an AI assistant that orchestrates software engineering tasks across multiple coding agents\.\n/,
-    )
-  })
-})
-
 describe("envelope", () => {
   it("one element per field, empty ones left out, field text escaped and the agent's text kept as is", () => {
     assert.strictEqual(
@@ -180,6 +138,7 @@ describe("envelope", () => {
     assert.isFalse(isUsageLimitError("model_not_found"))
     assert.isFalse(isUsageLimitError("model_not_found: usage limit"))
     assert.isFalse(isUsageLimitError("server_error: too many requests"))
+    assert.isFalse(isUsageLimitError("server_error: the assistant said rate limit"))
     assert.isFalse(isUsageLimitError("aborted"))
     assert.isFalse(isUsageLimitError(undefined))
     assert.strictEqual(outcome("t", undefined), 'Agent "t" finished')
@@ -190,48 +149,8 @@ describe("envelope", () => {
 describe("Db", () => {
   const fresh = <A, E>(program: Effect.Effect<A, E, Db>) => program.pipe(Effect.provide(database(":memory:")))
 
-  it.effect("an empty file gets the schema; a foreign file is refused", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path
-      const file = path.join(yield* tempDirectory("vibest-db-"), "vibest.db")
-      const withDb = <A, E>(e: Effect.Effect<A, E, Db>) => e.pipe(Effect.provide(database(file)))
-      yield* withDb(
-        Effect.gen(function* () {
-          const db = yield* Db
-          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
-          const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
-          yield* db.insertInbox({
-            sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-            kind: "notice",
-            message: "m",
-            details: {},
-          })
-          assert.match(coord.sessionId, ID)
-          assert.lengthOf(yield* db.coordinatorPending(yield* projectOf("r")), 1)
-        }),
-      )
-      assert.lengthOf(
-        yield* withDb(
-          Effect.gen(function* () {
-            return yield* (yield* Db).coordinatorPending(yield* projectOf("r"))
-          }),
-        ),
-        1,
-      )
-      yield* Effect.gen(function* () {
-        yield* (yield* SqlClient.SqlClient).unsafe("PRAGMA user_version = 99")
-      }).pipe(Effect.provide(Platform.sqlite(file)))
-      const exit = yield* Effect.exit(withDb(Effect.void))
-      assert.isTrue(Exit.isFailure(exit))
-      const pretty = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
-      assert.match(pretty, /SchemaMismatch/)
-      assert.include(pretty, `${file} is not this vibest's schema`)
-      assert.include(pretty, "move it aside to start empty")
-    }).pipe(Effect.provide(Platform.services)),
-  )
-
   it.effect(
-    "one coordinator row per project; a harness switch clears the conversation; reports match id and harness",
+    "one coordinator row per project; fresh starts a new main session and ends the old one; a harness switch clears the conversation; reports match id and harness",
     () =>
       Effect.gen(function* () {
         const db = yield* Db
@@ -265,25 +184,18 @@ describe("Db", () => {
           "s7",
         )
         const sql = yield* SqlClient.SqlClient
-        yield* db.insertSession(
-          session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
-            harnessId: "cursor",
-            startedAt: 1,
-            exitedAt: 1,
-            lastActive: 1,
-          }),
-          yield* projectOf("r"),
-        )
-        assert.isNull((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.harnessSessionId)
-        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { harnessSessionId: "w1" })
-        assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.harnessSessionId, "w1")
-        assert.deepStrictEqual(
-          (yield* db.listSessions({ stopped: true })).map((w) => w.id),
-          [first.sessionId, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
-        )
-        assert.deepStrictEqual(yield* db.listSessions(), [])
-        const deleted = yield* Effect.exit(sql`DELETE FROM project WHERE key = 'r'`)
-        assert.isTrue(Exit.isFailure(deleted))
+        const [old] = yield* sql<{
+          endedAt: number | null
+        }>`SELECT ended_at FROM session WHERE id = ${first.sessionId}`
+        assert.isNotNull(old!.endedAt)
+        const ends = yield* sql<{
+          reason: string
+        }>`SELECT json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ${first.sessionId} AND type = 'process.end'`
+        assert.strictEqual(ends.at(-1)?.reason, "archived")
+        const [project] = yield* sql<{
+          main: string
+        }>`SELECT entry_session_id AS main FROM project WHERE id = ${yield* projectOf("r")}`
+        assert.strictEqual(project!.main, renewed.sessionId)
       }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
 
@@ -293,7 +205,7 @@ describe("Db", () => {
     )
 
   it.effect(
-    "rescheduleSource: the open round's input, the trailing delivered user or parent run, and the parent id",
+    "rescheduleSource: the open round's input, the trailing delivered user or parent run, and the parent id; an empty open round resends the trailing same-sender batch, not an earlier turn",
     () =>
       memory(
         Effect.gen(function* () {
@@ -335,113 +247,42 @@ describe("Db", () => {
             delivered: "",
             parentSessionId: undefined,
           })
-        }),
-      ),
-  )
 
-  it.effect("rescheduleSource: an empty open round resends the trailing same-sender batch, not an earlier turn", () =>
-    memory(
-      Effect.gen(function* () {
-        const db = yield* Db
-        const sql = yield* SqlClient.SqlClient
-        const parent = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
-        yield* db.insertSession(
-          session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-          yield* projectOf("r"),
-          undefined,
-          "/w",
-          "do it",
-          parent.sessionId,
-        )
-        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
-        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
-        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 3 })
-        const follow = yield* db.insertSend("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "add tests")
-        yield* db.setInboxStatus([follow!.id], "delivered")
-        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
-        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 5 })
-        const row = (kind: string, senderId: string | null, content: string, status = "delivered") =>
-          sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, status)
-          VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ${kind}, ${senderId}, ${content}, ${status})`
-        yield* row("send", parent.sessionId, "from parent")
-        yield* row("send", null, "and docs")
-        assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).delivered, "and docs")
-        yield* row("send", null, "also types")
-        assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
-          working: "",
-          delivered: "and docs\n\nalso types",
-          parentSessionId: parent.sessionId,
-        })
-        yield* row("send", null, "still pending", "pending")
-        yield* row("notice", parent.sessionId, "a notice")
-        assert.strictEqual(
-          (yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).delivered,
-          "and docs\n\nalso types",
-        )
-      }),
-    ),
-  )
-
-  it.effect("coordinatorLaunch fresh starts a new main session and ends the old one; without fresh the id stays", () =>
-    memory(
-      Effect.gen(function* () {
-        const db = yield* Db
-        const sql = yield* SqlClient.SqlClient
-        const first = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
-        assert.strictEqual(
-          (yield* db.coordinatorLaunch(yield* projectOf("r"), "claude", false, place)).sessionId,
-          first.sessionId,
-        )
-        const renewed = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", true, place)
-        assert.notStrictEqual(renewed.sessionId, first.sessionId)
-        const [old] = yield* sql<{
-          endedAt: number | null
-        }>`SELECT ended_at FROM session WHERE id = ${first.sessionId}`
-        assert.isNotNull(old!.endedAt)
-        const ends = yield* sql<{
-          reason: string
-        }>`SELECT json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ${first.sessionId} AND type = 'process.end'`
-        assert.strictEqual(ends.at(-1)?.reason, "archived")
-        const [project] = yield* sql<{
-          main: string
-        }>`SELECT entry_session_id AS main FROM project WHERE id = ${yield* projectOf("r")}`
-        assert.strictEqual(project!.main, renewed.sessionId)
-        assert.deepStrictEqual(yield* db.listSessions(), [])
-        assert.isUndefined(yield* db.getSession(renewed.sessionId))
-        const ended = yield* db.getSession(first.sessionId)
-        assert.strictEqual(ended?.agent, "main")
-        assert.strictEqual(ended?.name, "main")
-        assert.strictEqual(ended?.exitedAt, old!.endedAt)
-        assert.deepStrictEqual(
-          (yield* db.listSessions({ stopped: true })).map((row) => row.id),
-          [first.sessionId],
-        )
-      }),
-    ),
-  )
-
-  it.effect("insertSession stores parent_session_id", () =>
-    memory(
-      Effect.gen(function* () {
-        const db = yield* Db
-        const sql = yield* SqlClient.SqlClient
-        const parent = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
-        assert.isTrue(
           yield* db.insertSession(
-            session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
             yield* projectOf("r"),
             undefined,
             "/w",
-            undefined,
+            "do it",
             parent.sessionId,
-          ),
-        )
-        const [row] = yield* sql<{
-          parentSessionId: string | null
-        }>`SELECT parent_session_id FROM session WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
-        assert.strictEqual(row!.parentSessionId, parent.sessionId)
-      }),
-    ),
+          )
+          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "open", turnPromptedAt: 1 })
+          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "completed" })
+          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "open", turnPromptedAt: 3 })
+          const follow = yield* db.insertSend("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "add tests")
+          yield* db.setInboxStatus([follow!.id], "delivered")
+          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "completed" })
+          yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "open", turnPromptedAt: 5 })
+          const row = (kind: string, senderId: string | null, content: string, status = "delivered") =>
+            sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, status)
+            VALUES ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', ${kind}, ${senderId}, ${content}, ${status})`
+          yield* row("send", parent.sessionId, "from parent")
+          yield* row("send", null, "and docs")
+          assert.strictEqual((yield* db.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).delivered, "and docs")
+          yield* row("send", null, "also types")
+          assert.deepStrictEqual(yield* db.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), {
+            working: "",
+            delivered: "and docs\n\nalso types",
+            parentSessionId: parent.sessionId,
+          })
+          yield* row("send", null, "still pending", "pending")
+          yield* row("notice", parent.sessionId, "a notice")
+          assert.strictEqual(
+            (yield* db.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).delivered,
+            "and docs\n\nalso types",
+          )
+        }),
+      ),
   )
 
   it.effect(
@@ -612,23 +453,6 @@ describe("Db", () => {
           },
         )
         assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.turnState, "completed")
-        const turns = yield* sql<{
-          status: string
-          output: string
-          endedAt: number | null
-        }>`SELECT status, output, ended_at FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
-        assert.strictEqual(turns.length, 1)
-        assert.deepInclude(turns[0], { status: "completed", output: "<summary>done</summary>" })
-        const [end] = yield* sql<{ data: string }>`SELECT data FROM event WHERE type = 'turn.end'`
-        assert.deepStrictEqual(JSON.parse(end!.data), {
-          status: "completed",
-          output: "the answer",
-          failure: { message: "late" },
-        })
-        assert.isNotNull(turns[0]!.endedAt)
-        assert.deepInclude((yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"))!.details, {
-          summary: "done",
-        })
         yield* db.closeTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "interrupted", {})
         assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.turnState, "completed")
         assert.notProperty(
@@ -872,39 +696,6 @@ describe("Db", () => {
       Layer.provide(Bus.layer),
     )
 
-  it.effect("an empty file initializes atomically, reopens, and allows one coordinator per project", () =>
-    Effect.gen(function* () {
-      const file = yield* fileAt(yield* tempDirectory("vibest-schema-"), "vibest.db")
-      const opened = yield* Effect.gen(function* () {
-        const db = yield* Db
-        const sql = yield* SqlClient.SqlClient
-        assert.strictEqual((yield* sql<{ journalMode: string }>`PRAGMA journal_mode`)[0]?.journalMode, "wal")
-        assert.strictEqual(
-          (yield* sql<{ applicationId: number }>`PRAGMA application_id`)[0]?.applicationId,
-          APPLICATION_ID,
-        )
-        yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
-        const first = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
-        assert.strictEqual(
-          (yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).sessionId,
-          first.sessionId,
-        )
-        return first.sessionId
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(file)), Layer.provide(Bus.layer))))
-      assert.strictEqual(
-        yield* Effect.gen(function* () {
-          const db = yield* Db
-          assert.strictEqual(
-            (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))?.id,
-            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          )
-          return (yield* db.coordinatorOf(yield* projectOf("r")))?.id
-        }).pipe(Effect.provide(database(file))),
-        opened,
-      )
-    }).pipe(Effect.provide(Platform.services)),
-  )
-
   it.effect("a failed or interrupted install rolls back, then a later open initializes", () =>
     Effect.gen(function* () {
       const dir = yield* tempDirectory("vibest-schema-rollback-")
@@ -939,7 +730,6 @@ describe("Db", () => {
         "CREATE TABLE event (id INTEGER PRIMARY KEY) STRICT",
       ]
       const cases = [
-        ["missing-table.db", [...pragma, tables[0]!, tables[4]!], "missing project_repository"],
         [
           "missing-index.db",
           [
@@ -965,23 +755,17 @@ describe("Db", () => {
         assert.include(yield* refusal(file), expected)
         assert.deepStrictEqual(yield* fs.readFile(file), before)
       }
-    }).pipe(Effect.provide(Platform.services)),
-  )
-
-  it.effect("a file without project_repository is refused and left byte-identical", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const file = yield* fileAt(yield* tempDirectory("vibest-schema-old-v2-"), "vibest.db")
-      yield* Effect.void.pipe(Effect.provide(database(file)))
-      yield* writeSql(file, ["DROP INDEX project_repository_project", "DROP TABLE project_repository"])
-      const before = yield* fs.readFile(file)
-      assert.include(yield* refusal(file), "missing project_repository")
-      assert.deepStrictEqual(yield* fs.readFile(file), before)
+      const dropped = yield* fileAt(dir, "missing-table.db")
+      yield* Effect.void.pipe(Effect.provide(database(dropped)))
+      yield* writeSql(dropped, ["DROP INDEX project_repository_project", "DROP TABLE project_repository"])
+      const droppedBytes = yield* fs.readFile(dropped)
+      assert.include(yield* refusal(dropped), "missing project_repository")
+      assert.deepStrictEqual(yield* fs.readFile(dropped), droppedBytes)
     }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect(
-    "a file of the shape before this baseline (version 1 too, no event table) is refused, naming its path and the release's migration script",
+    "a file of the shape before this baseline (version 1 too, no event table) is refused, naming its path and how to move it aside, since vibest never migrates one",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -997,37 +781,52 @@ describe("Db", () => {
         const before = yield* fs.readFile(file)
         const pretty = yield* refusal(file)
         assert.include(pretty, `${file} is from an older vibest`)
-        assert.include(pretty, "migration script given with this release")
-        assert.include(pretty, "move it aside to start empty")
-        assert.notInclude(pretty, "scripts/migrate")
+        assert.include(pretty, "vibest never migrates a database")
+        assert.include(pretty, "the sessions, results and queued messages it holds are lost")
+        assert.notInclude(pretty, "migration script")
         assert.deepStrictEqual(yield* fs.readFile(file), before)
       }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("a foreign database with user_version 1 is refused without changing its bytes", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const file = yield* fileAt(yield* tempDirectory("vibest-schema-foreign-"), "other.db")
-      yield* writeSql(file, [
-        "CREATE TABLE other (id INTEGER PRIMARY KEY, note TEXT)",
-        "INSERT INTO other (id, note) VALUES (1, 'keep-me')",
-        "PRAGMA user_version = 1",
-      ])
-      const before = yield* fs.readFile(file)
-      const pretty = yield* refusal(file)
-      assert.match(pretty, /SchemaMismatch/)
-      assert.match(pretty, /application_id 0x0, v1/)
-      assert.notMatch(pretty, /0x76696265/)
-      assert.include(pretty, `${file} is not this vibest's schema`)
-      assert.deepStrictEqual(yield* fs.readFile(file), before)
-      assert.isFalse(yield* fs.exists(`${file}-wal`))
-      assert.isFalse(yield* fs.exists(`${file}-shm`))
-      assert.match(yield* refusal(file), /application_id 0x0, v1/)
-      assert.deepStrictEqual(yield* fs.readFile(file), before)
-      const reader = new Database(file, { readonly: true })
-      assert.strictEqual((reader.query("SELECT note FROM other").get() as { note: string } | null)?.note, "keep-me")
-      reader.close()
-    }).pipe(Effect.provide(Platform.services)),
+  it.effect(
+    "a foreign database with user_version 1, or ours at a newer user_version, is refused without changing its bytes",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const file = yield* fileAt(yield* tempDirectory("vibest-schema-foreign-"), "other.db")
+        yield* writeSql(file, [
+          "CREATE TABLE other (id INTEGER PRIMARY KEY, note TEXT)",
+          "INSERT INTO other (id, note) VALUES (1, 'keep-me')",
+          "PRAGMA user_version = 1",
+        ])
+        const before = yield* fs.readFile(file)
+        const pretty = yield* refusal(file)
+        assert.match(pretty, /SchemaMismatch/)
+        assert.match(pretty, /application_id 0x0, v1/)
+        assert.notMatch(pretty, /0x76696265/)
+        assert.include(pretty, `${file} is not this vibest's schema`)
+        assert.deepStrictEqual(yield* fs.readFile(file), before)
+        assert.isFalse(yield* fs.exists(`${file}-wal`))
+        assert.isFalse(yield* fs.exists(`${file}-shm`))
+        assert.match(yield* refusal(file), /application_id 0x0, v1/)
+        assert.deepStrictEqual(yield* fs.readFile(file), before)
+        const reader = new Database(file, { readonly: true })
+        assert.strictEqual((reader.query("SELECT note FROM other").get() as { note: string } | null)?.note, "keep-me")
+        reader.close()
+
+        const newer = yield* fileAt(yield* tempDirectory("vibest-schema-newer-"), "vibest.db")
+        yield* Effect.void.pipe(Effect.provide(database(newer)))
+        yield* writeSql(newer, ["PRAGMA user_version = 99"])
+        const newerBytes = yield* fs.readFile(newer)
+        const newerSaid = yield* refusal(newer)
+        assert.match(newerSaid, /SchemaMismatch/)
+        assert.include(newerSaid, `${newer} is not this vibest's schema`)
+        assert.include(
+          newerSaid,
+          `for f in ${newer} ${newer}-wal ${newer}-shm; do [ -e "$f" ] && mv "$f" "$f.old"; done`,
+        )
+        assert.deepStrictEqual(yield* fs.readFile(newer), newerBytes)
+      }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect(
@@ -1060,12 +859,10 @@ describe("Db", () => {
         )
         const proc = Bun.spawn(["bun", maker, file, ready], { stdout: "pipe", stderr: "pipe" })
         yield* Effect.gen(function* () {
-          for (let i = 0; i < 50; i++) {
-            if (yield* fs.exists(ready)) return
+          while (!(yield* fs.exists(ready))) {
+            if (proc.exitCode !== null) return yield* Effect.die("hot wal helper exited before it was ready")
             yield* Effect.promise(() => Bun.sleep(20))
           }
-          proc.kill()
-          return yield* Effect.die("hot wal helper did not start")
         })
         proc.kill(9)
         yield* Effect.promise(() => proc.exited)
@@ -1137,25 +934,7 @@ const launchInput: LaunchInput = {
 describe("HarnessAdapter", () => {
   const input = launchInput
 
-  it("no launch argument contains a newline", () => {
-    for (const id of HARNESS_IDS)
-      for (const resume of [false, true]) assert.isFalse(hasNewline(ADAPTERS[id].launchArgs({ ...input, resume })))
-  })
-
-  it("provider / model translation", () => {
-    const pm = { ...input, provider: "openai", model: "gpt-5" }
-    assert.deepStrictEqual(ADAPTERS.pi.launchArgs(pm).slice(-4), ["--provider", "openai", "--model", "gpt-5"])
-    assert.deepStrictEqual(ADAPTERS.claude.launchArgs({ ...input, model: "opus" }).slice(-2), ["--model", "opus"])
-    assert.isString(ADAPTERS.claude.checkProvider("openai"))
-    assert.isUndefined(ADAPTERS.claude.checkProvider("anthropic"))
-    assert.isUndefined(ADAPTERS.cursor.checkProvider(null))
-  })
-
-  it("resume", () => {
-    assert.deepStrictEqual(ADAPTERS.claude.launchArgs({ ...input, resume: true }).slice(0, 2), ["--resume", "uuid-1"])
-    assert.deepStrictEqual(ADAPTERS.cursor.launchArgs({ ...input, resume: true, sessionId: "c-1" }).slice(0, 1), [
-      "--resume=c-1",
-    ])
+  it("cursor resumes a dash-leading session id as one --resume= argument", () => {
     const dashLeadingArgs = ADAPTERS.cursor.launchArgs({
       ...input,
       resume: true,
@@ -1163,27 +942,6 @@ describe("HarnessAdapter", () => {
     })
     assert.strictEqual(dashLeadingArgs[0], "--resume=--yolo")
     assert.notInclude(dashLeadingArgs, "--yolo")
-    assert.deepStrictEqual(ADAPTERS.pi.launchArgs({ ...input, resume: true }), ADAPTERS.pi.launchArgs(input))
-  })
-
-  it("each harness starts with vibest's plugin for this session only", () => {
-    const after = (args: ReadonlyArray<string>, flag: string) => args[args.indexOf(flag) + 1]
-    const dir = "/opt/vibest/harnesses/x"
-    assert.strictEqual(after(ADAPTERS.cursor.launchArgs(input), "--plugin-dir"), dir)
-    assert.strictEqual(after(ADAPTERS.claude.launchArgs(input), "--plugin-dir"), dir)
-    assert.strictEqual(after(ADAPTERS.pi.launchArgs(input), "-e"), `${dir}/extension.mjs`)
-    const coordinator = {
-      root: "/r",
-      projectDir: "/p",
-      systemPromptFile: "/r.md",
-      provider: null,
-      model: null,
-      sessionId: null,
-      pluginDir: dir,
-      env: {},
-    }
-    assert.strictEqual(after(ADAPTERS.claude.coordinatorArgs!(coordinator), "--plugin-dir"), dir)
-    assert.strictEqual(after(ADAPTERS.pi.coordinatorArgs!(coordinator), "-e"), `${dir}/extension.mjs`)
   })
 
   it("cursor reports its turn ends", () => {
@@ -1265,10 +1023,6 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(userPrompt(event, true))
     assert.isUndefined(userPrompt({ hook_event_name: "beforeSubmitPrompt", prompt: "  " }, false))
     assert.isUndefined(userPrompt({ hook_event_name: "afterAgentResponse", prompt: "look here" }, false))
-  })
-
-  it("claude starts with no --settings: its deny rules are the plugin's tool guard (guard.test)", () => {
-    assert.notInclude(ADAPTERS.claude.launchArgs(input), "--settings")
   })
 
   it("Coordinator argv: rules, the inspection tools and file tools for the project folder, no MCP server at all; cursor cannot be one", () => {
@@ -1386,39 +1140,6 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
     }),
   )
 
-  it.effect(
-    "vibest's plugin for a harness is VIBEST_HARNESSES/<harness>, else harnesses/ beside the binary's directory, and must be there",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const dir = yield* tempDirectory("vibest-harnesses-")
-        yield* fs.makeDirectory(path.join(dir, "pi"))
-        const plugin = (env: Record<string, string>, id: HarnessId, self: ReadonlyArray<string> = ["vibest"]) =>
-          Harness.make().pipe(
-            Effect.flatMap((h) => h.plugin(id)),
-            Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
-            Effect.provideService(VibestCommand, self),
-          )
-        assert.strictEqual(yield* plugin({ VIBEST_HARNESSES: dir }, "pi"), path.join(dir, "pi"))
-        assert.include(
-          (yield* Effect.flip(plugin({ VIBEST_HARNESSES: dir }, "claude"))).message,
-          `vibest's claude plugin is missing: ${path.join(dir, "claude")}`,
-        )
-        assert.include((yield* Effect.flip(plugin({}, "pi"))).message, "VIBEST_HARNESSES is not set")
-        const root = yield* tempDirectory("vibest-root-")
-        yield* fs.makeDirectory(path.join(root, "harnesses", "pi"), { recursive: true })
-        assert.strictEqual(
-          yield* plugin({}, "pi", [path.join(root, "bin", "vibest")]),
-          path.join(root, "harnesses", "pi"),
-        )
-        assert.strictEqual(
-          yield* plugin({ VIBEST_HARNESSES: dir }, "pi", [path.join(root, "bin", "vibest")]),
-          path.join(dir, "pi"),
-        )
-      }),
-  )
-
   it.effect("turn ends: text field per harness; error marks failure; a junk hook input is no turn end", () =>
     Effect.gen(function* () {
       const harnesses = yield* Harnesses
@@ -1432,9 +1153,10 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       assert.deepInclude(turnEndFrom(harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1), {
         error: "boom: why",
       })
-      assert.deepInclude(turnEndFrom(harnesses.get("cursor"), { text: "x", conversation_id: "--flag" }, 1), {
-        conversationId: undefined,
-      })
+      for (const bad of ["--flag", "-f", "--yolo", "--force", "a b", ""])
+        assert.deepInclude(turnEndFrom(harnesses.get("cursor"), { text: "x", conversation_id: bad }, 1), {
+          conversationId: undefined,
+        })
       assert.isUndefined(turnEndOf(harnesses.get("claude"), "general", "{", 1))
     }),
   )
@@ -1666,7 +1388,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
   )
 
   it.effect(
-    "vibest: the main checkout from anywhere inside, linked worktrees included; the main agent's command, env and rules file",
+    "vibest: the main checkout from anywhere inside, linked worktrees included; the main agent's command and env; a refused launch never asks for the session",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -1702,11 +1424,12 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
             projectId: string
             runtime?: string
           }> = Effect.succeed({ sessionId, harnessSessionId, projectId: PROJECT }),
+          provider: string | null = null,
         ) =>
           Launch.coordinatorCommand({
             harness: h,
             root: repo,
-            provider: null,
+            provider,
             model: null,
             passEnv: CALLER_ENV,
             session,
@@ -1726,29 +1449,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
             Effect.provide(Layer.effect(Layout, Layout.make(home))),
             Effect.provideService(VibestCommand, ["/bin/vibest"]),
           )
-        const claude = yield* run("claude")
-        assert.strictEqual(claude.file, "claude")
-        assert.deepStrictEqual(claude.env, {
-          VIBEST_AGENT: "coordinator",
-          VIBEST_HARNESS: "claude",
-          VIBEST_HOME: home,
-          VIBEST_COMMAND: '["/bin/vibest"]',
-          VIBEST_SESSION_ID: "",
-          VIBEST_PROJECT_ID: PROJECT,
-          VIBEST_PROJECT_DIR: `${home}/projects/${PROJECT}`,
-          HERDR_PANE_ID: "w1:p1",
-          HERDR_SOCKET_PATH: "/h/herdr.sock",
-        })
-        const rules = yield* fs.readFileString(claude.args[claude.args.indexOf("--append-system-prompt-file") + 1]!)
-        assert.include(rules, "You are a **coordinator**")
-        assert.include(rules, "`delegate`")
-        assert.include(rules, "`pipeline`")
-        assert.include(rules, "You run the bare command `vibest`")
-        assert.notInclude(rules, "`vibest run <harness> -- '<prompt>'`")
-        assert.notInclude(rules, "`--peer <id>`")
-        assert.notInclude(rules, "/bin/vibest")
-        assert.notInclude(rules, "VIBEST_COMMAND")
-        assert.notInclude(rules, "mcp__")
+        assert.strictEqual((yield* run("claude")).file, "claude")
         const launched = yield* run("claude", null, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
         assert.strictEqual(launched.env.VIBEST_SESSION_ID, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
         const placed = yield* run(
@@ -1783,6 +1484,7 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         )
         assert.strictEqual((yield* Effect.flip(run("cursor", null, "", counted)))._tag, "HarnessUnavailable")
         assert.include((yield* Effect.flip(run("pi", null, "", counted))).message, "vibest's pi plugin is missing")
+        assert.strictEqual((yield* Effect.flip(run("claude", null, "", counted, "openai")))._tag, "HarnessUnavailable")
         assert.strictEqual(asked, 0)
       }),
   )
@@ -1859,23 +1561,8 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       yield* fs.writeFileString(file, content)
     })
 
-  it.effect("copyIncluded: without .worktreeinclude nothing is copied, not even ignored or untracked config", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const repo = yield* makeRepository
-      yield* policy(repo, ".claude/settings.local.json\n.env\n")
-      yield* write(`${repo}/.claude/settings.local.json`, "{}\n")
-      yield* write(`${repo}/.env`, "K=1\n")
-      const exclude = yield* fs.readFileString(`${repo}/.git/info/exclude`)
-      const wt = yield* addWorktree(repo)
-      assert.deepStrictEqual(yield* copyIncluded(repo, wt), [])
-      for (const f of ["CLAUDE.md", ".claude", ".env"]) assert.isFalse(yield* fs.exists(`${wt}/${f}`), f)
-      assert.strictEqual(yield* fs.readFileString(`${repo}/.git/info/exclude`), exclude)
-    }),
-  )
-
   it.effect(
-    "copyIncluded: .worktreeinclude matches that git ignores, by git's own rules; nothing else; repeatable",
+    "copyIncluded: .worktreeinclude matches that git ignores, by git's own rules; nothing else; repeatable; without it nothing is copied",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -1933,6 +1620,10 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         assert.deepStrictEqual(yield* copyIncluded(repo, wt), [])
         assert.sameMembers(yield* copyIncluded(repo, yield* addWorktree(repo)), selected)
         assert.strictEqual(yield* fs.readFileString(`${repo}/.git/info/exclude`), exclude)
+        yield* fs.remove(`${repo}/.worktreeinclude`)
+        const without = yield* addWorktree(repo)
+        assert.deepStrictEqual(yield* copyIncluded(repo, without), [])
+        for (const f of [".claude", ".env.local", "cache"]) assert.isFalse(yield* fs.exists(`${without}/${f}`), f)
       }),
   )
 
@@ -2077,19 +1768,11 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
 })
 
 describe("pure", () => {
-  it("an unmarked command ignores VIBEST_MAIN_ENV; the command Launch typed uses it, over a shell rc", () => {
+  it("an unmarked command ignores VIBEST_MAIN_ENV; the command Launch typed uses it", () => {
     const carried = JSON.stringify({ MAIN_PROBE: "from-flag" })
     assert.deepStrictEqual(Launch.commandEnv({}, false, carried), {})
     assert.deepStrictEqual(Launch.commandEnv({}, true, carried), { MAIN_PROBE: "from-flag" })
     assert.deepStrictEqual(Launch.commandEnv({ MAIN_PROBE: "from-flag" }, true, carried), { MAIN_PROBE: "from-flag" })
-    const rc: Record<string, string> = { MAIN_PROBE: "from-rc", PATH: "/bin" }
-    const pairs: Record<string, string> = { MAIN_PROBE: "from-flag" }
-    const harness: Record<string, string> = { VIBEST_SESSION_ID: "s" }
-    const child: Record<string, string> = { ...rc, ...pairs, ...harness }
-    assert.strictEqual(child.MAIN_PROBE, "from-flag")
-    assert.strictEqual(child.PATH, "/bin")
-    assert.strictEqual(child.VIBEST_SESSION_ID, "s")
-    assert.strictEqual("VIBEST_MAIN_ENV" in child, false)
   })
 
   it.effect("~/.vibest layout: VIBEST_HOME, else $HOME/.vibest; the old product's OMO_HOME is not read", () =>

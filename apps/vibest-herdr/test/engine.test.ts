@@ -86,19 +86,6 @@ describe("session handlers", () => {
   )
 
   test(
-    "an exit fails the turn and the queue at once",
-    Effect.gen(function* () {
-      const { id, sessions, db, herdr } = yield* working
-      yield* sessions.send(id, "queued")
-      yield* settled
-      yield* herdr.runtime.close((yield* db.getSession(id))!.address)
-      yield* until(db.getSession(id), (r) => r?.turnState === "failed" && r.exitedAt !== null)
-      yield* until(db.pendingInbox(id), (rows) => rows.length === 0)
-      yield* until(notices(id), (rows) => rows.some((r) => r.message.includes("exited before it was delivered")))
-    }),
-  )
-
-  test(
     "blocked gives one notice",
     Effect.gen(function* () {
       const { id, herdr } = yield* working

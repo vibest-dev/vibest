@@ -444,11 +444,12 @@ const sessionTest = <E>(name: string, program: Effect.Effect<void, E, TestServic
 
 describe("multi-repository isolated workspace", () => {
   sessionTest(
-    "a writing subagent gets one detached worktree per repository; archive removes each that is safe; the result names branch and pushed per repository",
+    "vibest run from the project directory: a writing subagent gets one detached worktree per repository; archive removes each that is safe; the result names branch and pushed per repository",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const db = yield* Db
+      const layout = yield* Layout
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
@@ -461,14 +462,14 @@ describe("multi-repository isolated workspace", () => {
         address: { machine: "local", id: "test/coord" },
       })
 
-      const { id } = yield* sessions.spawn({
-        machine: { id: "local" },
-        root,
-        projectId: yield* projectOf(root),
-        name: "task",
-        prompt: "do it",
-        harness: "pi",
-      })
+      const spawned = yield* runVibest(root, { HOME: layout.home, VIBEST_HOME: layout.home }, [
+        "run",
+        "pi",
+        "--",
+        "do it",
+      ])
+      assert.strictEqual(spawned.code, 0, spawned.stderr)
+      const { id } = JSON.parse(spawned.stdout) as { id: string }
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
       const row = (yield* db.getSession(id))!
@@ -511,35 +512,6 @@ describe("multi-repository isolated workspace", () => {
       const removed = (yield* sessions.remove(id))!
       assert.strictEqual(removed.worktree, "removed")
       assert.isFalse(yield* fs.exists(workspace))
-    }),
-  )
-
-  sessionTest(
-    "vibest run from the project directory is the same workspace",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const db = yield* Db
-      const layout = yield* Layout
-      const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
-      const root = path.join(parent, "combo")
-      yield* fs.makeDirectory(root)
-      yield* repositoryWithOneCommitOnMain(root, "app")
-      yield* repositoryWithOneCommitOnMain(root, "sdk")
-      const spawned = yield* runVibest(root, { HOME: layout.home, VIBEST_HOME: layout.home }, [
-        "run",
-        "pi",
-        "--",
-        "do it",
-      ])
-      assert.strictEqual(spawned.code, 0, spawned.stderr)
-      const { id } = JSON.parse(spawned.stdout) as { id: string }
-      yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
-      const row = (yield* db.getSession(id))!
-      const workspace = (yield* db.sessionDirectory(row.id))!
-      assert.strictEqual(path.basename(path.dirname(workspace)), "combo")
-      assert.strictEqual(yield* sh(path.join(workspace, "app"), "rev-parse", "--is-inside-work-tree"), "true")
-      assert.strictEqual(yield* sh(path.join(workspace, "sdk"), "branch", "--show-current"), "")
     }),
   )
 

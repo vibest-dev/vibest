@@ -29,7 +29,7 @@ var methods = []string{
 }
 
 const (
-	schemaDir = "../../packages/effect-hc-sdk/schema"
+	schemaDir = "../../packages/effect-herdr-core-sdk/schema"
 	target    = "internal/core/hc_generated.go"
 	ref       = "#/components/schemas/"
 )

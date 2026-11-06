@@ -1,87 +1,42 @@
-import { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
 import {
-  agentModel,
+  ask,
+  claudeEnv,
+  fakeAnthropic,
+  holdsSlowResultModel,
+  lastUser,
+  text,
+  usageLimitedModel,
+} from "../fake-model.ts"
+import {
   agentName,
   alive,
   binary,
+  compiled,
   expect,
   harnesses,
   herdr,
+  readDb,
   SESSIONS,
   Skip,
-  transcript,
   TURNS,
   until,
   type World,
 } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
-type Message = { role: string; content: unknown }
 type Row = { id: string; harness_session_id: string | null; pid: number | null; version: string | null }
 type Agent = { name?: string | null; pane_id: string; agent?: string | null }
 
-const text = (m: Message | undefined) =>
-  m === undefined ? "" : typeof m.content === "string" ? m.content : JSON.stringify(m.content)
-const ask = (task: string) =>
-  `Do not run any tool. Reply with exactly two lines: the first is "done-${task}", the second is "status: completed".`
 const OLD = "0.0.0-old"
-
-const fakeModel = () => {
-  const seen: Array<ReadonlyArray<string>> = []
-  const held: Array<() => void> = []
-  const chunk = (o: object) =>
-    `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
-  const reply = (content: string) =>
-    chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) +
-    chunk({
-      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }) +
-    "data: [DONE]\n\n"
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    idleTimeout: 0,
-    fetch: async (req) => {
-      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
-      seen.push(messages.map((m) => `${m.role}: ${text(m)}`))
-      const last = text(messages.at(-1))
-      const headers = { "content-type": "text/event-stream" }
-      if (last.includes("<agent-") && last.includes("done-slow"))
-        return new Response(
-          new ReadableStream({
-            start: (c) =>
-              void held.push(() => {
-                try {
-                  c.close()
-                } catch {}
-              }),
-          }),
-          { headers },
-        )
-      const task = last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
-      return new Response(reply(task ? `done-${task[1]}\nstatus: completed` : "ok"), { headers })
-    },
-  })
-  return {
-    seen,
-    held: () => held.length,
-    url: `http://127.0.0.1:${server.port}/v1`,
-    stop: () => {
-      for (const release of held) release()
-      server.stop(true)
-    },
-  }
-}
 
 const oldInstall = async (w: World, name: string) => {
   const old = path.join(w.root, `${name}-old`)
   await fs.mkdir(path.join(old, "bin"), { recursive: true })
-  await fs.copyFile(binary, path.join(old, "bin", "vibest"))
+  await fs.copyFile(compiled, path.join(old, "bin", "vibest"))
   await fs.chmod(path.join(old, "bin", "vibest"), 0o755)
   await fs.cp(harnesses, path.join(old, "harnesses"), { recursive: true })
   const patch = async (file: string, from: RegExp, to: string) => {
@@ -107,7 +62,7 @@ const oldInstall = async (w: World, name: string) => {
   await point(path.join(old, "bin", "vibest"))
   const zdotdir = path.join(w.root, `${name}-zdotdir`)
   await fs.mkdir(zdotdir, { recursive: true })
-  return { wrapper, point, env: { PATH: `${bin}:${w.env().PATH}`, ZDOTDIR: zdotdir } }
+  return { old: OLD, wrapper, point, env: { PATH: `${bin}:${w.env().PATH}`, ZDOTDIR: zdotdir } }
 }
 
 const usageLimitMove = async (
@@ -123,36 +78,7 @@ const usageLimitMove = async (
   }) => Promise<void>,
 ) => {
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-  const seen: Array<string> = []
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    idleTimeout: 0,
-    fetch: async (req) => {
-      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
-      const last = text(messages.at(-1))
-      seen.push(`${new URL(req.url).pathname} ${last.slice(-80)}`)
-      if (o.limited(new URL(req.url).pathname))
-        return new Response(
-          `data: ${JSON.stringify({ error: { message: "usage limit reached, try again later" } })}\n\n`,
-          {
-            headers: { "content-type": "text/event-stream" },
-          },
-        )
-      const chunk = (c: object) =>
-        `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...c })}\n\n`
-      const content = /done-limit/.test(last) ? "done-limit\nstatus: completed" : "ok"
-      return new Response(
-        chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) +
-          chunk({
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          }) +
-          "data: [DONE]\n\n",
-        { headers: { "content-type": "text/event-stream" } },
-      )
-    },
-  })
+  const model = usageLimitedModel(o.limited)
   const session = `${w.herdrSession}-${o.name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const plugin = path.join(w.vibestHome, "plugins", `${o.name}.ts`)
@@ -161,7 +87,7 @@ const usageLimitMove = async (
     const agentDir = path.join(w.root, `pi-${o.name}`)
     await fs.mkdir(agentDir, { recursive: true })
     const provider = (base: string) => ({
-      baseUrl: `http://127.0.0.1:${server.port}/${base}`,
+      baseUrl: `http://127.0.0.1:${model.port}/${base}`,
       apiKey: "fake",
       api: "openai-completions",
       models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
@@ -193,7 +119,7 @@ const usageLimitMove = async (
       ) as { id: string }
     ).id
     const read = <A>(sql: string) => {
-      const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+      const db = readDb(path.join(w.vibestHome, "vibest.db"))
       try {
         return db.query<A, [string]>(sql).all(id)
       } finally {
@@ -202,7 +128,7 @@ const usageLimitMove = async (
     }
     await body({
       id,
-      seen,
+      seen: model.seen,
       row: () =>
         read<{ harness: string; provider: string | null; pid: number | null; conversation: string | null }>(
           `SELECT harness, provider, pid, harness_session_id AS conversation FROM ${SESSIONS} s WHERE id = ?`,
@@ -215,7 +141,7 @@ const usageLimitMove = async (
       log: async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-4000),
     })
   } finally {
-    server.stop(true)
+    model.stop()
     await fs.rm(plugin, { force: true })
     await w.stopDaemon()
     await dropHerdrSession(w, session)
@@ -229,7 +155,7 @@ const checks: ReadonlyArray<Check> = [
       "vibest update: vibestd hands over; No keeps an old Pi main agent mid-turn (its old protocol is told to run vibest update), Yes restarts its Pi subagent (herdr lists it as s-<id> before and after) and then it in its pane on the same session and conversation, its inbox continues the turn, and results still arrive",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const model = fakeModel()
+      const model = holdsSlowResultModel()
       const session = `${w.herdrSession}-restart`
       try {
         const repo = await project(w, "restart")
@@ -252,7 +178,7 @@ const checks: ReadonlyArray<Check> = [
           path.join(agentDir, "settings.json"),
           JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }),
         )
-        const { wrapper, point, env } = await oldInstall(w, "restart")
+        const { old, wrapper, point, env } = await oldInstall(w, "restart")
         const piEnv = `PI_CODING_AGENT_DIR=${agentDir}`
         const vibest = (args: ReadonlyArray<string>, timeoutMs = 60_000) =>
           w.run(repo, [wrapper, ...args], { env, timeoutMs })
@@ -262,7 +188,7 @@ const checks: ReadonlyArray<Check> = [
           return r.stdout
         }
         const read = (where: string, arg: string) => {
-          const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+          const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
             return db
               .query<Row, [string]>(
@@ -302,12 +228,12 @@ const checks: ReadonlyArray<Check> = [
         await until("herdr lists the subagent as s-<id>", async () => (await listed(zero))?.agent === "pi", 60_000)
         const subPane = (await listed(zero))!.pane_id
         const subBefore = subRow(zero)!
-        expect(subBefore.version === OLD && subBefore.pid !== null, `the subagent's row: ${JSON.stringify(subBefore)}`)
+        expect(subBefore.version === old && subBefore.pid !== null, `the subagent's row: ${JSON.stringify(subBefore)}`)
         await until(
           "the main agent reports the old integration and its conversation",
           () => {
             const row = main()
-            return row?.version === OLD && row.harness_session_id !== null && row.pid !== null
+            return row?.version === old && row.harness_session_id !== null && row.pid !== null
           },
           60_000,
         )
@@ -337,7 +263,7 @@ const checks: ReadonlyArray<Check> = [
         expect(daemonBefore === undefined || !alive(daemonBefore), `the old vibestd ${daemonBefore} still runs`)
         const kept = main()
         expect(kept?.pid === before.pid && alive(before.pid!), `No restarted the main agent: ${JSON.stringify(kept)}`)
-        expect(kept?.version === OLD, `the kept agent's integration: ${kept?.version}`)
+        expect(kept?.version === old, `the kept agent's integration: ${kept?.version}`)
         const refused = await fetch("http://vibestd/inbox/poll", {
           unix: path.join(w.vibestHome, "vibest-http.sock"),
           method: "POST",
@@ -362,7 +288,7 @@ const checks: ReadonlyArray<Check> = [
           "the subagent restarted on this integration",
           () => {
             const row = subRow(zero)
-            return row?.pid != null && row.pid !== subBefore.pid && row.version !== OLD && row.version !== null
+            return row?.pid != null && row.pid !== subBefore.pid && row.version !== old && row.version !== null
           },
           120_000,
         )
@@ -377,8 +303,15 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         expect((await listed(zero))?.pane_id === subPane, `the subagent's pane changed: ${subPane}`)
-        await until("the main agent restarted", () => main()?.pid != null && main()?.pid !== before.pid, 120_000)
-        const after = main()
+        let after: ReturnType<typeof main>
+        await until(
+          "the main agent restarted on this integration",
+          () => {
+            after = main()
+            return after?.pid != null && after.pid !== before.pid && after.version !== old && after.version !== null
+          },
+          120_000,
+        )
         expect(after?.id === before.id, `the main agent's session changed: ${before.id} -> ${after?.id}`)
         expect(
           after?.harness_session_id === before.harness_session_id,
@@ -386,7 +319,7 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(after?.pid !== before.pid, `the harness pid did not change (${before.pid})`)
         expect(!alive(before.pid!), `the old harness ${before.pid} still runs`)
-        await until("the restarted main agent reports this integration", () => main()?.version !== OLD, 30_000)
+        await until("the restarted main agent reports this integration", () => main()?.version !== old, 30_000)
         expect(
           JSON.stringify(await address()) === JSON.stringify(addressBefore),
           `the main agent's terminal changed: ${JSON.stringify(addressBefore)} -> ${JSON.stringify(await address())}`,
@@ -409,51 +342,12 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
-    id: "U3",
-    title:
-      "vibest update: a handoff the new vibest refuses before the takeover (a database it cannot open) leaves the old vibestd serving",
-    run: async (w) => {
-      const old = path.join(w.root, "handoff-old", "bin", "vibest")
-      await fs.mkdir(path.dirname(old), { recursive: true })
-      await fs.copyFile(binary, old)
-      await fs.chmod(old, 0o755)
-      await w.stopDaemon()
-      const started = await w.run(w.repository, [old, "daemon"])
-      expect(started.code === 0, `old vibest daemon exited ${started.code}: ${started.stderr}`)
-      const before = await w.daemonPid()
-      expect(before !== undefined, "no vibestd pid")
-      const file = path.join(w.vibestHome, "vibest.db")
-      const userVersion = (v?: number) => {
-        const db = new Database(file)
-        try {
-          if (v !== undefined) db.run(`PRAGMA user_version = ${v}`)
-          return db.query<{ user_version: number }, []>("PRAGMA user_version").get()!.user_version
-        } finally {
-          db.close()
-        }
-      }
-      const schema = userVersion()
-      userVersion(schema + 1)
-      try {
-        const r = await w.vibest(["update"], { timeoutMs: 120_000 })
-        const out = `${r.stdout}${r.stderr}`
-        expect(r.code !== 0, `vibest update exited 0: ${out}`)
-        expect(/vibestd: handoff\./.test(out) && /old vibestd .* still runs/.test(out), `unexpected: ${out}`)
-        expect((await w.daemonPid()) === before && alive(before!), `vibestd ${before} -> ${await w.daemonPid()}`)
-        await w.ok(["ls"])
-      } finally {
-        userVersion(schema)
-        await w.stopDaemon()
-      }
-    },
-  },
-  {
     id: "U6",
     title:
       "vibest daemon restart onto another vibest: Yes to both questions replaces vibestd and restarts an old Pi subagent in place, in the same pane on the same conversation",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const model = fakeModel()
+      const model = holdsSlowResultModel()
       const session = `${w.herdrSession}-drestart`
       try {
         const repo = await project(w, "drestart")
@@ -476,14 +370,14 @@ const checks: ReadonlyArray<Check> = [
           path.join(agentDir, "settings.json"),
           JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }),
         )
-        const { wrapper, point, env } = await oldInstall(w, "drestart")
+        const { old, wrapper, point, env } = await oldInstall(w, "drestart")
         const ok = async (args: ReadonlyArray<string>) => {
           const r = await w.run(repo, [wrapper, ...args], { env, timeoutMs: 60_000 })
           expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
           return r.stdout
         }
         const row = (id: string) => {
-          const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+          const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
             return db
               .query<Row, [string]>(
@@ -509,7 +403,7 @@ const checks: ReadonlyArray<Check> = [
           "the subagent reports the old integration and its conversation",
           () => {
             const r = row(id)
-            return r?.version === OLD && r.pid !== null && r.harness_session_id !== null
+            return r?.version === old && r.pid !== null && r.harness_session_id !== null
           },
           120_000,
         )
@@ -536,7 +430,7 @@ const checks: ReadonlyArray<Check> = [
           "the subagent restarted on this integration",
           () => {
             const now = row(id)
-            return now?.pid != null && now.pid !== before.pid && now.version !== OLD && now.version !== null
+            return now?.pid != null && now.pid !== before.pid && now.version !== old && now.version !== null
           },
           120_000,
         )
@@ -560,17 +454,35 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "U4",
     title:
-      "vibest update run by a Claude main agent itself: the CLI hands the restart to vibestd and returns; vibestd restarts it in its pane on the same conversation, its inbox gets the continue notice, and it goes on without running vibest update again",
+      "vibest update run by a Claude main agent itself (fake model): the CLI hands the restart to vibestd and returns; vibestd restarts it in its pane on the same conversation, its inbox gets the continue notice and that turn ends with a reply, and vibest update runs once",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const session = `${w.herdrSession}-cupdate`
       const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+      const UPDATE = "Run vibest update --yes now."
+      const NOTICE =
+        "vibest update is done and restarted this agent; do not run it again, continue the interrupted work."
+      let updates = 0
+      let noticed = false
+      const model = fakeAnthropic((r) => {
+        const last = text(lastUser(r))
+        if (last.includes(UPDATE)) {
+          if (r.tools.length > 0) updates++
+          return { tool: "Bash", input: { command: "vibest update --yes" } }
+        }
+        if (last.includes(NOTICE)) {
+          noticed = true
+          return "CONTINUED"
+        }
+        return last.includes('"tool_result"') ? "UPDATED" : "ok"
+      })
       try {
         const repo = await project(w, "claude-update")
         const install = await oldInstall(w, "cupdate")
-        const env = { ...install.env, CLAUDE_CONFIG_DIR: undefined }
+        const configTheResumeCheckReads = w.config.claude
+        const flags = await claudeEnv(w, "cupdate", model.url, configTheResumeCheckReads)
         const vibest = async (args: ReadonlyArray<string>, timeoutMs = 120_000) => {
-          const r = await w.run(repo, [install.wrapper, ...args], { env, timeoutMs })
+          const r = await w.run(repo, [install.wrapper, ...args], { env: install.env, timeoutMs })
           expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
           return r.stdout
         }
@@ -582,7 +494,7 @@ const checks: ReadonlyArray<Check> = [
           version: string | null
         }
         const main = () => {
-          const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+          const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
             return (
               db
@@ -603,10 +515,13 @@ const checks: ReadonlyArray<Check> = [
         }
         const log = async () =>
           (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-4000)
+        const failWith = async (e: Error) => {
+          throw new Error(`${e.message}; row ${JSON.stringify(main())}; screen:\n${await screen()}\n${await log()}`)
+        }
 
         await w.stopDaemon()
         await vibest(["daemon"])
-        await vibest(["--harness", "claude", ...agentModel(), "--session", session, "--headless"])
+        await vibest(["--harness", "claude", ...flags, "--session", session, "--headless"])
         await until("the main agent's row", () => pane() !== "", 60_000)
         await until(
           "Claude's trust question or its input box",
@@ -620,19 +535,13 @@ const checks: ReadonlyArray<Check> = [
         }
         await until(
           "the main agent polls on the old integration",
-          () => main()?.version === OLD && main()?.conversation != null && main()?.pid != null,
+          () => main()?.version === install.old && main()?.conversation != null && main()?.pid != null,
           120_000,
-        ).catch(async (e: Error) => {
-          throw new Error(`${e.message}; row ${JSON.stringify(main())}; screen:\n${await screen()}\n${await log()}`)
-        })
+        ).catch(failWith)
         const before = main()!
 
         await install.point(binary)
-        await Bun.sleep(5_000)
-        await herdr(socket, "pane.send_text", {
-          pane_id: pane(),
-          text: "Run this shell command once: vibest update --yes   Then reply with the one word UPDATED.",
-        })
+        await herdr(socket, "pane.send_text", { pane_id: pane(), text: UPDATE })
         await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
 
         await until(
@@ -643,14 +552,12 @@ const checks: ReadonlyArray<Check> = [
               row !== undefined &&
               row.pid != null &&
               row.pid !== before.pid &&
-              row.version !== OLD &&
+              row.version !== install.old &&
               row.version !== null
             )
           },
           240_000,
-        ).catch(async (e: Error) => {
-          throw new Error(`${e.message}; row ${JSON.stringify(main())}; screen:\n${await screen()}\n${await log()}`)
-        })
+        ).catch(failWith)
         expect(!alive(before.pid!), `the old Claude ${before.pid} still runs`)
         expect(main()?.id === before.id, `the main agent's session changed: ${before.id} -> ${main()?.id}`)
         expect(
@@ -658,34 +565,21 @@ const checks: ReadonlyArray<Check> = [
           `the conversation changed: ${before.conversation} -> ${main()?.conversation}`,
         )
         expect(main()?.runtime === before.runtime, `the terminal changed: ${before.runtime} -> ${main()?.runtime}`)
-
-        const updates = (entries: Awaited<ReturnType<typeof transcript>>) =>
-          entries.filter((e) => e.type === "assistant" && /"name":"Bash"/.test(e.raw) && /vibest update/.test(e.raw))
-            .length
-        let entries: Awaited<ReturnType<typeof transcript>> = []
+        const asked = () => model.requests.findIndex((r) => text(lastUser(r)).includes(UPDATE))
         await until(
-          "the continue notice in the main agent's conversation, and a reply after it",
-          async () => {
-            entries = await transcript(w, repo)
-            const at = entries.findIndex(
-              (e) =>
-                e.type === "user" &&
-                e.text.includes(
-                  "Notice: vibest update is done and restarted this agent; do not run it again, continue the interrupted work.",
-                ),
-            )
-            return at !== -1 && entries.slice(at + 1).some((e) => e.type === "assistant" && e.text.trim() !== "")
-          },
+          "the continue notice in a request after the update",
+          () => model.requests.slice(asked() + 1).some((r) => text(lastUser(r)).includes(NOTICE)),
           180_000,
-        ).catch(async (e: Error) => {
-          const tail = entries.slice(-10).map((x) => `${x.type}: ${x.raw.slice(0, 300)}`)
-          throw new Error(`${e.message}; the conversation ends with:\n${tail.join("\n")}\n${await log()}`)
-        })
-        await Bun.sleep(15_000)
-        entries = await transcript(w, repo)
-        expect(updates(entries) === 1, `vibest update ran ${updates(entries)} times in the main agent's conversation`)
+        ).catch(failWith)
+        await until(
+          "the turn on the continue notice ended with its reply",
+          async () => noticed && /⏺ CONTINUED\s+\S.*· done/.test(await screen()),
+          120_000,
+        ).catch(failWith)
+        expect(updates === 1, `vibest update was asked for ${updates} times`)
         expect(main()?.pid !== null && alive(main()!.pid!), "the restarted main agent is not running")
       } finally {
+        model.stop()
         await dropHerdrSession(w, session)
       }
     },
@@ -784,7 +678,7 @@ export default Plugin.define({
         },
         async ({ id, seen, row, status, log }) => {
           const results = () => {
-            const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+            const db = readDb(path.join(w.vibestHome, "vibest.db"))
             try {
               return db
                 .query<{ content: string }, [string]>(

@@ -14,8 +14,8 @@ import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibe
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
-import { CALLER_ENV as HC_CALLER_ENV } from "@vibest/runtime-hc/caller"
-import { plugin as runtimeHcPlugin } from "@vibest/runtime-hc/plugin"
+import { CALLER_ENV as HC_CALLER_ENV } from "@vibest/runtime-herdr-core/caller"
+import { plugin as runtimeHcPlugin } from "@vibest/runtime-herdr-core/plugin"
 import { CALLER_ENV as HERDR_CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { choicePlugin, type ConfiguredRuntime } from "@vibest/runtime-herdr/choice"
 import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
@@ -235,7 +235,7 @@ const configuredRuntime: ConfiguredRuntime = () =>
 const builtinPlugins: ReadonlyArray<Candidate> = [
   { source: "builtin:harness-choice", revision: "harness-choice", options: {}, plugin: harnessChoicePlugin },
   { source: "builtin:runtime-herdr", revision: "runtime-herdr", options: {}, plugin: runtimeHerdrPlugin },
-  { source: "builtin:runtime-hc", revision: "runtime-hc", options: {}, plugin: runtimeHcPlugin },
+  { source: "builtin:runtime-herdr-core", revision: "runtime-herdr-core", options: {}, plugin: runtimeHcPlugin },
   {
     source: "builtin:runtime-choice",
     revision: "runtime-choice",

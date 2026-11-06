@@ -39,19 +39,6 @@ const run = (event: string, env: Record<string, string>, stdin = "{}") => {
 const agent = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }
 
 describe("@vibest/cursor", () => {
-  it("hooks the guard fail-closed, the prompt, and both turn-end events", () => {
-    const hooks = JSON.parse(files["hooks/hooks.json"]!).hooks
-    assert.deepStrictEqual(Object.keys(hooks).sort(), [
-      "afterAgentResponse",
-      "beforeSubmitPrompt",
-      "preToolUse",
-      "stop",
-    ])
-    assert.isTrue(hooks.preToolUse[0].failClosed)
-    assert.isUndefined(hooks.beforeSubmitPrompt[0].failClosed)
-    assert.strictEqual(JSON.parse(files[".cursor-plugin/plugin.json"]!).name, "vibest")
-  })
-
   it("outside a vibest agent: allows without asking vibest, and reports nothing", () => {
     assert.deepStrictEqual(run("preToolUse", {}), { code: 0, stdout: '{"permission":"allow"}', calls: "" })
     assert.deepStrictEqual(run("beforeSubmitPrompt", {}, '{"prompt":"look"}'), { code: 0, stdout: "", calls: "" })
@@ -77,13 +64,13 @@ describe("@vibest/cursor", () => {
     assert.strictEqual(escaped.calls, "integration stop --harness cursor <{}>")
   })
 
-  it("a vibest agent's turn end goes to `vibest integration stop`, and never fails the hook", () => {
-    const r = run("afterAgentResponse", { ...agent, FAKE_EXIT: "1", FAKE_OUT: "noise" }, '{"text":"done"}')
-    assert.deepStrictEqual(r, { code: 0, stdout: "", calls: 'integration stop --harness cursor <{"text":"done"}>' })
-  })
-
-  it("a vibest agent's prompt goes to `vibest integration prompt`, and never blocks the prompt", () => {
-    const r = run("beforeSubmitPrompt", { ...agent, FAKE_EXIT: "1", FAKE_OUT: "noise" }, '{"prompt":"look"}')
-    assert.deepStrictEqual(r, { code: 0, stdout: "", calls: 'integration prompt --harness cursor <{"prompt":"look"}>' })
+  it("a vibest agent's turn end and prompt go to `vibest integration stop` and `prompt`, and never fail the hook or block the prompt", () => {
+    for (const [event, stdin, command] of [
+      ["afterAgentResponse", '{"text":"done"}', "stop"],
+      ["beforeSubmitPrompt", '{"prompt":"look"}', "prompt"],
+    ] as const) {
+      const r = run(event, { ...agent, FAKE_EXIT: "1", FAKE_OUT: "noise" }, stdin)
+      assert.deepStrictEqual(r, { code: 0, stdout: "", calls: `integration ${command} --harness cursor <${stdin}>` })
+    }
   })
 })

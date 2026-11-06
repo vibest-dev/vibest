@@ -2,8 +2,8 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { piDir } from "../fake-model.ts"
 import { binary, checkout, expect, harnesses, knownSessions, row, Skip, until } from "../world.ts"
-import { piDir } from "./inbox.ts"
 
 type CoreTerminal = { address: string; reported: boolean; status?: { state: string; kind?: string; app?: string } }
 

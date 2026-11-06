@@ -1,4 +1,5 @@
 import { newId } from "@vibest/schema/id"
+import { shellQuote } from "@vibest/schema/layout"
 import { MessageStatus } from "@vibest/schema/model"
 import {
   AgentStatus,
@@ -180,11 +181,12 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
 }) {
   override get message() {
     const file = this.file ?? "vibest.db"
+    const aside = `vibest never migrates a database. To start empty, with vibestd stopped, move it aside with its -wal and -shm files: for f in ${["", "-wal", "-shm"].map((suffix) => shellQuote(file + suffix)).join(" ")}; do [ -e "$f" ] && mv "$f" "$f.old"; done (the sessions, results and queued messages it holds are lost; agents still running keep running, but vibest no longer knows them)`
     if (this.older)
-      return `${file} is from an older vibest (its tables are the shape from before this release); this vibest never migrates by itself. Stop vibestd, then migrate it once with the migration script given with this release (it backs the file up first), or move it aside to start empty`
+      return `${file} is from an older vibest (its tables are the shape from before this release). ${aside}`
     const id = `0x${(this.applicationId >>> 0).toString(16)}`
     const extra = this.detail === undefined ? "" : `, ${this.detail}`
-    return `${file} is not this vibest's schema (application_id ${id}, v${this.version}${extra}); stop vibestd and move it aside to start empty`
+    return `${file} is not this vibest's schema (application_id ${id}, v${this.version}${extra}). ${aside}`
   }
 }
 

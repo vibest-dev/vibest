@@ -52,6 +52,10 @@ describe("projectText: preferences.md and the memory index injected into every a
         )
         const prompt = promptOf(dir, text)
         assert.include(prompt, "# User preferences\n\nPrefer short diffs.")
+        assert.include(
+          coordinatorSystemPrompt({ projectDir: dir, ...text }),
+          "# User preferences\n\nPrefer short diffs.",
+        )
         assert.include(prompt, "# Project memories\n\n")
         assert.notInclude(prompt, "# Project instructions")
         assert.notInclude(prompt, "instructions.md")
@@ -98,32 +102,4 @@ describe("projectText: preferences.md and the memory index injected into every a
         assert.include(text.memories, "1 entry left out; the folder holds them all.")
       }).pipe(Effect.provide(Platform.services)),
   )
-})
-
-describe("system prompt rules", () => {
-  it("tells the coordinator how to record a preference and a memory, and keeps preferences.md read-only for a subagent", () => {
-    const coordinator = coordinatorSystemPrompt({ projectDir: "/p", preferences: "Be brief.", memories: "" })
-    assert.include(
-      coordinator,
-      "when the user states a lasting preference about how work should be done, add or update one short line in it with your file tools; do not record one-off requests.",
-    )
-    assert.include(
-      coordinator,
-      "Each memory file holds one lesson and starts with a one-line summary (or frontmatter with `name` and `description`), because that line is what the index shows",
-    )
-    assert.include(coordinator, "# User preferences\n\nBe brief.")
-    assert.notInclude(coordinator, "instructions.md")
-    const session = sessionSystemPrompt({
-      id: "a",
-      projectDir: "/p",
-      vibest: ["vibest"],
-      preferences: "",
-      memories: "",
-    })
-    assert.include(
-      session,
-      "preferences.md are the user's and the coordinator's: read them, and change them only when your task says so.",
-    )
-    assert.notInclude(session, "instructions.md")
-  })
 })

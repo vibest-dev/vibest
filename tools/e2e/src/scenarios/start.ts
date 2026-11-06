@@ -1,12 +1,18 @@
 import fs from "node:fs/promises"
 import net from "node:net"
-import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { claudeConfigOf, claudeEnv, fakeAnthropic, heldModel, piDir } from "../fake-model.ts"
 import { expect, fail, row, SESSIONS, Skip, until, type World } from "../world.ts"
 
-type Entry = { id: string; agent: string; harness: string; routing?: { trace: Array<{ hook: string }> } }
+type Entry = {
+  id: string
+  agent: string
+  harness: string
+  address: { id: string }
+  routing?: { trace: Array<{ hook: string }> }
+}
 
 const mains = async (w: World) => (await w.json<Array<Entry>>(["ls"])).filter((e) => e.agent === "main")
 const start = (w: World) =>
@@ -65,27 +71,9 @@ const answerFolderTrust = async (socket: string, pane: string) => {
   return ready
 }
 
-const e2eModel = {
-  provider: process.env.VIBEST_E2E_PROVIDER || undefined,
-  model: process.env.VIBEST_E2E_MODEL || undefined,
-}
-
-const moveOptions = (harness: "claude" | "pi"): Array<string> => {
-  const { provider, model } = e2eModel
-  if (harness === "claude") {
-    if (provider && provider !== "anthropic")
-      throw new Skip(
-        "VIBEST_E2E_PROVIDER names a provider other than anthropic, which vibest does not give a Claude agent (claude.ts checkProvider)",
-      )
-    return ["--harness", "claude", "--model", model ?? "haiku"]
-  }
-  if (!model) throw new Skip("VIBEST_E2E_MODEL is not set (with VIBEST_E2E_PROVIDER for a provider of the user's Pi)")
-  return ["--harness", "pi", ...(provider ? ["--provider", provider] : []), "--model", model]
-}
-
-const piWrote = async (cwd: string) => {
+const piWrote = async (agentDir: string, cwd: string) => {
   const real = await fs.realpath(cwd)
-  const dir = path.join(os.homedir(), ".pi", "agent", "sessions", `--${real.slice(1).replaceAll("/", "-")}--`)
+  const dir = path.join(agentDir, "sessions", `--${real.slice(1).replaceAll("/", "-")}--`)
   for (const file of await fs.readdir(dir).catch(() => [] as Array<string>)) {
     const text = await Bun.file(path.join(dir, file)).text()
     const head = JSON.parse(text.slice(0, text.indexOf("\n"))) as { cwd?: string }
@@ -99,12 +87,21 @@ const move = (harness: "claude" | "pi"): Check => ({
   title: `a ${harness === "claude" ? "Claude" : "Pi"} main agent in terminal A; \`vibest\` in terminal B answered y: A's harness ends and A keeps its shell, B resumes the same conversation`,
   run: async (w) => {
     for (const bin of ["herdr", harness]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-    const options = moveOptions(harness)
+    const pi = heldModel()
+    pi.release()
+    const claude = fakeAnthropic(() => "ok")
+    const configTheResumeCheckReads = w.config.claude
+    const claudeFlags = await claudeEnv(w, "move", claude.url, configTheResumeCheckReads)
+    const piAgentDir = await piDir(w, "pi-move", pi.url)
+    const options =
+      harness === "claude"
+        ? ["--harness", "claude", ...claudeFlags]
+        : ["--harness", "pi", "--env", `PI_CODING_AGENT_DIR=${piAgentDir}`]
     const session = `${w.herdrSession}-move`
     const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
     const zdot = path.join(w.root, "zdotdir-move")
     await fs.mkdir(zdot, { recursive: true })
-    const env = { [harness === "claude" ? "CLAUDE_CONFIG_DIR" : "PI_CODING_AGENT_DIR"]: undefined, ZDOTDIR: zdot }
+    const env = { ZDOTDIR: zdot }
     await w.stopDaemon()
     await w.ok(["daemon"], { env })
     try {
@@ -126,7 +123,18 @@ const move = (harness: "claude" | "pi"): Check => ({
           return false
         },
         60_000,
-      )
+      ).catch(async (e: Error) => {
+        const panes = (
+          (await herdr(socket, "pane.list", {}).catch(() => ({ panes: [] }))) as { panes: Array<{ pane_id: string }> }
+        ).panes
+        const seen = await Promise.all(
+          panes.map(
+            async (p) =>
+              `${p.pane_id}: ${JSON.stringify(await foreground(socket, p.pane_id))}\n${await screen(socket, p.pane_id)}`,
+          ),
+        )
+        fail(`${e.message}; panes:\n${seen.join("\n")}`)
+      })
       const status = async (pane: string) =>
         ((await herdr(socket, "pane.get", { pane_id: pane })) as { pane: { agent_status: string } }).pane.agent_status
       await until(
@@ -142,12 +150,12 @@ const move = (harness: "claude" | "pi"): Check => ({
       const prompt = "Do not use any tools. Reply with exactly: ok"
       await herdr(socket, "agent.prompt", { target: a, text: prompt })
       let conversation: string | undefined
-      const projects = path.join(w.home, ".claude", "projects")
+      const projects = path.join(claudeConfigOf(claudeFlags), "projects")
       const realRepository = await fs.realpath(w.repository)
       await until(
         "A's conversation written",
         async () => {
-          if (harness === "pi") return await piWrote(w.repository)
+          if (harness === "pi") return await piWrote(piAgentDir, w.repository)
           conversation =
             row<{ c: string | null }>(
               w,
@@ -186,6 +194,10 @@ const move = (harness: "claude" | "pi"): Check => ({
           "Claude resumed in B",
           async () => (await harnessFlag(socket, b, "claude", "--resume")) !== undefined,
           60_000,
+        ).catch(async (e: Error) =>
+          fail(
+            `${e.message}; B runs ${JSON.stringify(await foreground(socket, b))}; its screen:\n${await screen(socket, b)}`,
+          ),
         )
         const resumed = await harnessFlag(socket, b, "claude", "--resume")
         expect(resumed === conversation, `B resumed ${resumed}, not ${conversation}`)
@@ -210,6 +222,8 @@ const move = (harness: "claude" | "pi"): Check => ({
       )
       expect(mains.length === 1 && mains[0]!.address.id.endsWith(b), `main agents: ${JSON.stringify(mains)}`)
     } finally {
+      pi.stop()
+      claude.stop()
       await w.stopDaemon()
       if (
         await fs.stat(path.dirname(socket)).then(
@@ -240,6 +254,14 @@ const checks: ReadonlyArray<Check> = [
       expect(
         main!.routing === undefined || main!.routing.trace.every((t) => typeof t.hook === "string"),
         `routing: ${JSON.stringify(main)}`,
+      )
+      const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
+      await herdr(socket, "pane.close", { pane_id: main!.address.id.split("/").pop() })
+      await until(
+        "the main agent's exit recorded",
+        () =>
+          row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, main!.id)?.e != null,
+        30_000,
       )
     },
   },

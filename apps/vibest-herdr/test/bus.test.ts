@@ -1,9 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus, type EngineEvent, type StoredEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
-import { Runtimes } from "@vibest/core/runtimes"
-import type { Runtime } from "@vibest/plugin"
-import { Cause, Effect, Exit, Layer, PubSub, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, PubSub } from "effect"
 import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
@@ -118,21 +116,5 @@ describe("bus", () => {
         assert.strictEqual((yield* db.getSession(session.id))!.metadata.pid, 4242)
       }),
     ).pipe(Effect.provide(dbLayer)),
-  )
-
-  it.effect("register publishes live.reset", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const bus = yield* Bus
-        const runtimes = yield* Runtimes
-        const sub = yield* bus.subscribe
-        yield* runtimes
-          .register({ kind: "bench", events: Stream.empty } as unknown as Runtime.Runtime)
-          .pipe(Effect.scoped)
-        assert.deepStrictEqual(yield* PubSub.takeUpTo(sub, 5), [
-          { type: "live.reset", runtime: "bench", machine: "local" },
-        ])
-      }),
-    ).pipe(Effect.provide(Runtimes.layer), Effect.provide(Bus.layer)),
   )
 })

@@ -34,6 +34,22 @@ const target = () => {
 }
 export const { binary, compiled, harnesses } = target()
 
+export const buildVersion = (
+  JSON.parse(fs.readFileSync(path.join(checkout, "apps/vibest-herdr/package.json"), "utf8")) as { version: string }
+).version
+
+const releaseStandIn = () =>
+  Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: (req) => {
+      const at = new URL(req.url).pathname
+      if (at.endsWith("/@vibest/cli/beta")) return Response.json({ version: buildVersion })
+      if (at.endsWith("/version")) return new Response(`${buildVersion}\n`)
+      return new Response("not found", { status: 404 })
+    },
+  })
+
 export interface Ran {
   readonly code: number
   readonly stdout: string
@@ -58,6 +74,7 @@ export class World {
   readonly origin: string
   readonly log: Array<{ readonly argv: ReadonlyArray<string>; readonly cwd: string; readonly result: Ran }> = []
   private readonly started: Array<ReturnType<typeof Bun.spawn>> = []
+  private readonly releases = releaseStandIn()
   readonly herdrSession: string
   readonly hcSocket: string
   readonly ownRuntimes = new Set<string>()
@@ -95,7 +112,13 @@ export class World {
   env(extra: Record<string, string | undefined> = {}): Record<string, string> {
     const env: Record<string, string | undefined> = {}
     for (const [k, v] of Object.entries(process.env))
-      if (!k.startsWith("VIBEST_") && !k.startsWith("HERDR_") && !k.startsWith("HC_") && k !== "PI_PACKAGE_DIR")
+      if (
+        !k.startsWith("VIBEST_") &&
+        !k.startsWith("HERDR_") &&
+        !k.startsWith("HC_") &&
+        k !== "PI_PACKAGE_DIR" &&
+        k !== "CLAUDE_CODE_CHILD_SESSION"
+      )
         env[k] = v
     Object.assign(
       env,
@@ -112,6 +135,8 @@ export class World {
         GIT_COMMITTER_NAME: "e2e",
         GIT_COMMITTER_EMAIL: "e2e@example.invalid",
         GIT_CONFIG_GLOBAL: "/dev/null",
+        npm_config_registry: `http://127.0.0.1:${this.releases.port}`,
+        VIBEST_DOWNLOAD_URL: `http://127.0.0.1:${this.releases.port}`,
       },
       extra,
     )
@@ -159,7 +184,7 @@ export class World {
   foreignTerminals(): ReadonlyArray<string> {
     const file = path.join(this.vibestHome, "vibest.db")
     if (!fs.existsSync(file)) return []
-    const db = new Database(file, { readonly: true })
+    const db = readDb(file)
     try {
       const rows = db.query(`SELECT id, runtime FROM ${SESSIONS} s`).all() as Array<{
         id: string
@@ -242,6 +267,7 @@ export class World {
     }
     for (const p of this.started) if (p.exitCode === null) p.kill()
     await Promise.all(this.started.map((p) => p.exited))
+    this.releases.stop(true)
   }
 }
 
@@ -272,8 +298,14 @@ export const SESSIONS = `(SELECT s.id, s.project_id, s.role AS agent_type, s.dir
 export const TURNS = `(SELECT t.id, t.session_id, coalesce(json_extract(te.data, '$.status'), 'working') AS status
   FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
 
+export const readDb = (file: string) => {
+  const db = new Database(file, { readonly: true })
+  db.run("PRAGMA busy_timeout = 5000")
+  return db
+}
+
 export const row = <A>(w: World, sql: string, ...args: Array<string | number>) => {
-  const db = new Database(path.join(w.vibestHome, "vibest.db"), { readonly: true })
+  const db = readDb(path.join(w.vibestHome, "vibest.db"))
   try {
     return (db.query(sql).get(...args) ?? undefined) as A | undefined
   } finally {
@@ -296,63 +328,6 @@ export const redact = (text: string) =>
     const value = pair.slice(pair.indexOf("=") + 1)
     return value === "" ? t : t.split(value).join("<redacted>")
   }, text)
-
-export const agentModel = (): ReadonlyArray<string> => {
-  const provider = process.env.VIBEST_E2E_PROVIDER
-  return [
-    ...(provider ? ["--provider", provider] : []),
-    "--model",
-    process.env.VIBEST_E2E_MODEL || "haiku",
-    ...agentEnv.flatMap((pair) => ["--env", pair]),
-  ]
-}
-
-export const agentName = (id: string) => `s-${id.replaceAll("-", "").slice(0, 30)}`
-
-export const herdr = (socket: string, method: string, params: object) =>
-  new Promise<Record<string, unknown>>((resolve, reject) => {
-    const id = crypto.randomUUID()
-    let buffer = ""
-    Bun.connect({
-      unix: socket,
-      socket: {
-        open: (s) => void s.write(`${JSON.stringify({ id, method, params })}\n`),
-        data: (s, chunk) => {
-          buffer += Buffer.from(chunk).toString("utf8")
-          for (const line of buffer.split("\n").slice(0, -1)) {
-            const m = JSON.parse(line) as { id?: string; result?: Record<string, unknown>; error?: unknown }
-            if (m.id !== id) continue
-            s.end()
-            if (m.error) reject(new Error(`herdr ${method}: ${JSON.stringify(m.error)}`))
-            else resolve(m.result ?? {})
-          }
-          buffer = buffer.slice(buffer.lastIndexOf("\n") + 1)
-        },
-        error: (_s, e) => reject(e),
-      },
-    }).catch(reject)
-  })
-
-export const transcript = async (w: World, cwd: string) => {
-  const dir = path.join(w.home, ".claude", "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
-  const files = (await fsPromises.readdir(dir).catch(() => [] as Array<string>)).filter((f) => f.endsWith(".jsonl"))
-  const entries: Array<{ type?: string; raw: string; text: string }> = []
-  for (const f of files)
-    for (const raw of (await fsPromises.readFile(path.join(dir, f), "utf8")).split("\n").filter(Boolean)) {
-      const e = JSON.parse(raw) as { type?: string; message?: { content?: unknown } }
-      const content = e.message?.content
-      const text =
-        typeof content === "string"
-          ? content
-          : Array.isArray(content)
-            ? content.map((c: { text?: string }) => c.text ?? "").join("")
-            : ""
-      entries.push({ type: e.type, raw, text })
-    }
-  return entries
-}
-
-export const onPath = (bin: string) => Bun.which(bin) !== null
 
 export const knownSessions = async (
   w: World,
@@ -382,3 +357,50 @@ export const knownSessions = async (
     db.close()
   }
 }
+
+export const agentName = (id: string) => `s-${id.replaceAll("-", "").slice(0, 30)}`
+
+export const herdr = (socket: string, method: string, params: object) =>
+  new Promise<Record<string, unknown>>((resolve, reject) => {
+    const id = crypto.randomUUID()
+    let buffer = ""
+    Bun.connect({
+      unix: socket,
+      socket: {
+        open: (s) => void s.write(`${JSON.stringify({ id, method, params })}\n`),
+        data: (s, chunk) => {
+          buffer += Buffer.from(chunk).toString("utf8")
+          for (const line of buffer.split("\n").slice(0, -1)) {
+            const m = JSON.parse(line) as { id?: string; result?: Record<string, unknown>; error?: unknown }
+            if (m.id !== id) continue
+            s.end()
+            if (m.error) reject(new Error(`herdr ${method}: ${JSON.stringify(m.error)}`))
+            else resolve(m.result ?? {})
+          }
+          buffer = buffer.slice(buffer.lastIndexOf("\n") + 1)
+        },
+        error: (_s, e) => reject(e),
+      },
+    }).catch(reject)
+  })
+
+export const transcript = async (w: World, cwd: string, claudeConfig = path.join(w.home, ".claude")) => {
+  const dir = path.join(claudeConfig, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
+  const files = (await fsPromises.readdir(dir).catch(() => [] as Array<string>)).filter((f) => f.endsWith(".jsonl"))
+  const entries: Array<{ type?: string; raw: string; text: string }> = []
+  for (const f of files)
+    for (const raw of (await fsPromises.readFile(path.join(dir, f), "utf8")).split("\n").filter(Boolean)) {
+      const e = JSON.parse(raw) as { type?: string; message?: { content?: unknown } }
+      const content = e.message?.content
+      const text =
+        typeof content === "string"
+          ? content
+          : Array.isArray(content)
+            ? content.map((c: { text?: string }) => c.text ?? "").join("")
+            : ""
+      entries.push({ type: e.type, raw, text })
+    }
+  return entries
+}
+
+export const onPath = (bin: string) => Bun.which(bin) !== null

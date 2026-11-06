@@ -5,8 +5,8 @@ import path from "node:path"
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { runtimeContract } from "@vibest/plugin/testing"
 import { Effect, Ref, type Scope, Stream } from "effect"
-import { Hc, SocketConnector } from "effect-hc-sdk"
-import * as HcBun from "effect-hc-sdk/bun"
+import { Hc, SocketConnector } from "effect-herdr-core-sdk"
+import * as HcBun from "effect-herdr-core-sdk/bun"
 
 import {
   KIND,
@@ -61,7 +61,7 @@ const withRuntime = <A, E>(
     return yield* body(runtime, hc)
   }).pipe(Effect.scoped, Effect.provide(HcBun.layer))
 
-describe.skipIf(!hcOnPath)("runtime-hc against an isolated herdr-core", () => {
+describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", () => {
   beforeAll(() => {
     for (const dir of ["r", "s", "c", "z"]) fs.mkdirSync(path.join(root, dir), { recursive: true })
     const started = hcCli("server", "start")

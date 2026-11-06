@@ -91,9 +91,10 @@ subagents. Everything else in this list is planned; each item says what runs tod
   guard reads `tools`. Today the coordinator and its subagents are two cases in the server and the guard.
 - **An addressable inbox per session** (planned): every row has a recipient (a session, or the **user**) and a
   sender (a session, or the user). One delivery path, locked per recipient, for main agents and subagents alike:
-  natively when the harness integration polls, typed into the terminal otherwise. A row for the user is kept and
-  read with `vibest inbox`. Today only the main agent polls or subscribes; subagents are typed into, and a row with
-  no session to go to is dropped.
+  natively when the harness integration polls or subscribes, typed into the terminal otherwise. A row for the user
+  is kept and read with `vibest inbox`. Today a main agent is never typed into: only a harness that polls (Claude)
+  or subscribes (Pi) can be one, and a subagent-only harness (Cursor) has no inbox mode. Subagents are typed into,
+  and a row with no session to go to is dropped.
 - **Reply routing is data** (planned), in one function, `replyTo(turn)`, evaluated when a turn ends:
   1. The `task` and `send` rows the turn consumed whose sender is a session: the result goes to those senders,
      each once.

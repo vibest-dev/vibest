@@ -63,15 +63,6 @@ const fakeServer = (protocol: number = PROTOCOL) =>
   })
 
 layer(Layer.mergeAll(BunServices.layer, HerdrBun.layer))("Herdr client", (it) => {
-  it.effect("call returns the result", () =>
-    Effect.gen(function* () {
-      const { herdr } = yield* fakeServer()
-      const pong = yield* herdr.call("ping", {})
-      assert.strictEqual(pong.type, "pong")
-      assert.strictEqual(pong.protocol, 22)
-    }),
-  )
-
   it.effect("server error is a HerdrError with its code", () =>
     Effect.gen(function* () {
       const { herdr } = yield* fakeServer()

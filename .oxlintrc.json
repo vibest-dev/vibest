@@ -17,6 +17,6 @@
     "node_modules",
     ".cache",
     "packages/effect-herdr-sdk/src/generated",
-    "packages/effect-hc-sdk/src/generated"
+    "packages/effect-herdr-core-sdk/src/generated"
   ]
 }

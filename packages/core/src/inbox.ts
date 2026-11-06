@@ -1,6 +1,6 @@
 import type { Polled } from "@vibest/protocol/protocol"
 import { shortId } from "@vibest/schema/id"
-import { Cause, Context, Duration, Effect, Exit, Layer, Option, Queue, Stream } from "effect"
+import { Cause, Context, Duration, Effect, Layer, Option, Queue, Stream } from "effect"
 
 import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
 import { Drain } from "./drain.ts"
@@ -126,24 +126,6 @@ export class Inbox extends Context.Service<
             if (Option.isNone(h)) return
             const presence = yield* coordinatorIdle(h.value, coord.address)
             if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
-            if (presence !== "idle") return
-            const mode = inboxOf(coord.harnessId)
-            if (mode === "subscribe" || mode === "poll") return
-            const batch = nextBatch(yield* db.coordinatorPending(projectId))
-            if (batch.length === 0) return
-            const claimed = yield* db.claim(
-              batch.map((r) => r.id),
-              guard,
-            )
-            if (claimed.length === 0) return
-            const body = text(batch.filter((r) => claimed.includes(r.id)))
-            yield* h.value
-              .send(coord.address, { text: body })
-              .pipe(
-                Effect.onExit((exit) =>
-                  Exit.isSuccess(exit) ? markDelivered(claimed) : db.setInboxStatus(claimed, "failed", "sending"),
-                ),
-              )
           }).pipe(
             Effect.catchCause((cause) => Effect.logWarning(`deliver to project ${projectId}: ${Cause.pretty(cause)}`)),
           ),

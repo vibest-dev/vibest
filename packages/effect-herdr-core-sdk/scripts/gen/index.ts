@@ -3,7 +3,9 @@ import { Console, Effect, FileSystem, Path, Schema, Stdio } from "effect"
 
 import { emitApi, type OpenRpc } from "./emit.ts"
 
-const VersionPin = Schema.fromJsonString(Schema.Struct({ version: Schema.String, generation: Schema.Number }))
+const VersionPin = Schema.fromJsonString(
+  Schema.Struct({ version: Schema.String, minimum: Schema.String, generation: Schema.Number }),
+)
 const decodeDocument = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.Any)))
 
 const GENERATION_IN_DESCRIPTION = /Protocol generation (\d+)\./
@@ -27,7 +29,7 @@ const main = Effect.gen(function* () {
       ),
     )
   const target = path.join(root, "src", "generated", "api.ts")
-  const body = emitApi(doc, pin.generation)
+  const body = emitApi(doc, pin.generation, pin.minimum)
   if (check) {
     const disk = yield* fs.readFileString(target).pipe(Effect.orElseSucceed(() => ""))
     if (disk !== body) return yield* Effect.fail(new Error("src/generated/api.ts is stale; run bun run generate"))

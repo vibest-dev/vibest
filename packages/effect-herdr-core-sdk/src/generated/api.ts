@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 
 export const VERSION = "0.1.18" as const
+export const MIN_VERSION = "0.1.13" as const
 export const GENERATION = 1 as const
 
 export type AttachResult = { readonly "automatic_input": boolean; readonly "channel": number; readonly "resize_notifications": boolean; readonly "terminal": Terminal; }

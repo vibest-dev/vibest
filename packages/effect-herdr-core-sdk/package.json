@@ -1,5 +1,5 @@
 {
-  "name": "effect-hc-sdk",
+  "name": "effect-herdr-core-sdk",
   "version": "0.0.1-beta.17",
   "private": true,
   "description": "Effect-native client for the herdr-core (hc) JSON-RPC API. Schemas generated from the OpenRPC document hc schema prints.",
@@ -12,7 +12,7 @@
   "scripts": {
     "generate": "bun scripts/gen/index.ts",
     "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.core.json && bun scripts/gen/index.ts --check",
-    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/effect-hc-sdk"
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/effect-herdr-core-sdk"
   },
   "dependencies": {
     "effect": "catalog:"

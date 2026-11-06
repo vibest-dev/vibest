@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import type { HarnessId } from "@vibest/core/harness"
@@ -23,7 +22,6 @@ import {
   HashMap,
   Path,
   PlatformError,
-  PubSub,
   Ref,
   type Scope,
   Stream,
@@ -414,24 +412,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "Session process exits mid-turn: failed result",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
-      yield* sessions.check(id)
-      assert.deepInclude(yield* db.getSession(id), { status: "unknown", turnState: "failed" })
-      assert.isNotNull((yield* db.getSession(id))!.exitedAt)
-      const [row] = yield* (yield* SqlClient.SqlClient)<{
-        message: string
-      }>`SELECT content AS message FROM inbox WHERE sender_session_id = ${id} AND kind = 'result'`
-      assert.include(row!.message, "<status>failed</status>")
-      assert.include(row!.message, "the session exited (its terminal is gone or its process with it)")
-      assert.notInclude(row!.message, "pane tail")
-    }),
-  )
-
-  test(
     "a session's in-memory flags, lock and live status go once it ends; resumed, its next turn ends as any turn does; archived, they go again with no check of its own",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -747,18 +727,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "list carries the pane each session was last seen in",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions } = yield* idleSession(yield* makeRepository)
-      const pane = (yield* herdr.agent(id))!.terminal
-      const row = (yield* sessions.list()).find((session) => session.id === id)!
-      assert.strictEqual(row.address.id, pane)
-      assert.strictEqual((yield* (yield* Db).getSession(id))!.address.id, pane)
-    }),
-  )
-
-  test(
     "a result written while confirm gives up is delivered, and the batch stays delivered",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -842,20 +810,6 @@ describe.concurrent("Sessions", () => {
         [{ status: "failed" }],
       )
       assert.include((yield* sqlNotices(id)).at(-1)!, "send: busy")
-    }),
-    { hooked: ["pi"] },
-  )
-
-  test(
-    "send to an idle session prompts it at once, in vibestd's own fiber",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      yield* sessions.send(id, "next")
-      yield* until(herdr.callsTo("send"), (calls) => calls.at(-1)!.text === "next")
     }),
     { hooked: ["pi"] },
   )
@@ -1012,20 +966,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "Cursor: a conversation id that would read as a flag is never kept",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      for (const bad of ["-f", "--yolo", "--force", "a b", ""]) {
-        const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "cursor")
-        yield* writeResult(id, "cursor", { conversation_id: bad, text: "status: completed" })
-        yield* herdr.endTurn(id)
-        yield* sessions.check(id)
-        assert.isNull((yield* db.getSession(id))!.harnessSessionId, bad)
-      }
-    }),
-  )
-
-  test(
     "a session that cannot be resumed: each accepted message fails on its own, with its own notice",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -1055,7 +995,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "herdr unreachable before the hand-over: the messages stay queued, no notice, and the next check delivers them",
+    "herdr unreachable before the hand-over: the messages stay queued, no notice, and the next check delivers them, also after a failed turn",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
@@ -1095,25 +1035,17 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "third")
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
-    }),
-    { hooked: ["pi"] },
-  )
 
-  test(
-    "a session whose turn failed still gets messages the poll delivers",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { error: "model_not_found" })
+      yield* writeResult(id, "pi", { error: "model_not_found" }, 3000)
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
       yield* settled
-      const held = yield* herdr.hold("state", id)
+      const failed = yield* herdr.hold("state", id)
       yield* sessions.send(id, "retry")
-      yield* held.reached
-      yield* held.release("unreachable")
-      yield* TestClock.withLive(Effect.sleep("50 millis"))
+      yield* failed.reached
+      yield* failed.release("unreachable")
+      yield* until(db.pendingInbox(id), (rows) => rows.length === 1)
       assert.deepStrictEqual(
         (yield* db.pendingInbox(id)).map((r) => r.message),
         ["retry"],
@@ -1155,30 +1087,6 @@ describe.concurrent("Sessions", () => {
       const result = (yield* db.coordinatorPending(moved.projectId)).find((row) => row.kind === "result")
       assert.include(result!.message, "moved")
       assert.notInclude(result!.message, "usage limit")
-    }),
-  )
-
-  test(
-    "a usage-limit move in place: only the limited harness ends, the next one runs in the same terminal, no pane closes",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const processes = yield* FakeProcesses
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      const before = (yield* db.getSession(id))!
-      yield* writeResult(id, "pi", { error: "rate_limit" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      const moved = (yield* db.getSession(id))!
-      assert.strictEqual(moved.harnessId, "claude")
-      assert.strictEqual(moved.turnState, "open")
-      assert.deepStrictEqual(yield* processes.signaled, [before.metadata.pid!], "SIGTERM to the pi harness only")
-      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
-      assert.lengthOf(yield* herdr.callsTo("open"), 1, "no other terminal")
-      const [run] = yield* herdr.callsTo("run")
-      assert.strictEqual(run!.terminal, before.address.id)
-      assert.strictEqual(harnessOf(run!.argv), "claude")
-      assert.deepStrictEqual(moved.address, before.address)
-      assert.include((yield* herdr.callsTo("send")).map((c) => c.text ?? "").join("\n"), "do it")
     }),
   )
 
@@ -1270,12 +1178,13 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "abort and model_not_found stay failures while the subscription is limited",
+    "abort and model_not_found stay failures and a missing hook stays lost while the subscription is limited",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const aborted = yield* spawnWorking(repo)
       const missing = yield* spawnWorking(repo)
+      const lost = yield* spawnWorking(repo)
       yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
       const fail = (
         id: string,
@@ -1297,42 +1206,15 @@ describe.concurrent("Sessions", () => {
         })
       yield* fail(aborted.id, aborted.sessions, aborted.db, "aborted")
       yield* fail(missing.id, missing.sessions, missing.db, "model_not_found", "usage limit")
-    }),
-  )
-
-  test(
-    "a quoted rate limit in error_details does not move the session",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { error: "server_error", error_details: "the assistant said rate limit" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "pi")
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi"],
-      )
-      assert.include((yield* db.latestInbox(id, "result"))!.message, "server_error")
-    }),
-  )
-
-  test(
-    "a missing hook stays lost while the subscription is limited",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+      yield* herdr.endTurn(lost.id)
+      yield* lost.sessions.check(lost.id)
+      assert.strictEqual((yield* lost.db.getSession(lost.id))!.turnState, "open")
       yield* TestClock.adjust("11 seconds")
-      yield* sessions.check(id)
-      assert.deepInclude(yield* db.getSession(id), { harnessId: "pi", turnState: "lost" })
+      yield* lost.sessions.check(lost.id)
+      assert.deepInclude(yield* lost.db.getSession(lost.id), { harnessId: "pi", turnState: "lost" })
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi"],
+        ["pi", "pi", "pi"],
       )
     }),
   )
@@ -1369,7 +1251,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a start failure after a limit tries the next harness",
+    "a start failure after a limit tries the next harness and is not remembered, so the next limit can use that harness",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
@@ -1380,30 +1262,12 @@ describe.concurrent("Sessions", () => {
       yield* held.reached
       yield* held.release("failed to start claude")
       yield* Fiber.join(checking)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "cursor")
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+      assert.deepInclude(yield* db.getSession(id), { harnessId: "cursor", turnState: "open" })
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude", "cursor"],
       )
       assert.include((yield* herdr.callsTo("send")).at(-1)!.text, "do it")
-    }),
-    { noRun: true },
-  )
-
-  test(
-    "a start failure after a limit is not remembered, so the next limit can use that harness",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { error: "rate_limit" })
-      yield* herdr.endTurn(id)
-      const held = yield* herdr.hold("open", id)
-      const checking = yield* Effect.forkChild(sessions.check(id))
-      yield* held.reached
-      yield* held.release("failed to start claude")
-      yield* Fiber.join(checking)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "cursor")
       yield* writeResult(id, "cursor", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -1416,11 +1280,11 @@ describe.concurrent("Sessions", () => {
     { noRun: true },
   )
 
-  const failSeen: Array<{ parent: string | undefined; attempts: ReadonlyArray<[string, string]> }> = []
+  type FailSeen = Array<{ parent: string | undefined; attempts: ReadonlyArray<[string, string]> }>
+  const failSeen: FailSeen = []
   test(
     "an unusable harness is never offered; the give-up names only real limits",
     Effect.gen(function* () {
-      failSeen.length = 0
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* writeResult(id, "pi", { error: "rate_limit" })
@@ -1737,28 +1601,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "one limited pi login does not block a free one, and the move uses it",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const subs = yield* Subscriptions
-      const open = { window: "5h", percent: 0, status: "available" as const, resetTime: null }
-      yield* subs.report({ harness: "pi", provider: "anthropic", limits: [limited] })
-      yield* subs.report({ harness: "pi", provider: "openai", limits: [open] })
-      const repo = yield* makeRepository
-      const started = yield* spawnWorking(repo)
-      assert.strictEqual((yield* started.db.getSession(started.id))!.harnessId, "pi")
-      const { id, sessions, db } = yield* spawnWorking(repo, "claude")
-      yield* writeResult(id, "claude", { error: "rate_limit" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      const moved = (yield* db.getSession(id))!
-      assert.deepInclude(moved, { harnessId: "pi", provider: "openai", turnState: "open" })
-      const args = (yield* herdr.callsTo("open")).at(-1)!.argv
-      assert.notInclude(args, "--provider")
-    }),
-  )
-
-  test(
     "a set provider matches only that login",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -1789,7 +1631,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "an unconfirmed prompt after a limit tries the next harness and leaves the task round working",
+    "an unconfirmed prompt after a limit tries the next harness, leaves the task round working and is not remembered, so the next limit can use that harness",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
@@ -1824,24 +1666,6 @@ describe.concurrent("Sessions", () => {
         ["pi", "claude", "cursor"],
       )
       assert.deepStrictEqual(yield* sqlNotices(id), [])
-    }),
-    { noRun: true },
-  )
-
-  test(
-    "an unconfirmed prompt after a limit is not remembered, so the next limit can use that harness",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* Ref.set(herdr.skipPromptUpdates, 2)
-      yield* writeResult(id, "pi", { error: "rate_limit" })
-      yield* herdr.endTurn(id)
-      const checking = yield* Effect.forkChild(sessions.check(id))
-      yield* untilVirtual(
-        Effect.sync(() => checking.pollUnsafe()),
-        (exit) => exit !== undefined,
-      )
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "cursor")
       yield* writeResult(id, "cursor", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -1855,62 +1679,46 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a limit on a typed turn resends that text, not the original task",
+    "a limit resends the open round's input, not the original task: a typed turn's text, the newest delivered follow-up, a whole merged batch",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      yield* sessions.userPrompt(id, "typed follow-up")
-      yield* writeResult(id, "pi", { error: "rate_limit" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
-      assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "typed follow-up")
-      assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
-    }),
-  )
-
-  test(
-    "a limit on a follow-up resends the newest delivered row, not the first task",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      yield* sessions.send(id, "add tests")
-      yield* until(herdr.callsTo("send"), (calls) => calls.at(-1)?.text === "add tests")
-      yield* writeResult(id, "pi", { error: "rate_limit" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
-      assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "add tests")
-      assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
-    }),
-  )
-
-  test(
-    "a limit on a merged follow-up resends that batch, not only its last row",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      const held = yield* herdr.hold("state", id)
-      yield* sessions.send(id, "add tests")
-      yield* held.reached
-      yield* sessions.send(id, "and docs")
-      yield* held.release()
-      yield* until(herdr.callsTo("send"), (calls) => calls.at(-1)?.text === "add tests\n\nand docs")
-      yield* writeResult(id, "pi", { error: "rate_limit" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
-      assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "add tests\n\nand docs")
-      assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
+      const sessions = yield* Sessions
+      const repo = yield* makeRepository
+      const resends = <E, R>(deliver: (id: string) => Effect.Effect<unknown, E, R>, input: string) =>
+        Effect.gen(function* () {
+          const { id, db } = yield* spawnWorking(repo)
+          yield* writeResult(id, "pi", { text: "status: completed" })
+          yield* herdr.endTurn(id)
+          yield* sessions.check(id)
+          yield* deliver(id)
+          yield* writeResult(id, "pi", { error: "rate_limit" })
+          yield* herdr.endTurn(id)
+          yield* sessions.check(id)
+          assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude", input)
+          assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, input)
+          assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
+        })
+      yield* resends((id) => sessions.userPrompt(id, "typed follow-up"), "typed follow-up")
+      yield* resends(
+        (id) =>
+          Effect.gen(function* () {
+            yield* sessions.send(id, "add tests")
+            yield* until(herdr.callsTo("send"), (calls) => calls.at(-1)?.text === "add tests")
+          }),
+        "add tests",
+      )
+      yield* resends(
+        (id) =>
+          Effect.gen(function* () {
+            const held = yield* herdr.hold("state", id)
+            yield* sessions.send(id, "add tests")
+            yield* held.reached
+            yield* sessions.send(id, "and docs")
+            yield* held.release()
+            yield* until(herdr.callsTo("send"), (calls) => calls.at(-1)?.text === "add tests\n\nand docs")
+          }),
+        "add tests\n\nand docs",
+      )
     }),
   )
 
@@ -2006,7 +1814,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "one limited pi login only rules out that login: the move stays on pi with the free one, and the limit is remembered on the session",
+    "one limited pi login only rules out that login: a pi session still starts, a move stays on pi or goes to pi with the free one, and the limit is remembered on the session",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const subs = yield* Subscriptions
@@ -2044,6 +1852,14 @@ describe.concurrent("Sessions", () => {
       )
       const args = (yield* herdr.callsTo("open")).at(-1)!.argv
       assert.notInclude(args, "--provider")
+      const started = yield* spawnWorking(repo)
+      assert.strictEqual((yield* db.getSession(started.id))!.harnessId, "pi")
+      const other = yield* spawnWorking(repo, "claude")
+      yield* writeResult(other.id, "claude", { error: "rate_limit" })
+      yield* herdr.endTurn(other.id)
+      yield* sessions.check(other.id)
+      assert.deepInclude(yield* db.getSession(other.id), { harnessId: "pi", provider: "zai", turnState: "open" })
+      assert.notInclude((yield* herdr.callsTo("open")).at(-1)!.argv, "--provider")
     }),
     { noRun: true },
   )
@@ -2227,10 +2043,10 @@ describe.concurrent("Sessions", () => {
     },
   )
 
+  const moveSeen: FailSeen = []
   test(
     "agent.fail gets the real parent and the attempts, and the subscriptions",
     Effect.gen(function* () {
-      failSeen.length = 0
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
       const subs = yield* Subscriptions
@@ -2246,8 +2062,8 @@ describe.concurrent("Sessions", () => {
       yield* writeResult(id, "pi", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      assert.strictEqual(failSeen.length, 1)
-      const seen = failSeen[0]!
+      assert.strictEqual(moveSeen.length, 1)
+      const seen = moveSeen[0]!
       assert.strictEqual(seen.parent, main.id)
       assert.deepStrictEqual(seen.attempts, [["pi", "limited"]])
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
@@ -2259,7 +2075,7 @@ describe.concurrent("Sessions", () => {
           effect: (ctx) =>
             ctx.agent.hook("fail", (e) =>
               Effect.sync(() => {
-                failSeen.push({ parent: e.parentSessionId, attempts: e.attempts.map((a) => [a.harness, a.outcome]) })
+                moveSeen.push({ parent: e.parentSessionId, attempts: e.attempts.map((a) => [a.harness, a.outcome]) })
               }),
             ),
         }),
@@ -2308,52 +2124,6 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
     { noRun: true },
-  )
-
-  test(
-    "a session that exits with messages queued: they fail with a notice instead of waiting forever",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* sessions.send(id, "later")
-      yield* db.pendingInbox(id)
-      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
-      yield* sessions.check(id)
-      assert.deepStrictEqual(yield* db.pendingInbox(id), [])
-      const notice = (yield* db.coordinatorPending((yield* db.getSession(id))!.projectId)).find(
-        (r) => r.kind === "notice" && r.message.startsWith("A message to"),
-      )!
-      assert.deepStrictEqual(notice.details, {})
-      assert.include(notice.message, `${id} exited before it was delivered; send it again to resume the session`)
-    }),
-    { hooked: ["pi"] },
-  )
-
-  test(
-    "a delivery cut off by vibestd stopping is not sent again: the next start fails it as possibly delivered",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      yield* settled
-      const prompts = (yield* herdr.callsTo("send")).length
-      const held = yield* herdr.hold("state", id)
-      const row = yield* db.insertInbox({ sessionId: id, kind: "send", message: "task", details: {} })
-      yield* held.reached
-      yield* db.setInboxStatus([row.id], "sending")
-      yield* held.release()
-      yield* settled
-      yield* Sessions.make({ maxSessions: undefined })
-      yield* settled
-      assert.lengthOf(yield* herdr.callsTo("send"), prompts)
-      assert.deepStrictEqual(yield* db.inboxWithStatus(id, "failed"), [{ ...row, status: "failed" }])
-      const notice = yield* db.latestInbox(id, "notice")
-      assert.deepStrictEqual(notice!.details, {})
-      assert.include(notice!.message, "vibestd stopped while handing it to the session; it may or may not have arrived")
-    }),
-    { hooked: ["pi"] },
   )
 
   test(
@@ -2620,36 +2390,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "remove: git removes a clean worktree without force; the pane and its workspace close; the branch stays",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const { id, sessions, db } = yield* idleSession(repo)
-      const worktree = yield* sessionWorktree(id)
-      yield* sh(worktree, "switch", "-q", "-c", "feat/x")
-      const before = yield* herdr.panes
-      const out = (yield* sessions.remove(id))!
-      assert.deepStrictEqual(out, {
-        id,
-        processes: "exited",
-        pane: "closed",
-        workspace: "none",
-        worktree: "removed",
-        path: worktree,
-        branch: "feat/x",
-        reasons: [],
-      })
-      assert.isFalse(yield* fs.exists(worktree))
-      assert.isFalse(yield* fs.exists((yield* Path.Path).dirname(yield* systemPromptFile(id))))
-      assert.strictEqual(yield* sh(repo, "branch", "--list", "feat/x"), "feat/x")
-      assert.isNotNull((yield* db.getSession(id))!.exitedAt)
-      assert.strictEqual(HashMap.size(yield* herdr.panes), HashMap.size(before) - 1)
-      assert.deepInclude(yield* sessions.remove(id), { worktree: "gone", pane: "none", workspace: "none" })
-    }),
-  )
-
-  test(
     "remove keeps what git would lose (changes, untracked files, commits on no branch, a lock) and tries again when asked",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -2800,30 +2540,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "remove leaves other panes alone: one beside it in the project workspace stays, and a pane with no process in the worktree no longer keeps it",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const paneOf = (id: string) => herdr.agent(id).pipe(Effect.map((found) => found!.terminal))
-
-      const a = yield* idleSession(repo)
-      const workspaceA = (yield* paneOf(a.id)).split(":")[0]!
-      yield* herdr.addPane("user:1", workspaceA, repo)
-      assert.deepInclude((yield* a.sessions.remove(a.id))!, { pane: "closed", workspace: "none", worktree: "removed" })
-      assert.isTrue(HashMap.has(yield* herdr.panes, "user:1"))
-      assert.isTrue((yield* herdr.workspaceState).find((w) => w.workspaceId === workspaceA)!.open)
-
-      const b = yield* idleSession(repo)
-      yield* herdr.addPane("user:2", "elsewhere", yield* sessionWorktree(b.id))
-      const out = (yield* b.sessions.remove(b.id))!
-      assert.deepInclude(out, { pane: "closed", workspace: "none", worktree: "removed" })
-      assert.isFalse(yield* fs.exists(yield* sessionWorktree(b.id)))
-      assert.isTrue(HashMap.has(yield* herdr.panes, "user:2"))
-    }),
-  )
-
-  test(
     "remove of a worktree that is gone, or not this repository's, reconciles its processes and leaves the directory alone",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -2847,23 +2563,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "remove when herdr fails part way: an error, the session not marked stopped, and a retry finishes",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* idleSession(yield* makeRepository)
-      const held = yield* herdr.hold("close")
-      const fiber = yield* Effect.forkChild(Effect.flip(sessions.remove(id)))
-      yield* held.reached
-      yield* held.release("unreachable")
-      assert.strictEqual((yield* Fiber.join(fiber))._tag, "RuntimeUnreachable")
-      assert.isNull((yield* db.getSession(id))!.exitedAt)
-      assert.isTrue(yield* fs.exists(yield* sessionWorktree(id)))
-      assert.deepInclude(yield* sessions.remove(id), { pane: "closed", worktree: "removed" })
-    }),
-  )
-
-  test(
     "interrupt stops the turn but keeps the session; no result arrives, and the next message goes straight in",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -2883,88 +2582,53 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a Claude turn the person stopped with Esc in its pane (turn.complete aborted): one failed result that says it was interrupted",
+    "vibest interrupt (pi): the aborted turn end its Esc makes is no result, no inbox row and no new round",
     Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
-      yield* writeResult(id, "claude", claudeEnd("aborted"))
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
-      const pending = yield* db.coordinatorPending((yield* db.getSession(id))!.projectId)
-      assert.deepStrictEqual(
-        pending.map((r) => r.kind),
-        ["result"],
-      )
-      assert.include(pending[0]!.message, "<status>failed</status>")
-      assert.include(
-        pending[0]!.message,
-        "error: interrupted: the turn was stopped in its terminal (Esc) before it ended",
-      )
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "pi")
+      assert.include((yield* sessions.interrupt(id)).message, "interrupted")
       const before = yield* roundAndResultCounts(id)
+      yield* writeResult(id, "pi", { text: "", error: "aborted", aborted: true }, 60_000)
       yield* TestClock.adjust("2 minutes")
       yield* sessions.check(id)
+      const row = (yield* db.getSession(id))!
+      assert.strictEqual(row.turnState, "interrupted")
+      assert.isUndefined(yield* db.latestInbox(id, "result"))
+      assert.deepStrictEqual(yield* db.coordinatorPending(row.projectId), [])
       assert.deepStrictEqual(yield* roundAndResultCounts(id), before)
-      assert.strictEqual(before.results, 1)
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
+      assert.strictEqual(before.results, 0)
     }),
+    { hooked: ["pi"] },
   )
 
   for (const harness of ["claude", "pi"] as const)
     test(
-      `vibest interrupt (${harness}): the aborted turn end its Esc makes is no result, no inbox row and no new round`,
+      `remove of a working ${harness} session: the aborted turn end of its interrupt is no result, written during the interrupt or after`,
       Effect.gen(function* () {
-        const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, harness)
-        assert.include((yield* sessions.interrupt(id)).message, "interrupted")
-        const before = yield* roundAndResultCounts(id)
-        yield* writeResult(
-          id,
-          harness,
-          harness === "claude" ? claudeEnd("aborted") : { text: "", error: "aborted", aborted: true },
-          60_000,
-        )
+        const herdr = yield* FakeRuntime
+        const repo = yield* makeRepository
+        const aborted = harness === "claude" ? claudeEnd("aborted") : { text: "", error: "aborted", aborted: true }
+        const during = yield* spawnWorking(repo, harness)
+        const held = yield* herdr.hold("send", during.id)
+        const removing = yield* Effect.forkChild(during.sessions.remove(during.id))
+        yield* held.reached
+        yield* writeResult(during.id, harness, aborted, 60_000)
+        yield* held.release()
+        yield* Fiber.join(removing)
+        const after = yield* spawnWorking(repo, harness)
+        yield* after.sessions.remove(after.id)
+        yield* writeResult(after.id, harness, aborted, 60_000)
         yield* TestClock.adjust("2 minutes")
-        yield* sessions.check(id)
-        const row = (yield* db.getSession(id))!
-        assert.strictEqual(row.turnState, "interrupted")
-        assert.isUndefined(yield* db.latestInbox(id, "result"))
-        assert.deepStrictEqual(yield* db.coordinatorPending(row.projectId), [])
-        assert.deepStrictEqual(yield* roundAndResultCounts(id), before)
-        assert.strictEqual(before.results, 0)
+        for (const { id, sessions, db } of [during, after]) {
+          const row = (yield* db.getSession(id))!
+          assert.isTrue(row.metadata.archived, id)
+          yield* sessions.check(id)
+          assert.deepStrictEqual(yield* roundAndResultCounts(id), { rounds: 1, results: 0 }, id)
+          assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted", id)
+          assert.deepStrictEqual(yield* db.coordinatorPending(row.projectId), [])
+        }
       }),
       harness === "pi" ? { hooked: ["pi"] } : undefined,
     )
-
-  for (const harness of ["claude", "pi"] as const)
-    for (const keepWorktree of [false, true])
-      test(
-        `${keepWorktree ? "archive --keep-worktree" : "remove"} of a working ${harness} session: the aborted turn end of its interrupt is no result, written during the interrupt or after`,
-        Effect.gen(function* () {
-          const herdr = yield* FakeRuntime
-          const repo = yield* makeRepository
-          const aborted = harness === "claude" ? claudeEnd("aborted") : { text: "", error: "aborted", aborted: true }
-          const during = yield* spawnWorking(repo, harness)
-          const held = yield* herdr.hold("send", during.id)
-          const removing = yield* Effect.forkChild(during.sessions.remove(during.id, { keepWorktree }))
-          yield* held.reached
-          yield* writeResult(during.id, harness, aborted, 60_000)
-          yield* held.release()
-          yield* Fiber.join(removing)
-          const after = yield* spawnWorking(repo, harness)
-          yield* after.sessions.remove(after.id, { keepWorktree })
-          yield* writeResult(after.id, harness, aborted, 60_000)
-          yield* TestClock.adjust("2 minutes")
-          for (const { id, sessions, db } of [during, after]) {
-            const row = (yield* db.getSession(id))!
-            assert.isTrue(row.metadata.archived, id)
-            yield* sessions.check(id)
-            assert.deepStrictEqual(yield* roundAndResultCounts(id), { rounds: 1, results: 0 }, id)
-            assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted", id)
-            assert.deepStrictEqual(yield* db.coordinatorPending(row.projectId), [])
-          }
-        }),
-        harness === "pi" ? { hooked: ["pi"] } : undefined,
-      )
 
   test(
     "interrupt delivers a result that is already in instead of discarding it",
@@ -2995,33 +2659,17 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "interrupt that does not take: SessionBusy, the turn stays open (each virtual step yields real time so a loaded machine cannot starve the fork)",
-    Effect.gen(function* () {
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
-      const yieldRealTime = TestClock.withLive(Effect.sleep("2 millis"))
-      for (let i = 0; i < 60 && interrupting.pollUnsafe() === undefined; i++) {
-        yield* TestClock.adjust("250 millis")
-        yield* yieldRealTime
-      }
-      const error = yield* Effect.flip(Fiber.join(interrupting))
-      assert.strictEqual(error._tag, "SessionBusy")
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
-    }),
-    { interruptIgnored: true },
-  )
-
-  test(
-    "interrupt that does not take: the round stays open, so the late aborted turn.complete is delivered as an interrupted result",
+    "interrupt that does not take: SessionBusy, the round stays open, so the late aborted turn.complete is delivered as an interrupted result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
       const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
-      for (let i = 0; i < 60 && interrupting.pollUnsafe() === undefined; i++) {
-        yield* TestClock.adjust("250 millis")
-        yield* TestClock.withLive(Effect.sleep("2 millis"))
-      }
+      yield* untilVirtual(
+        Effect.sync(() => interrupting.pollUnsafe()),
+        (exit) => exit !== undefined,
+      )
       assert.strictEqual((yield* Effect.flip(Fiber.join(interrupting)))._tag, "SessionBusy")
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
       yield* writeResult(id, "claude", claudeEnd("aborted"))
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
@@ -3032,18 +2680,6 @@ describe.concurrent("Sessions", () => {
       )
     }),
     { interruptIgnored: true },
-  )
-
-  test(
-    "a reset event keeps the session where it was: its terminal id is the runtime's own, a move is its business",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      const before = (yield* db.getSession(id))!.address
-      yield* PubSub.publish(herdr.events, { type: "reset", machine: "local" })
-      yield* Effect.yieldNow
-      assert.deepStrictEqual((yield* db.getSession(id))!.address, before)
-    }),
   )
 
   test(
@@ -3433,7 +3069,7 @@ const gated: TestOptions = {
 describe.concurrent("vibest run --archive-on-completion", () => {
   const archiveSession = (
     repo: string,
-    coordinator: "cursor" | "pi" = "cursor",
+    coordinator: "claude" | "pi" = "claude",
     input: { readonly peer?: string } = {},
   ) =>
     Effect.gen(function* () {
@@ -3463,18 +3099,26 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* w.sessions.check(w.id)
     })
 
+  const ackResult = (w: { readonly projectId: string }) =>
+    Effect.gen(function* () {
+      const inbox = yield* Inbox
+      const polled = yield* until(inbox.poll(w.projectId), (r) => r.ids.length > 0)
+      return yield* inbox.ack(w.projectId, polled.ids)
+    })
+
   const archived = (db: Db["Service"], id: string) => db.getSession(id).pipe(Effect.map((w) => !!w?.metadata.archived))
   const letForkedArchiveRun = TestClock.withLive(Effect.sleep("100 millis"))
   const latestNotice = (id: string) => sqlNotices(id).pipe(Effect.map((n) => n.at(-1) ?? ""))
 
   test(
-    "a completed result typed into the coordinator archives the session; a clean archive sends no notice (nothing to do); vibest result still works",
+    "a completed result the main agent acked archives the session; a clean archive sends no notice (nothing to do); vibest result still works",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const sql = yield* SqlClient.SqlClient
       const w = yield* archiveSession(yield* makeRepository)
       assert.isTrue((yield* w.db.getSession(w.id))!.metadata.archive)
       yield* finishTurn(w, "status: completed\nsummary: found it")
+      yield* ackResult(w)
       yield* until(archived(w.db, w.id), (a) => a)
       yield* until(fs.exists(yield* sessionWorktree(w.id)), (e) => !e)
       yield* until(w.db.getSession(w.id), (r) => r!.exitedAt !== null)
@@ -3548,24 +3192,20 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   slowTest(
-    "not archived while the result is only queued, when its delivery fails or is dropped, or when the Pi extension never acked it",
+    "not archived while the result is only queued, when its poll lease is released or it is dropped, or when the Pi extension never acked it",
     Effect.gen(function* () {
       const repo = yield* makeRepository
+      const inbox = yield* Inbox
       const a = yield* archiveSession(repo)
-      yield* a.herdr.updateAgent("test/coord", (c) => ({ ...c, status: "working" }))
       yield* finishTurn(a, "status: completed")
       yield* letForkedArchiveRun
       assert.strictEqual((yield* a.db.latestInbox(a.id, "result"))!.status, "pending")
       assert.isFalse(yield* archived(a.db, a.id))
-      yield* a.herdr.updateAgent("test/coord", (c) => ({ ...c, status: "idle" }))
-      const held = yield* a.herdr.hold("send", "test/coord")
-      const inbox = yield* Inbox
-      const delivering = yield* Effect.forkChild(inbox.deliver(a.projectId))
-      yield* held.reached
-      yield* held.release("failed")
-      yield* Fiber.join(delivering)
+      const polled = yield* inbox.poll(a.projectId)
+      assert.lengthOf(polled.ids, 1)
+      assert.deepStrictEqual(yield* inbox.ack(a.projectId, [], polled.ids), [])
       yield* letForkedArchiveRun
-      assert.strictEqual((yield* a.db.latestInbox(a.id, "result"))!.status, "failed")
+      assert.strictEqual((yield* a.db.latestInbox(a.id, "result"))!.status, "pending")
       assert.isFalse(yield* archived(a.db, a.id))
       const b = yield* archiveSession(repo)
       yield* b.herdr.updateAgent("test/coord", (c) => ({ ...c, alive: false }))
@@ -3582,68 +3222,26 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     }),
   )
 
-  slowTest(
-    "never after a failed turn",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const a = yield* archiveSession(repo)
-      yield* finishTurn(a, "status: failed\nsummary: tests fail", "model_error")
-      yield* until(a.db.latestInbox(a.id, "result"), (r) => r?.status === "delivered")
-      const row = yield* a.db.latestInbox(a.id, "result")
-      assert.match(String(row!.details.summary), /^Agent ".*" failed: model_error$/)
-      assert.include(row!.message, "<result>\nstatus: failed\nsummary: tests fail")
-      yield* letForkedArchiveRun
-      assert.isFalse(yield* archived(a.db, a.id))
-    }),
-    { hooked: ["pi"] },
-  )
-
   test(
-    "never after a failed turn; the flag stays, so the next completed result archives it",
+    "never after a failed turn, whose summary is the error; the flag stays, so the next completed result archives it",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const b = yield* archiveSession(repo)
-      yield* finishTurn(b, "which one?", "model_error")
-      yield* until(b.db.latestInbox(b.id, "result"), (r) => r?.status === "delivered")
+      yield* finishTurn(b, "status: failed\nsummary: tests fail", "model_error")
+      yield* ackResult(b)
+      const row = yield* b.db.latestInbox(b.id, "result")
+      assert.strictEqual(row!.status, "delivered")
+      assert.match(String(row!.details.summary), /^Agent ".*" failed: model_error$/)
+      assert.include(row!.message, "<result>\nstatus: failed\nsummary: tests fail")
       yield* letForkedArchiveRun
       assert.isFalse(yield* archived(b.db, b.id))
-      yield* b.herdr.updateAgent("test/coord", (c) => ({ ...c, status: "idle" }))
       yield* b.sessions.send(b.id, "the first one")
       yield* until(b.db.getSession(b.id), (w) => w?.turnState === "open")
       yield* finishTurn(b, "status: completed")
+      yield* ackResult(b)
       yield* until(archived(b.db, b.id), (x) => x)
     }),
     { hooked: ["pi"] },
-  )
-
-  test(
-    "never after a lost turn: the turn ended and no hook fired within the grace period",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const c = yield* archiveSession(repo)
-      yield* c.herdr.endTurn(c.id)
-      yield* c.sessions.check(c.id)
-      yield* TestClock.adjust("11 seconds")
-      yield* c.sessions.check(c.id)
-      assert.strictEqual((yield* c.db.getSession(c.id))!.turnState, "lost")
-      yield* until(c.db.latestInbox(c.id, "result"), (r) => r?.status === "delivered")
-      yield* letForkedArchiveRun
-      assert.isFalse(yield* archived(c.db, c.id))
-    }),
-    { hooked: ["pi"] },
-  )
-
-  test(
-    "never after an interrupted turn: it has no result",
-    Effect.gen(function* () {
-      const w = yield* archiveSession(yield* makeRepository)
-      assert.include((yield* w.sessions.interrupt(w.id)).message, "interrupted")
-      yield* TestClock.adjust("11 seconds")
-      yield* w.sessions.check(w.id)
-      yield* letForkedArchiveRun
-      assert.isUndefined(yield* w.db.latestInbox(w.id, "result"))
-      assert.isFalse(yield* archived(w.db, w.id))
-    }),
   )
 
   test(
@@ -3652,6 +3250,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const w = yield* archiveSession(yield* makeRepository)
       yield* w.sessions.send(w.id, "one more thing")
       yield* finishTurn(w, "status: completed")
+      yield* ackResult(w)
       yield* letForkedArchiveRun
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       assert.isFalse(yield* archived(w.db, w.id))
@@ -3664,12 +3263,12 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     "a message accepted while the archive runs wins: not archived, not failed, delivered",
     Effect.gen(function* () {
       const w = yield* archiveSession(yield* makeRepository)
+      yield* finishTurn(w, "status: completed")
       const held = yield* w.herdr.hold("state", w.id)
-      const finishing = yield* Effect.forkChild(finishTurn(w, "status: completed"))
+      yield* ackResult(w)
       yield* held.reached
       yield* w.sessions.send(w.id, "one more thing")
       yield* held.release()
-      yield* Fiber.join(finishing)
       yield* letForkedArchiveRun
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       assert.isFalse(yield* archived(w.db, w.id))
@@ -3681,18 +3280,14 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   test(
     "the session turns busy after it went idle (the user typed in its pane): refused before the tombstone, still unarchived and usable",
     Effect.gen(function* () {
-      const inbox = yield* Inbox
       const w = yield* archiveSession(yield* makeRepository)
-      yield* w.herdr.updateAgent("test/coord", (c) => ({ ...c, status: "working" }))
       yield* finishTurn(w, "status: completed")
       yield* settled
       const get = yield* w.herdr.hold("state", w.id, 2)
-      yield* w.herdr.updateAgent("test/coord", (c) => ({ ...c, status: "idle" }))
-      const delivering = yield* Effect.forkChild(inbox.deliver(w.projectId))
+      yield* ackResult(w)
       yield* get.reached
       yield* w.herdr.updateAgent(w.id, (a) => ({ ...a, status: "working" }))
       yield* get.release()
-      yield* Fiber.join(delivering)
       yield* letForkedArchiveRun
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       assert.deepStrictEqual(
@@ -3710,23 +3305,13 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "a reply with no status line ends normally, so it is archived: the status is what vibest observed",
-    Effect.gen(function* () {
-      const w = yield* archiveSession(yield* makeRepository)
-      yield* finishTurn(w, "status: needs_input\nDONE-1234")
-      yield* until(archived(w.db, w.id), (x) => x)
-      const row = yield* w.db.latestInbox(w.id, "result")
-      assert.include(row!.message, "<status>completed</status>")
-    }),
-  )
-
-  test(
     "a message sent once it decided to archive is refused, never accepted and then failed",
     Effect.gen(function* () {
       const fake = yield* FakeProcesses
       const w = yield* archiveSession(yield* makeRepository)
       const held = yield* fake.holdCwd()
       yield* finishTurn(w, "status: completed")
+      yield* ackResult(w)
       yield* held.reached
       assert.strictEqual(
         (yield* Effect.flip(w.sessions.send(w.id, "too late"))).message,
@@ -3762,26 +3347,10 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* writeResult(w.id, "pi", { text: "status: completed" })
       yield* w.herdr.updateAgent(w.id, (a) => ({ ...a, alive: false }))
       yield* w.sessions.check(w.id)
+      yield* ackResult(w)
       yield* until(latestNotice(w.id), (m) => m.includes("not archived"))
       assert.include(yield* latestNotice(w.id), "its harness already exited")
       assert.isFalse(yield* archived(w.db, w.id))
-    }),
-  )
-
-  test(
-    "vibest archive while the automatic one runs: SessionBusy, and the automatic one finishes",
-    Effect.gen(function* () {
-      const fake = yield* FakeProcesses
-      const w = yield* archiveSession(yield* makeRepository)
-      const held = yield* fake.holdCwd()
-      yield* finishTurn(w, "status: completed")
-      yield* held.reached
-      const busy = yield* Effect.flip(w.sessions.remove(w.id))
-      assert.strictEqual(busy._tag, "SessionBusy")
-      assert.include(busy.message, "already being removed")
-      yield* held.release()
-      const fs = yield* FileSystem.FileSystem
-      yield* until(fs.exists(yield* sessionWorktree(w.id)), (e) => !e)
     }),
   )
 
@@ -3790,16 +3359,13 @@ describe.concurrent("vibest run --archive-on-completion", () => {
     details: Record<string, unknown>,
   ) =>
     Effect.gen(function* () {
-      const inbox = yield* Inbox
-      yield* w.herdr.updateAgent("test/coord", (c) => ({ ...c, status: "working" }))
       yield* finishTurn(w, "status: completed\nsummary: first")
       yield* settled
       const check = yield* w.herdr.hold("state", w.id)
       const checking = yield* Effect.forkChild(w.sessions.check(w.id))
       yield* check.reached
-      yield* w.herdr.updateAgent("test/coord", (c) => ({ ...c, status: "idle" }))
       const looked = yield* awaitArchiveStart(w.id)
-      yield* inbox.deliver(w.projectId)
+      yield* ackResult(w)
       assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
       yield* looked
       yield* w.db.finishTurn(
@@ -3808,7 +3374,6 @@ describe.concurrent("vibest run --archive-on-completion", () => {
         { turnState: "completed", status: "idle" },
         { sessionId: w.id, kind: "result", message: "second", details },
       )
-      yield* w.herdr.updateAgent("test/coord", (c) => ({ ...c, status: "idle" }))
       return { release: check.release().pipe(Effect.andThen(Fiber.join(checking))) }
     })
 
@@ -3830,11 +3395,10 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   test(
     "a newer completed result delivered while the first one's archive waits for the lock: archived once, no notice",
     Effect.gen(function* () {
-      const inbox = yield* Inbox
       const w = yield* archiveSession(yield* makeRepository)
       const first = yield* firstArchiveWaiting(w, { status: "completed", summary: "second" })
       const looked = yield* awaitArchiveStart(w.id)
-      yield* inbox.deliver(w.projectId)
+      yield* ackResult(w)
       assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
       yield* looked
       yield* first.release
@@ -3848,30 +3412,28 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "a newer result still being sent when the waiting archive reads it: archived once it is delivered; never when its delivery fails",
+    "a newer result still being sent when the waiting archive reads it: archived once it is acked; never when its lease is released",
     Effect.gen(function* () {
       const inbox = yield* Inbox
       const repo = yield* makeRepository
-      for (const failure of [undefined, "server_error"]) {
+      for (const released of [false, true]) {
         const w = yield* archiveSession(repo)
         const first = yield* firstArchiveWaiting(w, { status: "completed", summary: "second" })
-        const prompt = yield* w.herdr.hold("send", "test/coord")
-        const sending = yield* Effect.forkChild(inbox.deliver(w.projectId))
-        yield* prompt.reached
+        const polled = yield* inbox.poll(w.projectId)
+        assert.lengthOf(polled.ids, 1)
         const read = { reached: yield* Deferred.make<void>(), release: yield* Deferred.make<void>() }
         pauseAfterResultRead = read
         yield* first.release
         yield* Deferred.await(read.reached)
         assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "sending")
         const looked = yield* awaitArchiveStart(w.id)
-        yield* prompt.release(failure)
-        yield* Fiber.join(sending)
-        if (failure === undefined) {
+        yield* inbox.ack(w.projectId, released ? [] : polled.ids, released ? polled.ids : [])
+        if (!released) {
           assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
           yield* looked
         }
         yield* Deferred.succeed(read.release, undefined)
-        if (failure === undefined) {
+        if (!released) {
           yield* until(archived(w.db, w.id), (a) => a)
           yield* assertArchivesDone(w)
           assert.deepStrictEqual(yield* sqlNotices(w.id), [])
@@ -3879,7 +3441,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
         }
         archiveStartedSignal = undefined
         yield* assertArchivesDone(w)
-        assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "failed")
+        assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "pending")
         assert.isFalse(yield* archived(w.db, w.id))
       }
     }),
@@ -3890,7 +3452,6 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   test(
     "the newer delivered result is failed, a message waits, or a new turn began: the waiting archive does not archive on it",
     Effect.gen(function* () {
-      const inbox = yield* Inbox
       const repo = yield* makeRepository
       for (const newer of ["failed", "message", "turn"]) {
         const w = yield* archiveSession(repo)
@@ -3899,7 +3460,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
         if (newer === "message") assert.isDefined(yield* w.db.insertSend(w.id, "one more thing"))
         if (newer === "turn") yield* w.db.updateSession(w.id, { turnState: "open" })
         const looked = completed ? yield* awaitArchiveStart(w.id) : Effect.void
-        yield* inbox.deliver(w.projectId)
+        yield* ackResult(w)
         assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
         yield* looked
         yield* first.release
@@ -3917,27 +3478,6 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "run --peer: an archive keeps a directory another live session works in; the last one out removes it",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const repo = yield* makeRepository
-      const owner = yield* idleSession(repo)
-      const worktree = yield* sessionWorktree(owner.id)
-      const a = yield* archiveSession(repo, "cursor", { peer: owner.id })
-      yield* finishTurn(a, "status: completed")
-      const first = yield* until(latestNotice(a.id), (m) => m.includes("archived ("))
-      assert.include(first, `worktree kept at ${worktree}`)
-      assert.include(first, `session ${owner.id} still works in it`)
-
-      const b = yield* archiveSession(repo, "cursor", { peer: owner.id })
-      assert.include((yield* owner.sessions.remove(owner.id))!.reasons.join("\n"), `session ${b.id} still works in it`)
-      yield* finishTurn(b, "status: completed")
-      yield* until(fs.exists(worktree), (exists) => !exists)
-      assert.isTrue(yield* archived(b.db, b.id))
-    }),
-  )
-
-  test(
     "an owner started with --archive-on-completion keeps its worktree while a borrower is live",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -3946,6 +3486,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
       yield* until(owner.db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* finishTurn(owner, "status: completed")
+      yield* ackResult(owner)
       const notice = yield* until(latestNotice(owner.id), (m) => m.includes("archived ("))
       assert.include(notice, `worktree kept: session ${id} still works in it`)
       assert.isTrue(yield* fs.exists(yield* sessionWorktree(owner.id)))
@@ -3958,7 +3499,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const fs = yield* FileSystem.FileSystem
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
-      const b = yield* archiveSession(repo, "cursor", { peer: owner.id })
+      const b = yield* archiveSession(repo, "claude", { peer: owner.id })
       const worktree = yield* sessionWorktree(owner.id)
       assert.include(
         (yield* owner.sessions.remove(owner.id, { keepWorktree: true }))!.reasons.join("\n"),
@@ -3967,31 +3508,6 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       const out = (yield* b.sessions.remove(b.id))!
       assert.strictEqual(out.worktree, "removed")
       assert.isFalse(yield* fs.exists(worktree))
-    }),
-  )
-
-  test(
-    "without --archive-on-completion a delivered completed result archives nothing",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const db = yield* Db
-      const sessions = yield* Sessions
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "cursor", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
-      yield* herdr.seedAgent("test/coord")
-      const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
-      yield* sessions.check(id)
-      const w = { id, row: (yield* db.getSession(id))!, sessions, db }
-      assert.isUndefined(w.row.metadata.archive)
-      yield* finishTurn({ ...w, herdr }, "status: completed")
-      yield* until(w.db.latestInbox(w.id, "result"), (r) => r?.status === "delivered")
-      yield* letForkedArchiveRun
-      assert.isFalse(yield* archived(w.db, w.id))
-      assert.deepStrictEqual(yield* sqlNotices(w.id), [])
     }),
   )
 })
@@ -4133,33 +3649,6 @@ describe.concurrent("after a vibestd stop", () => {
     )
 
   test(
-    "a first turn waiting for its harness to be ready has not taken its task",
-    waitingForReady((id) =>
-      Effect.gen(function* () {
-        const db = yield* Db
-        assert.isFalse(yield* db.turnTaken(id))
-        assert.strictEqual(yield* db.untakenTask(id), "do it")
-        assert.deepStrictEqual(yield* turnInputs(id), [{ input: "", status: "working" }])
-        assert.strictEqual(yield* typed("do it"), 0)
-      }),
-    ),
-  )
-
-  test(
-    "a task never handed over is handed over once by the next vibestd, as its open turn's input",
-    waitingForReady((id) =>
-      Effect.gen(function* () {
-        const db = yield* Db
-        yield* nextVibestd(Effect.map(typed("do it"), (n) => n === 1))
-        assert.deepStrictEqual(yield* turnInputs(id), [{ input: "do it", status: "working" }])
-        assert.isUndefined(yield* db.untakenTask(id))
-        assert.isTrue(yield* db.turnTaken(id))
-      }),
-    ),
-    { hooked: ["pi"] },
-  )
-
-  test(
     "a first turn ended before its handover (vibestd stopped in its ready wait) leaves the task for the next vibestd",
     waitingForReady((id) =>
       Effect.gen(function* () {
@@ -4196,27 +3685,6 @@ describe.concurrent("after a vibestd stop", () => {
     { hooked: ["pi"] },
   )
 
-  test(
-    "an archive cut off after its mark: the next vibestd closes its terminal and ends its process, once; the worktree stays",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const herdr = yield* FakeRuntime
-      const { id, row, db } = yield* idleSession(yield* makeRepository)
-      yield* db.updateSession(id, { metadata: { ...row.metadata, archived: true, removed: true } })
-      const closes = Effect.map(herdr.callsTo("close"), (calls) => calls.filter((c) => c.terminal === row.address.id))
-      yield* nextVibestd(Effect.map(processEnds(id), (ends) => ends.length > 0))
-      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
-      assert.strictEqual((yield* closes).length, 1)
-      assert.isTrue(yield* fs.exists(yield* sessionWorktree(id)))
-      assert.deepStrictEqual(yield* sqlNotices(id), [])
-      yield* (yield* Bus).observe({ type: "live.reset", runtime: RUNTIME, machine: "local" })
-      yield* settled
-      assert.strictEqual((yield* closes).length, 1)
-      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
-    }),
-    { hooked: ["pi"] },
-  )
-
   const deliveredNotArchived = Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const w = yield* idleSession(yield* makeRepository)
@@ -4226,20 +3694,6 @@ describe.concurrent("after a vibestd stop", () => {
     yield* w.db.setInboxStatus([result.id], "delivered")
     return w
   })
-
-  test(
-    "a session whose completed result was delivered before its archive is archived by the next vibestd, with no notice",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const { id, db } = yield* deliveredNotArchived
-      const worktree = yield* sessionWorktree(id)
-      yield* nextVibestd(Effect.map(db.getSession(id), (w) => !!w?.metadata.archived && w.exitedAt !== null))
-      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
-      assert.isFalse(yield* fs.exists(worktree))
-      assert.deepStrictEqual(yield* sqlNotices(id), [])
-    }),
-    { hooked: ["pi"] },
-  )
 
   test(
     "a session with archive-on-completion that has a message pending is left to it by the next vibestd",

@@ -122,7 +122,7 @@ describe("Shell denials", () => {
         assert.match(reason ?? "", /^vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT/, command)
   })
 
-  it("refuse vibest integration stop, the harness's turn-end hook, however it is wrapped", () => {
+  it("refuse vibest integration stop and prompt, the harness's turn-end and user-prompt hooks, however they are wrapped", () => {
     for (const command of [
       "vibest integration stop",
       "/usr/bin/bun /src/main.ts integration stop",
@@ -134,12 +134,8 @@ describe("Shell denials", () => {
     ])
       for (const reason of both(command))
         assert.match(reason ?? "", /^vibest integration stop is the harness's turn-end hook/, command)
-  })
-
-  it("refuse vibest integration prompt, the harness's user-prompt hook", () => {
     for (const reason of both("vibest integration prompt --harness claude"))
       assert.match(reason ?? "", /^vibest integration prompt is the harness's user-prompt hook/)
-    assert.isUndefined(shellBlock("vibest integration guard", source, false))
   })
 
   it("the coordinator also does not start harness CLIs (they would report as it) or run gh's credential and config commands", () => {
@@ -311,39 +307,6 @@ layer(Platform.services)("role rules", (it) => {
   )
 
   it.effect(
-    "Coordinator: no edits without its project folder; session: no herdr control and no project directory, symlinks included",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const home = yield* tempDirectory("vibest-guard-")
-        const vibestHome = path.join(home, ".vibest")
-        yield* fs.makeDirectory(path.join(vibestHome, "projects"), { recursive: true })
-        yield* fs.symlink(path.join(vibestHome, "projects"), path.join(home, "link"))
-        const as = (rules: Rules) => (tool: string, input: Record<string, unknown>) =>
-          rules({ tool, input, cwd: home }).pipe(
-            Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-            Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home }))),
-          )
-        const asCoordinator = as(coordinator)
-        const asSession = as(session)
-
-        assert.isString(yield* asCoordinator("Write", { file_path: "a" }))
-        assert.isUndefined(yield* asCoordinator("bash", { command: "rm a" }))
-        assert.isUndefined(yield* asCoordinator("Read", { file_path: "a" }))
-        assert.isUndefined(yield* asCoordinator("Grep", { pattern: "a" }))
-
-        assert.isString(yield* asSession("Bash", { command: "herdr pane list" }))
-        assert.isString(yield* asSession("Bash", { command: "cat ~/.vibest/projects/x" }))
-        assert.isString(yield* asSession("Read", { file_path: "link/x.md" }))
-        assert.isString(yield* asSession("read", { path: "~/.vibest/projects" }))
-        assert.isUndefined(yield* asSession("Edit", { file_path: "src/a.ts" }))
-        assert.isUndefined(yield* asSession("Bash", { command: "git push" }))
-        assert.isString(yield* asSession("bash", { command: "herdr --help" }))
-      }),
-  )
-
-  it.effect(
     "Session: only its own project folder (VIBEST_PROJECT_DIR) under projects; another project's folder, the projects directory itself and everything without VIBEST_PROJECT_DIR are refused; no herdr",
     () =>
       Effect.gen(function* () {
@@ -354,6 +317,7 @@ layer(Platform.services)("role rules", (it) => {
         const projects = path.join(vibestHome, "projects")
         const worktree = path.join(vibestHome, "worktrees", "abcd1234-abcd-4abc-8abc-abcd1234abcd")
         yield* fs.makeDirectory(worktree, { recursive: true })
+        yield* fs.symlink(projects, path.join(worktree, "link"))
         const own = path.join(projects, "0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b")
         const other = path.join(projects, "7c1e9d20-3b4a-4c5d-9e6f-0a1b2c3d4e5f")
         for (const dir of [own, other])
@@ -404,6 +368,7 @@ layer(Platform.services)("role rules", (it) => {
           assert.strictEqual(yield* asSession(tool, input), offLimits, `${tool} ${JSON.stringify(input)}`)
         for (const [tool, input] of calls(own, path.join(own, "notes.md")))
           assert.strictEqual(yield* asSession(tool, input, null), offLimits, `no VIBEST_PROJECT_DIR: ${tool}`)
+        assert.strictEqual(yield* asSession("Read", { file_path: "link/x.md" }, null), offLimits)
         assert.isUndefined(yield* asSession("Read", { file_path: path.join(worktree, "src/a.ts") }, null))
         assert.isUndefined(yield* asSession("Grep", { pattern: "x" }))
         for (const command of ["herdr pane list", "herdr --help", "cd /tmp && herdr"])
@@ -444,42 +409,6 @@ layer(Platform.services)("role rules", (it) => {
       }),
   )
 
-  it.effect("Session: its own project folder is the one project directory it may use", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const home = yield* tempDirectory("vibest-guard-")
-      const vibestHome = path.join(home, ".vibest")
-      const own = path.join(vibestHome, "projects", "k")
-      const work = path.join(own, "artifacts", "w1")
-      yield* fs.makeDirectory(work, { recursive: true })
-      const asSession = (tool: string, input: Record<string, unknown>) =>
-        session({ tool, input, cwd: home }).pipe(
-          Effect.provideServiceEffect(Layout, Layout.make(vibestHome)),
-          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_PROJECT_DIR: own }))),
-        )
-      const tilde = "~/.vibest/projects/k/artifacts/w1"
-      for (const [tool, input] of [
-        ["Write", { file_path: `${work}/notes.md` }],
-        ["read", { path: `${tilde}/notes.md` }],
-        ["Bash", { command: `cat ${work}/a.md > ${tilde}/b.md` }],
-        ["Bash", { command: `ls ${work}` }],
-        ["Bash", { command: `cat ${work}2/a.md` }],
-        ["Read", { file_path: path.join(own, "docs", "a.md") }],
-        ["Bash", { command: `cat ${tilde}/../../memories/x.md` }],
-      ] as const)
-        assert.isUndefined(yield* asSession(tool, input), JSON.stringify(input))
-      for (const [tool, input] of [
-        ["Read", { file_path: `${work}/../../../j/memories/a.md` }],
-        ["Read", { file_path: path.join(vibestHome, "projects", "j", "docs", "a.md") }],
-        ["Bash", { command: `cat ${work}/../../../j/memories/a.md` }],
-        ["Bash", { command: `ls ${work} ~/.vibest/projects/j/memories` }],
-        ["Bash", { command: `cat ${own}2/a.md` }],
-      ] as const)
-        assert.isString(yield* asSession(tool, input), JSON.stringify(input))
-    }),
-  )
-
   it.effect(
     "Session: paths are followed as the system would (.. anywhere, symlinks, relative, globs) and searches above the project refused",
     () =>
@@ -507,7 +436,15 @@ layer(Platform.services)("role rules", (it) => {
               ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: home, VIBEST_PROJECT_DIR: project })),
             ),
           )
+        const tilde = "~/.vibest/projects/own/artifacts/w1"
         for (const [tool, input] of [
+          ["Write", { file_path: `${work}/notes.md` }],
+          ["read", { path: `${tilde}/notes.md` }],
+          ["Bash", { command: `cat ${work}/a.md > ${tilde}/b.md` }],
+          ["Bash", { command: `ls ${work}` }],
+          ["Bash", { command: `cat ${work}2/a.md` }],
+          ["Read", { file_path: path.join(project, "docs", "a.md") }],
+          ["Bash", { command: `cat ${tilde}/../../memories/x.md` }],
           ["Bash", { command: `cat ${work}/x/../a.md` }],
           ["Bash", { command: "git commit -m 'fix: a/b' && bun test src/a.test.ts" }],
           ["Bash", { command: "cd ~/.vibest/worktrees/abcd1234-abcd-4abc-8abc-abcd1234abcd && ls" }],
@@ -524,6 +461,11 @@ layer(Platform.services)("role rules", (it) => {
         ] as const)
           assert.isUndefined(yield* asSession(tool, input), JSON.stringify(input))
         for (const [tool, input] of [
+          ["Read", { file_path: `${work}/../../../other/memories/a.md` }],
+          ["Read", { file_path: path.join(other, "docs", "a.md") }],
+          ["Bash", { command: `cat ${work}/../../../other/memories/a.md` }],
+          ["Bash", { command: `ls ${work} ~/.vibest/projects/other/memories` }],
+          ["Bash", { command: `cat ${project}2/a.md` }],
           ["Bash", { command: `cat ${work}/x/../../../../other/docs/secret.md` }],
           ["Read", { file_path: `${work}/x/../../../../other/docs/secret.md` }],
           ["Read", { file_path: `${work}/peer/a.md` }],

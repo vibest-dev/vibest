@@ -10,6 +10,6 @@
   },
   "devDependencies": {
     "@vibest/protocol": "workspace:*",
-    "effect-hc-sdk": "workspace:*"
+    "effect-herdr-core-sdk": "workspace:*"
   }
 }

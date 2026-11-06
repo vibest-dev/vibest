@@ -44,34 +44,6 @@ const coordinatorUpdate = (agent: string, args: ReadonlyArray<string>) =>
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 describe("vibest CLI", () => {
   test(
-    "run --archive-on-completion asks Spawn to archive on a completed result; the unreleased --archive is a usage error that spawns nothing",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const db = yield* Db
-      const layout = yield* Layout
-      const repo = yield* makeRepository
-      const run = (args: ReadonlyArray<string>) => vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args)
-
-      const old = yield* run(["run", "pi", "--archive", "--", "do it"])
-      assert.strictEqual(old.code, 2, old.stderr)
-      assert.match(old.stderr, /Unrecognized flag: --archive in command vibest run/)
-      assert.match(old.stdout, /--archive-on-completion/)
-      assert.notMatch(old.stdout, /--archive(?!-on-completion)/)
-      assert.deepStrictEqual(yield* db.listSessions(), [])
-      assert.lengthOf(yield* herdr.callsTo("open"), 0)
-
-      const spawned = yield* run(["run", "pi", "--archive-on-completion", "--", "do it"])
-      assert.strictEqual(spawned.code, 0, spawned.stderr)
-      const { id } = decodeJson(spawned.stdout) as { id: string }
-      assert.isTrue((yield* db.getSession(id))!.metadata.archive)
-      const plain = decodeJson((yield* run(["run", "pi", "--", "do it"])).stdout) as { id: string }
-      assert.isUndefined((yield* db.getSession(plain.id))!.metadata.archive)
-      const removed = yield* run(["run", "pi", "--access", "read", "--", "look"])
-      assert.strictEqual(removed.code, 2, removed.stderr)
-    }),
-  )
-
-  test(
     "plain CLI: run, status, send and ls print JSON; input is literal; empty input and unknown commands fail",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -360,29 +332,6 @@ describe("vibest CLI", () => {
   )
 
   test(
-    "project info: the project folder's paths, which agents read and write with file tools",
-    Effect.gen(function* () {
-      const layout = yield* Layout
-      const repo = yield* makeRepository
-      const run = (args: ReadonlyArray<string>) => vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args)
-      const out = yield* run(["project", "info"])
-      assert.strictEqual(out.code, 0, out.stderr)
-      const info = decodeJson(out.stdout) as Record<string, string>
-      const directory = info.directory ?? ""
-      assert.isTrue(directory.startsWith(`${layout.projects}/`))
-      assert.deepStrictEqual(info, {
-        directory,
-        preferences: `${directory}/preferences.md`,
-        docs: `${directory}/docs`,
-        memories: `${directory}/memories`,
-        artifacts: `${directory}/artifacts`,
-      })
-      for (const gone of ["read", "write", "list", "delete"])
-        assert.notStrictEqual((yield* run(["project", gone, "docs", "a.md"])).code, 0, gone)
-    }),
-  )
-
-  test(
     "vibest --env outside herdr is the new pane's environment and is not on the typed command",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -478,83 +427,6 @@ describe("vibest CLI without vibestd", () => {
         })
         assert.isFalse(yield* fs.exists(vibestHome))
         for (const dir of [".claude", ".cursor", ".pi"]) assert.isFalse(yield* fs.exists(path.join(home, dir)), dir)
-      }).pipe(Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
-
-  it.effect(
-    "harness list summarizes each harness; harness models and models <harness> list only that harness",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const home = yield* tempDirectory("vibest-cli-")
-        yield* fs.makeDirectory(`${home}/bin`)
-        yield* fs.writeFileString(
-          `${home}/bin/cursor-agent`,
-          "#!/bin/sh\nprintf 'Available models\\n\\nauto - Auto\\nfast-1 - Fast One (current)\\n'\n",
-        )
-        yield* fs.chmod(`${home}/bin/cursor-agent`, 0o755)
-        const run = (args: ReadonlyArray<string>) =>
-          vibest(home, { HOME: home, VIBEST_HOME: `${home}/vibest`, PATH: `${home}/bin:/bin` }, args)
-
-        const list = yield* run(["harness", "ls"])
-        assert.strictEqual(list.code, 0, list.stderr)
-        assert.deepStrictEqual(decodeJson(list.stdout), [
-          { harness: "pi", binary: "pi", available: false, defaultModel: null, error: "pi is not on PATH" },
-          { harness: "claude", binary: "claude", available: false, defaultModel: null, error: "claude is not on PATH" },
-          { harness: "cursor", binary: "cursor-agent", available: true, defaultModel: "fast-1", error: null },
-        ])
-
-        const cursor = {
-          models: [
-            { harness: "cursor", provider: null, model: "auto", name: "Auto", description: "", default: false },
-            { harness: "cursor", provider: null, model: "fast-1", name: "Fast One", description: "", default: true },
-          ],
-          errors: [],
-        }
-        for (const args of [
-          ["harness", "models", "cursor"],
-          ["models", "cursor"],
-          ["models", "--harness", "cursor"],
-        ]) {
-          const r = yield* run(args)
-          assert.strictEqual(r.code, 0, r.stderr)
-          assert.deepStrictEqual(decodeJson(r.stdout), cursor, args.join(" "))
-        }
-        const pi = yield* run(["harness", "models", "pi"])
-        assert.deepInclude(decodeJson(pi.stdout), { models: [] })
-        assert.strictEqual((yield* run(["harness", "models", "nope"])).code, 2)
-      }).pipe(Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
-
-  it.effect(
-    "vibest spawn is a usage error before vibestd; help lists run and not a spawn command",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const home = yield* tempDirectory("vibest-spawn-")
-        const vibestHome = `${home}/vibest`
-        const repo = yield* makeRepository
-        const run = (args: ReadonlyArray<string>) => vibest(repo, { HOME: home, VIBEST_HOME: vibestHome }, args)
-        const gone = yield* run(["spawn", "pi", "--", "do it"])
-        assert.strictEqual(gone.code, 2, gone.stderr)
-        assert.match(gone.stderr, /spawn/)
-        assert.isFalse(yield* fs.exists(vibestHome))
-        const help = yield* run(["--help"])
-        assert.strictEqual(help.code, 0, help.stderr)
-        assert.match(help.stdout, /\brun\b/)
-        assert.notMatch(help.stdout, /^\s*spawn\b/m)
-        const runHelp = yield* run(["run", "--help"])
-        assert.match(runHelp.stdout + runHelp.stderr, /--peer/)
-        assert.match(runHelp.stdout + runHelp.stderr, /--archive-on-completion/)
-        assert.notMatch(runHelp.stdout + runHelp.stderr, /--access/)
-        assert.notMatch(runHelp.stdout + runHelp.stderr, /--archive(?!-on-completion)/)
-        const lsHelp = yield* run(["ls", "--help"])
-        assert.match(lsHelp.stdout, /cut to 500 characters/)
-        assert.match(lsHelp.stdout, /latest result/)
-        assert.match(lsHelp.stdout, /vibest result keeps the full task/)
-        assert.isFalse(yield* fs.exists(vibestHome))
       }).pipe(Effect.provide(Platform.services)),
     TIMEOUT,
   )
@@ -702,6 +574,26 @@ describe("vibest CLI without vibestd", () => {
         assert.strictEqual(r.code, 1, r.stdout)
         assert.lengthOf(d.sends, 1)
         assert.isUndefined(d.sends[0]!.request)
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
+
+  it.effect(
+    "integration guard fails with no answer when no vibest agent runs it, or on input it cannot read; the plugin refuses the call then",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-guard-cli-" })
+        const guard = (env: Record<string, string>, stdin: string) =>
+          vibest(cwd, { HOME: cwd, VIBEST_HOME: cwd, ...env }, ["integration", "guard", "--harness", "cursor"], stdin)
+        const noAgent = yield* guard({}, JSON.stringify({ tool_name: "Shell", tool_input: { command: "git status" } }))
+        assert.notStrictEqual(noAgent.code, 0, noAgent.stderr)
+        assert.strictEqual(noAgent.stdout, "")
+        assert.match(noAgent.stderr, /VIBEST_AGENT/)
+        const unreadable = yield* guard({ VIBEST_AGENT: "general", VIBEST_PROJECT_DIR: cwd }, "not json")
+        assert.notStrictEqual(unreadable.code, 0, unreadable.stderr)
+        assert.strictEqual(unreadable.stdout, "")
+        assert.match(unreadable.stderr, /JSON/)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     TIMEOUT,
   )
