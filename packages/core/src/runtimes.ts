@@ -22,7 +22,7 @@ export interface RuntimesShape {
   readonly statuses: (
     machine: Machine,
   ) => Effect.Effect<ReadonlyArray<{ readonly runtime: Runtime; readonly status: MachineStatus }>>
-  readonly online: (runtime: Runtime, machine: Machine) => Effect.Effect<void, NoRuntime>
+  readonly online: (runtime: Runtime, machine: Machine, near?: Terminal) => Effect.Effect<void, NoRuntime>
 }
 
 const live = (kind: string, event: RuntimeEvent): LiveEvent => {
@@ -82,8 +82,13 @@ const make = (initial: ReadonlyArray<Runtime> = []): Effect.Effect<RuntimesShape
           (runtime) => runtime.status(machine).pipe(Effect.map((status) => ({ runtime, status }))),
           { concurrency: "unbounded" },
         ),
-      online: (runtime, machine) =>
+      online: (runtime, machine, near) =>
         runtime.status(machine).pipe(
+          Effect.flatMap((status) =>
+            status.status === "online" || near === undefined
+              ? Effect.succeed(status)
+              : runtime.process(near).pipe(Effect.as<MachineStatus>({ status: "online" })),
+          ),
           Effect.flatMap((status) =>
             status.status === "online"
               ? Effect.void

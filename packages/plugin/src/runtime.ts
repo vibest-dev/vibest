@@ -38,6 +38,12 @@ export type RuntimeEvent =
   | { readonly type: "state"; readonly terminal: Terminal; readonly state: AgentState }
   | { readonly type: "reset"; readonly machine: string }
 
+export interface CallerTerminal {
+  readonly terminal: Terminal
+  readonly live: boolean
+  readonly localRootPid?: number
+}
+
 export interface Runtime {
   readonly kind: string
   readonly status: (machine: Machine) => Effect.Effect<MachineStatus>
@@ -66,6 +72,10 @@ export interface Runtime {
   readonly close: (terminal: Terminal) => Effect.Effect<void, RuntimeError>
   readonly events: Stream.Stream<RuntimeEvent>
 
+  readonly caller?: {
+    readonly env: ReadonlyArray<string>
+    readonly detect: (env: Readonly<Record<string, string>>) => Effect.Effect<CallerTerminal | undefined, RuntimeError>
+  }
   readonly state?: (terminal: Terminal) => Effect.Effect<AgentState, RuntimeError>
   readonly session?: (terminal: Terminal) => Effect.Effect<string | null, RuntimeError>
   readonly run?: (terminal: Terminal, argv: ReadonlyArray<string>) => Effect.Effect<void, RuntimeError>

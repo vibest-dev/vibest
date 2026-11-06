@@ -15,7 +15,17 @@ export const livenessOf = (probe: () => void): Liveness => {
 
 export const validPid = (pid: unknown): pid is number => typeof pid === "number" && Number.isInteger(pid) && pid > 0
 
+export interface ProcessFacts {
+  readonly pid: number
+  readonly parent: number
+  readonly session: string | undefined
+  readonly tty: string | undefined
+  readonly start: string
+  readonly namespace: string
+}
+
 export interface ProcessPlatform {
+  readonly inspect?: (pid: number) => Promise<ProcessFacts | undefined>
   readonly liveness: (pid: number) => Liveness
   readonly terminate: (pid: number) => void
   readonly pid: number
@@ -36,6 +46,7 @@ export interface LsofRun {
 export class Processes extends Context.Service<
   Processes,
   {
+    readonly inspect: (pid: number) => Effect.Effect<ProcessFacts | undefined>
     readonly liveness: (pid: number) => Effect.Effect<Liveness>
     readonly terminate: (pid: number) => Effect.Effect<"sent" | "denied">
     readonly cwdUsers: (dirs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<number> | undefined>
@@ -51,6 +62,10 @@ export class Processes extends Context.Service<
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           )
         return Processes.of({
+          inspect: (pid) =>
+            Effect.promise(() =>
+              validPid(pid) ? (platform.inspect?.(pid) ?? Promise.resolve(undefined)) : Promise.resolve(undefined),
+            ).pipe(Effect.orElseSucceed(() => undefined)),
           liveness: (pid) => Effect.sync(() => (validPid(pid) ? platform.liveness(pid) : "unknown")),
           terminate: (pid) =>
             Effect.sync(() => {

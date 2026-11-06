@@ -5,6 +5,8 @@ import { shellQuote } from "@vibest/schema/layout"
 import { Deferred, Duration, Effect, PubSub, type Scope, Stream } from "effect"
 import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
+import { callerCapability } from "./caller.ts"
+
 export type Machine = VibestPlugin.Runtime.Machine
 export type Terminal = VibestPlugin.Runtime.Terminal
 export type Runtime = VibestPlugin.Runtime.Runtime
@@ -392,6 +394,7 @@ export const make = (deps: {
 
     return {
       kind: KIND,
+      caller: callerCapability(connect),
       status,
       open,
       send,

@@ -458,6 +458,12 @@ describe("vibest.sock", () => {
       assert.isDefined(yield* db.readyAt(id))
       assert.strictEqual((yield* db.getSession(id))!.metadata.pid, 4242)
 
+      assert.deepStrictEqual(yield* bare["Caller.Keys"](undefined, { headers: protocolHeaders() }), [])
+      assert.deepStrictEqual(
+        yield* bare["Caller.Detect"]({ pid: 50, keys: [], env: {} }, { headers: protocolHeaders() }),
+        { status: "outside" },
+      )
+      assert.strictEqual(failureTag(yield* Effect.exit(bare["Caller.Keys"]())), "ProtocolRejected")
       yield* bare.Plugins(undefined, { headers: protocolHeaders() })
       assert.isArray(yield* bare["Runtimes.Doctor"]({ harnesses: ["pi"] }, { headers: protocolHeaders() }))
       yield* bare.Subscriptions(undefined, { headers: protocolHeaders() })
@@ -481,6 +487,8 @@ describe("vibest.sock", () => {
         "Ping",
         "Plugins",
         "Runtimes.Doctor",
+        "Caller.Keys",
+        "Caller.Detect",
         "Subscriptions",
         "Republish",
         "TurnEnd",

@@ -7,6 +7,7 @@ import { Context, Effect, FileSystem, Layer } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 
+import { callerCapability } from "./caller.ts"
 import { HerdrPool } from "./pool.ts"
 import { fromPool } from "./terminal-runtime.ts"
 
@@ -26,13 +27,14 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
     Effect.gen(function* () {
       const scope = yield* Effect.scope
       const built = yield* Layer.build(layer)
-      yield* context.runtime.register(
-        yield* fromPool({
+      yield* context.runtime.register({
+        ...(yield* fromPool({
           pool: Context.get(built, HerdrPool),
           spawner: Context.get(built, ChildProcessSpawner.ChildProcessSpawner),
           fs: Context.get(built, FileSystem.FileSystem),
           scope,
-        }),
-      )
+        })),
+        caller: yield* callerCapability.pipe(Effect.provideContext(built)),
+      })
     }),
 })

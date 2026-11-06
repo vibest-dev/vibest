@@ -277,6 +277,7 @@ export class FakeProcesses extends Context.Service<
         holdCwd: () => holdNext(cwdGate),
         setCwdDelay: (d) => Ref.set(cwdDelay, d),
         processes: Processes.of({
+          inspect: () => Effect.succeed(undefined),
           liveness: (pid) =>
             Ref.update(probed, (p) => [...p, pid]).pipe(
               Effect.andThen(Ref.get(states)),

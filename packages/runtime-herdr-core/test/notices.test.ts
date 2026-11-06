@@ -26,7 +26,7 @@ const shell = { argv: ["/bin/zsh"], cwd: "/tmp", name: "zsh", pid: 100 }
 const sleeping = { argv: ["sleep", "5"], cwd: "/tmp", name: "sleep", pid: 101 }
 type Foreground = typeof shell
 
-const recordedTerminal = (foreground: Foreground) =>
+const recordedTerminal = (foreground: Foreground, state = "live", pid: number | null = 100) =>
   JSON.stringify({
     address: "t1",
     argv: ["/bin/zsh"],
@@ -43,14 +43,14 @@ const recordedTerminal = (foreground: Foreground) =>
     name: "probe1",
     notify: false,
     parent: null,
-    pid: 100,
+    pid,
     reason: null,
     reported: false,
     rm: false,
     rows: 120,
     screen: "exact",
     signal: null,
-    state: "live",
+    state,
     status: null,
     status_ms: null,
     template: null,
@@ -87,6 +87,8 @@ const fakeCore = Effect.gen(function* () {
   const socketPath = path.join(dir, "hc.sock")
   const foreground = yield* Ref.make<Foreground>(shell)
   const calls = yield* Ref.make<ReadonlyArray<string>>([])
+  const facts = yield* Ref.make({ state: "live", pid: 100 as number | null })
+  const requests = yield* Ref.make<ReadonlyArray<string>>([])
   const subscribers = yield* Queue.unbounded<Subscriber>()
 
   const serve = (socket: Socket.Socket) =>
@@ -103,7 +105,9 @@ const fakeCore = Effect.gen(function* () {
           ),
         ),
       ).pipe(Stream.splitLines, Stream.runHead)
-      const request = yield* Request(Option.getOrElse(line, () => ""))
+      const raw = Option.getOrElse(line, () => "")
+      yield* Ref.update(requests, (all) => [...all, raw])
+      const request = yield* Request(raw)
       yield* Ref.update(calls, (all) => [...all, request.method])
       const reply = (result: string) => writer.write(`{"id":${request.id},"jsonrpc":"2.0","result":${result}}\n`)
       if (request.method === "events.subscribe") {
@@ -114,8 +118,10 @@ const fakeCore = Effect.gen(function* () {
           close: Deferred.succeed(closed, undefined).pipe(Effect.asVoid),
         })
         yield* Deferred.await(closed)
-      } else if (request.method === "terminal.get") yield* reply(recordedTerminal(yield* Ref.get(foreground)))
-      else if (request.method === "terminal.send") yield* reply('{"started":null,"status":null,"turn":0}')
+      } else if (request.method === "terminal.get") {
+        const current = yield* Ref.get(facts)
+        yield* reply(recordedTerminal(yield* Ref.get(foreground), current.state, current.pid))
+      } else if (request.method === "terminal.send") yield* reply('{"started":null,"status":null,"turn":0}')
       yield* writer.write(new Socket.CloseEvent())
     }).pipe(Effect.scoped, Effect.ignore)
 
@@ -141,6 +147,9 @@ const fakeCore = Effect.gen(function* () {
     follow,
     runtime,
     foreground,
+    facts,
+    requests,
+    socketPath,
     calls,
     subscriber: Queue.take(subscribers),
     next: Queue.take(seen),
@@ -158,6 +167,25 @@ const live = <A, E>(
   it.live(name, () => body.pipe(Effect.scoped, Effect.provide(Layer.mergeAll(BunServices.layer, HcBun.layer))), 20_000)
 
 describe("runtime-herdr-core against a fake core", () => {
+  live(
+    "caller detection checks the exact idle shell without acknowledgements; finished and pending roots are distinct",
+    Effect.gen(function* () {
+      const core = yield* fakeCore
+      const caller = core.runtime.caller!
+      assert.isUndefined(yield* caller.detect({}))
+      assert.deepStrictEqual(yield* Ref.get(core.calls), [])
+      const env = { HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: core.socketPath }
+      assert.deepStrictEqual(yield* caller.detect(env), { terminal: core.terminal, live: true, localRootPid: 100 })
+      const request = JSON.parse((yield* Ref.get(core.requests)).at(-1)!)
+      assert.deepStrictEqual(request.params, { terminal: "t1" })
+      yield* Ref.set(core.facts, { state: "finished", pid: 100 })
+      assert.strictEqual((yield* caller.detect(env))?.live, false)
+      yield* Ref.set(core.facts, { state: "live", pid: null })
+      assert.deepStrictEqual(yield* caller.detect(env), { terminal: core.terminal, live: true })
+      assert.isUndefined((yield* caller.detect({ ...env, HC_TERMINAL_ID: "remote/t1" }))?.localRootPid)
+    }),
+  )
+
   live(
     "setting the runtime up touches no core: builtins activate before vibestd listens",
     Effect.gen(function* () {

@@ -1,5 +1,6 @@
 import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
+import { callerKeys, detectCaller, unresolved } from "@vibest/core/caller-runtime"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
@@ -621,6 +622,16 @@ export const handlers = VibestRpcs.toLayer(
           })
         }),
 
+      "Caller.Keys": () => plugins.list.pipe(Effect.andThen(runtimes.all), Effect.map(callerKeys)),
+      "Caller.Detect": (input) =>
+        Effect.gen(function* () {
+          if (!(yield* plugins.settled)) return unresolved("runtime plugins are still activating; retry")
+          const snapshot = yield* runtimes.all
+          const result = yield* detectCaller(snapshot, input)
+          return snapshot === (yield* runtimes.all)
+            ? result
+            : unresolved("runtime plugins changed during detection; retry")
+        }),
       Plugins: () => plugins.list,
 
       "Runtimes.Doctor": ({ harnesses }) =>
@@ -836,7 +847,7 @@ export const handlers = VibestRpcs.toLayer(
       Prompt: ({ sessionId, harness, event }, { headers }) =>
         hook(sessionId, harness, headers, (who) => Hooks.prompt(sessions, harnesses.get(harness), who, event)),
 
-      "Project.StartMain": ({ harness, provider, model, runtime }) =>
+      "Project.StartMain": ({ harness, provider, model, runtime, callerRuntime, callerTerminal }) =>
         Effect.gen(function* () {
           const { id, directory: root } = yield* scope("Project.StartMain")
           const current = yield* db.coordinatorOf(id)
@@ -852,7 +863,7 @@ export const handlers = VibestRpcs.toLayer(
             attempts: [],
             machine: { id: "local" },
             runtime,
-            parentRuntime: current?.runtime ?? undefined,
+            parentRuntime: callerRuntime,
             machines: yield* machinesListing(runtimes, [...HARNESS_IDS]).pipe(Effect.orElseSucceed(() => [])),
           })
           if (decision.harness === undefined) return yield* new NoHarnessChosen()
@@ -864,7 +875,11 @@ export const handlers = VibestRpcs.toLayer(
           if (decision.runtime === undefined)
             return yield* new NoRuntime({ message: "no terminal runtime was chosen for the main agent" })
           const rt = yield* runtimes.route(decision.runtime)
-          yield* runtimes.online(rt, { id: decision.machine.id })
+          yield* runtimes.online(
+            rt,
+            { id: decision.machine.id },
+            rt.kind === callerRuntime ? callerTerminal : undefined,
+          )
           return { ...decision, harness: decision.harness, runtime: rt.kind }
         }),
 

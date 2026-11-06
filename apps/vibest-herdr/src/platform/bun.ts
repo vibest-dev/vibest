@@ -25,6 +25,7 @@ import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
 
 import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
+import { inspect } from "./process-facts.ts"
 
 const unrefStdio = Layer.effect(
   Stdio.Stdio,
@@ -147,7 +148,7 @@ const terminate = (pid: number) => {
   process.kill(pid, "SIGTERM")
 }
 
-const processes: ProcessPlatform = { liveness, terminate, pid: process.pid, uid: process.getuid?.() }
+const processes: ProcessPlatform = { inspect, liveness, terminate, pid: process.pid, uid: process.getuid?.() }
 
 const securityPassword = (service: string) =>
   Effect.promise(async () => {

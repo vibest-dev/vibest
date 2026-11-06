@@ -60,6 +60,13 @@ export const RuntimeDoctor = Schema.Struct({
   ),
 })
 
+export const CallerResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("outside") }),
+  Schema.Struct({ status: Schema.Literal("unresolved"), reason: Schema.String }),
+  Schema.Struct({ status: Schema.Literal("matched"), runtime: Schema.String, terminal: RuntimeAddress }),
+])
+export type CallerResult = typeof CallerResult.Type
+
 export const PingResult = Schema.Struct({
   protocol: Schema.optional(Schema.Number),
   version: Schema.String,
@@ -286,6 +293,18 @@ export class VibestRpcs extends RpcGroup.make(
       }),
     ),
   ),
+  protocol(Rpc.make("Caller.Keys", { success: Schema.Array(Schema.String) })),
+  protocol(
+    Rpc.make("Caller.Detect", {
+      payload: {
+        pid: Schema.Number,
+        keys: Schema.Array(Schema.String),
+        env: Schema.Record(Schema.String, Schema.String),
+        runtime: Schema.optional(Schema.String),
+      },
+      success: CallerResult,
+    }),
+  ),
   protocol(Rpc.make("Plugins", { success: Schema.Array(PluginInfo) })),
   protocol(
     Rpc.make("Runtimes.Doctor", {
@@ -426,6 +445,8 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     Rpc.make("Project.StartMain", {
       payload: {
+        callerRuntime: Schema.optional(Schema.String),
+        callerTerminal: Schema.optional(RuntimeAddress),
         harness: Schema.optional(Schema.Literals(HARNESS_IDS)),
         provider: Schema.optional(Schema.String),
         model: Schema.optional(Schema.String),
@@ -583,6 +604,8 @@ export const ACCESS = {
   Ping: "open",
   Plugins: "open",
   "Runtimes.Doctor": "open",
+  "Caller.Keys": "open",
+  "Caller.Detect": "open",
   Subscriptions: "open",
   Republish: "open",
   TurnEnd: "open",
@@ -617,4 +640,4 @@ export const ACCESS = {
   "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self"
 >
 
-export const CAPABILITIES = { http: true, handoff: true, requests: true, watch: true } as const
+export const CAPABILITIES = { http: true, handoff: true, requests: true, watch: true, callerRuntime: true } as const

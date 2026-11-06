@@ -53,6 +53,19 @@ export const runtimeContract = (
       `reported a status that is not one of online, offline, blocked: ${JSON.stringify(shown)}`,
     )
 
+    if (runtime.caller !== undefined) {
+      yield* that(
+        "caller",
+        runtime.caller.env.length > 0 && runtime.caller.env.every((key) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)),
+        "caller declares valid environment keys",
+      )
+      yield* that(
+        "caller",
+        (yield* runtime.caller.detect({})) === undefined,
+        "caller without environment must not probe a default terminal",
+      )
+    }
+
     const seen = yield* Ref.make<ReadonlyArray<Runtime.RuntimeEvent>>([])
     yield* runtime.events.pipe(
       Stream.runForEach((event) => Ref.update(seen, (events) => [...events, event])),

@@ -14,12 +14,8 @@ export const choicePlugin = (configured: ConfiguredRuntime = none): VibestPlugin
           if (event.runtime !== undefined) return
           const runtimes = event.machines.find((m) => m.machine === event.machine.id)?.runtimes ?? []
           const online = runtimes.filter((r) => r.status === "online")
-          if (event.parentRuntime !== undefined && online.some((r) => r.kind === event.parentRuntime)) {
-            event.runtime = event.parentRuntime
-            return
-          }
-          const wanted = yield* configured()
-          if (wanted !== undefined && online.some((r) => r.kind === wanted)) {
+          const wanted = (yield* configured()) ?? event.parentRuntime
+          if (wanted !== undefined) {
             event.runtime = wanted
             return
           }

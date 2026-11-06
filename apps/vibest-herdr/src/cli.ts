@@ -24,15 +24,7 @@ import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
 import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
-import * as HcCaller from "@vibest/runtime-herdr-core/caller"
-import { KIND as HC_KIND } from "@vibest/runtime-herdr-core/terminal-runtime"
-import {
-  CALLER_ENV as HERDR_CALLER_ENV,
-  ambientHerdr,
-  callerMachine,
-  callerTerminal,
-  inPane,
-} from "@vibest/runtime-herdr/caller"
+import { callerMachine } from "@vibest/runtime-herdr/caller"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
@@ -61,9 +53,7 @@ import { type ReplaceFailed, replaceAnyway, replaceDaemon, compareVersions, vers
 export { compareVersions }
 import { LaunchFailed } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
-import { Forbidden, type Ping, VERSION } from "@vibest/protocol/rpc"
-
-const CALLER_ENV = [...HERDR_CALLER_ENV, ...HcCaller.CALLER_ENV]
+import { type CallerResult, Forbidden, type Ping, VERSION } from "@vibest/protocol/rpc"
 
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
 
@@ -350,34 +340,32 @@ const mainFlags = {
   inParent: Flag.String("in-parent").pipe(Flag.withHidden, Flag.optional),
 }
 
-export type MainPlace =
-  | { readonly in: "hc"; readonly terminal: string }
-  | { readonly in: "caller" }
-  | { readonly in: "launch" }
-  | { readonly in: "refused"; readonly message: string }
-
-export const mainPlace = (o: {
-  readonly marked: boolean
-  readonly runtime: string | undefined
-  readonly hcTerminal: string | undefined
-  readonly herdrPane: boolean
-}): MainPlace => {
-  if (o.marked) {
-    if (o.runtime !== HC_KIND) return { in: "caller" }
-    return o.hcTerminal !== undefined
-      ? { in: "hc", terminal: o.hcTerminal }
-      : { in: "refused", message: "vibestd opened this terminal in herdr-core, but it carries no HC_TERMINAL_ID" }
-  }
-  if (o.runtime === undefined && o.hcTerminal !== undefined && o.herdrPane)
-    return {
-      in: "refused",
-      message:
-        "this terminal carries both herdr-core's HC_TERMINAL_ID and herdr's HERDR_PANE_ID, so vibest cannot tell which one runs it; say which with --runtime hc or --runtime herdr",
-    }
-  if ((o.runtime === undefined || o.runtime === HC_KIND) && o.hcTerminal !== undefined)
-    return { in: "hc", terminal: o.hcTerminal }
-  return o.herdrPane ? { in: "caller" } : { in: "launch" }
+export const mainPlace = (result: CallerResult, runtime: string, marked: boolean) => {
+  if (result.status === "matched" && result.runtime === runtime)
+    return { in: "caller", terminal: result.terminal } as const
+  if (marked)
+    return { in: "refused", message: "the opened terminal could not be verified; retry with --runtime" } as const
+  return { in: "launch" } as const
 }
+
+const callerContext = (runtime?: string) =>
+  Effect.gen(function* () {
+    return yield* withVibest((yield* caller).claim, (client) =>
+      Effect.gen(function* () {
+        const keys = yield* client["Caller.Keys"]()
+        const env = Object.fromEntries(
+          keys.filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]!]),
+        )
+        const result = yield* client["Caller.Detect"]({
+          keys,
+          env,
+          pid: process.pid,
+          ...(runtime === undefined ? {} : { runtime }),
+        })
+        return { keys, env, result }
+      }),
+    )
+  })
 
 const startMain =
   (exec: Exec) =>
@@ -417,81 +405,93 @@ const startMain =
         ...(o.fresh ? ["--new"] : []),
       ]
       const marked = Option.contains(o.inParent, root)
-      const place = mainPlace({
-        marked,
-        runtime: runtimeKind,
-        hcTerminal: yield* HcCaller.callerTerminal,
-        herdrPane: yield* inPane,
-      })
+      if (marked && Option.isSome(o.session))
+        return yield* new LaunchFailed({
+          message: `--session ${o.session.value} cannot replace the opened terminal; drop --session`,
+        })
+      if (marked && (yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
+      const context = yield* callerContext(runtimeKind)
+      if (context.result.status === "unresolved" && runtimeKind === undefined)
+        return yield* new LaunchFailed({ message: context.result.reason + "; choose a runtime with --runtime" })
+      const claim = (yield* caller).claim
+      const chosen = yield* withVibest(claim, (client) =>
+        client["Project.StartMain"]({
+          harness,
+          provider,
+          model,
+          runtime: runtimeKind,
+          ...(context.result.status === "matched"
+            ? { callerRuntime: context.result.runtime, callerTerminal: context.result.terminal }
+            : {}),
+        }),
+      )
+      const place = mainPlace(context.result, chosen.runtime, marked)
       if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
-      const inHc = place.in === "hc" ? place.terminal : undefined
-      const here = !marked && place.in === "caller" ? yield* ambientHerdr : undefined
-      const machine = yield* callerMachine(Option.getOrUndefined(o.session))
-      const inPlace = marked || inHc !== undefined || here !== undefined
-      if (inPlace) {
+      const machine = Option.isSome(o.session) ? yield* callerMachine(o.session.value) : { id: "local" }
+      if (place.in === "caller") {
         if (Option.isSome(o.session))
           return yield* new LaunchFailed({
-            message: `--session ${o.session.value} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
+            message: "--session cannot replace the caller terminal's own runtime; drop --session",
           })
         if ((yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
-        const terminal = inHc ?? (yield* callerTerminal)
-        if (terminal === undefined)
-          return yield* new LaunchFailed({
-            message: "this pane's herdr session could not be named; run vibest outside herdr",
-          })
-        if (!(yield* probe((yield* Layout).socket))) yield* startDaemon
-        const claim = (yield* caller).claim
-        const chosen = yield* withVibest(claim, (client) =>
-          client["Project.StartMain"]({
-            harness,
-            provider,
-            model,
-            runtime: inHc !== undefined ? HC_KIND : runtimeKind,
-          }),
-        )
-        if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`main agent: ${describeSpawn(chosen)}`)
+        const terminal = place.terminal.id
+        if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error("main agent: " + describeSpawn(chosen))
         const passed = Launch.commandEnv(env, marked, carried)
         const session = withVibest(claim, (client) =>
-          Effect.gen(function* () {
-            return yield* soleMainAgent(
-              client,
-              terminal,
-              client["Project.CoordinatorSession"]({
+          soleMainAgent(
+            client,
+            terminal,
+            Effect.gen(function* () {
+              const verified = yield* client["Caller.Detect"]({
+                keys: context.keys,
+                env: context.env,
+                pid: process.pid,
+                runtime: chosen.runtime,
+              })
+              if (
+                verified.status !== "matched" ||
+                verified.terminal.id !== terminal ||
+                verified.terminal.machine !== place.terminal.machine
+              )
+                return yield* new LaunchFailed({
+                  message: "caller terminal changed before registration; retry with --runtime",
+                })
+              return yield* client["Project.CoordinatorSession"]({
                 harness: chosen.harness,
                 fresh: o.fresh,
                 terminal,
-                machine,
+                machine: { id: place.terminal.machine },
                 runtime: chosen.runtime,
                 provider: chosen.provider,
                 model: chosen.model,
                 routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
                 pid: process.pid,
                 ...(Object.keys(passed).length > 0 ? { env: passed } : {}),
-              }),
-            )
-          }),
+              })
+            }),
+          ),
         )
         const main = yield* Launch.coordinatorCommand({
           harness: chosen.harness,
           root,
           provider: chosen.provider ?? null,
           model: chosen.model ?? null,
-          passEnv: CALLER_ENV,
+          passEnv: context.keys,
           session,
         }).pipe(Effect.provide(Harness.layer))
         return yield* Effect.sync(() => exec(main.file, main.args, { ...passed, ...main.env }))
       }
-      const inHerdr = here !== undefined
-      const opened = yield* withVibest((yield* caller).claim, (client) =>
+      const inRuntime = context.result.status === "matched"
+      const opened = yield* withVibest(claim, (client) =>
         client.Launch({
           argv: again,
-          focus: inHerdr || !o.headless,
+          focus: inRuntime || !o.headless,
           machine,
-          ...(runtimeKind !== undefined ? { runtime: runtimeKind } : {}),
+          runtime: chosen.runtime,
         }),
       )
-      yield* Console.log(`the main agent is starting in ${opened.place}`)
-      if (inHerdr || o.headless || !opened.attach) return
+      yield* Console.log("the main agent is starting in " + opened.place)
+      if (inRuntime || o.headless || !opened.attach) return
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const [file, ...args] = opened.attach
       yield* spawner.exitCode(
@@ -872,7 +872,7 @@ const integrationStart = (exec: Exec) =>
         root,
         provider: got.provider,
         model: got.model,
-        passEnv: CALLER_ENV,
+        passEnv: yield* withVibest((yield* caller).claim, (client) => client["Caller.Keys"]()),
         session: Effect.succeed({
           sessionId: o.id,
           harnessSessionId: got.harnessSessionId,

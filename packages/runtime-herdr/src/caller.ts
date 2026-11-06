@@ -1,8 +1,9 @@
+import type { Runtime } from "@vibest/plugin"
 import { Config, Effect, Option, Schema } from "effect"
-import { Herdr } from "effect-herdr-sdk"
+import { Herdr, SocketConnector } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { encodeTarget } from "./terminal-runtime.ts"
+import { encodeTarget, failure, terminalOf } from "./terminal-runtime.ts"
 
 export const callerLocation = (named?: string) =>
   Effect.gen(function* () {
@@ -26,28 +27,41 @@ const SessionList = Schema.decodeUnknownEffect(
   ),
 )
 
-export const callerTerminal = Effect.gen(function* () {
-  const paneId = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_PANE_ID")))
-  const socketPath = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_SOCKET_PATH")))
-  if (paneId === undefined || paneId === "" || socketPath === undefined || socketPath === "") return undefined
+export const callerCapability = Effect.gen(function* () {
+  const connector = yield* Effect.context<SocketConnector>()
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const out = yield* spawner.string(ChildProcess.make("herdr", ["session", "list", "--json"]))
-  const list = yield* SessionList(out)
-  const session = list.sessions.find((s) => s.socket_path === socketPath)
-  return session === undefined ? undefined : `${session.name}/${paneId}`
-})
-
-export const ambientHerdr = Effect.gen(function* () {
-  const socket = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_SOCKET_PATH")))
-  const pane = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_PANE_ID")))
-  if (socket === undefined || pane === undefined) return undefined
-  const client = yield* Herdr.make(socket)
-  yield* Herdr.verifyProtocol(client)
-  return { h: client, paneId: pane } as const
-})
-
-export const inPane = Effect.gen(function* () {
-  const set = (name: string) =>
-    Config.option(Config.String(name)).pipe(Effect.map((value) => Option.isSome(value) && value.value !== ""))
-  return (yield* set("HERDR_PANE_ID")) && (yield* set("HERDR_SOCKET_PATH"))
+  return {
+    env: CALLER_ENV,
+    detect: (env) =>
+      Effect.gen(function* () {
+        const pane = env.HERDR_PANE_ID
+        const socket = env.HERDR_SOCKET_PATH
+        if (!pane && !socket) return undefined
+        if (!pane || !socket) return yield* Effect.fail(failure({ message: "incomplete caller environment" }))
+        const list = yield* spawner
+          .string(ChildProcess.make("herdr", ["session", "list", "--json"]))
+          .pipe(Effect.flatMap(SessionList), Effect.mapError(failure))
+        const session = list.sessions.find((s) => s.socket_path === socket)
+        if (!session) return yield* Effect.fail(failure({ message: "caller session is unavailable" }))
+        const terminal = terminalOf(session.name, pane)
+        if (!session.running) return { terminal, live: false }
+        const client = yield* Herdr.make(socket).pipe(Effect.provideContext(connector))
+        return yield* Herdr.verifyProtocol(client).pipe(
+          Effect.andThen(client.call("pane.process_info", { pane_id: pane })),
+          Effect.flatMap((r) =>
+            r.type === "pane_process_info"
+              ? Effect.succeed({
+                  terminal,
+                  live: r.process_info.shell_pid != null,
+                  ...(r.process_info.shell_pid == null ? {} : { localRootPid: r.process_info.shell_pid }),
+                })
+              : Effect.fail(failure({ message: "invalid caller process reply" })),
+          ),
+          Effect.mapError(failure),
+          Effect.catchTag("RuntimeError", (error) =>
+            error.code === "not_found" ? Effect.succeed({ terminal, live: false }) : Effect.fail(error),
+          ),
+        )
+      }),
+  } satisfies NonNullable<Runtime.Runtime["caller"]>
 })

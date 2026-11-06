@@ -618,10 +618,13 @@ export class Sessions extends Context.Service<
         harnesses.all.map((adapter) => adapter.id),
       )
 
-      const chosenRuntime = (decision: {
-        readonly machine: { readonly id: string }
-        readonly runtime: string | undefined
-      }) =>
+      const chosenRuntime = (
+        decision: {
+          readonly machine: { readonly id: string }
+          readonly runtime: string | undefined
+        },
+        parent?: { readonly runtime: string; readonly address: Terminal },
+      ) =>
         Effect.gen(function* () {
           if (decision.runtime === undefined) {
             const machines = yield* machinesListing
@@ -633,7 +636,11 @@ export class Sessions extends Context.Service<
             })
           }
           const rt = yield* runtimes.route(decision.runtime)
-          yield* runtimes.online(rt, { id: decision.machine.id })
+          yield* runtimes.online(
+            rt,
+            { id: decision.machine.id },
+            parent?.runtime === rt.kind && parent.address.machine === decision.machine.id ? parent.address : undefined,
+          )
           return rt
         })
 
@@ -662,7 +669,16 @@ export class Sessions extends Context.Service<
       const spawn = Effect.fn("Sessions.spawn")(function* (input: SpawnInput) {
         const root = input.root
         const agent = input.agent ?? "general"
-        const parent = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
+        const worker = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
+        const main =
+          input.parentSessionId !== undefined && worker === undefined
+            ? yield* db.coordinatorOf(input.projectId)
+            : undefined
+        const parent =
+          worker ??
+          (main?.id === input.parentSessionId && main?.runtime && main.address
+            ? { runtime: main.runtime, address: main.address }
+            : undefined)
         const decision = yield* plugins.start({
           project: root,
           agentType: agent,
@@ -683,7 +699,7 @@ export class Sessions extends Context.Service<
         })
         const { provider, model } = decision
         if (decision.harness === undefined) return yield* new NoHarnessChosen()
-        const rt = yield* chosenRuntime(decision)
+        const rt = yield* chosenRuntime(decision, parent)
         const machine: Machine = {
           id: decision.machine.id,
           ...(input.machine.id === decision.machine.id && input.machine.target !== undefined

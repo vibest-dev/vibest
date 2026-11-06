@@ -423,12 +423,13 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     })
 
     const list = settled.pipe(Effect.andThen(Effect.sync(() => slots.map(info))))
-    return { service: Plugins.of({ start, fail, list }), activate, ready }
+    return { service: Plugins.of({ start, fail, list, settled }), activate, ready }
   })
 
 export class Plugins extends Context.Service<
   Plugins,
   {
+    readonly settled: Effect.Effect<boolean>
     readonly start: (input: StartInput) => Effect.Effect<SpawnDecision, AgentRefused>
     readonly fail: (
       input: FailInput,
