@@ -1,18 +1,17 @@
 # Themes
 
 One theme colors the whole window: the sidebar, the tab bar, the controls,
-the pane gutter and dividers, and the terminal colors of the panes. herdr
-stays the only backend. A theme changes how the client draws herdr's data.
-It does not change sessions, panes, agent states or the client protocol.
-Switching themes keeps the connection and the pane contents. It reports the
-new terminal colors to herdr, which answers OSC 10/11/4 queries and mode
-2031 with them. A switch does not always keep the pane size: a theme with a
-different font size or cell height changes the space left for the panes, so
-herdr is sent the new columns and rows and the programs in the panes reflow.
+the pane gutter and dividers, and the terminal colors of the panes. herdr-core
+stays the only backend. A theme changes how the app draws, in each pane's own
+VT; it does not change Core terminals, the layout document or agent states.
+Switching themes keeps the connection and the pane contents. A switch does not
+always keep the pane size: a theme with a different font size or cell height
+changes the space left for the panes, so the terminals are resized and the
+programs in them reflow.
 None of the built-in themes do that. Newsprint asks for Office Code Pro when
 that family is installed; otherwise the pane font stays yours.
 
-reherdr does not read Otty, Otty's configuration, or any theme file.
+Vibest does not read Otty, Otty's configuration, or any theme file.
 
 ## Choosing a theme
 
@@ -33,19 +32,19 @@ Built-in themes:
 | Newsprint   | light     | Cream and ink, a dark slate selected row with white text.                                                                                                                                                                                                                                           |
 | TVA Light   | light     | The light companion of TVA Control: warm neutral off-white paper, subtle warm-gray surfaces, tobacco-brown text and a burnt-orange accent, with olive, ochre and wine statuses. The selected row and tab have a thin rust edge, warm gray while the window is not focused. It keeps your pane font. |
 | Nord        | dark      | The [Nord](https://www.nordtheme.com) palette (MIT). The default dark theme.                                                                                                                                                                                                                        |
-| TVA Control | dark      | reherdr's own warm control-room look: charcoal brown, cream text and amber. The selected row and tab have a thin amber edge, tan while the window is not focused. It keeps your pane font.                                                                                                          |
+| TVA Control | dark      | Vibest's own warm control-room look: charcoal brown, cream text and amber. The selected row and tab have a thin amber edge, tan while the window is not focused. It keeps your pane font.                                                                                                           |
 | Ghostty     | either    | Shown only when your Ghostty config sets `theme`. The panes use your Ghostty colors, including `light:X,dark:Y` pairs. The chrome is a neutral shade between the terminal's background and foreground, and its accent and status colors come from the terminal palette.                             |
 
 The color roles of Paper, Newsprint and Nord (surfaces, text, borders, the
 selected card, hover, the terminal colors and palette) are the values
 audited from the Otty themes of the same names. Those values are built into
-reherdr. No Otty code, assets or files are read. Where that audit set no
+Vibest. No Otty code, assets or files are read. Where that audit set no
 value, such as status colors, cursor, selection or the divider, the value
-is reherdr's own. Paper and Newsprint are different themes; Paper is not
+is Vibest's own. Paper and Newsprint are different themes; Paper is not
 Newsprint.
 
 TVA Control and TVA Light are not from Otty or any other source; all of
-their values are reherdr's own. They are an original retro look, inspired by
+their values are Vibest's own. They are an original retro look, inspired by
 a color family, with no film artwork or logos, and no claim to match any
 film's colors. To pair them, follow the system appearance and choose
 TVA Light under **Light Appearance** and TVA Control under **Dark
@@ -104,9 +103,8 @@ state file that exists, even a damaged one, is never replaced by it.
 Development previews set both directories to `vibest-desktop-dev`, with
 `open -n APP --env VIBEST_DESKTOP_CONFIG_DIR=$HOME/.config/vibest-desktop-dev --env
 VIBEST_DESKTOP_STATE_DIR=$HOME/.local/state/vibest-desktop-dev`, so their theme
-choice and window stay apart from the installed app's. `scripts/perf.sh`,
-`scripts/e2e-window.sh` and the Go tests set both to temporary directories
-of their own and never touch either.
+choice and window stay apart from the installed app's. The Go tests set both
+to temporary directories of their own and never touch either.
 
 `settings.json` stores only the theme choice, `window-state.json` only the
 window's geometry, saved when the window closes or the app quits. Both are
@@ -121,44 +119,6 @@ panes says what happened. The line can be dismissed.
   Nord (dark), and the note names the saved choice.
 
 Details go to the log.
-
-## herdr's own theme
-
-herdr ([herdrdev/herdr](https://github.com/herdrdev/herdr)) stays the
-backend. Its `[theme]` setting and reherdr's themes are separate, and
-neither has to change for the other. You do not need to change herdr's
-configuration to use reherdr.
-
-- **Terminal colors.** herdr's theme does not define the terminal's default
-  colors or its 16-color palette. reherdr reports its theme's foreground,
-  background and ANSI 0-15 to herdr over the client protocol, when it
-  connects and on every theme switch. herdr then answers programs' OSC
-  10/11/4 queries with them and tells programs using mode 2031 when the
-  lightness changes.
-- **Which cell colors a theme sets.** reherdr maps the default colors and
-  ANSI 0-15 to its theme. Entries 16-255 use the fixed xterm cube and grays,
-  and RGB colors are drawn as they are. A palette entry a program
-  redefined with OSC 4 reaches reherdr as an RGB color, so it keeps the
-  program's value across theme switches. The theme does not change these
-  colors itself; a program may still change them when it is told of a
-  switch.
-- **Several clients on one herdr.** The terminal's default colors, its
-  answers to color queries and mode 2031 reports follow the client that is
-  active. Another app or terminal on the same herdr with a different theme
-  changes what programs see while it is active.
-- **Colors herdr draws itself (known limitation).** A few cells of the
-  pane area come with RGB colors from herdr's own theme, not reherdr's:
-  - pane border titles and agent labels: reherdr draws its own borders and
-    dividers but keeps the label text's color, so a label can contrast
-    poorly with a reherdr theme. For example, catppuccin-latte's labels on
-    Nord or Paper measure about 2.5:1. This is read from both programs'
-    source;
-  - herdr's scrollbar column: herdr's source puts it outside a pane's
-    terminal area, and reherdr shows the whole area of an unframed pane,
-    so these cells would be drawn with herdr's colors. This is read from
-    the source only and was not seen in a running app.
-
-  Restyling these belongs to the planned pane headers.
 
 ## Active pane cue
 
