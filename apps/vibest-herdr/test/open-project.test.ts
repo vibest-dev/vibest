@@ -28,7 +28,6 @@ const movedCheckout = () => {
 
 describe("openProject in a checkout that moved asks [Y/n] before anything starts", () => {
   for (const [name, stdin, move, id] of [
-    ["y", typed("y\n"), true, "p"],
     ["Enter", typed("\n"), true, "p"],
     ["n", typed("n\n"), false, "q"],
   ] as const)

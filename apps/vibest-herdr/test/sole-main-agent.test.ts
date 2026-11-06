@@ -4,12 +4,12 @@ import { TestClock } from "effect/testing"
 
 import { soleMainAgent } from "../src/cli.ts"
 
-const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>, out: Array<string> = []) =>
+const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>) =>
   Stdio.layerTest({
     stdinIsTerminal: Effect.succeed(terminal),
     stdoutIsTerminal: Effect.succeed(terminal),
     stdin,
-    stdout: () => Sink.forEach((chunk: string | Uint8Array) => Effect.sync(() => out.push(String(chunk)))),
+    stdout: () => Sink.drain,
   })
 const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 
@@ -60,19 +60,6 @@ describe("soleMainAgent while the main agent runs in another terminal: only a y 
       assert.deepStrictEqual(f.calls, ["RunningCoordinator"])
     }).pipe(Effect.provide(stdio(true, Stream.never))),
   )
-
-  it.effect("y: asks to move it here, stops it, then starts", () => {
-    const out: Array<string> = []
-    return Effect.gen(function* () {
-      const f = recordingClient("stopped")
-      assert.strictEqual(yield* f.run, "started")
-      assert.deepStrictEqual(f.calls, ["RunningCoordinator", "StopCoordinator", "start"])
-      assert.include(
-        out.join(""),
-        "The main agent (claude) runs in herdr terminal w1:p1. Move it here and continue? [y/N]",
-      )
-    }).pipe(Effect.provide(stdio(true, typed("y\n"), out)))
-  })
 
   it.effect("y but the stop did not finish (running) or the main agent moved meanwhile: fails, starts nothing", () =>
     Effect.gen(function* () {

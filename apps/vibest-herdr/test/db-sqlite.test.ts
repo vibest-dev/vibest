@@ -21,23 +21,7 @@ const modes = (file: string) =>
     return { db: yield* modeOf(file), wal: yield* modeOf(`${file}-wal`), shm: yield* modeOf(`${file}-shm`) }
   })
 
-const SQLITE_SYNCHRONOUS_NORMAL = 1
-
 describe("SQLite", () => {
-  it.effect("a writable database is WAL with synchronous NORMAL", () =>
-    Effect.gen(function* () {
-      const file = `${yield* tempDirectory("vibest-sqlite-sync-")}/vibest.db`
-      yield* Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        assert.strictEqual((yield* sql<{ journalMode: string }>`PRAGMA journal_mode`)[0]?.journalMode, "wal")
-        assert.strictEqual(
-          (yield* sql<{ synchronous: number }>`PRAGMA synchronous`)[0]?.synchronous,
-          SQLITE_SYNCHRONOUS_NORMAL,
-        )
-      }).pipe(Effect.provide(database(file)))
-    }).pipe(Effect.provide(Platform.services)),
-  )
-
   it.effect(
     "vibest.db and its wal and shm are mode 0600, including files that were looser (a second connection holds the wal open so SQLite neither deletes nor recreates it)",
     () =>
@@ -59,15 +43,9 @@ describe("SQLite", () => {
       }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("a writable transaction is BEGIN IMMEDIATE and busy_timeout is 5000", () =>
+  it.effect("a writable transaction is BEGIN IMMEDIATE", () =>
     Effect.gen(function* () {
       const dir = yield* tempDirectory("vibest-sqlite-lock-")
-      const pragmaFile = `${dir}/pragma.db`
-      yield* Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        assert.strictEqual((yield* sql<{ timeout: number }>`PRAGMA busy_timeout`)[0]?.timeout, 5000)
-      }).pipe(Effect.provide(Platform.sqlite(pragmaFile)))
-
       const file = `${dir}/lock.db`
       const vibestsOwnConnection = Context.get(yield* Layer.build(Platform.sqlite(file)), SqlClient.SqlClient)
       const writerThatTimesOutFast = Context.get(

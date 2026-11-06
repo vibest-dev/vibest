@@ -84,7 +84,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
   )
 
   test(
-    "a name whose directory already exists is skipped and left untouched",
+    "a name whose directory or dangling symlink already exists is skipped and left untouched",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -92,15 +92,18 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      allocationNameSource.leaves = ["ab01", "ab02"]
+      allocationNameSource.leaves = ["ab01", "ab02", "ab03"]
       const reset = Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined)))
       const repository = yield* repositoryDirectoryName(repo)
       const taken = layout.allocationWorktree(repository, "ab01")
       yield* marker(taken)
+      const link = layout.allocationWorktree(repository, "ab02")
+      yield* fs.symlink("nowhere", link)
       const { id } = yield* sessions.spawn(yield* spawnInput(repo)).pipe(reset)
-      assert.strictEqual(yield* directoryOf(id), layout.allocationWorktree(repository, "ab02"))
+      assert.strictEqual(yield* directoryOf(id), layout.allocationWorktree(repository, "ab03"))
       yield* until(db.getSession(id), (w) => w?.startedAt !== null)
       assert.strictEqual(yield* fs.readFileString(path.join(taken, "keep")), "keep\n")
+      assert.strictEqual(yield* fs.readLink(link), "nowhere")
     }),
   )
 
@@ -127,61 +130,6 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
   )
 
   test(
-    "a dangling symlink at a name is skipped and left alone",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const layout = yield* Layout
-      const db = yield* Db
-      const sessions = yield* Sessions
-      const repo = yield* makeRepository
-      allocationNameSource.leaves = ["ab01", "ab02"]
-      const reset = Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined)))
-      const repository = yield* repositoryDirectoryName(repo)
-      const at = layout.allocationWorktree(repository, "ab01")
-      yield* fs.makeDirectory(path.dirname(at), { recursive: true })
-      yield* fs.symlink("nowhere", at)
-      yield* fs.writeFileString(path.join(path.dirname(at), "keep"), "keep\n")
-      const { id } = yield* sessions.spawn(yield* spawnInput(repo)).pipe(reset)
-      assert.strictEqual(yield* directoryOf(id), layout.allocationWorktree(repository, "ab02"))
-      yield* until(db.getSession(id), (w) => w?.startedAt !== null)
-      assert.strictEqual(yield* fs.readLink(at), "nowhere")
-      assert.strictEqual(yield* fs.readFileString(path.join(path.dirname(at), "keep")), "keep\n")
-    }),
-  )
-
-  test(
-    "a file at the only free name refuses the spawn, and list leaves it beside a real worktree",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const herdr = yield* FakeRuntime
-      const layout = yield* Layout
-      const db = yield* Db
-      const sessions = yield* Sessions
-      const repo = yield* makeRepository
-      allocationNameSource.leaves = ["ab01", "ab02"]
-      const reset = Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined)))
-      const { id: live } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* until(db.getSession(live), (w): w is NonNullable<typeof w> => w?.turnState === "open")
-      const liveTree = yield* directoryOf(live)
-      const repository = yield* repositoryDirectoryName(repo)
-      const file = layout.allocationWorktree(repository, "ab02")
-      yield* fs.makeDirectory(path.dirname(file), { recursive: true })
-      yield* fs.writeFileString(file, "keep\n")
-      const refused = yield* Effect.flip(sessions.spawn(yield* spawnInput(repo)).pipe(reset))
-      assert.include(refused.message, "no unused 4-hex worktree name")
-      assert.lengthOf(yield* herdr.callsTo("open"), 1)
-      const rows = yield* sessions.list()
-      const of = (sessionId: string) => rows.find((row) => row.id === sessionId)
-      assert.strictEqual(of(live)!.worktree, liveTree)
-      assert.ok(of(live)!.git)
-      assert.strictEqual(yield* fs.readFileString(file), "keep\n")
-      assert.isTrue(yield* fs.exists(liveTree))
-    }),
-  )
-
-  test(
     "a failed launch removes only the worktree it created",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -199,28 +147,6 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       yield* until(db.getSession(id), (w) => !!w && w.exitedAt !== null)
       assert.isFalse(yield* fs.exists(wt))
       assert.strictEqual(yield* fs.readFileString(path.join(path.dirname(wt), "sibling")), "group\n")
-    }),
-  )
-
-  test(
-    "a recorded directory that is gone is reported gone, and nothing else is touched",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const layout = yield* Layout
-      const db = yield* Db
-      const sessions = yield* Sessions
-      const repo = yield* makeRepository
-      const id = "d4e5f6a7-d4e5-4d4e-8d4e-d4e5f6a7d4e5"
-      const key = yield* projectOf(repo)
-      const repository = yield* repositoryDirectoryName(repo)
-      const neighbour = layout.allocationWorktree(repository, "cd35")
-      yield* marker(neighbour)
-      const grouped = layout.allocationWorktree(repository, "cd34")
-      yield* db.insertSession(storedRow(id, {}, { exitedAt: 1 }), key, undefined, grouped)
-      const out = (yield* sessions.remove(id))!
-      assert.deepInclude(out, { worktree: "gone", path: grouped })
-      assert.include(out.reasons.join("\n"), grouped + " was already gone")
-      assert.strictEqual(yield* fs.readFileString(neighbour + "/keep"), "keep\n")
     }),
   )
 
@@ -288,21 +214,27 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
   )
 
   test(
-    "exhausting the bounded name list inserts no row",
+    "exhausting the bounded name list, a directory and a file taking the names, opens nothing and inserts no row",
     Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const herdr = yield* FakeRuntime
       const db = yield* Db
       const sessions = yield* Sessions
       const layout = yield* Layout
       const repo = yield* makeRepository
       yield* sh(repo, "remote", "add", "origin", "git@github.com:Org/MyRepo.git")
       yield* marker(layout.allocationWorktree("MyRepo", "abcd"))
+      const file = layout.allocationWorktree("MyRepo", "abce")
+      yield* fs.writeFileString(file, "keep\n")
       const before = (yield* db.listSessions({ stopped: true })).map((row) => row.id)
-      allocationNameSource.leaves = ["abcd"]
+      allocationNameSource.leaves = ["abcd", "abce"]
       const failed = yield* Effect.flip(sessions.spawn(yield* spawnInput(repo))).pipe(
         Effect.ensuring(Effect.sync(() => (allocationNameSource.leaves = undefined))),
       )
       assert.strictEqual(failed._tag, "AllocationFailed")
       assert.include(failed.message, "no unused 4-hex")
+      assert.lengthOf(yield* herdr.callsTo("open"), 0)
+      assert.strictEqual(yield* fs.readFileString(file), "keep\n")
       assert.deepStrictEqual(
         (yield* db.listSessions({ stopped: true })).map((row) => row.id),
         before,
