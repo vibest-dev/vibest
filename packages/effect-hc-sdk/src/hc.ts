@@ -1,7 +1,7 @@
 import { Cause, Config, Context, Effect, Layer, Option, type Path, Schema, Stream } from "effect"
 import * as Socket from "effect/socket/Socket"
 
-import { GENERATION, METHODS, type SubscribeResult } from "./generated/api.js"
+import { GENERATION, METHODS, MIN_VERSION, type SubscribeResult } from "./generated/api.js"
 import { SocketConnector } from "./socket-connector.js"
 import { defaultSocketPath } from "./socket-path.js"
 
@@ -29,6 +29,47 @@ export class HcGenerationMismatch extends Schema.TaggedError<HcGenerationMismatc
   message: Schema.String,
 }) {}
 
+export class HcCoreTooOld extends Schema.TaggedError<HcCoreTooOld>()("HcCoreTooOld", {
+  socketPath: Schema.String,
+  version: Schema.String,
+  minimum: Schema.String,
+  message: Schema.String,
+}) {}
+
+export class HcMethodsMissing extends Schema.TaggedError<HcMethodsMissing>()("HcMethodsMissing", {
+  socketPath: Schema.String,
+  missing: Schema.Array(Schema.String),
+  message: Schema.String,
+}) {}
+
+export type HcIncompatible = HcGenerationMismatch | HcCoreTooOld | HcMethodsMissing
+
+export const USED_METHODS: ReadonlyArray<Method> = [
+  "events.subscribe",
+  "terminal.get",
+  "terminal.keys",
+  "terminal.kill",
+  "terminal.label",
+  "terminal.read",
+  "terminal.rm",
+  "terminal.run",
+  "terminal.send",
+]
+
+const semver = (v: string): ReadonlyArray<number> =>
+  v
+    .trim()
+    .replace(/^hc /, "")
+    .split(/[.-]/)
+    .slice(0, 3)
+    .map((n) => Number.parseInt(n, 10) || 0)
+
+const olderThan = (a: string, b: string): boolean => {
+  const [x, y] = [semver(a), semver(b)]
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0)
+  return false
+}
+
 export const HcEvent = Schema.Struct({
   type: Schema.String,
   seq: Schema.Number,
@@ -45,7 +86,7 @@ export type Notice =
 export interface HcShape {
   readonly socketPath: string
   readonly call: <M extends Method>(method: M, params: ParamsOf<M>) => Effect.Effect<ResultOf<M>, HcFailure>
-  readonly hello: Effect.Effect<ResultOf<"hello">, HcFailure | HcGenerationMismatch>
+  readonly hello: Effect.Effect<ResultOf<"hello">, HcFailure | HcIncompatible>
   readonly subscribe: (params: ParamsOf<"events.subscribe">) => Stream.Stream<Notice, HcFailure>
 }
 
@@ -136,19 +177,53 @@ function makeClient(socketPath: string, connect: SocketConnector["Service"]): Hc
   const hello = call("hello", { generation: GENERATION }).pipe(
     Effect.catchIf(
       (e): e is HcError => e._tag === "HcError" && e.kind === "unsupported_generation",
-      (e) => Effect.fail(new HcGenerationMismatch({ socketPath, expected: GENERATION, message: e.message })),
+      (e) =>
+        Effect.fail(
+          new HcGenerationMismatch({
+            socketPath,
+            expected: GENERATION,
+            message: `${e.message}${e.hint ? ` (${e.hint})` : ""}: update vibest`,
+          }),
+        ),
     ),
-    Effect.flatMap((r) =>
-      r.generation === GENERATION
+    Effect.flatMap((r): Effect.Effect<ResultOf<"hello">, HcIncompatible> => {
+      const core = `herdr-core ${r.version}`
+      if (r.generation > GENERATION)
+        return Effect.fail(
+          new HcGenerationMismatch({
+            socketPath,
+            expected: GENERATION,
+            message: `${core} speaks protocol generation ${r.generation}, vibest speaks ${GENERATION}: update vibest`,
+          }),
+        )
+      if (r.generation < GENERATION)
+        return Effect.fail(
+          new HcGenerationMismatch({
+            socketPath,
+            expected: GENERATION,
+            message: `${core} speaks protocol generation ${r.generation}, vibest needs ${GENERATION}: update herdr-core`,
+          }),
+        )
+      if (olderThan(r.version, MIN_VERSION))
+        return Effect.fail(
+          new HcCoreTooOld({
+            socketPath,
+            version: r.version,
+            minimum: MIN_VERSION,
+            message: `${core} is older than the minimum ${MIN_VERSION} vibest needs: update herdr-core`,
+          }),
+        )
+      const missing = USED_METHODS.filter((m) => !r.methods.includes(m))
+      return missing.length === 0
         ? Effect.succeed(r)
         : Effect.fail(
-            new HcGenerationMismatch({
+            new HcMethodsMissing({
               socketPath,
-              expected: GENERATION,
-              message: `herdr-core ${r.version} speaks generation ${r.generation}`,
+              missing,
+              message: `${core} lacks methods vibest calls (${missing.join(", ")}): update herdr-core`,
             }),
-          ),
-    ),
+          )
+    }),
   )
 
   const subscribe = (params: ParamsOf<"events.subscribe">): Stream.Stream<Notice, HcFailure> => {
