@@ -18,8 +18,9 @@ type coreSplitDrag struct {
 }
 
 type coreLook struct {
-	font  terminal.Font
-	theme *terminal.Theme
+	terminal *terminal.Terminal
+	font     terminal.Font
+	theme    *terminal.Theme
 }
 
 func (a *App) corePanes(c *ui.Context) {
@@ -175,7 +176,10 @@ func (a *App) corePaneView(c *ui.Context, p *core.Pane) {
 				return
 			}
 			a.lookedAt(p.Terminal.Address)
-			style := ui.Local(card, "terminal-look", func() coreLook { return coreLook{opts.Font, a.th.Terminal} })
+			style := ui.Local(card, "terminal-look", func() coreLook { return coreLook{} })
+			if style.terminal != view.VT {
+				*style = coreLook{terminal: view.VT}
+			}
 			if style.theme != a.th.Terminal {
 				view.VT.SetTheme(a.th.Terminal, nil)
 				style.theme = a.th.Terminal
