@@ -10,16 +10,6 @@ import {
   RuntimeAddress,
   TurnState,
 } from "@vibest/schema/session"
-// The only place with SQL (docs/design/schema.md, version 1: project, project_repository, session, inbox, event). One
-// schema, no migrations: an empty database gets it in one transaction; any other file is accepted only when its
-// version pragmas and required objects already match. A file of the shape from before this baseline (it also says
-// version 1, but has no event table) is refused, naming the one-time migration script given with the release.
-// `inspectSchema` only reads; the driver must run it on a read-only connection before opening an existing file
-// writable. One SQLite connection through effect/sql (the driver comes from #platform); rows are decoded with Schema;
-// multi-row changes run in `tx`: one transaction, and the events it appended are published after the commit.
-//
-// The session row callers read (`SessionRow`) is a read model: its process, turn and live fields come from the
-// append-only `event` table, and every change to them appends an event (schema.md, Event types).
 import { Clock, Context, Effect, Layer, Schema, String as Str } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
@@ -32,29 +22,18 @@ export { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnStat
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
 export const encodeAddress = Schema.encodeSync(AddressJson)
 
-/** What a running agent reports and a restart needs; on every session row, the main agent's too. */
 const Live = {
-  /** The integration (harness plugin) version and protocol the agent last sent (vibest-plugin-version, vibest-protocol). */
   integration: Schema.optional(Schema.Struct({ version: Schema.String, protocol: Schema.Number })),
-  /** The harness's own process, as its integration reported it when ready: the pid a restart sends SIGTERM to. */
   pid: Schema.optional(Schema.Number),
-  /** When the harness's integration reported it takes input; none since its process started. */
   ready: Schema.optional(Schema.Number),
 }
 
 const Metadata = Schema.Struct({
   ...Live,
   routing: Schema.optional(Routing),
-  /** `vibest run --archive-on-completion`: archived once a completed result reached the coordinator. */
   archive: Schema.optional(Schema.Boolean),
-  /** `vibest archive` (alias `rm`) ran (`session.ended_at`): never resumed again, even when its worktree was kept. */
   archived: Schema.optional(Schema.Boolean),
-  /** Same as `archived`, for older readers. */
   removed: Schema.optional(Schema.Boolean),
-  /**
-   * Real usage-limit tries for this session, oldest first: the (harness, provider) pairs whose process ended on a
-   * limit (`process.end` reason `limited`). Skips inside one move are not kept.
-   */
   attempts: Schema.optional(
     Schema.Array(
       Schema.Struct({
@@ -66,7 +45,6 @@ const Metadata = Schema.Struct({
     ),
   ),
 })
-/** A session in the shape its callers read: its columns plus what its events say. */
 export const SessionRow = Schema.Struct({
   id: Schema.String,
   projectId: Schema.String,
@@ -78,11 +56,8 @@ export const SessionRow = Schema.Struct({
   name: Schema.String,
   provider: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
-  /** The runtime's status of the agent, last seen; `unknown` before the runtime reported it. Memory only. */
   status: AgentStatus,
-  /** When its agent last started (spawn or resume); null while the first start is under way. */
   startedAt: Schema.NullOr(Schema.Number),
-  /** When its agent process was seen gone (or never came up); cleared when it starts again. */
   exitedAt: Schema.NullOr(Schema.Number),
   turnState: TurnState,
   turnPromptedAt: Schema.Number,
@@ -92,15 +67,12 @@ export const SessionRow = Schema.Struct({
 })
 export type SessionRow = typeof SessionRow.Type
 
-/** Why a process ended (`process.end` reason). */
 export type EndReason = "exited" | "limited" | "restart" | "move" | "archived" | "launch_failed"
 
 export type SessionPatch = Partial<Omit<SessionRow, "id" | "projectId" | "agent" | "createdAt" | "runtime">> & {
-  /** With `exitedAt`: why its process ended. Default `exited`. */
   readonly end?: EndReason
 }
 
-/** The project's main agent. */
 export const CoordinatorRow = Schema.Struct({
   id: Schema.String,
   projectId: Schema.String,
@@ -108,10 +80,8 @@ export const CoordinatorRow = Schema.Struct({
   harnessSessionId: Schema.NullOr(Schema.String),
   runtime: Schema.NullOr(Schema.String),
   address: Schema.NullOr(AddressJson),
-  /** The project directory (`project.directory`), else its main session's. Absent when neither is known. */
   projectDirectory: Schema.optional(Schema.String),
   createdAt: Schema.Number,
-  /** What scheduling chose when it last started (Project.StartMain): provider, model, routing. */
   provider: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
   routing: Schema.optional(Routing),
@@ -121,7 +91,6 @@ export type CoordinatorRow = typeof CoordinatorRow.Type
 
 export type NewInboxRow = Omit<InboxRow, "id" | "status" | "createdAt">
 
-/** The session an earlier try of the same spawn request made, with its first process's choice. */
 export type SpawnedBefore = {
   readonly id: string
   readonly harness: string
@@ -131,10 +100,8 @@ export type SpawnedBefore = {
   readonly routing: typeof Routing.Type | undefined
 }
 
-/** A repository of a project as `project_repository` keeps it: its main checkout's realpath and raw origin. */
 export type RepositoryRow = { readonly path: string; readonly remote: string | undefined }
 
-/** "vibe", as a 32-bit application id. */
 export const APPLICATION_ID = 0x76696265
 export const SCHEMA_VERSION = 1
 
@@ -208,9 +175,7 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
   version: Schema.Number,
   applicationId: Schema.Number,
   detail: Schema.optional(Schema.String),
-  /** vibest's own file in the shape from before this baseline (no event table). */
   older: Schema.optional(Schema.Boolean),
-  /** The database file, set by the driver that opened it. */
   file: Schema.optional(Schema.String),
 }) {
   override get message() {
@@ -223,7 +188,6 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
   }
 }
 
-/** The objects an existing file must have. Columns are not diffed. */
 const REQUIRED = SCHEMA.flatMap((statement) => {
   const found = /^CREATE (?:UNIQUE )?(TABLE|INDEX|TRIGGER) (\w+)/.exec(statement)
   return found ? [{ type: found[1]!.toLowerCase(), name: found[2]! }] : []
@@ -232,7 +196,6 @@ const REQUIRED = SCHEMA.flatMap((statement) => {
 const mismatch = (version: number, applicationId: number, detail?: string) =>
   new SchemaMismatch({ version, applicationId, ...(detail === undefined ? {} : { detail }) })
 
-/** Read-only. `"empty"` has no objects; `"ready"` is this schema. Does not install or repair. */
 export const inspectSchema = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const rows = yield* sql.unsafe<{ type: string; name: string }>("SELECT type, name FROM sqlite_master")
@@ -240,7 +203,6 @@ export const inspectSchema = Effect.gen(function* () {
   const applicationId = (yield* sql<{ applicationId: number }>`PRAGMA application_id`)[0]?.applicationId ?? 0
   const userVersion = (yield* sql<{ userVersion: number }>`PRAGMA user_version`)[0]?.userVersion ?? 0
   const missing = REQUIRED.find((object) => !rows.some((row) => row.type === object.type && row.name === object.name))
-  // The shape before this baseline carries the same pragmas; it is told apart by its tables.
   if (
     applicationId === APPLICATION_ID &&
     userVersion === SCHEMA_VERSION &&
@@ -262,11 +224,9 @@ const objectCount = SqlClient.SqlClient.pipe(
   Effect.map((rows) => rows[0]?.n ?? 0),
 )
 
-/** Install the schema on an empty file; refuse anything else that is not already this schema, without writing (SPEC §5.2). */
 export const migrate = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   if ((yield* inspectSchema) === "empty") {
-    // The write lock makes the recheck authoritative: a concurrent empty open either installs or sees the winner.
     const installed = yield* sql.withTransaction(
       Effect.gen(function* () {
         if ((yield* objectCount) !== 0) return false
@@ -279,7 +239,6 @@ export const migrate = Effect.gen(function* () {
   if ((yield* inspectSchema) !== "ready") return yield* mismatch(0, 0, "empty after install")
 })
 
-/** `process.start` data (schema.md): the choice and where it runs. An empty terminal: chosen, its terminal not open yet. */
 type ProcessStart = {
   readonly harness: string
   readonly provider?: string
@@ -288,15 +247,12 @@ type ProcessStart = {
   readonly runtime: string
   readonly machine: string
   readonly terminal: string
-  /** The conversation id it continues (or was given before its first start). */
   readonly resume?: string
-  /** The harness's pid when vibest itself execs it (the main agent), before its integration reports one. */
   readonly pid?: number
 }
 
 type Integration = { readonly version: string; readonly protocol: number }
 
-/** One session row with what its events say, as the read query returns it. */
 type SessionSql = {
   readonly id: string
   readonly project: string
@@ -321,7 +277,6 @@ type SessionSql = {
   readonly attempts: string | null
 }
 
-/** A session's current process, as its latest `process.start` and what followed it say. */
 type Current = {
   readonly id: number
   readonly start: ProcessStart
@@ -386,7 +341,6 @@ const fromColumns = (row: SessionSql, status: AgentStatus, integration: Integrat
 }
 const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
 
-/** Public `sending` is the column value `delivering`. */
 const storedStatus = (status: InboxStatus) => (status === "sending" ? "delivering" : status)
 
 type InboxSql = {
@@ -399,7 +353,6 @@ type InboxSql = {
   readonly turnEnd: string | null
 }
 
-/** The text between `<summary>` and `</summary>` of a rendered result, unescaped; undefined without one. */
 const summaryIn = (content: string) => {
   const found = /<summary>([\s\S]*?)<\/summary>/.exec(content)
   return found === null
@@ -409,25 +362,18 @@ const summaryIn = (content: string) => {
 
 const ROUND_STATUS = ["completed", "failed", "interrupted", "lost", "not_started"] as const
 
-/** `turn.end` data (schema.md), written once. */
 export type TurnEnd = {
   readonly status: (typeof ROUND_STATUS)[number]
-  /** The harness's last answer text. Rows written before `report`; new ends leave it out. */
   readonly output?: string
-  /** The `turn.reported` event this end consumed. */
   readonly report?: number
-  /** The harness's error. */
   readonly failure?: { readonly message: string }
 }
 
-/** A `turn.reported` row: the harness's turn end as received, and its event id. */
 export type TurnReport = TurnEnded & { readonly id: number }
 
-/** A harness error as `turn.end` failure; none for an empty error. */
 export const failureOf = (error: string | undefined): TurnEnd["failure"] =>
   error === undefined || error === "" ? undefined : { message: error }
 
-/** What a result row says, from the `turn.end` it reports and its rendered text. */
 const resultDetails = (content: string, end: TurnEnd | undefined) => {
   const error = end?.failure?.message
   const summary = summaryIn(content)
@@ -476,7 +422,6 @@ type BriefRow = {
   readonly endData: string | null
   readonly endedAt: number | null
   readonly resultContent: string | null
-  /** Answer text: the consumed `turn.reported`, else an old `turn.end`'s `output`. */
   readonly answer: string | null
 }
 
@@ -485,13 +430,8 @@ const roundStatus = (status: unknown): TurnEnd["status"] =>
     ? (status as TurnEnd["status"])
     : "completed"
 
-/** Rows a session's own sends and tasks are: never main-agent-bound. */
 const TO_SESSION = `('task', 'send')`
 
-/**
- * Rows appended by the fiber that opened the transaction. `closed` once that transaction ends: a forked fiber inherits
- * this reference (and the sql transaction) and must not append into a buffer nobody publishes.
- */
 const TxBuffer = Context.Reference<
   { readonly events: Array<StoredEvent>; readonly fiberId: number; closed: boolean } | undefined
 >("vibest/TxBuffer", { defaultValue: () => undefined })
@@ -499,10 +439,6 @@ const TxBuffer = Context.Reference<
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const bus = yield* Bus
-  /**
-   * The `process.start` that is the session's current process: its latest, passing over a start that never got its
-   * terminal (`launch_failed`) when an earlier one exists, so a failed move leaves the harness that last ran.
-   */
   const currentStart = (session: Statement.Fragment) => sql`(SELECT cs.id FROM event cs
       WHERE cs.session_id = ${session} AND cs.type = 'process.start'
       ORDER BY (json_extract(cs.data, '$.terminal') = '' AND EXISTS (SELECT 1 FROM event cf WHERE cf.process_id = cs.id
@@ -510,18 +446,10 @@ const make = Effect.gen(function* () {
   const now = Clock.currentTimeMillis
   const decodeInbox = Schema.decodeUnknownEffect(Schema.Array(InboxRow))
   const decodeCoordinators = Schema.decodeUnknownEffect(Schema.Array(CoordinatorRow))
-  /** The runtime's last reported status per Agent: live, never stored (schema.md). */
   const statuses = new Map<string, AgentStatus>()
-  /** The integration a session's requests last carried, until its next `process.ready` records it. */
   const integrations = new Map<string, Integration>()
-  /**
-   * When an open turn's text was last handed over (`turnPromptedAt` on an open turn: after a resume, or a move to the
-   * next harness), by turn id. Memory only: without it the turn's own start time stands.
-   */
   const prompted = new Map<number, number>()
-  /** Projects whose main agent left its place to move to another terminal (`detachCoordinator`): memory only. */
   const moving = new Set<string>()
-  /** No entry for `unknown` (what a missing one reads as) or an archived session (never live again): the map does not grow with ended sessions. */
   const remember = (row: Pick<SessionRow, "id" | "status" | "metadata">) => {
     if (row.metadata.archived || row.metadata.removed) integrations.delete(row.id)
     if (row.status === "unknown" || row.metadata.archived || row.metadata.removed) statuses.delete(row.id)
@@ -568,11 +496,6 @@ const make = Effect.gen(function* () {
       return id
     })
 
-  /**
-   * Run `body` in one transaction. After it commits, publish the rows it appended, in id order. A nested call shares
-   * this buffer, so only the outermost commit publishes. A rollback publishes nothing. Only `body` is interruptible:
-   * an interrupt that comes once it has finished waits until the commit's rows are published, so none is dropped.
-   */
   const tx = <A, E, R>(body: Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
       if ((yield* TxBuffer) !== undefined) return yield* body
@@ -588,12 +511,10 @@ const make = Effect.gen(function* () {
       )
     })
 
-  /** Some project id already starts with `short`. */
   const projectPrefixTaken = (short: string) =>
     sql`SELECT 1 FROM project WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
       Effect.map((rows) => rows.length > 0),
     )
-  /** Each repository row of project `id`; a path another project has is left to it. Its origin as git prints it now. */
   const putRepositories = (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
     Effect.forEach(
       repositories,
@@ -629,11 +550,8 @@ const make = Effect.gen(function* () {
     LEFT JOIN event p ON p.id = ${currentStart(sql`a.id`)}
     LEFT JOIN event t ON t.id = (SELECT max(id) FROM event WHERE session_id = a.id AND type = 'turn.start')`
 
-  /** Subagents: not a main agent session, the current conversation or an earlier one (`vibest --new`). */
   const notMain = sql`a.role != 'main'`
-  /** A main conversation `vibest --new` replaced. The current main agent stays a coordinator, not a session row. */
   const endedMain = sql`a.role = 'main' AND NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = a.id)`
-  /** Its latest process has not ended (or it has none yet). */
   const running = sql`p_ended IS NULL`
   const selectRaw = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
     sql<SessionSql>`SELECT * FROM (SELECT ${SESSION_COLUMNS} ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`}) ${filter ? sql`WHERE ${filter}` : sql``} ORDER BY created_at, id`
@@ -650,9 +568,7 @@ const make = Effect.gen(function* () {
       Effect.flatMap(decodeRows),
     )
   const findSession = (id: string) => selectSessions([sql`a.id = ${id}`]).pipe(Effect.map((rows) => rows[0]))
-  /** Get / result: an ended main conversation too. Mutations keep `findSession`, so they still cannot see it. */
   const readSession = (id: string) => selectSessions([sql`a.id = ${id}`], true).pipe(Effect.map((rows) => rows[0]))
-  /** Any session, the main agent's too, with its current process. */
   const anySession = (id: string) =>
     selectRaw([sql`a.id = ${id}`]).pipe(
       Effect.map((rows) => {
@@ -661,7 +577,6 @@ const make = Effect.gen(function* () {
       }),
     )
 
-  /** The main agent has its place: its latest process runs, and it is not moving to another terminal. */
   const placed = (projectIdValue: string, current: Current | undefined) =>
     current !== undefined && current.ended === null && current.start.terminal !== "" && !moving.has(projectIdValue)
 
@@ -719,12 +634,10 @@ const make = Effect.gen(function* () {
     inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind = 'send' AND m.status = ${storedStatus(status)}`)
   const entryOf = (projectIdValue: string) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
 
-  /** The row request `request` queued for session `sessionId` (its `inbox.queued` data), if any. */
   const queuedBy = (sessionId: string, request: string) =>
     sql<{ id: number }>`SELECT inbox_id AS id FROM event WHERE session_id = ${sessionId} AND type = 'inbox.queued'
         AND json_extract(data, '$.request') = ${request} LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
 
-  /** The session spawn request `request` made in project `project`, with its first process's choice. */
   const spawnedBy = (project: string, request: string) =>
     sql<{ id: string; data: string }>`SELECT s.id, p.data FROM session s
         JOIN event q ON q.session_id = s.id AND q.type = 'inbox.queued'
@@ -746,17 +659,12 @@ const make = Effect.gen(function* () {
       }),
     )
 
-  /** The open turn of `sessionId`: its latest `turn.start` with no `turn.end`. */
   const openTurn = (sessionId: string) =>
     sql<{ id: number }>`SELECT t.id FROM event t WHERE t.id = (SELECT max(id) FROM event WHERE session_id = ${sessionId}
         AND type = 'turn.start') AND NOT EXISTS (SELECT 1 FROM event e WHERE e.turn_id = t.id AND e.type = 'turn.end')`.pipe(
       Effect.map((rows) => rows[0]?.id),
     )
 
-  /**
-   * Move the rows `where` selects to `to`, one `inbox.status` event each; returns the ids that moved. A row moved to
-   * delivered names the turn its recipient has open (the turn that consumed it), if any.
-   */
   const moveInbox = (where: Statement.Fragment, to: string) =>
     tx(
       Effect.gen(function* () {
@@ -796,7 +704,6 @@ const make = Effect.gen(function* () {
     readonly content: string
     readonly resultEventId?: number
     readonly status: string
-    /** The caller's request id (`vibest send`, `vibest run`), kept in its `inbox.queued` so a repeat finds it. */
     readonly request?: string | undefined
   }) =>
     Effect.gen(function* () {
@@ -818,7 +725,6 @@ const make = Effect.gen(function* () {
         at,
         data: row.request === undefined ? {} : { request: row.request },
       })
-      // A task's delivery is the turn it is handed into (`linkTask`).
       if (row.status !== "pending" && row.kind !== "task")
         yield* append({
           sessionId,
@@ -830,7 +736,6 @@ const make = Effect.gen(function* () {
       return id
     })
 
-  /** A delivered task no turn took yet becomes the input of `turnId`, the turn it is handed into. */
   const linkTask = (sessionId: string, turnId: number, at: number) =>
     Effect.gen(function* () {
       const [task] = yield* sql<{ id: number }>`SELECT i.id FROM inbox i WHERE i.recipient_session_id = ${sessionId}
@@ -847,7 +752,6 @@ const make = Effect.gen(function* () {
         })
     })
 
-  /** End session `id`'s current process (`process.end`), unless it already ended or it has none. */
   const endProcess = (id: string, reason: EndReason, at?: number) =>
     Effect.gen(function* () {
       const found = yield* anySession(id)
@@ -864,10 +768,6 @@ const make = Effect.gen(function* () {
       return true
     })
 
-  /**
-   * Append a `process.start`. One that follows a start with no terminal yet (the same process, its terminal now open)
-   * carries over what that process reported while it started: its ready reports and conversation.
-   */
   const startProcess = (id: string, start: ProcessStart, at?: number) =>
     Effect.gen(function* () {
       const before = (yield* anySession(id))?.current
@@ -900,7 +800,6 @@ const make = Effect.gen(function* () {
       return processId
     })
 
-  /** Close `id`'s open turn, or open and close one when none is open; returns the `turn.end` event. */
   const endTurn = (id: string, end: TurnEnd, at?: number) =>
     Effect.gen(function* () {
       const found = yield* anySession(id)
@@ -930,13 +829,6 @@ const make = Effect.gen(function* () {
       })
     })
 
-  /**
-   * A `send` goes to the subagent and always waits for it. The rest go to the sender's reply target
-   * (`report_to_session_id` while it has not ended, else the project's entry session), `dropped` when it has no
-   * place; with no entry session at all they are kept as the sender's own (dropped), so `vibest result` still reads
-   * them. A result row points at the `turn.end` it reports: `end` when the caller is closing the turn, else one made
-   * from `details` (status, error).
-   */
   const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number, request?: string) =>
     Effect.gen(function* () {
       if (row.kind === "send") {
@@ -987,10 +879,6 @@ const make = Effect.gen(function* () {
       return (yield* inboxIn([id]))[0]!
     })
 
-  /**
-   * Apply `patch` to session `id`: its columns, and an event for each change to its process or turn (schema.md:
-   * the row is a read model). Times and the runtime status are not stored.
-   */
   const updateSession = (id: string, patch: SessionPatch) =>
     Effect.gen(function* () {
       if (Object.keys(patch).length === 0) return
@@ -1004,7 +892,6 @@ const make = Effect.gen(function* () {
       if (ending && !(current.metadata.archived || current.metadata.removed))
         yield* sql`UPDATE session SET ended_at = ${yield* now} WHERE id = ${id} AND ended_at IS NULL`
       const p = (yield* anySession(id))!.current
-      // A new choice, or a terminal opened for it, is a new process: its `process.start`.
       const routing = patch.metadata?.routing
       const choicePatched =
         (patch.harnessId !== undefined && patch.harnessId !== current.harnessId) ||
@@ -1052,7 +939,6 @@ const make = Effect.gen(function* () {
       }
       if (patch.exitedAt !== undefined && patch.exitedAt !== null && current.exitedAt === null)
         yield* endProcess(id, patch.end ?? "exited", patch.exitedAt)
-      // The open turn: "open" starts one (on an open one it only moves the hand-over time); an end closes it.
       if (patch.turnState === "open") {
         const open = yield* openTurn(id)
         const at = next.turnPromptedAt || (yield* now)
@@ -1081,10 +967,6 @@ const make = Effect.gen(function* () {
       }
     })
 
-  /**
-   * Pending main-Agent-bound rows of `projectId`. A place guard is the main agent the caller read. `"absent"` drops
-   * only while that project's main agent still has no place, so a launch that landed in between is left alone.
-   */
   const dropWaiting = (
     projectIdValue: string,
     guard?: { readonly runtime: string; readonly address: string } | "absent",
@@ -1093,7 +975,6 @@ const make = Effect.gen(function* () {
       if (guard !== undefined) {
         const [main] = yield* findCoordinators(projectIdValue)
         if (guard === "absent") {
-          // A main agent moving to another terminal (`detachCoordinator`) has no place either, but its rows wait for it.
           if (main?.runtime || moving.has(projectIdValue)) return
         } else if (
           !main?.runtime ||
@@ -1109,7 +990,6 @@ const make = Effect.gen(function* () {
       )
     })
 
-  /** Main agents whose live process is at this place (outside `except`), not moving. */
   const mainsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
       const rows = yield* sql<{ id: string; project: string }>`SELECT s.id, s.project_id AS project FROM session s
@@ -1122,7 +1002,6 @@ const make = Effect.gen(function* () {
       return rows.filter((r) => !moving.has(r.project))
     })
 
-  /** Clear the place of every main agent at it (outside `except`), and drop what was waiting for them. */
   const clearMainAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
       for (const main of yield* mainsAt(runtime, address, except)) {
@@ -1131,14 +1010,12 @@ const make = Effect.gen(function* () {
       }
     })
 
-  /** Some session id already starts with `short` (index-backed on the primary key). */
   const sessionPrefixTaken = (short: string) =>
     sql`SELECT 1 FROM session WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
       Effect.map((rows) => rows.length > 0),
     )
   const unusedId = newId(sessionPrefixTaken)
 
-  /** The conversation of session `id`'s current process, and that process. */
   const conversationOf = (id: string) =>
     anySession(id).pipe(
       Effect.map((found) => ({
@@ -1148,10 +1025,6 @@ const make = Effect.gen(function* () {
     )
 
   return {
-    /**
-     * The project `root` (a realpath) is: the project at that directory, else the one with a repository there (a
-     * repository of a multi-repository project belongs to it). Reads only.
-     */
     projectAt: (root: string) =>
       sql<{ id: string; directory: string }>`SELECT id, directory FROM project WHERE directory = ${root}
         UNION ALL SELECT p.id, p.directory FROM project_repository r JOIN project p ON p.id = r.project_id
@@ -1160,12 +1033,10 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /** A new project at `directory` (a realpath) with its repositories; its id. One already there is that project. */
     createProject: (directory: string, repositories: ReadonlyArray<RepositoryRow>) =>
       tx(
         Effect.gen(function* () {
           const id = yield* newId(projectPrefixTaken)
-          // Two first requests can both miss projectAt; the second must not die on directory UNIQUE.
           yield* sql`INSERT INTO project ${sql.insert({ id, directory })} ON CONFLICT (directory) DO NOTHING`
           const [row] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
           yield* putRepositories(row!.id, repositories)
@@ -1173,14 +1044,9 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /** Project `id`'s repositories as they are now: origins refreshed, newly present ones added. */
     refreshRepositories: (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
       tx(putRepositories(id, repositories)).pipe(Effect.orDie),
 
-    /**
-     * Projects with a directory whose repositories have exactly the origins `remotes` (non-null ones, as a set): where
-     * a moved checkout came from. Whether that directory still exists is the caller's to check.
-     */
     moveCandidates: (remotes: ReadonlyArray<string>) =>
       Effect.gen(function* () {
         const wanted = [...new Set(remotes)].sort()
@@ -1199,10 +1065,6 @@ const make = Effect.gen(function* () {
           .map(([id, p]) => ({ id, directory: p.directory }))
       }).pipe(Effect.orDie),
 
-    /**
-     * Project `id` now lives at `to` with `repositories`: its directory, its repository rows, and every session
-     * directory under its old directory move with it. Returns the old directory.
-     */
     moveProject: (id: string, to: string, repositories: ReadonlyArray<RepositoryRow>) =>
       tx(
         Effect.gen(function* () {
@@ -1217,21 +1079,18 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /** Where project `id` is; undefined for a project with no directory (migrated without one). */
     projectDirectory: (id: string) =>
       sql<{ directory: string | null }>`SELECT directory FROM project WHERE id = ${id}`.pipe(
         Effect.map((rows) => rows[0]?.directory ?? undefined),
         Effect.orDie,
       ),
 
-    /** Where the session works: its worktree, or the one `vibest run --peer` shares. */
     sessionDirectory: (id: string) =>
       sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${id}`.pipe(
         Effect.map((rows) => rows[0]?.directory),
         Effect.orDie,
       ),
 
-    /** Whether session `id` ever had a terminal (a `process.start` with one): false for a spawn cut off before it opened. */
     hadTerminal: (id: string) =>
       sql<{ one: number }>`SELECT 1 AS one FROM event WHERE session_id = ${id} AND type = 'process.start'
         AND json_extract(data, '$.terminal') != '' LIMIT 1`.pipe(
@@ -1239,10 +1098,6 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /**
-     * The other sessions still live (not archived) that work in session `id`'s directory on the same machine: while
-     * there is one, that directory stays.
-     */
     liveSharers: (id: string) =>
       sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
         WHERE o.id != s.id AND o.machine = s.machine AND o.directory = s.directory AND s.directory != ''
@@ -1252,10 +1107,6 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /**
-     * The earliest created live session that shares `id`'s directory and was created before it: the one whose worktree
-     * `id` joined with `--peer` (undefined for the session that owns it).
-     */
     earlierSharer: (id: string) =>
       sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
         WHERE o.id != s.id AND o.machine = s.machine AND o.directory = s.directory AND s.directory != ''
@@ -1265,11 +1116,6 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /**
-     * Insert a subagent of project `project`, working in `cwd` (a `--peer` records the directory it shares), with its
-     * `task` as its first inbox row (handed over by spawn itself, so recorded as delivered), unless `max` subagents are
-     * already running (one transaction). Its results go to its parent, or with none to the project's entry session.
-     */
     insertSession: (
       row: Omit<SessionRow, "projectId">,
       project: string,
@@ -1281,7 +1127,6 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<boolean | SpawnedBefore> =>
       tx(
         Effect.gen(function* () {
-          // A repeat of a spawn that already made its session: that session, nothing inserted.
           if (request !== undefined) {
             const before = yield* spawnedBy(project, request)
             if (before !== undefined) return before
@@ -1375,10 +1220,6 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /**
-     * The session `input` names: its full id, or a prefix of at least 8 characters that exactly one session's id
-     * starts with (as people see ids: their first 8).
-     */
     resolveSession: (input: string) =>
       Effect.gen(function* () {
         if (!/^[0-9a-f-]{8,36}$/.test(input))
@@ -1395,10 +1236,8 @@ const make = Effect.gen(function* () {
         return rows[0]!.id
       }),
 
-    /** A new session id: no other session's id starts with its first 8 characters. */
     newSessionId: unusedId.pipe(Effect.orDie),
 
-    /** Any Agent: a caller is this row; `agent` is `coordinator` for a project's main agent, else its definition. */
     sessionIdentity: (id: string) =>
       sql<{ id: string; projectId: string; agent: string; harness: string }>`SELECT a.id, a.project_id,
           coalesce(json_extract(p.data, '$.harness'), '') AS harness,
@@ -1412,12 +1251,10 @@ const make = Effect.gen(function* () {
 
     getSession: (id: string) => readSession(id).pipe(Effect.orDie),
 
-    /** How many sessions have a live status in memory (tests check it shrinks back once sessions end). */
     liveStatuses: Effect.sync(() => statuses.size),
 
     updateSession: (id: string, patch: SessionPatch) => tx(updateSession(id, patch)).pipe(Effect.orDie),
 
-    /** `projectId` limits to one project; `stopped` includes subagents whose process is gone and ended main conversations. */
     listSessions: (filter: { projectId?: string; stopped?: boolean } = {}) =>
       selectSessions(
         filter.projectId === undefined ? [] : [sql`a.project_id = ${filter.projectId}`],
@@ -1425,9 +1262,6 @@ const make = Effect.gen(function* () {
         filter.stopped ? undefined : running,
       ).pipe(Effect.orDie),
 
-    /**
-     * Task text and latest turn for `ls` / `result`. The task is the session's `task` row. Unknown ids are absent.
-     */
     sessionBriefs: (ids: ReadonlyArray<string>) =>
       (ids.length === 0
         ? Effect.succeed([] as ReadonlyArray<BriefRow>)
@@ -1465,7 +1299,6 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /** Every project's main agent. */
     coordinators: findCoordinators().pipe(Effect.orDie),
 
     coordinatorOf: (projectIdValue: string) =>
@@ -1474,20 +1307,12 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /** The project whose main agent is at this place, if any. */
     coordinatorAt: (runtime: string, address: RuntimeAddress) =>
       mainsAt(runtime, address).pipe(
         Effect.map((rows) => rows[0]?.project),
         Effect.orDie,
       ),
 
-    /**
-     * Point the project's main agent at this start, creating it on first use. Its id is stable across restarts and
-     * harness switches; `fresh` (`vibest --new`) ends the current conversation and starts another (a new main session).
-     * `start` is what scheduling chose (its `process.start`), and the PID its harness will have. Another project's main
-     * agent still recorded at this pane loses the place, and both projects drop what was waiting; so does this one,
-     * unless it is moving here (`detachCoordinator`): then what waits for it is delivered here.
-     */
     coordinatorLaunch: (
       project: string,
       harness: HarnessId,
@@ -1497,7 +1322,6 @@ const make = Effect.gen(function* () {
         readonly provider?: string | undefined
         readonly model?: string | undefined
         readonly routing?: unknown
-        /** The project directory. Stored as the main session's directory; never the key. */
         readonly projectDirectory?: string | undefined
         readonly pid?: number | undefined
       } = {},
@@ -1546,7 +1370,6 @@ const make = Effect.gen(function* () {
                 machine: location.address.machine,
                 terminal: location.address.id,
                 ...(resume === undefined ? {} : { resume }),
-                // The PID the harness will have (vibest execs it): its integration's ready report comes later.
                 ...(start.pid === undefined ? {} : { pid: start.pid }),
               },
               at,
@@ -1558,7 +1381,6 @@ const make = Effect.gen(function* () {
         )
       }).pipe(Effect.orDie),
 
-    /** The harness's own conversation id (latest wins: a /clear changes it), written only when it changed; true when it did. */
     noteHarnessSession: (id: string, harnessSessionId: string) =>
       tx(
         Effect.gen(function* () {
@@ -1574,10 +1396,6 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /**
-     * The integration version and protocol session `id` (main agent or not) sent; true when they changed. Recorded
-     * with its next `process.ready`.
-     */
     noteIntegration: (id: string, integration: Integration) =>
       Effect.gen(function* () {
         const found = yield* anySession(id)
@@ -1590,10 +1408,6 @@ const make = Effect.gen(function* () {
         return true
       }).pipe(Effect.orDie),
 
-    /**
-     * The harness's ready report (`ready`, and the pid it gave): a `process.ready` with the integration its requests
-     * carry. A null only says the old harness's go with its process, which its `process.end` already records.
-     */
     patchLive: (
       id: string,
       patch: {
@@ -1623,17 +1437,12 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /** When session `id`'s integration last reported ready (main agent or not); undefined when it has not since its start. */
     readyAt: (id: string) =>
       anySession(id).pipe(
         Effect.map((found) => found?.row.readyAt ?? undefined),
         Effect.orDie,
       ),
 
-    /**
-     * A restart in place: the harness in session `id`'s terminal got its SIGTERM, and the next one starts there on the
-     * same conversation (`process.end` restart, then the same `process.start`). The open turn stays open.
-     */
     restartProcess: (id: string) =>
       tx(
         Effect.gen(function* () {
@@ -1645,10 +1454,8 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /** End session `id`'s current process (`process.end` with `reason`); false when it had already ended. */
     endProcess: (id: string, reason: EndReason) => tx(endProcess(id, reason)).pipe(Effect.orDie),
 
-    /** The last report wins. Another harness, or an id that is not a main agent, changes nothing. */
     reportCoordinatorSession: (sessionId: string, harness: HarnessId, harnessSessionId: string) =>
       tx(
         Effect.gen(function* () {
@@ -1668,11 +1475,6 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /**
-     * The main agent leaves its place to move to another terminal (Project.StopCoordinator), before its harness is
-     * stopped: no place, so its exit drops nothing (`clearCoordinator` no longer matches), and what waits for it stays
-     * pending for the launch that follows. False when it is no longer at that place.
-     */
     detachCoordinator: (projectIdValue: string, runtime: string, address: RuntimeAddress) =>
       Effect.gen(function* () {
         const here = (yield* mainsAt(runtime, address)).some((m) => m.project === projectIdValue)
@@ -1680,23 +1482,19 @@ const make = Effect.gen(function* () {
         return here
       }).pipe(Effect.orDie),
 
-    /** Undo `detachCoordinator` when its harness did not stop: back at its place, unless something took the row since. */
     reattachCoordinator: (projectIdValue: string, _runtime: string, _address: RuntimeAddress) =>
       Effect.sync(() => {
         moving.delete(projectIdValue)
       }),
 
-    /** The runtime's `pane_closed` of a main agent's pane: it is gone, and what was waiting for it is dropped. */
     clearCoordinator: (runtime: string, address: RuntimeAddress) =>
       tx(clearMainAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
     insertInbox: (row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie),
 
-    /** A Message to the subagent, unless it is archived (undefined then). One transaction, so `archiveIfNoPending` sees it or it sees the tombstone. */
     insertSend: (sessionId: string, message: string, request?: string) =>
       tx(
         Effect.gen(function* () {
-          // A repeat of a request that already queued its row: that row, before the archive check (it was accepted).
           const before = request === undefined ? undefined : yield* queuedBy(sessionId, request)
           if (before !== undefined) return (yield* inboxIn([before]))[0]
           const s = yield* findSession(sessionId)
@@ -1705,14 +1503,12 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /** Whether request `request` already queued a row for session `sessionId`. */
     queuedBy: (sessionId: string, request: string) =>
       queuedBy(sessionId, request).pipe(
         Effect.map((id) => id !== undefined),
         Effect.orDie,
       ),
 
-    /** End the subagent (`stopped`) unless a Message to it is pending; false then. One transaction with `insertSend`'s. */
     archiveIfNoPending: (id: string) =>
       tx(
         Effect.gen(function* () {
@@ -1726,10 +1522,6 @@ const make = Effect.gen(function* () {
     closeTurn: (id: string, end: TurnState, patch: SessionPatch) =>
       tx(updateSession(id, { turnState: end, ...patch })).pipe(Effect.orDie),
 
-    /**
-     * Session `id`'s task becomes the input of its open turn: called right before its text is handed over, so a task
-     * with no `inbox.status` was certainly never typed. Nothing once it is linked, or with no open turn.
-     */
     linkTask: (id: string) =>
       tx(
         Effect.gen(function* () {
@@ -1738,11 +1530,6 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /**
-     * Session `id`'s task when it was never handed over (no `inbox.status`) and no turn of it that took an input (typed,
-     * or rows delivered into it) has ended. A turn that ended before its handover (vibestd stopped in `awaitReady`)
-     * took nothing.
-     */
     untakenTask: (id: string) =>
       sql<{ content: string }>`SELECT i.content FROM inbox i WHERE i.recipient_session_id = ${id} AND i.kind = 'task'
           AND NOT EXISTS (SELECT 1 FROM event e WHERE e.inbox_id = i.id AND e.type = 'inbox.status')
@@ -1754,10 +1541,6 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /**
-     * Whether session `id`'s open turn was taken up, from what is stored (so after a vibestd restart too): it was typed,
-     * or an inbox row was delivered into it. False with no open turn.
-     */
     turnTaken: (id: string) =>
       Effect.gen(function* () {
         const turn = yield* openTurn(id)
@@ -1769,7 +1552,6 @@ const make = Effect.gen(function* () {
         return row?.taken === 1
       }).pipe(Effect.orDie),
 
-    /** Latest time on any turn. Undefined: no turn yet. A turn end that is not newer was already delivered. */
     latestRoundAt: (sessionId: string) =>
       sql<{ at: number | null }>`SELECT max(at) AS at FROM event WHERE session_id = ${sessionId}
         AND type IN ('turn.start', 'turn.end')`.pipe(
@@ -1777,7 +1559,6 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /** The logins whose process ended on a usage limit at or after `at`, oldest first (repeats included). */
     limitedSince: (sessionId: string, at: number) =>
       sql<{ harness: string; provider: string | null }>`SELECT json_extract(ps.data, '$.harness') AS harness,
           json_extract(ps.data, '$.provider') AS provider
@@ -1786,11 +1567,6 @@ const make = Effect.gen(function* () {
           AND pe.at >= ${at}
         ORDER BY pe.id`.pipe(Effect.orDie),
 
-    /**
-     * What a usage-limit move can resend for a session, and the parent that asked for it. `working` is the open
-     * turn's input: its typed text, or the rows it consumed. `delivered`, used when that is empty, is the trailing run
-     * of delivered task and send rows from one sender that no turn consumed, oldest first, joined with a blank line.
-     */
     rescheduleSource: (id: string) =>
       Effect.gen(function* () {
         const [head] = yield* sql<{
@@ -1832,7 +1608,6 @@ const make = Effect.gen(function* () {
         }
       }).pipe(Effect.orDie),
 
-    /** Open a user-typed turn. False when a turn is already open. One transaction with the session row. */
     beginUserTurn: (id: string, text: string, patch: SessionPatch) =>
       tx(
         Effect.gen(function* () {
@@ -1851,10 +1626,6 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /**
-     * The harness's turn end, as received: one `turn.reported`, linked to the current process. No session lock. A check
-     * later writes the `turn.end` that points at it.
-     */
     reportTurn: (id: string, end: TurnEnded) =>
       tx(
         Effect.gen(function* () {
@@ -1875,15 +1646,6 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /**
-     * Session `id`'s latest `turn.reported`, if it came after the fence: `ready`, the current process's first
-     * `process.ready` its integration wrote (none yet: no report counts); `start`, the current `process.start` (a
-     * harness whose ready comes from the runtime). A harness ends a turn only after it is first ready, so a report at or
-     * before the fence is an earlier harness's (a restart's or a move's). The first, not the latest: the same harness
-     * reports ready again on a plugin reload or a new conversation, and its unconsumed report still counts. Ids, not
-     * times: a ready's `at` can be backfilled.
-     * Undefined too when a `turn.end` already consumed it: a report is one turn's end, taken once.
-     */
     latestReport: (id: string, fence: "ready" | "start") =>
       sql<{ id: number; at: number; data: string; consumed: number }>`SELECT r.id, r.at, r.data,
         EXISTS (SELECT 1 FROM event te WHERE te.session_id = ${id} AND te.type = 'turn.end'
@@ -1919,10 +1681,6 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
-    /**
-     * Close the open turn with `end` (its whole `turn.end` data) and point the result at it, in one transaction with the
-     * session row. `at`: no earlier than this (the reported turn end's time), so that end is not taken again.
-     */
     finishTurn: (id: string, end: TurnEnd, patch: SessionPatch, row: NewInboxRow, at?: number) =>
       tx(
         Effect.gen(function* () {
@@ -1943,10 +1701,6 @@ const make = Effect.gen(function* () {
         sql`m.kind NOT IN ${sql.literal(TO_SESSION)} AND m.status = 'pending' AND m.recipient_session_id = ${entryOf(projectIdValue)}`,
       ).pipe(Effect.orDie),
 
-    /**
-     * The project's main agent gave up rows `ids` without settling them (Inbox.poll: their lease ended): those still
-     * `sending` go back to pending. Returns the rows put back.
-     */
     releaseLeased: (projectIdValue: string, ids: ReadonlyArray<number>) =>
       ids.length === 0
         ? Effect.succeed([] as ReadonlyArray<number>)
@@ -1955,10 +1709,6 @@ const make = Effect.gen(function* () {
             "pending",
           ).pipe(Effect.orDie),
 
-    /**
-     * The main agent took `ids` (delivered) and gave back `release` (pending again): only its own rows, `sending` or
-     * `pending`. Returns the rows now delivered.
-     */
     settleLeased: (projectIdValue: string, ids: ReadonlyArray<number>, release: ReadonlyArray<number>) =>
       tx(
         Effect.gen(function* () {
@@ -1978,13 +1728,6 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /**
-     * Once at start, one transaction (decision 2): a claimed row whose delivery a stop cut off may or may not have
-     * arrived. Bound to a main agent whose harness polls (`pollHarnesses`, the adapters with inbox `poll`): pending
-     * again, because that integration acks by row id and skips a row it already showed. Any other main-agent row:
-     * failed. A subagent's rows: failed, with one notice per subagent (`notice` words it; its `inbox.queued` offers it);
-     * nothing is delivered again. (Leases are memory only: none outlives the vibestd that granted it.)
-     */
     recoverDelivering: (
       pollHarnesses: ReadonlyArray<string>,
       notice: (sessionId: string, messages: ReadonlyArray<string>) => string,
@@ -2024,13 +1767,11 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    /** Claimed deliveries must settle before a planned shutdown; pending Messages wait for the next vibestd. */
     sendingInbox: inbox(sql`m.status = 'delivering'`).pipe(
       Effect.map((rows) => rows.map((r) => ({ id: r.id, sessionId: r.sessionId, kind: r.kind }))),
       Effect.orDie,
     ),
 
-    /** Projects with main-Agent-bound Messages waiting (the reconcile tick). */
     pendingProjects: sql<{
       project: string
     }>`SELECT DISTINCT s.project_id AS project FROM inbox m JOIN session s ON s.id = m.recipient_session_id
@@ -2042,10 +1783,6 @@ const make = Effect.gen(function* () {
     dropWaiting: (projectIdValue: string, guard?: { readonly runtime: string; readonly address: string } | "absent") =>
       tx(dropWaiting(projectIdValue, guard)).pipe(Effect.asVoid, Effect.orDie),
 
-    /**
-     * Claim `pending` Messages. Main-Agent-bound claims also require the main agent still at the place the caller read.
-     * Only the returned ids are delivered.
-     */
     claim: (
       ids: ReadonlyArray<number>,
       guard?: {
@@ -2071,14 +1808,12 @@ const make = Effect.gen(function* () {
         return yield* moveInbox(sql`${sql.in("id", ids)} AND status = 'pending'`, "delivering")
       }).pipe(Effect.orDie),
 
-    /** Move rows and return only the ids that were in `from`. A short result means the transition did not happen. */
     transitionInbox: (ids: ReadonlyArray<number>, status: InboxStatus, from: InboxStatus) =>
       (ids.length === 0
         ? Effect.succeed([] as ReadonlyArray<number>)
         : moveInbox(sql`${sql.in("id", ids)} AND status = ${storedStatus(from)}`, storedStatus(status))
       ).pipe(Effect.orDie),
 
-    /** `from`: only rows still in that status (a claim and a drop never both land). Returns the rows it changed. */
     setInboxStatus: (ids: ReadonlyArray<number>, status: InboxStatus, from?: InboxStatus) =>
       Effect.gen(function* () {
         if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
@@ -2089,7 +1824,6 @@ const make = Effect.gen(function* () {
         return moved.length === 0 ? [] : yield* inboxIn(moved)
       }).pipe(Effect.orDie),
 
-    /** Newest row of `kind` for the subagent, whatever its status (`dropped` included). */
     latestInbox: (sessionId: string, kind: InboxKind) =>
       (kind === "send"
         ? inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind = 'send'`, sql`m.id DESC LIMIT 1`)
@@ -2107,21 +1841,16 @@ const make = Effect.gen(function* () {
   }
 })
 
-/** Name transforms the SQLite client must be built with: columns are the snake_case of the row fields. */
 export const SQL_NAMES = { transformQueryNames: Str.camelToSnake, transformResultNames: Str.snakeToCamel } as const
 
 export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibest/Db") {
-  /** Opened database over the provided SqlClient (a SQLite client built with `SQL_NAMES`). */
   static readonly layer = Layer.effect(
     Db,
     SqlClient.SqlClient.pipe(
       Effect.flatMap((sql) => sql.unsafe("PRAGMA foreign_keys = ON")),
       Effect.andThen(migrate),
-      // journal_mode writes the header, so it runs only after acceptance. A refused existing file keeps its database and WAL bytes; -shm may change or be created.
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA journal_mode = WAL")))),
-      // In WAL mode NORMAL cannot corrupt the database. A power loss may drop only the last commits. It removes an fsync per commit.
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
-      // The open's one write, which two processes opening an empty database at once need (unit.test "two empty opens").
       Effect.andThen(
         SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE project SET directory = directory WHERE id = ''`)),
       ),

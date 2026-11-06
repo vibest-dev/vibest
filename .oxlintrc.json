@@ -10,7 +10,6 @@
     "vibest/no-restricted-disable": "error",
     "vibest/no-comments": "error",
     "eslint/no-unused-vars": "error",
-    // A ternary is sometimes the effect: delete the variable, or assign it.
     "eslint/no-unused-expressions": ["error", { "allowTernary": true }]
   },
   "ignorePatterns": ["dist", "node_modules", ".cache", "packages/effect-herdr-sdk/src/generated"]
