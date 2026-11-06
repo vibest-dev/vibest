@@ -30,6 +30,9 @@ const putMovedDatabaseBack = async (w: World) => {
   for (const f of DATABASE_FILES) await fs.rename(file(`${f}.old`), file(f)).catch(() => undefined)
 }
 
+const writeTried = (dir: string) =>
+  `mkdir -p ${dir} && printf '#!/bin/sh\\necho vibest v999.0.0\\n' > ${dir}/vibest && chmod +x ${dir}/vibest`
+
 const out = (r: { stdout: string; stderr: string }) => `${r.stdout}${r.stderr}`.replace(/\r/g, "")
 
 const checks: ReadonlyArray<Check> = [
@@ -49,7 +52,8 @@ const checks: ReadonlyArray<Check> = [
           if (url === "/@vibest/cli/beta") return Response.json({ name: "@vibest/cli", version: "999.0.0" })
           if (url === "/install.sh")
             return new Response(
-              `echo "install.sh VIBEST_INSTALL=$VIBEST_INSTALL VIBEST_DOWNLOAD_URL=$VIBEST_DOWNLOAD_URL" >> '${log}'\n`,
+              `echo "install.sh VIBEST_INSTALL=$VIBEST_INSTALL VIBEST_DOWNLOAD_URL=$VIBEST_DOWNLOAD_URL" >> '${log}'\n` +
+                `if [ -n "\${VIBEST_BIN:-}" ]; then ${writeTried('"$VIBEST_BIN"')}; fi\n`,
             )
           return new Response("not found", { status: 404 })
         },
@@ -59,9 +63,11 @@ const checks: ReadonlyArray<Check> = [
         const argRecordingPmStubs = path.join(w.root, "update-bin")
         await fs.mkdir(argRecordingPmStubs, { recursive: true })
         for (const pm of ["npm", "bun"])
-          await fs.writeFile(path.join(argRecordingPmStubs, pm), `#!/bin/sh\necho "${pm} $*" >> '${log}'\n`, {
-            mode: 0o755,
-          })
+          await fs.writeFile(
+            path.join(argRecordingPmStubs, pm),
+            `#!/bin/sh\necho "${pm} $*" >> '${log}'\ncase "$2" in --prefix|--cwd) ${writeTried('"$3/node_modules/.bin"')} ;; esac\n`,
+            { mode: 0o755 },
+          )
         const r = await w.vibest(["update"], {
           env: {
             VIBEST_DOWNLOAD_URL: origin,
@@ -83,10 +89,22 @@ const checks: ReadonlyArray<Check> = [
           r.code === 0 && r.stdout.includes("vibest 999.0.0 is available"),
           `exit ${r.code}: ${r.stdout}${r.stderr}`,
         )
-        if (method === "npm") expect(ran === "npm install -g @vibest/cli@beta\n", `ran: ${ran}`)
+        const [tried, installed, ...more] = ran.split("\n").filter(Boolean)
+        expect(more.length === 0 && tried !== undefined && installed !== undefined, `ran: ${ran}`)
+        if (method === "npm")
+          expect(
+            /^npm install --prefix \S+ @vibest\/cli@999\.0\.0$/.test(tried!) &&
+              installed === "npm install -g @vibest/cli@999.0.0",
+            `ran: ${ran}`,
+          )
         else {
           const installDir = path.dirname(path.dirname(path.dirname(path.dirname(await fs.realpath(binary)))))
-          expect(ran === `install.sh VIBEST_INSTALL=${installDir} VIBEST_DOWNLOAD_URL=${origin}\n`, `ran: ${ran}`)
+          expect(
+            /^install\.sh VIBEST_INSTALL=\S+ VIBEST_DOWNLOAD_URL=/.test(tried!) &&
+              !tried!.startsWith(`install.sh VIBEST_INSTALL=${installDir} `) &&
+              installed === `install.sh VIBEST_INSTALL=${installDir} VIBEST_DOWNLOAD_URL=${origin}`,
+            `ran: ${ran}`,
+          )
         }
       } finally {
         await server.stop(true)
