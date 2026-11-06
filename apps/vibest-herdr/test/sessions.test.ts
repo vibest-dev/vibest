@@ -310,7 +310,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "spawn with no harness any plugin could run is refused with each harness's problem",
+    "an explicit harness whose plugin is missing is refused with that problem",
     Effect.gen(function* () {
       const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
         Effect.filterOrFail(
@@ -319,8 +319,8 @@ describe.concurrent("Sessions", () => {
         ),
       )
       assert.deepInclude(refused, { plugin: "harness-choice" })
-      assert.include(refused.reason, "no harness available: pi: vibest's pi plugin is missing")
-      assert.include(refused.reason, "claude: vibest's claude plugin is missing")
+      assert.include(refused.reason, "pi: vibest's pi plugin is missing")
+      assert.strictEqual(refused.reason.includes("claude"), false)
     }),
     { hooked: [] },
   )
@@ -1060,33 +1060,20 @@ describe.concurrent("Sessions", () => {
   const limited = { window: "5h", percent: 100, status: "limited" as const, resetTime: null }
 
   test(
-    "a forced limit moves the subagent to another harness and its result reaches the parent",
+    "an explicit harness limited before start is refused with that limit and starts nothing",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const sql = yield* SqlClient.SqlClient
+      const db = yield* Db
       yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
-      const repo = yield* makeRepository
-      const { id, sessions, db } = yield* spawnWorking(repo)
-      const moved = (yield* db.getSession(id))!
-      assert.strictEqual(moved.harnessId, "claude")
-      assert.strictEqual(moved.turnState, "open")
-      assert.isTrue((yield* herdr.callsTo("open")).at(-1)!.argv.includes("--plugin-dir"))
-      assert.include((yield* herdr.callsTo("send")).at(-1)!.text, "do it")
-      assert.strictEqual((yield* herdr.callsTo("open"))[0]!.cwd, yield* sessionWorktree(id))
-      assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
-      const tasks = yield* sql<{
-        n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ${id} AND kind IN ('task', 'send')`.pipe(
-        Effect.orDie,
+      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
+        Effect.filterOrFail(
+          (e): e is AgentRefused => e._tag === "AgentRefused",
+          () => new Error("not refused"),
+        ),
       )
-      assert.strictEqual(tasks[0]!.n, 1)
-
-      yield* writeResult(id, "claude", { last_assistant_message: "status: completed\nsummary: moved" })
-      yield* herdr.endTurn(id)
-      yield* sessions.check(id)
-      const result = (yield* db.coordinatorPending(moved.projectId)).find((row) => row.kind === "result")
-      assert.include(result!.message, "moved")
-      assert.notInclude(result!.message, "usage limit")
+      assert.deepInclude(refused, { plugin: "harness-choice", reason: "pi: 5h limit exhausted, no reset time" })
+      assert.strictEqual(yield* herdr.callCount, 0)
+      assert.deepStrictEqual(yield* db.listSessions(), [])
     }),
   )
 
@@ -1588,15 +1575,25 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "pi with no provider moves before start when every pi login is limited",
+    "an explicit harness is refused when every login is limited",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
+      const db = yield* Db
       const subs = yield* Subscriptions
       yield* subs.report({ harness: "pi", provider: "anthropic", limits: [limited] })
       yield* subs.report({ harness: "pi", provider: "openai", limits: [limited] })
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      assert.deepInclude(yield* db.getSession(id), { harnessId: "claude", provider: null, turnState: "open" })
-      assert.isTrue((yield* herdr.callsTo("open")).at(-1)!.argv.includes("--plugin-dir"))
+      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
+        Effect.filterOrFail(
+          (e): e is AgentRefused => e._tag === "AgentRefused",
+          () => new Error("not refused"),
+        ),
+      )
+      assert.strictEqual(
+        refused.reason,
+        "pi/anthropic: 5h limit exhausted, no reset time; pi/openai: 5h limit exhausted, no reset time",
+      )
+      assert.strictEqual(yield* herdr.callCount, 0)
+      assert.deepStrictEqual(yield* db.listSessions(), [])
     }),
   )
 
@@ -1615,17 +1612,20 @@ describe.concurrent("Sessions", () => {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
-      const blocked = yield* sessions.spawn({ ...(yield* spawnInput(repo)), provider: "anthropic" })
-      yield* until(db.getSession(blocked.id), (row) => !!row && (row.harnessId !== "pi" || row.startedAt !== null))
-      yield* sessions.check(blocked.id)
-      assert.strictEqual((yield* db.getSession(blocked.id))!.harnessId, "claude")
+      const blocked = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), provider: "anthropic" })).pipe(
+        Effect.filterOrFail(
+          (e): e is AgentRefused => e._tag === "AgentRefused",
+          () => new Error("not refused"),
+        ),
+      )
+      assert.strictEqual(blocked.reason, "pi/anthropic: 5h limit exhausted, no reset time")
       const fine = yield* sessions.spawn({ ...(yield* spawnInput(repo)), provider: "openai", name: "other" })
       yield* until(db.getSession(fine.id), (row) => !!row && row.startedAt !== null)
       yield* sessions.check(fine.id)
       assert.deepInclude(yield* db.getSession(fine.id), { harnessId: "pi", provider: "openai", turnState: "open" })
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["claude", "pi"],
+        ["pi"],
       )
     }),
   )
@@ -1723,29 +1723,27 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a plugin that forces a limited login at start gets what it asked for: no pre-start move",
+    "an explicit limited harness is refused before a later plugin can replace it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
+      const db = yield* Db
       yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "pi")
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi"],
+      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
+        Effect.filterOrFail(
+          (e): e is AgentRefused => e._tag === "AgentRefused",
+          () => new Error("not refused"),
+        ),
       )
-      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
+      assert.deepInclude(refused, { plugin: "harness-choice", reason: "pi: 5h limit exhausted, no reset time" })
+      assert.strictEqual(yield* herdr.callCount, 0)
+      assert.deepStrictEqual(yield* db.listSessions(), [])
     }),
     {
       plugins: [
         Plugin.define({
           id: "rewrite",
           effect: (ctx) =>
-            ctx.agent.hook("start.before", (e) =>
-              Effect.sync(() => {
-                e.harness = "pi"
-              }),
-            ),
+            ctx.agent.hook("start.before", () => Effect.sync(() => assert.fail("must not run after a refusal"))),
         }),
       ],
     },

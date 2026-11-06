@@ -263,7 +263,7 @@ const checks: ReadonlyArray<Check> = [
           const rerouted = /harness "cursor" → "(\w+)"/.exec(
             (await fs.readFile(daemonLog, "utf8").catch(() => "")).slice(logFrom),
           )
-          if (rerouted) throw new Skip(`harness-choice routed cursor to ${rerouted[1]} (cursor unavailable or limited)`)
+          expect(rerouted === null, `harness-choice routed cursor to ${rerouted?.[1] ?? "another harness"}`)
           await until(
             "the session's result",
             async () => ["completed", "failed"].includes((await turnState(w, id, repo)) ?? ""),

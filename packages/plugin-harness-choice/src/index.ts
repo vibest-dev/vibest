@@ -65,6 +65,30 @@ const whyNot = (harnesses: ReadonlyArray<HarnessOption>, subscriptions: Readonly
     })
     .join(", ")
 
+const resetOf = (resetTime: number | null) =>
+  resetTime === null ? "no reset time" : `resets ${new Date(resetTime).toISOString()}`
+
+const blocked = (
+  harnesses: ReadonlyArray<HarnessOption>,
+  subscriptions: ReadonlyArray<SubscriptionSnapshot>,
+  harness: string,
+  provider: string | undefined,
+) => {
+  const option = harnesses.find((h) => h.harness === harness)
+  if (option === undefined || !option.available) return `${harness}: ${option?.problem || "unavailable"}`
+  const text = rowsOf(subscriptions, harness)
+    .filter((row) => (provider === undefined || row.provider === provider) && isLimited(row))
+    .map((row) => {
+      const limits = row.limits
+        .filter((limit) => limit.status === "limited")
+        .map((limit) => `${limit.window} limit exhausted, ${resetOf(limit.resetTime)}`)
+        .join("; ")
+      return `${row.provider === "" ? harness : `${harness}/${row.provider}`}: ${limits}`
+    })
+    .join("; ")
+  return text === "" ? `${harness}: unavailable` : text
+}
+
 export const harnessChoicePlugin = Plugin.define({
   id: "harness-choice",
   effect: (context) =>
@@ -72,18 +96,19 @@ export const harnessChoicePlugin = Plugin.define({
       yield* context.agent.hook("start.before", (event) =>
         Effect.gen(function* () {
           const requested = event.harness
-          if (requested !== undefined && usable(event.harnesses, event.subscriptions, requested, event.provider)) {
+          if (requested !== undefined) {
+            if (!usable(event.harnesses, event.subscriptions, requested, event.provider)) {
+              return yield* new AgentRefused({
+                reason: blocked(event.harnesses, event.subscriptions, requested, event.provider),
+              })
+            }
             if (event.provider === undefined) {
               const rows = rowsOf(event.subscriptions, requested).filter((row) => !isLimited(row))
               if (rows.length > 0) event.provider = providerOf(emptiest(rows))
             }
             return
           }
-          const named =
-            requested !== undefined &&
-            event.provider !== undefined &&
-            rowsOf(event.subscriptions, requested).some((row) => row.provider === event.provider && isLimited(row))
-          const chosen = best(event.harnesses, event.subscriptions, new Set(), new Set(named ? [requested!] : []))
+          const chosen = best(event.harnesses, event.subscriptions, new Set(), new Set())
           if (chosen === undefined) {
             return yield* new AgentRefused({
               reason: `no harness available: ${whyNot(event.harnesses, event.subscriptions)}`,
