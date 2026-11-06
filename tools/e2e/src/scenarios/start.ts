@@ -57,7 +57,7 @@ const type = async (socket: string, pane: string, text: string) => {
   await herdr(socket, "pane.send_text", { pane_id: pane, text })
   await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
 }
-const answerFolderTrustAsVibestdDoes = async (socket: string, pane: string) => {
+const answerFolderTrust = async (socket: string, pane: string) => {
   const text = await screen(socket, pane)
   if (!/trust this folder/i.test(text)) return false
   const ready = /^\s*❯.*Yes, I trust this folder/im.test(text)
@@ -134,7 +134,7 @@ const move = (harness: "claude" | "pi"): Check => ({
         async () =>
           harness === "pi"
             ? (await status(a)) === "idle"
-            : !(await answerFolderTrustAsVibestdDoes(socket, a)) &&
+            : !(await answerFolderTrust(socket, a)) &&
               !/trust this folder/i.test(await screen(socket, a)) &&
               (await status(a)) === "idle",
         60_000,

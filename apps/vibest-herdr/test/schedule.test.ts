@@ -17,7 +17,7 @@ const candidate = (id: string, plugin: Plugin.Plugin, options: Record<string, un
   plugin,
 })
 
-const preflightEveryHarnessUsableInHarnessIdsOrder = [
+const usableHarnesses = [
   { harness: "pi", available: true },
   { harness: "claude", available: true },
   { harness: "cursor", available: true },
@@ -36,7 +36,7 @@ const start = {
   parentRuntime: undefined,
   machines: [],
   attempts: [],
-  harnesses: preflightEveryHarnessUsableInHarnessIdsOrder,
+  harnesses: usableHarnesses,
 }
 const failed = {
   project: "/r",
@@ -49,7 +49,7 @@ const failed = {
   harness: "pi",
   provider: undefined,
   attempts: [],
-  harnesses: preflightEveryHarnessUsableInHarnessIdsOrder,
+  harnesses: usableHarnesses,
 }
 
 const run = <A, E, R>(plugins: ReadonlyArray<Candidate>, f: (p: Plugins["Service"]) => Effect.Effect<A, E, R>) =>

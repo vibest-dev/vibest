@@ -38,23 +38,25 @@ describe("SQLite", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("vibest.db and its wal and shm are mode 0600, including files that were looser", () =>
-    Effect.gen(function* () {
-      const file = `${yield* tempDirectory("vibest-sqlite-mode-")}/vibest.db`
-      const modesWhileOpen = modes(file).pipe(Effect.provide(database(file)))
-      assert.deepStrictEqual(yield* modesWhileOpen, { db: 0o600, wal: 0o600, shm: 0o600 })
-      yield* Effect.gen(function* () {
-        const heldOpenSoSqliteNeitherDeletesNorRecreatesWal = Context.get(
-          yield* Layer.build(SqliteClient.layer({ filename: file, ...SQL_NAMES })),
-          SqlClient.SqlClient,
-        )
-        yield* heldOpenSoSqliteNeitherDeletesNorRecreatesWal`SELECT count(*) AS n FROM sqlite_master`
-        yield* Effect.promise(() =>
-          Promise.all([file, `${file}-wal`, `${file}-shm`].map((path) => fs.chmod(path, 0o644))),
-        )
+  it.effect(
+    "vibest.db and its wal and shm are mode 0600, including files that were looser (a second connection holds the wal open so SQLite neither deletes nor recreates it)",
+    () =>
+      Effect.gen(function* () {
+        const file = `${yield* tempDirectory("vibest-sqlite-mode-")}/vibest.db`
+        const modesWhileOpen = modes(file).pipe(Effect.provide(database(file)))
         assert.deepStrictEqual(yield* modesWhileOpen, { db: 0o600, wal: 0o600, shm: 0o600 })
-      }).pipe(Effect.scoped)
-    }).pipe(Effect.provide(Platform.services)),
+        yield* Effect.gen(function* () {
+          const walHolder = Context.get(
+            yield* Layer.build(SqliteClient.layer({ filename: file, ...SQL_NAMES })),
+            SqlClient.SqlClient,
+          )
+          yield* walHolder`SELECT count(*) AS n FROM sqlite_master`
+          yield* Effect.promise(() =>
+            Promise.all([file, `${file}-wal`, `${file}-shm`].map((path) => fs.chmod(path, 0o644))),
+          )
+          assert.deepStrictEqual(yield* modesWhileOpen, { db: 0o600, wal: 0o600, shm: 0o600 })
+        }).pipe(Effect.scoped)
+      }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect("a writable transaction is BEGIN IMMEDIATE and busy_timeout is 5000", () =>
@@ -136,8 +138,8 @@ describe("SQLite", () => {
     Effect.gen(function* () {
       const file = `${yield* tempDirectory("vibest-sqlite-project-")}/vibest.db`
       const open = database(file)
-      const createFileBeforeConcurrentOpens = Effect.void.pipe(Effect.provide(open))
-      yield* createFileBeforeConcurrentOpens
+      const createFileFirst = Effect.void.pipe(Effect.provide(open))
+      yield* createFileFirst
       const dir = `${file}-repo`
       const create = Effect.gen(function* () {
         return yield* (yield* Db).createProject(dir, [{ path: `${dir}/app`, remote: "git@example.com:a.git" }])
@@ -175,8 +177,8 @@ describe("a vibestd restart", () => {
         return ids
       }).pipe(Effect.provide(database(file)))
       const statuses = yield* Effect.gen(function* () {
-        const harnessesWhoseAdapterPollsAsInboxLayerPasses = ["claude"] as const
-        yield* (yield* Db).recoverDelivering(harnessesWhoseAdapterPollsAsInboxLayerPasses, () => "")
+        const pollingHarnesses = ["claude"] as const
+        yield* (yield* Db).recoverDelivering(pollingHarnesses, () => "")
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox ORDER BY id`
       }).pipe(Effect.provide(database(file)))

@@ -43,7 +43,7 @@ const test = <E>(
 
 const client = Effect.flatMap(Layout, (layout) => connect(layout.socket))
 
-const throwOnTerminationSignalOrProcessGroupSoNoRealProcessIsSignalled = Effect.acquireRelease(
+const refuseRealKills = Effect.acquireRelease(
   Effect.sync(() => {
     const real = process.kill
     process.kill = ((pid: number, signal?: string | number) => {
@@ -68,8 +68,8 @@ const throwOnTerminationSignalOrProcessGroupSoNoRealProcessIsSignalled = Effect.
 
 const HARNESS = 4242
 
-const workingPiMainAgentInP1WithPendingNoticeAndNoSubscription = Effect.gen(function* () {
-  yield* throwOnTerminationSignalOrProcessGroupSoNoRealProcessIsSignalled
+const workingPiMain = Effect.gen(function* () {
+  yield* refuseRealKills
   const db = yield* Db
   const herdr = yield* FakeRuntime
   const processes = yield* FakeProcesses
@@ -131,7 +131,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
     "terminate signals one valid PID: ESRCH is sent; EPERM or anything else, or an invalid PID, is denied",
     () =>
       Effect.gen(function* () {
-        yield* throwOnTerminationSignalOrProcessGroupSoNoRealProcessIsSignalled
+        yield* refuseRealKills
         const asked: Array<number> = []
         const processes = yield* Effect.gen(function* () {
           return yield* Processes
@@ -163,7 +163,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   test(
     "y: SIGTERM to the harness PID only, its terminal kept; its exit and a delivery round before the launch drop nothing; the start in another terminal resumes the same conversation and gets what waited",
     Effect.gen(function* () {
-      const s = yield* workingPiMainAgentInP1WithPendingNoticeAndNoSubscription
+      const s = yield* workingPiMain
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
       assert.deepStrictEqual(yield* s.herdr.callsTo("close"), [])
@@ -186,7 +186,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   test(
     "y with another harness: the same main session, a new conversation for that harness",
     Effect.gen(function* () {
-      const s = yield* workingPiMainAgentInP1WithPendingNoticeAndNoSubscription
+      const s = yield* workingPiMain
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
       assert.deepInclude(yield* s.startAt("test/p2", "claude"), {
         sessionId: s.started.sessionId,
@@ -199,7 +199,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   test(
     "y after a restart in place: SIGTERM to the pid the restarted harness reported ready with, its terminal kept",
     Effect.gen(function* () {
-      const s = yield* workingPiMainAgentInP1WithPendingNoticeAndNoSubscription
+      const s = yield* workingPiMain
       yield* s.processes.set(7777, "alive")
       yield* s.db.patchLive(s.started.sessionId, { pid: 7777 })
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
@@ -211,7 +211,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   test(
     "while a restart is between its harnesses: a start elsewhere is refused even with no agent seen, and the move is unsupported",
     Effect.gen(function* () {
-      const s = yield* workingPiMainAgentInP1WithPendingNoticeAndNoSubscription
+      const s = yield* workingPiMain
       yield* (yield* Restarting).mark(s.started.sessionId)
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
       const refused = yield* Effect.exit(s.startAt("test/p2"))
@@ -226,7 +226,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   test(
     "a harness that ignores SIGTERM: running after about 10 s, the row back at its terminal, nothing dropped, and the start elsewhere still refused",
     Effect.gen(function* () {
-      const s = yield* workingPiMainAgentInP1WithPendingNoticeAndNoSubscription
+      const s = yield* workingPiMain
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
       yield* untilVirtual(
@@ -248,7 +248,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   test(
     "stopped as soon as the runtime reports the harness's exit, with no clock advance, while its PID still reads alive",
     Effect.gen(function* () {
-      const s = yield* workingPiMainAgentInP1WithPendingNoticeAndNoSubscription
+      const s = yield* workingPiMain
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
       yield* until(s.processes.signaled, (pids) => pids.length === 1)
@@ -264,7 +264,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   test(
     "a harness that exits without an event is stopped at the deadline's last look",
     Effect.gen(function* () {
-      const s = yield* workingPiMainAgentInP1WithPendingNoticeAndNoSubscription
+      const s = yield* workingPiMain
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
       yield* until(s.processes.signaled, (pids) => pids.length === 1)
@@ -277,7 +277,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   test(
     "the CLI interrupted (Ctrl-C) after the detach: the stop still finishes, the row is back at its terminal, and a start elsewhere is still refused",
     Effect.gen(function* () {
-      const s = yield* workingPiMainAgentInP1WithPendingNoticeAndNoSubscription
+      const s = yield* workingPiMain
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
       yield* untilVirtual(s.db.coordinatorOf(s.projectId), (row) => row?.runtime === null)
@@ -294,7 +294,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   test(
     "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded (an older vibest), a remote machine, or no agent seen but a live (reused) PID; an exited PID moves without a signal",
     Effect.gen(function* () {
-      const s = yield* workingPiMainAgentInP1WithPendingNoticeAndNoSubscription
+      const s = yield* workingPiMain
       const restore = s.db.coordinatorLaunch(s.projectId, "pi", false, s.origin, { pid: HARNESS })
       yield* s.db.coordinatorLaunch(s.projectId, "pi", false, {
         ...s.origin,

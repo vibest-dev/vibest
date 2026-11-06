@@ -19,7 +19,7 @@ const skillFiles = () =>
     .map((entry) => path.join(skills, entry.name, "SKILL.md"))
     .sort()
 
-const vibestCommandsOnFenceLineOrBacktickSpans = (line: string) => {
+const vibestCommands = (line: string) => {
   const spans = [...line.matchAll(/`([^`\n]+)`/g)]
     .map((match) => match[1]!.trim())
     .filter((span) => span.startsWith("vibest "))
@@ -69,7 +69,7 @@ describe("builtin skills: the invocations they print, and how each harness plugi
         const line = lines[index] ?? ""
         const at = `${rel}:${index + 1}`
         if (line.includes("--access")) errors.push(`${at}: --access`)
-        for (const command of vibestCommandsOnFenceLineOrBacktickSpans(line)) {
+        for (const command of vibestCommands(line)) {
           if (command.startsWith("vibest run ")) archive = /(?:^|\s)--archive-on-completion(?:\s|$)/.test(command)
           const send = /^vibest send\s+(<[^>]+>)/.exec(command)
           if (!send?.[1]) continue
