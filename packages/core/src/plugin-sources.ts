@@ -76,6 +76,7 @@ export const makeSources = Effect.fnUntraced(function* (timeout: Duration.Input)
   const loader = yield* PluginLoader
   const imported = new Map<string, Imported>()
   let lastConfig: ConfigFile = { plugins: [] }
+  let warnedRuntime = false
 
   const sha = (bytes: Uint8Array) => crypto.digest("SHA-256", bytes).pipe(Effect.map(Hex.encode))
   const utf8 = (s: string) => new TextEncoder().encode(s)
@@ -192,6 +193,14 @@ export const makeSources = Effect.fnUntraced(function* (timeout: Duration.Input)
     const text = yield* fs.readFileString(layout.config).pipe(Effect.option)
     if (Option.isNone(text)) return (lastConfig = { plugins: [] })
     return yield* Effect.try(() => loader.parseJsonc(text.value)).pipe(
+      Effect.tap((raw) => {
+        if (warnedRuntime || raw === null || typeof raw !== "object" || !Object.hasOwn(raw, "runtime"))
+          return Effect.void
+        warnedRuntime = true
+        return Effect.logWarning(
+          `${layout.config}: the top-level "runtime" key is no longer read; agents use their caller or parent runtime, or --runtime`,
+        )
+      }),
       Effect.flatMap(Schema.decodeUnknownEffect(ConfigFile)),
       Effect.tap((config) => Effect.sync(() => (lastConfig = config))),
       Effect.tapError((e) =>

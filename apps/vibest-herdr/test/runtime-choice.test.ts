@@ -1,28 +1,36 @@
 import { assert, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
+import { Layout } from "@vibest/core/paths"
 import { Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
-import { Effect } from "effect"
+import { Effect, FileSystem } from "effect"
 
 import { FakeRuntime, makeRepository, projectOf, testLayer } from "./fakes.ts"
 
-it.effect("runtime choice: explicit, configured, parent (even offline), then the outside default", () =>
+it.effect("runtime choice: explicit or plugin, online parent, then the outside default", () =>
   Effect.gen(function* () {
-    for (const [explicit, configured, parent, expected] of [
-      ["explicit", "configured", "parent", "explicit"],
-      [undefined, "configured", "parent", "configured"],
-      [undefined, undefined, "parent", "parent"],
-      [undefined, "offline-configured", undefined, "offline-configured"],
-      [undefined, undefined, undefined, "herdr"],
+    const fake = (yield* FakeRuntime).runtime
+    const runtimes = yield* Runtimes
+    yield* runtimes.register({ ...fake, kind: "parent" })
+    yield* runtimes.register({
+      ...fake,
+      kind: "offline",
+      status: () => Effect.succeed({ status: "offline", reason: "absent" }),
+    })
+    for (const [explicit, parent, expected] of [
+      ["explicit", "parent", "explicit"],
+      [undefined, "parent", "parent"],
+      [undefined, "offline", "herdr"],
+      [undefined, undefined, "herdr"],
     ]) {
       const plugins = yield* Plugins.make([
-        { source: "test:choice", revision: "1", options: {}, plugin: choicePlugin(() => Effect.succeed(configured)) },
+        { source: "test:choice", revision: "1", options: {}, plugin: choicePlugin() },
       ])
       const choice = yield* plugins.start({
         project: "/repo",
-        agentType: "main",
+        agentType: "general",
         parentSessionId: undefined,
         harnesses: [],
         attempts: [],
@@ -41,7 +49,7 @@ it.effect("runtime choice: explicit, configured, parent (even offline), then the
 )
 
 it.effect(
-  "a coordinator is a parent too: its subagent uses its runtime, even when that runtime's default endpoint is offline",
+  "an obsolete runtime config cannot pull a subagent away from its coordinator, even when the parent default endpoint is offline",
   () =>
     Effect.gen(function* () {
       const fake = (yield* FakeRuntime).runtime
@@ -51,6 +59,10 @@ it.effect(
         status: () => Effect.succeed({ status: "offline", reason: "default endpoint absent" }),
         process: () => Effect.succeed({ running: true }),
       })
+      yield* (yield* FileSystem.FileSystem).writeFileString(
+        (yield* Layout).config,
+        JSON.stringify({ runtime: "herdr" }),
+      )
       const db = yield* Db
       const root = yield* makeRepository
       const projectId = yield* projectOf(root)

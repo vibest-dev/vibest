@@ -166,8 +166,22 @@ export const paneTail = (h: Runtime, terminal: Terminal | undefined, lines = 30)
 export const machinesListing = (
   runtimes: RuntimesShape,
   harnesses: ReadonlyArray<string>,
+  parent?: { readonly runtime: string; readonly terminal: Terminal },
 ): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
   runtimes.statuses({ id: "local" }).pipe(
+    Effect.flatMap((rows) =>
+      Effect.forEach(
+        rows,
+        (row) =>
+          row.status.status !== "online" && row.runtime.kind === parent?.runtime && parent.terminal.machine === "local"
+            ? row.runtime.process(parent.terminal).pipe(
+                Effect.as({ runtime: row.runtime, status: { status: "online" } as MachineStatus }),
+                Effect.orElseSucceed(() => row),
+              )
+            : Effect.succeed(row),
+        { concurrency: "unbounded" },
+      ),
+    ),
     Effect.map((rows) => [
       {
         machine: "local",

@@ -1,7 +1,6 @@
 import { dlopen, FFIType } from "bun:ffi"
 import fs from "node:fs"
 import fsPromises from "node:fs/promises"
-import path from "node:path"
 
 import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
@@ -17,7 +16,7 @@ import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { CALLER_ENV as HC_CALLER_ENV } from "@vibest/runtime-herdr-core/caller"
 import { plugin as runtimeHcPlugin } from "@vibest/runtime-herdr-core/plugin"
 import { CALLER_ENV as HERDR_CALLER_ENV } from "@vibest/runtime-herdr/caller"
-import { choicePlugin, type ConfiguredRuntime } from "@vibest/runtime-herdr/choice"
+import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
 import type { Host } from "@vibest/server/daemon"
 import * as effect from "effect"
@@ -218,21 +217,6 @@ const lock: Host["lock"] = (file) =>
     ),
   )
 
-const configuredRuntime: ConfiguredRuntime = () =>
-  Effect.sync(() => {
-    try {
-      const home =
-        process.env["VIBEST_HOME"] ?? (process.env["HOME"] ? path.join(process.env["HOME"], ".vibest") : undefined)
-      if (home === undefined) return undefined
-      const runtime = (
-        plugins.parseJsonc(fs.readFileSync(path.join(home, "vibest.json"), "utf8")) as { runtime?: unknown }
-      ).runtime
-      return typeof runtime === "string" && runtime !== "" ? runtime : undefined
-    } catch {
-      return undefined
-    }
-  })
-
 const builtinPlugins: ReadonlyArray<Candidate> = [
   { source: "builtin:harness-choice", revision: "harness-choice", options: {}, plugin: harnessChoicePlugin },
   { source: "builtin:runtime-herdr", revision: "runtime-herdr", options: {}, plugin: runtimeHerdrPlugin },
@@ -241,7 +225,7 @@ const builtinPlugins: ReadonlyArray<Candidate> = [
     source: "builtin:runtime-choice",
     revision: "runtime-choice",
     options: {},
-    plugin: choicePlugin(configuredRuntime),
+    plugin: choicePlugin(),
   },
 ]
 

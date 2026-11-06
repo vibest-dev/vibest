@@ -17,6 +17,9 @@ such a rewatch one more read follows a second later, because Bun 1.4's `fs.watch
 directories' events right after a watch closes (drop it when Bun no longer does). A teardown that times out is left
 running, so an old revision's finalizers can overlap the new setup.
 
+The obsolete top-level `runtime` key never chooses a runtime. The loader warns once per daemon when it sees
+the key and still loads the file's plugins; changing the key does not change agent placement.
+
 ## Caller discovery
 
 Runtime plugins optionally register `caller.env` and `caller.detect` alongside their other capabilities. The CLI

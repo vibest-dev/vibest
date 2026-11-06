@@ -41,7 +41,9 @@ export const describeSpawn = (s: {
   return [s.harness, s.provider, s.model].filter(Boolean).join(" / ") + by
 }
 
-export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions">
+export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions"> & {
+  readonly parentTerminal?: VibestPlugin.Runtime.Terminal | undefined
+}
 
 export type FailInput = Omit<VibestPlugin.AgentFail, "subscriptions" | "move">
 
@@ -386,7 +388,13 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       return yield* withHooks("agent.start.before", (hooks, trace) =>
         Effect.gen(function* () {
           const current = yield* subscriptions.list
-          const machines = yield* machinesListing(runtimes, input.machines[0]?.harnesses ?? [])
+          const machines = yield* machinesListing(
+            runtimes,
+            input.machines[0]?.harnesses ?? [],
+            input.parentRuntime && input.parentTerminal
+              ? { runtime: input.parentRuntime, terminal: input.parentTerminal }
+              : undefined,
+          )
           const event: VibestPlugin.AgentStartBefore = { ...input, machines, subscriptions: current }
           const decidedBy: Record<string, string> = {}
           const stopped = yield* runHook(

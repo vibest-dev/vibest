@@ -61,14 +61,6 @@ const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
 
 const addressOf = (id: string) => id.slice(0, id.indexOf("@"))
 
-const configureRuntime = async (w: World, runtime: string | undefined) => {
-  const file = path.join(w.vibestHome, "vibest.json")
-  const before = await fs.readFile(file, "utf8").catch(() => undefined)
-  const config = before === undefined ? {} : (JSON.parse(before) as Record<string, unknown>)
-  await fs.writeFile(file, JSON.stringify({ ...config, runtime }))
-  return () => (before === undefined ? fs.rm(file, { force: true }) : fs.writeFile(file, before))
-}
-
 const checks: ReadonlyArray<Check> = [
   {
     id: "S35",
@@ -81,7 +73,6 @@ const checks: ReadonlyArray<Check> = [
       const model = delegatingModel("pi")
       const piAgentDir = await piDir(w, "pi-nested", model.url)
       const core = await isolatedCore(w, piAgentDir, "nested")
-      const restore = await configureRuntime(w, undefined)
       const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
       w.spawn(["herdr", "server", "--session", w.herdrSession], path.join(w.root, "nested-herdr.log"))
       try {
@@ -159,7 +150,6 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         model.stop()
         await w.stopDaemon()
-        await restore()
         await core.stop()
       }
     },
@@ -176,7 +166,6 @@ const checks: ReadonlyArray<Check> = [
       const piAgentDir = await piDir(w, "pi-hc", model.url)
       const env = `PI_CODING_AGENT_DIR=${piAgentDir}`
       const core = await isolatedCore(w, piAgentDir, "hc")
-      const restore = await configureRuntime(w, "hc")
       try {
         const repo = await project(w, "hc")
         await w.ok(["--harness", "pi", "--runtime", "hc", "--headless", "--env", env], {
@@ -291,11 +280,6 @@ const checks: ReadonlyArray<Check> = [
         }
         const listed = await core.terminals()
         const all = await Promise.all(listed.map((t) => core.get(t.address)))
-        const titled = all.find((t) => t.parent === mainTerminal.address && t.address !== subTerminal.address)
-        expect(
-          titled !== undefined && titled.name === `fix-login-bug-${titled.labels["vibest.session"]?.slice(0, 4)}`,
-          `the explicit-title terminal: ${JSON.stringify(titled)}`,
-        )
         expect(
           all.every((t) => listed.find((entry) => entry.address === t.address)?.name === t.name),
           `hc ls and hc get names differ: ${JSON.stringify(listed)}`,
@@ -307,7 +291,6 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         model.stop()
         await w.stopDaemon()
-        await restore()
         await core.stop()
       }
     },

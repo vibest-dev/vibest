@@ -864,6 +864,7 @@ export const handlers = VibestRpcs.toLayer(
             machine: { id: "local" },
             runtime,
             parentRuntime: callerRuntime,
+            parentTerminal: callerTerminal,
             machines: yield* machinesListing(runtimes, [...HARNESS_IDS]).pipe(Effect.orElseSucceed(() => [])),
           })
           if (decision.harness === undefined) return yield* new NoHarnessChosen()

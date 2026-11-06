@@ -85,15 +85,16 @@ Several runtimes run at once, on any machine; core routes every call by the Agen
 product keeps one instance per machine (one herdr session `vibest`, one rex server, one tern daemon).
 
 - Each Agent gets its runtime in `agent.start.before` (`event.runtime`, beside `machine` and `harness`). A runtime
-  already set by the caller (`--runtime`) or a plugin stands. Next is vibest.json's top-level `runtime`, then the
-  parent's runtime, then herdr, then the only online runtime. The product reads the configuration on every start.
-  An unavailable configured or parent runtime is refused, never silently replaced by another runtime. Main agents
-  count as parents too; their rows are read through `coordinatorOf`, not the worker-only `getSession`.
-- A main Agent defaults to the positively identified caller terminal's runtime. An explicit/configured different
+  already set by the caller (`--runtime`) or a plugin stands. Next is the parent's runtime when online on the
+  chosen machine, then herdr among online runtimes, then the only online runtime. Main agents count as parents
+  too; their rows are read through `coordinatorOf`, not the worker-only `getSession`.
+- A main Agent defaults to the positively identified caller terminal's runtime. An explicit different
   runtime opens a new terminal instead of registering the caller's terminal under the other runtime. Outside any
   runtime the default remains herdr, then the only online runtime. Subagents open near their parent; reachability
   can be proved at that parent endpoint even when the default server of the same runtime kind is offline.
 - None online: refused, listing each runtime and why. vibest never installs a runtime locally.
+- There is no top-level runtime preference in configuration. An old `runtime` key is ignored, with one warning
+  per daemon configuration loader; its `plugins` still load. Use `--runtime` or a user plugin for an override.
 
 ### Identifying the caller terminal
 

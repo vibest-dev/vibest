@@ -16,6 +16,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Logger,
   Path,
   Schedule,
   Scope,
@@ -447,6 +448,37 @@ const live = <E>(
 ) => it.live(name, () => program.pipe(Effect.scoped, Effect.provide(Platform.services)), { timeout: 20_000 })
 
 describe("plugins: supervisor", () => {
+  live(
+    "an obsolete top-level runtime key warns once and does not prevent configured plugins loading",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* packageHome
+      const logs: Array<unknown> = []
+      yield* fs.writeFileString(
+        path.join(dir, "kept.ts"),
+        pluginFile("kept", "kept-config", 'ctx.options.updated ? "updated" : "kept"'),
+      )
+      const config = path.join(dir, "vibest.json")
+      yield* fs.writeFileString(config, JSON.stringify({ runtime: "hc", plugins: ["./kept.ts"] }))
+      yield* Effect.gen(function* () {
+        const plugins = yield* supervise(dir)
+        assert.strictEqual((yield* plugins.start(event)).model, "kept")
+        yield* fs.writeFileString(
+          config,
+          JSON.stringify({ runtime: "other", plugins: [{ package: "./kept.ts", options: { updated: true } }] }),
+        )
+        yield* eventually(
+          plugins.start(event),
+          (decision) => decision.model === "updated",
+          "config reloaded without runtime routing",
+        )
+        assert.strictEqual((yield* plugins.start(event)).model, "updated")
+        assert.strictEqual(logs.filter((line) => JSON.stringify(line).includes("key is no longer read")).length, 1)
+      }).pipe(Effect.provide(Logger.layer([Logger.make((entry) => void logs.push(entry.message))])))
+    }),
+  )
+
   live(
     "a dependency edit (atomic save) reloads the changed transitive import, without touching the entry",
     Effect.gen(function* () {

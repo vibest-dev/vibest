@@ -695,6 +695,7 @@ export class Sessions extends Context.Service<
           machine: { id: input.machine.id },
           runtime: undefined,
           parentRuntime: parent?.runtime,
+          parentTerminal: parent?.address,
           machines: yield* machinesListing,
         })
         const { provider, model } = decision

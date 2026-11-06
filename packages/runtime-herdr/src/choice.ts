@@ -1,22 +1,17 @@
 import * as VibestPlugin from "@vibest/plugin"
 import { Effect } from "effect"
 
-export type ConfiguredRuntime = () => Effect.Effect<string | undefined>
-
-const none: ConfiguredRuntime = () => Effect.succeed(undefined)
-
-export const choicePlugin = (configured: ConfiguredRuntime = none): VibestPlugin.Plugin.Plugin =>
+export const choicePlugin = (): VibestPlugin.Plugin.Plugin =>
   VibestPlugin.Plugin.define({
     id: "runtime-choice",
     effect: (context) =>
       context.agent.hook("start.before", (event) =>
-        Effect.gen(function* () {
+        Effect.sync(() => {
           if (event.runtime !== undefined) return
           const runtimes = event.machines.find((m) => m.machine === event.machine.id)?.runtimes ?? []
           const online = runtimes.filter((r) => r.status === "online")
-          const wanted = (yield* configured()) ?? event.parentRuntime
-          if (wanted !== undefined) {
-            event.runtime = wanted
+          if (event.parentRuntime !== undefined && online.some((r) => r.kind === event.parentRuntime)) {
+            event.runtime = event.parentRuntime
             return
           }
           const herdr = online.find((r) => r.kind === "herdr")
