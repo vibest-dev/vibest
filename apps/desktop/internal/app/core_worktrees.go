@@ -213,7 +213,7 @@ func (a *App) coreWorktree(id, value string, create bool) {
 		if created != "" {
 			a.coreOperationNote = created + "checkout retained unless separately removed"
 		}
-		a.coreRunCapture(s, intent, n, core.RunOptions{CWD: target.root}, created, func(l *core.Layout, p core.Pane, _ core.Terminal) error {
+		a.coreRunCapture(s, intent, n, core.TerminalRunParams{CWD: core.Optional(target.root)}, created, func(l *core.Layout, p core.Pane, _ core.Terminal) error {
 			sourceExists := false
 			for _, source := range l.Workspaces {
 				sourceExists = sourceExists || source.ID == w.ID && source.CWD == w.CWD && source.Machine == ""

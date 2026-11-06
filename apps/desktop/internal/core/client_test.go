@@ -161,7 +161,7 @@ func attach(t *testing.T, c *core.Client, f *fixture, address string, ch uint32)
 		q := f.next()
 		f.reply(q, map[string]any{"channel": ch, "terminal": map[string]any{"address": address, "state": "live", "cols": 80, "rows": 24}})
 	}()
-	v, err := c.Attach(context.Background(), core.AttachOptions{Terminal: address, Cols: 80, Rows: 24})
+	v, err := c.Attach(context.Background(), core.TerminalAttachParams{Terminal: address, Cols: 80, Rows: 24})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestPublicVerticalSliceAndFocusOwnership(t *testing.T) {
 		}
 		f.reply(q, map[string]any{"address": "t1", "state": "live"})
 	}()
-	record, err := c.Run(context.Background(), core.RunOptions{CWD: "/mock"})
+	record, err := c.Run(context.Background(), core.TerminalRunParams{CWD: core.Optional("/mock")})
 	if err != nil || record.Address != "t1" {
 		t.Fatal(record, err)
 	}
@@ -276,7 +276,7 @@ func TestAttachAcceptsFirstPaintBeforeRPCReply(t *testing.T) {
 		f.send(7, 0, []byte("first paint"))
 		f.reply(q, map[string]any{"channel": 7, "terminal": map[string]any{"address": "t1", "state": "live", "cols": 80, "rows": 24}})
 	}()
-	v, err := c.Attach(context.Background(), core.AttachOptions{Terminal: "t1", Cols: 80, Rows: 24})
+	v, err := c.Attach(context.Background(), core.TerminalAttachParams{Terminal: "t1", Cols: 80, Rows: 24})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,10 @@ func TestCanceledAttachDetachesLateChannel(t *testing.T) {
 	c, f := newFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
-	go func() { _, err := c.Attach(ctx, core.AttachOptions{Terminal: "t1", Cols: 80, Rows: 24}); result <- err }()
+	go func() {
+		_, err := c.Attach(ctx, core.TerminalAttachParams{Terminal: "t1", Cols: 80, Rows: 24})
+		result <- err
+	}()
 	q := f.next()
 	cancel()
 	if err := <-result; !errors.Is(err, context.Canceled) {

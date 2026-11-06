@@ -122,7 +122,7 @@ func TestCoreAppRemoteOutputIsReadOnlyWithVisibleReasonAndLocalInputWorks(t *tes
 	p := core.NewPane(core.TerminalRef{CoreID: "remote-A", Address: "rohan/t1"})
 	a, f := newCoreAppFixtureWith(t, func(f *coreAppFixture) {
 		f.layout.AddWorkspace("Remote", "/inert", "rohan", p)
-		f.machines = []core.Machine{{Name: "rohan", ID: "remote-A", State: "connected"}}
+		f.machines = []core.MachineView{{Name: "rohan", ID: "remote-A", State: "connected"}}
 		f.terminals["remote-A/t1"] = core.Terminal{Address: "rohan/t1", State: "live", Cols: 80, Rows: 24}
 	})
 	tt := ui.NewTester(a.View, 1000, 700)

@@ -46,16 +46,17 @@ type RPCError struct {
 
 func (e *RPCError) Error() string { return fmt.Sprintf("core: %s: %s", e.Data.Kind, e.Message) }
 
-type Hello struct {
-	Generation uint32 `json:"generation"`
-	Version    string `json:"version"`
-	Core       struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"core"`
-	Framed   bool     `json:"framed"`
-	Methods  []string `json:"methods"`
-	Features []string `json:"features"`
+type Mismatch struct {
+	Version    string
+	Generation uint32
+	Reason     string
+}
+
+func (e *Mismatch) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("herdr-core refused protocol generation %d (%s); this app needs herdr-core %s", PinnedGeneration, e.Reason, PinnedVersion)
+	}
+	return fmt.Sprintf("herdr-core %s (generation %d) does not match the herdr-core %s (generation %d) this app was built for; run herdr-core %s", e.Version, e.Generation, PinnedVersion, PinnedGeneration, PinnedVersion)
 }
 
 var requiredMethods = []string{"terminal.run", "terminal.get", "terminal.attach", "terminal.kill", "events.subscribe", "doc.get", "doc.set", "machine.list"}
@@ -89,7 +90,7 @@ type outgoing struct {
 
 type Client struct {
 	conn        net.Conn
-	hello       Hello
+	hello       HelloResult
 	mu          sync.Mutex
 	next        uint64
 	calls       map[uint64]*pending
@@ -120,7 +121,8 @@ func Connect(ctx context.Context, conn net.Conn) (*Client, error) {
 	}
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
-	hello, _ := json.Marshal(message{JSONRPC: "2.0", ID: 1, Method: "hello", Params: map[string]any{"generation": 1, "framed": true}})
+	generation := uint32(PinnedGeneration)
+	hello, _ := json.Marshal(message{JSONRPC: "2.0", ID: 1, Method: "hello", Params: HelloParams{Generation: &generation, Framed: true}})
 	if err := writeAll(conn, append(hello, '\n')); err != nil {
 		return nil, err
 	}
@@ -137,14 +139,20 @@ func Connect(ctx context.Context, conn net.Conn) (*Client, error) {
 		return nil, errors.New("core: invalid hello reply")
 	}
 	if reply.Error != nil {
+		if reply.Error.Data.Kind == "unsupported_generation" {
+			return nil, &Mismatch{Generation: PinnedGeneration, Reason: reply.Error.Message}
+		}
 		return nil, reply.Error
 	}
-	var h Hello
+	var h HelloResult
 	if err := json.Unmarshal(reply.Result, &h); err != nil {
 		return nil, err
 	}
-	if h.Generation != 1 || h.Version != "0.1.13" || !h.Framed || h.Core.ID == "" {
-		return nil, fmt.Errorf("core: require 0.1.13 generation 1 framed viewer, got %q generation %d", h.Version, h.Generation)
+	if h.Generation != PinnedGeneration || h.Version != PinnedVersion {
+		return nil, &Mismatch{Version: h.Version, Generation: h.Generation}
+	}
+	if !h.Framed || h.Core.ID == "" {
+		return nil, errors.New("core: hello did not switch to a framed connection with a core id")
 	}
 	for _, m := range requiredMethods {
 		if !slices.Contains(h.Methods, m) {
@@ -169,7 +177,7 @@ func Connect(ctx context.Context, conn net.Conn) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) Hello() Hello {
+func (c *Client) Hello() HelloResult {
 	h := c.hello
 	h.Methods = slices.Clone(h.Methods)
 	h.Features = slices.Clone(h.Features)

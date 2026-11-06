@@ -70,7 +70,7 @@ func TestSidebarEndpointMetadata(t *testing.T) {
 	find(t, tt, "offline")
 	find(t, tt, "local repo")
 	publishCoreLayout(t, a, f, func(f *coreAppFixture) {
-		f.machines = append(f.machines, core.Machine{Name: "Unknown", ID: "unknown", State: "connecting"})
+		f.machines = append(f.machines, core.MachineView{Name: "Unknown", ID: "unknown", State: "connecting"})
 	})
 	tt.Frame()
 	find(t, tt, "machine: Unknown")

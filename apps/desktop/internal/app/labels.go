@@ -77,7 +77,7 @@ func (a *App) writeLabel(address, key, value string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = c.Call(ctx, "terminal.label", map[string]any{"terminal": address, "labels": map[string]string{key: value}}, nil)
+		_ = c.Call(ctx, "terminal.label", core.TerminalLabelParams{Terminal: address, Labels: map[string]string{key: value}}, nil)
 	}()
 }
 

@@ -115,7 +115,7 @@ func TestLostAttachAndReconnectDoNotRetarget(t *testing.T) {
 		q := f.next()
 		f.reply(q, map[string]any{"channel": 11, "terminal": map[string]any{"address": "t1", "state": "live"}})
 	}()
-	v, err := s.Attach(context.Background(), pane, core.AttachOptions{Cols: 80, Rows: 24})
+	v, err := s.Attach(context.Background(), pane, core.TerminalAttachParams{Cols: 80, Rows: 24})
 	if err != nil {
 		t.Fatal(err)
 	}

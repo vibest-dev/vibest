@@ -20,7 +20,8 @@ build:
 
 vet:
 	go vet ./...
-	@files=$$(gofmt -l cmd internal testdata); [ -z "$$files" ] || { echo "gofmt needed:" $$files >&2; exit 1; }
+	go run ./scripts/hcgen -check
+	@files=$$(gofmt -l cmd internal scripts testdata); [ -z "$$files" ] || { echo "gofmt needed:" $$files >&2; exit 1; }
 
 test:
 	python3 scripts/test_patch_mygo.py

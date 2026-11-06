@@ -132,7 +132,7 @@ func TestActivityRemoteReportsCannotAcknowledgePinnedPane(t *testing.T) {
 		w := &f.layout.Workspaces[1]
 		w.Machine = "remote"
 		w.Tabs[0].Root.Pane.Terminal = core.TerminalRef{CoreID: "remote-A", Address: "remote/d"}
-		f.machines = []core.Machine{{Name: "remote", ID: "remote-A", State: "connected"}}
+		f.machines = []core.MachineView{{Name: "remote", ID: "remote-A", State: "connected"}}
 		f.terminals["remote/d"] = core.Terminal{Address: "remote/d", Reported: true, Status: &core.Status{State: "done"}, Turn: 99}
 	})
 	coreAppAct(a, func() {

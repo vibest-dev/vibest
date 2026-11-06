@@ -161,10 +161,10 @@ func (c *connection) UseTheme(th *terminal.Theme) error {
 	if th == nil {
 		return nil
 	}
-	hex := func(c ui.Color) string {
+	hex := func(c ui.Color) *string {
 		const digits = "0123456789abcdef"
-		b := []byte{'#', digits[c.R>>4], digits[c.R&15], digits[c.G>>4], digits[c.G&15], digits[c.B>>4], digits[c.B&15]}
-		return string(b)
+		b := string([]byte{'#', digits[c.R>>4], digits[c.R&15], digits[c.G>>4], digits[c.G&15], digits[c.B>>4], digits[c.B&15]})
+		return &b
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

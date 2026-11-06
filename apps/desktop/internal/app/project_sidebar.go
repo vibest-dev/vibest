@@ -263,7 +263,7 @@ func (a *App) projectNewTerminal(p vibest.Project) {
 		a.err = "Not connected to Core"
 		return
 	}
-	o := core.RunOptions{CWD: directory(p), Keep: true, Labels: map[string]string{ProjectLabel: p.ID}}
+	o := core.TerminalRunParams{CWD: core.Optional(directory(p)), Keep: true, Labels: map[string]string{ProjectLabel: p.ID}}
 	a.coreNavigation++
 	intent := a.coreNavigation
 	n := a.beginCoreCapture("", true)

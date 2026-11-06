@@ -12,7 +12,7 @@ import (
 func coreMachineUI(t *testing.T) (*App, *coreAppFixture, *ui.Tester) {
 	t.Helper()
 	return coreActivityUIWith(t, func(f *coreAppFixture) {
-		f.machines = []core.Machine{{Name: "Remote", ID: "remote-A", State: "connected"}}
+		f.machines = []core.MachineView{{Name: "Remote", ID: "remote-A", State: "connected"}}
 		w := &f.layout.Workspaces[1]
 		w.Label, w.Machine = "Remote Alpha", "Remote"
 		w.Tabs[0].Root.Pane.Terminal = core.TerminalRef{CoreID: "remote-A", Address: "Remote/r"}

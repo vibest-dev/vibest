@@ -6,11 +6,13 @@ on:
     paths:
       - "apps/desktop/**"
       - "packages/protocol/**"
+      - "packages/effect-hc-sdk/schema/**"
       - ".github/workflows/desktop.yml"
   pull_request:
     paths:
       - "apps/desktop/**"
       - "packages/protocol/**"
+      - "packages/effect-hc-sdk/schema/**"
       - ".github/workflows/desktop.yml"
 
 permissions:

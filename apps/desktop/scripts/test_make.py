@@ -61,6 +61,7 @@ if sys.argv[1:] == ['test', './...'] and os.environ.get('FAIL_TEST'): sys.exit(1
             ["python3", "scripts/test_make.py"],
             ["go", "test", "./..."],
             ["go", "vet", "./..."],
+            ["go", "run", "./scripts/hcgen", "-check"],
             ["go", "run", "github.com/egoist/mygo/cmd/mygo", "build", "-sign", "-", "-skip-notarize", "-skip-dmg", "-o", "out", "."],
             ["go", "app", "-core-session", "work", "-autostart=false"],
         ])

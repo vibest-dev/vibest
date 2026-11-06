@@ -417,21 +417,21 @@ func (a *App) coreCreate(workspace, pane, direction string) {
 			return
 		}
 	}
-	o := core.RunOptions{}
+	cwd, on := "", ""
 	group := a.machine.id()
 	if pane != "" {
 		workspace, _ = a.coreState.Layout.Location(pane)
 	}
 	for _, w := range a.coreState.Layout.Workspaces {
 		if w.ID == workspace {
-			o.CWD, group = w.CWD, w.Machine
+			cwd, group = w.CWD, w.Machine
 			if group != "" && pane == "" {
 				mixed := false
 				for _, tab := range w.Tabs {
 					walkCorePanes(tab.Root, func(p *core.Pane) {
-						if o.On == "" {
-							o.On = p.Terminal.CoreID
-						} else if o.On != p.Terminal.CoreID {
+						if on == "" {
+							on = p.Terminal.CoreID
+						} else if on != p.Terminal.CoreID {
 							mixed = true
 						}
 					})
@@ -444,24 +444,25 @@ func (a *App) coreCreate(workspace, pane, direction string) {
 		}
 	}
 	if pane != "" {
-		o.On = a.coreState.Layout.Pane(pane).Terminal.CoreID
+		on = a.coreState.Layout.Pane(pane).Terminal.CoreID
 	}
 	if workspace == "" && group != "" {
 		for _, m := range a.coreState.Machines {
 			if m.Name == group && m.State == "connected" {
-				o.On = m.ID
+				on = m.ID
 				break
 			}
 		}
 	}
-	if group != "" && o.On == "" {
+	if group != "" && on == "" {
 		a.navigationNote = "Core machine identity unavailable"
 		return
 	}
+	o := core.TerminalRunParams{CWD: core.Optional(cwd), On: core.Optional(on)}
 	a.coreNavigation++
 	intent := a.coreNavigation
 	n := a.beginCoreCapture("", true)
-	if o.On != "" && o.On != a.coreState.Layout.CoreID {
+	if on != "" && on != a.coreState.Layout.CoreID {
 		a.cancelCoreCapture()
 	}
 	a.corePending = true
@@ -482,7 +483,7 @@ func (a *App) coreCreate(workspace, pane, direction string) {
 	})
 }
 
-func (a *App) coreRunCapture(s *core.Session, intent uint64, n *coreCapture, o core.RunOptions, outcome string, insert func(*core.Layout, core.Pane, core.Terminal) error) {
+func (a *App) coreRunCapture(s *core.Session, intent uint64, n *coreCapture, o core.TerminalRunParams, outcome string, insert func(*core.Layout, core.Pane, core.Terminal) error) {
 	before := s.State().Terminals
 	o.Labels = withSeenZero(o.Labels)
 	go func() {
@@ -692,7 +693,7 @@ func (a *App) coreAttach(id string, opts terminal.Options) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		v, err := s.Attach(ctx, id, core.AttachOptions{Cols: 80, Rows: 24, History: 2000})
+		v, err := s.Attach(ctx, id, core.TerminalAttachParams{Cols: 80, Rows: 24, History: 2000})
 		var view *coreview.Terminal
 		if err == nil {
 			opts.NoClipboardWrite = true

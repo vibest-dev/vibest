@@ -42,7 +42,7 @@ func queuedClient(t *testing.T) (*Client, *writeGate, <-chan deliveredInput) {
 		if _, err := r.ReadBytes('\n'); err != nil {
 			return
 		}
-		h := Hello{Generation: 1, Version: "0.1.13", Framed: true, Methods: requiredMethods, Features: requiredFeatures}
+		h := HelloResult{Generation: 1, Version: "0.1.13", Framed: true, Methods: requiredMethods, Features: requiredFeatures}
 		h.Core.ID = "queue-fixture"
 		payload, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "result": h})
 		if writeAll(b, append(payload, '\n')) != nil {
@@ -95,7 +95,7 @@ func queuedClient(t *testing.T) (*Client, *writeGate, <-chan deliveredInput) {
 }
 func queueViewer(t *testing.T, c *Client) *Viewer {
 	t.Helper()
-	v, err := c.Attach(context.Background(), AttachOptions{Terminal: "t1", Cols: 80, Rows: 24})
+	v, err := c.Attach(context.Background(), TerminalAttachParams{Terminal: "t1", Cols: 80, Rows: 24})
 	if err != nil {
 		t.Fatal(err)
 	}

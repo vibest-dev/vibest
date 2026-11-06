@@ -130,7 +130,7 @@ func TestMachineFoldIDsAndLifecycle(t *testing.T) {
 		t.Fatal("removed machine fold leaked or erased local")
 	}
 	publishCoreLayout(t, a, f, func(f *coreAppFixture) {
-		f.machines = []core.Machine{{Name: "Remote", ID: "remote-A", State: "connected"}}
+		f.machines = []core.MachineView{{Name: "Remote", ID: "remote-A", State: "connected"}}
 		p := core.NewPane(core.TerminalRef{CoreID: "remote-A", Address: "Remote/s"})
 		f.layout.AddWorkspace("again", "", "Remote", p)
 	})

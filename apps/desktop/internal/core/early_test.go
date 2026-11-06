@@ -17,7 +17,7 @@ func TestEarlyCloseOnSuccessiveFailedAttaches(t *testing.T) {
 	other := attach(t, c, f, "local", 50)
 	for ch := uint32(1); ch <= 2; ch++ {
 		go func(ch uint32) { q := f.next(); f.send(ch, 2, nil); unavailable(f, q) }(ch)
-		_, err := c.Attach(context.Background(), core.AttachOptions{Terminal: "rohan/t1", Cols: 80, Rows: 24})
+		_, err := c.Attach(context.Background(), core.TerminalAttachParams{Terminal: "rohan/t1", Cols: 80, Rows: 24})
 		var rpc *core.RPCError
 		if !errors.As(err, &rpc) {
 			t.Fatalf("attempt %d: want independent RPC error, got %v; connection %v", ch, err, c.Err())
@@ -39,12 +39,12 @@ func TestConcurrentEarlyChannelsMatchReverseReplies(t *testing.T) {
 			}
 			a, b := make(chan answer, 1), make(chan answer, 1)
 			go func() {
-				v, e := c.Attach(context.Background(), core.AttachOptions{Terminal: "t1", Cols: 80, Rows: 24})
+				v, e := c.Attach(context.Background(), core.TerminalAttachParams{Terminal: "t1", Cols: 80, Rows: 24})
 				a <- answer{v, e}
 			}()
 			qa := f.next()
 			go func() {
-				v, e := c.Attach(context.Background(), core.AttachOptions{Terminal: "t2", Cols: 80, Rows: 24})
+				v, e := c.Attach(context.Background(), core.TerminalAttachParams{Terminal: "t2", Cols: 80, Rows: 24})
 				b <- answer{v, e}
 			}()
 			qb := f.next()
@@ -74,7 +74,7 @@ func TestClosedEarlySuccessSurvivesAnotherFailedReply(t *testing.T) {
 	c, f := newFixture(t)
 	result := make(chan *core.Viewer, 1)
 	go func() {
-		v, err := c.Attach(context.Background(), core.AttachOptions{Terminal: "t1", Cols: 80, Rows: 24})
+		v, err := c.Attach(context.Background(), core.TerminalAttachParams{Terminal: "t1", Cols: 80, Rows: 24})
 		if err != nil {
 			t.Error(err)
 		}
@@ -83,7 +83,7 @@ func TestClosedEarlySuccessSurvivesAnotherFailedReply(t *testing.T) {
 	success := f.next()
 	failed := make(chan error, 1)
 	go func() {
-		_, err := c.Attach(context.Background(), core.AttachOptions{Terminal: "bad/t2", Cols: 80, Rows: 24})
+		_, err := c.Attach(context.Background(), core.TerminalAttachParams{Terminal: "bad/t2", Cols: 80, Rows: 24})
 		failed <- err
 	}()
 	failure := f.next()
@@ -108,19 +108,19 @@ func TestUnmatchedClosedBudgetRefusesNewOpenWithoutDisconnect(t *testing.T) {
 	other := attach(t, c, f, "other", 500)
 	pending := make(chan error, 1)
 	go func() {
-		_, err := c.Attach(context.Background(), core.AttachOptions{Terminal: "pending", Cols: 80, Rows: 24})
+		_, err := c.Attach(context.Background(), core.TerminalAttachParams{Terminal: "pending", Cols: 80, Rows: 24})
 		pending <- err
 	}()
 	last := f.next()
 	for ch := uint32(1); ch <= 126; ch++ {
 		go func(ch uint32) { q := f.next(); f.send(ch, 2, nil); unavailable(f, q) }(ch)
-		if _, err := c.Attach(context.Background(), core.AttachOptions{Terminal: "failed", Cols: 80, Rows: 24}); err == nil {
+		if _, err := c.Attach(context.Background(), core.TerminalAttachParams{Terminal: "failed", Cols: 80, Rows: 24}); err == nil {
 			t.Fatal("missing failure")
 		}
 	}
 	refused := make(chan error, 1)
 	go func() {
-		_, err := c.Attach(context.Background(), core.AttachOptions{Terminal: "too many", Cols: 80, Rows: 24})
+		_, err := c.Attach(context.Background(), core.TerminalAttachParams{Terminal: "too many", Cols: 80, Rows: 24})
 		refused <- err
 	}()
 	select {

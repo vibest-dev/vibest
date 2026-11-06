@@ -98,7 +98,7 @@ func noticeCoreUI(t *testing.T) (*App, *coreAppFixture, *ui.Tester) {
 		p := core.NewPane(core.TerminalRef{CoreID: "remote-A", Address: "rohan/r"})
 		p.ID = "r"
 		f.layout.AddWorkspace("Remote", "/inert", "rohan", p)
-		f.machines = []core.Machine{{Name: "rohan", ID: "remote-A", State: "connected"}}
+		f.machines = []core.MachineView{{Name: "rohan", ID: "remote-A", State: "connected"}}
 		f.terminals["remote-A/r"] = core.Terminal{Address: "rohan/r", State: "live", Cols: 80, Rows: 24}
 	})
 }

@@ -7,41 +7,11 @@ import (
 	"errors"
 )
 
-type Status struct {
-	State    string  `json:"state"`
-	App      string  `json:"app"`
-	Title    string  `json:"title"`
-	Message  string  `json:"msg"`
-	Kind     *string `json:"kind"`
-	Progress *uint8  `json:"progress"`
-}
-type Foreground struct {
-	PID  uint32   `json:"pid"`
-	Name string   `json:"name"`
-	Argv []string `json:"argv"`
-	CWD  string   `json:"cwd"`
-}
-type Terminal struct {
-	Address    string            `json:"address"`
-	Name       *string           `json:"name"`
-	Argv       []string          `json:"argv"`
-	CWD        string            `json:"cwd"`
-	State      string            `json:"state"`
-	PID        *uint32           `json:"pid"`
-	Reason     *string           `json:"reason"`
-	ExitCode   *int              `json:"exit_code"`
-	Signal     *int              `json:"signal"`
-	Cols       uint16            `json:"cols"`
-	Rows       uint16            `json:"rows"`
-	Keep       bool              `json:"keep"`
-	Reported   bool              `json:"reported"`
-	Status     *Status           `json:"status"`
-	Records    map[string]Status `json:"records"`
-	Foreground *Foreground       `json:"foreground"`
-	Title      string            `json:"title"`
-	Turn       uint64            `json:"turn"`
-	Labels     map[string]string `json:"labels"`
-	Parent     *string           `json:"parent"`
+func Optional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func (t Terminal) Activity() string {
@@ -53,56 +23,29 @@ func (t Terminal) Activity() string {
 
 func (t Terminal) NeedsCloseConfirmation() bool { return t.State != "finished" }
 
-type RunOptions struct {
-	CWD    string            `json:"cwd,omitempty"`
-	On     string            `json:"on,omitempty"`
-	Argv   []string          `json:"argv,omitempty"`
-	Labels map[string]string `json:"labels,omitempty"`
-	Keep   bool              `json:"keep,omitempty"`
-}
-
-func (c *Client) Run(ctx context.Context, o RunOptions) (Terminal, error) {
-	var t Terminal
-	err := c.Call(ctx, "terminal.run", o, &t)
-	if err == nil && t.Address == "" {
+func (c *Client) Run(ctx context.Context, o TerminalRunParams) (Terminal, error) {
+	var r RunResult
+	err := c.Call(ctx, "terminal.run", o, &r)
+	if err == nil && r.Address == "" {
 		err = errors.New("core: run omitted terminal identity")
 	}
-	return t, err
+	return r.Terminal, err
 }
 func (c *Client) Terminal(ctx context.Context, address string) (Terminal, error) {
 	var t Terminal
-	err := c.Call(ctx, "terminal.get", map[string]string{"terminal": address}, &t)
+	err := c.Call(ctx, "terminal.get", TerminalGetParams{Terminal: address}, &t)
 	return t, err
 }
 func (c *Client) Kill(ctx context.Context, address string) error {
-	return c.Call(ctx, "terminal.kill", map[string]string{"terminal": address}, nil)
+	return c.Call(ctx, "terminal.kill", TerminalKillParams{Terminal: address}, nil)
 }
 
-type Machine struct {
-	Name      string  `json:"name"`
-	ID        string  `json:"id"`
-	Host      string  `json:"host"`
-	Target    string  `json:"target"`
-	Session   *string `json:"session"`
-	State     string  `json:"state"`
-	Why       *string `json:"why"`
-	Version   string  `json:"version"`
-	Via       bool    `json:"via"`
-	Temporary bool    `json:"temporary"`
-}
-
-func (c *Client) Machines(ctx context.Context) ([]Machine, error) {
-	var r struct {
-		Machines []Machine `json:"machines"`
-	}
-	err := c.Call(ctx, "machine.list", struct{}{}, &r)
+func (c *Client) Machines(ctx context.Context) ([]MachineView, error) {
+	var r MachineListResult
+	err := c.Call(ctx, "machine.list", MachineListParams{}, &r)
 	return r.Machines, err
 }
 
-type Snapshot struct {
-	Seq       uint64     `json:"seq"`
-	Terminals []Terminal `json:"terminals"`
-}
 type Event struct {
 	Method string `json:"method"`
 	Params struct {
@@ -117,13 +60,13 @@ type Event struct {
 
 type Subscription struct {
 	*Stream
-	Snapshot Snapshot
+	Snapshot SubscribeResult
 	reader   *bufio.Reader
 }
 
 func (c *Client) Subscribe(ctx context.Context) (*Subscription, error) {
-	var snap Snapshot
-	s, err := c.call(ctx, "events.subscribe", struct{}{}, &snap, true)
+	var snap SubscribeResult
+	s, err := c.call(ctx, "events.subscribe", EventsSubscribeParams{}, &snap, true)
 	if err != nil {
 		return nil, err
 	}

@@ -42,7 +42,7 @@ func TestRemoteAliasReassignmentCannotRetargetPinnedAttach(t *testing.T) {
 			unavailable(f, q)
 		}
 	}()
-	v, err := s.Attach(context.Background(), pane, core.AttachOptions{Cols: 80, Rows: 24})
+	v, err := s.Attach(context.Background(), pane, core.TerminalAttachParams{Cols: 80, Rows: 24})
 	wire := <-got
 	if wire != "remote-A/t1" || err == nil || v != nil {
 		t.Fatalf("pinned A admitted replacement B: wire=%q viewer=%v error=%v", wire, v, err)
@@ -56,18 +56,18 @@ func TestPinnedRemoteRunKillAndRenamedAttach(t *testing.T) {
 	ref := state.Layout.Pane(pane).Terminal
 	go func() {
 		q := f.next()
-		var p core.RunOptions
+		var p core.TerminalRunParams
 		json.Unmarshal(q.Params, &p)
-		if q.Method != "terminal.run" || p.On != "remote-A" {
+		if q.Method != "terminal.run" || p.On == nil || *p.On != "remote-A" {
 			t.Errorf("run not pinned: %s %s", q.Method, q.Params)
 		}
 		f.reply(q, map[string]any{"address": "renamed/t2", "state": "live"})
 	}()
-	record, created, err := s.Run(context.Background(), core.RunOptions{On: "remote-A"})
+	record, created, err := s.Run(context.Background(), core.TerminalRunParams{On: core.Optional("remote-A")})
 	if err != nil || created.CoreID != "remote-A" || created.Address != record.Address {
 		t.Fatal(record, created, err)
 	}
-	if _, _, err := s.Run(context.Background(), core.RunOptions{On: "rohan"}); err == nil {
+	if _, _, err := s.Run(context.Background(), core.TerminalRunParams{On: core.Optional("rohan")}); err == nil {
 		t.Fatal("session Run accepted mutable alias")
 	}
 	go func() {
@@ -91,7 +91,7 @@ func TestPinnedRemoteRunKillAndRenamedAttach(t *testing.T) {
 		}
 		f.reply(q, map[string]any{"channel": 11, "terminal": map[string]any{"address": "renamed/t1", "state": "live"}})
 	}()
-	v, err := s.Attach(context.Background(), pane, core.AttachOptions{Cols: 80, Rows: 24})
+	v, err := s.Attach(context.Background(), pane, core.TerminalAttachParams{Cols: 80, Rows: 24})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestRemoteRelayCannotAdmitInputBeforeItsLateMissedFence(t *testing.T) {
 		q := f.next()
 		f.reply(q, map[string]any{"channel": 11, "terminal": map[string]any{"address": "rohan/t1", "state": "live", "cols": 80, "rows": 24}})
 	}()
-	v, err := s.Attach(context.Background(), pane, core.AttachOptions{Cols: 80, Rows: 24})
+	v, err := s.Attach(context.Background(), pane, core.TerminalAttachParams{Cols: 80, Rows: 24})
 	if err != nil {
 		t.Fatal(err)
 	}

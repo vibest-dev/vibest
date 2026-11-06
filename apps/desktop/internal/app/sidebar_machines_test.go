@@ -174,7 +174,7 @@ func TestRemovedMachineForgetsItsFolds(t *testing.T) {
 		t.Fatal("removed machine retains folds")
 	}
 	publishCoreLayout(t, a, f, func(f *coreAppFixture) {
-		f.machines = []core.Machine{{Name: "Remote", ID: "remote-A", State: "connected"}}
+		f.machines = []core.MachineView{{Name: "Remote", ID: "remote-A", State: "connected"}}
 		f.layout.Workspaces = append(f.layout.Workspaces, saved...)
 	})
 	tt.Frame()

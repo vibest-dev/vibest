@@ -100,7 +100,7 @@ func (a *App) openEditorBound(id string, s *core.Session, ref core.TerminalRef, 
 				n := a.beginCoreCapture("", true)
 				a.corePending = true
 				a.coreSelect(nil)
-				a.coreRunCapture(s, next, n, core.RunOptions{Argv: args}, "", func(l *core.Layout, p core.Pane, _ core.Terminal) error {
+				a.coreRunCapture(s, next, n, core.TerminalRunParams{Argv: args}, "", func(l *core.Layout, p core.Pane, _ core.Terminal) error {
 					_, err := l.AddTab(workspace, "Editor", p)
 					return err
 				})

@@ -30,14 +30,9 @@ func (s *Session) ExecLocal(ctx context.Context, cwd string, argv []string) ([]b
 	if size > 16<<10 {
 		return nil, errors.New("exec argv exceeds 16KiB")
 	}
-	var r struct {
-		Code      *int   `json:"code"`
-		Stdout    string `json:"stdout"`
-		Stderr    string `json:"stderr"`
-		Truncated bool   `json:"truncated"`
-		TimedOut  bool   `json:"timed_out"`
-	}
-	err := s.client.Call(ctx, "machine.exec", map[string]any{"cwd": cwd, "argv": argv, "timeout": 5, "env": map[string]string{"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}}, &r)
+	var r ExecResult
+	timeout := 5.0
+	err := s.client.Call(ctx, "machine.exec", MachineExecParams{CWD: &cwd, Argv: argv, Timeout: &timeout, Env: map[string]string{"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}}, &r)
 	if err != nil {
 		return nil, err
 	}

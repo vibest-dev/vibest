@@ -328,9 +328,9 @@ func TestPaneStyleInputDuringTheMotion(t *testing.T) {
 	tt.Release(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 	for _, req := range coreRequests(f, "terminal.run") {
-		var args core.RunOptions
+		var args core.TerminalRunParams
 		json.Unmarshal(req, &args)
-		if args.CWD != "/inert/repo" {
+		if args.CWD == nil || *args.CWD != "/inert/repo" {
 			t.Fatal("wrong split CWD", args)
 		}
 	}

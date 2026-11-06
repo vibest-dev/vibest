@@ -183,7 +183,7 @@ func TestRemoteCloseUsesPinnedOwnerAcrossAliasChanges(t *testing.T) {
 		p := f.layout.Pane("d")
 		p.Terminal = core.TerminalRef{CoreID: "remote-A", Address: "alias/d"}
 		f.layout.Workspaces[1].Machine = "alias"
-		f.machines = []core.Machine{{Name: "renamed", ID: "remote-A", State: "connected"}, {Name: "alias", ID: "remote-B", State: "connected"}}
+		f.machines = []core.MachineView{{Name: "renamed", ID: "remote-A", State: "connected"}, {Name: "alias", ID: "remote-B", State: "connected"}}
 		f.terminals["alias/d"] = core.Terminal{Address: "alias/d"}
 	})
 	coreAppAct(a, func() {

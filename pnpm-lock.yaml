@@ -224,6 +224,9 @@ importers:
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      effect-hc-sdk:
+        specifier: workspace:*
+        version: link:../../packages/effect-hc-sdk
 
   apps/vibest-herdr:
     devDependencies:

@@ -34,7 +34,7 @@ type coreAppFixture struct {
 	reconnect  chan net.Conn
 	methods    []string
 	params     []json.RawMessage
-	machines   []core.Machine
+	machines   []core.MachineView
 	layout     core.Layout
 	version    uint64
 	seq        uint64
@@ -173,7 +173,7 @@ func (f *coreAppFixture) serve() {
 			result = t
 			created = &t
 		case "terminal.attach":
-			var args core.AttachOptions
+			var args core.TerminalAttachParams
 			json.Unmarshal(req.Params, &args)
 			gateKey += " " + args.Terminal
 			channel++
@@ -494,7 +494,7 @@ func TestCoreAppPinnedRemotePaneDoesNotBorrowAliasReplacementActivity(t *testing
 	a, _ := newCoreAppFixtureWith(t, func(f *coreAppFixture) {
 		f.layout.AddWorkspace("Remote", "/inert", "rohan", remote)
 		f.layout.AddWorkspace("Local", "/inert", "", local)
-		f.machines = []core.Machine{{Name: "renamed", ID: "remote-A", State: "connected"}, {Name: "rohan", ID: "remote-B", State: "connected"}}
+		f.machines = []core.MachineView{{Name: "renamed", ID: "remote-A", State: "connected"}, {Name: "rohan", ID: "remote-B", State: "connected"}}
 		f.terminals["rohan/t1"] = core.Terminal{Address: "rohan/t1", Reported: true, Status: &core.Status{State: "done"}, Title: "replacement B", Turn: 44}
 		f.terminals["t2"] = core.Terminal{Address: "t2", Reported: true, Status: &core.Status{State: "working"}}
 	})

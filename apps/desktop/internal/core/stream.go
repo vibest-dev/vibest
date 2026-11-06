@@ -122,22 +122,6 @@ func (s *Stream) Close() error {
 	return nil
 }
 
-type Display struct {
-	FG     string     `json:"fg,omitempty"`
-	BG     string     `json:"bg,omitempty"`
-	Cursor string     `json:"cursor,omitempty"`
-	Cell   *[2]uint32 `json:"cell,omitempty"`
-}
-type AttachOptions struct {
-	Terminal string  `json:"terminal"`
-	Cols     uint16  `json:"cols"`
-	Rows     uint16  `json:"rows"`
-	History  uint32  `json:"history,omitempty"`
-	Observe  bool    `json:"observe,omitempty"`
-	Resumed  bool    `json:"resumed,omitempty"`
-	Display  Display `json:"display"`
-}
-
 type Viewer struct {
 	*Stream
 	Terminal Terminal
@@ -146,13 +130,11 @@ type Viewer struct {
 	ref      TerminalRef
 }
 
-func (c *Client) Attach(ctx context.Context, o AttachOptions) (*Viewer, error) {
+func (c *Client) Attach(ctx context.Context, o TerminalAttachParams) (*Viewer, error) {
 	if o.Terminal == "" || o.Cols == 0 || o.Rows == 0 {
 		return nil, errors.New("core: terminal and positive attach size required")
 	}
-	var r struct {
-		Terminal Terminal `json:"terminal"`
-	}
+	var r AttachResult
 	s, err := c.call(ctx, "terminal.attach", o, &r, true)
 	if err != nil {
 		return nil, err

@@ -11,15 +11,11 @@ import (
 	"time"
 )
 
-type Document struct {
-	Value   json.RawMessage `json:"value"`
-	Version uint64          `json:"version"`
-}
 type SessionState struct {
 	Layout    Layout
 	Version   uint64
 	Terminals map[string]Terminal
-	Machines  []Machine
+	Machines  []MachineView
 	Programs  map[string]uint64
 	Connected bool
 	Error     string
@@ -94,8 +90,8 @@ func (s *Session) State() SessionState {
 	return snapshot
 }
 func (s *Session) load(ctx context.Context) (Layout, uint64, error) {
-	var d Document
-	if err := s.client.Call(ctx, "doc.get", map[string]string{"name": LayoutDocument}, &d); err != nil {
+	var d DocGetResult
+	if err := s.client.Call(ctx, "doc.get", DocGetParams{Name: LayoutDocument}, &d); err != nil {
 		return Layout{}, 0, err
 	}
 	l := Layout{Schema: LayoutSchema, CoreID: s.client.hello.Core.ID}
@@ -206,10 +202,8 @@ func (s *Session) Edit(ctx context.Context, change func(*Layout) error) error {
 	if len(b) > 1<<20 {
 		return errors.New("layout: document exceeds Core's 1 MiB limit")
 	}
-	var result struct {
-		Version uint64 `json:"version"`
-	}
-	err = s.client.Call(ctx, "doc.set", map[string]any{"name": LayoutDocument, "value": next, "version": before.Version}, &result)
+	var result DocSetResult
+	err = s.client.Call(ctx, "doc.set", DocSetParams{Name: LayoutDocument, Value: b, Version: before.Version}, &result)
 	if err != nil {
 		var rpc *RPCError
 		if errors.As(err, &rpc) && rpc.Data.Kind == "conflict" {
@@ -237,7 +231,7 @@ func (s *Session) Edit(ctx context.Context, change func(*Layout) error) error {
 	return nil
 }
 
-func (s *Session) Attach(ctx context.Context, pane string, o AttachOptions) (*Viewer, error) {
+func (s *Session) Attach(ctx context.Context, pane string, o TerminalAttachParams) (*Viewer, error) {
 	s.mu.Lock()
 	p := s.state.Layout.Pane(pane)
 	if !s.state.Connected || p == nil {
@@ -441,14 +435,18 @@ func (s *Session) Kill(ctx context.Context, ref TerminalRef) error {
 	return s.client.Kill(ctx, ref.wireAddress())
 }
 
-func (s *Session) Run(ctx context.Context, o RunOptions) (Terminal, TerminalRef, error) {
+func (s *Session) Run(ctx context.Context, o TerminalRunParams) (Terminal, TerminalRef, error) {
 	s.mu.Lock()
 	id := s.client.hello.Core.ID
-	remote := o.On != "" && o.On != id
+	on := ""
+	if o.On != nil {
+		on = *o.On
+	}
+	remote := on != "" && on != id
 	if remote {
 		id = ""
 		for _, m := range s.state.Machines {
-			if m.ID == o.On && m.State == "connected" {
+			if m.ID == on && m.State == "connected" {
 				id = m.ID
 				break
 			}
@@ -462,10 +460,9 @@ func (s *Session) Run(ctx context.Context, o RunOptions) (Terminal, TerminalRef,
 	if id == "" {
 		return Terminal{}, TerminalRef{}, errors.New("core: terminal owner unavailable")
 	}
+	o.On = nil
 	if remote {
-		o.On = id
-	} else {
-		o.On = ""
+		o.On = &id
 	}
 	record, err := s.client.Run(ctx, o)
 	ref := TerminalRef{CoreID: id, Address: record.Address}
