@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { alive, binary, compiled, expect, harnesses, method, until, type World } from "../world.ts"
+import { alive, binary, checkout, compiled, expect, harnesses, method, until, type World } from "../world.ts"
 
 const userVersion = (w: World, v?: number) => {
   const db = new Database(path.join(w.vibestHome, "vibest.db"))
@@ -131,34 +131,35 @@ const checks: ReadonlyArray<Check> = [
       await fs.symlink(old, path.join(bin, "vibest"))
       await fs.writeFile(path.join(share, "bin"), `${bin}\n`)
       await fs.writeFile(path.join(share, "current"), `${version}\n`)
-      const newer = path.join(root, "vibest-999")
+      const release = path.join(root, "release-999")
+      await fs.mkdir(path.join(release, "bin"), { recursive: true })
       await fs.writeFile(
-        newer,
+        path.join(release, "bin", "vibest"),
         `#!/bin/sh\n[ "$1" = --version ] && echo "vibest v999.0.0" && exit 0\nexec '${compiled}' "$@"\n`,
         { mode: 0o755 },
       )
-      const log = path.join(root, "install.log")
-      const installSh = [
-        `echo "install.sh VIBEST_INSTALL=$VIBEST_INSTALL VIBEST_BIN=\${VIBEST_BIN:-}" >> '${log}'`,
-        `bin=\${VIBEST_BIN:-$(cat "$VIBEST_INSTALL/bin")}`,
-        `mkdir -p "$VIBEST_INSTALL/versions/999.0.0/bin" "$bin"`,
-        `cp '${newer}' "$VIBEST_INSTALL/versions/999.0.0/bin/vibest"`,
-        `ln -sfn "$VIBEST_INSTALL/versions/999.0.0/bin/vibest" "$bin/vibest"`,
-        "",
-      ].join("\n")
+      await fs.cp(harnesses, path.join(release, "harnesses"), { recursive: true })
+      const archive = `vibest-${process.platform}-${process.arch}.tar.gz`
+      const packed = await w.run(root, ["tar", "-czf", path.join(root, archive), "-C", release, "bin", "harnesses"])
+      expect(packed.code === 0, `tar: ${out(packed)}`)
+      const installSh = path.join(checkout, "apps", "vibest-herdr", "install.sh")
+      let downloads = 0
       const server = Bun.serve({
         port: 0,
         hostname: "127.0.0.1",
         fetch: (req) => {
           const url = new URL(req.url).pathname
           if (url === "/version") return new Response("999.0.0\n")
-          if (url === "/install.sh") return new Response(installSh)
+          if (url === "/install.sh") return new Response(Bun.file(installSh))
+          if (url === `/${archive}`) {
+            downloads++
+            return new Response(Bun.file(path.join(root, archive)))
+          }
           return new Response("not found", { status: 404 })
         },
       })
       const env = { VIBEST_DOWNLOAD_URL: `http://127.0.0.1:${server.port}`, npm_config_registry: "http://127.0.0.1:9" }
       const vibest = (args: ReadonlyArray<string>) => w.run(w.repository, [old, ...args], { env, timeoutMs: 120_000 })
-      const installs = async () => (await fs.readFile(log, "utf8").catch(() => "")).split("\n").filter(Boolean)
       let schema: number | undefined
       try {
         const started = await vibest(["daemon"])
@@ -183,10 +184,10 @@ const checks: ReadonlyArray<Check> = [
           `unexpected: ${said}`,
         )
         expect(!said.includes("migration script"), `it names a migration script: ${said}`)
-        const tried = await installs()
+        expect(downloads === 1, `the release was downloaded ${downloads} times to try it`)
         expect(
-          tried.length === 1 && !tried[0]!.includes(`VIBEST_INSTALL=${share} `) && !tried[0]!.endsWith("VIBEST_BIN="),
-          `install.sh ran other than once into a directory of its own: ${tried.join(" | ")}`,
+          (await fs.readFile(path.join(share, "current"), "utf8")).trim() === version,
+          "install.sh recorded another current version",
         )
         expect(
           !(await fs.stat(path.join(share, "versions", "999.0.0")).then(
@@ -223,10 +224,10 @@ const checks: ReadonlyArray<Check> = [
           through.code === 0 && out(through).includes("vibest 999.0.0 is available"),
           `vibest update after the way out exited ${through.code}: ${out(through)}`,
         )
-        const all = await installs()
+        expect(downloads === 3, `the release was downloaded ${downloads} times; one try, then one try and one install`)
         expect(
-          all.length === 3 && all[2] === `install.sh VIBEST_INSTALL=${share} VIBEST_BIN=`,
-          `install.sh runs: ${all.join(" | ")}`,
+          (await fs.readFile(path.join(share, "current"), "utf8")).trim() === "999.0.0",
+          "install.sh did not record 999.0.0 as current",
         )
         expect(
           (await fs.readlink(path.join(bin, "vibest"))) === path.join(share, "versions", "999.0.0", "bin", "vibest"),
