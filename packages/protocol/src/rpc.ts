@@ -557,3 +557,42 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
 ) {}
+
+export const ACCESS = {
+  Ping: "open",
+  Plugins: "open",
+  "Runtimes.Doctor": "open",
+  Subscriptions: "open",
+  Republish: "open",
+  TurnEnd: "open",
+  Prompt: "open",
+  CoordinatorSessionReady: "open",
+  Report: "session",
+  Spawn: "agent",
+  Launch: "agent",
+  List: "agent",
+  Get: "agent",
+  "Inbox.Subscribe": "coordinator",
+  "Project.Open": "cli",
+  "Project.CoordinatorSession": "agent",
+  "Project.StartMain": "agent",
+  "Project.RunningCoordinator": "agent",
+  "Project.StopCoordinator": "agent",
+  "Project.Info": "agent",
+  "Project.Search": "agent",
+  Send: "owner",
+  Interrupt: "owner",
+  Peek: "owner",
+  Remove: "owner",
+  "Daemon.Stop": "cli",
+  "Daemon.Handoff": "cli",
+  "Session.Start": "self",
+  "Session.Ready": "self",
+  "Agents.Outdated": "cli",
+  "Agents.Restart": "cli",
+} as const satisfies Record<
+  RpcGroup.Rpcs<typeof VibestRpcs>["_tag"],
+  "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self"
+>
+
+export const CAPABILITIES = { http: true, handoff: true, requests: true } as const

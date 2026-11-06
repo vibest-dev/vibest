@@ -11,6 +11,7 @@
     "**/dist/**",
     "**/node_modules/**",
     "packages/effect-herdr-sdk/src/generated/**",
-    "packages/effect-herdr-sdk/schema/**"
+    "packages/effect-herdr-sdk/schema/**",
+    "packages/protocol/contract/**"
   ]
 }

@@ -41,9 +41,11 @@ import {
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
 import {
+  ACCESS,
   Admission,
   Caller,
   CallerGate,
+  CAPABILITIES,
   DaemonBusy,
   type DaemonIdentity,
   DaemonStopping,
@@ -63,7 +65,6 @@ import { Clock, Context, Deferred, Duration, Effect, FileSystem, Layer, Option, 
 import * as Headers from "effect/http/Headers"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
-import type { RpcGroup } from "effect/rpc"
 
 import * as Hooks from "./hooks.ts"
 
@@ -147,48 +148,10 @@ const mainStatus = (h: Runtime, terminal: Terminal): Effect.Effect<AgentStatus> 
     )
   })
 
-const ACCESS = {
-  Ping: "open",
-  Plugins: "open",
-  "Runtimes.Doctor": "open",
-  Subscriptions: "open",
-  Republish: "open",
-  TurnEnd: "open",
-  Prompt: "open",
-  CoordinatorSessionReady: "open",
-  Report: "session",
-  Spawn: "agent",
-  Launch: "agent",
-  List: "agent",
-  Get: "agent",
-  "Inbox.Subscribe": "coordinator",
-  "Project.Open": "cli",
-  "Project.CoordinatorSession": "agent",
-  "Project.StartMain": "agent",
-  "Project.RunningCoordinator": "agent",
-  "Project.StopCoordinator": "agent",
-  "Project.Info": "agent",
-  "Project.Search": "agent",
-  Send: "owner",
-  Interrupt: "owner",
-  Peek: "owner",
-  Remove: "owner",
-  "Daemon.Stop": "cli",
-  "Daemon.Handoff": "cli",
-  "Session.Start": "self",
-  "Session.Ready": "self",
-  "Agents.Outdated": "cli",
-  "Agents.Restart": "cli",
-} as const satisfies Record<
-  RpcGroup.Rpcs<typeof VibestRpcs>["_tag"],
-  "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self"
->
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyof Access]
 
 const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
-
-export const CAPABILITIES = { http: true, handoff: true, requests: true } as const
 
 export const Identity = Context.Reference<DaemonIdentity>("vibest/DaemonIdentity", { defaultValue: () => ({}) })
 
