@@ -2,137 +2,12 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { ask, delegatingModel, heldModel, piDir } from "../fake-model.ts"
 import { agentModel, agentName, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string }
-type Message = { role: string; content: unknown }
 
 const HERDR_AGENT_START_TIMEOUT_MS = 120_000
-
-const text = (m: Message | undefined) =>
-  m === undefined ? "" : typeof m.content === "string" ? m.content : JSON.stringify(m.content)
-const ask = (task: string) =>
-  `Do not run any tool. Reply with exactly two lines: the first is "done-${task}", the second is "status: completed".`
-
-const delegatingModel = (sub: string) => {
-  const seen: Array<string> = []
-  let sessionId = ""
-  let calls = 0
-  const chunk = (o: object) =>
-    `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
-  const done = (finish: string) =>
-    chunk({
-      choices: [{ index: 0, delta: {}, finish_reason: finish }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }) + "data: [DONE]\n\n"
-  const reply = (content: string) =>
-    chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) + done("stop")
-  const bash = (command: string) =>
-    chunk({
-      choices: [
-        {
-          index: 0,
-          delta: {
-            role: "assistant",
-            tool_calls: [
-              {
-                index: 0,
-                id: `call${++calls}`,
-                type: "function",
-                function: { name: "bash", arguments: JSON.stringify({ command }) },
-              },
-            ],
-          },
-          finish_reason: null,
-        },
-      ],
-    }) + done("tool_calls")
-  const answer = (last: Message | undefined) => {
-    const body = text(last)
-    if (last?.role === "tool") {
-      const id = /"id":\s*\\?"([\w-]+)\\?"/.exec(body)?.[1]
-      if (id && !sessionId) sessionId = id
-      return reply("ok")
-    }
-    if (body.includes("<agent-")) {
-      if (body.includes("done-zero")) return bash(`vibest run ${sub} -- '${ask("one")}'`)
-      if (body.includes("done-one")) return bash(`vibest send ${sessionId} -- '${ask("two")}'`)
-      return reply("ok")
-    }
-    const task = /done-(\w+)/.exec(body)
-    return task ? reply(`done-${task[1]}\nstatus: completed`) : reply("ok")
-  }
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    fetch: async (req) => {
-      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
-      seen.push(`${messages.at(-1)?.role}: ${text(messages.at(-1))}`)
-      return new Response(answer(messages.at(-1)), { headers: { "content-type": "text/event-stream" } })
-    },
-  })
-  return { seen, sessionId: () => sessionId, url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
-}
-
-export const heldModel = () => {
-  const held: Array<() => void> = []
-  const requestsPerTask = new Map<string, number>()
-  let released = false
-  const chunk = (o: object) =>
-    `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
-  const reply = (content: string) =>
-    chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) +
-    chunk({
-      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }) +
-    "data: [DONE]\n\n"
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    idleTimeout: 0,
-    fetch: async (req) => {
-      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
-      const last = text(messages.at(-1))
-      const headers = { "content-type": "text/event-stream" }
-      const task = last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
-      if (!task) return new Response(reply("ok"), { headers })
-      requestsPerTask.set(task[1]!, (requestsPerTask.get(task[1]!) ?? 0) + 1)
-      const answer = reply(`done-${task[1]}\nstatus: completed`)
-      if (released) return new Response(answer, { headers })
-      return new Response(
-        new ReadableStream({
-          start: (c) => {
-            c.enqueue(new TextEncoder().encode(chunk({ choices: [{ index: 0, delta: { role: "assistant" } }] })))
-            held.push(() => {
-              try {
-                c.enqueue(new TextEncoder().encode(answer))
-                c.close()
-              } catch {}
-            })
-          },
-        }),
-        { headers },
-      )
-    },
-  })
-  return {
-    held: () => held.length,
-    asked: (task: string) => requestsPerTask.get(task) ?? 0,
-    releaseOne: () => {
-      held.shift()?.()
-    },
-    release: () => {
-      released = true
-      for (const go of held.splice(0)) go()
-    },
-    url: `http://127.0.0.1:${server.port}/v1`,
-    stop: () => {
-      for (const go of held.splice(0)) go()
-      server.stop(true)
-    },
-  }
-}
 
 export const project = async (w: World, name: string) => {
   const repo = path.join(w.root, name)
@@ -145,26 +20,6 @@ export const project = async (w: World, name: string) => {
     expect(r.code === 0, `${argv.join(" ")}: ${r.stderr}`)
   }
   return fs.realpath(repo)
-}
-
-export const piDir = async (w: World, name: string, url: string) => {
-  const dir = path.join(w.root, name)
-  await fs.mkdir(dir, { recursive: true })
-  await fs.writeFile(
-    path.join(dir, "models.json"),
-    JSON.stringify({
-      providers: {
-        fake: {
-          baseUrl: url,
-          apiKey: "fake",
-          api: "openai-completions",
-          models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
-        },
-      },
-    }),
-  )
-  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }))
-  return dir
 }
 
 export const dropHerdrSession = async (w: World, session: string) => {

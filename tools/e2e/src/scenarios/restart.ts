@@ -3,6 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { ask, holdsSlowResultModel, usageLimitedModel } from "../fake-model.ts"
 import {
   agentModel,
   agentName,
@@ -21,63 +22,10 @@ import {
 } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
-type Message = { role: string; content: unknown }
 type Row = { id: string; harness_session_id: string | null; pid: number | null; version: string | null }
 type Agent = { name?: string | null; pane_id: string; agent?: string | null }
 
-const text = (m: Message | undefined) =>
-  m === undefined ? "" : typeof m.content === "string" ? m.content : JSON.stringify(m.content)
-const ask = (task: string) =>
-  `Do not run any tool. Reply with exactly two lines: the first is "done-${task}", the second is "status: completed".`
 const OLD = "0.0.0-old"
-
-const fakeModel = () => {
-  const seen: Array<ReadonlyArray<string>> = []
-  const held: Array<() => void> = []
-  const chunk = (o: object) =>
-    `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
-  const reply = (content: string) =>
-    chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) +
-    chunk({
-      choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }) +
-    "data: [DONE]\n\n"
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    idleTimeout: 0,
-    fetch: async (req) => {
-      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
-      seen.push(messages.map((m) => `${m.role}: ${text(m)}`))
-      const last = text(messages.at(-1))
-      const headers = { "content-type": "text/event-stream" }
-      if (last.includes("<agent-") && last.includes("done-slow"))
-        return new Response(
-          new ReadableStream({
-            start: (c) =>
-              void held.push(() => {
-                try {
-                  c.close()
-                } catch {}
-              }),
-          }),
-          { headers },
-        )
-      const task = last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
-      return new Response(reply(task ? `done-${task[1]}\nstatus: completed` : "ok"), { headers })
-    },
-  })
-  return {
-    seen,
-    held: () => held.length,
-    url: `http://127.0.0.1:${server.port}/v1`,
-    stop: () => {
-      for (const release of held) release()
-      server.stop(true)
-    },
-  }
-}
 
 const oldInstall = async (w: World, name: string) => {
   const old = path.join(w.root, `${name}-old`)
@@ -124,36 +72,7 @@ const usageLimitMove = async (
   }) => Promise<void>,
 ) => {
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-  const seen: Array<string> = []
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    idleTimeout: 0,
-    fetch: async (req) => {
-      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
-      const last = text(messages.at(-1))
-      seen.push(`${new URL(req.url).pathname} ${last.slice(-80)}`)
-      if (o.limited(new URL(req.url).pathname))
-        return new Response(
-          `data: ${JSON.stringify({ error: { message: "usage limit reached, try again later" } })}\n\n`,
-          {
-            headers: { "content-type": "text/event-stream" },
-          },
-        )
-      const chunk = (c: object) =>
-        `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...c })}\n\n`
-      const content = /done-limit/.test(last) ? "done-limit\nstatus: completed" : "ok"
-      return new Response(
-        chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) +
-          chunk({
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          }) +
-          "data: [DONE]\n\n",
-        { headers: { "content-type": "text/event-stream" } },
-      )
-    },
-  })
+  const model = usageLimitedModel(o.limited)
   const session = `${w.herdrSession}-${o.name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const plugin = path.join(w.vibestHome, "plugins", `${o.name}.ts`)
@@ -162,7 +81,7 @@ const usageLimitMove = async (
     const agentDir = path.join(w.root, `pi-${o.name}`)
     await fs.mkdir(agentDir, { recursive: true })
     const provider = (base: string) => ({
-      baseUrl: `http://127.0.0.1:${server.port}/${base}`,
+      baseUrl: `http://127.0.0.1:${model.port}/${base}`,
       apiKey: "fake",
       api: "openai-completions",
       models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
@@ -203,7 +122,7 @@ const usageLimitMove = async (
     }
     await body({
       id,
-      seen,
+      seen: model.seen,
       row: () =>
         read<{ harness: string; provider: string | null; pid: number | null; conversation: string | null }>(
           `SELECT harness, provider, pid, harness_session_id AS conversation FROM ${SESSIONS} s WHERE id = ?`,
@@ -216,7 +135,7 @@ const usageLimitMove = async (
       log: async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-4000),
     })
   } finally {
-    server.stop(true)
+    model.stop()
     await fs.rm(plugin, { force: true })
     await w.stopDaemon()
     await dropHerdrSession(w, session)
@@ -230,7 +149,7 @@ const checks: ReadonlyArray<Check> = [
       "vibest update: vibestd hands over; No keeps an old Pi main agent mid-turn (its old protocol is told to run vibest update), Yes restarts its Pi subagent (herdr lists it as s-<id> before and after) and then it in its pane on the same session and conversation, its inbox continues the turn, and results still arrive",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const model = fakeModel()
+      const model = holdsSlowResultModel()
       const session = `${w.herdrSession}-restart`
       try {
         const repo = await project(w, "restart")
@@ -454,7 +373,7 @@ const checks: ReadonlyArray<Check> = [
       "vibest daemon restart onto another vibest: Yes to both questions replaces vibestd and restarts an old Pi subagent in place, in the same pane on the same conversation",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const model = fakeModel()
+      const model = holdsSlowResultModel()
       const session = `${w.herdrSession}-drestart`
       try {
         const repo = await project(w, "drestart")

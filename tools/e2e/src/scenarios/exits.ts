@@ -5,11 +5,9 @@ import path from "node:path"
 
 import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
 import type { Check } from "../check.ts"
+import { ask, heldModel, piDir } from "../fake-model.ts"
 import { alive, expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
-import { dropHerdrSession, heldModel, piDir, project } from "./inbox.ts"
-
-const ask = (task: string) =>
-  `Do not run any tool. Reply with exactly two lines: the first is "done-${task}", the second is "status: completed".`
+import { dropHerdrSession, project } from "./inbox.ts"
 
 const piProject = async (w: World, name: string) => {
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)

@@ -2,12 +2,11 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { expect, row, Skip, until, type World } from "../world.ts"
-import { dropHerdrSession, piDir, project as newRepository } from "./inbox.ts"
+import { claudeEnv, fakeAnthropic, fakeOpenAI, piDir, type Step } from "../fake-model.ts"
+import { expect, row, Skip, until } from "../world.ts"
+import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 type Info = { directory: string; preferences: string; docs: string; memories: string; artifacts: string }
-
-type Step = { readonly tool: string; readonly input: Record<string, string> } | string
 
 const filesTurn =
   (results: Record<string, Array<string>>, other: string, names: { write: string; read: string; path: string }) =>
@@ -20,157 +19,6 @@ const filesTurn =
       return { tool: names.write, input: { [names.path]: path.join(other, "artifacts", `${who}.md`), content: "x\n" } }
     return `done-${who}\nstatus: completed`
   }
-
-const fakeOpenAI = (step: ReturnType<typeof filesTurn>, dirs: Record<string, string>) => {
-  let calls = 0
-  const chunk = (o: object) =>
-    `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
-  const done = (finish: string) =>
-    chunk({
-      choices: [{ index: 0, delta: {}, finish_reason: finish }],
-      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-    }) + "data: [DONE]\n\n"
-  const answer = (s: Step) =>
-    typeof s === "string"
-      ? chunk({ choices: [{ index: 0, delta: { role: "assistant", content: s }, finish_reason: null }] }) + done("stop")
-      : chunk({
-          choices: [
-            {
-              index: 0,
-              delta: {
-                role: "assistant",
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: `call${++calls}`,
-                    type: "function",
-                    function: { name: s.tool, arguments: JSON.stringify(s.input) },
-                  },
-                ],
-              },
-              finish_reason: null,
-            },
-          ],
-        }) + done("tool_calls")
-  const text = (content: unknown) => (typeof content === "string" ? content : JSON.stringify(content))
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    fetch: async (req) => {
-      const { messages = [] } = (await req.json()) as { messages?: Array<{ role: string; content: unknown }> }
-      const system = text(messages.find((m) => m.role === "system" || m.role === "developer")?.content)
-      const main = /The project folder is (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)
-      const sub = /Project folder: (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)
-      const who = main ? "main" : sub ? "pi" : undefined
-      const tools = messages.filter((m) => m.role === "tool")
-      const last = messages.at(-1)
-      const headers = { "content-type": "text/event-stream" }
-      const mainTurnNotStartedBySubagentResult =
-        who === "main" && tools.length === 0 && !text(last?.content).includes("<agent-")
-      if (who === undefined || mainTurnNotStartedBySubagentResult) return new Response(answer("ok"), { headers })
-      if (tools.length > 3) return new Response(answer("ok"), { headers })
-      dirs[who] = (main ?? sub)![1]!
-      const result = last?.role === "tool" ? text(last.content) : undefined
-      return new Response(answer(step(who, dirs[who]!, tools.length, result)), { headers })
-    },
-  })
-  return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
-}
-
-const fakeAnthropic = (step: ReturnType<typeof filesTurn>, dirs: Record<string, string>) => {
-  let n = 0
-  const sse = (events: ReadonlyArray<readonly [string, object]>) =>
-    events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify({ type: e, ...d })}\n\n`).join("")
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    idleTimeout: 0,
-    fetch: async (req) => {
-      const url = new URL(req.url)
-      if (req.method !== "POST" || !url.pathname.endsWith("/messages")) return Response.json({ input_tokens: 1 })
-      const body = (await req.json()) as {
-        stream?: boolean
-        system?: unknown
-        tools?: Array<unknown>
-        messages?: Array<{ role: string; content: unknown }>
-      }
-      const blocks = (body.messages ?? []).flatMap((m) =>
-        Array.isArray(m.content) ? (m.content as Array<{ type?: string; content?: unknown }>) : [],
-      )
-      const results = blocks.filter((b) => b.type === "tool_result")
-      const dir = /Project folder: (\S+) \(VIBEST_PROJECT_DIR\)/.exec(JSON.stringify(body.system ?? ""))?.[1]
-      let content: Array<object> = [{ type: "text", text: "ok" }]
-      let stop = "end_turn"
-      if ((body.tools?.length ?? 0) > 0 && dir !== undefined && results.length <= 3) {
-        dirs.claude = dir
-        const last = results.at(-1)
-        const s = step("claude", dir, results.length, last === undefined ? undefined : JSON.stringify(last.content))
-        if (typeof s === "string") content = [{ type: "text", text: s }]
-        else {
-          content = [{ type: "tool_use", id: `toolu_${results.length}`, name: s.tool, input: s.input }]
-          stop = "tool_use"
-        }
-      }
-      const message = {
-        id: `msg_${++n}`,
-        type: "message",
-        role: "assistant",
-        model: "claude-fake",
-        content,
-        stop_reason: stop,
-        usage: { input_tokens: 1, output_tokens: 1 },
-      }
-      if (!body.stream) return Response.json(message)
-      const events: Array<readonly [string, object]> = [
-        ["message_start", { message: { ...message, content: [], stop_reason: null } }],
-      ]
-      content.forEach((c, index) => {
-        const block = c as { type: string; text?: string; id?: string; name?: string; input?: object }
-        if (block.type === "text") {
-          events.push(["content_block_start", { index, content_block: { type: "text", text: "" } }])
-          events.push(["content_block_delta", { index, delta: { type: "text_delta", text: block.text } }])
-        } else {
-          events.push([
-            "content_block_start",
-            { index, content_block: { type: "tool_use", id: block.id, name: block.name, input: {} } },
-          ])
-          events.push([
-            "content_block_delta",
-            { index, delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input) } },
-          ])
-        }
-        events.push(["content_block_stop", { index }])
-      })
-      events.push(["message_delta", { delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: 1 } }])
-      events.push(["message_stop", {}])
-      return new Response(sse(events), { headers: { "content-type": "text/event-stream" } })
-    },
-  })
-  return { url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
-}
-
-const autoModeOff = {
-  disableAutoMode: "disable",
-  permissions: { defaultMode: "default", disableAutoMode: "disable" },
-}
-
-const claudeEnv = async (w: World, name: string, url: string) => {
-  const dir = path.join(w.root, `claude-${name}`)
-  await fs.mkdir(dir, { recursive: true })
-  const key = "sk-ant-e2e-fake-0123456789abcdefghijklmnop"
-  await fs.writeFile(
-    path.join(dir, ".claude.json"),
-    JSON.stringify({
-      hasCompletedOnboarding: true,
-      customApiKeyResponses: { approved: [key.slice(-20)], rejected: [] },
-    }),
-  )
-  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify(autoModeOff))
-  return [`CLAUDE_CONFIG_DIR=${dir}`, `ANTHROPIC_BASE_URL=${url}`, `ANTHROPIC_API_KEY=${key}`].flatMap((pair) => [
-    "--env",
-    pair,
-  ])
-}
 
 const checks: ReadonlyArray<Check> = [
   {
