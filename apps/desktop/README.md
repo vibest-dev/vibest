@@ -6,7 +6,7 @@ Source: reherdr `feat/project-view` 4e0a802 (github.com/iamdin/reherdr), importe
 
 A native macOS frontend built with [MyGo](https://github.com/egoist/mygo). Vibest owns its workspace/tab/split document and window-local navigation; Core owns terminals, programs and remote routing. Not affiliated with herdr.
 
-Requires Go (the version in `go.mod`), Make, Python 3, Git and macOS 13+. MyGo remains official v0.6.0 with the original eight patches plus tracked patches 0009 (input ownership), 0010 (VT rendering), 0011 (terminal-menu extension), 0012 (owned navigation batches/native text eligibility), 0013 (window-owned right-click and menu-clear admission), 0014 (captured local file/image paste), 0015 (capture before clipboard-provider acquisition, with an eager software-provider fixture), and 0016 (emulator replies sent through `AutomaticWriter`, so they go to Core as AUTOMATIC_INPUT). No earlier patches are changed. No fork, dependency upgrade or Ghostty update is included.
+Requires Go (the version in `go.mod`), Make, Python 3, Git and macOS 13+. MyGo remains official v0.6.0 with the original eight patches plus tracked patches 0009 (input ownership), 0010 (VT rendering), 0011 (terminal-menu extension), 0012 (owned navigation batches/native text eligibility), 0013 (window-owned right-click and menu-clear admission), 0014 (captured local file/image paste), 0015 (capture before clipboard-provider acquisition, with an eager software-provider fixture), 0016 (emulator replies sent through `AutomaticWriter`, so they go to Core as AUTOMATIC_INPUT), and 0017 (`CaptureAutomaticInput`, so a terminal without the keyboard still answers its program). No earlier patches are changed. No fork, dependency upgrade or Ghostty update is included.
 
 ## Build and checks
 

@@ -160,6 +160,29 @@ func (v *Viewer) InputError() error {
 	return nil
 }
 
+func (v *Viewer) WriteAutomatic(b []byte) (int, error) {
+	if v.observe {
+		return 0, ErrOwnership
+	}
+	if err := v.InputError(); err != nil {
+		return 0, err
+	}
+	if len(b) > MaxInputBytes {
+		return 0, ErrBusy
+	}
+	if len(b) == 0 {
+		return 0, nil
+	}
+	kind := data
+	if v.automatic {
+		kind = automaticInput
+	}
+	if err := v.control(kind, b); err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
+
 func (v *Viewer) Resize(cols, rows int) error {
 	if cols < 1 || rows < 1 || cols > 65535 || rows > 65535 {
 		return errors.New("core: invalid viewer size")
@@ -299,16 +322,7 @@ func (i Input) Valid() bool {
 	defer k.mu.Unlock()
 	return k.viewer == i.viewer && k.generation == i.generation && k.rendered && !i.viewer.remote && i.viewer.alive()
 }
-func (i Input) Write(b []byte) (int, error) { return i.write(data, b) }
-
-func (i Input) WriteAutomatic(b []byte) (int, error) {
-	if i.viewer != nil && i.viewer.automatic {
-		return i.write(automaticInput, b)
-	}
-	return i.write(data, b)
-}
-
-func (i Input) write(kind byte, b []byte) (int, error) {
+func (i Input) Write(b []byte) (int, error) {
 	if i.keyboard == nil {
 		return 0, ErrOwnership
 	}
@@ -321,7 +335,7 @@ func (i Input) write(kind byte, b []byte) (int, error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
-	err := i.viewer.client.send(context.Background(), i.viewer.channel, kind, b, func() error {
+	err := i.viewer.client.send(context.Background(), i.viewer.channel, data, b, func() error {
 		k := i.keyboard
 		k.mu.Lock()
 		defer k.mu.Unlock()

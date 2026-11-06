@@ -53,6 +53,12 @@ func New(v *core.Viewer, k *core.Keyboard, opts terminal.Options) (*Terminal, er
 		}
 		return captured{input: input, terminal: t}
 	}
+	opts.CaptureAutomaticInput = func() io.Writer {
+		if t.mode.Load() != 1 {
+			return nil
+		}
+		return replies{t}
+	}
 	painted := opts.OnPaint
 	opts.OnPaint = func(cols, rows, cellWidth, cellHeight int) {
 		t.fitted.Store(t.mode.Load() == 1 && cols > 0 && rows > 0 && cellWidth > 0 && cellHeight > 0 && t.visible != nil && t.visible())
@@ -172,23 +178,37 @@ func (c *connection) UseTheme(th *terminal.Theme) error {
 	return c.terminal.Viewer.SetDisplay(c.display)
 }
 
+type replies struct{ terminal *Terminal }
+
+func (r replies) Write(p []byte) (int, error) { return r.WriteAutomatic(p) }
+
+func (r replies) WriteAutomatic(p []byte) (int, error) {
+	if r.terminal.mode.Load() != 1 {
+		return 0, terminal.ErrInputCanceled
+	}
+	n, err := r.terminal.Viewer.WriteAutomatic(p)
+	if errors.Is(err, core.ErrBusy) {
+		return n, terminal.ErrInputFull
+	}
+	if err != nil {
+		return 0, terminal.ErrInputCanceled
+	}
+	return n, nil
+}
+
 type captured struct {
 	input    core.Input
 	terminal *Terminal
 }
 
-func (c captured) Write(p []byte) (int, error) { return c.write(c.input.Write, p) }
-
-func (c captured) WriteAutomatic(p []byte) (int, error) { return c.write(c.input.WriteAutomatic, p) }
-
-func (c captured) write(send func([]byte) (int, error), p []byte) (int, error) {
+func (c captured) Write(p []byte) (int, error) {
 	if c.terminal.mode.Load() != 1 || !c.input.Valid() {
 		return 0, terminal.ErrInputCanceled
 	}
 	if len(p) == 0 {
 		return 0, nil
 	}
-	n, err := send(p)
+	n, err := c.input.Write(p)
 	if errors.Is(err, core.ErrBusy) {
 		return n, terminal.ErrInputFull
 	}

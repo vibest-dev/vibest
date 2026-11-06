@@ -105,7 +105,7 @@ func TestEmulatorRepliesUseAutomaticInputOnlyWhenTheCoreAndAttachSaySo(t *testin
 			keyboard.Select(v)
 			keyboard.Rendered(keyboard.OwnerKey(), 80, 24, 8, 16)
 			input, _ := keyboard.Capture()
-			if _, err := input.WriteAutomatic([]byte("\x1b[48;24;80t")); err != nil {
+			if _, err := v.WriteAutomatic([]byte("\x1b[48;24;80t")); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := input.Write([]byte("k")); err != nil {
