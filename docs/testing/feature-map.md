@@ -95,6 +95,13 @@ the typed prompt lands in the middle of the scripted hook sequence. I5 is the re
 | H1  | `harness list`: binary, on PATH, default model, per harness                                               | script | one entry per harness (Claude, Pi, Cursor); a missing CLI says so   |
 | H2  | `harness models <harness>` / `models`                                                                     | script | non-empty list for each installed harness; a missing one is skipped |
 | H3  | `doctor`: grouped (coding agents, herdr, vibestd, plugins), a fix line under each problem, then a verdict | script | one agent line per harness; a herdr line per usable harness         |
+| H4  | Cursor discovery and subscription probes under a temporary macOS HOME                                     | script | no Cursor process starts; the missing keychain directory is named   |
+
+On macOS, Cursor model discovery and subscription probes refuse a HOME without `Library/Keychains`.
+This also keeps T1's daemon and harness-choice plugin from starting real Cursor behind its hook fixture.
+H4 puts a sentinel CLI on PATH and fails if it runs. Direct Cursor commands in the E2E World check HOME too.
+H2 records its install method, binary, HOME, PATH and Cursor path in `H2-environment.json`; the curl and npm
+verify legs keep the login HOME and isolate `VIBEST_HOME` and harness configuration instead.
 
 ## Integrations (harness adapters)
 

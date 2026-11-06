@@ -1,3 +1,5 @@
+import { Effect, FileSystem, Path } from "effect"
+
 import { anthropicOnly, type HarnessAdapter, opt } from "../harness.ts"
 import type { RawModel } from "../models.ts"
 
@@ -9,9 +11,28 @@ export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawMod
   })
 }
 
+export const cursorEnvironment = (home: string) =>
+  Effect.gen(function* () {
+    const platform = (globalThis as { readonly process?: { readonly platform?: string } }).process?.platform
+    if (platform !== "darwin") return undefined
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const keychains = path.join(home, "Library", "Keychains")
+    const present =
+      home !== "" &&
+      (yield* fs.stat(keychains).pipe(
+        Effect.map((info) => info.type === "Directory"),
+        Effect.orElseSucceed(() => false),
+      ))
+    return present
+      ? undefined
+      : `Cursor is disabled: HOME has no Library/Keychains directory (${home || "unset"}); use the macOS login home to avoid Cursor's keychain probe dialog`
+  })
+
 export const cursor: HarnessAdapter = {
   id: "cursor",
   binary: "cursor-agent",
+  checkEnvironment: cursorEnvironment,
   ownSessionId: false,
   systemPromptInPrompt: true,
   interruptKey: "ctrl+c",

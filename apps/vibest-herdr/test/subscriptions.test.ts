@@ -135,6 +135,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const dir = yield* home
+      yield* fs.makeDirectory(path.join(dir, "Library", "Keychains"), { recursive: true })
       const agent = path.join(dir, ".pi", "agent")
       yield* fs.makeDirectory(agent, { recursive: true })
       yield* fs.writeFileString(
@@ -230,6 +231,8 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
   it.effect("a usage response replaces plugin limits; a hung CLI and a non-200 do not", () =>
     Effect.gen(function* () {
       const dir = yield* home
+      const fs = yield* FileSystem.FileSystem
+      yield* fs.makeDirectory(`${dir}/Library/Keychains`, { recursive: true })
       const fresh = fakeMachine({
         installed: ["claude", "cursor"],
         home: dir,
@@ -323,6 +326,23 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       assert.strictEqual(row.error, "claude auth status failed")
       assert.strictEqual(row.limits[0]?.percent, 8)
       assert.strictEqual(hung.requests.length, 0)
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("Cursor subscription probes skip a macOS HOME without Library/Keychains before spawning", () =>
+    Effect.gen(function* () {
+      if (process.platform !== "darwin") return
+      const fake = fakeMachine({ installed: ["cursor"], home: yield* home, commands: {} })
+      const rows = yield* fake.provide(
+        Effect.gen(function* () {
+          const subs = yield* Subscriptions
+          yield* subs.poll
+          return yield* subs.list
+        }),
+      )
+      assert.include(rows[0]?.error, "Library/Keychains")
+      assert.deepStrictEqual(fake.spawned, [])
+      assert.deepStrictEqual(fake.requests, [])
     }),
   )
 

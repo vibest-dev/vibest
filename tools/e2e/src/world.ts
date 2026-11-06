@@ -148,9 +148,16 @@ export class World {
     argv: ReadonlyArray<string>,
     options: { env?: Record<string, string | undefined>; stdin?: string; timeoutMs?: number } = {},
   ): Promise<Ran> {
+    const env = this.env(options.env)
+    if (process.platform === "darwin" && ["cursor-agent", "agent"].includes(path.basename(argv[0]!)))
+      expect(
+        !!env.HOME &&
+          fs.statSync(path.join(env.HOME, "Library", "Keychains"), { throwIfNoEntry: false })?.isDirectory() === true,
+        "Refusing to start Cursor: HOME lacks Library/Keychains; use the macOS login home",
+      )
     const p = Bun.spawn([...argv], {
       cwd,
-      env: this.env(options.env),
+      env,
       stdin: options.stdin === undefined ? "ignore" : new TextEncoder().encode(options.stdin),
       stdout: "pipe",
       stderr: "pipe",

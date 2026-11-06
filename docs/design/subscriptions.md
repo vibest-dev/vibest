@@ -79,6 +79,12 @@ seen). From push: `status: rejected`.
 Token: macOS keychain items `cursor-access-token`, `cursor-refresh-token` (`~/.cursor/cli-config.json` holds
 only `authInfo` without tokens). Linux location unverified.
 
+On macOS, both Cursor model discovery and subscription probes check for `HOME/Library/Keychains` before
+starting its CLI. A missing directory reports Cursor unavailable rather than starting its default-keychain
+write probe, which can open a system dialog even for `--version`. Child commands keep the inherited environment
+and use the checked HOME. This does not create, unlock or change a keychain, and does not detect a locked
+keychain or a process outside the login security session.
+
 Windows: one monthly window per bucket the CLI shows: `monthly` (`totalPercentUsed`), `monthly-auto`
 (Auto-bucket models, `autoPercentUsed`), `monthly-api` (named models, `apiPercentUsed`). Which bucket a
 definition draws on depends on its model, which the scheduling plugin knows (`autoBucketModels` in the
