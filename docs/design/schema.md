@@ -283,39 +283,12 @@ before that and not yet consumed still counts. A report a `turn.end` consumed is
 ## Moving from the earlier shape
 
 The shape before the baseline also carries vibest's `application_id` and `user_version` 1, so vibestd tells it apart by
-its tables: no `event` table. vibestd never migrates by itself: on such a file it refuses to start, names the file, and
-says it is from an older vibest and must be migrated once with the migration script given with this release, or moved
-aside to start empty. Nothing in the repository migrates anything. The script is not part of the repository: it is one
-self-contained file (bun:sqlite and node built-ins only) handed out with the release, which the owner runs by hand
-after stopping vibestd: `bun migrate-db-v2.ts ~/.vibest/vibest.db`. It recognizes the earlier shape by its tables, not
-by `user_version`, copies the file to `vibest.db.v1-backup-<time>` first, builds the baseline from that copy into a new
-file, checks its foreign keys, and only then puts it in place with `user_version` 1. The script maps:
-
-- `session.report_to_session_id` = `parent_session_id`; when that is null and the role is not `main`, the
-  project's `main_session_id`.
-- Every project and session id becomes a new UUIDv4 (the script prints the old to new mapping), rewritten wherever
-  it is held: `session.id`, `parent_session_id`, `report_to_session_id`, `project.entry_session_id`, the inbox sender
-  and recipient, `event.session_id`, and a session id held as a value in event data. Harness conversation ids and
-  message text are kept as they are. Stop every agent first: a running one still carries its old id.
-- `project.entry_session_id` = `main_session_id`; a main session's `directory` = its `metadata.projectDirectory`.
-  `project.directory` is the realpath of the main session's project directory (else the main checkout of a
-  subagent's), with its repositories and their origins; projects claim directories newest first, and one with
-  none known keeps a null directory (history only). `projects/<old key>/` is renamed `projects/<project id>/`, and
-  inside it `memory/` becomes `memories/` and `scratch/` becomes `artifacts/`; any failure puts every renamed
-  directory back and leaves the old file untouched.
-- The session's harness, runtime, terminal and conversation become its `process.start`; its pid, ready time and
-  integration a `process.ready`; its exit (or archive) a `process.end`; each usage-limit attempt a `process.start`
-  and `process.end` (limited).
-- Each `message` row becomes a `turn.start` (typed, when it had no inbox row and some input), the `inbox.status`
-  delivered of the rows it consumed, and a `turn.end` unless it was still working.
-- Inbox `sender_type` becomes the kind: `user` is the session's `task` (its `metadata.task`) or a `send`, `session`
-  a `report`, or a `result` when it points at a message; `system` (and anything else) a `notice`. An old-shape result row's
-  content is empty; its text is the message's output (the rendered result), which becomes the row's content.
-- A turn end left in `results/<id>.json` that vibestd had not collected (newer than the open turn's start, or than
-  the last turn's end for a turn typed in the pane) becomes that turn's `turn.end`; `results/` and `reports/` are
-  then moved aside as `<dir>.v1-backup-<time>`.
-- Dropped: stop records, the runtime's last status, a result's parsed details (derived again from its text), and
-  every other `metadata` key.
+its tables: no `event` table. vibest never migrates a database, and no migration script exists: on such a file, or any
+file not of this schema, vibestd refuses to start, names the file, and gives the one way out, moving it aside with its
+`-wal` and `-shm` files while vibestd is stopped, which loses the sessions, results and queued messages it holds.
+`vibest update` and `vibest daemon restart` find this out before they change anything (the new binary runs
+`vibest daemon import-check`, which opens the file read-only), so the old install and the old vibestd keep working and
+the message says how to stop vibestd and move the file aside to go on.
 
 From the baseline on, upgrades run step by step on `user_version`: 1 to 2, then 2 to 3, each a numbered SQL step.
 
