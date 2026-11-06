@@ -21,7 +21,6 @@ type SessionState struct {
 	Terminals map[string]Terminal
 	Machines  []Machine
 	Programs  map[string]uint64
-	DocEpoch  uint64
 	Connected bool
 	Error     string
 }
@@ -55,34 +54,24 @@ func OpenSession(ctx context.Context, c *Client) (*Session, error) {
 	}
 	s.state.Connected = true
 	go s.watch()
-	go s.pollMachines()
 	return s, nil
 }
 
-var MachinePoll = 5 * time.Second
+const machineRefreshTimeout = 5 * time.Second
 
-func (s *Session) pollMachines() {
-	t := time.NewTicker(MachinePoll)
-	defer t.Stop()
-	for {
-		select {
-		case <-s.done:
-			return
-		case <-t.C:
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), MachinePoll)
-		machines, err := s.client.Machines(ctx)
-		cancel()
-		if err != nil {
-			continue
-		}
-		s.mu.Lock()
-		changed := !reflect.DeepEqual(s.state.Machines, machines)
-		s.state.Machines = machines
-		s.mu.Unlock()
-		if changed {
-			s.signal()
-		}
+func (s *Session) refreshMachines() {
+	ctx, cancel := context.WithTimeout(context.Background(), machineRefreshTimeout)
+	defer cancel()
+	machines, err := s.client.Machines(ctx)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	changed := !reflect.DeepEqual(s.state.Machines, machines)
+	s.state.Machines = machines
+	s.mu.Unlock()
+	if changed {
+		s.signal()
 	}
 }
 func (s *Session) Changes() <-chan struct{} { return s.changes }
@@ -332,7 +321,6 @@ func (s *Session) apply(e Event) error {
 			s.state.Terminals[t.Address] = t
 		}
 		s.seq = e.Params.Seq
-		s.state.DocEpoch++
 		s.mu.Unlock()
 		return s.refresh(context.Background())
 	case "heartbeat":
@@ -368,13 +356,10 @@ func (s *Session) apply(e Event) error {
 		if d.Name == LayoutDocument && e.Params.Machine == "" {
 			return s.refresh(context.Background())
 		}
-		if e.Params.Machine == "" {
-			s.mu.Lock()
-			s.state.DocEpoch++
-			s.mu.Unlock()
-			s.signal()
-		}
 		return nil
+	}
+	if remote := strings.Contains(address, "/"); remote && (e.Params.Type == "created" || e.Params.Type == "restarted" || e.Params.Type == "lost") {
+		go s.refreshMachines()
 	}
 	var err error
 	switch e.Params.Type {

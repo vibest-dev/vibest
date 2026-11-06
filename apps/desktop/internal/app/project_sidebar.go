@@ -29,8 +29,93 @@ func newProjectWindow() projectWindow {
 	return projectWindow{vibestSocket: vibest.SocketPath(), dialVibest: vibest.Dial}
 }
 
+const (
+	vibestBackoffMin = 250 * time.Millisecond
+	vibestBackoffMax = 5 * time.Second
+)
+
+func (a *App) vibestRun(ctx context.Context) {
+	a.mu.Lock()
+	socket, dial := a.vibestSocket, a.dialVibest
+	a.mu.Unlock()
+	if socket == "" {
+		return
+	}
+	backoff := vibestBackoffMin
+	for ctx.Err() == nil {
+		watched, final := a.vibestWatch(ctx, socket, dial)
+		if final {
+			return
+		}
+		if watched {
+			backoff = vibestBackoffMin
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, vibestBackoffMax)
+	}
+}
+
+func (a *App) setVibestNote(note string) {
+	a.mu.Lock()
+	a.vibestNote = note
+	a.mu.Unlock()
+	a.invalidate()
+}
+
+func (a *App) vibestWatch(ctx context.Context, socket string, dial func(context.Context, string) (*vibest.Client, error)) (watched, final bool) {
+	attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	c, err := dial(attempt, socket)
+	if err != nil {
+		a.setVibestNote("vibestd is not running")
+		return false, false
+	}
+	defer c.Close()
+	ping, err := c.Ping(attempt)
+	if err != nil {
+		a.setVibestNote(vibestMessage(err))
+		var mismatch *vibest.ProtocolError
+		return false, errors.As(err, &mismatch)
+	}
+	if !ping.Capabilities["watch"] {
+		a.setVibestNote("vibestd " + ping.Version + " cannot stream changes: run vibest update")
+		return false, true
+	}
+	w, err := c.Watch("/")
+	if err != nil {
+		a.setVibestNote(vibestMessage(err))
+		return false, false
+	}
+	defer w.Close()
+	for {
+		events, err := w.Next(ctx)
+		if err != nil {
+			if ctx.Err() == nil {
+				a.setVibestNote(vibestMessage(err))
+			}
+			return watched, false
+		}
+		a.mu.Lock()
+		for _, e := range events {
+			a.vibestModel.Apply(e)
+		}
+		a.vibestNote = ""
+		a.mu.Unlock()
+		a.invalidate()
+		watched = true
+	}
+}
+
 func (a *App) vibestDo(action func(context.Context, *vibest.Client) error) {
 	socket, dial := a.vibestSocket, a.dialVibest
+	if socket == "" {
+		a.vibestNote = "vibestd is not configured"
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

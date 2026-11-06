@@ -2,6 +2,7 @@ package vibest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
@@ -109,3 +110,31 @@ func (c *Client) Remove(ctx context.Context, params RemoveParams) (*RemoveResult
 	var out *RemoveResult
 	return out, c.Call(ctx, "Remove", "/", params, &out)
 }
+
+type Watch struct{ stream *Stream }
+
+func (c *Client) Watch(repository string) (*Watch, error) {
+	s, err := c.Stream("Watch", repository, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &Watch{stream: s}, nil
+}
+
+func (w *Watch) Next(ctx context.Context) ([]Event, error) {
+	chunk, err := w.stream.Next(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events := make([]Event, 0, len(chunk))
+	for _, raw := range chunk {
+		var e Event
+		if err := json.Unmarshal(raw, &e); err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	return events, nil
+}
+
+func (w *Watch) Close() error { return w.stream.Close() }

@@ -49,7 +49,7 @@ func TestProtocolMatchesTheContract(t *testing.T) {
 	if contract.Protocol != Protocol {
 		t.Fatalf("contract protocol %d, client %d", contract.Protocol, Protocol)
 	}
-	for method, stream := range map[string]bool{"Ping": false, "Project.Open": false, "Launch": false, "Remove": false} {
+	for method, stream := range map[string]bool{"Ping": false, "Project.Open": false, "Launch": false, "Remove": false, "Watch": true} {
 		m, ok := contract.Methods[method]
 		if !ok || m.Stream != stream {
 			t.Errorf("%s: in contract %v, stream %v, want stream %v", method, ok, m.Stream, stream)
@@ -72,6 +72,22 @@ func TestEveryFixtureResultDecodesStrictly(t *testing.T) {
 		"project-open.ndjson": func() any { return &OpenResult{} },
 		"launch.ndjson":       func() any { return &LaunchResult{} },
 		"remove.ndjson":       func() any { return &RemoveResult{} },
+	}
+	for _, line := range vibestfake.Load(t, "watch.ndjson") {
+		var m inbound
+		if err := json.Unmarshal(line, &m); err != nil {
+			t.Fatal(err)
+		}
+		if !m.Chunk {
+			continue
+		}
+		var events []json.RawMessage
+		if err := json.Unmarshal(m.Result, &events); err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range events {
+			strictDecode(t, e, &Event{})
+		}
 	}
 	for file, into := range types {
 		for _, line := range vibestfake.Load(t, file) {
@@ -236,4 +252,42 @@ func equal(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestWatchReplaysTheRecordedSnapshotAndDeltas(t *testing.T) {
+	c := dial(t, vibestfake.Load(t, "watch.ndjson"))
+	ctx := timeout(t)
+	w, err := c.Watch("/fixture/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m Model
+	for range 3 {
+		events, err := w.Next(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range events {
+			m.Apply(e)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	groups := m.Groups()
+	got := []string{shape(groups[0]), shape(groups[1])}
+	if got[0] != "other waiting=0 working=0:" || got[1] != "repo waiting=0 working=1: 00000000-0000-4000-8000-000000000002/0* 00000000-0000-4000-8000-000000000003/1" {
+		t.Fatalf("%q", got)
+	}
+	if m.Sessions["00000000-0000-4000-8000-000000000003"].Name != "renamed" {
+		t.Fatal("the Session delta was not applied")
+	}
+}
+
+func TestPingReportsTheWatchCapability(t *testing.T) {
+	c := dial(t, vibestfake.Load(t, "ping.ndjson"))
+	got, err := c.Ping(timeout(t))
+	if err != nil || !got.Capabilities["watch"] {
+		t.Fatalf("%+v %v", got, err)
+	}
 }

@@ -303,3 +303,32 @@ func TestLayoutOperationsKeepFrontendAndTerminalIdentityDistinct(t *testing.T) {
 		t.Fatal("empty workspace retained")
 	}
 }
+
+func TestMachinesAreReadOnConnectAndOnRemoteTerminalEventsNeverOnATimer(t *testing.T) {
+	c, f := newFixture(t)
+	s, err := openSession(t, c, f, layout(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	select {
+	case q := <-f.requests:
+		t.Fatalf("an idle session sent %s", q.Method)
+	case <-time.After(300 * time.Millisecond):
+	}
+	event := map[string]any{"jsonrpc": "2.0", "method": "event", "params": map[string]any{"seq": 1, "type": "lost", "terminal": "box/t9", "machine": "box", "data": map[string]any{"reason": "holder_lost", "exit_code": nil}}}
+	b, _ := json.Marshal(event)
+	f.send(10, 0, append(b, '\n'))
+	q := f.next()
+	if q.Method != "machine.list" {
+		t.Fatalf("method %s", q.Method)
+	}
+	f.reply(q, map[string]any{"machines": []any{map[string]any{"name": "box", "state": "disconnected"}}})
+	deadline := time.Now().Add(3 * time.Second)
+	for len(s.State().Machines) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("machines not refreshed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

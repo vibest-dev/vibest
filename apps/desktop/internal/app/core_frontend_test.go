@@ -52,6 +52,7 @@ type coreAppFixture struct {
 	exec       func(string, []string) ([]byte, error)
 	execResult any
 	otherDocs  []string
+	vibest     string
 }
 
 func (f *coreAppFixture) send(ch uint32, p []byte) {
@@ -280,6 +281,7 @@ func newCoreAppFixtureWith(t *testing.T, prepare func(*coreAppFixture)) (*App, *
 	}
 	go f.serve()
 	a := NewApp("/inert/never-dialed.sock")
+	a.vibestSocket = f.vibest
 	f.reconnect = make(chan net.Conn, 1)
 	if f.wrap != nil {
 		f.reconnect <- f.wrap(left)

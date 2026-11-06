@@ -13,6 +13,9 @@ func TestMain(m *testing.M) {
 	if err == nil {
 		err = os.Setenv("XDG_STATE_HOME", dir)
 	}
+	if err == nil {
+		err = os.Setenv("VIBEST_HOME", dir)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

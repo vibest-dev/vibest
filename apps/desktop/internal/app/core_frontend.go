@@ -59,6 +59,7 @@ func newCoreWindow() coreWindow {
 }
 
 func (a *App) Run(ctx context.Context) {
+	go a.vibestRun(ctx)
 	backoff := 250 * time.Millisecond
 	for ctx.Err() == nil {
 		attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
