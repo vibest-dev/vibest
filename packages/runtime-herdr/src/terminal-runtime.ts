@@ -566,6 +566,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
 
     const present: Runtime["present"] = (terminal, info) =>
       Effect.gen(function* () {
+        if (["agent", "harness", "project", "live"].every((key) => cut(info[key]) === undefined)) return
         const place = yield* at(terminal, "present")
         const h = yield* client(place.session)
         const pane = yield* failWith(h.call("pane.get", { pane_id: place.paneId }))
