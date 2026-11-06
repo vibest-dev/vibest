@@ -9,7 +9,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "herdr-mygo-state")
+	dir, err := os.MkdirTemp("", "vibest-desktop-state")
 	if err == nil {
 		err = os.Setenv("XDG_STATE_HOME", dir)
 	}

@@ -1,4 +1,4 @@
-# herdr-mygo 方案
+# vibest-desktop 方案
 
 用 [MyGo](https://github.com/egoist/mygo) 做 [herdr](https://herdr.dev) 的原生桌面客户端，实现 [penso/herdr-gpui](https://github.com/penso/herdr-gpui) 的基础能力。非 herdr 官方项目。
 
@@ -27,7 +27,7 @@ internal/app/input.go           网格交互：键盘、文本、鼠标、滚轮
 internal/app/view.go            侧边栏、标签栏、网格、原生右键菜单、状态栏、快捷键
 internal/app/state.go           给测试和调试 socket 用的状态快照
 internal/app/prompt_darwin.go   macOS 原生确认框和输入框（prompt_other.go 是其他平台的窗口内对话框）
-internal/app/debug.go           调试 socket（仅 e2edebug 构建标签 + HERDR_MYGO_DEBUG=1）
+internal/app/debug.go           调试 socket（仅 e2edebug 构建标签 + VIBEST_DESKTOP_DEBUG=1）
 internal/chrome/                主题：内置 Paper/Newsprint/Nord、Ghostty 适配、主题选择的保存、图标和尺寸阶梯
 internal/sidebar/               workspace 分组和上下移动
 internal/ghostty/               读取 Ghostty 配置的主题、字体、光标，以及随包字体

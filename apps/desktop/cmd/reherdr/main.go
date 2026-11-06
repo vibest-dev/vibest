@@ -42,7 +42,7 @@ func main() {
 			trafficLights = client.TrafficLights()
 		}
 		win := mygo.NewWindow(mygo.WindowOptions{
-			Title:                "herdr",
+			Title:                "Vibest",
 			Width:                1280,
 			Height:               800,
 			StateKey:             "main",
@@ -55,7 +55,7 @@ func main() {
 			Invalidate: win.Invalidate,
 			SetTitle: func(t string) {
 				if t == "" {
-					t = "herdr"
+					t = "Vibest"
 				}
 				win.SetTitle(t)
 			},

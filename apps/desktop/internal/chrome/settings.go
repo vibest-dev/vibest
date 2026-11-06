@@ -24,10 +24,10 @@ func DefaultSettings() Settings {
 }
 
 const (
-	appName      = "herdr-mygo"
+	appName      = "vibest-desktop"
 	settingsFile = "settings.json"
-	configEnv    = "HERDR_MYGO_CONFIG_DIR"
-	stateEnv     = "HERDR_MYGO_STATE_DIR"
+	configEnv    = "VIBEST_DESKTOP_CONFIG_DIR"
+	stateEnv     = "VIBEST_DESKTOP_STATE_DIR"
 )
 
 func ConfigDir() string {

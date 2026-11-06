@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-WORK=${TMPDIR:-/tmp}/herdr-mygo-perf
+WORK=${TMPDIR:-/tmp}/vibest-desktop-perf
 mkdir -p "$WORK"
-rm -f "$WORK/config/window-state.json" "$WORK/state/herdr-mygo/window-state.json"
+rm -f "$WORK/config/window-state.json" "$WORK/state/vibest-desktop/window-state.json"
 APP=${1:-$WORK/reherdr}
 if [ $# -eq 0 ]; then
 	sh scripts/patch-mygo.sh
@@ -23,7 +23,7 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
 	sleep 0.5
 done
 for try in 1 2; do
-	HERDR_MYGO_CONFIG_DIR="$WORK/config" HERDR_MYGO_STATE_DIR="$WORK/state/herdr-mygo" "$APP" -session mygo-perf >"$WORK/app.log" 2>&1 &
+	VIBEST_DESKTOP_CONFIG_DIR="$WORK/config" VIBEST_DESKTOP_STATE_DIR="$WORK/state/vibest-desktop" "$APP" -session mygo-perf >"$WORK/app.log" 2>&1 &
 	pid=$!
 	sleep 6
 	kill -0 "$pid" 2>/dev/null && break

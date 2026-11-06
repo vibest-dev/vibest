@@ -13,7 +13,7 @@ var _ mygo.WindowStateStore = WindowStates{}
 
 func TestDirs(t *testing.T) {
 	t.Setenv("HOME", "/home/u")
-	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "HERDR_MYGO_CONFIG_DIR", "HERDR_MYGO_STATE_DIR"} {
+	for _, v := range []string{"XDG_CONFIG_HOME", "XDG_STATE_HOME", "VIBEST_DESKTOP_CONFIG_DIR", "VIBEST_DESKTOP_STATE_DIR"} {
 		t.Setenv(v, "")
 	}
 	check := func(what, config, state string) {
@@ -25,17 +25,17 @@ func TestDirs(t *testing.T) {
 			t.Errorf("%s: state %s, want %s", what, got, state)
 		}
 	}
-	check("home", "/home/u/.config/herdr-mygo", "/home/u/.local/state/herdr-mygo")
+	check("home", "/home/u/.config/vibest-desktop", "/home/u/.local/state/vibest-desktop")
 	t.Setenv("XDG_CONFIG_HOME", "rel/config")
 	t.Setenv("XDG_STATE_HOME", "./state")
-	check("relative XDG", "/home/u/.config/herdr-mygo", "/home/u/.local/state/herdr-mygo")
+	check("relative XDG", "/home/u/.config/vibest-desktop", "/home/u/.local/state/vibest-desktop")
 	t.Setenv("XDG_CONFIG_HOME", "/xdg/config")
 	t.Setenv("XDG_STATE_HOME", "/xdg/state")
-	check("XDG", "/xdg/config/herdr-mygo", "/xdg/state/herdr-mygo")
-	t.Setenv("HERDR_MYGO_CONFIG_DIR", "/home/u/.config/herdr-mygo-dev")
-	check("config only", "/home/u/.config/herdr-mygo-dev", "/xdg/state/herdr-mygo")
-	t.Setenv("HERDR_MYGO_STATE_DIR", "/home/u/.local/state/herdr-mygo-dev")
-	check("both", "/home/u/.config/herdr-mygo-dev", "/home/u/.local/state/herdr-mygo-dev")
+	check("XDG", "/xdg/config/vibest-desktop", "/xdg/state/vibest-desktop")
+	t.Setenv("VIBEST_DESKTOP_CONFIG_DIR", "/home/u/.config/vibest-desktop-dev")
+	check("config only", "/home/u/.config/vibest-desktop-dev", "/xdg/state/vibest-desktop")
+	t.Setenv("VIBEST_DESKTOP_STATE_DIR", "/home/u/.local/state/vibest-desktop-dev")
+	check("both", "/home/u/.config/vibest-desktop-dev", "/home/u/.local/state/vibest-desktop-dev")
 }
 
 type profile struct {
@@ -105,7 +105,7 @@ var legacyStates = map[string]mygo.WindowState{"main": {X: 10, Y: 20, Width: 140
 
 func TestWindowStatesRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	main, dev := newProfile(t, root, "herdr-mygo"), newProfile(t, root, "herdr-mygo-dev")
+	main, dev := newProfile(t, root, "vibest-desktop"), newProfile(t, root, "vibest-desktop-dev")
 	main.load(nil, false)
 	if _, err := os.Stat(main.state); !os.IsNotExist(err) {
 		t.Fatalf("loading created the state directory: %v", err)
@@ -132,7 +132,7 @@ func TestWindowStatesRoundTrip(t *testing.T) {
 }
 
 func TestWindowStatesMoveFromTheConfiguration(t *testing.T) {
-	p := newProfile(t, t.TempDir(), "herdr-mygo-dev")
+	p := newProfile(t, t.TempDir(), "vibest-desktop-dev")
 	p.legacy(legacyJSON)
 	p.load(legacyStates, false)
 	p.kept()
@@ -145,7 +145,7 @@ func TestWindowStatesMoveFromTheConfiguration(t *testing.T) {
 }
 
 func TestWindowStatesStateFileWins(t *testing.T) {
-	p := newProfile(t, t.TempDir(), "herdr-mygo")
+	p := newProfile(t, t.TempDir(), "vibest-desktop")
 	p.legacy(legacyJSON)
 	own := `{"main": {"x": 1, "y": 2, "width": 900, "height": 700}}`
 	p.write(p.state, own)
@@ -170,7 +170,7 @@ func TestWindowStatesStateFileWins(t *testing.T) {
 }
 
 func TestWindowStatesKeepDanglingStateEntry(t *testing.T) {
-	p := newProfile(t, t.TempDir(), "herdr-mygo")
+	p := newProfile(t, t.TempDir(), "vibest-desktop")
 	p.legacy(legacyJSON)
 	if err := os.MkdirAll(p.state, 0o755); err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestWindowStatesKeepDanglingStateEntry(t *testing.T) {
 }
 
 func TestWindowStatesLeaveABadLegacy(t *testing.T) {
-	p := newProfile(t, t.TempDir(), "herdr-mygo")
+	p := newProfile(t, t.TempDir(), "vibest-desktop")
 	p.load(nil, false)
 	for _, bad := range []string{"{", "[1, 2]", `{"main": {"width": "wide"}}`, "\x00\xff", "{}", "null"} {
 		p.legacy(bad)
@@ -204,7 +204,7 @@ func TestWindowStatesLeaveABadLegacy(t *testing.T) {
 }
 
 func TestWindowStatesFailedSave(t *testing.T) {
-	p := newProfile(t, t.TempDir(), "herdr-mygo")
+	p := newProfile(t, t.TempDir(), "vibest-desktop")
 	old := map[string]mygo.WindowState{"main": {X: 1, Y: 2, Width: 900, Height: 700}}
 	if err := p.store().SaveWindowStates(old); err != nil {
 		t.Fatal(err)
@@ -223,9 +223,9 @@ func TestWindowStatesFailedSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Chmod(locked, 0o755)
-	q := newProfile(t, t.TempDir(), "herdr-mygo")
+	q := newProfile(t, t.TempDir(), "vibest-desktop")
 	q.legacy(legacyJSON)
-	dir := filepath.Join(locked, "herdr-mygo")
+	dir := filepath.Join(locked, "vibest-desktop")
 	if got, err := (WindowStates{Dir: dir, Legacy: q.config}).LoadWindowStates(); err != nil || !reflect.DeepEqual(got, legacyStates) {
 		t.Fatalf("unsaved carry-over: %v, %v", got, err)
 	}

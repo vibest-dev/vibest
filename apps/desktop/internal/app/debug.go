@@ -16,12 +16,12 @@ import (
 )
 
 func StartDebug(app *App, win *mygo.Window) {
-	if os.Getenv("HERDR_MYGO_DEBUG") != "1" {
+	if os.Getenv("VIBEST_DESKTOP_DEBUG") != "1" {
 		return
 	}
-	path := os.Getenv("HERDR_MYGO_DEBUG_SOCKET")
+	path := os.Getenv("VIBEST_DESKTOP_DEBUG_SOCKET")
 	if path == "" {
-		path = filepath.Join(os.TempDir(), fmt.Sprintf("herdr-mygo-%d.sock", os.Getpid()))
+		path = filepath.Join(os.TempDir(), fmt.Sprintf("vibest-desktop-%d.sock", os.Getpid()))
 	}
 	os.Remove(path)
 	ln, err := net.Listen("unix", path)

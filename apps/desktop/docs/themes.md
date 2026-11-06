@@ -87,23 +87,23 @@ The pane font size is the first of these that is set:
 
 | What                    | Where                                                                                                                                                                                                                                  |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Configuration directory | `$HERDR_MYGO_CONFIG_DIR`, else `$XDG_CONFIG_HOME/herdr-mygo`, else `~/.config/herdr-mygo`                                                                                                                                              |
-| State directory         | `$HERDR_MYGO_STATE_DIR`, else `$XDG_STATE_HOME/herdr-mygo`, else `~/.local/state/herdr-mygo`                                                                                                                                           |
+| Configuration directory | `$VIBEST_DESKTOP_CONFIG_DIR`, else `$XDG_CONFIG_HOME/vibest-desktop`, else `~/.config/vibest-desktop`                                                                                                                                  |
+| State directory         | `$VIBEST_DESKTOP_STATE_DIR`, else `$XDG_STATE_HOME/vibest-desktop`, else `~/.local/state/vibest-desktop`                                                                                                                               |
 | Choice                  | `settings.json` in the configuration directory: `{"theme": "Paper", "theme_dark": "Nord", "follow_system": true}`                                                                                                                      |
 | Window                  | `window-state.json` in the state directory: MyGo's position, size, and maximized and full screen state of the window, which reopens there while it fits a connected display. Missing, damaged or foreign, the window opens at 1280x800 |
 
 A relative `XDG_CONFIG_HOME` or `XDG_STATE_HOME` is ignored, as the XDG Base
 Directory Specification says. Each directory is resolved on its own: setting
-only `HERDR_MYGO_CONFIG_DIR` leaves the state in the default one.
+only `VIBEST_DESKTOP_CONFIG_DIR` leaves the state in the default one.
 
 Builds before the state directory kept `window-state.json` in the
 configuration directory. While the state directory has none, a valid one
 there is copied to the state directory and used; it is left in place. A
 state file that exists, even a damaged one, is never replaced by it.
 
-Development previews set both directories to `herdr-mygo-dev`, with
-`open -n APP --env HERDR_MYGO_CONFIG_DIR=$HOME/.config/herdr-mygo-dev --env
-HERDR_MYGO_STATE_DIR=$HOME/.local/state/herdr-mygo-dev`, so their theme
+Development previews set both directories to `vibest-desktop-dev`, with
+`open -n APP --env VIBEST_DESKTOP_CONFIG_DIR=$HOME/.config/vibest-desktop-dev --env
+VIBEST_DESKTOP_STATE_DIR=$HOME/.local/state/vibest-desktop-dev`, so their theme
 choice and window stay apart from the installed app's. `scripts/perf.sh`,
 `scripts/e2e-window.sh` and the Go tests set both to temporary directories
 of their own and never touch either.
