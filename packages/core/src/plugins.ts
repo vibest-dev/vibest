@@ -452,6 +452,7 @@ export class Plugins extends Context.Service<
       const host = yield* makeHost()
       const sources = yield* makeSources(DEFAULT_TIMEOUT)
       const builtins = yield* Builtins
+      yield* host.activate(builtins)
       const triggers = yield* Queue.sliding<void>(1)
       const changed = new Set<string>()
       let observed = 0
