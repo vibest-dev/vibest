@@ -11,6 +11,7 @@ import (
 func useVibest(a *App, path string) {
 	a.mu.Lock()
 	a.vibestSocket = path
+	a.vibestNote = "previous action failed"
 	a.mu.Unlock()
 }
 
@@ -30,6 +31,7 @@ func TestStartMainAgentLaunchesInHcOnlyWhenNoneRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	awaitCoreApp(t, a, func() bool { return a.vibestNote == "" })
+	tt.Frame()
 	if err := tt.Click("Start main agent in Shipping"); err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +80,7 @@ func TestArchiveAsksFirstThenRemovesAndShowsFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	awaitCoreApp(t, a, func() bool { return a.vibestNote == "" && a.dialog == nil })
+	tt.Frame()
 	archive("ghost")
 	if err := tt.Click("Archive"); err != nil {
 		t.Fatal(err)
@@ -117,6 +120,7 @@ func TestStopEndsTheMainAgentThroughStopCoordinator(t *testing.T) {
 	}
 	stop()
 	awaitCoreApp(t, a, func() bool { return a.vibestNote == "" && a.dialog == nil })
+	tt.Frame()
 	stop()
 	awaitCoreApp(t, a, func() bool { return a.vibestNote != "" })
 	tt.Frame()

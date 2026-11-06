@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/egoist/mygo/ui"
 	"testing"
+	"time"
 	"vibest-desktop/internal/chrome"
 )
 
@@ -94,6 +95,39 @@ func TestInactivePaneTintGeometryAndContrast(t *testing.T) {
 		}
 	}
 }
+func TestDelayedPaneUsesCurrentThemeAndFont(t *testing.T) {
+	a, f := newCoreAppFixtureWith(t, coreActivitySeed)
+	release, held := holdCoreMethod(t, f, "terminal.attach b")
+	tt := ui.NewTester(a.View, 1280, 800)
+	readyCorePane(t, a, tt, "a")
+	select {
+	case <-held:
+	case <-time.After(time.Second):
+		t.Fatal("attach did not reach barrier")
+	}
+	th, _ := chrome.Builtin("TVA Control")
+	coreAppAct(a, func() {
+		a.themes.light, a.themes.dark = th, th
+		a.themes.settings.FollowSystem = false
+		a.fontSize = 20
+	})
+	tt.SetScale(2)
+	tt.Frame()
+	release()
+	awaitCorePaintWithoutOwnership(t, a, tt, "b")
+	r := find(t, tt, "inactive/b")
+	bg := th.Terminal.Background.Mix(th.Foreground, inactiveVeil)
+	if got := tt.Image().RGBAAt(int((r.X+r.W/2)*2), int((r.Y+r.H/2)*2)); !nearColor(got, bg) {
+		t.Errorf("delayed pane tint %v want %v", got, bg)
+	}
+	a.mu.Lock()
+	view := a.coreViews["b"]
+	a.mu.Unlock()
+	if got := vtView(t, view).FieldByName("fonts").Index(0).FieldByName("Size").Float(); got != 20 {
+		t.Errorf("delayed pane font size %v want 20", got)
+	}
+}
+
 func TestInactivePaneTintSkipsSingleZoomAndTooSmall(t *testing.T) {
 	a, _, tt := coreGridFixture(t)
 	coreAppAct(a, func() { a.ZoomPane("a") })
