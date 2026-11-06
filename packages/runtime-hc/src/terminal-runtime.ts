@@ -95,6 +95,7 @@ export const make = (deps: { readonly hc: HcShape; readonly scope: Scope.Scope }
         track(data as api.Terminal)
         return Effect.void
       }
+      if (type === "removed") return exited(terminal).pipe(Effect.ensuring(Effect.sync(() => names.delete(terminal))))
       if (EXIT_EVENTS.has(type)) return exited(terminal)
       if (type === "foreground") {
         if (!atShell(data as api.Foreground)) {
