@@ -1,0 +1,167 @@
+diff --git a/plugins/terminal/prepare_paste_test.go b/plugins/terminal/prepare_paste_test.go
+new file mode 100644
+index 0000000..59348c9
+--- /dev/null
++++ b/plugins/terminal/prepare_paste_test.go
+@@ -0,0 +1,59 @@
++package terminal
++
++import (
++	"reflect"
++	"testing"
++
++	"github.com/egoist/mygo/transfer"
++	"github.com/egoist/mygo/ui"
++)
++
++func TestCapturedInputPreparePastePrecedesProvider(t *testing.T) {
++	for _, eager := range []bool{false, true} {
++		t.Run(map[bool]string{false: "lazy", true: "eager"}[eager], func(t *testing.T) {
++			var services ui.Services
++			tt := ui.NewTester(func(c *ui.Context) { services = c.Services() }, 100, 100)
++			tt.SetClipboardEager(eager)
++			var steps []string
++			tt.SetClipboardData(transfer.New(transfer.NewItem(transfer.Lazy(transfer.FileList, func() ([]byte, error) {
++				steps = append(steps, "provider")
++				return []byte("file:///inert/provider"), nil
++			}))))
++			term := &Terminal{opts: Options{PreparePaste: func() func(transfer.Data) bool {
++				steps = append(steps, "capture")
++				return func(d transfer.Data) bool {
++					steps = append(steps, "handler")
++					if _, err := d.Read(transfer.FileList); err != nil {
++						t.Fatal(err)
++					}
++					return true
++				}
++			}, OnPaste: func(transfer.Data) bool { t.Fatal("prepared paste recaptured through OnPaste"); return true }}}
++			v := &view{t: term, services: services}
++			if !v.paste() {
++				t.Fatal("paste was not consumed")
++			}
++			want := []string{"capture", "handler", "provider"}
++			if eager {
++				want = []string{"capture", "provider", "handler"}
++			}
++			if !reflect.DeepEqual(steps, want) {
++				t.Fatal("capture/provider order", steps, want)
++			}
++		})
++	}
++}
++
++func TestCapturedInputPreparePasteRefusesBeforeProvider(t *testing.T) {
++	var services ui.Services
++	tt := ui.NewTester(func(c *ui.Context) { services = c.Services() }, 100, 100)
++	tt.SetClipboardEager(true)
++	tt.SetClipboardData(transfer.New(transfer.NewItem(transfer.Lazy(transfer.FileList, func() ([]byte, error) { t.Fatal("refusal read clipboard provider"); return nil, nil }))))
++	term := &Terminal{opts: Options{PreparePaste: func() func(transfer.Data) bool { return nil }, OnPaste: func(transfer.Data) bool { t.Fatal("refusal fell back to OnPaste"); return false }}}
++	if !(&view{t: term, services: services}).paste() {
++		t.Fatal("refusal not consumed")
++	}
++	if len(term.in.queue) != 0 {
++		t.Fatal("refusal sent input")
++	}
++}
+diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
+index 5c51fea..4a4ceff 100644
+--- a/plugins/terminal/terminal.go
++++ b/plugins/terminal/terminal.go
+@@ -266,6 +266,10 @@ type Options struct {
+ 	// the clipboard's files or image (d.Files, transfer.PNG) for a remote
+ 	// program, then pastes their paths with Paste.
+ 	OnPaste func(d transfer.Data) bool
++	// PreparePaste runs before any clipboard service access, without terminal locks.
++	// It captures an operation-specific OnPaste handler; nil refuses the paste
++	// without reading the clipboard. Nil PreparePaste keeps OnPaste behavior.
++	PreparePaste func() func(transfer.Data) bool
+ 	// OnDropFiles may consume original paths before shell quoting or clipboard
+ 	// offering. It runs on the UI thread; true suppresses the default paste.
+ 	OnDropFiles func(paths []string) bool
+diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
+index 2adbdae..c363961 100644
+--- a/plugins/terminal/view.go
++++ b/plugins/terminal/view.go
+@@ -924,15 +924,22 @@ func (v *view) copied(text string, by CopySource) {
+ // read: it reads what was read here.
+ func (v *view) paste() bool {
+ 	t := v.t
++	onPaste := t.opts.OnPaste
++	if prepare := t.opts.PreparePaste; prepare != nil {
++		onPaste = prepare()
++		if onPaste == nil {
++			return true
++		}
++	}
+ 	held := v.services.ClipboardFormats()
+ 	if len(held) == 0 {
+ 		return false
+ 	}
+ 	var d transfer.Data
+ 	switch {
+-	case t.opts.OnPaste != nil:
++	case onPaste != nil:
+ 		d = v.services.ReadClipboardData()
+-		if t.opts.OnPaste(d) {
++		if onPaste(d) {
+ 			return true
+ 		}
+ 	case t.readsClipboard():
+diff --git a/ui/headless.go b/ui/headless.go
+index 7b9f32c..5ce9c9f 100644
+--- a/ui/headless.go
++++ b/ui/headless.go
+@@ -33,10 +33,11 @@ type headless struct {
+ 	rtl       bool
+ 	clipboard string
+ 	// clipboardData is what WriteClipboardData copied, with its formats.
+-	clipboardData transfer.Data
+-	cursor        Cursor
+-	ime           platform.TextInputState
+-	opened        []string
++	clipboardData  transfer.Data
++	clipboardEager bool
++	cursor         Cursor
++	ime            platform.TextInputState
++	opened         []string
+ 	// escapes counts the Escapes nothing handled.
+ 	escapes int
+ 	openErr error
+@@ -121,7 +122,10 @@ func (h *headless) readClipboardData(formats []transfer.Format) transfer.Data {
+ 		d = transfer.TextData(h.clipboard)
+ 	}
+ 	if formats == nil {
+-		return d
++		if !h.clipboardEager {
++			return d
++		}
++		formats = d.Formats()
+ 	}
+ 	var reps []transfer.Representation
+ 	for _, f := range formats {
+@@ -141,7 +145,12 @@ func (h *headless) writeClipboardData(d transfer.Data) {
+ 	h.clipboard = string(b)
+ }
+ 
+-func (h *headless) clipboardFormats() []transfer.Format { return h.readClipboardData(nil).Formats() }
++func (h *headless) clipboardFormats() []transfer.Format {
++	if h.clipboard != "" && len(h.clipboardData.Items()) == 0 {
++		return []transfer.Format{transfer.Text}
++	}
++	return h.clipboardData.Formats()
++}
+ 
+ func (h *headless) startDataDrag(d transfer.Data, local any, o transfer.DragOptions, x, y float32) error {
+ 	h.dragData, h.dragLocal, h.dragOptions = d.Snapshot(), local, o
+@@ -768,6 +777,11 @@ func (t *Tester) SetClipboard(s string) { t.h.clipboard, t.h.clipboardData = s,
+ // another app copies HTML.
+ func (t *Tester) ClipboardData() transfer.Data { return t.h.readClipboardData(nil) }
+ 
++// SetClipboardEager makes ReadClipboardData materialize every advertised format,
++// like native providers. Default false preserves lazy headless data. Format
++// enumeration never materializes either mode. No system clipboard is accessed.
++func (t *Tester) SetClipboardEager(eager bool) { t.h.clipboardEager = eager }
++
+ func (t *Tester) SetClipboardData(d transfer.Data) {
+ 	t.h.clipboardData = d.Snapshot()
+ 	b, _ := d.Read(transfer.Text)

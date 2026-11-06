@@ -1,0 +1,6 @@
+{
+  "name": "Herdr MyGo",
+  "main": "./cmd/reherdr",
+  "identifier": "dev.iamdin.herdr-mygo",
+  "macos": { "minimumSystemVersion": "13.0" }
+}

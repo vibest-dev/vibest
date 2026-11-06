@@ -1,0 +1,14 @@
+{
+  "name": "@vibest/desktop",
+  "version": "0.0.1-beta.17",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "make build",
+    "typecheck": "make vet",
+    "test": "make test"
+  },
+  "devDependencies": {
+    "@vibest/protocol": "workspace:*"
+  }
+}

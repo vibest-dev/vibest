@@ -1,0 +1,561 @@
+diff --git a/internal/platform/surface.go b/internal/platform/surface.go
+--- a/internal/platform/surface.go
++++ b/internal/platform/surface.go
+@@ -122,6 +122,8 @@
+ // TextInputState is the state of the text input that has the keyboard,
+ // for input methods.
+ type TextInputState struct {
++	// Session identifies the owning element even for a nil-client TextCaret.
++	Session uint64
+ 	// Active is true while an editable element has the keyboard.
+ 	Active bool
+ 	// Caret is the caret's rectangle, in DIPs relative to the surface.
+@@ -250,6 +252,9 @@
+ 	// the surface has the keyboard again, and the content moves the focus
+ 	// on from the web view's element.
+ 	WebViewTabOut
++	// SurfacePrepareInput queries whether queued activation needs a frame before
++	// the native backend decides text eligibility. It does not itself take input.
++	SurfacePrepareInput
+ )
+ 
+ // SurfaceEvent is input on a Surface, or a change of it.
+diff --git a/ui/runtime.go b/ui/runtime.go
+--- a/ui/runtime.go
++++ b/ui/runtime.go
+@@ -258,8 +258,9 @@
+ 	cellInBlock func(f *listFrame, x, y float32) bool
+ 	// pressDragger is the element around the one pressed that drags a
+ 	// value, which takes the press as it moves (dragMove), or 0.
+-	pressDragger uint64
+-	focused      uint64
++	pressDragger      uint64
++	activationPending bool
++	focused           uint64
+ 	// texts are selectable paragraphs in build order; selection spans those
+ 	// of one Selectable container (textselection.go).
+ 	texts        []*state
+@@ -327,8 +328,9 @@
+ 	// ime is the text input state the host has, and base the rune of the
+ 	// focused editor its text starts at.
+ 	ime struct {
+-		state platform.TextInputState
+-		base  int
++		state  platform.TextInputState
++		base   int
++		cancel func(InputEvent) bool
+ 	}
+ 	// drag is the value being dragged within the window.
+ 	drag        *valueDrag
+@@ -484,6 +486,7 @@
+ 	rt.inFrame = true
+ 	defer rt.endFrame()
+ 
++	rt.activationPending = false
+ 	rt.frame++
+ 	rt.input = false
+ 	rt.focusRead = false
+diff --git a/ui/input.go b/ui/input.go
+--- a/ui/input.go
++++ b/ui/input.go
+@@ -11,6 +11,15 @@
+ // event handles a surface event on the main thread. It reports whether
+ // an element takes files dragged over or dropped at the event's position.
+ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
++	if ev.Kind == platform.SurfacePrepareInput {
++		return !rt.inFrame && (rt.activationPending || len(rt.keys) > 0)
++	}
++	// Drain completed activation before the next physical intent or terminal
++	// entry, including menu commands/commits that never call native keyDown.
++	switch ev.Kind {
++	case platform.PointerDown, platform.KeyPressed, platform.TextInput, platform.TextComposition, platform.SurfaceCommand:
++		rt.prepareInputFrame()
++	}
+ 	if ev.Kind != platform.SurfaceFrame {
+ 		// Whatever the event changes, the next frame builds anew.
+ 		rt.redraw = false
+@@ -417,6 +426,7 @@
+ 				break // it moved the element (Draggable): no click
+ 			}
+ 			s.clicks++
++			rt.activationPending = true
+ 			s.clickMods = s.pressMods
+ 		case 1:
+ 			s.rightClicks++
+@@ -690,6 +700,7 @@
+ 		window := s != nil && key == KeyEnter && s.flags&flagToggle != 0
+ 		if s != nil && !rt.claimedBy(k, window) && s.flags&flagClickable != 0 && s.flags&flagDisabled == 0 {
+ 			s.clicks++
++			rt.activationPending = true
+ 			s.clickMods = 0
+ 			rt.focusVisible = true
+ 			rt.requestFrame()
+@@ -952,12 +963,24 @@
+ 		r := transformRect(s.world, Rect{s.x + s.caret.X, s.y + s.caret.Y, s.caret.W, s.caret.H})
+ 		t.Caret = platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)}
+ 	}
++	if t.Active {
++		t.Session = rt.focused
++	}
+ 	if t != rt.ime.state {
+ 		if t.Client != rt.ime.state.Client {
+ 			if old, ok := rt.ime.state.Client.(*textInputAdapter); ok {
+ 				old.release()
+ 			}
+ 		}
++		if t.Session != rt.ime.state.Session && rt.ime.cancel != nil {
++			rt.ime.cancel(InputEvent{Kind: InputCompose, Session: rt.ime.state.Session, Time: rt.now()})
++		}
++		rt.ime.cancel = nil
++		if t.Active {
++			if s := rt.states[rt.focused]; s != nil && s.input != nil && s.takesText {
++				rt.ime.cancel = s.input
++			}
++		}
+ 		rt.ime.state, rt.ime.base = t, base
+ 		rt.host.setTextInput(t)
+ 	}
+diff --git a/ui/handler.go b/ui/handler.go
+--- a/ui/handler.go
++++ b/ui/handler.go
+@@ -47,8 +47,10 @@
+ 
+ // InputEvent is input an element takes as it comes (HandleInput).
+ type InputEvent struct {
+-	Kind InputKind
+-	Key  Key
++	// Session identifies the element owning this input/composition.
++	Session uint64
++	Kind    InputKind
++	Key     Key
+ 	// PhysicalKey is Key by position on an ANSI US keyboard, whatever the
+ 	// layout types: the S key is KeyS on a Cyrillic layout too, where Key
+ 	// is KeyUnknown. KeyUnknown where the platform does not report it.
+@@ -134,6 +136,7 @@
+ 	}
+ 	ev.X, ev.Y = s.local(rt.pointerX, rt.pointerY)
+ 	ev.Time = rt.now()
++	ev.Session = s.id
+ 	if ev.Kind == InputScroll {
+ 		ev.DX, ev.DY = s.vector(rt.pointerX, rt.pointerY, ev.DX, ev.DY)
+ 	}
+diff --git a/internal/darwin/surface.go b/internal/darwin/surface.go
+--- a/internal/darwin/surface.go
++++ b/internal/darwin/surface.go
+@@ -460,6 +460,10 @@
+ }
+ 
+ func (s *surface) SetTextInput(t platform.TextInputState) {
++	if s.input.Active && s.input.Session != t.Session {
++		s.marked = ""
++		send(send(s.view, "inputContext"), "discardMarkedText")
++	}
+ 	if s.input.Client != t.Client && s.input.Active {
+ 		s.marked = ""
+ 		send(send(s.view, "inputContext"), "discardMarkedText")
+@@ -496,6 +500,13 @@
+ 	s.send(platform.SurfaceEvent{Kind: kind})
+ }
+ 
++// Resolve queued clicks/shortcuts before keyDown captures the native text state.
++func (s *surface) prepareInput() {
++	if s.send(platform.SurfaceEvent{Kind: platform.SurfacePrepareInput}) {
++		s.frameNow(false)
++	}
++}
++
+ func (s *surface) send(ev platform.SurfaceEvent) bool {
+ 	if s.w.closed {
+ 		return false
+@@ -709,6 +720,7 @@
+ 	command := func(name string) objc.MethodDef {
+ 		return method(name+":", func(self id, _ objc.SEL, sender id) {
+ 			if s := b().surfaceOf(self); s != nil {
++				s.prepareInput()
+ 				s.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name})
+ 			}
+ 		})
+@@ -879,6 +891,7 @@
+ 			if s == nil {
+ 				return
+ 			}
++			s.prepareInput()
+ 			mods := eventMods(ev)
+ 			text := s.input.Active && mods&(platform.ModSuper|platform.ModCtrl) == 0
+ 			ime := text && !s.input.NoInputMethod
+diff --git a/internal/darwin/surface_input.go b/internal/darwin/surface_input.go
+--- a/internal/darwin/surface_input.go
++++ b/internal/darwin/surface_input.go
+@@ -126,6 +126,9 @@
+ }
+ 
+ func (s *surface) setMarkedText(text string, selected, replacement nsRange) {
++	if !s.keyDown {
++		s.prepareInput()
++	}
+ 	if c := s.input.Client; c != nil {
+ 		c.SetMarkedText(clientRange(replacement), text, platform.TextRange{Start: int(selected.Location), End: int(selected.Location + selected.Length)})
+ 		return
+@@ -140,6 +143,9 @@
+ }
+ 
+ func (s *surface) insertText(text string, replacement nsRange) {
++	if !s.keyDown {
++		s.prepareInput()
++	}
+ 	if c := s.input.Client; c != nil {
+ 		c.ReplaceText(clientRange(replacement), text)
+ 		return
+diff --git a/ui/navigation_input.go b/ui/navigation_input.go
+new file mode 100644
+--- /dev/null
++++ b/ui/navigation_input.go
+@@ -0,0 +1,53 @@
++package ui
++
++import "github.com/egoist/mygo/internal/platform"
++
++// ReleaseUnframed reports a release without running the next display frame.
++func (t *Tester) ReleaseUnframed(x, y float32) {
++	t.rt.event(platform.SurfaceEvent{Kind: platform.PointerUp, X: float64(x), Y: float64(y)})
++}
++
++// KeyUnframed reports a key without running the next display frame.
++func (t *Tester) KeyUnframed(mods Modifiers, key Key) {
++	t.rt.event(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.Key(key), Mods: platform.Modifiers(mods)})
++	t.rt.event(platform.SurfaceEvent{Kind: platform.KeyReleased, Key: platform.Key(key), Mods: platform.Modifiers(mods)})
++}
++
++// PressUnframed reports a press without supplying a display frame. Pending
++// activation may still render internally before this newer physical intent.
++func (t *Tester) PressUnframed(x, y float32) {
++	t.rt.event(platform.SurfaceEvent{Kind: platform.PointerDown, X: float64(x), Y: float64(y), Clicks: 1})
++}
++
++// CommitTextNative models an ordinary text commit without a keyDown or frame.
++func (t *Tester) CommitTextNative(text string) bool {
++	if t.rt.event(platform.SurfaceEvent{Kind: platform.SurfacePrepareInput}) {
++		t.Frame()
++	}
++	if !t.h.ime.Active {
++		return false
++	}
++	t.rt.event(platform.SurfaceEvent{Kind: platform.TextInput, Text: text})
++	return true
++}
++
++// CommandNative enters the production SurfaceCommand route, not a keyDown.
++func (t *Tester) CommandNative(name string) {
++	t.rt.event(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name})
++}
++
++// TypeKeyNative models Darwin's prepare-before-eligibility and plain-text commit.
++// The supplied text stands for the input method's commit, not a real IME run.
++func (t *Tester) TypeKeyNative(mods Modifiers, key Key, text string) bool {
++	if t.rt.event(platform.SurfaceEvent{Kind: platform.SurfacePrepareInput}) {
++		t.Frame()
++	}
++	active := t.h.ime.Active && mods&(Super|Ctrl) == 0
++	t.rt.event(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.Key(key), PhysicalKey: platform.Key(key), Mods: platform.Modifiers(mods)})
++	if active {
++		t.rt.event(platform.SurfaceEvent{Kind: platform.TextInput, Text: text})
++	}
++	t.rt.event(platform.SurfaceEvent{Kind: platform.KeyReleased, Key: platform.Key(key), PhysicalKey: platform.Key(key), Mods: platform.Modifiers(mods)})
++	t.Frame()
++	return active
++}
+diff --git a/ui/navigation_input_test.go b/ui/navigation_input_test.go
+new file mode 100644
+--- /dev/null
++++ b/ui/navigation_input_test.go
+@@ -0,0 +1,89 @@
++package ui
++
++import "testing"
++
++func TestNativeInputResolvesQueuedActivation(t *testing.T) {
++	for _, how := range []string{"pointer", "enter", "shortcut"} {
++		t.Run(how, func(t *testing.T) {
++			selected := false
++			var got []string
++			tt := NewTester(func(c *Context) {
++				root := Row(c).Fill()
++				if root.Shortcut(Cmd, Key2) {
++					selected = true
++				}
++				root.Children(func() {
++					if ButtonBase(c).Label("Go").Size(60, 30).Clicked() {
++						selected = true
++					}
++					label := "old"
++					if selected {
++						label = "new"
++					}
++					Box(c).Key(label).Size(100, 30).Focusable().AutoFocus().TextCaret(Rect{W: 1, H: 16}).HandleInput(func(e InputEvent) bool {
++						if e.Kind == InputText {
++							got = append(got, label+":"+e.Text)
++						}
++						return true
++					})
++				})
++			}, 240, 100)
++			oldSession := tt.h.ime.Session
++			r, _ := tt.Find("Go")
++			x, y := r.X+r.W/2, r.Y+r.H/2
++			switch how {
++			case "pointer":
++				tt.Press(x, y)
++				tt.ReleaseUnframed(x, y)
++			case "enter":
++				tt.Press(x, y)
++				tt.Release(-1, -1)
++				tt.KeyUnframed(0, KeyEnter)
++			case "shortcut":
++				tt.KeyUnframed(Cmd, Key2)
++			}
++			if !tt.TypeKeyNative(0, KeyX, "x") {
++				t.Fatal("eligibility checked before activation")
++			}
++			if len(got) != 1 || got[0] != "new:x" {
++				t.Fatalf("first text routed to %v", got)
++			}
++			if tt.h.ime.Session == oldSession {
++				t.Fatal("native composition session retained old owner")
++			}
++		})
++	}
++}
++
++func TestCommitEntryResolvesOldTargetNegativeControl(t *testing.T) {
++	selected := false
++	var got string
++	tt := NewTester(func(c *Context) {
++		Row(c).Fill().Children(func() {
++			if ButtonBase(c).KeepFocus().Label("Go").Size(60, 30).Clicked() {
++				selected = true
++			}
++			label := "old"
++			if selected {
++				label = "new"
++			}
++			Box(c).Key(label).Size(100, 30).Focusable().AutoFocus().TextCaret(Rect{W: 1, H: 16}).HandleInput(func(e InputEvent) bool {
++				if e.Kind == InputText {
++					got = label + ":" + e.Text
++				}
++				return true
++			})
++		})
++	}, 240, 100)
++	r, _ := tt.Find("Go")
++	tt.Press(r.X+10, r.Y+10)
++	tt.ReleaseUnframed(r.X+10, r.Y+10)
++	if selected || !tt.h.ime.Active {
++		t.Fatal("old-target/active setup no longer distinguishes the unsafe baseline")
++	}
++	// Direct text commit (not keyDown) must resolve the pending activation.
++	tt.Type("x")
++	if got != "new:x" {
++		t.Fatalf("FIRST commit went to old target: %s", got)
++	}
++}
+diff --git a/internal/darwin/navigation_input_test.go b/internal/darwin/navigation_input_test.go
+new file mode 100644
+--- /dev/null
++++ b/internal/darwin/navigation_input_test.go
+@@ -0,0 +1,66 @@
++//go:build darwin
++
++package darwin
++
++import (
++	"github.com/egoist/mygo/internal/platform"
++	"os"
++	"strings"
++	"testing"
++)
++
++type navigationInputHandler struct {
++	platform.WindowHandler
++	s       *surface
++	pending bool
++	events  []platform.SurfaceEventKind
++}
++
++func (h *navigationInputHandler) SurfaceEvent(e platform.SurfaceEvent) bool {
++	h.events = append(h.events, e.Kind)
++	if e.Kind == platform.SurfacePrepareInput {
++		return h.pending
++	}
++	if e.Kind == platform.SurfaceFrame {
++		h.pending = false
++		h.s.input = platform.TextInputState{Active: true, Session: 2}
++	}
++	return false
++}
++
++func TestNativePrepareBeforeTextEligibility(t *testing.T) {
++	h := &navigationInputHandler{pending: true}
++	s := &surface{w: &window{h: h}}
++	h.s = s
++	s.prepareInput()
++	if !s.input.Active || s.input.Session != 2 || len(h.events) != 2 || h.events[0] != platform.SurfacePrepareInput || h.events[1] != platform.SurfaceFrame {
++		t.Fatal("activation not resolved before text state", h.events)
++	}
++	source, err := os.ReadFile("surface.go")
++	if err != nil {
++		t.Fatal(err)
++	}
++	body := strings.Split(strings.Split(string(source), `method("keyDown:",`)[1], `method("keyUp:"`)[0]
++	if strings.Index(body, "s.prepareInput()") > strings.Index(body, "text := s.input.Active") || !strings.Contains(body, "s.prepareInput()") {
++		t.Fatal("native keyDown captures stale text eligibility")
++	}
++}
++
++// These are supplied legitimate callbacks, not proof of a stale AppKit callback.
++func TestNativeCommitResolvesPendingSession(t *testing.T) {
++	for _, composition := range []bool{false, true} {
++		h := &navigationInputHandler{pending: true}
++		s := &surface{w: &window{h: h}, input: platform.TextInputState{Active: true, Session: 1}}
++		h.s = s
++		want := platform.TextInput
++		if composition {
++			s.setMarkedText("new", nsRange{}, nsRange{Location: nsNotFound})
++			want = platform.TextComposition
++		} else {
++			s.insertText("new", nsRange{Location: nsNotFound})
++		}
++		if len(h.events) != 3 || h.events[0] != platform.SurfacePrepareInput || h.events[1] != platform.SurfaceFrame || h.events[2] != want {
++			t.Fatal("legitimate commit/composition lost at ownership preflight", h.events)
++		}
++	}
++}
+diff --git a/ui/input_prepare.go b/ui/input_prepare.go
+new file mode 100644
+--- /dev/null
++++ b/ui/input_prepare.go
+@@ -0,0 +1,18 @@
++package ui
++
++import "github.com/egoist/mygo/internal/platform"
++
++// Use the existing surface-frame entry, not painting from an arbitrary native
++// callback. Headless probes use the same engine path without a native surface.
++func (rt *engine) prepareInputFrame() {
++	if rt.inFrame || !(rt.activationPending || len(rt.keys) > 0) {
++		return
++	}
++	if h, ok := rt.host.(*windowHost); ok {
++		if s, ok := h.conn.Surface.(platform.PacedSurface); ok {
++			s.FrameNow()
++		}
++	} else if _, ok := rt.host.(*headless); ok {
++		rt.runFrame()
++	}
++}
+diff --git a/ui/preedit_owner_test.go b/ui/preedit_owner_test.go
+new file mode 100644
+--- /dev/null
++++ b/ui/preedit_owner_test.go
+@@ -0,0 +1,37 @@
++package ui
++
++import "testing"
++
++func TestTextSessionLossClearsMatchingCustomPreedit(t *testing.T) {
++	preedit := ""
++	cleared := 0
++	var owner uint64
++	tt := NewTester(func(c *Context) {
++		Row(c).Fill().Children(func() {
++			ButtonBase(c).Label("Control").Size(80, 30).Clicked()
++			Box(c).Key("terminal").Size(100, 30).Focusable().AutoFocus().TextCaret(Rect{W: 1, H: 16}).HandleInput(func(e InputEvent) bool {
++				if e.Kind == InputCompose {
++					if e.Text == "" {
++						if e.Session != owner {
++							t.Errorf("cancel delivered to wrong session: %d want %d", e.Session, owner)
++						}
++						cleared++
++					}
++					preedit = e.Text
++					owner = e.Session
++				}
++				return true
++			})
++		})
++	}, 240, 100)
++	tt.Compose("に", 1)
++	if preedit != "に" {
++		t.Fatal("preedit setup")
++	}
++	r, _ := tt.Find("Control")
++	tt.Press(r.X+5, r.Y+5)
++	tt.Release(-1, -1)
++	if preedit != "" || cleared != 1 || !tt.Focused("Control") {
++		t.Fatalf("focus loss retained custom preedit: %q clears=%d", preedit, cleared)
++	}
++}
+diff --git a/ui/scope.go b/ui/scope.go
+--- a/ui/scope.go
++++ b/ui/scope.go
+@@ -50,7 +50,7 @@
+ 	if slices.ContainsFunc(scopes, func(sc focusScope) bool { return sc.anchor != 0 }) {
+ 		rt.placePopovers(order, scopes)
+ 	}
+-	if m := rt.modal; m != 0 && rt.scopeOf(rt.focused) != m {
++	if m := rt.modal; m != 0 && (rt.scopeOf(rt.focused) != m || !slices.Contains(rt.focusOrder, rt.focused)) {
+ 		for i, sc := range rt.focusScopes {
+ 			if sc.modal == m {
+ 				rt.focused = rt.focusOrder[i]
+diff --git a/ui/modal_replacement_input_test.go b/ui/modal_replacement_input_test.go
+new file mode 100644
+--- /dev/null
++++ b/ui/modal_replacement_input_test.go
+@@ -0,0 +1,48 @@
++package ui
++
++import "testing"
++
++func TestModalReplacementKeepsFirstInputAndOriginalOpener(t *testing.T) {
++	for _, firstField := range []bool{true, false} {
++		label := "button-to-field"
++		if firstField {
++			label = "field-to-button"
++		}
++		t.Run(label, func(t *testing.T) {
++			open, field := true, firstField
++			value := ""
++			tt := coreNewTester(func(c *context) {
++				coreButton(c, "Opener").AutoFocus()
++				coreModal(c, &open, func() {
++					if field {
++						coreTextInput(c, &value).Label("Field")
++					}
++					if coreButton(c, "Cancel").Clicked() {
++						open = false
++					}
++				})
++			}, 400, 280)
++			field = !field
++			tt.Frame()
++			want := "Cancel"
++			if field {
++				want = "Field"
++			}
++			if !tt.Focused(want) {
++				t.Fatalf("first replacement frame did not focus %s", want)
++			}
++			if field {
++				tt.Type("x")
++				if value != "x" {
++					t.Fatalf("first text lost: %q", value)
++				}
++				tt.Key(0, KeyEscape)
++			} else {
++				tt.Key(0, KeyEnter)
++			}
++			if open || !tt.Focused("Opener") {
++				t.Fatal("replacement did not close to original opener")
++			}
++		})
++	}
++}

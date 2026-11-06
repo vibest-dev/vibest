@@ -1,0 +1,62 @@
+diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
+index b1f4c7d..e1fabbc 100644
+--- a/plugins/terminal/terminal.go
++++ b/plugins/terminal/terminal.go
+@@ -166,6 +166,9 @@ type Options struct {
+ 	// right-click-action: show the context menu when zero. A program that
+ 	// takes the mouse gets the click instead, unless Shift is held.
+ 	RightClick RightClickAction
++	// ProgramRightClick optionally routes unmodified secondary clicks to mouse
++	// reporting; false keeps the context menu, even when the program tracks mice.
++	ProgramRightClick func() bool
+ 	// NoClipboardWrite keeps programs from writing to the clipboard (OSC
+ 	// 52, OSC 5522), as Ghostty's clipboard-write = deny. Writes go
+ 	// through unless it is set; reads are governed by ClipboardRead.
+@@ -266,6 +269,9 @@ type Options struct {
+ 	// ExtendMenu appends application actions after the built-in terminal menu.
+ 	// It runs on the UI thread when the menu opens or an item is chosen.
+ 	ExtendMenu func(m *ui.Menu)
++	// OnMenuClear may consume Clear before selection/history changes. Like
++	// ExtendMenu it runs while View builds the menu, not from key dispatch.
++	OnMenuClear func() bool
+ 	// TextInputReady gates native text eligibility without disabling selection,
+ 	// pointer input or local commands. Nil keeps the normal terminal behavior.
+ 	TextInputReady func() bool
+diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
+index 2a3880a..2adbdae 100644
+--- a/plugins/terminal/view.go
++++ b/plugins/terminal/view.go
+@@ -545,7 +545,7 @@ func (v *view) menu(m *ui.Menu) {
+ 	m.Separator()
+ 	// Clear clears as ⌘K does, as Ghostty's: clearing the scrollback
+ 	// alone would change nothing on the screen.
+-	if v.menuItem(m, tx.ClearTerminal(), ActionClearScreen).Disabled(alt).Chosen() {
++	if v.menuItem(m, tx.ClearTerminal(), ActionClearScreen).Disabled(alt).Chosen() && (t.opts.OnMenuClear == nil || !t.opts.OnMenuClear()) {
+ 		v.clearScreen()
+ 	}
+ 	if more := t.opts.ExtendMenu; more != nil {
+@@ -998,6 +998,10 @@ func (v *view) cellAt(x, y float32) (col, row int) {
+ // selects.
+ func (v *view) pointerEvent(ev ui.InputEvent) bool {
+ 	t := v.t
++	// Query host policy before taking the terminal lock.
++	if ev.Button == 1 && t.opts.ProgramRightClick != nil && (ev.Mods != 0 || !t.opts.ProgramRightClick()) {
++		return false
++	}
+ 	v.pointer = [2]float32{ev.X, ev.Y}
+ 	t.mu.Lock()
+ 	defer t.mu.Unlock()
+diff --git a/ui/navigation_input.go b/ui/navigation_input.go
+index edf476e..a227e7a 100644
+--- a/ui/navigation_input.go
++++ b/ui/navigation_input.go
+@@ -51,3 +51,9 @@ func (t *Tester) TypeKeyNative(mods Modifiers, key Key, text string) bool {
+ 	t.Frame()
+ 	return active
+ }
++
++// RightClickAtWith models a secondary click with explicit native modifiers.
++func (t *Tester) RightClickAtWith(mods Modifiers, x, y float32) {
++	t.send(platform.SurfaceEvent{Kind: platform.PointerDown, X: float64(x), Y: float64(y), Button: 1, Mods: platform.Modifiers(mods)})
++	t.send(platform.SurfaceEvent{Kind: platform.PointerUp, X: float64(x), Y: float64(y), Button: 1, Mods: platform.Modifiers(mods)})
++}

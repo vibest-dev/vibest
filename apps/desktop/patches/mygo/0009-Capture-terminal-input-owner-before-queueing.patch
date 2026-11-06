@@ -1,0 +1,418 @@
+diff --git a/plugins/terminal/input_owner_test.go b/plugins/terminal/input_owner_test.go
+new file mode 100644
+index 0000000..8c5a3cc
+--- /dev/null
++++ b/plugins/terminal/input_owner_test.go
+@@ -0,0 +1,137 @@
++package terminal
++
++import (
++	"bytes"
++	"github.com/egoist/mygo/transfer"
++	"io"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++type capturedWriter struct {
++	generation *atomic.Uint64
++	captured   uint64
++	out        io.Writer
++}
++
++func (w capturedWriter) Write(p []byte) (int, error) {
++	if w.generation.Load() != w.captured {
++		return 0, ErrInputCanceled
++	}
++	return w.out.Write(p)
++}
++func TestCapturedInputDoesNotReviveAfterOwnerReturns(t *testing.T) {
++	var generation atomic.Uint64
++	var out bytes.Buffer
++	generation.Store(1)
++	q := inputQueue{capture: func() io.Writer { return capturedWriter{&generation, generation.Load(), &out} }}
++	q.push([]byte("stale"))
++	generation.Store(3) // focus left and returned before the writer dequeued
++	q.push([]byte("current"))
++	done := make(chan struct{})
++	q.pushDone(nil, func() { close(done) })
++	go q.run(io.Discard)
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("queue stopped on canceled entry")
++	}
++	q.close()
++	if out.String() != "current" {
++		t.Fatal(out.String())
++	}
++}
++func TestCapturedInputBoundsAndCancel(t *testing.T) {
++	term := &Terminal{offer: &pasteOffer{}}
++	term.in.capture = func() io.Writer { return io.Discard }
++	q := &term.in
++	q.push(make([]byte, 1<<20))
++	q.push([]byte("overflow"))
++	if len(q.queue) != 1 || q.bytes != 1<<20 {
++		t.Fatal("unbounded owner queue")
++	}
++	term.CancelInput()
++	if len(term.in.queue) != 0 || term.in.bytes != 0 || term.offer != nil {
++		t.Fatal("captures survived cancel")
++	}
++}
++
++// A recoverable capacity refusal must neither claim delivery nor poison the FIFO.
++type busyOnce struct {
++	calls int
++	out   bytes.Buffer
++}
++
++func (w *busyOnce) Write(p []byte) (int, error) {
++	w.calls++
++	if w.calls == 1 {
++		return 0, ErrInputFull
++	}
++	return w.out.Write(p)
++}
++func TestCapturedInputCapacityRefusalKeepsQueueUsable(t *testing.T) {
++	w := &busyOnce{}
++	refused := make(chan error, 2)
++	delivered := make(chan struct{}, 1)
++	q := inputQueue{capture: func() io.Writer { return w }, onError: func(err error) { refused <- err }}
++	q.pushDone([]byte("refused"), func() { delivered <- struct{}{} })
++	go q.run(io.Discard)
++	defer q.close()
++	select {
++	case err := <-refused:
++		if err != ErrInputFull {
++			t.Fatal(err)
++		}
++	case <-time.After(time.Second):
++		t.Fatal("silent refusal")
++	}
++	done := make(chan struct{})
++	q.pushDone([]byte("current"), func() { close(done) })
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("capacity permanently stopped input")
++	}
++	if w.out.String() != "current" {
++		t.Fatal(w.out.String())
++	}
++	select {
++	case <-delivered:
++		t.Fatal("refused input claimed delivery")
++	default:
++	}
++}
++func TestCapturedInputPayloadLimitReportsOverflow(t *testing.T) {
++	rejected := 0
++	q := inputQueue{limit: (1 << 20) - 9, capture: func() io.Writer { return io.Discard }, onError: func(err error) {
++		if err != ErrInputFull {
++			t.Fatal(err)
++		}
++		rejected++
++	}}
++	for _, size := range []int{1 << 20, (1 << 20) + 1} {
++		if q.pushDone(make([]byte, size), nil) {
++			t.Fatal("oversized payload accepted")
++		}
++	}
++	if rejected != 2 || !q.pushDone([]byte("next"), nil) {
++		t.Fatal("silent overflow or poisoned queue")
++	}
++}
++
++func TestCapturedInputFileDropHonorsPasteRefusal(t *testing.T) {
++	called := false
++	term := &Terminal{opts: Options{OnPaste: func(d transfer.Data) bool {
++		files, err := d.Files()
++		if err != nil || len(files) != 1 || files[0] != "/inert/not-read" {
++			t.Fatalf("bad file offer: %v %v", files, err)
++		}
++		called = true
++		return true
++	}}}
++	term.dropFiles([]string{"/inert/not-read"})
++	if !called || len(term.in.queue) != 0 {
++		t.Fatal("drop bypassed existing paste policy")
++	}
++}
+diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
+index 6925bec..21ca1f9 100644
+--- a/plugins/terminal/paint.go
++++ b/plugins/terminal/paint.go
+@@ -150,7 +150,7 @@ func (v *view) paint(p *ui.Painter, r ui.Rect) {
+ 		t.term.SetMode(vt.ModeSyncOutput, false)
+ 		t.held = false
+ 	}
+-	held := t.held
++	held, hasOutput := t.held, t.hasOutput
+ 	if !held {
+ 		t.rs.BeginUpdate(t.term)
+ 	}
+@@ -184,6 +184,14 @@ func (v *view) paint(p *ui.Painter, r ui.Rect) {
+ 	}
+ 	rs.Clean()
+ 	v.draw(p, r)
++	fits := int(math.Round(float64(r.W*p.Scale()))) >= cols*v.cellW+2*v.ox && int(math.Round(float64(r.H*p.Scale()))) >= rows*v.cellH+2*v.oy
++	if t.opts.OnPaint != nil {
++		if !hasOutput || !fits || r.W <= 0 || r.H <= 0 {
++			t.opts.OnPaint(0, 0, 0, 0)
++		} else if !held {
++			t.opts.OnPaint(cols, rows, v.cellW, v.cellH)
++		}
++	}
+ }
+ 
+ // resolved is a cell's style with its colors resolved.
+diff --git a/plugins/terminal/paste.go b/plugins/terminal/paste.go
+index 03ea381..fac0352 100644
+--- a/plugins/terminal/paste.go
++++ b/plugins/terminal/paste.go
+@@ -280,9 +280,11 @@ func (t *Terminal) sendReply(p []byte) {
+ 		if len(p) == 0 {
+ 			status = PasteSent
+ 		}
+-		t.in.pushDone(piece, func() {
++		if !t.in.pushDone(piece, func() {
+ 			t.pasteStatus(PasteProgress{Status: status, Sent: done, Total: total})
+-		})
++		}) {
++			return
++		} // refusal must not be followed by a false PasteSent callback
+ 	}
+ }
+ 
+@@ -316,7 +318,11 @@ func (t *Terminal) dropFiles(paths []string) {
+ 	items := d.Items()
+ 	first, _ := items[0].Read(transfer.FileList)
+ 	items[0] = transfer.NewItem(transfer.Bytes(transfer.FileList, first), transfer.Bytes(transfer.URIList, first), text)
+-	t.PasteData(transfer.New(items...))
++	d = transfer.New(items...)
++	if t.opts.OnPaste != nil && t.opts.OnPaste(d) {
++		return
++	}
++	t.PasteData(d)
+ }
+ 
+ // quoting is how a shell takes a path as one argument, whatever it holds.
+diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
+index 4a8b958..fce382c 100644
+--- a/plugins/terminal/terminal.go
++++ b/plugins/terminal/terminal.go
+@@ -97,6 +97,24 @@ type Options struct {
+ 	// shows, for the other end to answer a program's questions about them
+ 	// (Terminal.UseTheme).
+ 	Conn io.ReadWriteCloser
++	// CaptureInput freezes the destination when bytes enter the input queue.
++	// A nil writer discards that entry. A captured writer may return
++	// ErrInputCanceled to discard stale input without closing the queue.
++	// It can run under the terminal lock and must not call Terminal methods.
++	CaptureInput func() io.Writer
++	// InputLimit is the largest captured input payload; zero keeps 1 MiB.
++	InputLimit int
++	// OnInputError reports rejected capacity or fatal writes. It may run under
++	// terminal/queue locks; do not call Terminal methods or block in it.
++	OnInputError func(error)
++	// OnOutput observes bytes after the VT parser consumed them, under its lock.
++	// Do not call Terminal methods. It does not establish rendered readiness.
++	OnOutput func([]byte)
++	// OnPaint reports the grid and pixel cell size actually drawn, on the UI
++	// thread. A zero grid means no parsed, complete grid fits the view. Held
++	// synchronized updates do not establish a new paint. The callback must
++	// not call Terminal methods while the paint lock is held.
++	OnPaint func(cols, rows, cellWidth, cellHeight int)
+ 	// ResizeByConn leaves the size of the screen to whoever reads Conn:
+ 	// the view tells Conn the size it fits, with its Resize, and the
+ 	// screen takes a size only as Terminal.Resize sets it. A client of a
+@@ -469,13 +487,14 @@ type Terminal struct {
+ 	quoting quoting
+ 
+ 	// mu guards the emulator, which the reader changes and frames read.
+-	mu      sync.Mutex
+-	term    *vt.Terminal
+-	size    gridSize
+-	asked   gridSize // what the view last asked Conn for, with ResizeByConn
+-	events  events
+-	closed  bool
+-	clipOut []string // what programs copied, for the view to write
++	mu        sync.Mutex
++	term      *vt.Terminal
++	size      gridSize
++	asked     gridSize // what the view last asked Conn for, with ResizeByConn
++	events    events
++	closed    bool
++	hasOutput bool     // output was parsed, not merely returned by Conn.Read
++	clipOut   []string // what programs copied, for the view to write
+ 	// clipForward are reads of the clipboard for a Mirror to pass on, with
+ 	// ClipboardForward: whether each is of the primary selection. The
+ 	// first Mirror to frame takes them, as one terminal answers a read.
+@@ -555,6 +574,11 @@ func New(opts Options) (*Terminal, error) {
+ 	}
+ 	opts.Font.Features = append([]string(nil), opts.Font.Features...)
+ 	t := &Terminal{opts: opts, done: make(chan struct{})}
++	t.in.capture, t.in.onError = opts.CaptureInput, opts.OnInputError
++	t.in.limit = 1 << 20
++	if opts.InputLimit > 0 {
++		t.in.limit = min(t.in.limit, opts.InputLimit)
++	}
+ 	t.binds = keybinds(&opts)
+ 	t.size = gridSize{80, 24, 8, 16}
+ 	var err error
+@@ -780,6 +804,10 @@ func (t *Terminal) write(p []byte) {
+ 	var title string
+ 	if t.term != nil {
+ 		t.term.Write(p)
++		t.hasOutput = t.hasOutput || len(p) > 0
++		if len(p) > 0 && t.opts.OnOutput != nil {
++			t.opts.OnOutput(p)
++		}
+ 		ev, t.events = t.events, events{}
+ 		if ev.title {
+ 			title = t.term.Title()
+@@ -1060,6 +1088,22 @@ func (t *Terminal) ClearScreen() bool {
+ // ClearScrollback clears the scrollback, leaving the screen as it is.
+ func (t *Terminal) ClearScrollback() { t.write([]byte("\x1b[3J")) }
+ 
++// CancelInput drops queued bytes, deferred paste/clipboard captures and local
++// composition. Call on the UI thread when logical input ownership changes;
++// captured writers must also reject an already-dequeued stale entry.
++func (t *Terminal) CancelInput() {
++	t.mu.Lock()
++	t.offer, t.clipReads, t.replying = nil, nil, false
++	t.in.mu.Lock()
++	t.in.queue, t.in.bytes = nil, 0
++	t.in.mu.Unlock()
++	t.mu.Unlock()
++	if v := t.v; v != nil {
++		v.preedit, v.pending = "", nil
++		v.reads, v.clipPrompt, v.clipOpen = nil, nil, false
++	}
++}
++
+ // Close closes the terminal: the program is hung up (SIGHUP), or Conn
+ // closed, and the terminal frees its memory. A view of it then shows
+ // nothing.
+@@ -1304,17 +1348,27 @@ func unhex(c byte) (byte, bool) {
+ // inputQueue writes what is typed to the program in order, from a
+ // goroutine of its own: a program that does not read its input must not
+ // block the reader, which answers its queries.
++var ErrInputCanceled = errors.New("terminal: captured input canceled")
++
++// ErrInputFull rejects this input without disabling future typing or retrying it.
++var ErrInputFull = errors.New("terminal: input capacity exceeded; rejected input was not replayed, earlier parts may have been sent")
++
+ type inputQueue struct {
+-	mu     sync.Mutex
+-	cond   *sync.Cond
+-	queue  []queued
+-	closed bool
++	capture func() io.Writer
++	onError func(error)
++	limit   int
++	bytes   int
++	mu      sync.Mutex
++	cond    *sync.Cond
++	queue   []queued
++	closed  bool
+ }
+ 
+ // queued is input to write, and what to run once it is written.
+ type queued struct {
+-	p    []byte
+-	done func()
++	writer io.Writer
++	p      []byte
++	done   func()
+ }
+ 
+ func (q *inputQueue) init() {
+@@ -1327,21 +1381,42 @@ func (q *inputQueue) push(p []byte) { q.pushDone(p, nil) }
+ 
+ // pushDone queues p, and done to run once it is written, on the queue's
+ // goroutine.
+-func (q *inputQueue) pushDone(p []byte, done func()) {
++func (q *inputQueue) pushDone(p []byte, done func()) bool {
+ 	q.mu.Lock()
++	defer q.mu.Unlock()
+ 	q.init()
+ 	if !q.closed {
+-		q.queue = append(q.queue, queued{p, done})
++		var writer io.Writer
++		if q.capture != nil {
++			writer = q.capture()
++			// Owner-aware clients must not retain an unbounded input backlog.
++			if writer == nil {
++				return false
++			}
++			limit := q.limit
++			if limit == 0 {
++				limit = 1 << 20
++			}
++			if len(p) > limit || q.bytes+len(p) > limit || len(q.queue) >= 4096 {
++				if q.onError != nil {
++					q.onError(ErrInputFull)
++				}
++				return false
++			}
++		}
++		q.bytes += len(p)
++		q.queue = append(q.queue, queued{writer: writer, p: p, done: done})
+ 		q.cond.Signal()
++		return true
+ 	}
+-	q.mu.Unlock()
++	return false
+ }
+ 
+ func (q *inputQueue) close() {
+ 	q.mu.Lock()
+ 	q.init()
+ 	q.closed = true
+-	q.queue = nil
++	q.queue, q.bytes = nil, 0
+ 	q.cond.Broadcast()
+ 	q.mu.Unlock()
+ }
+@@ -1358,13 +1433,32 @@ func (q *inputQueue) run(w io.Writer) {
+ 			return
+ 		}
+ 		item := q.queue[0]
++		q.queue[0] = queued{}
+ 		q.queue = q.queue[1:]
++		q.bytes -= len(item.p)
+ 		q.mu.Unlock()
+-		if len(item.p) == 0 {
+-			// Only something to run, in its place among the writes.
+-		} else if _, err := w.Write(item.p); err != nil {
+-			q.close()
+-			return
++		writer := w
++		if item.writer != nil {
++			writer = item.writer
++		}
++		if len(item.p) > 0 || item.writer != nil {
++			n, err := writer.Write(item.p)
++			if err == nil && n != len(item.p) {
++				err = io.ErrShortWrite
++			}
++			if err != nil {
++				if n == 0 && errors.Is(err, ErrInputCanceled) {
++					continue
++				}
++				if q.onError != nil {
++					q.onError(err)
++				}
++				if n == 0 && errors.Is(err, ErrInputFull) {
++					continue
++				}
++				q.close()
++				return
++			}
+ 		}
+ 		if item.done != nil {
+ 			item.done()

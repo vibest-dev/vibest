@@ -1,0 +1,13 @@
+# The MyGo this app builds with: scripts/patch-mygo.sh fetches this module
+# version, checks it against SUM, applies ./*.patch in order
+# and writes third_party/mygo, which go.mod's replace points at.
+#
+# Upstream: https://github.com/egoist/mygo tag v0.6.0, commit
+# 081639f2a55d62a09aca742684827937dac6cb39.
+# The patches are `git format-patch --zero-commit --no-signature` of
+# 081639f2a55d62a09aca742684827937dac6cb39..b3ae3ae24e4c7f50a66e4233b2b53e097a968d47
+# (terminal.Grid, plugins/terminal only). To change them, commit on a MyGo
+# checkout of that tag and export them again the same way.
+MODULE=github.com/egoist/mygo
+VERSION=v0.6.0
+SUM=h1:ex6ggOqOwtrLjfzmTkcRc6hrS6wTqUSKjRp3cVZSn+U=

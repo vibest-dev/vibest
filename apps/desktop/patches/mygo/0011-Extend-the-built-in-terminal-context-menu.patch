@@ -1,0 +1,29 @@
+diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
+index fce382c..a43cb8d 100644
+--- a/plugins/terminal/terminal.go
++++ b/plugins/terminal/terminal.go
+@@ -263,6 +263,9 @@ type Options struct {
+ 	// the clipboard's files or image (d.Files, transfer.PNG) for a remote
+ 	// program, then pastes their paths with Paste.
+ 	OnPaste func(d transfer.Data) bool
++	// ExtendMenu appends application actions after the built-in terminal menu.
++	// It runs on the UI thread when the menu opens or an item is chosen.
++	ExtendMenu func(m *ui.Menu)
+ 	// OnKey sees a key press before Keybinds and before the terminal
+ 	// encodes it, on the main thread, and reports whether it took the key;
+ 	// a key taken sends nothing, neither the text it types nor its
+diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
+index ed8b43b..dfd333d 100644
+--- a/plugins/terminal/view.go
++++ b/plugins/terminal/view.go
+@@ -543,6 +543,10 @@ func (v *view) menu(m *ui.Menu) {
+ 	if v.menuItem(m, tx.ClearTerminal(), ActionClearScreen).Disabled(alt).Chosen() {
+ 		v.clearScreen()
+ 	}
++	if more := t.opts.ExtendMenu; more != nil {
++		m.Separator()
++		more(m)
++	}
+ }
+ 
+ // menuItem adds an item of the menu, showing the key bound to its action.

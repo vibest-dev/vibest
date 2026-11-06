@@ -1,0 +1,125 @@
+--- a/internal/darwin/surface_input.go
++++ b/internal/darwin/surface_input.go
+@@ -133,8 +133,11 @@
+ }
+ 
+ func (s *surface) prepareTextInput() bool {
++	session, client := s.preparedTextSession(), s.input.Client
++	marked := s.hasMarkedText()
++	bound := s.keyDown || marked // Existing marks give outside callbacks an entry owner too.
+ 	s.prepareInput()
+-	return !s.keyDown || s.keySession == s.input.Session
++	return !bound || session == s.input.Session && client == s.input.Client && (!marked || s.hasMarkedText())
+ }
+ 
+ func (s *surface) setMarkedText(text string, selected, replacement nsRange) {
+--- /dev/null
++++ b/internal/darwin/surface_input_owner_test.go
+@@ -0,0 +1,107 @@
++//go:build darwin
++
++package darwin
++
++import (
++	"github.com/egoist/mygo/internal/platform"
++	"testing"
++)
++
++type inputOwnerHandler struct {
++	platform.WindowHandler
++	on func(platform.SurfaceEvent) bool
++}
++
++func (h *inputOwnerHandler) SurfaceEvent(e platform.SurfaceEvent) bool { return h.on(e) }
++
++type entryMarkedClient struct{ platform.TextInputClient }
++
++func (*entryMarkedClient) MarkedRange() (platform.TextRange, bool) {
++	return platform.TextRange{End: 1}, true
++}
++
++func TestOutsideCompositionEntrySurvivesPreparationOnlyForItsOwner(t *testing.T) {
++	for _, kind := range []string{"owner-changed", "marks-canceled", "client-changed", "same-owner", "geometry", "fresh-unmarked", "fresh-session", "keyDown"} {
++		for _, update := range []bool{false, true} {
++			name := kind + "/commit"
++			if update {
++				name = kind + "/update"
++			}
++			t.Run(name, func(t *testing.T) {
++				s := &surface{input: platform.TextInputState{Session: 11, Active: true}, marked: "字"}
++				if kind == "client-changed" {
++					s.input.Client = &entryMarkedClient{}
++				}
++				payload := "字"
++				if kind == "fresh-unmarked" {
++					s.marked = ""
++					payload = "新"
++				}
++				if kind == "fresh-session" {
++					s.input.Session = 12
++					s.marked = "新"
++					payload = "新"
++				}
++				if kind == "keyDown" {
++					s.keyDown = true
++					s.keySession = 11
++				}
++				changed := kind == "owner-changed" || kind == "fresh-unmarked" || kind == "keyDown"
++				reject := kind == "owner-changed" || kind == "marks-canceled" || kind == "client-changed" || kind == "keyDown"
++				queries := 0
++				var sent []platform.SurfaceEvent
++				s.w = &window{h: &inputOwnerHandler{on: func(e platform.SurfaceEvent) bool {
++					if e.Kind == platform.SurfacePrepareInput {
++						queries++
++						if changed {
++							s.input.Session++
++							s.marked = ""
++						}
++						if kind == "client-changed" {
++							s.input.Client = &entryMarkedClient{}
++							s.marked = ""
++						}
++						if kind == "marks-canceled" {
++							s.marked = ""
++						}
++						if kind == "geometry" {
++							s.input.Caret.X++
++						}
++						return false
++					}
++					sent = append(sent, e)
++					return false
++				}}}
++				if update {
++					s.setMarkedText(payload+"候", nsRange{Location: 1}, nsRange{Location: nsNotFound})
++				} else {
++					s.insertText(payload, nsRange{Location: nsNotFound})
++				}
++				if queries != 1 {
++					t.Fatal("callback did not reconcile exactly once", queries)
++				}
++				if reject {
++					if len(sent) != 0 || s.marked != "" {
++						t.Fatal("invalidated entry payload resurrected", sent, s.marked)
++					}
++					return
++				}
++				found := false
++				for _, e := range sent {
++					if e.Session != s.input.Session {
++						t.Fatal("wrong prepared session")
++					}
++					if e.Kind == platform.TextInput && !update && e.Text == payload {
++						found = true
++					}
++					if e.Kind == platform.TextComposition && update && e.Text == payload+"候" {
++						found = true
++					}
++				}
++				if !found {
++					t.Fatal("legitimate same-owner/fresh outside payload rejected", sent)
++				}
++			})
++		}
++	}
++}

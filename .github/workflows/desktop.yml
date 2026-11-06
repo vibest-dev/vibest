@@ -1,0 +1,65 @@
+name: Desktop
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/desktop/**"
+      - "packages/protocol/**"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "packages/protocol/**"
+      - ".github/workflows/desktop.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    if: >-
+      github.event_name == 'push' ||
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(fromJSON(vars.TRUSTED_PR_AUTHORS || '[]'), github.event.pull_request.user.login)
+      )
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      VT_URL: https://github.com/egoist/mygo/releases/download/libghostty-vt-befcdfd2c3a1/libghostty-vt-darwin-arm64.dylib
+      VT_SHA256: 6f385d3221f8c776ba40530db9baf8c71478907897959849896eeb0ddbf16b41
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
+
+      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/desktop/go.mod
+          cache-dependency-path: apps/desktop/go.sum
+
+      - name: Fetch MyGo's libghostty-vt and check its SHA256
+        run: |
+          test "$(uname -m)" = arm64
+          vt="${RUNNER_TEMP}/libghostty-vt.dylib"
+          curl -fsSL -o "$vt" "$VT_URL"
+          printf '%s  %s\n' "$VT_SHA256" "$vt" | shasum -a 256 -c -
+          echo "MYGO_GHOSTTY_VT=$vt" >> "$GITHUB_ENV"
+
+      - run: pnpm install --frozen-lockfile
+      - run: bun tools/check/go-comments.ts apps/desktop
+      - run: pnpm turbo run build typecheck test --filter=@vibest/desktop...

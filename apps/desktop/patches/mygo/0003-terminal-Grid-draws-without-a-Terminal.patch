@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: oxwen11 <iamoxwen@gmail.com>
+Date: Fri, 23 Oct 2026 16:56:29 +0800
+Subject: [PATCH 3/3] terminal: Grid draws without a Terminal
+
+view.draw read Options.Transparent and Options.PaddingColor through
+v.t, so NewGrid made an empty Terminal for their defaults. paint now
+copies them into the view where it reads MinimumContrast, and draw and
+extendPadding read the copies; a Grid has the zero values, the
+defaults. View's behavior is unchanged.
+---
+ plugins/terminal/grid.go  | 3 +--
+ plugins/terminal/paint.go | 7 ++++---
+ plugins/terminal/view.go  | 4 ++++
+ 3 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/plugins/terminal/grid.go b/plugins/terminal/grid.go
+index c9fd12f..9f09aae 100644
+--- a/plugins/terminal/grid.go
++++ b/plugins/terminal/grid.go
+@@ -55,8 +55,7 @@ type GridCursor struct {
+ // selection's and its cursor's.
+ func NewGrid(theme *Theme) *Grid {
+ 	g := &Grid{}
+-	// draw reads the options of a terminal: the defaults.
+-	g.v = view{t: &Terminal{}, theme: theme, colors: vt.Colors{Foreground: rgb(theme.Foreground), Background: rgb(theme.Background)}}
++	g.v = view{theme: theme, colors: vt.Colors{Foreground: rgb(theme.Foreground), Background: rgb(theme.Background)}}
+ 	g.v.shaped.init(4096)
+ 	return g
+ }
+diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
+index b9d91e2..6925bec 100644
+--- a/plugins/terminal/paint.go
++++ b/plugins/terminal/paint.go
+@@ -156,6 +156,7 @@ func (v *view) paint(p *ui.Painter, r ui.Rect) {
+ 	}
+ 	v.scrollbar = t.term.Scrollbar()
+ 	contrast := t.opts.MinimumContrast
++	v.transparent, v.padding = t.opts.Transparent, t.opts.PaddingColor
+ 	tc, tr := t.term.Size()
+ 	v.matches, v.matchBuf = t.viewportMatches(v.matches, v.matchBuf, tc, tr)
+ 	if !held {
+@@ -533,10 +534,10 @@ func (v *view) draw(p *ui.Painter, r ui.Rect) {
+ 	base := float32(v.baseline) / s
+ 	// A transparent terminal still draws a background a program set (OSC
+ 	// 11), as Ghostty shows it.
+-	if !v.t.opts.Transparent || v.colors.Background != rgb(v.theme.Background) {
++	if !v.transparent || v.colors.Background != rgb(v.theme.Background) {
+ 		p.Fill(r, color(v.colors.Background), 0)
+ 	}
+-	if v.t.opts.PaddingColor != PaddingBackground {
++	if v.padding != PaddingBackground {
+ 		v.extendPadding(p, r, ox, oy, cw, ch)
+ 	}
+ 	selection := v.theme.Selection
+@@ -673,7 +674,7 @@ func (v *view) extendPadding(p *ui.Painter, r ui.Rect, ox, oy, cw, ch float32) {
+ 	if len(v.lines) == 0 {
+ 		return
+ 	}
+-	always := v.t.opts.PaddingColor == PaddingExtendAlways
++	always := v.padding == PaddingExtendAlways
+ 	extends := func(line *rowCache) bool { return always || line.filled }
+ 	cols := v.cols
+ 	left, right := r.X, r.X+r.W
+diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
+index 1b0d5f5..ed8b43b 100644
+--- a/plugins/terminal/view.go
++++ b/plugins/terminal/view.go
+@@ -159,6 +159,10 @@ type view struct {
+ 	ox, oy                 int
+ 	cols, rows             int
+ 
++	// Options.Transparent and Options.PaddingColor, as of the last paint.
++	transparent bool
++	padding     PaddingColor
++
+ 	colors    vt.Colors
+ 	contrast  float32 // Options.MinimumContrast, as of the last paint
+ 	cursor    vt.Cursor

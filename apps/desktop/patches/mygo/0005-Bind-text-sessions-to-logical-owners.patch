@@ -1,0 +1,147 @@
+--- a/ui/element.go
++++ b/ui/element.go
+@@ -332,12 +332,13 @@
+ 
+ 	// Input the element takes itself (HandleInput), and where the caret of
+ 	// the text it takes is (TextCaret).
+-	inputFn    func(InputEvent) bool
+-	textClient TextInputClient
+-	caret      Rect
+-	takesText  bool
+-	noIME      bool // InputMethod(false)
+-	copyData   func(parts []SelectedText) transfer.Data
++	inputFn     func(InputEvent) bool
++	textClient  TextInputClient
++	caret       Rect
++	textSession uint64
++	takesText   bool
++	noIME       bool // InputMethod(false)
++	copyData    func(parts []SelectedText) transfer.Data
+ 
+ 	// Content.
+ 	spans    []Span // of a RichText
+--- a/ui/context.go
++++ b/ui/context.go
+@@ -632,6 +632,7 @@
+ 	textClient  TextInputClient
+ 	textAdapter *textInputAdapter
+ 	caret       Rect
++	textSession uint64
+ 	takesText   bool
+ 	noIME       bool
+ 	// copyData is what a Selectable container's selection copies as
+--- a/ui/runtime.go
++++ b/ui/runtime.go
+@@ -1013,6 +1013,7 @@
+ 	s.webView = e.webView
+ 	s.role = e.role
+ 	s.input, s.caret, s.takesText, s.noIME = e.inputFn, e.caret, e.takesText, e.noIME
++	s.textSession = e.textSession
+ 	s.copyData = e.copyData
+ 	if s.textClient != e.textClient {
+ 		if s.textAdapter != nil {
+--- a/ui/handler.go
++++ b/ui/handler.go
+@@ -104,6 +104,13 @@
+ 	return e
+ }
+ 
++// TextInputSession identifies the logical text owner without changing widget focus
++// or pointer identity. A changed key cancels only the previous composition.
++func (e *node) TextInputSession(key any) *node {
++	e.textSession = keyedID(e.id, key)
++	return e
++}
++
+ // InputMethod sets whether the system's input methods compose text for the
+ // element while it has the keyboard focus, as they do by default for one
+ // that takes text (HandleTextInput, TextCaret). Turned off, keys type the
+@@ -137,6 +144,9 @@
+ 	ev.X, ev.Y = s.local(rt.pointerX, rt.pointerY)
+ 	ev.Time = rt.now()
+ 	ev.Session = s.id
++	if s.textSession != 0 {
++		ev.Session = s.textSession
++	}
+ 	if ev.Kind == InputScroll {
+ 		ev.DX, ev.DY = s.vector(rt.pointerX, rt.pointerY, ev.DX, ev.DY)
+ 	}
+--- a/ui/input.go
++++ b/ui/input.go
+@@ -965,6 +965,9 @@
+ 	}
+ 	if t.Active {
+ 		t.Session = rt.focused
++		if s := rt.states[rt.focused]; s != nil && s.textSession != 0 {
++			t.Session = s.textSession
++		}
+ 	}
+ 	if t != rt.ime.state {
+ 		if t.Client != rt.ime.state.Client {
+--- a/ui/api_gen.go
++++ b/ui/api_gen.go
+@@ -5486,6 +5486,18 @@
+ 	return wrapElement(_node.TextColor(c))
+ }
+ 
++// TextInputSession identifies the logical text owner without changing widget focus
++// or pointer identity. A changed key cancels only the previous composition.
++func (_handle Element) TextInputSession(key any) Element {
++	_node := _handle.node()
++	if _node == nil {
++		return Element{}
++	}
++	_ctx := _node.c
++	_ = _ctx
++	return wrapElement(_node.TextInputSession(key))
++}
++
+ // TextRanges styles runs of a text input's text, in the frames that call
+ // it. Ranges may overlap and nest, as the attributes of an attributed
+ // string do: where they do, each of Color and Weight is that of the last
+--- /dev/null
++++ b/ui/text_input_session_test.go
+@@ -0,0 +1,43 @@
++package ui
++
++import "testing"
++
++func TestCustomTextOwnerKeepsWidgetAndCancelsOnlyOldPreedit(t *testing.T) {
++	owner := 1
++	x := float32(0)
++	preedit := ""
++	var session uint64
++	clears := 0
++	tt := NewTester(func(c *Context) {
++		Box(c).Key("terminal").Label("terminal").Size(100, 30).Focusable().AutoFocus().TextInputSession(owner).TextCaret(Rect{X: x, W: 1, H: 16}).HandleInput(func(e InputEvent) bool {
++			if e.Kind == InputCompose {
++				if e.Text == "" {
++					if e.Session != session {
++						t.Error("canceled another owner")
++					}
++					clears++
++				}
++				preedit = e.Text
++				session = e.Session
++			}
++			return true
++		})
++	}, 240, 100)
++	id := tt.rt.focused
++	tt.Compose("字", 1)
++	old := session
++	x = 12
++	tt.Frame()
++	if preedit != "字" || session != old || clears != 0 {
++		t.Fatal("caret change canceled composition")
++	}
++	owner++
++	tt.Frame()
++	if preedit != "" || clears != 1 || tt.rt.focused != id || !tt.Focused("terminal") {
++		t.Fatal("logical change failed cancellation or disturbed focus")
++	}
++	tt.Compose("新", 1)
++	if preedit != "新" || session == old {
++		t.Fatal("new owner cannot compose")
++	}
++}
