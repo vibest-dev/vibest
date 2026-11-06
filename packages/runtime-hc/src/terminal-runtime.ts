@@ -2,7 +2,7 @@ import type * as VibestPlugin from "@vibest/plugin"
 import { Runtime as RuntimeApi } from "@vibest/plugin"
 import { ID, randomId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
-import { Duration, Effect, PubSub, Schedule, type Scope, Stream } from "effect"
+import { Deferred, Duration, Effect, PubSub, type Scope, Stream } from "effect"
 import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-hc-sdk"
 
 export type Machine = VibestPlugin.Runtime.Machine
@@ -61,7 +61,6 @@ export const failure = (error: HcFailure | { readonly message: string }): Runtim
 const failWith = <A, R>(effect: Effect.Effect<A, HcFailure, R>) => effect.pipe(Effect.mapError(failure))
 
 const SHELL_WAIT = Duration.seconds(30)
-const SHELL_POLL = Schedule.spaced("300 millis")
 export const FOLLOW_ATTEMPTS = 8
 
 export const followBackoff = (failures: number) =>
@@ -69,7 +68,11 @@ export const followBackoff = (failures: number) =>
 
 const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
 
-type Core = { readonly hc: HcShape; readonly busy: Set<string> }
+type Core = {
+  readonly hc: HcShape
+  readonly busy: Set<string>
+  readonly waiting: Map<string, Set<Deferred.Deferred<void>>>
+}
 
 export const make = (deps: {
   readonly connect: (socketPath: string) => HcShape
@@ -83,9 +86,17 @@ export const make = (deps: {
     const followed = new Set<string>()
     const home = connect(deps.socket)
 
+    const wake = (core: Core, address: string) =>
+      Effect.forEach(core.waiting.get(address) ?? [], (waiter) => Deferred.succeed(waiter, undefined), {
+        discard: true,
+      })
     const exited = (socket: string, core: Core, address: string) => {
       core.busy.delete(address)
-      return PubSub.publish(events, { type: "exited", terminal: { machine: "local", id: terminalId(socket, address) } })
+      return wake(core, address).pipe(
+        Effect.andThen(
+          PubSub.publish(events, { type: "exited", terminal: { machine: "local", id: terminalId(socket, address) } }),
+        ),
+      )
     }
     const track = (core: Core, t: api.Terminal) => {
       if (t.state === "live" && t.foreground && !atShell(t.foreground)) core.busy.add(t.address)
@@ -96,6 +107,7 @@ export const make = (deps: {
         return Effect.gen(function* () {
           core.busy.clear()
           for (const t of notice.result.terminals) track(core, t)
+          for (const t of notice.result.terminals) if (!core.busy.has(t.address)) yield* wake(core, t.address)
           if (followed.has(socket)) yield* PubSub.publish(events, { type: "reset", machine: "local" })
           followed.add(socket)
         })
@@ -114,7 +126,7 @@ export const make = (deps: {
           core.busy.add(terminal)
           return Effect.void
         }
-        return core.busy.has(terminal) ? exited(socket, core, terminal) : Effect.void
+        return core.busy.has(terminal) ? exited(socket, core, terminal) : wake(core, terminal)
       }
       return Effect.void
     }
@@ -145,7 +157,11 @@ export const make = (deps: {
       Effect.gen(function* () {
         const known = cores.get(socket)
         if (known !== undefined) return known
-        const core: Core = { hc: socket === deps.socket ? home : connect(socket), busy: new Set() }
+        const core: Core = {
+          hc: socket === deps.socket ? home : connect(socket),
+          busy: new Set(),
+          waiting: new Map(),
+        }
         cores.set(socket, core)
         yield* follow(socket, core).pipe(Effect.ensuring(Effect.sync(() => cores.delete(socket))), Effect.forkIn(scope))
         return core
@@ -154,7 +170,8 @@ export const make = (deps: {
     const reach = (terminal: Terminal) =>
       Effect.gen(function* () {
         const { socket, address } = parseTerminalId(terminal.id, deps.socket)
-        return { hc: (yield* coreAt(socket)).hc, socket, address }
+        const core = yield* coreAt(socket)
+        return { hc: core.hc, core, socket, address }
       })
 
     const get = (terminal: Terminal) =>
@@ -250,25 +267,46 @@ export const make = (deps: {
         ),
       )
 
+    const backToShell = (core: Core, address: string, terminal: Terminal) =>
+      Deferred.make<void>().pipe(
+        Effect.flatMap((back) => {
+          const waiters = core.waiting.get(address) ?? new Set()
+          core.waiting.set(address, waiters.add(back))
+          return Effect.gen(function* () {
+            const t = yield* failWith(core.hc.call("terminal.get", { terminal: address }))
+            if (t.state !== "live")
+              return yield* new RuntimeApi.RuntimeError({
+                code: "not_found",
+                message: `terminal ${terminal.id} has finished`,
+              })
+            if (atShell(t.foreground)) return
+            yield* Deferred.await(back).pipe(
+              Effect.timeoutOrElse({
+                duration: SHELL_WAIT,
+                orElse: () =>
+                  Effect.fail(
+                    new RuntimeApi.RuntimeError({
+                      code: "busy",
+                      message: `terminal ${terminal.id} did not come back to its shell within ${Duration.format(SHELL_WAIT)}`,
+                    }),
+                  ),
+              }),
+            )
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                waiters.delete(back)
+                if (waiters.size === 0 && core.waiting.get(address) === waiters) core.waiting.delete(address)
+              }),
+            ),
+          )
+        }),
+      )
+
     const run: NonNullable<Runtime["run"]> = (terminal, argv) =>
       Effect.gen(function* () {
-        const { hc, address } = yield* reach(terminal)
-        const idle = yield* get(terminal).pipe(
-          Effect.flatMap((t) =>
-            t.state === "live"
-              ? Effect.succeed(atShell(t.foreground))
-              : Effect.fail(
-                  new RuntimeApi.RuntimeError({ code: "not_found", message: `terminal ${terminal.id} has finished` }),
-                ),
-          ),
-          Effect.repeat({ until: (ok) => ok, schedule: SHELL_POLL }),
-          Effect.timeoutOrElse({ duration: SHELL_WAIT, orElse: () => Effect.succeed(false) }),
-        )
-        if (!idle)
-          return yield* new RuntimeApi.RuntimeError({
-            code: "busy",
-            message: `terminal ${terminal.id} did not come back to its shell within ${Duration.format(SHELL_WAIT)}`,
-          })
+        const { hc, core, address } = yield* reach(terminal)
+        yield* backToShell(core, address, terminal)
         yield* typeLine(hc, address, argv)
       })
 

@@ -13,7 +13,7 @@ Each call opens its own connection in plain mode (one JSON-RPC message per line)
 ## Terminals
 
 - A terminal vibest opens is named `s-<30 hex>` from `VIBEST_SESSION_ID`, else `vbt-<28 hex>`, so `hc ls` shows which session it holds; vibest itself uses its address.
-- `open` runs the machine's shell (`keep: true`) and types the argv into it with `terminal.send`, so the shell stays after the program (runtime-boundary rule 4) and `run` types the next program into the same shell. `terminal.send` waits until nobody typed for about 3 s, so each prompt takes at least that long.
+- `open` runs the machine's shell (`keep: true`) and types the argv into it with `terminal.send`, so the shell stays after the program (runtime-boundary rule 4) and `run` types the next program into the same shell. `run` reads the terminal once; when a program still runs in it, it waits for the core's `foreground` event back to the shell (or a fresh snapshot showing it), at most 30 s, without polling. `terminal.send` waits until nobody typed for about 3 s, so each prompt takes at least that long.
 - A kept terminal whose program is lost (a signal death, a core crash) gets a shell with the same environment (the runtime-hc test kills the shell with `kill -9` and reads the variable back).
 - Exits come from events: `finished`, `removed`, `lost`, and a `foreground` change back to an interactive shell (`sh`, `bash`, `zsh`, `fish`, `dash`, `ksh`, `tcsh`, `nu`, with no script argument) after a program ran. A harness that is itself a shell script would look like a shell; none is.
 - Agent state (`state`) is not offered: readiness and turns come from the harness integrations.
