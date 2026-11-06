@@ -2,8 +2,19 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, delegatingModel, heldModel, piDir } from "../fake-model.ts"
-import { agentModel, agentName, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
+import {
+  ask,
+  claudeConfigOf,
+  claudeEnv,
+  delegatingModel,
+  fakeAnthropic,
+  heldModel,
+  lastUser,
+  piDir,
+  type Step,
+  text,
+} from "../fake-model.ts"
+import { agentName, alive, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
 
 type Entry = { id: string; agent: string }
 
@@ -34,7 +45,16 @@ export const dropHerdrSession = async (w: World, session: string) => {
   }
 }
 
-const claudeMain = async (w: World, name: string, model: ReturnType<typeof delegatingModel>) => {
+const claudeMain = async (
+  w: World,
+  name: string,
+  model: ReturnType<typeof delegatingModel>,
+  respond: Parameters<typeof fakeAnthropic>[0] = () => "ok",
+) => {
+  const anthropic = fakeAnthropic(respond)
+  const configTheResumeCheckReads = w.config.claude
+  const flags = await claudeEnv(w, name, anthropic.url, configTheResumeCheckReads)
+  const config = claudeConfigOf(flags)
   const session = `${w.herdrSession}-${name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const repo = await project(w, name)
@@ -42,11 +62,10 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof deleg
   const zdot = path.join(w.root, `zdotdir-${name}`)
   await fs.mkdir(zdot, { recursive: true })
   await w.stopDaemon()
-  await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
-  await w.ok(["--harness", "claude", ...agentModel(), "--session", session, "--headless"], {
+  await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+  await w.ok(["--harness", "claude", ...flags, "--session", session, "--headless"], {
     cwd: repo,
     timeoutMs: 120_000,
-    env: { CLAUDE_CONFIG_DIR: undefined },
   })
   let main = ""
   await until(
@@ -96,7 +115,7 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof deleg
     await until(
       `the ${marker} line and its context in the main agent's conversation`,
       async () => {
-        entries = await transcript(w, repo)
+        entries = await transcript(w, repo, config)
         const lineShown = entries.some((e) => e.type === "user" && e.text.includes(line))
         const fullTextAttachedByPromptSubmitHook = entries.some(
           (e) =>
@@ -134,12 +153,14 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof deleg
       foreground_processes?: Array<{ pid: number; name: string; argv0?: string | null; cmdline?: string | null }>
     }
     return (info.foreground_processes ?? []).find(
-      (p) => p.pid !== info.shell_pid && /claude/i.test(`${p.name} ${p.argv0 ?? ""} ${p.cmdline ?? ""}`),
+      (p) => p.pid !== info.shell_pid && path.basename(p.argv0 ?? p.cmdline?.split(" ")[0] ?? "") === "claude",
     )?.pid
   }
   return {
     repo,
     main,
+    flags,
+    config,
     projectId,
     conversation,
     delivered,
@@ -149,7 +170,10 @@ const claudeMain = async (w: World, name: string, model: ReturnType<typeof deleg
     enter,
     claudePid,
     screen,
-    close: () => dropHerdrSession(w, session),
+    close: async () => {
+      anthropic.stop()
+      await dropHerdrSession(w, session)
+    },
   }
 }
 
@@ -207,18 +231,22 @@ const checks: ReadonlyArray<Check> = [
         }
 
         const first = c.conversation()
-        await Bun.sleep(10_000)
         await c.typeIn("/clear")
         await until("the conversation after /clear", () => c!.conversation() !== first, 60_000)
         await round("cmtwo")
 
         const cleared = c.conversation()
-        await Bun.sleep(10_000)
         const pid = await c.claudePid()
         expect(pid !== undefined, "no claude process in the main agent's pane")
         process.kill(pid!, "SIGTERM")
-        await until("the main agent's Claude exited", async () => (await c!.claudePid()) === undefined, 30_000)
-        await c.typeIn(["vibest", ...agentModel()].join(" "))
+        await until("the main agent's Claude exited", async () => (await c!.claudePid()) === undefined, 30_000).catch(
+          async (e: Error) => {
+            throw new Error(
+              `${e.message}; pid ${pid} alive ${alive(pid!)}, now ${await c!.claudePid()}; its screen:\n${await c!.screen()}`,
+            )
+          },
+        )
+        await c.typeIn(["vibest", ...c.flags].join(" "))
         await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
         await round("cmthree")
         expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
@@ -235,10 +263,16 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude", "curl"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
+      const go = path.join(w.root, "cmmid-go")
+      const wait = `until [ -e ${go} ]; do sleep 1; done`
       let c: Awaited<ReturnType<typeof claudeMain>> | undefined
       let stopped: number | undefined
       try {
-        c = await claudeMain(w, "cmtwo", model)
+        c = await claudeMain(w, "cmtwo", model, (r): Step => {
+          const last = text(lastUser(r))
+          if (last.includes(wait)) return { tool: "Bash", input: { command: wait } }
+          return last.includes('"tool_result"') ? "waited" : "ok"
+        })
         const a = await c.start("Answer probe alpha", "cmalpha")
         await c.result(a, "Answer probe alpha", "cmalpha", 0)
         const b = await c.start("Answer probe beta", "cmbeta")
@@ -261,23 +295,11 @@ const checks: ReadonlyArray<Check> = [
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
 
-        const go = path.join(w.root, "cmmid-go")
-        const wait = `until [ -e ${go} ]; do sleep 1; done`
-        await c.typeIn(
-          `Run this exact command with the Bash tool in the foreground, not in the background, and wait for it: ${wait} Then reply with one word: waited`,
-        )
-        let typed = Date.now()
+        await c.typeIn(`Wait for the go file: ${wait}`)
         await until(
           "the main agent's own turn running",
-          async () => {
-            const entries = await transcript(w, c!.repo)
-            if (entries.some((e) => e.type === "assistant" && e.raw.includes(go))) return true
-            if (!entries.some((e) => e.type === "user" && e.text.includes(wait)) && Date.now() - typed > 5_000) {
-              await c!.enter()
-              typed = Date.now()
-            }
-            return false
-          },
+          async () =>
+            (await transcript(w, c!.repo, c!.config)).some((e) => e.type === "assistant" && e.raw.includes(go)),
           60_000,
         ).catch(async (e: Error) => {
           throw new Error(`${e.message}; its screen:\n${await c!.screen()}`)
@@ -299,7 +321,6 @@ const checks: ReadonlyArray<Check> = [
         stopped = await c.claudePid()
         expect(stopped !== undefined, "no claude process in the main agent's pane")
         process.kill(stopped!, "SIGSTOP")
-        await Bun.sleep(3_000)
         const who = { main: c.main, projectId: c.projectId }
         const status = (id: number) => row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE id = ?", id)?.s
         await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
@@ -336,11 +357,7 @@ const checks: ReadonlyArray<Check> = [
         process.kill(stopped!, "SIGCONT")
         stopped = undefined
 
-        const restart = await w.tty(["daemon", "restart"], "y\n", {
-          cwd: c.repo,
-          env: { CLAUDE_CONFIG_DIR: undefined },
-          timeoutMs: 60_000,
-        })
+        const restart = await w.tty(["daemon", "restart"], "y\n", { cwd: c.repo, timeoutMs: 60_000 })
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
         const after = c.delivered(b)
         await w.ok(["send", b, "--", ask("cmafter")], { cwd: c.repo })
@@ -358,7 +375,11 @@ const checks: ReadonlyArray<Check> = [
       "Pi main agent: each result reaches the real Pi TUI as its own turn: a Claude subagent's first and second result, and one after `vibest daemon restart`",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const model = delegatingModel("claude")
+      const claude = fakeAnthropic((r) => {
+        const task = r.tools.length > 0 ? /done-(\w+)/.exec(text(lastUser(r))) : null
+        return task ? `done-${task[1]}\nstatus: completed` : "ok"
+      })
+      const model = delegatingModel(`claude ${(await claudeEnv(w, "inbox", claude.url)).join(" ")}`)
       const session = `${w.herdrSession}-inbox`
       try {
         const repo = await project(w, "inbox")
@@ -367,7 +388,6 @@ const checks: ReadonlyArray<Check> = [
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
-          env: { CLAUDE_CONFIG_DIR: undefined },
         })
         const mains = async () => (await w.json<Array<Entry>>(["ls"], { cwd: repo })).filter((e) => e.agent === "main")
         await until("the main agent in vibest ls", async () => (await mains()).length === 1, 30_000)
@@ -381,16 +401,13 @@ const checks: ReadonlyArray<Check> = [
         await reached("the main agent's turn on the first result", "done-zero")
         await reached("the main agent's turn on the Claude subagent's first result", "done-one")
         await reached("the main agent's turn on the Claude subagent's second result", "done-two")
-        const restart = await w.tty(["daemon", "restart"], "y\n", {
-          cwd: repo,
-          env: { CLAUDE_CONFIG_DIR: undefined },
-          timeoutMs: 60_000,
-        })
+        const restart = await w.tty(["daemon", "restart"], "y\n", { cwd: repo, timeoutMs: 60_000 })
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
         await w.ok(["send", model.sessionId(), ask("three")], { cwd: repo })
         await reached("the main agent's turn on a result after vibestd restarted", "done-three")
       } finally {
         model.stop()
+        claude.stop()
         await dropHerdrSession(w, session)
       }
     },
@@ -458,7 +475,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S20",
     title:
-      "ids: vibest run answers a UUID, herdr names the agent s-<30 hex>, result takes 8 characters and peek 12, and the system prompt is $TMPDIR/vibest/<id>/system-prompt.md",
+      "ids: vibest run answers a UUID, herdr names the agent s-<30 hex>, result takes 8 characters and peek 12 (peek prints the terminal, at most N lines with --lines, and refuses an unknown id), and the system prompt is $TMPDIR/vibest/<id>/system-prompt.md",
     run: async (w) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = heldModel()
@@ -503,7 +520,14 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         const peek = await w.vibest(["peek", sub.slice(0, 12)], { cwd: repo })
-        expect(peek.code === 0, `vibest peek ${sub.slice(0, 12)} exited ${peek.code}: ${peek.stderr}${peek.stdout}`)
+        expect(
+          peek.code === 0 && /\S/.test(peek.stdout),
+          `vibest peek ${sub.slice(0, 12)} exited ${peek.code}: ${peek.stderr}${peek.stdout}`,
+        )
+        const few = await w.ok(["peek", sub, "--lines", "3"], { cwd: repo })
+        expect(few.trimEnd().split("\n").length <= 3, `--lines 3 printed:\n${few}`)
+        const unknown = await w.vibest(["peek", "nope0000"], { cwd: repo })
+        expect(unknown.code !== 0 && /NoSuchSession/.test(unknown.stderr), `${unknown.code}: ${unknown.stderr}`)
         const prompt = path.join(w.root, "tmp", "vibest", sub, "system-prompt.md")
         expect(await Bun.file(prompt).exists(), `no ${prompt}`)
         const short = await w.vibest(["result", sub.slice(0, 7)], { cwd: repo })

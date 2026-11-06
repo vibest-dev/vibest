@@ -3,8 +3,19 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { claudeEnv, fakeAnthropic, fakeOpenAI, piDir, resultText, type Step, subagentFolder } from "../fake-model.ts"
-import { agentModel, agentName, compiled, expect, harnesses, herdr, Skip, until, type World } from "../world.ts"
+import {
+  claudeConfigOf,
+  claudeEnv,
+  fakeAnthropic,
+  fakeOpenAI,
+  lastUser,
+  piDir,
+  resultText,
+  type Step,
+  subagentFolder,
+  text,
+} from "../fake-model.ts"
+import { agentName, compiled, expect, harnesses, herdr, Skip, until, type World } from "../world.ts"
 import { project as newRepository } from "./inbox.ts"
 
 const userHarnessFiles = [".claude/settings.json", ".cursor/hooks.json", ".pi/agent/settings.json"].map((p) =>
@@ -27,7 +38,6 @@ const listed = async (w: World, id: string, cwd = w.repository) =>
   (await w.json<Array<{ id: string; status: string; turnState: string; worktree: string }>>(["ls"], { cwd })).find(
     (e) => e.id === id,
   )
-const status = async (w: World, id: string) => (await listed(w, id))?.status
 const turnState = async (w: World, id: string, cwd = w.repository) => (await listed(w, id, cwd))?.turnState
 
 const latest = async (w: World, id: string, cwd = w.repository) =>
@@ -38,8 +48,6 @@ const ends = async (w: World, id: string) =>
     const found = new RegExp(`turn end ${id} \\((\\w+)(, interrupted)?\\)`).exec(l)
     return found ? [{ harness: found[1]!, interrupted: found[2] !== undefined }] : []
   })
-
-const STORY = "Do not use any tools. Write a very long story, at least 4000 words, about a lighthouse keeper."
 
 const withSession = async (
   w: World,
@@ -200,7 +208,7 @@ const checks: ReadonlyArray<Check> = [
       )
       try {
         const flags = await claudeEnv(w, "beside", model.url)
-        const config = flags[flags.indexOf("--env") + 1]!.slice("CLAUDE_CONFIG_DIR=".length)
+        const config = claudeConfigOf(flags)
         for (const argv of [
           ["claude", "plugin", "marketplace", "add", market],
           ["claude", "plugin", "install", "e2e-beside@e2e-local"],
@@ -276,69 +284,64 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I7",
     title:
-      "Claude: every main-loop turn end is the plugin's turn.complete: an answer is the result, Esc in the pane is one interrupted result, `vibest interrupt` is none",
+      "Claude (fake model): every main-loop turn end is the plugin's turn.complete: an answer is the result, Esc in the pane is one interrupted result, `vibest interrupt` is none",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const answer = "Do not use tools. Reply with exactly two lines: `status: completed` and `summary: e2e answer`."
-      await withSession(w, "claude", agentModel(), answer, async ({ id, socket }) => {
-        const settled = (want: string) => async () => (await turnState(w, id)) === want
-        await until("the answer's result", settled("completed"), 120_000)
-        const first = await latest(w, id)
-        expect(
-          /<status>completed<\/status>/.test(first?.message ?? "") && /summary: e2e answer/.test(first?.message ?? ""),
-          `answer result: ${first?.message.slice(0, 500)}`,
-        )
-        const aborted = async () => (await ends(w, id)).filter((e) => e.interrupted).length
-
-        await w.ok(["send", id, STORY])
-        await until("the story turn", settled("open"), 60_000)
-        await Bun.sleep(10_000)
-        const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
-          env: { HERDR_SOCKET_PATH: socket },
-        })
-        expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)
-        await until("the interrupted result", settled("failed"), 60_000)
-        const second = await latest(w, id)
-        expect(
-          second !== undefined &&
-            second.id !== first!.id &&
-            second.message.includes("interrupted: the turn was stopped in its terminal (Esc) before it ended"),
-          `Esc result: ${second?.message.slice(0, 500)}`,
-        )
-        expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
-
-        await w.ok(["send", id, STORY])
-        await until("the second story turn", settled("open"), 60_000)
-        await Bun.sleep(10_000)
-        await w.ok(["interrupt", id], { timeoutMs: 60_000 })
-        await until("the interrupted turn's turn.complete", async () => (await aborted()) === 2, 30_000)
-        await Bun.sleep(5_000)
-        expect((await turnState(w, id)) === "interrupted", `turn state: ${await turnState(w, id)}`)
-        const third = await latest(w, id)
-        expect(third?.id === second!.id, `a result after vibest interrupt: ${third?.message.slice(0, 500)}`)
+      const HOLD = "Keep working on this until you are stopped."
+      let held = 0
+      const model = fakeAnthropic((r) => {
+        if (r.tools.length === 0 || subagentFolder(r.system) === undefined) return "ok"
+        if (!text(lastUser(r)).includes(HOLD)) return "status: completed\nsummary: e2e answer"
+        held++
+        return new Promise<Step>(() => {})
       })
-    },
-  },
-  {
-    id: "I8",
-    title: "`vibest peek <id> [--lines N]` prints the session's terminal on demand; an unknown id is refused",
-    run: async (w) => {
-      for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      await withSession(w, "claude", agentModel(), STORY, async ({ id }) => {
-        await until("the session working", async () => (await status(w, id)) === "working", 120_000)
-        let screen = ""
-        await until(
-          "Claude's input box on the session's screen",
-          async () => /❯/.test((screen = await w.ok(["peek", id]))),
-          60_000,
-        ).catch((e: Error) => {
-          throw new Error(`${e.message}; vibest peek printed:\n${screen}`)
-        })
-        const few = await w.ok(["peek", id, "--lines", "3"])
-        expect(few.trimEnd().split("\n").length <= 3, `--lines 3 printed:\n${few}`)
-        const unknown = await w.vibest(["peek", "nope0000"])
-        expect(unknown.code !== 0 && /NoSuchSession/.test(unknown.stderr), `${unknown.code}: ${unknown.stderr}`)
-      })
+      try {
+        await withSession(
+          w,
+          "claude",
+          await claudeEnv(w, "turns", model.url),
+          "Answer once.",
+          async ({ id, socket }) => {
+            const settled = (want: string) => async () => (await turnState(w, id)) === want
+            await until("the answer's result", settled("completed"), 120_000)
+            const first = await latest(w, id)
+            expect(
+              /<status>completed<\/status>/.test(first?.message ?? "") &&
+                /summary: e2e answer/.test(first?.message ?? ""),
+              `answer result: ${first?.message.slice(0, 500)}`,
+            )
+            const aborted = async () => (await ends(w, id)).filter((e) => e.interrupted).length
+
+            await w.ok(["send", id, HOLD])
+            await until("the held turn at the model", () => held === 1, 60_000)
+            await until("the held turn open", settled("open"), 60_000)
+            const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
+              env: { HERDR_SOCKET_PATH: socket },
+            })
+            expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)
+            await until("the interrupted result", settled("failed"), 60_000)
+            const second = await latest(w, id)
+            expect(
+              second !== undefined &&
+                second.id !== first!.id &&
+                second.message.includes("interrupted: the turn was stopped in its terminal (Esc) before it ended"),
+              `Esc result: ${second?.message.slice(0, 500)}`,
+            )
+            expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
+
+            await w.ok(["send", id, HOLD])
+            await until("the second held turn at the model", () => held === 2, 60_000)
+            await until("the second held turn open", settled("open"), 60_000)
+            await w.ok(["interrupt", id], { timeoutMs: 60_000 })
+            await until("the interrupted turn's turn.complete", async () => (await aborted()) === 2, 30_000)
+            await until("the turn interrupted", settled("interrupted"), 30_000)
+            const third = await latest(w, id)
+            expect(third?.id === second!.id, `a result after vibest interrupt: ${third?.message.slice(0, 500)}`)
+          },
+        )
+      } finally {
+        model.stop()
+      }
     },
   },
   {

@@ -244,6 +244,8 @@ export type AnthropicRequest = {
 
 export const subagentFolder = (system: string) => /Project folder: (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)?.[1]
 
+export const lastUser = (r: AnthropicRequest) => r.messages.findLast((m) => m.role === "user")
+
 export const resultText = (r: ToolResult) => (typeof r.content === "string" ? r.content : JSON.stringify(r.content))
 
 export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<Step>) => {
@@ -324,8 +326,10 @@ const autoModeOff = {
   permissions: { defaultMode: "default", disableAutoMode: "disable" },
 }
 
-export const claudeEnv = async (w: World, name: string, url: string) => {
-  const dir = path.join(w.root, `claude-${name}`)
+export const claudeConfigOf = (flags: ReadonlyArray<string>) =>
+  flags.find((f) => f.startsWith("CLAUDE_CONFIG_DIR="))!.slice("CLAUDE_CONFIG_DIR=".length)
+
+export const claudeEnv = async (w: World, name: string, url: string, dir = path.join(w.root, `claude-${name}`)) => {
   await fs.mkdir(dir, { recursive: true })
   const key = "sk-ant-e2e-fake-0123456789abcdefghijklmnop"
   await fs.writeFile(

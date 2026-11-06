@@ -346,8 +346,8 @@ export const herdr = (socket: string, method: string, params: object) =>
     }).catch(reject)
   })
 
-export const transcript = async (w: World, cwd: string) => {
-  const dir = path.join(w.home, ".claude", "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
+export const transcript = async (w: World, cwd: string, claudeConfig = path.join(w.home, ".claude")) => {
+  const dir = path.join(claudeConfig, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
   const files = (await fsPromises.readdir(dir).catch(() => [] as Array<string>)).filter((f) => f.endsWith(".jsonl"))
   const entries: Array<{ type?: string; raw: string; text: string }> = []
   for (const f of files)
