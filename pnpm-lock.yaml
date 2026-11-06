@@ -296,6 +296,16 @@ importers:
         specifier: 4.0.2
         version: 4.0.2
 
+  packages/effect-hc-sdk:
+    dependencies:
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+    devDependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
+
   packages/effect-herdr-sdk:
     dependencies:
       effect:
