@@ -28,8 +28,13 @@ export interface SubscriptionSnapshot {
   readonly error?: string | undefined
 }
 
-export const isLimited = (row: { readonly limits: ReadonlyArray<{ readonly status: string }> }) =>
-  row.limits.some((l) => l.status === "limited")
+const resetPassed = (resetTime: number | null | undefined, now: number) =>
+  typeof resetTime === "number" && resetTime <= now
+
+export const isLimited = (
+  row: { readonly limits: ReadonlyArray<{ readonly status: string; readonly resetTime?: number | null }> },
+  now = Date.now(),
+) => row.limits.some((limit) => limit.status === "limited" && !resetPassed(limit.resetTime, now))
 
 export const stillLimited = (
   attempt: { readonly harness: string; readonly provider: string | undefined; readonly at: number },

@@ -1115,7 +1115,7 @@ describe.concurrent("Sessions", () => {
     "a usage-limit failure of a running session reports the limit and starts nothing else",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const resetTime = Date.parse("2026-11-01T21:00:00.296Z")
+      const resetTime = Date.parse("2099-01-01T00:00:00.000Z")
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       yield* (yield* Subscriptions).report({
         harness: "pi",

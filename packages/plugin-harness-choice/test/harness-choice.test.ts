@@ -45,7 +45,7 @@ const start = (overrides: Partial<AgentStartBefore>): AgentStartBefore => ({
   ...overrides,
 })
 
-const resetTime = Date.parse("2026-11-01T21:00:00.296Z")
+const resetTime = Date.parse("2099-01-01T00:00:00.000Z")
 
 const limitedCursor: SubscriptionSnapshot = {
   harness: "cursor",
@@ -86,6 +86,24 @@ describe("harness choice", () => {
       const reason = reasonOf(yield* Effect.flip(hook(event)))
       assert.strictEqual(reason, "cursor: cursor model discovery failed: Not logged in")
       assert.deepStrictEqual([event.harness, event.provider, event.model], ["cursor", undefined, "composer"])
+    }).pipe(Effect.scoped),
+  )
+
+  it.effect("an explicit harness is not refused when its limit reset has passed", () =>
+    Effect.gen(function* () {
+      const hook = yield* startHook
+      const event = start({
+        harness: "cursor",
+        model: "composer",
+        subscriptions: [
+          {
+            ...limitedCursor,
+            limits: [{ window: "monthly", percent: 100, status: "limited", resetTime: Date.now() - 1_000 }],
+          },
+        ],
+      })
+      yield* hook(event)
+      assert.deepStrictEqual([event.harness, event.model], ["cursor", "composer"])
     }).pipe(Effect.scoped),
   )
 
