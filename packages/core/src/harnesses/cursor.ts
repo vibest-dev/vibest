@@ -16,7 +16,6 @@ export const cursor: HarnessAdapter = {
   systemPromptInPrompt: true,
   interruptKey: "ctrl+c",
   resultField: "text",
-  inbox: "prompt",
   ready: "runtime",
   checkProvider: anthropicOnly("cursor"),
   launchArgs: (i) => [

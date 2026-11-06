@@ -540,66 +540,6 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "a pane-type owner gets one sender's rows merged when idle; a busy pane keeps the rest",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const inbox = yield* Inbox
-      const db = yield* Db
-      const general = {
-        agent: "general",
-        name: "n",
-        harnessId: "pi" as const,
-        provider: null,
-        model: null,
-        harnessSessionId: null,
-        runtime: "herdr",
-        address: { machine: "local", id: "test/p0" },
-        status: "idle" as const,
-        startedAt: 1,
-        exitedAt: null,
-        turnState: "none" as const,
-        turnPromptedAt: 0,
-        metadata: {},
-        createdAt: 1,
-        lastActive: 1,
-      }
-      yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, yield* projectOf("r"))
-      yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, yield* projectOf("r"))
-      yield* db.coordinatorLaunch(yield* projectOf("r"), "cursor", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p9" },
-      })
-      yield* herdr.seedAgent("w1:p9")
-      yield* herdr.updateAgent("w1:p9", (a) => ({ ...a, status: "working" }))
-      const project = (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.projectId
-      const row = (sessionId: string, message: string) => ({ sessionId, kind: "result" as const, message, details: {} })
-      yield* inbox.enqueue(row("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "one"))
-      yield* inbox.enqueue(row("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "two"))
-      yield* inbox.enqueue(row("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "three"))
-      yield* settled
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p9"),
-        [],
-      )
-      yield* herdr.endTurn("w1:p9")
-      yield* inbox.deliver(project)
-      yield* until(db.coordinatorPending(project), (rows) => rows.length === 1)
-      const prompts = (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p9")
-      assert.deepStrictEqual(
-        prompts.map((p) => p.text),
-        ["one\n\ntwo"],
-      )
-
-      yield* Effect.void
-      assert.strictEqual((yield* db.coordinatorPending(project)).length, 1, "the prompt made the pane busy")
-      yield* herdr.endTurn("w1:p9")
-      yield* inbox.deliver(project)
-      assert.deepStrictEqual(yield* db.coordinatorPending(project), [])
-      assert.strictEqual((yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p9").at(-1)!.text, "three")
-    }),
-  )
-
-  test(
     "a Pi pane never gets agent.prompt; its subscription takes pending rows first, then new ones as they arrive",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

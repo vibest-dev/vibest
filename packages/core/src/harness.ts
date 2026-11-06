@@ -46,7 +46,7 @@ export interface HarnessAdapter {
   readonly interruptKey: string
   readonly startup?: Startup
   readonly resultField: "text" | "last_assistant_message"
-  readonly inbox: "prompt" | "subscribe" | "poll"
+  readonly inbox?: "subscribe" | "poll"
   readonly ready: "integration" | "runtime"
   readonly checkProvider: (provider: string | null) => string | undefined
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
