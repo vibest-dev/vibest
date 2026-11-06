@@ -156,8 +156,13 @@ const checks: ReadonlyArray<Check> = [
         const subAt = runtimeOf(sub)
         expect(subAt.kind === "hc", `the subagent ${sub} runs in ${JSON.stringify(subAt)}, not hc`)
         const subTerminal = await core.get(addressOf(subAt.id!))
+        const taskSlug = ask("one")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .slice(0, 27)
+          .replace(/-+$/, "")
         expect(
-          subTerminal.name === `do-not-run-any-tool-reply-w-${sub.slice(0, 4)}`,
+          subTerminal.name === `${taskSlug}-${sub.slice(0, 4)}`,
           `the task-derived terminal name: ${subTerminal.name}`,
         )
         expect(subAt.id === `${subTerminal.address}@${w.hcSocket}`, `the subagent identity changed: ${subAt.id}`)
