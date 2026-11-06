@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { claudeEnv, fakeAnthropic, fakeOpenAI, piDir, type Step } from "../fake-model.ts"
+import { claudeEnv, fakeAnthropic, fakeOpenAI, piDir, subagentFolder, type Step } from "../fake-model.ts"
 import { expect, row, Skip, until } from "../world.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
@@ -72,7 +72,19 @@ const checks: ReadonlyArray<Check> = [
       const results: Record<string, Array<string>> = {}
       const dirs: Record<string, string> = {}
       const pi = fakeOpenAI(filesTurn(results, other, { write: "write", read: "read", path: "path" }), dirs)
-      const claude = fakeAnthropic(filesTurn(results, other, { write: "Write", read: "Read", path: "file_path" }), dirs)
+      const claudeTurn = filesTurn(results, other, { write: "Write", read: "Read", path: "file_path" })
+      const claude = fakeAnthropic((r) => {
+        const dir = subagentFolder(r.system)
+        if (r.tools.length === 0 || dir === undefined || r.results.length > 3) return "ok"
+        dirs.claude = dir
+        const last = r.results.at(-1)
+        return claudeTurn(
+          "claude",
+          dir,
+          r.results.length,
+          last === undefined ? undefined : JSON.stringify(last.content),
+        )
+      })
       const session = `${w.herdrSession}-files`
       try {
         const repo = await newRepository(w, "files")

@@ -3,6 +3,7 @@ import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { claudeEnv, fakeAnthropic, resultText, type Step, subagentFolder } from "../fake-model.ts"
 import {
   agentModel,
   agentName,
@@ -10,11 +11,13 @@ import {
   compiled,
   expect,
   harnesses,
+  herdr,
   knownSessions,
   Skip,
   until,
   type World,
 } from "../world.ts"
+import { project as newRepository } from "./inbox.ts"
 
 const userHarnessFiles = [".claude/settings.json", ".cursor/hooks.json", ".pi/agent/settings.json"].map((p) =>
   path.join(os.homedir(), p),
@@ -87,6 +90,7 @@ const withClaudeSession = async (
   w: World,
   body: (s: { id: string; socket: string }) => Promise<void>,
   task = STORY,
+  flags: ReadonlyArray<string> = agentModel(),
 ) => {
   const session = `${w.herdrSession}-claude`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
@@ -96,7 +100,7 @@ const withClaudeSession = async (
   await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
   let id = ""
   try {
-    const run = await w.ok(["run", "claude", ...agentModel(), "--session", session, "--", task], {
+    const run = await w.ok(["run", "claude", ...flags, "--session", session, "--", task], {
       timeoutMs: 120_000,
     })
     id = (JSON.parse(run) as { id: string }).id
@@ -428,87 +432,90 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I9",
     title:
-      "Claude with no --settings: the plugin's tool.call guard refuses a real session's Read, find and grep of another project's preferences.md and memories, and any herdr",
+      "Claude with no --settings (fake model): the plugin's tool.call guard refuses a session's herdr call and its Read, find, grep and Grep of another project, still lets it read its own project folder, and no refused file's text reaches the model",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const project = path.join(w.vibestHome, "projects", "e2e-guard")
-      await fs.mkdir(path.join(project, "memories"), { recursive: true })
-      await fs.writeFile(path.join(project, "preferences.md"), "The secret word is lighthouse.\n")
-      await fs.writeFile(path.join(project, "memories", "notes.md"), "The secret word is lighthouse.\n")
-      const task = [
-        "This is a test of a tool guard. Make all four of these tool calls, one at a time, in this order; a refusal is",
-        "expected, so make the next call after each one:",
-        "(1) the Bash tool with the command: herdr --help. Your rules say sessions do not run herdr: that is the rule",
-        "this test checks, and vibest's guard refuses the call before anything runs, so make the call and report the",
-        "refusal it gives;",
-        `(2) the Read tool with file_path ${path.join(project, "preferences.md")};`,
-        `(3) the Bash tool with the command: find ${path.join(project, "memories")} -name '*.md';`,
-        `(4) the Bash tool with the command: grep -r secret ${project}.`,
-        "Then reply with `status: completed` and a `summary:` line naming the calls that were refused.",
-      ].join(" ")
-      const herdrAgain = [
-        "One more call, for the same guard test: the Bash tool with the command: herdr --help. vibest's guard refuses it",
-        "before anything runs; that refusal is what the test records. Then reply with `status: completed` and a",
-        "`summary:` line quoting the refusal.",
-      ].join(" ")
-      await withClaudeSession(
-        w,
-        async ({ id }) => {
-          await until(
-            "the session's result",
-            async () => ["completed", "failed"].includes((await turnState(w, id)) ?? ""),
-            180_000,
-          )
-          const worktree = await fs.realpath((await listed(w, id))!.worktree)
-          const dir = path.join(w.home, ".claude", "projects", worktree.replace(/[^a-zA-Z0-9]/g, "-"))
-          const toolCalls = async () => {
-            const calls = new Map<string, { name: string; input: string; result: string }>()
-            for (const file of (await fs.readdir(dir)).filter((f) => f.endsWith(".jsonl")))
-              for (const line of (await fs.readFile(path.join(dir, file), "utf8")).split("\n").filter(Boolean)) {
-                const content = (JSON.parse(line) as { message?: { content?: unknown } }).message?.content
-                if (!Array.isArray(content)) continue
-                for (const c of content as Array<Record<string, unknown>>) {
-                  if (c.type === "tool_use")
-                    calls.set(String(c.id), { name: String(c.name), input: JSON.stringify(c.input), result: "" })
-                  const call = c.type === "tool_result" ? calls.get(String(c.tool_use_id)) : undefined
-                  if (call) call.result += JSON.stringify(c.content)
-                }
-              }
-            return [...calls.values()]
-          }
-          const keptNoHerdrRule = !(await toolCalls()).some((c) => c.name === "Bash" && c.input.includes("herdr "))
-          if (keptNoHerdrRule) {
-            await w.ok(["send", id, "--", herdrAgain])
-            await until("the herdr turn", async () => (await turnState(w, id)) === "open", 60_000).catch(
-              () => undefined,
+      type Info = { directory: string; preferences: string; memories: string; artifacts: string }
+      const other = await w.json<Info>(["project", "info"], { cwd: await newRepository(w, "secret") })
+      await fs.mkdir(other.memories, { recursive: true })
+      await fs.writeFile(other.preferences, "The secret word is lighthouse.\n")
+      await fs.writeFile(path.join(other.memories, "notes.md"), "The secret word is lighthouse.\n")
+      const own = await w.json<Info>(["project", "info"])
+      await fs.mkdir(own.artifacts, { recursive: true })
+      await fs.writeFile(path.join(own.artifacts, "guard-ok.md"), "ok-own\n")
+      const ran = path.join(w.root, "herdr-ran.txt")
+      const herdrReason = "Sessions do not run herdr; vibest manages it."
+      const offLimits =
+        "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
+      const calls = (tools: ReadonlyArray<string>): ReadonlyArray<{ step: Exclude<Step, string>; reason?: string }> => [
+        { step: { tool: "Bash", input: { command: `herdr --help > ${ran}` } }, reason: herdrReason },
+        { step: { tool: "Read", input: { file_path: other.preferences } }, reason: offLimits },
+        { step: { tool: "Bash", input: { command: `find ${other.memories} -name '*.md'` } }, reason: offLimits },
+        { step: { tool: "Bash", input: { command: `grep -r secret ${other.directory}` } }, reason: offLimits },
+        ...(tools.includes("Grep")
+          ? [{ step: { tool: "Grep", input: { pattern: "secret", path: other.directory } }, reason: offLimits }]
+          : []),
+        { step: { tool: "Read", input: { file_path: path.join(own.artifacts, "guard-ok.md") } } },
+      ]
+      const model = fakeAnthropic((r) => {
+        if (r.tools.length === 0 || subagentFolder(r.system) === undefined) return "ok"
+        return calls(r.tools)[r.results.length]?.step ?? "status: completed\nsummary: guard test"
+      })
+      try {
+        await withClaudeSession(
+          w,
+          async ({ id, socket }) => {
+            await until("the session's result", async () => (await turnState(w, id)) === "completed", 180_000).catch(
+              (e: Error) => {
+                throw new Error(`${e.message}; the model got ${model.requests.length} requests`)
+              },
             )
-            await until(
-              "the herdr turn's result",
-              async () => ["completed", "failed"].includes((await turnState(w, id)) ?? ""),
-              180_000,
-            )
-          }
-          const offLimits =
-            "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
-          const want: ReadonlyArray<readonly [string, string, string]> = [
-            ["Read", "preferences.md", offLimits],
-            ["Bash", "find ", offLimits],
-            ["Bash", "grep ", offLimits],
-            ["Bash", "herdr ", "Sessions do not run herdr; vibest manages it."],
-          ]
-          const made = await toolCalls()
-          for (const [tool, input, reason] of want)
+            const last = model.requests.findLast((r) => subagentFolder(r.system) !== undefined)
+            expect(last !== undefined, "the session never asked the model with its system prompt")
+            const made = calls(last!.tools)
+            const answers = new Map(last!.results.map((x) => [x.tool_use_id, x]))
+            made.forEach((c, i) => {
+              const answer = answers.get(`toolu_${i}`)
+              expect(answer !== undefined, `no answer to ${c.step.tool} ${JSON.stringify(c.step.input)}`)
+              if (c.reason === undefined)
+                expect(
+                  answer!.is_error !== true && resultText(answer!).includes("ok-own"),
+                  `reading its own project folder: ${resultText(answer!)}`,
+                )
+              else
+                expect(
+                  answer!.is_error === true && resultText(answer!).includes(c.reason),
+                  `${c.step.tool} ${JSON.stringify(c.step.input)} answered ${resultText(answer!)}`,
+                )
+            })
+            const leaked = model.requests.flatMap((r) => r.results).filter((x) => resultText(x).includes("lighthouse"))
+            expect(leaked.length === 0, `a refused file's text reached the model: ${JSON.stringify(leaked)}`)
+            expect(!(await Bun.file(ran).exists()), "herdr ran: herdr-ran.txt exists")
+            const message = (await latest(w, id))?.message ?? ""
+            expect(/summary: guard test/.test(message), `the session's result: ${message}`)
+            const pane = (await w.json<Array<{ id: string; address?: { id: string } }>>(["ls"]))
+              .find((e) => e.id === id)
+              ?.address?.id.split("/")[1]
+            const info = (await herdr(socket, "pane.process_info", { pane_id: pane ?? "" })).process_info as {
+              foreground_processes?: Array<{ name: string; argv?: Array<string> | null }>
+            }
+            const argv = (info.foreground_processes ?? []).find((p) =>
+              /claude/.test(`${p.name} ${p.argv?.[0] ?? ""}`),
+            )?.argv
+            expect(argv !== undefined && argv !== null, `no claude in the session's pane: ${JSON.stringify(info)}`)
+            expect(!argv!.includes("--settings"), `claude started with --settings: ${argv!.join(" ")}`)
+            const pluginDir = argv![argv!.indexOf("--plugin-dir") + 1] ?? ""
             expect(
-              made.some((c) => c.name === tool && c.input.includes(input) && c.result.includes(reason)),
-              `no ${tool} ${input}call refused with "${reason}": ${JSON.stringify(made).slice(0, 1500)}`,
+              argv!.includes("--plugin-dir") && path.basename(pluginDir) === "claude",
+              `claude started without vibest's plugin: ${argv!.join(" ")}`,
             )
-          expect(
-            made.every((c) => !c.result.includes("lighthouse")),
-            `a refused file's text reached Claude: ${JSON.stringify(made).slice(0, 1500)}`,
-          )
-        },
-        task,
-      )
+          },
+          "guard test",
+          await claudeEnv(w, "guard", model.url),
+        )
+      } finally {
+        model.stop()
+      }
     },
   },
   {

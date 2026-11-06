@@ -233,11 +233,22 @@ export const fakeOpenAI = (
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
 
-export const fakeAnthropic = (
-  step: (who: string, dir: string, done: number, last: string | undefined) => Step,
-  dirs: Record<string, string>,
-) => {
+export type ToolResult = { readonly tool_use_id: string; readonly is_error?: boolean; readonly content: unknown }
+
+export type AnthropicRequest = {
+  readonly system: string
+  readonly tools: ReadonlyArray<string>
+  readonly messages: ReadonlyArray<Message>
+  readonly results: ReadonlyArray<ToolResult>
+}
+
+export const subagentFolder = (system: string) => /Project folder: (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)?.[1]
+
+export const resultText = (r: ToolResult) => (typeof r.content === "string" ? r.content : JSON.stringify(r.content))
+
+export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<Step>) => {
   let n = 0
+  const requests: Array<AnthropicRequest> = []
   const sse = (events: ReadonlyArray<readonly [string, object]>) =>
     events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify({ type: e, ...d })}\n\n`).join("")
   const server = Bun.serve({
@@ -250,26 +261,26 @@ export const fakeAnthropic = (
       const body = (await req.json()) as {
         stream?: boolean
         system?: unknown
-        tools?: Array<unknown>
-        messages?: Array<{ role: string; content: unknown }>
+        tools?: Array<{ name?: string }>
+        messages?: Array<Message>
       }
-      const blocks = (body.messages ?? []).flatMap((m) =>
-        Array.isArray(m.content) ? (m.content as Array<{ type?: string; content?: unknown }>) : [],
-      )
-      const results = blocks.filter((b) => b.type === "tool_result")
-      const dir = /Project folder: (\S+) \(VIBEST_PROJECT_DIR\)/.exec(JSON.stringify(body.system ?? ""))?.[1]
-      let content: Array<object> = [{ type: "text", text: "ok" }]
-      let stop = "end_turn"
-      if ((body.tools?.length ?? 0) > 0 && dir !== undefined && results.length <= 3) {
-        dirs.claude = dir
-        const last = results.at(-1)
-        const s = step("claude", dir, results.length, last === undefined ? undefined : JSON.stringify(last.content))
-        if (typeof s === "string") content = [{ type: "text", text: s }]
-        else {
-          content = [{ type: "tool_use", id: `toolu_${results.length}`, name: s.tool, input: s.input }]
-          stop = "tool_use"
-        }
+      const messages = body.messages ?? []
+      const results = messages
+        .flatMap((m) => (Array.isArray(m.content) ? (m.content as Array<{ type?: string }>) : []))
+        .filter((b): b is ToolResult & { type: string } => b.type === "tool_result")
+      const request: AnthropicRequest = {
+        system: JSON.stringify(body.system ?? ""),
+        tools: (body.tools ?? []).map((t) => t.name ?? ""),
+        messages,
+        results,
       }
+      requests.push(request)
+      const s = await respond(request)
+      const content: Array<object> =
+        typeof s === "string"
+          ? [{ type: "text", text: s }]
+          : [{ type: "tool_use", id: `toolu_${results.length}`, name: s.tool, input: s.input }]
+      const stop = typeof s === "string" ? "end_turn" : "tool_use"
       const message = {
         id: `msg_${++n}`,
         type: "message",
@@ -305,7 +316,7 @@ export const fakeAnthropic = (
       return new Response(sse(events), { headers: sseHeaders })
     },
   })
-  return { url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
+  return { requests, url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
 }
 
 const autoModeOff = {

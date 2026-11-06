@@ -4,7 +4,6 @@ import path from "node:path"
 import type { Check } from "./check.ts"
 import daemon from "./scenarios/daemon.ts"
 import exits from "./scenarios/exits.ts"
-import guard from "./scenarios/guard.ts"
 import harness from "./scenarios/harness.ts"
 import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
@@ -21,7 +20,6 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   plugins,
   harness,
   integration,
-  guard,
   update,
   start,
   inbox,
