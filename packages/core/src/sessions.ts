@@ -1422,8 +1422,8 @@ export class Sessions extends Context.Service<
           Effect.gen(function* () {
             const now = at ?? (yield* Clock.currentTimeMillis)
             yield* bus.observe({ type: "live.turn_start", sessionId: id, at: now })
-            yield* db.updateSession(id, { status: "working" })
             yield* userPrompt(id, text, now)
+            yield* db.markWorking(id)
           }),
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: Effect.gen(function* () {

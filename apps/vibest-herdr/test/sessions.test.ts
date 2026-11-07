@@ -12,7 +12,7 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, isLimited, Plugin, stillLimited } from "@vibest/plugin"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID } from "@vibest/schema/id"
-import { turnEnd } from "@vibest/server/hooks"
+import { prompt, turnEnd } from "@vibest/server/hooks"
 import {
   Cause,
   Clock,
@@ -994,7 +994,12 @@ describe.concurrent("Sessions", () => {
         { id, agent: "general" },
         JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }),
       )
+      const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
+      yield* prompt(sessions, cursor, { id, agent: "general" }, thought)
+      assert.strictEqual((yield* db.getSession(id))!.status, "idle")
       yield* untilVirtual(db.getSession(id), (w) => w?.turnState === "completed")
+      yield* prompt(sessions, cursor, { id, agent: "general" }, thought)
+      yield* settled
       assert.strictEqual((yield* db.getSession(id))!.status, "idle")
       yield* sessions.send(id, "next")
       yield* untilVirtual(db.getSession(id), (w) => w?.turnState === "open" && w.status === "working")
