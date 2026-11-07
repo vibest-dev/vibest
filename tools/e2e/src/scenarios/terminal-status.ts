@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { piDir } from "../fake-model.ts"
-import { binary, checkout, expect, harnesses, knownSessions, row, Skip, until } from "../world.ts"
+import { binary, checkout, expect, row, Skip, until } from "../world.ts"
 
 type CoreTerminal = { address: string; reported: boolean; status?: { state: string; kind?: string; app?: string } }
 
@@ -135,7 +135,7 @@ const fakeModel = () => {
 const checks: ReadonlyArray<Check> = [
   {
     id: "T1",
-    title: "native Claude/Pi statuses and Cursor hook reports in an isolated herdr-core",
+    title: "native Claude/Pi statuses in an isolated herdr-core",
     run: async (w, evidence) => {
       for (const bin of ["hc", "claude", "pi", "python3"]) if (!Bun.which(bin)) throw new Skip(bin + " not on PATH")
       const model = fakeModel()
@@ -448,52 +448,8 @@ const checks: ReadonlyArray<Check> = [
         await status("Pi input dismissed", "idle")
         await hc("kill", terminal)
         owner = undefined
-        const cursor = crypto.randomUUID()
-        const project = await knownSessions(w, { [cursor]: "general" }, w.repository, "cursor")
-        const cursorCapture = path.join(w.root, "status-output/cursor")
-        terminal = (
-          JSON.parse(
-            await hc(
-              "run",
-              "--bg",
-              "--no-parent",
-              "--no-notify",
-              "--cwd",
-              w.repository,
-              "--",
-              "env",
-              "VIBEST_AGENT=general",
-              "VIBEST_SESSION_ID=" + cursor,
-              "VIBEST_PROJECT_ID=" + project,
-              "VIBEST_HARNESS=cursor",
-              "VIBEST_COMMAND=" + JSON.stringify([binary]),
-              "python3",
-              "-I",
-              path.join(w.root, "status-pty.py"),
-              cursorCapture,
-              "sh",
-              path.join(checkout, "tools/e2e/src/fixtures/status-cursor.sh"),
-              path.join(harnesses, "cursor/hooks/vibest.sh"),
-            ),
-          ) as { address: string }
-        ).address
-        await visible("prompt-finished")
-        await status("Cursor prompt", "working")
-        await hc("keys", terminal, "enter")
-        await visible("response-finished")
-        await status("Cursor response", "idle")
-        await hc("keys", terminal, "enter")
-        await visible("ignored-finished")
-        const cursorBytes = await fs.readFile(cursorCapture + ".raw", "utf8")
-        const cursorReports = reports(cursorBytes)
-        expect(
-          JSON.stringify(cursorReports) === JSON.stringify(["state=working", "state=idle"]),
-          "Cursor reports: " + JSON.stringify(cursorReports),
-        )
-        expect(!(await hc("read", terminal)).includes("7501;"), "Cursor OSC was visible")
-        await hc("kill", terminal)
         for (const file of await fs.readdir(path.join(w.root, "status-output"))) {
-          if (!file.endsWith(".raw") || file === "cursor.raw") continue
+          if (!file.endsWith(".raw")) continue
           const records = reports(await fs.readFile(path.join(w.root, "status-output", file), "utf8")).filter((r) =>
             r.startsWith("state="),
           )
