@@ -108,7 +108,9 @@ export const claudeShadow = async (dir: string, profile: Profile, from: UserPath
 export type PiProvider = { readonly baseUrl: string; readonly models?: ReadonlyArray<string> }
 
 const strings = (...values: ReadonlyArray<unknown>): Array<string> =>
-  values.flatMap((v) => (typeof v === "string" ? [v] : Array.isArray(v) ? strings(...v) : []))
+  values.flatMap((v) =>
+    typeof v === "string" ? [v] : typeof v === "number" ? [String(v)] : Array.isArray(v) ? strings(...v) : [],
+  )
 
 export const userPrivateValues = async (from: UserPaths = user) => {
   const [claude, pi, cursor] = await Promise.all([
@@ -134,6 +136,8 @@ export const userPrivateValues = async (from: UserPaths = user) => {
         cursor.exploreSubagentModel,
         field(cursor.authInfo, "email"),
         field(cursor.authInfo, "authId"),
+        field(cursor.authInfo, "displayName"),
+        field(cursor.authInfo, "userId"),
       ).filter((v) => v.length >= 3),
     ),
   ]

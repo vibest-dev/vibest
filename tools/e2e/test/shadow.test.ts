@@ -74,11 +74,20 @@ describe("shadows", () => {
       ".pi/agent/settings.json": { defaultProvider: "pi-provider", defaultModel: "pi-model" },
       ".cursor/cli-config.json": {
         model: { modelId: "cursor-id", displayName: "Cursor Model" },
-        authInfo: { email: "someone@example.com" },
+        authInfo: { email: "someone@example.com", displayName: "Sam Person", userId: 98765432 },
       },
     })
     expect((await userPrivateValues(from)).sort()).toEqual(
-      ["Cursor Model", "claude-pick", "cursor-id", "pi-model", "pi-provider", "someone@example.com"].sort(),
+      [
+        "98765432",
+        "Cursor Model",
+        "Sam Person",
+        "claude-pick",
+        "cursor-id",
+        "pi-model",
+        "pi-provider",
+        "someone@example.com",
+      ].sort(),
     )
   })
 })
