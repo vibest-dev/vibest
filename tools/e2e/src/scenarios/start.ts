@@ -93,8 +93,7 @@ const move = (harness: "claude" | "pi"): Check => ({
     const session = `${w.herdrSession}-move`
     const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
     const env = {}
-    await w.stopDaemon()
-    await w.ok(["daemon"], { env })
+    await w.daemon({ env })
     try {
       await w.ok([...options, "--session", session, "--headless"], { env, timeoutMs: 60_000 })
       let a = ""

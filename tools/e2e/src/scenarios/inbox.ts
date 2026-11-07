@@ -72,8 +72,7 @@ const claudeMain = async (
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const repo = await project(w, name)
   const env = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
-  await w.stopDaemon()
-  await w.ok(["daemon"])
+  await w.daemon()
   await w.ok(["--harness", "claude", ...flags, "--session", session, "--headless"], {
     cwd: repo,
     timeoutMs: 120_000,
@@ -453,8 +452,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await project(w, "held")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-held", model.url)}`
-        await w.stopDaemon()
-        await w.ok(["daemon"])
+        await w.daemon()
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
@@ -512,8 +510,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await project(w, "ids")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-ids", model.url)}`
-        await w.stopDaemon()
-        await w.ok(["daemon"])
+        await w.daemon()
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
@@ -579,8 +576,7 @@ const checks: ReadonlyArray<Check> = [
         })
         expect(hook.code === 0, `herdr integration install pi exited ${hook.code}: ${hook.stderr}${hook.stdout}`)
         const env = `PI_CODING_AGENT_DIR=${dir}`
-        await w.stopDaemon()
-        await w.ok(["daemon"])
+        await w.daemon()
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
@@ -643,8 +639,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await project(w, "s26")
         const pi = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-s26", model.url)}`
-        await w.stopDaemon()
-        await w.ok(["daemon"], { env })
+        await w.daemon({ env })
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", pi], {
           cwd: repo,
           env,

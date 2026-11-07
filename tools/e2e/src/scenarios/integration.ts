@@ -97,8 +97,7 @@ const checks: ReadonlyArray<Check> = [
       const session = `${w.herdrSession}-other`
       try {
         const piEnv = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-other", pi.url)}`
-        await w.stopDaemon()
-        await w.ok(["daemon"], { env })
+        await w.daemon({ env })
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", piEnv], { env, timeoutMs: 90_000 })
         const run = async (flags: ReadonlyArray<string>) =>
           (

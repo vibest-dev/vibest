@@ -273,6 +273,17 @@ export class World {
     }
   }
 
+  async daemon(options: Parameters<World["vibest"]>[1] = {}) {
+    await this.stopDaemon()
+    await this.ok(["daemon"], options)
+  }
+
+  async killDaemon(pid: number | undefined) {
+    expect(pid !== undefined, "no vibestd pid")
+    process.kill(pid!, "SIGKILL")
+    await until("vibestd gone", () => !alive(pid!), 10_000)
+  }
+
   async close() {
     await this.stopDaemon()
     const startedHerdrSession = await fsPromises

@@ -98,8 +98,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await newRepository(w, "files")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-files", pi.url)}`
-        await w.stopDaemon()
-        await w.ok(["daemon"])
+        await w.daemon()
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
@@ -183,8 +182,7 @@ const checks: ReadonlyArray<Check> = [
       const session = `${w.herdrSession}-p7`
       let vibestOwnWorktree = ""
       try {
-        await w.stopDaemon()
-        await w.ok(["daemon"])
+        await w.daemon()
         const pi = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-p7", model.url)}`
         const { id } = JSON.parse(
           await w.ok(["run", "pi", "--session", session, "--env", pi, "--", ask("p7")], {
