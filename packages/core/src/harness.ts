@@ -73,10 +73,8 @@ export interface HarnessAdapter {
 }
 
 export const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
-export const anthropicOnly = (harness: string) => (provider: string | null) =>
-  provider && provider !== "anthropic"
-    ? `${harness} has no provider option; only "anthropic" (or none) is accepted, got "${provider}"`
-    : undefined
+export const noProvider = (harness: string) => (provider: string | null) =>
+  provider ? `${harness} has no provider option` : undefined
 
 export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 

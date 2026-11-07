@@ -637,7 +637,10 @@ const report = Command.make("report", { message: text("message") }, (o) =>
   ),
 )
 
-const providerFlag = Flag.String("provider").pipe(Flag.withDescription("Only this provider's models"), Flag.optional)
+const providerFlag = Flag.String("provider").pipe(
+  Flag.withDescription("Only this provider's models; only Pi has providers, Claude and Cursor refuse any"),
+  Flag.optional,
+)
 const catalog = vibest((client) => client["Harnesses.List"]())
 const modelsOf = (harnesses: ReadonlyArray<HarnessId>, provider: Option.Option<string>) =>
   Effect.gen(function* () {

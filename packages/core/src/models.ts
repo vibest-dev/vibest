@@ -120,8 +120,8 @@ export const catalogModels = (
       continue
     }
     const kept = c.models
-      .map((m) => ({ harness: c.harness, ...m, provider: m.provider ?? provider }))
       .filter((m) => provider === null || m.provider === provider)
+      .map((m) => ({ harness: c.harness, ...m }))
     if (kept.length === 0) errors.push(`${c.harness}: ${adapter.binary} lists no models for provider "${provider}"`)
     models.push(...kept)
   }

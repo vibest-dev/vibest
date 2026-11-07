@@ -6,7 +6,6 @@ import { projectActivity, raisesSeen, unseenDone } from "@vibest/core/activity"
 import { Bus } from "@vibest/core/bus"
 import { APPLICATION_ID, Db, encodeAddress, SCHEMA_VERSION, type SessionRow } from "@vibest/core/db"
 import {
-  anthropicOnly,
   type CoordinatorInput,
   Harness,
   Harnesses,
@@ -15,6 +14,7 @@ import {
   type HarnessId,
   hasNewline,
   type LaunchInput,
+  noProvider,
   harnessCatalog,
   harnessOptions,
   preflight,
@@ -1206,33 +1206,39 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
     assert.isFalse(raisesSeen({ turn: 3, seen: null }, 1.5))
   })
 
-  it("models --provider: a harness whose models name no provider takes the requested one through its checkProvider", () => {
+  it("models --provider: only Pi filters by provider; Claude and Cursor refuse any provider and keep provider null", () => {
     const adapters = {
-      get: (id: HarnessId) => ({
-        binary: id,
-        checkProvider: id === "pi" ? () => undefined : anthropicOnly(id),
-      }),
+      get: (id: HarnessId) => ({ binary: id, checkProvider: id === "pi" ? () => undefined : noProvider(id) }),
     }
     const choices: ReadonlyArray<HarnessChoice> = [
       { harness: "claude", problem: null, models: [{ provider: null, model: "opus", name: "Opus", default: true }] },
-      { harness: "pi", problem: null, models: [{ provider: "openai", model: "gpt", name: "GPT", default: true }] },
+      {
+        harness: "pi",
+        problem: null,
+        models: [
+          { provider: "openai", model: "gpt", name: "GPT", default: true },
+          { provider: "anthropic", model: "sonnet", name: "Sonnet", default: false },
+        ],
+      },
     ]
     assert.deepStrictEqual(catalogModels(choices, adapters, "anthropic"), {
-      models: [{ harness: "claude", provider: "anthropic", model: "opus", name: "Opus", default: true }],
-      errors: ['pi: pi lists no models for provider "anthropic"'],
+      models: [{ harness: "pi", provider: "anthropic", model: "sonnet", name: "Sonnet", default: false }],
+      errors: ["claude: claude has no provider option"],
     })
-    const openai = catalogModels(choices, adapters, "openai")
-    assert.deepStrictEqual(openai.models, [
-      { harness: "pi", provider: "openai", model: "gpt", name: "GPT", default: true },
-    ])
+    assert.deepStrictEqual(catalogModels(choices, adapters, "google"), {
+      models: [],
+      errors: ["claude: claude has no provider option", 'pi: pi lists no models for provider "google"'],
+    })
     assert.deepStrictEqual(
-      openai.errors,
-      [anthropicOnly("claude")("openai")].map((e) => `claude: ${e}`),
+      catalogModels(choices, adapters, null).models.map((m) => [m.harness, m.provider]),
+      [
+        ["claude", null],
+        ["pi", "openai"],
+        ["pi", "anthropic"],
+      ],
     )
-    assert.deepStrictEqual(
-      catalogModels(choices, adapters, null).models.map((m) => m.provider),
-      [null, "openai"],
-    )
+    assert.strictEqual(noProvider("cursor")("anthropic"), "cursor has no provider option")
+    assert.isUndefined(noProvider("cursor")(null))
   })
 
   it.effect("the harness catalog and the start options agree: a harness off PATH has a problem and no models", () =>
