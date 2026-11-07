@@ -28,7 +28,7 @@ const CLI_TIMEOUT = "10 seconds"
 const MACHINE = "local" as const
 
 type Row = Subscription
-type Usage = { readonly limits: ReadonlyArray<SubscriptionLimit> } | { readonly error: string }
+type Usage = { readonly limits: ReadonlyArray<SubscriptionLimit>; readonly error?: string } | { readonly error: string }
 
 const keyOf = (harness: string, provider: string) => `${harness}\0${provider}`
 
@@ -150,10 +150,20 @@ const piProviders = Effect.gen(function* () {
 const usageOf = (
   result: Option.Option<{ readonly status: number; readonly body: unknown }>,
   limits: (body: unknown) => ReadonlyArray<SubscriptionLimit>,
+  error?: string,
 ): Usage =>
   Option.match(result, {
-    onNone: () => ({ error: "usage endpoint failed" }),
-    onSome: (r) => (r.status === 200 ? { limits: limits(r.body) } : { error: `usage endpoint answered ${r.status}` }),
+    onNone: () => {
+      const usageError = "usage endpoint failed"
+      return { error: error === undefined ? usageError : `${error}; ${usageError}` }
+    },
+    onSome: (r) => {
+      if (r.status !== 200) {
+        const usageError = `usage endpoint answered ${r.status}`
+        return { error: error === undefined ? usageError : `${error}; ${usageError}` }
+      }
+      return error === undefined ? { limits: limits(r.body) } : { limits: limits(r.body), error }
+    },
   })
 
 export class Subscriptions extends Context.Service<
@@ -256,6 +266,10 @@ export class Subscriptions extends Context.Service<
         onNone: () => undefined,
         onSome: (r) => (r.status === 200 ? r.body : undefined),
       })
+      const hardError = Option.match(hard, {
+        onNone: () => "GetHardLimit failed",
+        onSome: (r) => (r.status === 200 ? undefined : `GetHardLimit answered ${r.status}`),
+      })
       const usage = yield* endpoint(
         authed(
           HttpClientRequest.bodyJsonUnsafe(
@@ -272,7 +286,7 @@ export class Subscriptions extends Context.Service<
           "cursor",
           "",
           account,
-          usageOf(usage, (body) => cursorUsage(body, hardBody)),
+          usageOf(usage, (body) => cursorUsage(body, hardBody), hardError),
         ),
       )
     })

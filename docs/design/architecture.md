@@ -648,11 +648,12 @@ crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin
 failed with the plugin error, no move). Nothing is skipped silently.
 
 **The default harness choice** (`@vibest/plugin-harness-choice`, id `harness-choice`; the product loads it first, before the
-runtime plugins and user plugins): left alone, a
-caller's usable harness preference stands (and a free login is picked when the provider is unset); anything
-else is routed to the available harness with the most quota left, and a start with no harness any plugin could
-run is refused naming each harness's problem. On `agent.fail` with reason `limited` and `move` still unset, it
-moves to the best harness that is neither limited nor already tried.
+runtime plugins and user plugins): an explicit harness is never replaced. A usable one stands (and a free
+login is picked when the provider is unset); one that cannot run refuses the start, naming that harness and the
+cause (its preflight error, or each exhausted subscription limit and its reset time). Only `auto` (no harness
+named) is routed to the available harness with the most quota left, and a start no harness can run is refused
+naming each harness's problem. On `agent.fail` with reason `limited` and `move` still unset, it leaves the move
+unset: the round fails naming that harness and each exhausted limit with its reset time, and nothing else starts.
 
 **Plugin API facts** (`@vibest/plugin`): vibestd maps this module and `effect` to its own instances when it loads a
 plugin, so a plugin imports both normally and bundles neither. A plugin's `effect` runs once per load in the plugin's
@@ -854,16 +855,16 @@ the launch was about to send, else the trailing delivered batch) — on the harn
 `event.move`. Before each candidate starts, the move runs the `agent.start.before` chain with the move's
 harness/provider/model and the session's real attempts prefilled: a refusal skips that candidate (recorded as a
 `refused` try), and what the chain decides — including a rewritten harness or prompt — is what gets patched and
-started, so a start policy plugin governs a moved Agent exactly like a first start. The default choice moves to
-the available harness with the most quota left that is neither limited nor already tried; nothing left ends the
-round failed, naming what ran out. The pairs that already hit a limit are remembered per (harness, provider) in
+started, so a start policy plugin governs a moved Agent exactly like a first start. The default choice does not
+move: with `move` still unset the round fails, naming that harness and each exhausted limit with its reset time,
+and no other harness starts. A plugin may still set `move`. The pairs that already hit a limit are remembered per (harness, provider) in
 `process.end` events with reason `limited` (joined to their `process.start`), so they survive moves and a vibestd
 restart. Within one round (since its turn started; for a launch's own limit, since the last turn ended or the
 session began) vibest never moves to a pair that hit a limit in it, whatever that login's usage reading says now:
 a round that hit limits on every login it may use fails instead of cycling, and a later round may use such a login
 again once its reading is free. A preflight miss, or a start or prompt that fails, is not a limit — the next move
-may use that harness again. A login already limited before start is `agent.start.before`'s to avoid (the builtin
-does), never a move's.
+may use that harness again. A login already limited before start is `agent.start.before`'s: a named harness is
+refused with that limit, and only `auto` chooses another. A move does not.
 
 How the move runs (`move.ts`, under the session's lock): a choice the chains already ruled out (an unknown harness,
 a login limited in this round, a harness this move skipped) ends the move, since asking the same plugins again cannot
@@ -882,7 +883,8 @@ agent running, so check keeps polling it.
 The default choice ranks a harness by its emptiest non-limited, non-excluded login (the lowest fullest usage window;
 a login that reported no window scores -1) and starts on that login, so the harness's own default cannot be its limited
 one. A harness with no known logins is available but ranks after every harness whose quota is known, unless exactly
-that pair was tried. A caller who named a limited login does not get another login of that harness. A move does not
+that pair was tried. A named harness is not ranked: if it or its named login cannot run, the start is refused
+with that cause and nothing else is chosen. A move does not
 carry the model named for the old harness, which the new one would not list: the move starts on the new harness's
 default. The memory of tried pairs is per harness when no login was named and per login when one was.
 

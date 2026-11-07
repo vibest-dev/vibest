@@ -8,7 +8,7 @@ import { Layout } from "@vibest/core/paths"
 import { AgentRefused } from "@vibest/core/plugins"
 import { peerAdmitPause, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin"
+import { AgentRefused as PluginRefused, isLimited, Plugin, stillLimited } from "@vibest/plugin"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID } from "@vibest/schema/id"
 import {
@@ -310,7 +310,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "spawn with no harness any plugin could run is refused with each harness's problem",
+    "an explicit harness whose plugin is missing is refused with that problem",
     Effect.gen(function* () {
       const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
         Effect.filterOrFail(
@@ -319,8 +319,8 @@ describe.concurrent("Sessions", () => {
         ),
       )
       assert.deepInclude(refused, { plugin: "harness-choice" })
-      assert.include(refused.reason, "no harness available: pi: vibest's pi plugin is missing")
-      assert.include(refused.reason, "claude: vibest's claude plugin is missing")
+      assert.include(refused.reason, "pi: vibest's pi plugin is missing")
+      assert.strictEqual(refused.reason.includes("claude"), false)
     }),
     { hooked: [] },
   )
@@ -1059,34 +1059,100 @@ describe.concurrent("Sessions", () => {
 
   const limited = { window: "5h", percent: 100, status: "limited" as const, resetTime: null }
 
+  const chooseNext = Plugin.define({
+    id: "choose-next",
+    effect: (ctx) =>
+      ctx.agent.hook("fail", (event) =>
+        Effect.sync(() => {
+          if (event.reason !== "limited" || event.move !== undefined) return
+          const pair = (harness: string, provider: string) => `${harness}\0${provider}`
+          const excludedPairs = new Set<string>()
+          const excludedHarnesses = new Set(event.attempts.filter((a) => a.outcome !== "limited").map((a) => a.harness))
+          for (const attempt of event.attempts) {
+            if (attempt.outcome !== "limited") continue
+            if (attempt.provider === undefined) excludedHarnesses.add(attempt.harness)
+            else if (stillLimited(attempt, event.subscriptions))
+              excludedPairs.add(pair(attempt.harness, attempt.provider))
+          }
+          if (event.provider === undefined) excludedHarnesses.add(event.harness)
+          else excludedPairs.add(pair(event.harness, event.provider))
+          const fullest = (row: (typeof event.subscriptions)[number]) =>
+            row.limits.reduce((max, limit) => Math.max(max, limit.percent), -1)
+          const known: Array<{ harness: string; provider: string | undefined; score: number }> = []
+          const unknown: Array<string> = []
+          for (const option of event.harnesses) {
+            if (!option.available || excludedHarnesses.has(option.harness)) continue
+            const rows = event.subscriptions.filter(
+              (row) =>
+                row.harness === option.harness &&
+                !isLimited(row) &&
+                !excludedPairs.has(pair(option.harness, row.provider)),
+            )
+            if (rows.length === 0) {
+              if (
+                event.subscriptions.every((row) => row.harness !== option.harness) &&
+                !excludedPairs.has(pair(option.harness, ""))
+              )
+                unknown.push(option.harness)
+              continue
+            }
+            const row = rows.reduce((a, b) => (fullest(a) <= fullest(b) ? a : b))
+            known.push({
+              harness: option.harness,
+              provider: row.provider === "" ? undefined : row.provider,
+              score: fullest(row),
+            })
+          }
+          const picked = known.length > 0 ? known.reduce((a, b) => (a.score <= b.score ? a : b)) : undefined
+          const fallback = unknown[0]
+          const chosen = picked ?? (fallback === undefined ? undefined : { harness: fallback, provider: undefined })
+          if (chosen !== undefined) event.move = chosen
+        }),
+      ),
+  })
+
   test(
-    "a forced limit moves the subagent to another harness and its result reaches the parent",
+    "a usage-limit failure of a running session reports the limit and starts nothing else",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const sql = yield* SqlClient.SqlClient
-      yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
-      const repo = yield* makeRepository
-      const { id, sessions, db } = yield* spawnWorking(repo)
-      const moved = (yield* db.getSession(id))!
-      assert.strictEqual(moved.harnessId, "claude")
-      assert.strictEqual(moved.turnState, "open")
-      assert.isTrue((yield* herdr.callsTo("open")).at(-1)!.argv.includes("--plugin-dir"))
-      assert.include((yield* herdr.callsTo("send")).at(-1)!.text, "do it")
-      assert.strictEqual((yield* herdr.callsTo("open"))[0]!.cwd, yield* sessionWorktree(id))
-      assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
-      const tasks = yield* sql<{
-        n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ${id} AND kind IN ('task', 'send')`.pipe(
-        Effect.orDie,
-      )
-      assert.strictEqual(tasks[0]!.n, 1)
-
-      yield* writeResult(id, "claude", { last_assistant_message: "status: completed\nsummary: moved" })
+      const resetTime = Date.parse("2099-01-01T00:00:00.000Z")
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      yield* (yield* Subscriptions).report({
+        harness: "pi",
+        limits: [{ window: "5h", percent: 100, status: "limited", resetTime }],
+      })
+      yield* writeResult(id, "pi", { error: "rate_limit" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      const result = (yield* db.coordinatorPending(moved.projectId)).find((row) => row.kind === "result")
-      assert.include(result!.message, "moved")
-      assert.notInclude(result!.message, "usage limit")
+      const row = (yield* db.getSession(id))!
+      assert.strictEqual(row.harnessId, "pi")
+      assert.strictEqual(row.turnState, "failed")
+      assert.include(
+        (yield* db.latestInbox(id, "result"))!.message,
+        `pi: 5h limit exhausted, resets ${new Date(resetTime).toISOString()}`,
+      )
+      assert.deepStrictEqual(
+        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
+        ["pi"],
+      )
+    }),
+  )
+
+  test(
+    "an explicit harness limited before start is refused with that limit and starts nothing",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db
+      yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
+      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
+        Effect.filterOrFail(
+          (e): e is AgentRefused => e._tag === "AgentRefused",
+          () => new Error("not refused"),
+        ),
+      )
+      assert.deepInclude(refused, { plugin: "harness-choice", reason: "pi: 5h limit exhausted, no reset time" })
+      assert.strictEqual(yield* herdr.callCount, 0)
+      assert.deepStrictEqual(yield* db.listSessions(), [])
     }),
   )
 
@@ -1113,6 +1179,7 @@ describe.concurrent("Sessions", () => {
       assert.include(prompt, "learned before the move")
       assert.notInclude(prompt, "stale text")
     }),
+    { plugins: [chooseNext] },
   )
 
   test(
@@ -1174,7 +1241,7 @@ describe.concurrent("Sessions", () => {
       )
       assert.strictEqual(linked[0]!.inbox, open[0]!.inbox)
     }),
-    { noRun: true },
+    { noRun: true, plugins: [chooseNext] },
   )
 
   test(
@@ -1247,7 +1314,7 @@ describe.concurrent("Sessions", () => {
       assert.isNull(row.exitedAt)
       assert.include((yield* db.latestInbox(id, "result"))!.message, "closing its terminal failed")
     }),
-    { noRun: true },
+    { noRun: true, plugins: [chooseNext] },
   )
 
   test(
@@ -1277,7 +1344,7 @@ describe.concurrent("Sessions", () => {
         ["pi", "claude", "cursor", "claude"],
       )
     }),
-    { noRun: true },
+    { noRun: true, plugins: [chooseNext] },
   )
 
   type FailSeen = Array<{ parent: string | undefined; attempts: ReadonlyArray<[string, string]> }>
@@ -1299,7 +1366,8 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(row.turnState, "failed")
       assert.isNull(row.exitedAt)
       const message = (yield* db.latestInbox(id, "result"))!.message
-      assert.include(message, "pi, cursor hit a usage limit")
+      assert.include(message, "cursor: rate_limit")
+      assert.strictEqual(message.includes("claude"), false)
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "cursor"],
@@ -1309,6 +1377,7 @@ describe.concurrent("Sessions", () => {
       noRun: true,
       unusable: ["claude"],
       plugins: [
+        chooseNext,
         Plugin.define({
           id: "see-again",
           effect: (ctx) =>
@@ -1353,6 +1422,7 @@ describe.concurrent("Sessions", () => {
         [["completed", true]],
       )
     }),
+    { plugins: [chooseNext] },
   )
 
   test(
@@ -1419,6 +1489,44 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a refused move target is named as tried and not started",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, db } = yield* spawnWorking(yield* makeRepository)
+      yield* writeResult(id, "pi", { error: "rate_limit" })
+      yield* herdr.endTurn(id)
+      yield* (yield* Sessions).check(id)
+      const row = (yield* db.getSession(id))!
+      assert.strictEqual(row.harnessId, "pi")
+      assert.strictEqual(row.turnState, "failed")
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "claude tried and did not start")
+      assert.deepStrictEqual(
+        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
+        ["pi"],
+      )
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "refuse-claude",
+          effect: (ctx) =>
+            Effect.gen(function* () {
+              yield* ctx.agent.hook("start.before", (event) =>
+                event.harness === "claude" ? Effect.fail(new PluginRefused({ reason: "no claude" })) : Effect.void,
+              )
+              yield* ctx.agent.hook("fail", (event) =>
+                Effect.sync(() => {
+                  if (!event.attempts.some((attempt) => attempt.harness === "claude"))
+                    event.move = { harness: "claude" }
+                }),
+              )
+            }),
+        }),
+      ],
+    },
+  )
+
+  test(
     "a plugin that unsets the move keeps the still-running agent listed with one failed result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -1438,7 +1546,7 @@ describe.concurrent("Sessions", () => {
       assert.isTrue(HashMap.has(yield* herdr.panes, pane))
       assert.strictEqual(harnessOf((yield* herdr.callsTo("open"))[0]!.argv), "pi")
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
-      assert.include((yield* db.latestInbox(id, "result"))!.message, "no harness left")
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "pi: rate_limit")
       const results = yield* sql<{
         n: number
       }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'result'`.pipe(Effect.orDie)
@@ -1478,8 +1586,8 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(row.turnState, "failed")
       assert.isNull(row.exitedAt)
       const message = (yield* db.latestInbox(id, "result"))!.message
-      assert.include(message, "no harness left")
-      assert.include(message, "(claude, cursor, pi limited)")
+      assert.include(message, "pi: 5h limit exhausted, no reset time")
+      assert.strictEqual(message.includes("claude"), false)
       assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
@@ -1503,7 +1611,7 @@ describe.concurrent("Sessions", () => {
       assert.lengthOf(closes, 2)
       assert.isFalse(HashMap.has(yield* herdr.panes, closes[1]!))
       assert.isFalse((yield* herdr.agent(id))!.agent.alive)
-      assert.include((yield* db.latestInbox(id, "result"))!.message, "no harness left")
+      assert.include((yield* db.latestInbox(id, "result"))!.message, "rate_limit")
       assert.isNotNull((yield* db.getSession(id))!.exitedAt)
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
@@ -1588,15 +1696,25 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "pi with no provider moves before start when every pi login is limited",
+    "an explicit harness is refused when every login is limited",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
+      const db = yield* Db
       const subs = yield* Subscriptions
       yield* subs.report({ harness: "pi", provider: "anthropic", limits: [limited] })
       yield* subs.report({ harness: "pi", provider: "openai", limits: [limited] })
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      assert.deepInclude(yield* db.getSession(id), { harnessId: "claude", provider: null, turnState: "open" })
-      assert.isTrue((yield* herdr.callsTo("open")).at(-1)!.argv.includes("--plugin-dir"))
+      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
+        Effect.filterOrFail(
+          (e): e is AgentRefused => e._tag === "AgentRefused",
+          () => new Error("not refused"),
+        ),
+      )
+      assert.strictEqual(
+        refused.reason,
+        "pi/anthropic: 5h limit exhausted, no reset time; pi/openai: 5h limit exhausted, no reset time",
+      )
+      assert.strictEqual(yield* herdr.callCount, 0)
+      assert.deepStrictEqual(yield* db.listSessions(), [])
     }),
   )
 
@@ -1615,17 +1733,20 @@ describe.concurrent("Sessions", () => {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
-      const blocked = yield* sessions.spawn({ ...(yield* spawnInput(repo)), provider: "anthropic" })
-      yield* until(db.getSession(blocked.id), (row) => !!row && (row.harnessId !== "pi" || row.startedAt !== null))
-      yield* sessions.check(blocked.id)
-      assert.strictEqual((yield* db.getSession(blocked.id))!.harnessId, "claude")
+      const blocked = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), provider: "anthropic" })).pipe(
+        Effect.filterOrFail(
+          (e): e is AgentRefused => e._tag === "AgentRefused",
+          () => new Error("not refused"),
+        ),
+      )
+      assert.strictEqual(blocked.reason, "pi/anthropic: 5h limit exhausted, no reset time")
       const fine = yield* sessions.spawn({ ...(yield* spawnInput(repo)), provider: "openai", name: "other" })
       yield* until(db.getSession(fine.id), (row) => !!row && row.startedAt !== null)
       yield* sessions.check(fine.id)
       assert.deepInclude(yield* db.getSession(fine.id), { harnessId: "pi", provider: "openai", turnState: "open" })
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["claude", "pi"],
+        ["pi"],
       )
     }),
   )
@@ -1675,7 +1796,7 @@ describe.concurrent("Sessions", () => {
         ["pi", "claude", "cursor", "claude"],
       )
     }),
-    { noRun: true },
+    { noRun: true, plugins: [chooseNext] },
   )
 
   test(
@@ -1720,32 +1841,31 @@ describe.concurrent("Sessions", () => {
         "add tests\n\nand docs",
       )
     }),
+    { plugins: [chooseNext] },
   )
 
   test(
-    "a plugin that forces a limited login at start gets what it asked for: no pre-start move",
+    "an explicit limited harness is refused before a later plugin can replace it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
+      const db = yield* Db
       yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "pi")
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi"],
+      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
+        Effect.filterOrFail(
+          (e): e is AgentRefused => e._tag === "AgentRefused",
+          () => new Error("not refused"),
+        ),
       )
-      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
+      assert.deepInclude(refused, { plugin: "harness-choice", reason: "pi: 5h limit exhausted, no reset time" })
+      assert.strictEqual(yield* herdr.callCount, 0)
+      assert.deepStrictEqual(yield* db.listSessions(), [])
     }),
     {
       plugins: [
         Plugin.define({
           id: "rewrite",
           effect: (ctx) =>
-            ctx.agent.hook("start.before", (e) =>
-              Effect.sync(() => {
-                e.harness = "pi"
-              }),
-            ),
+            ctx.agent.hook("start.before", () => Effect.sync(() => assert.fail("must not run after a refusal"))),
         }),
       ],
     },
@@ -1782,6 +1902,7 @@ describe.concurrent("Sessions", () => {
         ["pi", "claude"],
       )
     }),
+    { plugins: [chooseNext] },
   )
 
   test(
@@ -1861,7 +1982,7 @@ describe.concurrent("Sessions", () => {
       assert.deepInclude(yield* db.getSession(other.id), { harnessId: "pi", provider: "zai", turnState: "open" })
       assert.notInclude((yield* herdr.callsTo("open")).at(-1)!.argv, "--provider")
     }),
-    { noRun: true },
+    { noRun: true, plugins: [chooseNext] },
   )
 
   test(
@@ -1890,6 +2011,7 @@ describe.concurrent("Sessions", () => {
     }),
     {
       plugins: [
+        chooseNext,
         Plugin.define({
           id: "zai-only",
           effect: (ctx) =>
@@ -1999,6 +2121,7 @@ describe.concurrent("Sessions", () => {
     {
       unusable: ["cursor"],
       plugins: [
+        chooseNext,
         Plugin.define({
           id: "cursor-only",
           effect: (ctx) =>
@@ -2030,6 +2153,7 @@ describe.concurrent("Sessions", () => {
     {
       noRun: true,
       plugins: [
+        chooseNext,
         Plugin.define({
           id: "no-claude",
           effect: (ctx) =>
@@ -2070,6 +2194,7 @@ describe.concurrent("Sessions", () => {
     }),
     {
       plugins: [
+        chooseNext,
         Plugin.define({
           id: "see-move",
           effect: (ctx) =>
@@ -2123,7 +2248,7 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(results[0]!.n, 1)
       assert.deepStrictEqual(yield* sqlNotices(id), [])
     }),
-    { noRun: true },
+    { noRun: true, plugins: [chooseNext] },
   )
 
   test(

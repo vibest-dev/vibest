@@ -28,8 +28,31 @@ export interface SubscriptionSnapshot {
   readonly error?: string | undefined
 }
 
-export const isLimited = (row: { readonly limits: ReadonlyArray<{ readonly status: string }> }) =>
-  row.limits.some((l) => l.status === "limited")
+type LimitWindow = {
+  readonly status: string
+  readonly resetTime?: number | null
+  readonly window?: string
+}
+
+const resetPassed = (resetTime: number | null | undefined, now: number) =>
+  typeof resetTime === "number" && resetTime <= now
+
+const bucketWindow = (window: string | undefined) => window === "monthly-auto" || window === "monthly-api"
+
+const countsAsLimited = (limit: LimitWindow, now: number) =>
+  limit.status === "limited" && !bucketWindow(limit.window) && !resetPassed(limit.resetTime, now)
+
+export const isLimited = (row: { readonly limits: ReadonlyArray<LimitWindow> }, now = Date.now()) =>
+  row.limits.some((limit) => countsAsLimited(limit, now))
+
+export const exhaustedText = (limits: ReadonlyArray<LimitWindow & { readonly window: string }>, now = Date.now()) =>
+  limits
+    .filter((limit) => countsAsLimited(limit, now))
+    .map((limit) => {
+      const reset = limit.resetTime == null ? "no reset time" : `resets ${new Date(limit.resetTime).toISOString()}`
+      return `${limit.window} limit exhausted, ${reset}`
+    })
+    .join("; ")
 
 export const stillLimited = (
   attempt: { readonly harness: string; readonly provider: string | undefined; readonly at: number },
