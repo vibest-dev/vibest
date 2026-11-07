@@ -912,7 +912,7 @@ export class Sessions extends Context.Service<
           }
           if (!(yield* Ref.getAndSet(r.launchRechecked, true)))
             yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkLocked(id))
-        }
+        } else yield* Ref.set(r.launchRechecked, false)
         if (!harnesses.get(session.harnessId).ownSessionId && h.session !== undefined) {
           const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
           if (sessionId !== null && sessionId !== session.harnessSessionId)

@@ -249,6 +249,30 @@ describe("runtime-herdr-core against a fake core", () => {
   )
 
   live(
+    "a foreground that leaves the shell clears vibest.typed, so a later shell is not a pending launch",
+    Effect.gen(function* () {
+      const core = yield* fakeCore
+      const sub = yield* core.follow
+      yield* core.runtime.run!(core.terminal, ["echo", "hi"])
+      assert.notStrictEqual((yield* Ref.get(core.labels))[LABEL.typed], "")
+      yield* sub.push(foregroundEvent(1, sleeping))
+      const cleared = yield* Effect.gen(function* () {
+        const deadline = Date.now() + 2_000
+        for (;;) {
+          if ((yield* Ref.get(core.labels))[LABEL.typed] === "") return true
+          if (Date.now() > deadline) return false
+          yield* Effect.sleep("20 millis")
+        }
+      })
+      assert.isTrue(cleared)
+      yield* Ref.set(core.foreground, shell)
+      assert.isFalse((yield* core.runtime.process(core.terminal)).running)
+      const restarted = yield* make({ connect: core.connect, socket: core.socketPath, scope: yield* Effect.scope })
+      assert.isFalse((yield* restarted.process(core.terminal)).running)
+    }),
+  )
+
+  live(
     "run types into a busy terminal only after the foreground event back to its shell",
     Effect.gen(function* () {
       const core = yield* fakeCore

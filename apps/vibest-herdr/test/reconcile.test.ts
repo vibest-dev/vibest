@@ -212,6 +212,64 @@ describe("reconcile: a terminal whose agent has not started", () => {
       assert.isNull((yield* db.getSession(id))!.exitedAt)
     }),
   )
+
+  test(
+    "a known state clears the one re-check, so a later pending launch is looked at again",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const id = "eeeeeeee-eeee-4eee-8eee-000000000001"
+      const terminal = "w8:again"
+      yield* herdr.addPane(terminal, "w8", repo)
+      yield* db.insertSession(
+        {
+          id,
+          agent: "general",
+          name: "again",
+          harnessId: "pi",
+          provider: null,
+          model: null,
+          harnessSessionId: null,
+          runtime: TEST_HERDR,
+          address: { machine: "local", id: terminal },
+          status: "unknown",
+          startedAt: 1,
+          exitedAt: null,
+          turnState: "open",
+          turnPromptedAt: 1,
+          metadata: {},
+          createdAt: 1,
+          lastActive: 1,
+        },
+        projectId,
+        undefined,
+        repo,
+      )
+      const reads = () =>
+        Effect.gen(function* () {
+          const state = (yield* herdr.callsTo("state")).filter((call) => call.terminal === terminal).length
+          const process = (yield* herdr.callsTo("process")).filter((call) => call.terminal === terminal).length
+          return state + process
+        })
+      const sessions = yield* Sessions.make({ maxSessions: undefined })
+      yield* until(reads(), (n) => n >= 2)
+      yield* settled
+      yield* TestClock.adjust(START_TIMEOUT)
+      yield* until(reads(), (n) => n >= 4)
+      yield* settled
+      const spent = yield* reads()
+      yield* herdr.seedAgent(terminal)
+      yield* sessions.check(id)
+      yield* herdr.addPane(terminal, "w8", repo)
+      yield* sessions.check(id)
+      yield* TestClock.adjust(START_TIMEOUT)
+      yield* until(reads(), (n) => n > spent)
+      yield* settled
+      assert.isNull((yield* db.getSession(id))!.exitedAt)
+    }),
+  )
 })
 
 describe("reconcile: one look at every live session at start, when a runtime registers, and on live.reset; nothing reads a runtime in between", () => {

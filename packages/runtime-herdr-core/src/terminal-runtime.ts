@@ -36,11 +36,12 @@ export const shellTypedRecently = (
   labels: Readonly<Record<string, string>> | undefined,
   atShellNow: boolean,
   now: number,
+  windowMs: number,
 ): boolean => {
   if (!atShellNow) return false
   const typed = labels?.[LABEL.typed]
   if (typed === undefined || !/^\d+$/.test(typed)) return false
-  return now - Number(typed) < TYPED_LAUNCH_MS
+  return now - Number(typed) < windowMs
 }
 
 const SEEN_EVENTS = new Set(["turn", "labels"])
@@ -130,9 +131,11 @@ export const make = (deps: {
   readonly connect: (socketPath: string) => HcShape
   readonly socket: string
   readonly scope: Scope.Scope
+  readonly typedLaunch?: Duration.Input
 }): Effect.Effect<Runtime> =>
   Effect.gen(function* () {
     const { connect, scope } = deps
+    const typedLaunchMs = Duration.toMillis(deps.typedLaunch ?? Duration.millis(TYPED_LAUNCH_MS))
     const events = yield* PubSub.unbounded<RuntimeEvent>()
     const cores = new Map<string, Core>()
     const home = connect(deps.socket)
@@ -189,7 +192,9 @@ export const make = (deps: {
       if (type === "foreground") {
         if (!atShell(data as api.Foreground)) {
           core.busy.add(terminal)
-          return Effect.void
+          return core.hc
+            .call("terminal.label", { terminal, labels: { [LABEL.typed]: "" } })
+            .pipe(Effect.asVoid, Effect.ignore)
         }
         return core.busy.has(terminal) ? exited(socket, core, terminal) : wake(core, terminal)
       }
@@ -340,7 +345,7 @@ export const make = (deps: {
               ? { running: false }
               : { running: false, exitCode: t.exit_code }
           if (!atShell(t.foreground)) return { running: true }
-          return { running: shellTypedRecently(t.labels, true, Date.now()) }
+          return { running: shellTypedRecently(t.labels, true, Date.now(), typedLaunchMs) }
         }),
       )
 

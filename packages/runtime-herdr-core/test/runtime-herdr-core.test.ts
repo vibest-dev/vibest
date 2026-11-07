@@ -57,7 +57,12 @@ const withRuntime = <A, E>(
     const connector = yield* SocketConnector
     const connect = (at: string) => Effect.runSync(Hc.make(at).pipe(Effect.provideService(SocketConnector, connector)))
     const hc = connect(socketPath)
-    const runtime = yield* make({ connect, socket: socketPath, scope: yield* Effect.scope })
+    const runtime = yield* make({
+      connect,
+      socket: socketPath,
+      scope: yield* Effect.scope,
+      typedLaunch: "2 seconds",
+    })
     return yield* body(runtime, hc)
   }).pipe(Effect.scoped, Effect.provide(HcBun.layer))
 
@@ -74,8 +79,8 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
 
   it.live(
     "passes the shared runtime contract",
-    () => withRuntime((runtime) => runtimeContract(runtime, { cwd: fs.realpathSync(root), timeout: "150 seconds" })),
-    200_000,
+    () => withRuntime((runtime) => runtimeContract(runtime, { cwd: fs.realpathSync(root), timeout: "30 seconds" })),
+    120_000,
   )
 
   it.live(
@@ -182,7 +187,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
   )
 
   it.live(
-    "labels a main agent's terminal for herdr-app and keeps the shell running while vibest.typed is fresh",
+    "labels a main agent's terminal for herdr-app and reports the typed program's exit",
     () =>
       withRuntime((runtime, hc) =>
         Effect.gen(function* () {
@@ -208,7 +213,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           })
           yield* runtime.run!(main, ["sleep", "1"])
           yield* until(Ref.get(seen), (all) => all.includes(`exited:${main.id}`), "no exited event after sleep ended")
-          assert.isTrue((yield* runtime.process(main)).running)
+          assert.isFalse((yield* runtime.process(main)).running)
           yield* runtime.close(main)
         }),
       ),
