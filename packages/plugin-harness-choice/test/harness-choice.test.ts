@@ -45,13 +45,20 @@ const start = (overrides: Partial<AgentStartBefore>): AgentStartBefore => ({
   ...overrides,
 })
 
-const limitedClaude: SubscriptionSnapshot = {
-  harness: "claude",
+const resetTime = Date.parse("2099-01-01T00:00:00.000Z")
+
+const limitedCursor: SubscriptionSnapshot = {
+  harness: "cursor",
   provider: "",
   machine: "local",
   account: { kind: "subscription" },
-  limits: [{ window: "5h", percent: 100, status: "limited", resetTime: null }],
+  limits: [{ window: "monthly", percent: 100, status: "limited", resetTime }],
   updatedAt: 0,
+}
+
+const reasonOf = (error: unknown) => {
+  assert.deepInclude(error as { _tag: string }, { _tag: "AgentRefused" })
+  return (error as { reason: string }).reason
 }
 
 describe("harness choice", () => {
@@ -64,13 +71,80 @@ describe("harness choice", () => {
     }).pipe(Effect.scoped),
   )
 
-  it.effect("rerouting off a limited harness drops the model named for it", () =>
+  it.effect("an explicit unavailable harness fails with its reason and starts nothing", () =>
     Effect.gen(function* () {
       const hook = yield* startHook
-      const event = start({ harness: "claude", model: "claude-opus-5-5", subscriptions: [limitedClaude] })
+      const event = start({
+        harness: "cursor",
+        model: "composer",
+        harnesses: [
+          { harness: "pi", available: true },
+          { harness: "claude", available: true },
+          { harness: "cursor", available: false, problem: "cursor model discovery failed: Not logged in" },
+        ],
+      })
+      const reason = reasonOf(yield* Effect.flip(hook(event)))
+      assert.strictEqual(reason, "cursor: cursor model discovery failed: Not logged in")
+      assert.deepStrictEqual([event.harness, event.provider, event.model], ["cursor", undefined, "composer"])
+    }).pipe(Effect.scoped),
+  )
+
+  it.effect("an explicit harness is not refused when its limit reset has passed", () =>
+    Effect.gen(function* () {
+      const hook = yield* startHook
+      const event = start({
+        harness: "cursor",
+        model: "composer",
+        subscriptions: [
+          {
+            ...limitedCursor,
+            limits: [{ window: "monthly", percent: 100, status: "limited", resetTime: Date.now() - 1_000 }],
+          },
+        ],
+      })
+      yield* hook(event)
+      assert.deepStrictEqual([event.harness, event.model], ["cursor", "composer"])
+    }).pipe(Effect.scoped),
+  )
+
+  it.effect("an exhausted cursor auto bucket does not refuse the harness", () =>
+    Effect.gen(function* () {
+      const hook = yield* startHook
+      const event = start({
+        harness: "cursor",
+        model: "composer",
+        subscriptions: [
+          {
+            ...limitedCursor,
+            limits: [
+              { window: "monthly", percent: 30, status: "available", resetTime },
+              { window: "monthly-auto", percent: 100, status: "limited", resetTime },
+              { window: "monthly-api", percent: 20, status: "available", resetTime },
+            ],
+          },
+        ],
+      })
+      yield* hook(event)
+      assert.deepStrictEqual([event.harness, event.model], ["cursor", "composer"])
+    }).pipe(Effect.scoped),
+  )
+
+  it.effect("an explicit limited harness fails with the limit", () =>
+    Effect.gen(function* () {
+      const hook = yield* startHook
+      const event = start({ harness: "cursor", model: "composer", subscriptions: [limitedCursor] })
+      const reason = reasonOf(yield* Effect.flip(hook(event)))
+      assert.strictEqual(reason, `cursor: monthly limit exhausted, resets ${new Date(resetTime).toISOString()}`)
+      assert.deepStrictEqual([event.harness, event.provider, event.model], ["cursor", undefined, "composer"])
+    }).pipe(Effect.scoped),
+  )
+
+  it.effect("auto still picks an available harness", () =>
+    Effect.gen(function* () {
+      const hook = yield* startHook
+      const event = start({ subscriptions: [limitedCursor] })
       yield* hook(event)
       assert.strictEqual(event.harness, "pi")
-      assert.strictEqual(event.model, undefined)
     }).pipe(Effect.scoped),
   )
 })

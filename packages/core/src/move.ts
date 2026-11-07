@@ -1,5 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin"
-import { isLimited, stillLimited } from "@vibest/plugin"
+import { exhaustedText, isLimited, stillLimited } from "@vibest/plugin"
 import type { Subscription } from "@vibest/schema/subscription"
 import { Cause, Clock, Context, Crypto, Effect, Exit, FileSystem, Path } from "effect"
 import { ChildProcessSpawner } from "effect/process"
@@ -22,6 +22,23 @@ export interface LimitMove {
     ownsTerminal: boolean,
     error: string,
   ) => Effect.Effect<boolean>
+}
+
+const limitFailure = (
+  rows: ReadonlyArray<Subscription>,
+  harness: string,
+  provider: string | undefined,
+  error: string,
+) => {
+  const text = rows
+    .filter((row) => row.harness === harness && (provider === undefined || row.provider === provider) && isLimited(row))
+    .map((row) => {
+      const who = row.provider === "" ? harness : `${harness}/${row.provider}`
+      return `${who}: ${exhaustedText(row.limits)}`
+    })
+    .join("; ")
+  const named = provider === undefined || provider === "" ? harness : `${harness}/${provider}`
+  return text === "" ? `${named}: ${error}` : text
 }
 
 export const limitMoveBox = (): {
@@ -231,6 +248,14 @@ export const sessionMove = (deps: {
         })
         .pipe(Effect.exit)
       if (Exit.isFailure(decided)) return yield* giveUp(`${yield* left()}: ${errorMessage(decided.cause)}`)
+      if (decided.value.move === undefined) {
+        const why = limitFailure(rows, row.harnessId, row.provider ?? undefined, error)
+        const tried =
+          skipped.length === 0
+            ? ""
+            : `; ${skipped.map((attempt) => attempt.harness).join(", ")} tried and did not start`
+        return yield* giveUp(`${why}${tried}`)
+      }
       if (ruledOut(decided.value.move, rows)) return yield* giveUp(yield* left())
       const move = decided.value.move!
       const decidedStart = yield* plugins

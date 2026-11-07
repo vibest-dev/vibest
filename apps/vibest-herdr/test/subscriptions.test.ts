@@ -73,6 +73,7 @@ const fakeMachine = (options: {
   readonly commandsThatNeverExit?: ReadonlyArray<string>
   readonly passwords?: Readonly<Record<string, string>>
   readonly http?: Readonly<Record<string, { readonly status: number; readonly body: unknown }>>
+  readonly httpHang?: ReadonlyArray<string>
   readonly home: string
 }) => {
   const spawned: Array<Spawned> = []
@@ -92,6 +93,7 @@ const fakeMachine = (options: {
       url: request.url,
       authorization: Option.getOrUndefined(Headers.get(request.headers, "authorization")),
     })
+    if ((options.httpHang ?? []).includes(request.url)) return Effect.never
     const hit = options.http?.[request.url] ?? { status: 599, body: {} }
     return Effect.succeed(
       HttpClientResponse.fromWeb(request, new Response(JSON.stringify(hit.body), { status: hit.status })),
@@ -352,6 +354,72 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       assert.include(rows[0]?.error, "Library/Keychains")
       assert.deepStrictEqual(fake.spawned, [])
       assert.deepStrictEqual(fake.requests, [])
+    }),
+  )
+
+  it.effect("a failed GetHardLimit is an error and does not mark Cursor limited", () =>
+    Effect.gen(function* () {
+      const fake = fakeMachine({
+        installed: ["cursor"],
+        home: yield* home,
+        commands: {
+          "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
+          "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
+        },
+        passwords: { [CURSOR_ACCESS_TOKEN]: CURSOR_SECRET },
+        http: {
+          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage": {
+            status: 200,
+            body: {
+              billingCycleEnd: "1794886804000",
+              planUsage: { totalPercentUsed: 100, autoPercentUsed: 10, apiPercentUsed: 10, limit: 40000 },
+            },
+          },
+          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetHardLimit": { status: 500, body: {} },
+        },
+      })
+      const row = yield* fake.provide(
+        Effect.gen(function* () {
+          const subs = yield* Subscriptions
+          yield* subs.poll
+          return (yield* subs.list).find((entry) => entry.harness === "cursor")!
+        }),
+      )
+      assert.include(row.error ?? "", "GetHardLimit")
+      assert.strictEqual(
+        row.limits.some((limit) => limit.status === "limited"),
+        false,
+      )
+    }),
+  )
+
+  it.effect("a failed GetHardLimit and a failed usage request keep both errors", () =>
+    Effect.gen(function* () {
+      const usageUrl = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
+      const fake = fakeMachine({
+        installed: ["cursor"],
+        home: yield* home,
+        commands: {
+          "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
+          "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
+        },
+        passwords: { [CURSOR_ACCESS_TOKEN]: CURSOR_SECRET },
+        http: {
+          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetHardLimit": { status: 500, body: {} },
+        },
+        httpHang: [usageUrl],
+      })
+      const row = yield* fake.provide(
+        Effect.gen(function* () {
+          const subs = yield* Subscriptions
+          const pending = yield* Effect.forkChild(subs.poll)
+          yield* TestClock.adjust("10 seconds")
+          yield* Fiber.join(pending)
+          return (yield* subs.list).find((entry) => entry.harness === "cursor")!
+        }),
+      )
+      assert.include(row.error ?? "", "GetHardLimit answered 500")
+      assert.include(row.error ?? "", "usage endpoint failed")
     }),
   )
 
