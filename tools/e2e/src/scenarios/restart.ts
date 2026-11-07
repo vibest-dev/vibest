@@ -60,9 +60,7 @@ const oldInstall = async (w: World, name: string) => {
   const wrapper = path.join(bin, "vibest")
   const point = (target: string) => fs.writeFile(wrapper, `#!/bin/sh\nexec '${target}' "$@"\n`, { mode: 0o755 })
   await point(path.join(old, "bin", "vibest"))
-  const zdotdir = path.join(w.root, `${name}-zdotdir`)
-  await fs.mkdir(zdotdir, { recursive: true })
-  return { old: OLD, wrapper, point, env: { PATH: `${bin}:${w.env().PATH}`, ZDOTDIR: zdotdir } }
+  return { old: OLD, wrapper, point, env: { PATH: `${bin}:${w.env().PATH}` } }
 }
 
 const usageLimitMove = async (
@@ -303,7 +301,7 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         expect((await listed(zero))?.pane_id === subPane, `the subagent's pane changed: ${subPane}`)
-        let after: ReturnType<typeof main>
+        let after = null as ReturnType<typeof main>
         await until(
           "the main agent restarted on this integration",
           () => {
@@ -464,11 +462,12 @@ const checks: ReadonlyArray<Check> = [
         "vibest update is done and restarted this agent; do not run it again, continue the interrupted work."
       let updates = 0
       let noticed = false
+      let wrapper = "vibest"
       const model = fakeAnthropic((r) => {
         const last = text(lastUser(r))
         if (last.includes(UPDATE)) {
           if (r.tools.length > 0) updates++
-          return { tool: "Bash", input: { command: "vibest update --yes" } }
+          return { tool: "Bash", input: { command: `${wrapper} update --yes` } }
         }
         if (last.includes(NOTICE)) {
           noticed = true
@@ -479,6 +478,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await project(w, "claude-update")
         const install = await oldInstall(w, "cupdate")
+        wrapper = install.wrapper
         const configTheResumeCheckReads = w.config.claude
         const flags = await claudeEnv(w, "cupdate", model.url, configTheResumeCheckReads)
         const vibest = async (args: ReadonlyArray<string>, timeoutMs = 120_000) => {

@@ -13,9 +13,7 @@ const piProject = async (w: World, name: string) => {
   const model = heldModel()
   const session = `${w.herdrSession}-${name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-  const zdot = path.join(w.root, `zdotdir-${name}`)
-  await fs.mkdir(zdot, { recursive: true })
-  const env = { ZDOTDIR: zdot }
+  const env = {}
   const repo = await project(w, name)
   const pi = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
   const startDaemon = () => w.ok(["daemon"], { env })

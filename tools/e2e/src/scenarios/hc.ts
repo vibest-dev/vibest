@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
-import { expect, row, SESSIONS, Skip, until, vibestd, type World } from "../world.ts"
+import { expect, row, SESSIONS, Skip, until, vibestd, vibestTyped, type World } from "../world.ts"
 import { project } from "./inbox.ts"
 
 type Entry = { id: string; agent: string; status: string; turnState: string }
@@ -29,14 +29,12 @@ const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
     config: path.join(w.root, `${tag}-config`),
     runtime: path.join(w.root, `${tag}-runtime`),
   }
-  const zdot = path.join(w.root, `zdotdir-${tag}`)
-  for (const dir of [...Object.values(dirs), zdot]) await fs.mkdir(dir, { recursive: true })
+  for (const dir of Object.values(dirs)) await fs.mkdir(dir, { recursive: true })
   const env = {
     HC_SESSION: tag,
     XDG_RUNTIME_DIR: dirs.runtime,
     XDG_STATE_HOME: dirs.state,
     XDG_CONFIG_HOME: dirs.config,
-    ZDOTDIR: zdot,
     PI_CODING_AGENT_DIR: piAgentDir,
     CLAUDE_CONFIG_DIR: undefined,
   }
@@ -240,7 +238,7 @@ const checks: ReadonlyArray<Check> = [
         const typed = await core.hc(
           "send",
           "users-own",
-          `cd ${repo} && vibest --harness pi --runtime hc --env PI_CODING_AGENT_DIR=${piAgentDir}`,
+          `cd ${repo} && ${vibestTyped} --harness pi --runtime hc --env PI_CODING_AGENT_DIR=${piAgentDir}`,
         )
         expect(typed.code === 0, `hc send: ${typed.stderr}`)
         let main = ""

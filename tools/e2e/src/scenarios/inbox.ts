@@ -14,7 +14,19 @@ import {
   type Step,
   text,
 } from "../fake-model.ts"
-import { agentName, alive, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
+import {
+  agentName,
+  alive,
+  expect,
+  herdr,
+  row,
+  SESSIONS,
+  Skip,
+  transcript,
+  until,
+  vibestTyped,
+  type World,
+} from "../world.ts"
 
 type Entry = { id: string; agent: string }
 
@@ -59,10 +71,8 @@ const claudeMain = async (
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const repo = await project(w, name)
   const env = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
-  const zdot = path.join(w.root, `zdotdir-${name}`)
-  await fs.mkdir(zdot, { recursive: true })
   await w.stopDaemon()
-  await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+  await w.ok(["daemon"])
   await w.ok(["--harness", "claude", ...flags, "--session", session, "--headless"], {
     cwd: repo,
     timeoutMs: 120_000,
@@ -246,7 +256,7 @@ const checks: ReadonlyArray<Check> = [
             )
           },
         )
-        await c.typeIn(["vibest", ...c.flags].join(" "))
+        await c.typeIn([vibestTyped, ...c.flags].join(" "))
         await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
         await round("cmthree")
         expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
@@ -451,10 +461,8 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await project(w, "held")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-held", model.url)}`
-        const zdot = path.join(w.root, "zdotdir-held")
-        await fs.mkdir(zdot, { recursive: true })
         await w.stopDaemon()
-        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.ok(["daemon"])
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
@@ -512,10 +520,8 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await project(w, "ids")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-ids", model.url)}`
-        const zdot = path.join(w.root, "zdotdir-ids")
-        await fs.mkdir(zdot, { recursive: true })
         await w.stopDaemon()
-        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.ok(["daemon"])
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
@@ -581,10 +587,8 @@ const checks: ReadonlyArray<Check> = [
         })
         expect(hook.code === 0, `herdr integration install pi exited ${hook.code}: ${hook.stderr}${hook.stdout}`)
         const env = `PI_CODING_AGENT_DIR=${dir}`
-        const zdot = path.join(w.root, "zdotdir-confirm")
-        await fs.mkdir(zdot, { recursive: true })
         await w.stopDaemon()
-        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.ok(["daemon"])
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
@@ -602,7 +606,6 @@ const checks: ReadonlyArray<Check> = [
         const t0 = Date.now()
         const restart = await w.tty(["daemon", "restart"], "y\n", {
           cwd: repo,
-          env: { ZDOTDIR: zdot },
           timeoutMs: 60_000,
         })
         expect(
@@ -629,9 +632,7 @@ const checks: ReadonlyArray<Check> = [
       const model = heldModel()
       const session = `${w.herdrSession}-s26`
       const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-      const zdot = path.join(w.root, "zdotdir-s26")
-      await fs.mkdir(zdot, { recursive: true })
-      const env = { ZDOTDIR: zdot }
+      const env = {}
       const logFile = path.join(w.vibestHome, "vibestd.log")
       const pct = (xs: Array<number>, p: number) => {
         const s = [...xs].sort((a, b) => a - b)

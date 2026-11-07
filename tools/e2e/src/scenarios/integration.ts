@@ -44,10 +44,8 @@ const withSession = async (
 ) => {
   const session = `${w.herdrSession}-${harness}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-  const zdot = path.join(w.root, "zdotdir")
-  await fs.mkdir(zdot, { recursive: true })
   await w.stopDaemon()
-  await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
+  await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined } })
   let id = ""
   try {
     const run = await w.ok(["run", harness, ...flags, "--session", session, "--", task], {

@@ -4,7 +4,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { claudeConfigOf, claudeEnv, fakeAnthropic, heldModel, piDir } from "../fake-model.ts"
-import { expect, fail, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { expect, fail, row, SESSIONS, Skip, until, vibestTyped, type World } from "../world.ts"
 
 type Entry = {
   id: string
@@ -100,9 +100,7 @@ const move = (harness: "claude" | "pi"): Check => ({
         : ["--harness", "pi", "--env", `PI_CODING_AGENT_DIR=${piAgentDir}`]
     const session = `${w.herdrSession}-move`
     const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-    const zdot = path.join(w.root, "zdotdir-move")
-    await fs.mkdir(zdot, { recursive: true })
-    const env = { ZDOTDIR: zdot }
+    const env = {}
     await w.stopDaemon()
     await w.ok(["daemon"], { env })
     try {
@@ -178,12 +176,12 @@ const move = (harness: "claude" | "pi"): Check => ({
           target_pane_id: a,
           direction: "right",
           cwd: w.repository,
-          env: { ZDOTDIR: zdot, PATH: w.env().PATH! },
+          env: { PATH: w.env().PATH! },
           focus: false,
         })) as { pane: { pane_id: string } }
       ).pane.pane_id
       await until("B's shell", async () => /\S/.test(await screen(socket, b)), 30_000)
-      await type(socket, b, ["vibest", ...options].join(" "))
+      await type(socket, b, [vibestTyped, ...options].join(" "))
       await until(
         "B asks to move the main agent",
         async () => (await screen(socket, b)).includes("Move it here and continue? [y/N]"),

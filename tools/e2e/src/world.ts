@@ -4,6 +4,8 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import { loginEnv, secretName } from "./world/user-env.ts"
+
 export const checkout = path.resolve(import.meta.dirname, "../../..")
 
 export const method = (process.env.VIBEST_E2E_METHOD ?? "build") as "build" | "npm" | "curl"
@@ -33,6 +35,8 @@ const target = () => {
   return { binary: compiled, compiled, harnesses: path.join(checkout, "apps/vibest-herdr/harnesses") }
 }
 export const { binary, compiled, harnesses } = target()
+
+export const vibestTyped = `'${binary.replaceAll("'", "'\\''")}'`
 
 export const buildVersion = (
   JSON.parse(fs.readFileSync(path.join(checkout, "apps/vibest-herdr/package.json"), "utf8")) as { version: string }
@@ -117,16 +121,8 @@ export class World {
   }
 
   env(extra: Record<string, string | undefined> = {}): Record<string, string> {
-    const env: Record<string, string | undefined> = {}
-    for (const [k, v] of Object.entries(process.env))
-      if (
-        !k.startsWith("VIBEST_") &&
-        !k.startsWith("HERDR_") &&
-        !k.startsWith("HC_") &&
-        k !== "PI_PACKAGE_DIR" &&
-        k !== "CLAUDE_CODE_CHILD_SESSION"
-      )
-        env[k] = v
+    const login = loginEnv()
+    const env: Record<string, string | undefined> = { ...login }
     Object.assign(
       env,
       {
@@ -134,14 +130,9 @@ export class World {
         PI_CODING_AGENT_DIR: this.config.pi,
         CLAUDE_CONFIG_DIR: this.config.claude,
         CURSOR_CONFIG_DIR: this.config.cursor,
-        PATH: [path.dirname(binary), path.join(this.home, ".local", "bin"), process.env.PATH].join(":"),
+        PATH: [path.dirname(binary), login.PATH].join(":"),
         TMPDIR: path.join(this.root, "tmp"),
         HC_SOCKET: this.hcSocket,
-        GIT_AUTHOR_NAME: "e2e",
-        GIT_AUTHOR_EMAIL: "e2e@example.invalid",
-        GIT_COMMITTER_NAME: "e2e",
-        GIT_COMMITTER_EMAIL: "e2e@example.invalid",
-        GIT_CONFIG_GLOBAL: "/dev/null",
         npm_config_registry: `http://127.0.0.1:${this.releases.port}`,
         VIBEST_DOWNLOAD_URL: `http://127.0.0.1:${this.releases.port}`,
       },
@@ -336,16 +327,19 @@ export const until = async (what: string, ok: () => Promise<boolean> | boolean, 
     if (Date.now() > deadline) fail(`timed out waiting for ${what}`)
 }
 
-const agentEnv = (process.env.VIBEST_E2E_ENV ?? "")
-  .split("\n")
-  .map((l) => l.trim())
-  .filter((l) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
+const secrets = () => [
+  ...(process.env.VIBEST_E2E_ENV ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
+    .map((pair) => pair.slice(pair.indexOf("=") + 1)),
+  ...Object.entries(loginEnv())
+    .filter(([name, value]) => secretName.test(name) && value.length >= 6)
+    .map(([, value]) => value),
+]
 
 export const redact = (text: string) =>
-  agentEnv.reduce((t, pair) => {
-    const value = pair.slice(pair.indexOf("=") + 1)
-    return value === "" ? t : t.split(value).join("<redacted>")
-  }, text)
+  secrets().reduce((t, value) => (value === "" ? t : t.split(value).join("<redacted>")), text)
 
 export const knownSessions = async (
   w: World,
@@ -435,7 +429,7 @@ export const vibestd = async (w: World, repo: string, method: string, params: un
 export const transcript = async (w: World, cwd: string, claudeConfig = path.join(w.home, ".claude")) => {
   const dir = path.join(claudeConfig, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
   const files = (await fsPromises.readdir(dir).catch(() => [] as Array<string>)).filter((f) => f.endsWith(".jsonl"))
-  const entries: Array<{ type?: string; raw: string; text: string }> = []
+  const entries: Array<{ type?: string | undefined; raw: string; text: string }> = []
   for (const f of files)
     for (const raw of (await fsPromises.readFile(path.join(dir, f), "utf8")).split("\n").filter(Boolean)) {
       const e = JSON.parse(raw) as { type?: string; message?: { content?: unknown } }

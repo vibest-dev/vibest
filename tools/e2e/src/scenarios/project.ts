@@ -98,10 +98,8 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await newRepository(w, "files")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-files", pi.url)}`
-        const zdot = path.join(w.root, "zdotdir-files")
-        await fs.mkdir(zdot, { recursive: true })
         await w.stopDaemon()
-        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.ok(["daemon"])
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
@@ -183,12 +181,10 @@ const checks: ReadonlyArray<Check> = [
       const model = heldModel()
       model.release()
       const session = `${w.herdrSession}-p7`
-      const zdot = path.join(w.root, "zdotdir-p7")
-      await fs.mkdir(zdot, { recursive: true })
       let vibestOwnWorktree = ""
       try {
         await w.stopDaemon()
-        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.ok(["daemon"])
         const pi = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-p7", model.url)}`
         const { id } = JSON.parse(
           await w.ok(["run", "pi", "--session", session, "--env", pi, "--", ask("p7")], {
