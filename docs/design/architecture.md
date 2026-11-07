@@ -371,7 +371,9 @@ How `packages/core/src/sessions.ts` keeps these:
   vibestd is restarting. A delivery already waiting on that session does not resume once the exit has failed its
   queued sends; it decides only after that, and the next message is what resumes it. Unreachable or `unknown` status
   is no answer. No agent, while that terminal's process is
-  running, is not an exit: the shell may still be starting it. A terminal the runtime cannot find is. A turn counts
+  running, is not an exit: the shell may still be starting it. That keep arms one re-check after the start
+  timeout; the re-check still exits only if the runtime then reports the process gone. A terminal the runtime cannot
+  find is. A turn counts
   as worked when it was seen
   working, a turn start of this round was reported, or after a restart when it was typed or a row was delivered into
   it. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost

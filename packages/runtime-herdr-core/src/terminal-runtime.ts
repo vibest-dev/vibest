@@ -109,6 +109,7 @@ const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
 type Core = {
   readonly hc: HcShape
   readonly busy: Set<string>
+  readonly pending: Set<string>
   readonly waiting: Map<string, Set<Deferred.Deferred<void>>>
 }
 
@@ -129,6 +130,7 @@ export const make = (deps: {
       })
     const exited = (socket: string, core: Core, address: string) => {
       core.busy.delete(address)
+      core.pending.delete(address)
       return wake(core, address).pipe(
         Effect.andThen(
           PubSub.publish(events, { type: "exited", terminal: { machine: "local", id: terminalId(socket, address) } }),
@@ -175,6 +177,7 @@ export const make = (deps: {
       if (type === "foreground") {
         if (!atShell(data as api.Foreground)) {
           core.busy.add(terminal)
+          core.pending.delete(terminal)
           return Effect.void
         }
         return core.busy.has(terminal) ? exited(socket, core, terminal) : wake(core, terminal)
@@ -212,6 +215,7 @@ export const make = (deps: {
         const core: Core = {
           hc: socket === deps.socket ? home : connect(socket),
           busy: new Set(),
+          pending: new Set(),
           waiting: new Map(),
         }
         cores.set(socket, core)
@@ -255,7 +259,8 @@ export const make = (deps: {
       Effect.gen(function* () {
         const near = input.near !== undefined ? parseTerminalId(input.near.id, deps.socket) : undefined
         const socket = near?.socket ?? deps.socket
-        const { hc } = yield* coreAt(socket)
+        const core = yield* coreAt(socket)
+        const hc = core.hc
         const project = input.env["VIBEST_PROJECT_ID"]
         const session = input.env["VIBEST_SESSION_ID"]
         let attempt = 0
@@ -283,10 +288,12 @@ export const make = (deps: {
           ),
         )
         const terminal: Terminal = { machine: machine.id, id: terminalId(socket, started.address) }
-        if (input.argv.length > 0)
+        if (input.argv.length > 0) {
           yield* typeLine(hc, started.address, input.argv).pipe(
             Effect.tapError(() => close(terminal).pipe(Effect.ignore)),
           )
+          core.pending.add(started.address)
+        }
         return terminal
       })
 
@@ -316,15 +323,21 @@ export const make = (deps: {
       )
 
     const process: Runtime["process"] = (terminal) =>
-      get(terminal).pipe(
-        Effect.map((t) =>
-          t.state === "live"
-            ? { running: !atShell(t.foreground) }
-            : t.exit_code === null || t.exit_code === undefined
-              ? { running: false }
-              : { running: false, exitCode: t.exit_code },
-        ),
-      )
+      Effect.gen(function* () {
+        const { hc, core, address } = yield* reach(terminal)
+        const t = yield* failWith(hc.call("terminal.get", { terminal: address }))
+        if (t.state !== "live") {
+          core.pending.delete(address)
+          return t.exit_code === null || t.exit_code === undefined
+            ? { running: false }
+            : { running: false, exitCode: t.exit_code }
+        }
+        if (!atShell(t.foreground)) {
+          core.pending.delete(address)
+          return { running: true }
+        }
+        return { running: core.pending.delete(address) }
+      })
 
     const close: Runtime["close"] = (terminal) =>
       Effect.gen(function* () {
@@ -380,6 +393,7 @@ export const make = (deps: {
         const { hc, core, address } = yield* reach(terminal)
         yield* backToShell(core, address, terminal)
         yield* typeLine(hc, address, argv)
+        core.pending.add(address)
       })
 
     const seen: NonNullable<Runtime["seen"]> = (terminal) => get(terminal).pipe(Effect.map(seenOf))

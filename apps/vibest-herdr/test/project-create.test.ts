@@ -622,6 +622,8 @@ describe("multi-repository isolated workspace", () => {
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       yield* herdr.updateAgent(id, (agent) => ({ ...agent, alive: false }))
+      yield* sessions.check(id)
+      yield* until(db.getSession(id), (row) => row?.exitedAt != null)
       const before = (yield* herdr.callsTo("open")).length
       yield* sessions.send(id, "again")
       const places = yield* until(herdr.callsTo("open"), (calls) => calls.length > before)

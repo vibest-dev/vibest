@@ -213,6 +213,23 @@ describe("runtime-herdr-core against a fake core", () => {
   )
 
   live(
+    "a command typed while the foreground is still the shell counts as running until that foreground leaves it",
+    Effect.gen(function* () {
+      const core = yield* fakeCore
+      yield* core.follow
+      assert.isFalse((yield* core.runtime.process(core.terminal)).running)
+      yield* core.runtime.run!(core.terminal, ["echo", "hi"])
+      assert.isTrue((yield* core.runtime.process(core.terminal)).running)
+      assert.isFalse((yield* core.runtime.process(core.terminal)).running)
+      yield* core.runtime.run!(core.terminal, ["sleep", "5"])
+      yield* Ref.set(core.foreground, sleeping)
+      assert.isTrue((yield* core.runtime.process(core.terminal)).running)
+      yield* Ref.set(core.foreground, shell)
+      assert.isFalse((yield* core.runtime.process(core.terminal)).running)
+    }),
+  )
+
+  live(
     "run types into a busy terminal only after the foreground event back to its shell",
     Effect.gen(function* () {
       const core = yield* fakeCore

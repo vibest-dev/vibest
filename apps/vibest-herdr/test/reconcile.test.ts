@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Runtimes } from "@vibest/core/runtimes"
-import { Sessions } from "@vibest/core/sessions"
+import { Sessions, START_TIMEOUT } from "@vibest/core/sessions"
 import type { Runtime } from "@vibest/plugin"
 import { Effect, Ref, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -109,6 +109,51 @@ describe("reconcile: a terminal whose agent has not started", () => {
       yield* settled
       assert.isNull((yield* db.getSession(alive))!.exitedAt)
       assert.strictEqual((yield* db.getSession(alive))!.turnState, "open")
+    }),
+  )
+
+  test(
+    "a pending launch is checked again after the start timeout, and ended once the runtime says it is gone",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const id = "cccccccc-cccc-4ccc-8ccc-000000000001"
+      yield* herdr.addPane("w8:pending", "w8", repo)
+      yield* db.insertSession(
+        {
+          id,
+          agent: "general",
+          name: "pending",
+          harnessId: "pi",
+          provider: null,
+          model: null,
+          harnessSessionId: null,
+          runtime: TEST_HERDR,
+          address: { machine: "local", id: "w8:pending" },
+          status: "unknown",
+          startedAt: 1,
+          exitedAt: null,
+          turnState: "open",
+          turnPromptedAt: 1,
+          metadata: {},
+          createdAt: 1,
+          lastActive: 1,
+        },
+        projectId,
+        undefined,
+        repo,
+      )
+      yield* Sessions.make({ maxSessions: undefined })
+      yield* settled
+      assert.isNull((yield* db.getSession(id))!.exitedAt)
+      yield* herdr.seedAgent("w8:pending")
+      yield* herdr.updateAgent("w8:pending", (agent) => ({ ...agent, alive: false }))
+      yield* settled
+      assert.isNull((yield* db.getSession(id))!.exitedAt)
+      yield* TestClock.adjust(START_TIMEOUT)
+      yield* until(db.getSession(id), (session) => session?.exitedAt != null)
     }),
   )
 })
