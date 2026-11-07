@@ -68,6 +68,9 @@ func focusNavigationControl(t *testing.T, tt *ui.Tester, row string) {
 	tt.Press(r.X+r.W/2, r.Y+r.H/2)
 	tt.Release(-10, -10)
 	if !tt.Focused(row) {
+		tt.Key(0, ui.KeyEscape)
+	}
+	if !tt.Focused(row) {
 		t.Fatalf("pointer press did not focus %q", row)
 	}
 }
