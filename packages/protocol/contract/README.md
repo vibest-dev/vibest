@@ -25,6 +25,13 @@ session `List({ all: true })` answers, each with its `parentId`; after it come `
 When the client stops acknowledging, the stream fails with `WatchLagged` instead of buffering without bound; on that
 or any other end, reconnect and take the new `Snapshot` as the truth.
 
+With capability `projects`: each project has `activity` (`blocked`, `done`, `working` or `idle`), and each session
+`turn` (null: its runtime counts no turns) and may have `status` `done` (idle with a finished turn nobody looked at).
+A `Project` comes again whenever one of its sessions changes. Show these as they are. When a session's terminal is
+drawn in the focused window, send `Session.Seen` (`cli`) `{id, turn}` with the `turn` Watch last gave it, once per
+turn; vibestd writes only a mark that rises, so a stale or repeated call changes nothing, and the result comes back
+through Watch.
+
 `Harnesses.List` (`open`): one entry per harness, `{harness, problem, models}`. `problem` is null when vibestd can
 start that harness, else the reason to show; `models` (empty with a problem) are `{provider, model, name, default}`,
 provider null meaning the harness's default provider and `default` the model it runs when none is given. A start

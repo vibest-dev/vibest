@@ -426,6 +426,7 @@ describe("vibest.sock", () => {
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         ["Watch", Stream.runDrain(c.Watch(undefined))],
+        ["Session.Seen", c["Session.Seen"]({ id: "x", turn: 0 })],
         [
           "Project.CoordinatorSession",
           c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" }),

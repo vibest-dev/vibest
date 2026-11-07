@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite"
 import url from "node:url"
 
 import { assert, describe, it, layer } from "@effect/vitest"
+import { projectActivity, raisesSeen, unseenDone } from "@vibest/core/activity"
 import { Bus } from "@vibest/core/bus"
 import { APPLICATION_ID, Db, encodeAddress, SCHEMA_VERSION, type SessionRow } from "@vibest/core/db"
 import {
@@ -1142,6 +1143,32 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       assert.strictEqual(yield* reported(auth), `cursor model discovery failed: ${auth}`)
     }),
   )
+
+  it("a project shows what needs the user most: blocked, then an unseen done, then working, else idle", () => {
+    assert.strictEqual(projectActivity(["idle", "working", "done", "blocked"]), "blocked")
+    assert.strictEqual(projectActivity(["working", "done", "idle"]), "done")
+    assert.strictEqual(projectActivity(["idle", "working", "unknown"]), "working")
+    assert.strictEqual(projectActivity(["idle", "unknown"]), "idle")
+    assert.strictEqual(projectActivity([]), "idle")
+  })
+
+  it("an idle session is done only while its turn is past the mark; no mark (or no runtime support) is never done", () => {
+    assert.strictEqual(unseenDone("idle", { turn: 3, seen: 2 }), "done")
+    assert.strictEqual(unseenDone("idle", { turn: 3, seen: 3 }), "idle")
+    assert.strictEqual(unseenDone("idle", { turn: 3, seen: null }), "idle")
+    assert.strictEqual(unseenDone("idle", undefined), "idle")
+    assert.strictEqual(unseenDone("working", { turn: 3, seen: 0 }), "working")
+    assert.strictEqual(unseenDone("blocked", { turn: 3, seen: 0 }), "blocked")
+  })
+
+  it("the seen mark only rises, never past the turn the runtime counted; a missing mark may be set", () => {
+    assert.isTrue(raisesSeen({ turn: 3, seen: 2 }, 3))
+    assert.isFalse(raisesSeen({ turn: 3, seen: 3 }, 3))
+    assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 1))
+    assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 4))
+    assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 2.5))
+    assert.isTrue(raisesSeen({ turn: 3, seen: null }, 0))
+  })
 
   it.effect("the harness catalog and the start options agree: a harness off PATH has a problem and no models", () =>
     Effect.gen(function* () {

@@ -1,4 +1,5 @@
 import { importCheck, spawnDaemon } from "@vibest/client/client"
+import { projectActivity, raisesSeen, unseenDone } from "@vibest/core/activity"
 import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -56,6 +57,7 @@ import {
   WatchLagged,
   type WatchEvent,
   type WatchSession,
+  type ProjectRow,
   ProtocolRejected,
   VERSION,
   WrongInstance,
@@ -457,10 +459,51 @@ export const handlers = VibestRpcs.toLayer(
         ]
       })
 
-    const withParents = (infos: ReadonlyArray<SessionInfo>) =>
-      Effect.map(db.sessionParents(infos.map((info) => info.id)), (parents) =>
-        infos.map((info): WatchSession => ({ ...info, parentId: parents.get(info.id) ?? null })),
+    const seenAt = (runtime: string, address: RuntimeAddress) =>
+      address.id === ""
+        ? Effect.succeed(undefined)
+        : runtimes.route(runtime).pipe(
+            Effect.flatMap((rt) => (rt.seen === undefined ? Effect.succeed(undefined) : rt.seen(address))),
+            Effect.orElseSucceed(() => undefined),
+          )
+
+    const watched = (infos: ReadonlyArray<SessionInfo>) =>
+      Effect.gen(function* () {
+        const parents = yield* db.sessionParents(infos.map((info) => info.id))
+        return yield* Effect.forEach(
+          infos,
+          (info) =>
+            Effect.map(seenAt(info.runtime, info.address), (seen): WatchSession => ({
+              ...info,
+              status: unseenDone(info.status, seen),
+              parentId: parents.get(info.id) ?? null,
+              turn: seen?.turn ?? null,
+            })),
+          { concurrency: "unbounded" },
+        )
+      })
+
+    const snapshotProjects = (sessions: ReadonlyArray<WatchSession>) =>
+      Effect.map(db.watchProjects(), (rows) =>
+        rows.map((row): ProjectRow => ({
+          ...row,
+          activity: projectActivity(sessions.filter((s) => s.projectId === row.id).map((s) => s.status)),
+        })),
       )
+
+    const projectStatuses = (id: string) =>
+      Effect.gen(function* () {
+        const main = yield* listedMain(yield* db.coordinatorOf(id))
+        const live = [
+          ...(main === undefined ? [] : [main]),
+          ...(yield* db.listSessions({ projectId: id, stopped: false })),
+        ]
+        return yield* Effect.forEach(
+          live,
+          (s) => Effect.map(seenAt(s.runtime, s.address), (seen) => unseenDone(s.status, seen)),
+          { concurrency: "unbounded" },
+        )
+      })
 
     const watchSession = (id: string) =>
       Effect.gen(function* () {
@@ -483,12 +526,33 @@ export const handlers = VibestRpcs.toLayer(
                 return (yield* listedRows([view]))[0]
               })
         if (info === undefined || info.id !== id) return [ended]
-        const [session] = yield* withParents([info])
+        const [session] = yield* watched([info])
         return [{ _tag: "Session", session: session! } satisfies WatchEvent]
       })
 
     const watchProject = (id: string) =>
-      Effect.map(db.watchProjects(id), (rows) => rows.map((project): WatchEvent => ({ _tag: "Project", project })))
+      Effect.gen(function* () {
+        const rows = yield* db.watchProjects(id)
+        if (rows.length === 0) return []
+        const activity = projectActivity(yield* projectStatuses(id))
+        return rows.map((row): WatchEvent => ({ _tag: "Project", project: { ...row, activity } }))
+      })
+
+    const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
+      Effect.gen(function* () {
+        const project = yield* db.coordinatorAt(runtime, terminal)
+        const main = project === undefined ? undefined : yield* db.coordinatorOf(project)
+        const rows = yield* db.listSessions()
+        return [
+          ...(main === undefined ? [] : [main.id]),
+          ...rows
+            .filter(
+              (row) =>
+                row.runtime === runtime && row.address.machine === terminal.machine && row.address.id === terminal.id,
+            )
+            .map((row) => row.id),
+        ]
+      })
 
     const watchDeltas = (events: ReadonlyArray<EngineEvent>) =>
       Effect.gen(function* () {
@@ -502,13 +566,19 @@ export const handlers = VibestRpcs.toLayer(
             const project = yield* db.coordinatorAt(event.runtime, event.terminal)
             const main = project === undefined ? undefined : yield* db.coordinatorOf(project)
             if (main !== undefined) sessionIds.add(main.id)
-          } else if (event.type === "live.reset")
+          } else if (event.type === "live.seen")
+            for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
+          else if (event.type === "live.reset")
             for (const info of yield* listed(undefined, false))
               if (info.runtime === event.runtime) sessionIds.add(info.id)
         }
+        for (const id of sessionIds) {
+          const identity = yield* db.sessionIdentity(id)
+          if (identity !== undefined) projectIds.add(identity.projectId)
+        }
         return [
-          ...(yield* Effect.forEach(projectIds, watchProject)).flat(),
           ...(yield* Effect.forEach(sessionIds, watchSession)).flat(),
+          ...(yield* Effect.forEach(projectIds, watchProject)).flat(),
         ]
       })
 
@@ -804,10 +874,10 @@ export const handlers = VibestRpcs.toLayer(
               ),
               Effect.forkScoped,
             )
-            const sessionRows = yield* withParents(yield* listed(undefined, false))
+            const sessionRows = yield* watched(yield* listed(undefined, false))
             const snapshot: WatchEvent = {
               _tag: "Snapshot",
-              projects: yield* db.watchProjects(),
+              projects: yield* snapshotProjects(sessionRows),
               sessions: sessionRows,
             }
             return Stream.concat(
@@ -818,6 +888,24 @@ export const handlers = VibestRpcs.toLayer(
             )
           }),
         ),
+
+      "Session.Seen": ({ id, turn }) =>
+        Effect.gen(function* () {
+          yield* cliOnly("Session.Seen")
+          const identity = yield* db.sessionIdentity(id)
+          if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
+          const at =
+            identity.agent === "coordinator" ? yield* db.coordinatorOf(identity.projectId) : yield* db.getSession(id)
+          if (at?.id !== id || !at.runtime || !at.address || at.address.id === "") return
+          const address = at.address
+          const rt = yield* runtimes.route(at.runtime).pipe(Effect.option)
+          if (Option.isNone(rt) || rt.value.seen === undefined || rt.value.see === undefined) return
+          const see = rt.value.see
+          const unreachable = (e: { readonly message: string }) =>
+            new RuntimeUnreachable({ session: id, message: e.message })
+          const now = yield* rt.value.seen(address).pipe(Effect.mapError(unreachable))
+          if (raisesSeen(now, turn)) yield* see(address, turn).pipe(Effect.mapError(unreachable))
+        }),
 
       "Inbox.Subscribe": () =>
         Stream.unwrap(

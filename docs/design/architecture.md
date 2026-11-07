@@ -1006,6 +1006,11 @@ id a harness made for a coordinator; the last report wins). Of the rest:
   `Project.RunningCoordinator` finds a coordinator in another pane; `Project.StopCoordinator` sends SIGTERM to its
   recorded PID only, keeps its terminal, and answers `stopped`, `running` (nothing changed), `moved` (the row is no
   longer there) or `unsupported` (with the reason).
+- `Watch` and `Session.Seen` (user only, `projects` capability) serve the desktop. A Watch session carries `turn` (the
+  runtime's count of finished turns, null without `seen`) and `status` `done` when it is idle and its turn is past
+  the runtime's seen mark; a project carries `activity`, the first of blocked, done, working its live sessions show,
+  else idle (herdr's order: a finished agent waiting for the user outranks a busy one). `Session.Seen({id, turn})`
+  raises that mark to `turn` only when it rises and no further than the runtime's count; anything else writes nothing.
 - `Daemon.Stop` (user only, naming the instance from Ping): accepted, not exited; a client sends it once and
   watches Ping. `Daemon.Handoff` (`handoff` capability) checks that `command` opens the database, drains as
   `Daemon.Stop` does, starts `command daemon --foreground --import`, then hands over its sockets and lock; a

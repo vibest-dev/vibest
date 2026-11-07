@@ -80,7 +80,9 @@ describe("Watch", () => {
       const { repo, project, main, coordinator } = yield* withMain
       const { next, c } = yield* watching(repo)
       const snapshot = yield* next(isSnapshot)
-      assert.deepStrictEqual(snapshot.projects, [{ id: project, directory: repo, entrySessionId: main }])
+      assert.deepStrictEqual(snapshot.projects, [
+        { id: project, directory: repo, entrySessionId: main, activity: "idle" },
+      ])
       assert.deepStrictEqual(
         snapshot.sessions.map((s) => [s.id, s.agent, s.parentId]),
         [[main, "main", null]],
@@ -100,7 +102,12 @@ describe("Watch", () => {
       const seen = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Project" }> => e._tag === "Project" && e.project.directory === other,
       )
-      assert.deepStrictEqual(seen.project, { id: opened.projectId, directory: other, entrySessionId: null })
+      assert.deepStrictEqual(seen.project, {
+        id: opened.projectId,
+        directory: other,
+        entrySessionId: null,
+        activity: "idle",
+      })
 
       yield* c.Remove({ id })
       yield* next(
@@ -141,6 +148,43 @@ describe("Watch", () => {
   )
 
   test(
+    "a turn that ends unwatched is done, for the session and its project, until Session.Seen raises the mark to it",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db
+      const { repo, project, coordinator } = yield* withMain
+      const { next, c } = yield* watching(repo)
+      yield* next(isSnapshot)
+      const { id } = yield* coordinator.Spawn({ harness: "pi", prompt: "do it" })
+      const isSession = (status: string, turn: number) => (e: WatchEvent) =>
+        e._tag === "Session" && e.session.id === id && e.session.status === status && e.session.turn === turn
+      yield* next((e): e is WatchEvent => isSession("working", 0)(e))
+      const terminal = (yield* herdr.terminalOf(id))!
+      yield* herdr.endTurn(id)
+      yield* db.updateSession(id, { status: "idle" })
+      const isProject = (activity: string) => (e: WatchEvent) =>
+        e._tag === "Project" && e.project.id === project && e.project.activity === activity
+      yield* next((e): e is WatchEvent => isSession("idle", 0)(e))
+      yield* herdr.finishTurn(terminal.id)
+      yield* next((e): e is WatchEvent => isSession("done", 1)(e))
+      yield* next((e): e is WatchEvent => isProject("done")(e))
+
+      yield* c["Session.Seen"]({ id, turn: 2 })
+      yield* c["Session.Seen"]({ id, turn: 0 })
+      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { turn: 1, seen: 0 })
+      yield* c["Session.Seen"]({ id, turn: 1 })
+      yield* next((e): e is WatchEvent => isSession("idle", 1)(e))
+      yield* next((e): e is WatchEvent => isProject("idle")(e))
+      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { turn: 1, seen: 1 })
+      assert.strictEqual(
+        (yield* Effect.flip(coordinator["Session.Seen"]({ id, turn: 1 })))._tag,
+        "Forbidden",
+        "only the user marks what they saw",
+      )
+    }),
+  )
+
+  test(
     "Watch is the user's: a main agent is refused",
     Effect.gen(function* () {
       const { coordinator } = yield* withMain
@@ -172,9 +216,11 @@ describe("Watch", () => {
   )
 
   test(
-    "Ping says Watch is there",
+    "Ping says Watch and the project contracts (Harnesses.List, activity, Session.Seen) are there",
     Effect.gen(function* () {
-      assert.strictEqual((yield* (yield* client).Ping()).capabilities?.["watch"], true)
+      const capabilities = (yield* (yield* client).Ping()).capabilities
+      assert.strictEqual(capabilities?.["watch"], true)
+      assert.strictEqual(capabilities?.["projects"], true)
     }),
   )
 })

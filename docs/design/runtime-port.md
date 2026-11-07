@@ -32,8 +32,8 @@ An Agent row stores `runtime { kind, address: Terminal }` (JSON, no DDL); equal 
 
 ## 3. The interface
 
-Required: `kind`, `status(machine)`, `events` (exited, state, reset: core reads a runtime only when one arrives, and
-once at start and on a reset), and on terminals `open`, `send`, `read`, `process`, `close`. `open`'s input
+Required: `kind`, `status(machine)`, `events` (exited, state, reset, and seen from a runtime with `seen`: core reads a
+runtime only when one arrives, and once at start and on a reset), and on terminals `open`, `send`, `read`, `process`, `close`. `open`'s input
 beside the placement (`project`, `cwd`, `argv`, `env`, `label`) carries `near` (beside that terminal when possible),
 `split` (a split beside `near` instead of a tab of its own, `vibest run --peer`) and `focus` (the user is waiting to
 see it); each is the runtime's to honor as it can.
@@ -45,6 +45,7 @@ see it); each is the runtime's to honor as it can.
 | `events` (required)          | `events.subscribe`                                                                                               | `session.attach_all`           | `tern events`                            | none: required                                 |
 | `exec(machine, argv, cwd)`   | —                                                                                                                | detached block, `child_exited` | `new tab --keep-open`, `wait`, `capture` | hidden terminal: `open`, wait for exit, `read` |
 | `present(terminal, info)`    | `pane.report_metadata`                                                                                           | block/window labels            | `rename`                                 | the `label` given to `open`                    |
+| `seen`, `see`                | —                                                                                                                | —                              | —                                        | never `done` in Watch                          |
 | `prepare(machine)`           | `herdr machine add <target> --remote-session vibest`                                                             | `rex hosts add`                | `tern remote setup`                      | the user prepares the machine                  |
 | `attach(machine)`            | `herdr --session vibest`                                                                                         | — (Rex.app)                    | `tern`                                   | none                                           |
 | `doctor(machine, harnesses)` | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs                 | what tern needs                          | `vibest doctor` shows `status` only            |

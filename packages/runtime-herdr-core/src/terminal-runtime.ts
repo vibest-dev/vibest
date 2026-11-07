@@ -26,7 +26,16 @@ export const LABEL = {
   session: "vibest.session",
   space: "herdr.space",
   tab: "herdr.tab",
+  seen: "herdr.seen",
 } as const
+
+const SEEN_EVENTS = new Set(["turn", "labels"])
+
+export const seenOf = (t: api.Terminal): VibestPlugin.Runtime.Seen => {
+  const label = t.labels[LABEL.seen]
+  const seen = label === undefined || !/^\d+$/.test(label) ? null : Number(label)
+  return { turn: t.turn ?? 0, seen }
+}
 
 export const PRESENT_MAIN_SESSION = "mainSession"
 export const PRESENT_PROJECT_ID = "projectId"
@@ -158,6 +167,11 @@ export const make = (deps: {
               state,
             })
       }
+      if (SEEN_EVENTS.has(type))
+        return PubSub.publish(events, {
+          type: "seen",
+          terminal: { machine: "local", id: terminalId(socket, terminal) },
+        })
       if (type === "foreground") {
         if (!atShell(data as api.Foreground)) {
           core.busy.add(terminal)
@@ -253,6 +267,7 @@ export const make = (deps: {
               env: { ...input.env },
               labels: {
                 [LABEL.runtime]: KIND,
+                [LABEL.seen]: "0",
                 ...(project !== undefined ? { [LABEL.project]: project } : {}),
                 ...(session !== undefined ? { [LABEL.session]: session } : {}),
               },
@@ -367,6 +382,16 @@ export const make = (deps: {
         yield* typeLine(hc, address, argv)
       })
 
+    const seen: NonNullable<Runtime["seen"]> = (terminal) => get(terminal).pipe(Effect.map(seenOf))
+
+    const see: NonNullable<Runtime["see"]> = (terminal, turn) =>
+      reach(terminal).pipe(
+        Effect.flatMap(({ hc, address }) =>
+          failWith(hc.call("terminal.label", { terminal: address, labels: { [LABEL.seen]: String(turn) } })),
+        ),
+        Effect.asVoid,
+      )
+
     const present: Runtime["present"] = (terminal, info) => {
       const main = info[PRESENT_MAIN_SESSION]
       const project = info[PRESENT_PROJECT_ID]
@@ -401,6 +426,8 @@ export const make = (deps: {
       close,
       run,
       present,
+      seen,
+      see,
       events: Stream.fromPubSub(events),
     } satisfies Runtime
   })

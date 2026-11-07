@@ -80,6 +80,7 @@ export class FakeRuntime extends Context.Service<
     ) => Effect.Effect<{ readonly terminal: string; readonly agent: FakeAgent } | undefined>
     readonly updateAgent: (target: string, f: (agent: FakeAgent) => FakeAgent) => Effect.Effect<void>
     readonly endTurn: (target: string) => Effect.Effect<void>
+    readonly finishTurn: (terminal: string) => Effect.Effect<void>
     readonly addWorkspace: (id: string, root: string, path?: string) => Effect.Effect<void>
     readonly addPane: (paneId: string, workspaceId: string, cwd: string) => Effect.Effect<void>
     readonly seedAgent: (terminal: string) => Effect.Effect<void>
@@ -109,6 +110,17 @@ export class FakeRuntime extends Context.Service<
       const holds = yield* Ref.make(HashMap.empty<HoldMethod, Hold>())
       const events = yield* PubSub.unbounded<RuntimeEvent>()
       const onStarted = yield* Ref.make<(session: string) => Effect.Effect<void>>(() => Effect.void)
+      const marks = yield* Ref.make(HashMap.empty<string, R.Seen>())
+      const markOf = (terminal: string) =>
+        Effect.map(Ref.get(marks), (map) =>
+          Option.getOrElse(HashMap.get(map, terminal), (): R.Seen => ({ turn: 0, seen: 0 })),
+        )
+      const mark = (terminal: string, f: (now: R.Seen) => R.Seen) =>
+        markOf(terminal).pipe(
+          Effect.flatMap((now) => Ref.update(marks, (map) => HashMap.set(map, terminal, f(now)))),
+          Effect.andThen(PubSub.publish(events, { type: "seen", terminal: { machine: "local", id: terminal } })),
+          Effect.asVoid,
+        )
       let counter = 0
       const next = () => Effect.sync(() => ++counter)
 
@@ -444,6 +456,8 @@ export class FakeRuntime extends Context.Service<
           ),
         present: (terminal, info) =>
           call("present", { terminal: terminal.id, info: { ...info } }, terminal.id, Effect.void),
+        seen: (terminal) => markOf(terminal.id),
+        see: (terminal, turn) => mark(terminal.id, (now) => ({ ...now, seen: turn })),
         attach: () => ["fake", "attach"],
       }
 
@@ -475,6 +489,7 @@ export class FakeRuntime extends Context.Service<
           ),
         updateAgent,
         endTurn,
+        finishTurn: (terminal) => mark(terminal, (now) => ({ ...now, turn: now.turn + 1 })),
         addWorkspace: (id, root, path = root) =>
           Ref.update(workspaces, (map) => HashMap.set(map, id, { path, root, open: true })),
         addPane,
