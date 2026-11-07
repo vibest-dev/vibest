@@ -5,15 +5,15 @@ Stories for `runtime-port.md`. Each becomes an e2e check (tools/e2e) or a contra
 
 ## Using a runtime
 
-| ID  | Story                              | Steps                                                                          | Expect                                                                                                                                            |
-| --- | ---------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1  | herdr is there, nothing configured | `cd shop && vibest`, ask the main Agent to delegate a task                     | The main Agent and the subagent run in herdr, beside each other in the Project's workspace; the result returns; `vibest ls` shows runtime `herdr` |
-| R2  | Only tern is installed             | `cd shop && vibest` on a machine without herdr                                 | vibest picks tern (the only runtime online); the subagent opens in a tern tab of the Project's session; the result returns                        |
-| R3  | Choose a runtime                   | `"runtime": "rex"` in the user configuration, then `vibest`                    | Agents run in Rex blocks; `vibest ls` shows runtime `rex`                                                                                         |
-| R4  | No runtime                         | `vibest` on a machine with none of herdr, rex, tern                            | Refused before anything starts: each runtime and why it is unavailable ("herdr is not installed", …)                                              |
-| R5  | Step in on any runtime             | While a subagent works in rex (or tern), type into its block                   | That round's result still reaches the main Agent once, with what you typed                                                                        |
-| R6  | A harness dies early               | A harness exits right after start (broken binary, login prompt it cannot pass) | Within seconds the main Agent gets the terminal's last lines and the exit code, on every runtime; no endless retry                                |
-| R7  | Restart vibestd                    | Stop vibestd while a subagent works; start it again                            | The subagent kept running in its terminal; vibestd finds it again and its result is delivered                                                     |
+| ID  | Story                  | Steps                                                                          | Expect                                                                                                                                            |
+| --- | ---------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | inside a herdr pane    | `vibest`, then the main Agent delegates a task                                 | The main Agent and the subagent run in herdr, beside each other in the Project's workspace; the result returns; `vibest ls` shows runtime `herdr` |
+| R2  | Only tern is installed | `cd shop && vibest` outside any terminal                                       | Refused: no runtime was detected; pass `--runtime tern`. vibest does not pick the only runtime online                                             |
+| R3  | An old runtime key     | `"runtime": "rex"` left in vibest.json, then `vibest` inside a herdr pane      | The key warns once and is ignored; the agents run in herdr. `vibest --runtime rex` is what chooses rex                                            |
+| R4  | No runtime detected    | `vibest` outside any terminal, with no `--runtime`                             | Refused before anything starts, saying to pass `--runtime`. vibest does not install a runtime                                                     |
+| R5  | Step in on any runtime | While a subagent works in rex (or tern), type into its block                   | That round's result still reaches the main Agent once, with what you typed                                                                        |
+| R6  | A harness dies early   | A harness exits right after start (broken binary, login prompt it cannot pass) | Within seconds the main Agent gets the terminal's last lines and the exit code, on every runtime; no endless retry                                |
+| R7  | Restart vibestd        | Stop vibestd while a subagent works; start it again                            | The subagent kept running in its terminal; vibestd finds it again and its result is delivered                                                     |
 
 ## Machines
 

@@ -77,8 +77,8 @@ three checks move to the real previous release, downloaded once into an E2E cach
 | T1  | Native Claude/Pi OSC 7501 and shipped Cursor hooks in isolated HC | script | Native working/blocked/resume/done/abort, unchanged results, Cursor working/idle only; raw evidence, no visible OSC |
 
 T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG state/config/runtime directories; it never contacts the
-user's herdr-core or changes harness configuration outside that temporary root. Coordinator coverage awaits
-herdr-core caller detection; the exact follow-up check is in [runtime-port.md](../design/runtime-port.md#terminal-status-ownership).
+user's herdr-core or changes harness configuration outside that temporary root. Placement without `--runtime` is
+S35. Coordinator OSC coverage is still the follow-up in [runtime-port.md](../design/runtime-port.md#terminal-status-ownership).
 
 T1's Cursor half writes its Cursor session straight into the database and drives the shipped hook script with a
 fixture, because no real start reaches what it checks. A real cursor-agent needs the user's own login and a paid
@@ -171,3 +171,4 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S32 | Send repeated with one request id: the same answer, one row, one delivery, one result                                                                                                    | exits: `tools/e2e` S32                                               |
 | S33 | herdr-core runtime: Pi main agent and subagents in hc, results and send, status, herdr-app labels and parent                                                                             | hc: `tools/e2e` S33                                                  |
 | S34 | herdr-core runtime: `vibest --runtime hc` typed in the user's hc terminal starts the main agent in place                                                                                 | hc: `tools/e2e` S34                                                  |
+| S35 | herdr-core: `vibest` in an isolated hc terminal, no `--runtime`, starts the main agent and its subagent there; `vibest run --runtime herdr` places one in this run's herdr               | hc: `tools/e2e` S35                                                  |
