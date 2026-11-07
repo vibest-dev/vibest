@@ -2,6 +2,7 @@ import readline from "node:readline"
 
 import { type Claim, type VibestClient, withVibest } from "@vibest/client/client"
 import { VibestCommand } from "@vibest/core/paths"
+import { isLimited } from "@vibest/plugin"
 import type { SessionInfo } from "@vibest/protocol/rpc"
 import { callerMachine } from "@vibest/runtime-herdr/caller"
 import { agentName, KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
@@ -42,6 +43,8 @@ export interface UsageWindow {
   readonly window: string
   readonly percent: number
   readonly status: "available" | "limited"
+  readonly resetTime: number | null
+  readonly error?: string
 }
 
 type Step<A, E, R> = Effect.Effect<A, E, R>
@@ -103,7 +106,13 @@ export const formatRuns = (sessions: ReadonlyArray<LiveSession>) => {
 
 export const formatUsage = (usage: ReadonlyArray<UsageWindow> | undefined) => {
   if (usage === undefined || usage.length === 0) return "unknown"
-  return usage.map((window) => `${window.harness}  ${window.window}  ${window.percent}%  ${window.status}`).join("\n")
+  return usage
+    .map((window) => {
+      const status = isLimited({ limits: [window] }) ? "limited" : "available"
+      const error = window.error ? `  ${window.error}` : ""
+      return `${window.harness}  ${window.window}  ${window.percent}%  ${status}${error}`
+    })
+    .join("\n")
 }
 
 export const sessionToStop = (
@@ -248,6 +257,8 @@ const theDaemon = {
             window: limit.window,
             percent: limit.percent,
             status: limit.status,
+            resetTime: limit.resetTime,
+            ...(row.error ? { error: row.error } : {}),
           })),
         ),
       ),

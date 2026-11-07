@@ -90,7 +90,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I1",
     title:
-      "the plugins ship with vibest: one directory per harness; `integration` has only the hooks' guard, prompt and stop and a main agent's restart start, nothing to install",
+      "the plugins ship with vibest: one directory per harness; `integration` has only the hooks' guard, prompt, stop and ready and a main agent's restart start, nothing to install",
     run: async (w) => {
       for (const file of [
         "pi/extension.mjs",
@@ -109,7 +109,7 @@ const checks: ReadonlyArray<Check> = [
       const help = await w.ok(["integration", "--help"])
       const subcommands = [...help.matchAll(/^ {2}(\w+) {2,}/gm)].map((m) => m[1])
       expect(
-        JSON.stringify(subcommands) === JSON.stringify(["guard", "prompt", "stop", "start"]),
+        JSON.stringify(subcommands) === JSON.stringify(["guard", "prompt", "stop", "ready", "start"]),
         `subcommands: ${subcommands.join(", ")}`,
       )
     },
@@ -263,7 +263,7 @@ const checks: ReadonlyArray<Check> = [
           const rerouted = /harness "cursor" → "(\w+)"/.exec(
             (await fs.readFile(daemonLog, "utf8").catch(() => "")).slice(logFrom),
           )
-          if (rerouted) throw new Skip(`harness-choice routed cursor to ${rerouted[1]} (cursor unavailable or limited)`)
+          expect(rerouted === null, `harness-choice routed cursor to ${rerouted?.[1] ?? "another harness"}`)
           await until(
             "the session's result",
             async () => ["completed", "failed"].includes((await turnState(w, id, repo)) ?? ""),

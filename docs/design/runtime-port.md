@@ -32,8 +32,8 @@ An Agent row stores `runtime { kind, address: Terminal }` (JSON, no DDL); equal 
 
 ## 3. The interface
 
-Required: `kind`, `status(machine)`, `events` (exited, state, reset: core reads a runtime only when one arrives, and
-once at start and on a reset), and on terminals `open`, `send`, `read`, `process`, `close`. `open`'s input
+Required: `kind`, `status(machine)`, `events` (exited, state, reset, and seen from a runtime with `seen`: core reads a
+runtime only when one arrives, and once at start and on a reset), and on terminals `open`, `send`, `read`, `process`, `close`. `open`'s input
 beside the placement (`project`, `cwd`, `argv`, `env`, `label`) carries `near` (beside that terminal when possible),
 `split` (a split beside `near` instead of a tab of its own, `vibest run --peer`) and `focus` (the user is waiting to
 see it); each is the runtime's to honor as it can.
@@ -45,6 +45,7 @@ see it); each is the runtime's to honor as it can.
 | `events` (required)          | `events.subscribe`                                                                                               | `session.attach_all`           | `tern events`                            | none: required                                 |
 | `exec(machine, argv, cwd)`   | —                                                                                                                | detached block, `child_exited` | `new tab --keep-open`, `wait`, `capture` | hidden terminal: `open`, wait for exit, `read` |
 | `present(terminal, info)`    | `pane.report_metadata`                                                                                           | block/window labels            | `rename`                                 | the `label` given to `open`                    |
+| `seen`, `see`                | —                                                                                                                | —                              | —                                        | never `done` in Watch                          |
 | `prepare(machine)`           | `herdr machine add <target> --remote-session vibest`                                                             | `rex hosts add`                | `tern remote setup`                      | the user prepares the machine                  |
 | `attach(machine)`            | `herdr --session vibest`                                                                                         | — (Rex.app)                    | `tern`                                   | none                                           |
 | `doctor(machine, harnesses)` | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs                 | what tern needs                          | `vibest doctor` shows `status` only            |
@@ -117,9 +118,13 @@ kinds and restores the prior state when a dialog closes. Vibest writes no Pi sta
 Pi UI widget kinds describe how a prompt is drawn, not why it blocks, so vibest never maps them to permission,
 question or auth; an unknown blocked reason would omit kind, and native reports are left unchanged.
 
-Cursor writes working before its prompt RPC and idle for accepted response/stop hooks. Its public hook API has
-no paired permission/question/auth waits, so it never writes blocked. Guard denials remain permission decisions,
-not evidence that a human is being asked. Cursor idle relies on `afterAgentResponse` firing every turn.
+Cursor writes no terminal status. Its hooks run detached from the terminal (no `/dev/tty`), so its plugin reports to
+vibestd over RPC instead: `sessionStart` is `Session.Ready` (vibest types the first task only then, since herdr-core
+has no status for Cursor), `afterAgentThought` and `postToolUse` (and `beforeSubmitPrompt` when the user or project
+also hooks it) are a turn start, which vibestd shows as working, and `afterAgentResponse` is the turn end, shown as
+idle. Cursor 2026.11.05 does not run a `--plugin-dir` plugin's `stop` hook, and runs its `beforeSubmitPrompt` hook only
+when user or project hooks also have one. It reports no permission/question/auth waits, so vibestd never shows it
+blocked on herdr-core. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
 
 Claude Code owns its OSC 7501 output; vibest adds no second writer. Claude negotiates support with the terminal
 and reports native `working`, `blocked` (including permission/question/auth kinds), `done`, interrupted `idle`,
@@ -128,7 +133,7 @@ the distinction for its unseen mark. `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` disabl
 Live-checked on Claude Code 2.1.318 and 2.1.319; older versions have no guaranteed coverage or fallback writer.
 
 `pnpm e2e T1` launches the built integrations in real Claude and Pi with held fake models, through a test-only
-runtime plugin into its own herdr-core, and exercises the shipped Cursor hook script in a real PTY. Its HOME,
+runtime plugin into its own herdr-core. Its HOME,
 HC_SESSION, HC_SOCKET and XDG directories are under the test root. The fixture is not a shipped runtime adapter:
 it tests terminal reports, not exit-event recovery. Raw output and timestamped input/output captures stay in
 evidence files, never the runner terminal. Claude ignores keys at its first dialog draw; the check waits for

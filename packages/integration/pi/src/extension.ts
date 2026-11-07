@@ -184,6 +184,7 @@ const ready = (sessionId: string): Role =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const pi = yield* Pi
+      const scope = yield* Effect.scope
       yield* pi.handle("session_start", (_e, ctx) =>
         ctx.mode !== "tui"
           ? Effect.void
@@ -191,7 +192,17 @@ const ready = (sessionId: string): Role =>
               { _tag: "session", sessionId, pluginVersion: VERSION },
               (client) => client["Session.Ready"]({ id: sessionId, pid: process.pid }),
               { start: false },
-            ).pipe(Effect.timeout("2 seconds"), Effect.ignore),
+            ).pipe(
+              Effect.timeout("2 seconds"),
+              Effect.retry({
+                while: (e) =>
+                  e._tag === "DaemonUnavailable" || e._tag === "RpcClientError" || e._tag === "TimeoutError",
+                schedule: Schedule.spaced("1 second"),
+              }),
+              Effect.ignore,
+              Effect.forkIn(scope),
+              Effect.asVoid,
+            ),
       )
     }),
   )

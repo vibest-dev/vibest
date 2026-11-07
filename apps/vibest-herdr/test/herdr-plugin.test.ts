@@ -12,9 +12,11 @@ import * as Platform from "#platform"
 import { ARCHIVE_ROOTS, copyHerdrPlugin } from "../scripts/archive-layout.ts"
 import {
   ACTIONS,
+  formatUsage,
   type HerdrDaemon,
   type LiveSession,
   type PluginContext,
+  type UsageWindow,
   VERBS,
   paletteMenu,
   parsePluginContext,
@@ -67,6 +69,36 @@ const shown = (verb: Verb, context: PluginContext, daemon: HerdrDaemon, lines: R
   })
 
 const project = ctx({ focusedPaneId: "w1:p1", focusedPaneCwd: "/repo", workspaceCwd: "/plugin-directory" })
+
+describe("subscription lines", () => {
+  const window = (patch: Partial<UsageWindow>): UsageWindow => ({
+    harness: "cursor",
+    window: "monthly",
+    percent: 100,
+    status: "limited",
+    resetTime: null,
+    ...patch,
+  })
+
+  it("uses the start verdict and keeps a row error", () => {
+    const passed = Date.now() - 1_000
+    const future = Date.now() + 60_000
+    assert.strictEqual(
+      formatUsage([
+        window({ resetTime: passed }),
+        window({ window: "monthly-auto", resetTime: future }),
+        window({ status: "available", resetTime: future, error: "GetHardLimit answered 500" }),
+        window({ resetTime: future }),
+      ]),
+      [
+        "cursor  monthly  100%  available",
+        "cursor  monthly-auto  100%  available",
+        "cursor  monthly  100%  available  GetHardLimit answered 500",
+        "cursor  monthly  100%  limited",
+      ].join("\n"),
+    )
+  })
+})
 
 describe("herdr plugin context", () => {
   it.effect("the project directory is the focused pane, never the workspace or the process", () =>

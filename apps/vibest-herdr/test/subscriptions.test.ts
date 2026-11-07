@@ -9,7 +9,19 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin"
 import * as Server from "@vibest/server/server"
-import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
+import {
+  ByteSize,
+  ConfigProvider,
+  Context,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  Path,
+  Stream,
+} from "effect"
 import { Sink } from "effect"
 import { Headers, HttpClient, HttpClientResponse } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
@@ -73,6 +85,7 @@ const fakeMachine = (options: {
   readonly commandsThatNeverExit?: ReadonlyArray<string>
   readonly passwords?: Readonly<Record<string, string>>
   readonly http?: Readonly<Record<string, { readonly status: number; readonly body: unknown }>>
+  readonly httpHang?: ReadonlyArray<string>
   readonly home: string
 }) => {
   const spawned: Array<Spawned> = []
@@ -92,6 +105,7 @@ const fakeMachine = (options: {
       url: request.url,
       authorization: Option.getOrUndefined(Headers.get(request.headers, "authorization")),
     })
+    if ((options.httpHang ?? []).includes(request.url)) return Effect.never
     const hit = options.http?.[request.url] ?? { status: 599, body: {} }
     return Effect.succeed(
       HttpClientResponse.fromWeb(request, new Response(JSON.stringify(hit.body), { status: hit.status })),
@@ -129,12 +143,37 @@ const home = Effect.gen(function* () {
   return yield* fs.makeTempDirectoryScoped({ prefix: "vibest-subs-" })
 }).pipe(Effect.provide(Platform.services), Effect.orDie)
 
+const clockSafeKeychain = FileSystem.makeNoop({
+  stat: () =>
+    Effect.succeed({
+      type: "File",
+      mtime: Option.none(),
+      atime: Option.none(),
+      birthtime: Option.none(),
+      dev: 0,
+      ino: Option.none(),
+      mode: 0,
+      nlink: Option.none(),
+      uid: Option.none(),
+      gid: Option.none(),
+      rdev: Option.none(),
+      size: ByteSize.zero,
+      blksize: Option.none(),
+      blocks: Option.none(),
+    }),
+})
+
 describe("subscription polls and vibest subscriptions over fake CLIs, keychain and HTTP: nothing touches the network", () => {
   it.effect("an expired or missing token skips the endpoint and keeps the last limits", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const dir = yield* home
+      yield* fs.makeDirectory(path.join(dir, "Library", "Keychains"), { recursive: true })
+      yield* fs.writeFileString(
+        path.join(dir, "Library", "Keychains", "login.keychain-db"),
+        "fake keychain; no real CLI",
+      )
       const agent = path.join(dir, ".pi", "agent")
       yield* fs.makeDirectory(agent, { recursive: true })
       yield* fs.writeFileString(
@@ -230,6 +269,9 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
   it.effect("a usage response replaces plugin limits; a hung CLI and a non-200 do not", () =>
     Effect.gen(function* () {
       const dir = yield* home
+      const fs = yield* FileSystem.FileSystem
+      yield* fs.makeDirectory(`${dir}/Library/Keychains`, { recursive: true })
+      yield* fs.writeFileString(`${dir}/Library/Keychains/login.keychain-db`, "fake keychain; no real CLI")
       const fresh = fakeMachine({
         installed: ["claude", "cursor"],
         home: dir,
@@ -323,6 +365,99 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       assert.strictEqual(row.error, "claude auth status failed")
       assert.strictEqual(row.limits[0]?.percent, 8)
       assert.strictEqual(hung.requests.length, 0)
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("Cursor subscription probes skip an empty macOS Keychains directory before spawning", () =>
+    Effect.gen(function* () {
+      if (process.platform !== "darwin") return
+      const dir = yield* home
+      yield* Effect.flatMap(FileSystem.FileSystem, (fs) =>
+        fs.makeDirectory(`${dir}/Library/Keychains`, { recursive: true }),
+      ).pipe(Effect.provide(Platform.services))
+      const fake = fakeMachine({ installed: ["cursor"], home: dir, commands: {} })
+      const rows = yield* fake.provide(
+        Effect.gen(function* () {
+          const subs = yield* Subscriptions
+          yield* subs.poll
+          return yield* subs.list
+        }),
+      )
+      assert.include(rows[0]?.error, "Library/Keychains")
+      assert.deepStrictEqual(fake.spawned, [])
+      assert.deepStrictEqual(fake.requests, [])
+    }),
+  )
+
+  it.effect("a failed GetHardLimit is an error and does not mark Cursor limited", () =>
+    Effect.gen(function* () {
+      const dir = yield* home
+      yield* Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        yield* fs.makeDirectory(`${dir}/Library/Keychains`, { recursive: true })
+        yield* fs.writeFileString(`${dir}/Library/Keychains/login.keychain-db`, "fake keychain; no real CLI")
+      }).pipe(Effect.provide(Platform.services))
+      const fake = fakeMachine({
+        installed: ["cursor"],
+        home: dir,
+        commands: {
+          "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
+          "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
+        },
+        passwords: { [CURSOR_ACCESS_TOKEN]: CURSOR_SECRET },
+        http: {
+          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage": {
+            status: 200,
+            body: {
+              billingCycleEnd: "1794886804000",
+              planUsage: { totalPercentUsed: 100, autoPercentUsed: 10, apiPercentUsed: 10, limit: 40000 },
+            },
+          },
+          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetHardLimit": { status: 500, body: {} },
+        },
+      })
+      const row = yield* fake.provide(
+        Effect.gen(function* () {
+          const subs = yield* Subscriptions
+          yield* subs.poll
+          return (yield* subs.list).find((entry) => entry.harness === "cursor")!
+        }),
+      )
+      assert.include(row.error ?? "", "GetHardLimit")
+      assert.strictEqual(
+        row.limits.some((limit) => limit.status === "limited"),
+        false,
+      )
+    }),
+  )
+
+  it.effect("a failed GetHardLimit and a failed usage request keep both errors", () =>
+    Effect.gen(function* () {
+      const usageUrl = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
+      const fake = fakeMachine({
+        installed: ["cursor"],
+        home: yield* home,
+        commands: {
+          "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
+          "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
+        },
+        passwords: { [CURSOR_ACCESS_TOKEN]: CURSOR_SECRET },
+        http: {
+          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetHardLimit": { status: 500, body: {} },
+        },
+        httpHang: [usageUrl],
+      })
+      const row = yield* fake.provide(
+        Effect.gen(function* () {
+          const subs = yield* Subscriptions
+          const pending = yield* Effect.forkChild(subs.poll)
+          yield* TestClock.adjust("10 seconds")
+          yield* Fiber.join(pending)
+          return (yield* subs.list).find((entry) => entry.harness === "cursor")!
+        }).pipe(Effect.provideService(FileSystem.FileSystem, clockSafeKeychain)),
+      )
+      assert.include(row.error ?? "", "GetHardLimit answered 500")
+      assert.include(row.error ?? "", "usage endpoint failed")
     }),
   )
 

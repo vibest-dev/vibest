@@ -648,11 +648,12 @@ crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin
 failed with the plugin error, no move). Nothing is skipped silently.
 
 **The default harness choice** (`@vibest/plugin-harness-choice`, id `harness-choice`; the product loads it first, before the
-runtime plugins and user plugins): left alone, a
-caller's usable harness preference stands (and a free login is picked when the provider is unset); anything
-else is routed to the available harness with the most quota left, and a start with no harness any plugin could
-run is refused naming each harness's problem. On `agent.fail` with reason `limited` and `move` still unset, it
-moves to the best harness that is neither limited nor already tried.
+runtime plugins and user plugins): an explicit harness is never replaced. A usable one stands (and a free
+login is picked when the provider is unset); one that cannot run refuses the start, naming that harness and the
+cause (its preflight error, or each exhausted subscription limit and its reset time). Only `auto` (no harness
+named) is routed to the available harness with the most quota left, and a start no harness can run is refused
+naming each harness's problem. On `agent.fail` with reason `limited` and `move` still unset, it leaves the move
+unset: the round fails naming that harness and each exhausted limit with its reset time, and nothing else starts.
 
 **Plugin API facts** (`@vibest/plugin`): vibestd maps this module and `effect` to its own instances when it loads a
 plugin, so a plugin imports both normally and bundles neither. A plugin's `effect` runs once per load in the plugin's
@@ -854,16 +855,16 @@ the launch was about to send, else the trailing delivered batch) — on the harn
 `event.move`. Before each candidate starts, the move runs the `agent.start.before` chain with the move's
 harness/provider/model and the session's real attempts prefilled: a refusal skips that candidate (recorded as a
 `refused` try), and what the chain decides — including a rewritten harness or prompt — is what gets patched and
-started, so a start policy plugin governs a moved Agent exactly like a first start. The default choice moves to
-the available harness with the most quota left that is neither limited nor already tried; nothing left ends the
-round failed, naming what ran out. The pairs that already hit a limit are remembered per (harness, provider) in
+started, so a start policy plugin governs a moved Agent exactly like a first start. The default choice does not
+move: with `move` still unset the round fails, naming that harness and each exhausted limit with its reset time,
+and no other harness starts. A plugin may still set `move`. The pairs that already hit a limit are remembered per (harness, provider) in
 `process.end` events with reason `limited` (joined to their `process.start`), so they survive moves and a vibestd
 restart. Within one round (since its turn started; for a launch's own limit, since the last turn ended or the
 session began) vibest never moves to a pair that hit a limit in it, whatever that login's usage reading says now:
 a round that hit limits on every login it may use fails instead of cycling, and a later round may use such a login
 again once its reading is free. A preflight miss, or a start or prompt that fails, is not a limit — the next move
-may use that harness again. A login already limited before start is `agent.start.before`'s to avoid (the builtin
-does), never a move's.
+may use that harness again. A login already limited before start is `agent.start.before`'s: a named harness is
+refused with that limit, and only `auto` chooses another. A move does not.
 
 How the move runs (`move.ts`, under the session's lock): a choice the chains already ruled out (an unknown harness,
 a login limited in this round, a harness this move skipped) ends the move, since asking the same plugins again cannot
@@ -882,7 +883,8 @@ agent running, so check keeps polling it.
 The default choice ranks a harness by its emptiest non-limited, non-excluded login (the lowest fullest usage window;
 a login that reported no window scores -1) and starts on that login, so the harness's own default cannot be its limited
 one. A harness with no known logins is available but ranks after every harness whose quota is known, unless exactly
-that pair was tried. A caller who named a limited login does not get another login of that harness. A move does not
+that pair was tried. A named harness is not ranked: if it or its named login cannot run, the start is refused
+with that cause and nothing else is chosen. A move does not
 carry the model named for the old harness, which the new one would not list: the move starts on the new harness's
 default. The memory of tried pairs is per harness when no login was named and per login when one was.
 
@@ -977,7 +979,9 @@ the authentication; roles prevent mistakes, not attackers.
 `CallerGate` on scoped methods (resolves the caller for that request only, from its headers and the stored row; a
 session never declares itself coordinator), and `Admission` on methods that change something (see
 [drain admission](daemon.md#admission-while-draining)). Protocol-only methods take no caller: `Plugins`,
-`Runtimes.Doctor`, `Subscriptions`, `Republish` (put terminal labels back after the runtime started or restarted;
+`Harnesses.List` (each harness with `problem`, null when vibestd can start it, else why not, and the models it lists;
+the same preflight `Project.StartMain` and `Spawn` route by, so the catalog and a start never disagree; `vibest models`
+and `vibest harness list` print it), `Runtimes.Doctor`, `Subscriptions`, `Republish` (put terminal labels back after the runtime started or restarted;
 answers how many), the hooks' `TurnEnd` and `Prompt` (verbatim harness JSON read with the adapter's `turnEnd` /
 `userPrompt`; unknown ids, another harness than the session's, and events the adapter ignores change nothing; a
 prompt from the main agent or from vibest's own delivery is ignored), and `CoordinatorSessionReady` (the conversation
@@ -1002,6 +1006,11 @@ id a harness made for a coordinator; the last report wins). Of the rest:
   `Project.RunningCoordinator` finds a coordinator in another pane; `Project.StopCoordinator` sends SIGTERM to its
   recorded PID only, keeps its terminal, and answers `stopped`, `running` (nothing changed), `moved` (the row is no
   longer there) or `unsupported` (with the reason).
+- `Watch` and `Session.Seen` (user only, `projects` capability) serve the desktop. A Watch session carries `turn` (the
+  runtime's count of finished turns, null without `seen`) and `status` `done` when it is idle and its turn is past
+  the runtime's seen mark; a project carries `activity`, the first of blocked, done, working its live sessions show,
+  else idle (herdr's order: a finished agent waiting for the user outranks a busy one). `Session.Seen({id, turn})`
+  raises that mark to `turn` only when it rises and no further than the runtime's count; anything else writes nothing.
 - `Daemon.Stop` (user only, naming the instance from Ping): accepted, not exited; a client sends it once and
   watches Ping. `Daemon.Handoff` (`handoff` capability) checks that `command` opens the database, drains as
   `Daemon.Stop` does, starts `command daemon --foreground --import`, then hands over its sockets and lock; a

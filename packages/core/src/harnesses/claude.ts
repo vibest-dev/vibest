@@ -1,6 +1,6 @@
 import { Config, Effect, FileSystem, Path, Ref, Schema } from "effect"
 
-import { anthropicOnly, type HarnessAdapter, opt, type Startup } from "../harness.ts"
+import { noProvider, type HarnessAdapter, opt, type Startup } from "../harness.ts"
 import { findMessage, jsonLines, type RawModel, withConfigured } from "../models.ts"
 
 const CLAUDE_MENUS = [
@@ -117,7 +117,7 @@ export const claude: HarnessAdapter = {
   resultField: "last_assistant_message",
   inbox: "poll",
   ready: "integration",
-  checkProvider: anthropicOnly("claude"),
+  checkProvider: noProvider("claude"),
   launchArgs: (i) => [
     ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),
     "--append-system-prompt-file",
