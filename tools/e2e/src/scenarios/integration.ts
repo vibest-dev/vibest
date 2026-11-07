@@ -212,6 +212,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "I5",
+    tier: "agent",
     title:
       "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks; asked to run herdr, herdr does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the session result",
     run: async (w, evidence) => {

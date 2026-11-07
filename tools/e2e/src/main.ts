@@ -36,19 +36,34 @@ const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) 
 
 const args = process.argv.slice(2)
 const strict = args.includes("--strict")
-const jobsAt = args.indexOf("--jobs")
-const jobs = jobsAt === -1 ? undefined : Number(args[jobsAt + 1])
+const valueOf = (flag: string) => {
+  const at = args.indexOf(flag)
+  if (at === -1) return undefined
+  const value = args[at + 1]
+  args.splice(at, 2)
+  return value ?? ""
+}
+const jobsText = valueOf("--jobs")
+const jobs = jobsText === undefined ? undefined : Number(jobsText)
 if (jobs !== undefined && !(Number.isInteger(jobs) && jobs > 0)) {
   console.error("--jobs takes a positive whole number")
   process.exit(1)
 }
-const only = args.filter((a, i) => a !== "--strict" && a !== "--jobs" && i !== jobsAt + 1)
+const tier = valueOf("--tier") ?? "gate"
+if (!["gate", "slow", "agent", "all"].includes(tier)) {
+  console.error("--tier is gate, slow, agent or all")
+  process.exit(1)
+}
+const only = args.filter((a) => a !== "--strict")
 const unknown = only.filter((a) => !(a in areas) && !checks.some((c) => c.id === a))
 if (unknown.length) {
   console.error(`unknown ${unknown.join(", ")}; areas: ${Object.keys(areas).join(", ")}`)
   process.exit(1)
 }
-const selected = only.length ? checks.filter((c) => only.includes(c.area) || only.includes(c.id)) : checks
+const inTier = (c: (typeof checks)[number]) => tier === "all" || (c.check.tier ?? "gate") === tier
+const selected = checks.filter((c) =>
+  only.length ? only.includes(c.id) || (only.includes(c.area) && inTier(c)) : inTier(c),
+)
 
 for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
   if (!(await Bun.file(built).exists())) {
@@ -61,6 +76,7 @@ type Outcome = "pass" | "fail" | "skip" | "flaky-under-load"
 type Result = {
   id: string
   area: string
+  tier: string
   title: string
   outcome: Outcome
   startedAt: string
@@ -99,6 +115,7 @@ const once = async ({ area, check }: (typeof checks)[number], evidenceName: stri
   return {
     id: check.id,
     area,
+    tier: check.tier ?? "gate",
     title: check.title,
     outcome,
     startedAt: startedAt.toISOString(),

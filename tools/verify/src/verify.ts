@@ -83,10 +83,10 @@ if (only.length === 0) {
   let section = ""
   for (const line of fs.readFileSync(path.join(root, "docs/testing/feature-map.md"), "utf8").split("\n")) {
     if (line.startsWith("## ")) section = line.slice(3)
-    const m = /^\| [A-Z]+\d+ \| (.+?) \| (agent|runtime) \|/.exec(line)
+    const m = /^\| [A-Z]+\d+ +\| (.+?) \| (agent|runtime|slow) +\|/.exec(line)
     if (m)
       manual.push(
-        `  ${section}: ${m[1]!.replaceAll("`", "")}${m[2] === "agent" ? " (an agent checks it)" : " (needs the Agent runtime)"}`,
+        `  ${section}: ${m[1]!.trim().replaceAll("`", "")}${{ agent: " (an agent checks it: pnpm e2e --tier agent)", slow: " (pnpm e2e --tier slow)", runtime: " (needs the Agent runtime)" }[m[2]!]}`,
       )
   }
   if (manual.length) console.log(`Not proven by a script (docs/testing/feature-map.md):\n${manual.join("\n")}`)

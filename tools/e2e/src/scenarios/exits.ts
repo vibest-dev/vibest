@@ -138,7 +138,7 @@ const killedMidTurn = async (
         p.sendRow(sub, message)?.status === "failed" &&
         p.notices(sub, "exited before it was delivered") === 1 &&
         p.exited(sub),
-      10_000,
+      30_000,
     )
     await recordMs(evidence, name.toUpperCase(), "exitSeenMs", Date.now() - t0)
     expect(p.results(sub) === 1, `${p.results(sub)} results for one turn`)

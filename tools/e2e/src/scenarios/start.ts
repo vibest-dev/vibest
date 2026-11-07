@@ -68,6 +68,7 @@ const answerFolderTrust = async (socket: string, pane: string) => {
   if (!/trust this folder/i.test(text)) return false
   const ready = /^\s*❯.*Yes, I trust this folder/im.test(text)
   await herdr(socket, "pane.send_keys", { pane_id: pane, keys: [ready ? "enter" : "down"] })
+  await Bun.sleep(1_000)
   return ready
 }
 

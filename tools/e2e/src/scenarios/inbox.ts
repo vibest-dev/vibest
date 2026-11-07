@@ -813,4 +813,6 @@ const checks: ReadonlyArray<Check> = [
   },
 ]
 
-export default checks
+const heldPastAgentStart = checks.find((c) => c.id === "S18")!
+
+export default [...checks, { ...heldPastAgentStart, id: "S18-slow", tier: "slow" } satisfies Check]
