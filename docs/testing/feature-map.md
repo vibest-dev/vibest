@@ -2,7 +2,7 @@
 
 Every product capability vibest carries from omac, and how it is proven in a real environment: the built
 `apps/vibest-herdr/dist/vibest`, a real herdr, real harness CLIs, a scratch git repository with a local bare `origin`,
-the user's own `HOME` (the harnesses' logins) with a temp `VIBEST_HOME` and temp harness config directories (see
+the user's own `HOME` (the harnesses' logins) with a temp `VIBEST_HOME` and shadow harness config built from the user's (see
 [e2e-plan.md](e2e-plan.md) §1). Fakes do not count.
 
 **Method**
@@ -20,8 +20,11 @@ Run the gate's script checks with `pnpm run e2e` (all of tier gate; `--tier slow
 runs them on a curl and an npm install of this checkout instead, after every other gate. Questions that
 only a terminal is asked (`[y/N]`) are answered on a pseudo-terminal. Evidence: `tools/e2e/evidence/<run>/`.
 Checks that run a turn run it on a fake model server (`tools/e2e/src/fake-model.ts`: Anthropic Messages for Claude,
-OpenAI-compatible for Pi) with temp harness config, so their prompts and answers are scripted. No gate check runs a real model: I5 and I10 are agent checks (`pnpm e2e --tier agent I5`) on the user's own
+OpenAI-compatible for Pi) with shadow harness config, so their prompts and answers are scripted. No gate check runs a real model: I5 and I10 are agent checks (`pnpm e2e --tier agent I5`) on the user's own
 Cursor login.
+
+Merged checks keep their ids as cases: naming a covered id runs the check that covers it (D1 covers D2–D4, H1 covers H2
+and H3, I7 covers I4, S15 covers S11; T1 is T1-claude and T1-pi).
 
 ## Daemon and protocol
 
@@ -102,9 +105,9 @@ this in a spawned process.
 ## Integrations (harness adapters)
 
 vibest's plugin for each harness ships in `@vibest/cli` (`harnesses/<harness>`, `VIBEST_HARNESSES`) and is loaded into each
-session vibest starts: Pi `-e`, Claude and Cursor `--plugin-dir`. Nothing is installed. I3 and I4 run on a fake model with temp
-config; I5 uses the user's own Cursor login and config, read only; the user's real config files keep their modification
-times (I6). Cursor cannot run on a fake model: `cursor-agent --endpoint` speaks Cursor's own backend protocol, not a
+session vibest starts: Pi `-e`, Claude and Cursor `--plugin-dir`. Nothing is installed. I3 and I4 run on a fake model with shadow
+config built from the user's (docs/testing/e2e-plan.md §1); I5 uses the user's own Cursor login and config, read only;
+the settings the shadows read keep their content (I6). Cursor cannot run on a fake model: `cursor-agent --endpoint` speaks Cursor's own backend protocol, not a
 model API a fake can answer, and a real model cannot be held between hook events, so I10 is an agent check on the
 user's login.
 
