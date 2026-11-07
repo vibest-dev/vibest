@@ -1,5 +1,3 @@
-import { Effect } from "effect"
-
 import { terminalId } from "./terminal-runtime.ts"
 
 export const CALLER_ENV = ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"] as const
@@ -12,5 +10,3 @@ export const terminalFrom = (env: Readonly<Record<string, string | undefined>>) 
     ? terminalId(socket, address)
     : undefined
 }
-
-export const callerTerminal = Effect.sync(() => terminalFrom(process.env))

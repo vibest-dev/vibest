@@ -17,9 +17,9 @@ const platform = Layer.mergeAll(
   NodePath.layer,
 )
 
-export const layer = HerdrPool.layer.pipe(
-  Layer.provideMerge(Layer.provideMerge(NodeChildProcessSpawner.layer, platform)),
-)
+const callerServices = Layer.provideMerge(NodeChildProcessSpawner.layer, platform)
+
+export const layer = HerdrPool.layer.pipe(Layer.provideMerge(callerServices))
 
 export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   id: "runtime-herdr",
@@ -27,8 +27,8 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
     kind: KIND,
     env: CALLER_ENV,
     priority: CALLER_PRIORITY,
-    terminal: (env) => terminalFrom(env) as Effect.Effect<string | undefined, unknown, never>,
-    ready: (env) => readyFrom(env) as Effect.Effect<boolean, unknown, never>,
+    terminal: (env) => terminalFrom(env).pipe(Effect.provide(callerServices)),
+    ready: (env) => readyFrom(env).pipe(Effect.provide(platform)),
     missing: "this pane's herdr session could not be named; run vibest outside herdr",
   },
   effect: (context) =>

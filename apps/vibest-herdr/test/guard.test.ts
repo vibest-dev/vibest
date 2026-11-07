@@ -781,7 +781,7 @@ describe("vibest --session inside herdr", () => {
       const secret = "probe-value-9f3c"
       const herdr: Array<string> = []
       let cwdAfter = ""
-      const host = new Proxy({ builtinPlugins: [] } as unknown as Host, {
+      const host = new Proxy({ builtinPlugins: [], plugins: Platform.plugins } as unknown as Host, {
         get: (target, prop, receiver) =>
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })

@@ -38,13 +38,14 @@ const ConfigEntry = Schema.Union([
 ])
 const ConfigFile = Schema.Struct({ plugins: Schema.optional(Schema.Array(ConfigEntry)) })
 type ConfigFile = typeof ConfigFile.Type
+const isPlugin = (u: unknown): u is VibestPlugin.Plugin.Plugin =>
+  typeof u === "object" &&
+  u !== null &&
+  typeof (u as { readonly id?: unknown }).id === "string" &&
+  typeof (u as { readonly effect?: unknown }).effect === "function"
+
 const PluginModule = Schema.Struct({
-  default: Schema.Struct({
-    id: Schema.String,
-    effect: Schema.declare<VibestPlugin.Plugin.Plugin["effect"]>(
-      (u): u is VibestPlugin.Plugin.Plugin["effect"] => typeof u === "function",
-    ),
-  }),
+  default: Schema.declare(isPlugin),
 })
 
 type Operation =

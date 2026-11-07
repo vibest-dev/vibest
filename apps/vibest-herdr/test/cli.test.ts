@@ -590,6 +590,78 @@ describe("vibest CLI without vibestd", () => {
     TIMEOUT,
   )
 
+  const spawnProbe = (capabilities: Record<string, boolean>, args: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const home = yield* tempDirectory("vibest-spawn-runtime-")
+      const calls: Array<{ method: string | undefined; params: { runtime?: string } | undefined }> = []
+      const server = net.createServer((sock) => {
+        let buf = ""
+        sock.on("data", (chunk) => {
+          buf += chunk.toString()
+          for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
+            const req = JSON.parse(buf.slice(0, nl)) as {
+              id?: string
+              method?: string
+              params?: { runtime?: string }
+            }
+            buf = buf.slice(nl + 1)
+            calls.push({ method: req.method, params: req.params })
+            const reply = (body: object) => sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, ...body }) + "\n")
+            if (req.method === "Ping")
+              reply({ result: { protocol: PROTOCOL, version: VERSION, runtimes: [], capabilities } })
+            else if (req.method === "Spawn")
+              reply({
+                result: {
+                  id: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
+                  harness: "pi",
+                  decidedBy: {},
+                  trace: [],
+                },
+              })
+          }
+        })
+      })
+      yield* Effect.acquireRelease(
+        Effect.callback<void>((resume) => void server.listen(`${home}/vibest.sock`, () => resume(Effect.void))),
+        () => Effect.sync(() => server.close()),
+      )
+      return { calls, run: vibest(home, { HOME: home, VIBEST_HOME: home }, args) }
+    })
+
+  it.effect(
+    "vibest run --runtime is refused when vibestd has no spawnRuntime capability, and is sent when it does",
+    () =>
+      Effect.gen(function* () {
+        const missing = yield* spawnProbe({ http: true, handoff: true, requests: true, watch: true }, [
+          "run",
+          "--runtime",
+          "herdr",
+          "pi",
+          "do it",
+        ])
+        const refused = yield* missing.run
+        assert.notStrictEqual(refused.code, 0, refused.stdout)
+        assert.match(refused.stderr, /does not take --runtime/)
+        assert.notInclude(
+          missing.calls.map((call) => call.method),
+          "Spawn",
+        )
+        const plain = yield* spawnProbe({ http: true, handoff: true, requests: true, watch: true }, [
+          "run",
+          "pi",
+          "do it",
+        ])
+        const spawned = yield* plain.run
+        assert.strictEqual(spawned.code, 0, spawned.stderr)
+        assert.strictEqual(plain.calls.find((call) => call.method === "Spawn")?.params?.runtime ?? null, null)
+        const capable = yield* spawnProbe({ spawnRuntime: true }, ["run", "--runtime", "herdr", "pi", "do it"])
+        const accepted = yield* capable.run
+        assert.strictEqual(accepted.code, 0, accepted.stderr)
+        assert.strictEqual(capable.calls.find((call) => call.method === "Spawn")?.params?.runtime, "herdr")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
+
   it.effect(
     "integration guard fails with no answer when no vibest agent runs it, or on input it cannot read; the plugin refuses the call then",
     () =>
