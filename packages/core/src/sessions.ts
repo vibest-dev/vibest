@@ -319,7 +319,7 @@ export class Sessions extends Context.Service<
           const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
           const look = Effect.gen(function* () {
             const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
-            const ready = reports ? (yield* db.readyAt(id)) !== undefined : settled(seen)
+            const ready = (yield* db.readyAt(id)) !== undefined || (!reports && settled(seen))
             return { seen, ready }
           })
           return yield* look.pipe(
@@ -534,6 +534,11 @@ export class Sessions extends Context.Service<
           ),
         )
         if (delivered) return undefined
+        if (state === "unknown" && adapter.ready === "runtime") {
+          yield* sawTurnStart(session.id)
+          yield* db.updateSession(session.id, { status: "working" })
+          return undefined
+        }
         const round = { ...session, turnPromptedAt: now }
         if (yield* confirmed(h, round, terminal, subscription)) return undefined
         yield* h.send(terminal, { keys: ["enter"] }).pipe(Effect.ignore)
@@ -1047,16 +1052,19 @@ export class Sessions extends Context.Service<
                 const collected = yield* collectResult(h, session)
                 if (collected === "delivered")
                   return { message: `${id} had already finished its turn; its result is delivered` }
-                const seen = yield* agentState(h, terminal)
-                const state = stateOf(seen)
-                if (state === undefined || !busy(state))
+                const state = stateOf(yield* agentState(h, terminal))
+                const runtimeKnows = state !== undefined && state !== "unknown"
+                if (runtimeKnows ? !busy(state) : session.turnState !== "open")
                   return { message: `${id} is not working; nothing to interrupt` }
                 if (!(yield* interruptAgent(h, session, terminal)))
                   return yield* new SessionBusy({
                     id,
                     message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
                   })
-                yield* db.closeTurn(id, "interrupted", { lastActive: yield* Clock.currentTimeMillis })
+                yield* db.closeTurn(id, "interrupted", {
+                  lastActive: yield* Clock.currentTimeMillis,
+                  ...(runtimeKnows ? {} : { status: "idle" as const }),
+                })
                 return { message: `${id} interrupted; its terminal, worktree and session are kept` }
               }),
             ).pipe(Effect.catchTags({ RuntimeError: unreachable(known), PlatformError: Effect.die })),
@@ -1414,6 +1422,7 @@ export class Sessions extends Context.Service<
           Effect.gen(function* () {
             const now = at ?? (yield* Clock.currentTimeMillis)
             yield* bus.observe({ type: "live.turn_start", sessionId: id, at: now })
+            yield* db.updateSession(id, { status: "working" })
             yield* userPrompt(id, text, now)
           }),
         republish: republish().pipe(Effect.provideContext(platform)),

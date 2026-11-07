@@ -3,6 +3,7 @@ import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import type { HarnessId } from "@vibest/core/harness"
 import { claude } from "@vibest/core/harnesses/claude"
+import { cursor } from "@vibest/core/harnesses/cursor"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { AgentRefused } from "@vibest/core/plugins"
@@ -11,6 +12,7 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, isLimited, Plugin, stillLimited } from "@vibest/plugin"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID } from "@vibest/schema/id"
+import { turnEnd } from "@vibest/server/hooks"
 import {
   Cause,
   Clock,
@@ -962,6 +964,44 @@ describe.concurrent("Sessions", () => {
       yield* herdr.updateAgent(id, (a) => ({ ...a, session: "h-9" }))
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "h-9")
+    }),
+  )
+
+  test(
+    "Cursor on a runtime with no status for it: the task waits for its ready report and, typed, shows it working without a resend; its turn end shows it idle, and an interrupt goes by its open turn",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Sessions
+      const db = yield* Db
+      const repo = yield* makeRepository
+      yield* Ref.set(herdr.onStarted, (session) =>
+        herdr.updateAgent(session, (a) => ({ ...a, status: "unknown", registerPrompt: false })),
+      )
+      const { id } = yield* sessions.spawn(yield* spawnInput(repo, "cursor"))
+      yield* until(db.getSession(id), (w) => !!w && w.startedAt !== null)
+      for (let i = 0; i < 20; i++) yield* untilVirtual(Effect.succeed(0), () => true)
+      assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
+      yield* db.patchLive(id, { ready: yield* Clock.currentTimeMillis })
+      yield* untilVirtual(db.getSession(id), (w) => w?.status === "working")
+      assert.isTrue((yield* herdr.callsTo("send")).some((c) => c.text?.includes("do it")))
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+      yield* TestClock.adjust("40 seconds")
+      yield* settled
+      assert.isFalse((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("enter")))
+      yield* turnEnd(
+        db,
+        cursor,
+        { id, agent: "general" },
+        JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }),
+      )
+      yield* untilVirtual(db.getSession(id), (w) => w?.turnState === "completed")
+      assert.strictEqual((yield* db.getSession(id))!.status, "idle")
+      yield* sessions.send(id, "next")
+      yield* untilVirtual(db.getSession(id), (w) => w?.turnState === "open" && w.status === "working")
+      const stopped = yield* sessions.interrupt(id)
+      assert.include(stopped.message, "interrupted")
+      assert.isTrue((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("ctrl+c")))
+      assert.deepInclude(yield* db.getSession(id), { status: "idle", turnState: "interrupted" })
     }),
   )
 
