@@ -32,6 +32,7 @@ const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
       projectId,
       name: "task",
       prompt: "do it",
+      runtime: "herdr",
       harness,
     })
     yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))

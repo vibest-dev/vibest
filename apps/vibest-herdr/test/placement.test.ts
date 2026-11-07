@@ -27,6 +27,7 @@ const spawnInput = (repo: string) =>
     name: "task",
     prompt: "do it",
     harness: "pi" as const,
+    runtime: "herdr",
   }))
 
 describe("placement: every session is a tab beside the project's main agent, in vibest's own detached worktree", () => {

@@ -233,6 +233,10 @@ const run = Command.make(
       ),
       Flag.withDefault(false),
     ),
+    runtime: Flag.String("runtime").pipe(
+      Flag.withDescription("The terminal runtime for this session. Default: its parent's"),
+      Flag.optional,
+    ),
     session: sessionFlag,
   },
   (o) =>
@@ -250,6 +254,7 @@ const run = Command.make(
           env: Option.getOrUndefined(o.env),
           peer: Option.getOrUndefined(o.peer),
           archive: o.archive || undefined,
+          runtime: Option.getOrUndefined(o.runtime),
           machine,
         }),
       )

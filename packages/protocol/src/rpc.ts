@@ -258,6 +258,7 @@ export class VibestRpcs extends RpcGroup.make(
           machine: Schema.optional(RuntimeMachine),
           peer: Schema.optional(Schema.String),
           archive: Schema.optional(Schema.Boolean),
+          runtime: Schema.optional(Schema.String),
           request: Schema.optional(Schema.String),
         },
         success: Schema.Struct({

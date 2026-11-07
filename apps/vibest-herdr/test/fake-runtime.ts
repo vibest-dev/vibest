@@ -24,6 +24,7 @@ export interface FakeRuntimeOptions {
   readonly interruptIgnored?: boolean
   readonly statusEvents?: boolean
   readonly noRun?: boolean
+  readonly offline?: string
 }
 
 export interface RuntimeCalls {
@@ -277,7 +278,12 @@ export class FakeRuntime extends Context.Service<
       const runtime: Runtime = {
         kind: KIND,
         ...(options.noRun ? {} : { run }),
-        status: () => Effect.succeed({ status: "online" as const }),
+        status: () =>
+          Effect.succeed(
+            options.offline === undefined
+              ? { status: "online" as const }
+              : { status: "offline" as const, reason: options.offline },
+          ),
         open: (machine, input) =>
           call(
             "open",

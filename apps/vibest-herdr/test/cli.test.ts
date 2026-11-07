@@ -55,7 +55,7 @@ describe("vibest CLI", () => {
         vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args, stdin)
 
       const task = `it's "$HOME" and \`x\`\nsecond line`
-      const spawned = yield* run(["run", "pi", "-"], task)
+      const spawned = yield* run(["run", "--runtime", "herdr", "pi", "-"], task)
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = decodeJson(spawned.stdout) as { id: string }
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
@@ -107,7 +107,9 @@ describe("vibest CLI", () => {
       assert.strictEqual((yield* run(["frobnicate"])).code, 2)
       assert.strictEqual((yield* run(["status", id])).code, 2)
 
-      const { id: other } = decodeJson((yield* run(["run", "pi", "-"], "other")).stdout) as { id: string }
+      const { id: other } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "-"], "other")).stdout) as {
+        id: string
+      }
       yield* until(db.getSession(other), (w) => w?.turnState === "open")
       yield* db.updateSession(id, { status: "unknown", exitedAt: 1 })
       const ids = (args: ReadonlyArray<string>) =>
@@ -134,7 +136,9 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const { id } = decodeJson((yield* vibest(repo, cli, ["run", "pi", "do it"])).stdout) as { id: string }
+      const { id } = decodeJson((yield* vibest(repo, cli, ["run", "--runtime", "herdr", "pi", "do it"])).stdout) as {
+        id: string
+      }
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       const asSession = (sessionId: string, args: ReadonlyArray<string>) =>
         Effect.flatMap(db.sessionIdentity(sessionId), (row) =>
@@ -291,7 +295,7 @@ describe("vibest CLI", () => {
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
       const run = (args: ReadonlyArray<string>) => vibest(repo, cli, args)
-      const { id } = decodeJson((yield* run(["run", "pi", "do it"])).stdout) as { id: string }
+      const { id } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "do it"])).stdout) as { id: string }
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       const reported = yield* vibest(
         repo,
@@ -340,7 +344,15 @@ describe("vibest CLI", () => {
       const secret = "probe-value-9f3c"
       const run = (args: ReadonlyArray<string>) =>
         vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home, VIBEST_NO_UPDATE_CHECK: "1" }, args)
-      const started = yield* run(["--harness", "pi", "--headless", "--env", "MAIN_PROBE=" + secret])
+      const started = yield* run([
+        "--runtime",
+        "herdr",
+        "--harness",
+        "pi",
+        "--headless",
+        "--env",
+        "MAIN_PROBE=" + secret,
+      ])
       assert.strictEqual(started.code, 0, started.stderr)
       assert.notInclude(started.stdout, secret)
       assert.notInclude(started.stderr, secret)

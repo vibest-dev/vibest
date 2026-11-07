@@ -39,6 +39,7 @@ const workingSession = Effect.gen(function* () {
     projectId: yield* projectOf(repo),
     name: "task",
     prompt: "do it",
+    runtime: "herdr",
     harness: "pi",
   })
   yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))

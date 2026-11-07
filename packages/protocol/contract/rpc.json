@@ -8594,6 +8594,16 @@
               }
             ]
           },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "request": {
             "anyOf": [
               {

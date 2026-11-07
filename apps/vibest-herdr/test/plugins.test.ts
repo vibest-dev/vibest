@@ -31,6 +31,7 @@ const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: st
     projectId,
     name: "task",
     prompt: extra.prompt ?? "do it",
+    runtime: "herdr",
     ...extra,
   }))
 
@@ -63,13 +64,12 @@ describe("plugins: spawn hook", () => {
       )
       assert.strictEqual(s.harness, "claude")
       assert.strictEqual(s.model, "claude-haiku-5-5")
-      assert.deepStrictEqual(s.decidedBy, { harness: "route", runtime: "runtime-choice", model: "route" })
+      assert.deepStrictEqual(s.decidedBy, { harness: "route", model: "route" })
       const row = (yield* db.getSession(s.id))!
       assert.strictEqual(row.harnessId, "claude")
       assert.strictEqual(row.model, "claude-haiku-5-5")
       assert.deepStrictEqual(row.metadata.routing?.decidedBy, {
         harness: "route",
-        runtime: "runtime-choice",
         model: "route",
       })
       yield* until(herdr.callsTo("open"), (c) => c.length > 0)

@@ -420,7 +420,7 @@ describe("vibest.sock", () => {
       ): ReadonlyArray<readonly [string, Effect.Effect<unknown, { readonly _tag: string }>]> => [
         ["Spawn", c.Spawn({ harness: "pi", prompt: "more" })],
         ["Launch", c.Launch({ argv: [], focus: false })],
-        ["Project.StartMain", c["Project.StartMain"]({})],
+        ["Project.StartMain", c["Project.StartMain"]({ runtime: "herdr" })],
         ["Project.Open", c["Project.Open"]({})],
         ["List", c.List({ stopped: true })],
         ["Get", c.Get({ id })],
@@ -498,7 +498,11 @@ describe("vibest.sock", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
-      const opened = yield* c.Launch({ argv: ["/bin/vibest", "--harness", "pi", "--model", "it's"], focus: true })
+      const opened = yield* c.Launch({
+        argv: ["/bin/vibest", "--harness", "pi", "--model", "it's"],
+        focus: true,
+        runtime: "herdr",
+      })
       const root = yield* sh(repo, "rev-parse", "--show-toplevel")
       assert.deepStrictEqual(opened, {
         runtime: "herdr",
@@ -536,7 +540,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, repo)
       const herdr = yield* FakeRuntime
       const secret = "probe-value-9f3c"
-      yield* c.Launch({ argv: ["/bin/vibest", "--env", "MAIN_PROBE=" + secret], focus: false })
+      yield* c.Launch({ argv: ["/bin/vibest", "--env", "MAIN_PROBE=" + secret], focus: false, runtime: "herdr" })
       const pane = JSON.parse((yield* herdr.callsTo("open"))[0]!.env.VIBEST_MAIN_ENV!) as Record<string, string>
       const started = yield* c["Project.CoordinatorSession"]({
         harness: "pi",
@@ -558,7 +562,11 @@ describe("vibest.sock", () => {
       const repo = yield* makeRepository
       const linked = `${yield* tempDirectory("vibest-linked-")}/wt`
       yield* sh(repo, "worktree", "add", "-q", "--detach", linked)
-      yield* asCli(yield* client, linked).Launch({ argv: ["/bin/vibest", "--harness", "pi"], focus: false })
+      yield* asCli(yield* client, linked).Launch({
+        argv: ["/bin/vibest", "--harness", "pi"],
+        focus: false,
+        runtime: "herdr",
+      })
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((p) => [p.project, p.cwd]),
         [[repo, repo]],
@@ -924,11 +932,11 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
-      assert.strictEqual((yield* c["Project.StartMain"]({})).harness, "pi")
+      assert.strictEqual((yield* c["Project.StartMain"]({ runtime: "herdr" })).harness, "pi")
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
       assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
       yield* c["Project.CoordinatorSession"]({ harness: "cursor", fresh: false, terminal: "test/p1" })
-      assert.strictEqual((yield* c["Project.StartMain"]({})).harness, "cursor")
+      assert.strictEqual((yield* c["Project.StartMain"]({ runtime: "herdr" })).harness, "cursor")
     }),
     {
       plugins: [

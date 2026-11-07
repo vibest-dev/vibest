@@ -464,6 +464,8 @@ describe("multi-repository isolated workspace", () => {
 
       const spawned = yield* runVibest(root, { HOME: layout.home, VIBEST_HOME: layout.home }, [
         "run",
+        "--runtime",
+        "herdr",
         "pi",
         "--",
         "do it",

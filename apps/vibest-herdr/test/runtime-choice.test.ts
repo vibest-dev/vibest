@@ -1,0 +1,100 @@
+import { assert, describe, it } from "@effect/vitest"
+import { Db } from "@vibest/core/db"
+import { Sessions } from "@vibest/core/sessions"
+import { Plugin } from "@vibest/plugin"
+import { Effect, type Scope } from "effect"
+
+import { makeRepository, projectOf, testLayer, type TestOptions, type TestServices } from "./fakes.ts"
+
+const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
+  it.effect(name, () => program.pipe(Effect.provide(testLayer(options))))
+
+const input = (
+  repo: string,
+  projectId: string,
+  extra: { readonly runtime?: string; readonly parentSessionId?: string } = {},
+) => ({
+  machine: { id: "local" as const },
+  root: repo,
+  projectId,
+  name: "task",
+  prompt: "do it",
+  harness: "pi" as const,
+  ...extra,
+})
+
+const main = Effect.gen(function* () {
+  const db = yield* Db
+  const repo = yield* makeRepository
+  const projectId = yield* projectOf(repo)
+  const coordinator = yield* db.coordinatorLaunch(projectId, "pi", false, {
+    runtime: "herdr",
+    address: { machine: "local", id: "test/coord" },
+  })
+  return { db, repo, projectId, sessions: yield* Sessions, parent: coordinator.sessionId }
+})
+
+describe("subagent runtime", () => {
+  test(
+    "a subagent of the main agent inherits the coordinator runtime",
+    Effect.gen(function* () {
+      const { db, repo, projectId, sessions, parent } = yield* main
+      assert.strictEqual(yield* db.getSession(parent), undefined)
+      const spawned = yield* sessions.spawn(input(repo, projectId, { parentSessionId: parent }))
+      assert.strictEqual(spawned.runtime, "herdr")
+      assert.strictEqual(spawned.decidedBy.runtime, "runtime-choice")
+    }),
+  )
+
+  test(
+    "--runtime overrides the parent runtime",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const coordinator = yield* db.coordinatorLaunch(projectId, "pi", false, {
+        runtime: "hc",
+        address: { machine: "local", id: "test/coord" },
+      })
+      const spawned = yield* (yield* Sessions).spawn(
+        input(repo, projectId, { parentSessionId: coordinator.sessionId, runtime: "herdr" }),
+      )
+      assert.strictEqual(spawned.runtime, "herdr")
+      assert.strictEqual(spawned.decidedBy.runtime, undefined)
+    }),
+  )
+
+  test(
+    "an offline parent runtime refuses the start with the runtime's reason",
+    Effect.gen(function* () {
+      const { repo, projectId, sessions, parent } = yield* main
+      const error = yield* Effect.flip(sessions.spawn(input(repo, projectId, { parentSessionId: parent })))
+      assert.strictEqual(error._tag, "NoRuntime")
+      assert.match("message" in error ? error.message : "", /herdr is offline on local \(not running\)/)
+    }),
+    { offline: "not running" },
+  )
+
+  test(
+    "a user plugin can still set the runtime when nothing else did",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const spawned = yield* (yield* Sessions).spawn(input(repo, yield* projectOf(repo)))
+      assert.strictEqual(spawned.runtime, "herdr")
+      assert.strictEqual(spawned.decidedBy.runtime, "pick")
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "pick",
+          effect: (ctx) =>
+            ctx.agent.hook("start.before", (event) =>
+              Effect.sync(() => {
+                event.runtime = "herdr"
+              }),
+            ),
+        }),
+      ],
+    },
+  )
+})

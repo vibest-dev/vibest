@@ -59,14 +59,6 @@ const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
 
 const addressOf = (id: string) => id.slice(0, id.indexOf("@"))
 
-const configureRuntime = async (w: World, runtime: string | undefined) => {
-  const file = path.join(w.vibestHome, "vibest.json")
-  const before = await fs.readFile(file, "utf8").catch(() => undefined)
-  const config = before === undefined ? {} : (JSON.parse(before) as Record<string, unknown>)
-  await fs.writeFile(file, JSON.stringify({ ...config, runtime }))
-  return () => (before === undefined ? fs.rm(file, { force: true }) : fs.writeFile(file, before))
-}
-
 const checks: ReadonlyArray<Check> = [
   {
     id: "S33",
@@ -80,7 +72,6 @@ const checks: ReadonlyArray<Check> = [
       const piAgentDir = await piDir(w, "pi-hc", model.url)
       const env = `PI_CODING_AGENT_DIR=${piAgentDir}`
       const core = await isolatedCore(w, piAgentDir, "hc")
-      const restore = await configureRuntime(w, "hc")
       try {
         const repo = await project(w, "hc")
         await w.ok(["--harness", "pi", "--runtime", "hc", "--headless", "--env", env], {
@@ -117,7 +108,7 @@ const checks: ReadonlyArray<Check> = [
             await Bun.sleep(100)
           }
         })()
-        await w.ok(["run", "pi", "--env", env, "--title", "Fix login bug", ask("zero")], {
+        await w.ok(["run", "pi", "--runtime", "hc", "--env", env, "--title", "Fix login bug", ask("zero")], {
           cwd: repo,
           timeoutMs: 60_000,
         })
@@ -211,7 +202,6 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         model.stop()
         await w.stopDaemon()
-        await restore()
         await core.stop()
       }
     },

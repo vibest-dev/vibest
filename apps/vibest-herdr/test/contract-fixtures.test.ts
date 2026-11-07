@@ -148,7 +148,7 @@ describe("contract", () => {
       const w = yield* wire
       const layout = yield* Layout
       const repo = yield* makeRepository
-      yield* w.send(request(1, "Launch", { argv: ["vibest"], focus: false }, cliHeaders(repo)))
+      yield* w.send(request(1, "Launch", { argv: ["vibest"], focus: false, runtime: "herdr" }, cliHeaders(repo)))
       yield* w.recv
       yield* check("launch", w.lines, { [repo]: "/fixture/repo", [layout.home]: "/fixture/home" })
     }),
