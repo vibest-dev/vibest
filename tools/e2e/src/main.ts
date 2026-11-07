@@ -91,7 +91,7 @@ type Result = {
   detail?: string
 }
 
-const run = new Date().toISOString().replace(/[:.]/g, "-")
+const run = `${new Date().toISOString().replace(/[:.]/g, "-")}-${method}`
 const evidence = path.join(checkout, "tools/e2e/evidence", run)
 await fs.mkdir(evidence, { recursive: true })
 const userFilesBefore = await userFileHashes()
