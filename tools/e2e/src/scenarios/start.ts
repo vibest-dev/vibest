@@ -3,8 +3,9 @@ import net from "node:net"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { answerFolderTrust } from "../drivers/claude.ts"
 import { claudeConfigOf, claudeEnv, fakeAnthropic, heldModel, piDir } from "../fake-model.ts"
-import { expect, fail, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { expect, fail, row, SESSIONS, Skip, until, vibestTyped, type World } from "../world.ts"
 
 type Entry = {
   id: string
@@ -63,14 +64,6 @@ const type = async (socket: string, pane: string, text: string) => {
   await herdr(socket, "pane.send_text", { pane_id: pane, text })
   await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
 }
-const answerFolderTrust = async (socket: string, pane: string) => {
-  const text = await screen(socket, pane)
-  if (!/trust this folder/i.test(text)) return false
-  const ready = /^\s*❯.*Yes, I trust this folder/im.test(text)
-  await herdr(socket, "pane.send_keys", { pane_id: pane, keys: [ready ? "enter" : "down"] })
-  return ready
-}
-
 const piWrote = async (agentDir: string, cwd: string) => {
   const real = await fs.realpath(cwd)
   const dir = path.join(agentDir, "sessions", `--${real.slice(1).replaceAll("/", "-")}--`)
@@ -99,11 +92,8 @@ const move = (harness: "claude" | "pi"): Check => ({
         : ["--harness", "pi", "--env", `PI_CODING_AGENT_DIR=${piAgentDir}`]
     const session = `${w.herdrSession}-move`
     const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-    const zdot = path.join(w.root, "zdotdir-move")
-    await fs.mkdir(zdot, { recursive: true })
-    const env = { ZDOTDIR: zdot }
-    await w.stopDaemon()
-    await w.ok(["daemon"], { env })
+    const env = {}
+    await w.daemon({ env })
     try {
       await w.ok([...options, "--session", session, "--headless"], { env, timeoutMs: 60_000 })
       let a = ""
@@ -137,16 +127,12 @@ const move = (harness: "claude" | "pi"): Check => ({
       })
       const status = async (pane: string) =>
         ((await herdr(socket, "pane.get", { pane_id: pane })) as { pane: { agent_status: string } }).pane.agent_status
-      await until(
-        `${harness} ready in A`,
-        async () =>
-          harness === "pi"
-            ? (await status(a)) === "idle"
-            : !(await answerFolderTrust(socket, a)) &&
-              !/trust this folder/i.test(await screen(socket, a)) &&
-              (await status(a)) === "idle",
-        60_000,
-      )
+      if (harness === "claude")
+        await answerFolderTrust(
+          () => screen(socket, a),
+          (key) => herdr(socket, "pane.send_keys", { pane_id: a, keys: [key] }),
+        )
+      await until(`${harness} ready in A`, async () => (await status(a)) === "idle", 60_000)
       const prompt = "Do not use any tools. Reply with exactly: ok"
       await herdr(socket, "agent.prompt", { target: a, text: prompt })
       let conversation: string | undefined
@@ -177,12 +163,12 @@ const move = (harness: "claude" | "pi"): Check => ({
           target_pane_id: a,
           direction: "right",
           cwd: w.repository,
-          env: { ZDOTDIR: zdot, PATH: w.env().PATH! },
+          env: { PATH: w.env().PATH! },
           focus: false,
         })) as { pane: { pane_id: string } }
       ).pane.pane_id
       await until("B's shell", async () => /\S/.test(await screen(socket, b)), 30_000)
-      await type(socket, b, ["vibest", ...options].join(" "))
+      await type(socket, b, [vibestTyped, ...options].join(" "))
       await until(
         "B asks to move the main agent",
         async () => (await screen(socket, b)).includes("Move it here and continue? [y/N]"),

@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { line } from "@vibest/core/inbox"
+import { VibestCommand } from "@vibest/core/paths"
 import { CONTINUE, continueNotice, continueText, type Restarted } from "@vibest/core/restart"
 import { Restarting } from "@vibest/core/restarting"
 import { Sessions } from "@vibest/core/sessions"
@@ -195,7 +196,12 @@ describe("restart in place", () => {
       assert.lengthOf(notices, 1)
       assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
       assert.include(notices[0]!.message, `Restarted: ${sub}, ${main}.`)
-    }),
+      assert.deepInclude(
+        (yield* herdr.callsTo("run")).map((c) => c.argv),
+        ["/own/bin/vibest", "integration", "start", main],
+        "the main agent restarts through the vibest vibestd runs, not the first vibest on PATH",
+      )
+    }).pipe(Effect.provideService(VibestCommand, ["/own/bin/vibest"])),
   )
 
   test(

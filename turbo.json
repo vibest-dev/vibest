@@ -1,17 +1,49 @@
 {
   "$schema": "https://turborepo.com/schema.v2.json",
-  "globalDependencies": ["tools/tsconfig/base.json"],
+  "globalDependencies": ["tools/tsconfig/base.json", "vitest.config.ts"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "bin/vibest", "harnesses/**"],
+      "outputs": ["dist/**", "bin/vibest", "harnesses/**"]
+    },
+    "@vibest/cli#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/integration/*/src/**",
+        "$TURBO_ROOT$/packages/integration/*/{scripts,hooks}/**",
+        "$TURBO_ROOT$/packages/integration/*/{package.json,README.md,LICENSE}",
+        "$TURBO_ROOT$/packages/skills/**"
+      ],
+      "outputs": ["dist/**", "bin/vibest", "harnesses/**"]
+    },
+    "@vibest/claude#build": { "cache": false },
+    "@vibest/cursor#build": { "cache": false },
+    "@vibest/pi#build": { "cache": false },
+    "@vibest/cli-darwin-arm64#build": {
+      "outputs": ["bin/vibest"],
+      "cache": false
+    },
+    "@vibest/cli-linux-x64#build": {
+      "outputs": ["bin/vibest"],
       "cache": false
     },
     "typecheck": {
       "dependsOn": ["^typecheck"]
     },
     "test": {
-      "cache": false
+      "dependsOn": ["^typecheck"],
+      "outputs": []
+    },
+    "@vibest/cli#test": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "//#e2e": {
+      "dependsOn": ["@vibest/cli#build"],
+      "inputs": ["tools/e2e/src/**", "docs/testing/feature-map.md"],
+      "outputs": [],
+      "cache": true
     }
   }
 }

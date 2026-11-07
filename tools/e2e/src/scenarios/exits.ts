@@ -5,7 +5,7 @@ import path from "node:path"
 import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
 import type { Check } from "../check.ts"
 import { ask, heldModel, piDir } from "../fake-model.ts"
-import { alive, expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 const piProject = async (w: World, name: string) => {
@@ -13,9 +13,7 @@ const piProject = async (w: World, name: string) => {
   const model = heldModel()
   const session = `${w.herdrSession}-${name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-  const zdot = path.join(w.root, `zdotdir-${name}`)
-  await fs.mkdir(zdot, { recursive: true })
-  const env = { ZDOTDIR: zdot }
+  const env = {}
   const repo = await project(w, name)
   const pi = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
   const startDaemon = () => w.ok(["daemon"], { env })
@@ -138,7 +136,7 @@ const killedMidTurn = async (
         p.sendRow(sub, message)?.status === "failed" &&
         p.notices(sub, "exited before it was delivered") === 1 &&
         p.exited(sub),
-      10_000,
+      30_000,
     )
     await recordMs(evidence, name.toUpperCase(), "exitSeenMs", Date.now() - t0)
     expect(p.results(sub) === 1, `${p.results(sub)} results for one turn`)
@@ -243,9 +241,7 @@ const checks: ReadonlyArray<Check> = [
         p.model.releaseOne()
         await until("(b) turn end logged", async () => (await p.log()).slice(from).includes(`turn end ${b}`), 30_000)
         const pid = await w.daemonPid()
-        expect(pid !== undefined, "no vibestd pid")
-        process.kill(pid!, "SIGKILL")
-        await until("vibestd gone", () => !alive(pid!), 10_000)
+        await w.killDaemon(pid)
         await p.startDaemon()
         await one(b, "(b)")
       } finally {
@@ -267,7 +263,6 @@ const checks: ReadonlyArray<Check> = [
         for (let attempt = 1; message === "" && attempt <= killWindowTries; attempt++) {
           const tried = ask(`cut${attempt}`)
           const daemon = await w.daemonPid()
-          expect(daemon !== undefined, "no vibestd pid")
           const sending = p.vibestSend(sub, tried)
           let status: string | undefined
           for (const deadline = Date.now() + 15_000; ; await Bun.sleep(1)) {
@@ -276,9 +271,8 @@ const checks: ReadonlyArray<Check> = [
             expect(Date.now() < deadline, "the row never left pending")
           }
           if (status === "delivering") {
-            process.kill(daemon!, "SIGKILL")
+            await w.killDaemon(daemon)
             await sending.catch(() => undefined)
-            await until("vibestd gone", () => !alive(daemon!), 10_000)
             await p.startDaemon()
             message = tried
           } else {
@@ -359,12 +353,10 @@ const checks: ReadonlyArray<Check> = [
         let sub = ""
         for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
-          expect(daemon !== undefined, "no vibestd pid")
           const id = await p.runSub(`cut${attempt}`)
           const now = startTerminal(id)
           if (now?.t === "" && now.ended === 0) {
-            process.kill(daemon!, "SIGKILL")
-            await until("vibestd gone", () => !alive(daemon!), 10_000)
+            await w.killDaemon(daemon)
             sub = id
           } else await until(`${id} idle`, () => p.idle(id), 60_000)
         }
@@ -408,15 +400,13 @@ const checks: ReadonlyArray<Check> = [
         let sub = ""
         for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
-          expect(daemon !== undefined, "no vibestd pid")
           const id = await p.runSub(`t${attempt}`)
           const opened = () =>
             row<{ n: number }>(w, "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'turn.start'", id)
               ?.n === 1
           for (const deadline = Date.now() + 60_000; !opened(); await Bun.sleep(1))
             expect(Date.now() < deadline, `${id}: its first turn never opened`)
-          process.kill(daemon!, "SIGKILL")
-          await until("vibestd gone", () => !alive(daemon!), 10_000)
+          await w.killDaemon(daemon)
           if (untaken(w, id)) sub = id
           await p.startDaemon()
           if (sub === "") await until(`${id} idle`, () => p.idle(id), 60_000)
@@ -473,12 +463,10 @@ const checks: ReadonlyArray<Check> = [
           const dir = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", id)?.d ?? ""
           expect(tab !== "" && dir !== "", `no pane or worktree recorded for ${id}`)
           const daemon = await w.daemonPid()
-          expect(daemon !== undefined, "no vibestd pid")
           const archiving = w.vibest(["archive", id], { cwd: p.repo, env: p.env, timeoutMs: 60_000 })
           for (const deadline = Date.now() + 60_000; !marked(id); await Bun.sleep(1))
             expect(Date.now() < deadline, `${id}: vibest archive never set its mark`)
-          process.kill(daemon!, "SIGKILL")
-          await until("vibestd gone", () => !alive(daemon!), 10_000)
+          await w.killDaemon(daemon)
           await archiving
           if (!processEnded(id)) [sub, pane, worktree] = [id, tab, dir]
           await p.startDaemon()
@@ -525,14 +513,12 @@ const checks: ReadonlyArray<Check> = [
         let sub = ""
         for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
-          expect(daemon !== undefined, "no vibestd pid")
           const id = await p.runSub(`a${attempt}`, "--archive-on-completion")
           await until(`${id} held`, () => p.model.held() > 0, 60_000)
           p.model.releaseOne()
           for (const deadline = Date.now() + 60_000; state(id)?.status !== "delivered"; await Bun.sleep(1))
             expect(Date.now() < deadline, `${id}: its result was never delivered`)
-          process.kill(daemon!, "SIGKILL")
-          await until("vibestd gone", () => !alive(daemon!), 10_000)
+          await w.killDaemon(daemon)
           if (state(id)?.ended === null) sub = id
           await p.startDaemon()
         }

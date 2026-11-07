@@ -6,24 +6,29 @@ those, for every omac feature vibest carries.
 
 ## 1. Isolation
 
-vibest writes nothing into the user's `~/.vibest`, harness config (`~/.claude`, `~/.pi`, `~/.cursor`) or main herdr session.
+vibest writes nothing into the user's `~/.vibest`, harness config (`~/.claude`, `~/.pi`, `~/.cursor`), herdr sessions or
+herdr-core. Every check gets its own World: a `0700` temp root with its own `VIBEST_HOME`, its own herdr sessions and,
+where a check needs one, its own herdr-core. The harnesses run as the user runs them, on the user's environment and a
+copy of the user's settings; only the model is fake.
 
-| Thing          | E2E value                                                                                                                                                                                                                                                                                                     |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `HOME`         | the user's own: the harnesses' subscription logins live in its keychain, and a temp `HOME` is logged out                                                                                                                                                                                                      |
-| `VIBEST_HOME`  | a fresh `0700` temp directory per run                                                                                                                                                                                                                                                                         |
-| Harness config | temp directories per run through each harness's own variable: `PI_CODING_AGENT_DIR`, `CLAUDE_CONFIG_DIR`, `CURSOR_CONFIG_DIR`. I5, the one real-model turn, uses the user's own Cursor config, read only, and loads vibest's plugin from `VIBEST_HARNESSES`. The user's real files are checked unchanged (I6) |
-| herdr session  | herdr keeps its sessions under the real `HOME`: a session vibest starts during the run is stopped at the end; the user's sessions stay                                                                                                                                                                        |
-| Repository     | a scratch git repository with a local bare `origin`, so pushed / unpushed / dirty states are real                                                                                                                                                                                                             |
-| Binary         | `apps/vibest-herdr/dist/vibest` from this checkout, first on `PATH` (harness plugins run `vibest` from `PATH`), then `~/.local/bin` (cursor-agent)                                                                                                                                                            |
-| Credentials    | the user's subscription logins; never printed or written to evidence                                                                                                                                                                                                                                          |
-| Releases       | `npm_config_registry` and `VIBEST_DOWNLOAD_URL` point at a local stand-in that names this checkout's version as the latest, so `vibest update` and the update notice never reach npm or GitHub and never install into the user's global npm                                                                   |
-
-| Harness             | Login                   | Note                                                                                                                |
-| ------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Claude Code 2.1.314 | subscription (keychain) | `CLAUDE_CONFIG_DIR` keys its login to the config directory: a temp one is logged out, enough for the install checks |
-| Pi 1.4.0            | `~/.pi/agent/auth.json` | a temp `PI_CODING_AGENT_DIR` has no login, enough for the install checks                                            |
-| Cursor 2026.10.22   | subscription (keychain) | stays logged in with a temp `CURSOR_CONFIG_DIR`; its transcripts still go to the real `~/.cursor/projects`          |
+| Thing         | E2E value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Environment   | the user's login environment, captured once per run with `$SHELL -l -i -c 'unset HISTFILE; env -0'` from an empty environment with `HISTFILE=/dev/null` (nothing reaches the user's shell history), never the runner's own. Dropped: shell-session state, runner variables (`CLAUDECODE`, `CLAUDE_CODE_*`, `CLAUDE_PID`, `VIBEST_*`, `HERDR_*`, `HC_*`, `PI_PACKAGE_DIR`) and real-model access (`ANTHROPIC_*`, `OPENAI_*`, `*_API_KEY`, `*_BASE_URL`, `*_MODEL`, …). `NO_PROXY` and `no_proxy` get `127.0.0.1,localhost`                                                                                                      |
+| `HOME`        | the user's own                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `PATH`        | the login `PATH` with the build's (or the install's) `bin` first                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Pane shell    | the user's `$SHELL` with its rc files, read through a `ZDOTDIR` in the world that sources the user's zsh files and then points `HISTFILE` into the world (`HISTFILE` for bash too), so commands typed into panes never reach the user's shell history. An rc can put another vibest first on `PATH`, so whatever types `vibest` into a pane types the build's absolute path, the Pi and Cursor plugins reach vibest through `VIBEST_COMMAND`, and the Claude plugin talks to vibestd over HTTP (`$.http.fetch`). I11 and the terminal-status checks set an empty `ZDOTDIR`: their subject is an older `vibest` first on `PATH` |
+| git           | the user's `~/.gitconfig`, read by git                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `VIBEST_HOME` | `<world>/vibest`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Claude config | a shadow `CLAUDE_CONFIG_DIR` written from the user's `settings.json` keys `permissions`, `env` (without model, provider, base-URL, key or token variables, so the fake model's `ANTHROPIC_BASE_URL` wins), `language`, `worktree`, `autoMode`, `attribution`, `cleanupPeriodDays` and `.claude.json`'s onboarding and auto-mode keys, plus the fake key's approval. Not copied: hooks, `statusLine` and plugins (they reach the user's herdr, Rex and other orchestrators), the model choice, credentials. Auto mode is off: a fake model cannot answer its classifier's side requests (P8, S15 and U4 fail with it on)        |
+| Pi config     | a shadow `PI_CODING_AGENT_DIR` per agent: the user's `settings.json` keys `defaultThinkingLevel`, `defaultTools`, `steeringMode`, `doubleEscapeAction`, `codemode`, `tuiMode`, `theme`, `trust.json` copied, and a `models.json` naming only the fake providers. Not copied: `packages`, `auth.json`. vibestd's own Pi dir stays empty, as on a fresh install                                                                                                                                                                                                                                                                  |
+| Cursor config | a shadow `CURSOR_CONFIG_DIR` with the user's `cli-config.json` keys `version`, `approvalMode`, `sandbox`, `permissions` and `network`; never the model fields or `authInfo`. The gate runs no Cursor model turn                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Profiles      | `user` (the shadows above, the default) and `first-run` (today's defaults, no user keys). T1-pi runs in a temp `HOME` and uses `first-run`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| User files    | the files and keys the shadows read are hashed (content) before and after the run; a change fails the run. Evidence holds only these hashes, never their content                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| herdr         | sessions named `<world>[-…]` under the real `~/.config/herdr/sessions`, stopped and deleted when the check ends; a session left over fails the check                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| herdr-core    | the hc and status checks start their own server (`HC_SOCKET`, `XDG_*` in the World)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Repository    | a scratch git repository with a local bare `origin`, so pushed / unpushed / dirty states are real                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Releases      | `npm_config_registry` and `VIBEST_DOWNLOAD_URL` point at a local stand-in that names this checkout's version as the latest, so `vibest update` and the update notice never reach npm or GitHub and never install into the user's global npm                                                                                                                                                                                                                                                                                                                                                                                    |
+| Secrets       | values of secret-looking login variables and `VIBEST_E2E_ENV` values, and the user's model, provider and account values (Claude `model`, Pi `defaultProvider`/`defaultModel`, Cursor model fields and account ids), are shown as `<redacted>` in output and evidence; the run fails if evidence still holds one                                                                                                                                                                                                                                                                                                                |
 
 A test that starts the built vibestd itself (`test/plugin-binary.test.ts`) asks it over its socket, never through the
 `vibest` CLI: the CLI starts a vibestd of its own when a Ping is slow and would leave a second, untracked one behind. It
@@ -32,8 +37,10 @@ gives vibestd a `PATH` of the system directories only, so vibestd does not poll 
 ## 2. Layers
 
 **L0, already automated, no keys.** `pnpm test`; `HERDR_LIVE=1 pnpm test` inside a herdr pane (the two live files);
-`pnpm verify` runs all of it (build, typecheck, test), installs vibest as a user does (install.sh from a release archive, and npm from the packed `@vibest/cli`), and runs
-every script check on that install, a skip failing the run (tools/verify/README.md).
+`pnpm verify` runs build, typecheck and test, installs vibest as a user does (install.sh from a release archive, and npm
+from the packed `@vibest/cli`, both while the unit tests run), then runs the gate on the curl install and, at the same
+time, a smoke set (I1, I2, U1, U9, U10, H1) on the npm install; the npm install gets the full gate when its file layout
+differs from the last one that passed it. A skip fails the run (tools/verify/README.md).
 
 **L1, real herdr, no model.** Every command whose effect does not need a model turn.
 
@@ -73,29 +80,56 @@ and `integration stop` ends cleanly. Pi only: the coordinator TUI (tool groups, 
 
 ## 3. Runner
 
-`tools/e2e` (Bun, private package): one scenario per file, run in sequence, each with a timeout. It writes evidence to
-`tools/e2e/evidence/<run>/`: commands, exit codes, `ls --json`, `result`, pane text, and the database. It signals and
-closes only the PIDs and panes it recorded. A skipped harness (no key) is reported as skipped, never as passed. A check
-that leaves a pane outside the run's herdr sessions fails, whatever it proved. A run with a failure keeps its temp world
-for inspection; a clean run removes it. U1 stops vibestd first: a running one would be offered for replacement, which
-asks on a terminal.
+`tools/e2e` (Bun, private package): `pnpm e2e [area | id …] [--tier gate|slow|agent|all] [--jobs N] [--no-cache]
+[--strict]`. Each check runs in a World of its own, so a check passes alone or not at all.
 
-Checks that run a turn use a fake model by default (`tools/e2e/src/fake-model.ts`): a local Anthropic Messages server
-for Claude (a temp `CLAUDE_CONFIG_DIR` with its onboarding done, `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` passed as
-vibest's own `--env`) and OpenAI-compatible servers for Pi (a temp `PI_CODING_AGENT_DIR` whose `models.json` names
-them). The fake answers from the request, so what the agent asks and does is scripted, and a turn can be held open until
-the check releases it. Only I5 runs a real model: the login smoke on the user's Cursor login. `VIBEST_E2E_ENV` (`KEY=VALUE`
-pairs, one per line) names values the evidence masks: console output, failure details and evidence show `<redacted>`
-instead.
+- **Pool.** Checks run in parallel in a pool shared by every worktree and every `pnpm e2e` on the machine: its slots are
+  lock files under `<git-common-dir>/vibest-e2e/slots`, CPU count − 2 of them, and a check starts only while the one-minute
+  load average is below the CPU count (one always runs when no slot is busy). `--jobs N` runs ungated: N checks at a
+  time, with no load gate, ignoring the machine cap (it never waits for slots other runs hold). Checks start longest
+  first, by the duration each last took (`vibest-e2e/timings.json`).
+- **Flaky under load.** A failed check is run again alone. If it then passes it is reported `flaky-under-load`, which
+  still fails the run.
+- **Tiers.** `gate` (the default), `slow` (S18-slow, herdr's full 120 s window) and `agent` (I5: a real model; an agent
+  runs it and attaches the evidence). An id named on the command line runs whatever its tier. A check that merges
+  others names them (`covers`), and naming a covered id runs it: D1 covers D2–D4, H1 covers H2 and H3, I7 covers I4, S15
+  covers S11. Naming T1 runs T1-claude and T1-pi.
+- **Result cache.** A check that passed is not run again while its key is unchanged; it prints `CACHED`. The key hashes
+  the vibest binary that runs (for npm and curl the installed launcher and the compiled binary it starts), the harness
+  plugins tree but for the files Claude writes into it when it loads the plugin (`claude/tsconfig.json`,
+  `claude/.claude-plugin/types/`), the runner's own source (all of `tools/e2e/src` but the checks), the check's area file
+  and every file it imports by a relative path, recursively, the herdr, hc, claude, pi, cursor-agent, bun and node version numbers, the
+  install method, the hashes of the user settings the shadows read, and the login `PATH`. Passes are kept under
+  `<git-common-dir>/vibest-e2e/cache`, shared by every worktree. Agent-tier checks are never cached; `--no-cache` runs
+  everything; `pnpm verify --no-cache` passes it to both legs and runs the whole gate on both installs, the run before a
+  release. Turborepo's `e2e` task (`turbo run e2e`) skips the whole suite when neither the build nor `tools/e2e`
+  changed, but it cannot see tool versions or the user's settings, so `pnpm verify` runs the runner and its cache.
+- **Invariants.** After each check: no terminal outside its herdr sessions, no herdr session left. After the run: the
+  user files the shadows read are unchanged, no line of the user's shell history files (`~/.zsh_history`, `~/.bash_history`,
+  fish's) names one of this run's worlds (the user's own terminals and other runs keep writing there, so the file
+  itself may change), and no evidence file holds a user model, provider or account value.
+
+The run writes evidence to `tools/e2e/evidence/<run>/`: per check the commands, exit codes and output (`<id>.json`,
+`<id>.alone.json` for a rerun), files a check saves, and `report.json` with every check's tier, outcome, start time and
+duration, the wall time, the user files' hashes and the invariants. It signals and closes only the PIDs and panes it
+recorded. A skipped check is reported as skipped, never as passed. A failed check keeps its World for inspection; a
+passing one removes it.
+
+Checks that run a turn use a fake model (`tools/e2e/src/fake-model.ts`): a local Anthropic Messages server for Claude
+(the shadow `CLAUDE_CONFIG_DIR`, `ANTHROPIC_BASE_URL` and the fake `ANTHROPIC_API_KEY` passed as vibest's own `--env`)
+and OpenAI-compatible servers for Pi (the shadow `PI_CODING_AGENT_DIR`, whose `models.json` names them). The fake answers
+from the request, so what the agent asks and does is scripted, and a turn can be held open until the check releases it.
+The gate runs no real model; I5, the Cursor login smoke, is in tier `agent`. `VIBEST_E2E_ENV` (`KEY=VALUE` pairs, one
+per line) names more values the evidence masks.
 
 ### The world
 
 - `VIBEST_E2E_METHOD` (`npm` or `curl`) and `VIBEST_E2E_INSTALL`, set by `pnpm verify`, point the checks at an installed
   vibest; unset, they drive this checkout's build. The world sets no `VIBEST_HARNESSES`: npm's launcher sets it as for
   a user, and the build and the curl install find their plugins beside the binary.
-- The world's environment drops every inherited `VIBEST_*` and `HERDR_*` variable, so the model options reach an agent
-  only as vibest's own flags. It drops `PI_PACKAGE_DIR` too: a Pi install directory the parent exported may be gone when
-  a child starts, and Pi then reports version 0.0.0 and refuses extensions that want a newer Pi.
+- The world's environment is the login environment of §1, so the model options reach an agent only as vibest's own
+  flags. It has no `PI_PACKAGE_DIR`: a Pi install directory the parent exported may be gone when a child starts, and Pi
+  then reports version 0.0.0 and refuses extensions that want a newer Pi.
 - On macOS the temp root is under `/tmp`: `vibest.sock` lives in `VIBEST_HOME`, and a Unix socket path is at most 104
   bytes there. vibest.db stores resolved paths, `/private/tmp`.
 - `vibest run` and a bare `vibest` get `--session <run>` unless they name one: vibest's default session `vibest` is the
@@ -109,26 +143,27 @@ What the checks that drive real herdr panes rely on:
 
 - A pane gets the environment of its herdr server, which gets vibestd's. A check that needs something in its panes
   (`PI_CODING_AGENT_DIR`, or `CLAUDE_CONFIG_DIR` unset for the user's Claude login) starts vibestd and a herdr session
-  of its own, and drops only that session at the end. An empty `ZDOTDIR` keeps the pane shell from putting another
-  vibest first on `PATH`.
+  of its own, and drops only that session at the end.
 - Claude asks whether to trust a new folder and loads hooks only once it is trusted. For a main agent the check answers
-  as the person does (down to Yes, then enter); vibest answers it for subagents.
-- A Claude agent on a fake model gets `disableAutoMode` in its temp settings: with auto mode on, a first-run question
-  stops the pane.
+  as the person does (down to Yes, then enter, `drivers/claude.ts`); vibest answers it for subagents.
+- A Claude agent on a fake model gets `disableAutoMode` in its shadow settings: with auto mode on, the fake model cannot
+  answer the auto-mode classifier's side requests.
 - An enter typed right behind text in Claude's input box is sometimes swallowed; a check waiting for that line presses
   enter again.
 - Claude refuses a standalone `sleep`: to keep a main agent busy, the check has its turn wait in a Bash call for a file
   the check creates.
 - herdr drops a started agent's name when it is not marked ready within `agent.start`'s 120 s, and refuses
-  `agent.prompt` until the agent is ready; it marks an agent ready only once the agent is read (S18, S19).
+  `agent.prompt` until the agent is ready; it marks an agent ready only once the agent is read (S18, S19). S18 proves in
+  the gate that `agent.start` has resolved (the terminal is recorded) while the first turn is still held, and a unit
+  test pins the 120 s window; S18-slow waits the window out.
 - With herdr's own Pi hook installed (`herdr integration install pi`), herdr reads Pi's state from the hook alone, and an
   idle Pi sends it nothing more (S19).
 - Pi can open more than one model stream for one turn: S26 releases every stream held at that moment before the next
   turn starts.
 - A fake usage limit is an error inside the stream: Pi reports its message as the turn's error, and retries a failed
   request, so every retry fails too (U5, U8).
-- I6 leaves out
-  `~/.cursor/cli-config.json`: vibest never touches it, and cursor-agent rewrites it while it runs.
+- The user-file invariant hashes only the keys the shadows read: the user's own Claude and Pi sessions rewrite other
+  keys of the same files while a run goes on, and cursor-agent rewrites `~/.cursor/cli-config.json`.
 - cursor-agent's hook shell rebuilds `PATH`, so I5 names its recording `vibest` wrapper through `VIBEST_COMMAND`, which
   is how an agent vibest starts names its own binary.
 - I9's Claude has no Glob or Grep tool and finds and searches with Bash (guard.test covers those tools). Its session
@@ -151,8 +186,19 @@ end it.
 
 ## 4. Cost and time
 
-The turns run on fake models and cost nothing; I5's Cursor turn is the one real-model turn. A full `pnpm e2e` takes
-about 20–30 minutes.
+The gate's turns run on fake models and cost nothing; I5's Cursor turn, in tier `agent`, is the one real-model turn.
+Measured on a 10-core Mac shared with other agents' E2E runs (2026-11-07):
+
+| Run                                        | Wall time                                                                              |
+| ------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `pnpm e2e`, 52 gate checks, nothing cached | 164–285 s at a load average of 7–12; 450–660 s when the load stays above the CPU count |
+| `pnpm e2e`, nothing changed                | about 1 s (every check a cache hit)                                                    |
+| `pnpm test`, nothing cached / cached       | 41 s / 2 s                                                                             |
+| `pnpm verify`, nothing cached              | 570–705 s at a load average of 8–14 (both legs' gates run at once)                     |
+| `pnpm verify`, nothing changed             | 6 s                                                                                    |
+
+The load gate admits a new check only while the load average is below the CPU count, so on a machine other runs keep
+above it the checks run nearly one at a time; that is the price of not flaking under load.
 
 `bun tools/bench/src/ls.ts` measures `vibest ls` at 200 and 1000 sessions: the median and p95 of 20 runs, and vibestd's
 CPU seconds over 60 idle seconds. It seeds the sessions in a temp home under a runtime kind that is not registered, so no

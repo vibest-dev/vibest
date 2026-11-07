@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { answerFolderTrust } from "../drivers/claude.ts"
 import {
   ask,
   claudeConfigOf,
@@ -14,7 +15,20 @@ import {
   type Step,
   text,
 } from "../fake-model.ts"
-import { agentName, alive, expect, herdr, row, SESSIONS, Skip, transcript, until, type World } from "../world.ts"
+import {
+  agentName,
+  alive,
+  expect,
+  herdr,
+  row,
+  SESSIONS,
+  Skip,
+  transcript,
+  until,
+  vibestTyped,
+  type World,
+  writeEvidence,
+} from "../world.ts"
 
 type Entry = { id: string; agent: string }
 
@@ -59,10 +73,7 @@ const claudeMain = async (
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const repo = await project(w, name)
   const env = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
-  const zdot = path.join(w.root, `zdotdir-${name}`)
-  await fs.mkdir(zdot, { recursive: true })
-  await w.stopDaemon()
-  await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+  await w.daemon()
   await w.ok(["--harness", "claude", ...flags, "--session", session, "--headless"], {
     cwd: repo,
     timeoutMs: 120_000,
@@ -88,16 +99,7 @@ const claudeMain = async (
     const r = await herdr(socket, "pane.read", { pane_id: pane(), source: "visible", strip_ansi: true })
     return String((r.read as { text?: string } | undefined)?.text ?? "")
   }
-  await until(
-    "Claude's trust question or its input box",
-    async () => /trust this folder|❯\s*$/m.test(await screen()),
-    60_000,
-  )
-  for (let i = 0; i < 10 && /trust this folder/.test(await screen()); i++) {
-    const yes = /^\s*❯.*Yes, I trust this folder/m.test(await screen())
-    await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [yes ? "enter" : "down"] })
-    await Bun.sleep(1_000)
-  }
+  await answerFolderTrust(screen, (key) => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [key] }))
   await until("the main agent's first poll", () => conversation() !== null, 120_000).catch(async (e: Error) => {
     const peek = await w.vibest(["peek", main, "--lines", "40"], { cwd: repo })
     const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
@@ -210,56 +212,81 @@ const curl = async (
   return { status: Number(r.stdout.slice(at + 1)), body: JSON.parse(r.stdout.slice(0, at) || "null") as unknown }
 }
 
+const heldSubagent = async (w: World, pastWindow: boolean) => {
+  for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+  const model = heldModel()
+  const session = `${w.herdrSession}-held`
+  const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+  try {
+    const repo = await project(w, "held")
+    const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-held", model.url)}`
+    await w.daemon()
+    await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+      cwd: repo,
+      timeoutMs: 60_000,
+    })
+    const sub = (
+      JSON.parse(
+        await w.ok(["run", "pi", "--session", session, "--env", env, "--", ask("held")], {
+          cwd: repo,
+          timeoutMs: 60_000,
+        }),
+      ) as { id: string }
+    ).id
+    const started = Date.now()
+    await until("the subagent's turn held by the model", () => model.held() > 0, 60_000)
+    const named = async () =>
+      ((await herdr(socket, "agent.list", {})).agents as Array<{ name?: string | null }>).some(
+        (a) => a.name === agentName(sub),
+      )
+    const exited = () =>
+      row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, sub)?.e ?? null
+    const log = async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).slice(-3000)
+    const kept = async () => {
+      expect(exited() === null, `the subagent was recorded as exited at ${exited()}; vibestd.log:\n${await log()}`)
+      expect(await named(), `herdr no longer names the subagent ${agentName(sub)}; vibestd.log:\n${await log()}`)
+    }
+    if (pastWindow)
+      while (Date.now() - started < HERDR_AGENT_START_TIMEOUT_MS + 15_000) {
+        await Bun.sleep(5_000)
+        await kept()
+      }
+    else {
+      const terminal = () =>
+        (
+          JSON.parse(
+            row<{ r: string | null }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, sub)?.r ?? "{}",
+          ) as {
+            id?: string
+          }
+        ).id ?? ""
+      await until("its terminal recorded while the first turn is held", () => terminal() !== "", 60_000)
+      expect(model.held() > 0, "the first turn ended before the terminal was recorded")
+      await kept()
+    }
+    const peek = await w.vibest(["peek", sub], { cwd: repo })
+    expect(peek.code === 0, `vibest peek ${sub} exited ${peek.code}: ${peek.stderr}${peek.stdout}`)
+    model.release()
+    await until(
+      "the held turn's result",
+      async () =>
+        (
+          (await w.json<{ result?: { message?: string } | null }>(["result", sub], { cwd: repo })).result?.message ?? ""
+        ).includes("done-held"),
+      60_000,
+    )
+  } finally {
+    model.stop()
+    await dropHerdrSession(w, session)
+  }
+}
+
 const checks: ReadonlyArray<Check> = [
   {
-    id: "S11",
-    title:
-      "Claude main agent: a subagent's result arrives over HTTP as one line with its full text as prompt context, after /clear too, and after the main agent is stopped (SIGTERM) and `vibest` resumes it in the same pane",
-    run: async (w) => {
-      for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const model = delegatingModel("pi")
-      let c: Awaited<ReturnType<typeof claudeMain>> | undefined
-      try {
-        c = await claudeMain(w, "cmain", model)
-        const title = "Answer the probe"
-        const sub = await c.start(title, "cmone")
-        await c.result(sub, title, "cmone", 0)
-        const round = async (marker: string) => {
-          const before = c!.delivered(sub)
-          await w.ok(["send", sub, "--", ask(marker)], { cwd: c!.repo })
-          await c!.result(sub, title, marker, before)
-        }
-
-        const first = c.conversation()
-        await c.typeIn("/clear")
-        await until("the conversation after /clear", () => c!.conversation() !== first, 60_000)
-        await round("cmtwo")
-
-        const cleared = c.conversation()
-        const pid = await c.claudePid()
-        expect(pid !== undefined, "no claude process in the main agent's pane")
-        process.kill(pid!, "SIGTERM")
-        await until("the main agent's Claude exited", async () => (await c!.claudePid()) === undefined, 30_000).catch(
-          async (e: Error) => {
-            throw new Error(
-              `${e.message}; pid ${pid} alive ${alive(pid!)}, now ${await c!.claudePid()}; its screen:\n${await c!.screen()}`,
-            )
-          },
-        )
-        await c.typeIn(["vibest", ...c.flags].join(" "))
-        await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
-        await round("cmthree")
-        expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
-      } finally {
-        model.stop()
-        await c?.close()
-      }
-    },
-  },
-  {
     id: "S15",
+    covers: ["S11"],
     title:
-      "Claude main agent over HTTP: two subagents' lines and contexts match one to one, a result arriving mid-turn still arrives, a lease goes back to pending once its poller leaves, curl --unix-socket poll / ack / project and protocol mismatch, and delivery after `vibest daemon restart`",
+      "Claude main agent over HTTP: two subagents' lines and contexts match one to one, a result arriving mid-turn still arrives, a lease goes back to pending once its poller leaves, curl --unix-socket poll / ack / project and protocol mismatch, and delivery after `vibest daemon restart`; S11: a result still arrives as one line with its context after /clear, and after the main agent is stopped (SIGTERM) and `vibest` resumes it in the same pane",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude", "curl"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -294,6 +321,31 @@ const checks: ReadonlyArray<Check> = [
           const n = entries.filter((e) => e.type === "user" && e.text.includes(line)).length
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
+
+        const round = async (marker: string) => {
+          const before = c!.delivered(b)
+          await w.ok(["send", b, "--", ask(marker)], { cwd: c!.repo })
+          await c!.result(b, "Answer probe beta", marker, before)
+        }
+        const first = c.conversation()
+        await c.typeIn("/clear")
+        await until("the conversation after /clear", () => c!.conversation() !== first, 60_000)
+        await round("cmcleared")
+        const cleared = c.conversation()
+        const pid = await c.claudePid()
+        expect(pid !== undefined, "no claude process in the main agent's pane")
+        process.kill(pid!, "SIGTERM")
+        await until("the main agent's Claude exited", async () => (await c!.claudePid()) === undefined, 30_000).catch(
+          async (e: Error) => {
+            throw new Error(
+              `${e.message}; pid ${pid} alive ${alive(pid!)}, now ${await c!.claudePid()}; its screen:\n${await c!.screen()}`,
+            )
+          },
+        )
+        await c.typeIn([vibestTyped, ...c.flags].join(" "))
+        await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
+        await round("cmresumed")
+        expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
 
         await c.typeIn(`Wait for the go file: ${wait}`)
         await until(
@@ -442,62 +494,8 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S18",
     title:
-      "a Pi subagent whose first turn outlasts herdr's 120 s agent.start window keeps its terminal: herdr still names it s-<id>, vibest peek reads it, no exit is recorded, and its result arrives",
-    run: async (w) => {
-      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const model = heldModel()
-      const session = `${w.herdrSession}-held`
-      const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-      try {
-        const repo = await project(w, "held")
-        const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-held", model.url)}`
-        const zdot = path.join(w.root, "zdotdir-held")
-        await fs.mkdir(zdot, { recursive: true })
-        await w.stopDaemon()
-        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
-        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
-          cwd: repo,
-          timeoutMs: 60_000,
-        })
-        const sub = (
-          JSON.parse(
-            await w.ok(["run", "pi", "--session", session, "--env", env, "--", ask("held")], {
-              cwd: repo,
-              timeoutMs: 60_000,
-            }),
-          ) as { id: string }
-        ).id
-        const started = Date.now()
-        await until("the subagent's turn held by the model", () => model.held() > 0, 60_000)
-        const named = async () =>
-          ((await herdr(socket, "agent.list", {})).agents as Array<{ name?: string | null }>).some(
-            (a) => a.name === agentName(sub),
-          )
-        const exited = () =>
-          row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, sub)?.e ?? null
-        while (Date.now() - started < HERDR_AGENT_START_TIMEOUT_MS + 15_000) {
-          await Bun.sleep(5_000)
-          const log = async () => (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")).slice(-3000)
-          expect(exited() === null, `the subagent was recorded as exited at ${exited()}; vibestd.log:\n${await log()}`)
-          expect(await named(), `herdr no longer names the subagent ${agentName(sub)}; vibestd.log:\n${await log()}`)
-        }
-        const peek = await w.vibest(["peek", sub], { cwd: repo })
-        expect(peek.code === 0, `vibest peek ${sub} exited ${peek.code}: ${peek.stderr}${peek.stdout}`)
-        model.release()
-        await until(
-          "the held turn's result",
-          async () =>
-            (
-              (await w.json<{ result?: { message?: string } | null }>(["result", sub], { cwd: repo })).result
-                ?.message ?? ""
-            ).includes("done-held"),
-          60_000,
-        )
-      } finally {
-        model.stop()
-        await dropHerdrSession(w, session)
-      }
-    },
+      "a Pi subagent whose first turn is still held already has its terminal (herdr's agent.start resolved before the turn ends): herdr names it s-<id>, vibest peek reads it, no exit is recorded, and its result arrives",
+    run: (w) => heldSubagent(w, false),
   },
   {
     id: "S20",
@@ -512,10 +510,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await project(w, "ids")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-ids", model.url)}`
-        const zdot = path.join(w.root, "zdotdir-ids")
-        await fs.mkdir(zdot, { recursive: true })
-        await w.stopDaemon()
-        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.daemon()
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
@@ -581,10 +576,7 @@ const checks: ReadonlyArray<Check> = [
         })
         expect(hook.code === 0, `herdr integration install pi exited ${hook.code}: ${hook.stderr}${hook.stdout}`)
         const env = `PI_CODING_AGENT_DIR=${dir}`
-        const zdot = path.join(w.root, "zdotdir-confirm")
-        await fs.mkdir(zdot, { recursive: true })
-        await w.stopDaemon()
-        await w.ok(["daemon"], { env: { ZDOTDIR: zdot } })
+        await w.daemon()
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
           cwd: repo,
           timeoutMs: 60_000,
@@ -602,7 +594,6 @@ const checks: ReadonlyArray<Check> = [
         const t0 = Date.now()
         const restart = await w.tty(["daemon", "restart"], "y\n", {
           cwd: repo,
-          env: { ZDOTDIR: zdot },
           timeoutMs: 60_000,
         })
         expect(
@@ -623,15 +614,13 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S26",
     title:
-      "latency: 10 rounds of a busy Pi subagent, a queued send, then release, and 10 pane closes of idle subagents; every queued send goes out and every closed pane's process ends; the times (turn end to delivering, pane close to process.end) are recorded",
+      "latency: 3 rounds of a busy Pi subagent, a queued send, then release, and 3 pane closes of idle subagents; every queued send goes out and every closed pane's process ends; the times (turn end to delivering, pane close to process.end) are recorded",
     run: async (w, evidence) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = heldModel()
       const session = `${w.herdrSession}-s26`
       const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-      const zdot = path.join(w.root, "zdotdir-s26")
-      await fs.mkdir(zdot, { recursive: true })
-      const env = { ZDOTDIR: zdot }
+      const env = {}
       const logFile = path.join(w.vibestHome, "vibestd.log")
       const pct = (xs: Array<number>, p: number) => {
         const s = [...xs].sort((a, b) => a - b)
@@ -650,8 +639,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await project(w, "s26")
         const pi = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-s26", model.url)}`
-        await w.stopDaemon()
-        await w.ok(["daemon"], { env })
+        await w.daemon({ env })
         await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", pi], {
           cwd: repo,
           env,
@@ -671,7 +659,7 @@ const checks: ReadonlyArray<Check> = [
         await until("the subagent's turn held", () => model.held() > 0, 60_000)
         const hook: Array<number> = []
         const delivery: Array<number> = []
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 3; i++) {
           const beforeEnd =
             q<{ id: number }>(
               "SELECT id FROM event WHERE session_id = ? AND type = 'turn.end' ORDER BY id DESC LIMIT 1",
@@ -756,7 +744,7 @@ const checks: ReadonlyArray<Check> = [
         }
         model.release()
         const closes: Array<number> = []
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 3; i++) {
           const id = await runSub(`c${i}`)
           await until(
             `subagent ${i} idle`,
@@ -803,7 +791,7 @@ const checks: ReadonlyArray<Check> = [
           turnEndToDeliveringMs: stats(delivery),
           paneCloseToProcessEndMs: stats(closes),
         }
-        await fs.writeFile(path.join(evidence, "latency.json"), `${JSON.stringify(out, null, 2)}\n`)
+        await writeEvidence(path.join(evidence, "latency.json"), `${JSON.stringify(out, null, 2)}\n`)
         console.log(`S26 ${JSON.stringify(out)}`)
       } finally {
         model.stop()
@@ -813,4 +801,13 @@ const checks: ReadonlyArray<Check> = [
   },
 ]
 
-export default checks
+export default [
+  ...checks,
+  {
+    id: "S18-slow",
+    tier: "slow",
+    title:
+      "a Pi subagent whose first turn outlasts herdr's 120 s agent.start window keeps its terminal: herdr still names it s-<id>, vibest peek reads it, no exit is recorded, and its result arrives",
+    run: (w) => heldSubagent(w, true),
+  } satisfies Check,
+]

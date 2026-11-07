@@ -1,5 +1,4 @@
 import fs from "node:fs/promises"
-import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
@@ -15,22 +14,20 @@ import {
   subagentFolder,
   text,
 } from "../fake-model.ts"
-import { agentName, compiled, expect, harnesses, herdr, Skip, until, type World } from "../world.ts"
-import { project as newRepository } from "./inbox.ts"
-
-const userHarnessFiles = [".claude/settings.json", ".cursor/hooks.json", ".pi/agent/settings.json"].map((p) =>
-  path.join(os.homedir(), p),
-)
-const stamp = () =>
-  Promise.all(
-    userHarnessFiles.map((p) =>
-      fs.stat(p).then(
-        (s) => `${p} ${s.mtimeMs}`,
-        () => `${p} missing`,
-      ),
-    ),
-  )
-const realBefore = stamp()
+import {
+  agentName,
+  compiled,
+  expect,
+  harnesses,
+  herdr,
+  row,
+  SESSIONS,
+  Skip,
+  until,
+  type World,
+  writeEvidence,
+} from "../world.ts"
+import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
 
@@ -59,10 +56,8 @@ const withSession = async (
 ) => {
   const session = `${w.herdrSession}-${harness}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-  const zdot = path.join(w.root, "zdotdir")
-  await fs.mkdir(zdot, { recursive: true })
   await w.stopDaemon()
-  await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined, ZDOTDIR: zdot } })
+  await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined } })
   let id = ""
   try {
     const run = await w.ok(["run", harness, ...flags, "--session", session, "--", task], {
@@ -86,7 +81,108 @@ const withSession = async (
   }
 }
 
+const installBesidePlugin = async (w: World, config: string) => {
+  const market = path.join(w.root, "claude-market")
+  const beside = path.join(market, "plugins", "beside")
+  const besideRan = path.join(w.root, "beside-ran")
+  await fs.mkdir(path.join(market, ".claude-plugin"), { recursive: true })
+  await fs.mkdir(path.join(beside, ".claude-plugin"), { recursive: true })
+  await fs.mkdir(path.join(beside, "hooks"), { recursive: true })
+  await fs.writeFile(
+    path.join(market, ".claude-plugin", "marketplace.json"),
+    JSON.stringify({
+      name: "e2e-local",
+      owner: { name: "e2e" },
+      plugins: [{ name: "e2e-beside", source: "./plugins/beside", description: "e2e" }],
+    }),
+  )
+  await fs.writeFile(
+    path.join(beside, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name: "e2e-beside", version: "1.0.0", description: "e2e" }),
+  )
+  await fs.writeFile(
+    path.join(beside, "hooks", "hooks.json"),
+    JSON.stringify({
+      hooks: { SessionStart: [{ hooks: [{ type: "command", command: `touch '${besideRan}'` }] }] },
+    }),
+  )
+  for (const argv of [
+    ["claude", "plugin", "marketplace", "add", market],
+    ["claude", "plugin", "install", "e2e-beside@e2e-local"],
+  ]) {
+    const r = await w.run(w.root, argv, { env: { CLAUDE_CONFIG_DIR: config } })
+    expect(r.code === 0, `${argv.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
+  }
+  return besideRan
+}
+
 const checks: ReadonlyArray<Check> = [
+  {
+    id: "I11",
+    title:
+      "another vibest first on PATH (an older install): a Pi main agent, a Pi subagent and a Claude subagent still reach this build's vibestd through their integrations, and the other vibest never runs",
+    run: async (w) => {
+      for (const bin of ["pi", "claude", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const other = path.join(w.root, "other-vibest")
+      const ran = path.join(w.root, "other-vibest-ran")
+      await fs.mkdir(other, { recursive: true })
+      await fs.writeFile(
+        path.join(other, "vibest"),
+        `#!/bin/sh\necho "$@" >> '${ran}'\necho "not the vibest under test" >&2\nexit 1\n`,
+        { mode: 0o755 },
+      )
+      const zdot = path.join(w.root, "zdotdir-other")
+      await fs.mkdir(zdot, { recursive: true })
+      const env = { PATH: `${other}:${w.env().PATH}`, ZDOTDIR: zdot }
+      const pi = fakeOpenAI(
+        (who, _dir, _done, last) => (who === "pi" && last === undefined ? "pong\nstatus: completed" : "ok"),
+        {},
+      )
+      const claude = fakeAnthropic((r) =>
+        r.tools.length > 0 && subagentFolder(r.system) !== undefined ? "pong\nstatus: completed" : "ok",
+      )
+      const session = `${w.herdrSession}-other`
+      try {
+        const piEnv = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-other", pi.url)}`
+        await w.daemon({ env })
+        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", piEnv], { env, timeoutMs: 90_000 })
+        const run = async (flags: ReadonlyArray<string>) =>
+          (
+            JSON.parse(
+              await w.ok(["run", ...flags, "--session", session, "--", "Answer once."], { env, timeoutMs: 120_000 }),
+            ) as { id: string }
+          ).id
+        const subs = [
+          await run(["pi", "--env", piEnv]),
+          await run(["claude", ...(await claudeEnv(w, "other", claude.url))]),
+        ]
+        for (const id of subs) {
+          await until(`${id}'s result`, async () => (await turnState(w, id)) === "completed", 120_000)
+          expect(/pong/.test((await latest(w, id))?.message ?? ""), `${id}: ${(await latest(w, id))?.message}`)
+        }
+        const main = (await w.json<Array<{ id: string; agent: string }>>(["ls"])).find((e) => e.agent === "main")
+        expect(main !== undefined, "no main agent")
+        await until(
+          "the Pi main agent's ready report",
+          () =>
+            row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, main!.id)
+              ?.c != null,
+          60_000,
+        )
+        expect(
+          !(await Bun.file(ran).exists()),
+          `the other vibest ran: ${await Bun.file(ran)
+            .text()
+            .catch(() => "")}`,
+        )
+      } finally {
+        pi.stop()
+        claude.stop()
+        await w.stopDaemon()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
   {
     id: "I1",
     title:
@@ -172,61 +268,8 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
-    id: "I4",
-    title:
-      "Claude: vibest run claude (fake model) loads vibest's plugin beside a plugin the user installed, and its turn end lands as the session result",
-    run: async (w) => {
-      for (const bin of ["claude", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const market = path.join(w.root, "claude-market")
-      const beside = path.join(market, "plugins", "beside")
-      const besideRan = path.join(w.root, "beside-ran")
-      await fs.mkdir(path.join(market, ".claude-plugin"), { recursive: true })
-      await fs.mkdir(path.join(beside, ".claude-plugin"), { recursive: true })
-      await fs.mkdir(path.join(beside, "hooks"), { recursive: true })
-      await fs.writeFile(
-        path.join(market, ".claude-plugin", "marketplace.json"),
-        JSON.stringify({
-          name: "e2e-local",
-          owner: { name: "e2e" },
-          plugins: [{ name: "e2e-beside", source: "./plugins/beside", description: "e2e" }],
-        }),
-      )
-      await fs.writeFile(
-        path.join(beside, ".claude-plugin", "plugin.json"),
-        JSON.stringify({ name: "e2e-beside", version: "1.0.0", description: "e2e" }),
-      )
-      await fs.writeFile(
-        path.join(beside, "hooks", "hooks.json"),
-        JSON.stringify({
-          hooks: { SessionStart: [{ hooks: [{ type: "command", command: `touch '${besideRan}'` }] }] },
-        }),
-      )
-      const model = fakeAnthropic((r) =>
-        r.tools.length > 0 && subagentFolder(r.system) !== undefined ? "pong\nstatus: completed" : "ok",
-      )
-      try {
-        const flags = await claudeEnv(w, "beside", model.url)
-        const config = claudeConfigOf(flags)
-        for (const argv of [
-          ["claude", "plugin", "marketplace", "add", market],
-          ["claude", "plugin", "install", "e2e-beside@e2e-local"],
-        ]) {
-          const r = await w.run(w.root, argv, { env: { CLAUDE_CONFIG_DIR: config } })
-          expect(r.code === 0, `${argv.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
-        }
-        await withSession(w, "claude", flags, "say pong", async ({ id }) => {
-          await until("the session's result", async () => (await turnState(w, id)) === "completed", 120_000)
-          const message = (await latest(w, id))?.message ?? ""
-          expect(/<harness>claude<\/harness>/.test(message) && /pong/.test(message), message)
-          expect(await Bun.file(besideRan).exists(), "the installed plugin's SessionStart hook did not run")
-        })
-      } finally {
-        model.stop()
-      }
-    },
-  },
-  {
     id: "I5",
+    tier: "agent",
     title:
       "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks; asked to run herdr, herdr does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the session result",
     run: async (w, evidence) => {
@@ -281,7 +324,7 @@ const checks: ReadonlyArray<Check> = [
           const tried = (await Promise.all(files.map((f) => fs.readFile(path.join(transcripts, f), "utf8")))).some(
             (t) => /"tool_use".*herdr pane list/.test(t),
           )
-          await fs.writeFile(path.join(evidence, "I5-herdr-call.json"), `${JSON.stringify({ tried, transcripts })}\n`)
+          await writeEvidence(path.join(evidence, "I5-herdr-call.json"), `${JSON.stringify({ tried, transcripts })}\n`)
           expect(/<status>completed<\/status>/.test(message), message)
           expect(
             /<harness>cursor<\/harness>/.test(message) && /<result>[\s\S]*\bpong\b[\s\S]*<\/result>/.test(message),
@@ -295,8 +338,9 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "I7",
+    covers: ["I4"],
     title:
-      "Claude (fake model): every main-loop turn end is the plugin's turn.complete: an answer is the result, Esc in the pane is one interrupted result, `vibest interrupt` is none",
+      "Claude (fake model): every main-loop turn end is the plugin's turn.complete: an answer is the result, Esc in the pane is one interrupted result, `vibest interrupt` is none; I4: vibest's plugin loads beside a plugin the user installed",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const HOLD = "Keep working on this until you are stopped."
@@ -308,49 +352,47 @@ const checks: ReadonlyArray<Check> = [
         return new Promise<Step>(() => {})
       })
       try {
-        await withSession(
-          w,
-          "claude",
-          await claudeEnv(w, "turns", model.url),
-          "Answer once.",
-          async ({ id, socket }) => {
-            const settled = (want: string) => async () => (await turnState(w, id)) === want
-            await until("the answer's result", settled("completed"), 120_000)
-            const first = await latest(w, id)
-            expect(
-              /<status>completed<\/status>/.test(first?.message ?? "") &&
-                /summary: e2e answer/.test(first?.message ?? ""),
-              `answer result: ${first?.message.slice(0, 500)}`,
-            )
-            const aborted = async () => (await ends(w, id)).filter((e) => e.interrupted).length
+        const flags = await claudeEnv(w, "turns", model.url)
+        const besideRan = await installBesidePlugin(w, claudeConfigOf(flags))
+        await withSession(w, "claude", flags, "Answer once.", async ({ id, socket }) => {
+          const settled = (want: string) => async () => (await turnState(w, id)) === want
+          await until("the answer's result", settled("completed"), 120_000)
+          const first = await latest(w, id)
+          expect(
+            /<status>completed<\/status>/.test(first?.message ?? "") &&
+              /<harness>claude<\/harness>/.test(first?.message ?? "") &&
+              /summary: e2e answer/.test(first?.message ?? ""),
+            `answer result: ${first?.message.slice(0, 500)}`,
+          )
+          expect(await Bun.file(besideRan).exists(), "I4: the installed plugin's SessionStart hook did not run")
+          const aborted = async () => (await ends(w, id)).filter((e) => e.interrupted).length
 
-            await w.ok(["send", id, HOLD])
-            await until("the held turn at the model", () => held === 1, 60_000)
-            await until("the held turn open", settled("open"), 60_000)
-            const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
-              env: { HERDR_SOCKET_PATH: socket },
-            })
-            expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)
-            await until("the interrupted result", settled("failed"), 60_000)
-            const second = await latest(w, id)
-            expect(
-              second !== undefined &&
-                second.id !== first!.id &&
-                second.message.includes("interrupted: the turn was stopped in its terminal (Esc) before it ended"),
-              `Esc result: ${second?.message.slice(0, 500)}`,
-            )
-            expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
+          await w.ok(["send", id, HOLD])
+          await until("the held turn at the model", () => held === 1, 60_000)
+          await until("the held turn open", settled("open"), 60_000)
+          const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
+            env: { HERDR_SOCKET_PATH: socket },
+          })
+          expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)
+          await until("the interrupted result", settled("failed"), 60_000)
+          const second = await latest(w, id)
+          expect(
+            second !== undefined &&
+              second.id !== first!.id &&
+              second.message.includes("interrupted: the turn was stopped in its terminal (Esc) before it ended"),
+            `Esc result: ${second?.message.slice(0, 500)}`,
+          )
+          expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
 
-            await w.ok(["send", id, HOLD])
-            await until("the second held turn at the model", () => held === 2, 60_000)
-            await until("the second held turn open", settled("open"), 60_000)
-            await w.ok(["interrupt", id], { timeoutMs: 60_000 })
-            await until("the interrupted turn's turn.complete", async () => (await aborted()) === 2, 30_000)
-            await until("the turn interrupted", settled("interrupted"), 30_000)
-            const third = await latest(w, id)
-            expect(third?.id === second!.id, `a result after vibest interrupt: ${third?.message.slice(0, 500)}`)
-          },
-        )
+          await w.ok(["send", id, HOLD])
+          await until("the second held turn at the model", () => held === 2, 60_000)
+          await until("the second held turn open", settled("open"), 60_000)
+          await w.ok(["interrupt", id], { timeoutMs: 60_000 })
+          await until("the interrupted turn's turn.complete", async () => (await aborted()) === 2, 30_000)
+          await until("the turn interrupted", settled("interrupted"), 30_000)
+          const third = await latest(w, id)
+          expect(third?.id === second!.id, `a result after vibest interrupt: ${third?.message.slice(0, 500)}`)
+        })
       } finally {
         model.stop()
       }
@@ -438,15 +480,6 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         model.stop()
       }
-    },
-  },
-  {
-    id: "I6",
-    title: "the user's own harness config files did not change",
-    run: async () => {
-      const before = await realBefore
-      const after = await stamp()
-      before.forEach((b, i) => expect(b === after[i], `changed: ${b} → ${after[i]}`))
     },
   },
 ]

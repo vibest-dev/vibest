@@ -2,6 +2,9 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "./check.ts"
+import { cached, cacheKeys, rememberPasses } from "./runner/cache.ts"
+import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
+import { lastMs, pool, saveMs } from "./runner/pool.ts"
 import daemon from "./scenarios/daemon.ts"
 import exits from "./scenarios/exits.ts"
 import harness from "./scenarios/harness.ts"
@@ -14,7 +17,7 @@ import restart from "./scenarios/restart.ts"
 import start from "./scenarios/start.ts"
 import terminalStatus from "./scenarios/terminal-status.ts"
 import update from "./scenarios/update.ts"
-import { binary, checkout, harnesses, redact, Skip, World } from "./world.ts"
+import { binary, checkout, compiled, harnesses, method, privateIn, redact, Skip, World } from "./world.ts"
 
 const areas: Record<string, ReadonlyArray<Check>> = {
   daemon,
@@ -30,15 +33,43 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   hc,
   "terminal-status": terminalStatus,
 }
-const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check })))
-const strict = process.argv.includes("--strict")
-const only = process.argv.slice(2).filter((a) => a !== "--strict")
-const unknown = only.filter((a) => !(a in areas) && !checks.some((c) => c.check.id === a))
+const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check, id: check.id })))
+
+const args = process.argv.slice(2)
+const strict = args.includes("--strict")
+const noCache = args.includes("--no-cache")
+const valueOf = (flag: string) => {
+  const at = args.indexOf(flag)
+  if (at === -1) return undefined
+  const value = args[at + 1]
+  args.splice(at, 2)
+  return value ?? ""
+}
+const jobsText = valueOf("--jobs")
+const jobs = jobsText === undefined ? undefined : Number(jobsText)
+if (jobs !== undefined && !(Number.isInteger(jobs) && jobs > 0)) {
+  console.error("--jobs takes a positive whole number")
+  process.exit(1)
+}
+const tier = valueOf("--tier") ?? "gate"
+if (!["gate", "slow", "agent", "all"].includes(tier)) {
+  console.error("--tier is gate, slow, agent or all")
+  process.exit(1)
+}
+const only = args.filter((a) => a !== "--strict" && a !== "--no-cache")
+const groupOf = (a: string, c: (typeof checks)[number]) => c.id.startsWith(`${a}-`)
+const named = (a: string, c: (typeof checks)[number]) => c.id === a || (c.check.covers ?? []).includes(a)
+const unknown = only.filter((a) => !(a in areas) && !checks.some((c) => named(a, c) || groupOf(a, c)))
 if (unknown.length) {
   console.error(`unknown ${unknown.join(", ")}; areas: ${Object.keys(areas).join(", ")}`)
   process.exit(1)
 }
-const selected = only.length ? checks.filter((c) => only.includes(c.area) || only.includes(c.check.id)) : checks
+const inTier = (c: (typeof checks)[number]) => tier === "all" || (c.check.tier ?? "gate") === tier
+const selected = checks.filter((c) =>
+  only.length
+    ? only.some((a) => named(a, c)) || ((only.includes(c.area) || only.some((a) => groupOf(a, c))) && inTier(c))
+    : inTier(c),
+)
 
 for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
   if (!(await Bun.file(built).exists())) {
@@ -47,40 +78,142 @@ for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
   }
 }
 
-const run = new Date().toISOString().replace(/[:.]/g, "-")
+type Outcome = "pass" | "cached" | "fail" | "skip" | "flaky-under-load"
+type Result = {
+  id: string
+  area: string
+  tier: string
+  title: string
+  outcome: Outcome
+  startedAt: string
+  ms: number
+  root: string
+  detail?: string
+}
+
+const run = `${new Date().toISOString().replace(/[:.]/g, "-")}-${method}`
 const evidence = path.join(checkout, "tools/e2e/evidence", run)
 await fs.mkdir(evidence, { recursive: true })
-const world = await World.create()
-const results: Array<{ id: string; title: string; outcome: "pass" | "fail" | "skip"; detail?: string }> = []
-try {
-  for (const { area, check } of selected) {
-    const from = world.log.length
-    let outcome: "pass" | "fail" | "skip" = "pass"
-    let detail: string | undefined
-    try {
-      await check.run(world, evidence)
-    } catch (e) {
-      outcome = e instanceof Skip ? "skip" : "fail"
-      detail = redact(e instanceof Error ? e.message : String(e))
-    }
-    const foreign = world.foreignTerminals()
-    if (foreign.length > 0) {
-      outcome = "fail"
-      detail = `${detail ? `${detail}\n` : ""}terminals outside this run's herdr sessions: ${foreign.join(", ")}`
-    }
-    results.push({ id: check.id, title: check.title, outcome, ...(detail ? { detail } : {}) })
-    console.log(
-      `${outcome.toUpperCase().padEnd(4)} ${area}: ${check.title}${detail ? `\n     ${detail.split("\n").join("\n     ")}` : ""}`,
-    )
-    await fs.writeFile(path.join(evidence, `${check.id}.json`), redact(JSON.stringify(world.log.slice(from), null, 2)))
+const worlds: Array<string> = []
+const userFilesBefore = await userFileHashes()
+
+const once = async ({ area, check }: (typeof checks)[number], evidenceName: string): Promise<Result> => {
+  const startedAt = new Date()
+  const world = await World.create()
+  worlds.push(world.root)
+  let outcome: Outcome = "pass"
+  let detail: string | undefined
+  const problem = (text: string) => {
+    outcome = "fail"
+    detail = `${detail ? `${detail}\n` : ""}${text}`
   }
-} finally {
-  await world.close()
+  try {
+    await check.run(world, evidence)
+  } catch (e) {
+    outcome = e instanceof Skip ? "skip" : "fail"
+    detail = redact(e instanceof Error ? e.message : String(e))
+  }
+  const foreign = world.foreignTerminals()
+  if (foreign.length > 0) problem(`terminals outside this check's herdr sessions: ${foreign.join(", ")}`)
+  await world.close().catch((e: unknown) => problem(`closing the world: ${String(e)}`))
+  const left = await herdrSessionsLeft(world.herdrSession)
+  if (left.length > 0) problem(`herdr sessions left after the check: ${left.join(", ")}`)
+  await fs.writeFile(path.join(evidence, `${evidenceName}.json`), redact(JSON.stringify(world.log, null, 2)))
+  if (outcome !== "fail") await fs.rm(world.root, { recursive: true, force: true })
+  return {
+    id: check.id,
+    area,
+    tier: check.tier ?? "gate",
+    title: check.title,
+    outcome,
+    startedAt: startedAt.toISOString(),
+    ms: Date.now() - startedAt.getTime(),
+    root: world.root,
+    ...(detail ? { detail } : {}),
+  }
 }
-await fs.writeFile(path.join(evidence, "report.json"), JSON.stringify({ root: world.root, results }, null, 2))
-const count = (o: string) => results.filter((r) => r.outcome === o).length
-if (!count("fail")) await fs.rm(world.root, { recursive: true, force: true })
-console.log(
-  `\n${count("pass")} passed, ${count("fail")} failed, ${count("skip")} skipped; evidence in ${path.relative(checkout, evidence)}`,
+
+const print = (r: Result) =>
+  console.log(
+    `${r.outcome.toUpperCase().padEnd(4)} ${r.area}: ${r.id} ${r.title} (${(r.ms / 1000).toFixed(1)} s)${r.detail ? `\n     ${r.detail.split("\n").join("\n     ")}` : ""}`,
+  )
+
+const t0 = Date.now()
+const results = new Map<string, Result>()
+const keyOf = await cacheKeys({ binaries: [binary, compiled], harnesses, method, userFiles: userFilesBefore })
+const keys = new Map(await Promise.all(selected.map(async (c) => [c.id, await keyOf(c.area, c.id)] as const)))
+const cacheable = (c: (typeof checks)[number]) => !noCache && (c.check.tier ?? "gate") !== "agent"
+for (const c of selected)
+  if (cacheable(c) && (await cached(keys.get(c.id)!))) {
+    const r: Result = {
+      id: c.id,
+      area: c.area,
+      tier: c.check.tier ?? "gate",
+      title: c.check.title,
+      outcome: "cached",
+      startedAt: new Date().toISOString(),
+      ms: 0,
+      root: "",
+    }
+    results.set(c.id, r)
+    print(r)
+  }
+const known = await lastMs()
+const longestFirst = selected
+  .filter((c) => !results.has(c.id))
+  .sort((a, b) => (known[b.id] ?? 60_000) - (known[a.id] ?? 60_000))
+await pool(
+  longestFirst,
+  async (c) => {
+    const r = await once(c, c.id)
+    results.set(c.id, r)
+    print(r)
+  },
+  jobs,
 )
-process.exit(count("fail") || (strict && count("skip")) ? 1 : 0)
+for (const c of selected.filter((c) => results.get(c.id)?.outcome === "fail")) {
+  console.log(`RERUN ${c.id} alone`)
+  const again = await once(c, `${c.id}.alone`)
+  print(again)
+  if (again.outcome === "pass") results.set(c.id, { ...results.get(c.id)!, outcome: "flaky-under-load" })
+}
+const ordered = selected.map((c) => results.get(c.id)!)
+await saveMs(Object.fromEntries(ordered.filter((r) => r.outcome === "pass").map((r) => [r.id, r.ms])))
+
+const changed = changedUserFiles(userFilesBefore, await userFileHashes())
+const typedIntoHistory = await historyNaming(worlds)
+const leaked = (
+  await Promise.all(
+    (await fs.readdir(evidence, { recursive: true, withFileTypes: true }))
+      .filter((e) => e.isFile())
+      .map(async (e) => {
+        const file = path.join(e.parentPath, e.name)
+        return privateIn(await fs.readFile(file, "utf8")).length > 0 ? [path.relative(evidence, file)] : []
+      }),
+  )
+).flat()
+const invariants = [
+  ...(changed.length ? [`user files changed during the run: ${changed.join(", ")}`] : []),
+  ...(typedIntoHistory.length
+    ? [`commands typed in this run's worlds reached the user's shell history: ${typedIntoHistory.join(", ")}`]
+    : []),
+  ...(leaked.length ? [`evidence holds a user model, provider or account value: ${leaked.join(", ")}`] : []),
+]
+for (const line of invariants) console.log(`FAIL ${line}`)
+await rememberPasses(
+  selected
+    .filter((c) => cacheable(c) && results.get(c.id)?.outcome === "pass")
+    .map((c) => ({ key: keys.get(c.id)!, id: c.id })),
+  invariants,
+)
+await fs.writeFile(
+  path.join(evidence, "report.json"),
+  redact(
+    JSON.stringify({ wallMs: Date.now() - t0, userFiles: userFilesBefore, invariants, results: ordered }, null, 2),
+  ),
+)
+const count = (o: Outcome) => ordered.filter((r) => r.outcome === o).length
+console.log(
+  `\n${count("pass")} passed, ${count("cached")} cached, ${count("fail")} failed, ${count("flaky-under-load")} flaky under load, ${count("skip")} skipped in ${((Date.now() - t0) / 1000).toFixed(0)} s; evidence in ${path.relative(checkout, evidence)}`,
+)
+process.exit(count("fail") || count("flaky-under-load") || invariants.length || (strict && count("skip")) ? 1 : 0)

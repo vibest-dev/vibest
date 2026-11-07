@@ -2,12 +2,14 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { answerFolderTrust } from "../drivers/claude.ts"
 import {
   ask,
   claudeEnv,
   fakeAnthropic,
   holdsSlowResultModel,
   lastUser,
+  piDir,
   text,
   usageLimitedModel,
 } from "../fake-model.ts"
@@ -26,6 +28,7 @@ import {
   until,
   type World,
 } from "../world.ts"
+import { piShadow } from "../world/shadow.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type Row = { id: string; harness_session_id: string | null; pid: number | null; version: string | null }
@@ -68,9 +71,7 @@ const oldInstall = async (w: World, name: string) => {
   const wrapper = path.join(bin, "vibest")
   const point = (target: string) => fs.writeFile(wrapper, `#!/bin/sh\nexec '${target}' "$@"\n`, { mode: 0o755 })
   await point(path.join(old, "bin", "vibest"))
-  const zdotdir = path.join(w.root, `${name}-zdotdir`)
-  await fs.mkdir(zdotdir, { recursive: true })
-  return { old: OLD, wrapper, point, env: { PATH: `${bin}:${w.env().PATH}`, ZDOTDIR: zdotdir } }
+  return { old: OLD, wrapper, point, env: { PATH: `${bin}:${w.env().PATH}` } }
 }
 
 const usageLimitMove = async (
@@ -92,17 +93,12 @@ const usageLimitMove = async (
   const plugin = path.join(w.vibestHome, "plugins", `${o.name}.ts`)
   try {
     const repo = await project(w, o.name)
-    const agentDir = path.join(w.root, `pi-${o.name}`)
-    await fs.mkdir(agentDir, { recursive: true })
-    const provider = (base: string) => ({
-      baseUrl: `http://127.0.0.1:${model.port}/${base}`,
-      apiKey: "fake",
-      api: "openai-completions",
-      models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
-    })
-    await fs.writeFile(
-      path.join(agentDir, "models.json"),
-      JSON.stringify({ providers: { first: provider("v1"), second: provider("v2") } }),
+    const base = `http://127.0.0.1:${model.port}`
+    const agentDir = await piShadow(
+      path.join(w.root, `pi-${o.name}`),
+      w.profile,
+      { first: { baseUrl: `${base}/v1` }, second: { baseUrl: `${base}/v2` } },
+      undefined,
     )
     await fs.mkdir(path.dirname(plugin), { recursive: true })
     await fs.writeFile(plugin, o.plugin)
@@ -167,25 +163,7 @@ const checks: ReadonlyArray<Check> = [
       const session = `${w.herdrSession}-restart`
       try {
         const repo = await project(w, "restart")
-        const agentDir = path.join(w.root, "pi-restart")
-        await fs.mkdir(agentDir, { recursive: true })
-        await fs.writeFile(
-          path.join(agentDir, "models.json"),
-          JSON.stringify({
-            providers: {
-              fake: {
-                baseUrl: model.url,
-                apiKey: "fake",
-                api: "openai-completions",
-                models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
-              },
-            },
-          }),
-        )
-        await fs.writeFile(
-          path.join(agentDir, "settings.json"),
-          JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }),
-        )
+        const agentDir = await piDir(w, "pi-restart", model.url)
         const { old, wrapper, point, env } = await oldInstall(w, "restart")
         const piEnv = `PI_CODING_AGENT_DIR=${agentDir}`
         const vibest = (args: ReadonlyArray<string>, timeoutMs = 60_000) =>
@@ -311,7 +289,7 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         expect((await listed(zero))?.pane_id === subPane, `the subagent's pane changed: ${subPane}`)
-        let after: ReturnType<typeof main>
+        let after = null as ReturnType<typeof main>
         await until(
           "the main agent restarted on this integration",
           () => {
@@ -359,25 +337,7 @@ const checks: ReadonlyArray<Check> = [
       const session = `${w.herdrSession}-drestart`
       try {
         const repo = await project(w, "drestart")
-        const agentDir = path.join(w.root, "pi-drestart")
-        await fs.mkdir(agentDir, { recursive: true })
-        await fs.writeFile(
-          path.join(agentDir, "models.json"),
-          JSON.stringify({
-            providers: {
-              fake: {
-                baseUrl: model.url,
-                apiKey: "fake",
-                api: "openai-completions",
-                models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
-              },
-            },
-          }),
-        )
-        await fs.writeFile(
-          path.join(agentDir, "settings.json"),
-          JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }),
-        )
+        const agentDir = await piDir(w, "pi-drestart", model.url)
         const { old, wrapper, point, env } = await oldInstall(w, "drestart")
         const ok = async (args: ReadonlyArray<string>) => {
           const r = await w.run(repo, [wrapper, ...ensureRuntime(args)], { env, timeoutMs: 60_000 })
@@ -472,11 +432,12 @@ const checks: ReadonlyArray<Check> = [
         "vibest update is done and restarted this agent; do not run it again, continue the interrupted work."
       let updates = 0
       let noticed = false
+      let wrapper = "vibest"
       const model = fakeAnthropic((r) => {
         const last = text(lastUser(r))
         if (last.includes(UPDATE)) {
           if (r.tools.length > 0) updates++
-          return { tool: "Bash", input: { command: "vibest update --yes" } }
+          return { tool: "Bash", input: { command: `${wrapper} update --yes` } }
         }
         if (last.includes(NOTICE)) {
           noticed = true
@@ -487,6 +448,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const repo = await project(w, "claude-update")
         const install = await oldInstall(w, "cupdate")
+        wrapper = install.wrapper
         const configTheResumeCheckReads = w.config.claude
         const flags = await claudeEnv(w, "cupdate", model.url, configTheResumeCheckReads)
         const vibest = async (args: ReadonlyArray<string>, timeoutMs = 120_000) => {
@@ -531,16 +493,7 @@ const checks: ReadonlyArray<Check> = [
         await vibest(["daemon"])
         await vibest(["--harness", "claude", ...flags, "--session", session, "--headless"])
         await until("the main agent's row", () => pane() !== "", 60_000)
-        await until(
-          "Claude's trust question or its input box",
-          async () => /trust this folder|❯\s*$/m.test(await screen()),
-          60_000,
-        )
-        for (let i = 0; i < 10 && /trust this folder/.test(await screen()); i++) {
-          const yes = /^\s*❯.*Yes, I trust this folder/m.test(await screen())
-          await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [yes ? "enter" : "down"] })
-          await Bun.sleep(1_000)
-        }
+        await answerFolderTrust(screen, (key) => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [key] }))
         await until(
           "the main agent polls on the old integration",
           () => main()?.version === install.old && main()?.conversation != null && main()?.pid != null,
@@ -706,8 +659,9 @@ export default Plugin.define({
           await until("the move to the second login", () => row().provider === "second", 120_000).catch(fail)
           await until("the round fails", () => status().some((m) => m.status === "failed"), 120_000).catch(fail)
           const moved = row()
-          const thirdStartWindowMs = 10_000
-          await Bun.sleep(thirdStartWindowMs)
+          await until("the round's no-harness-left result", () =>
+            results().some((r) => r.includes("no harness left")),
+          ).catch(fail)
           expect(status().length === 1, `one round: ${JSON.stringify(status())}`)
           expect(status()[0]!.status === "failed", `the round: ${JSON.stringify(status())}`)
           const said = results()

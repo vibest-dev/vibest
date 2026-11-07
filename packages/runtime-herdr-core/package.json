@@ -8,7 +8,8 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.core.json"
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.core.json",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/runtime-herdr-core"
   },
   "dependencies": {
     "@effect/platform-node-shared": "catalog:",

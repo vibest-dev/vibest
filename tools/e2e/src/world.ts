@@ -4,6 +4,9 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import { claudeShadow, cursorShadow, type Profile, userPrivateValues } from "./world/shadow.ts"
+import { loginEnv, secretName } from "./world/user-env.ts"
+
 export const checkout = path.resolve(import.meta.dirname, "../../..")
 
 export const method = (process.env.VIBEST_E2E_METHOD ?? "build") as "build" | "npm" | "curl"
@@ -34,9 +37,25 @@ const target = () => {
 }
 export const { binary, compiled, harnesses } = target()
 
+export const vibestTyped = `'${binary.replaceAll("'", "'\\''")}'`
+
 export const buildVersion = (
   JSON.parse(fs.readFileSync(path.join(checkout, "apps/vibest-herdr/package.json"), "utf8")) as { version: string }
 ).version
+
+const zshKeepingHistoryInTheWorld = async (dir: string) => {
+  await fsPromises.mkdir(dir, { mode: 0o700 })
+  const user = (file: string) =>
+    `ZDOTDIR=$__vbe_user\n[[ -r $ZDOTDIR/${file} ]] && source $ZDOTDIR/${file}\nZDOTDIR=$__vbe_zdot\n`
+  const history = "HISTFILE=$__vbe_zdot/.zsh_history\n"
+  await fsPromises.writeFile(
+    path.join(dir, ".zshenv"),
+    "__vbe_zdot=$ZDOTDIR\nZDOTDIR=$HOME\n[[ -r $HOME/.zshenv ]] && source $HOME/.zshenv\n__vbe_user=$ZDOTDIR\nZDOTDIR=$__vbe_zdot\n",
+  )
+  await fsPromises.writeFile(path.join(dir, ".zprofile"), user(".zprofile"))
+  await fsPromises.writeFile(path.join(dir, ".zshrc"), user(".zshrc") + history)
+  await fsPromises.writeFile(path.join(dir, ".zlogin"), user(".zlogin") + history)
+}
 
 const releaseStandIn = () =>
   Bun.serve({
@@ -77,12 +96,17 @@ export class World {
   private readonly releases = releaseStandIn()
   readonly herdrSession: string
   readonly hcSocket: string
+  readonly shellDir: string
   readonly ownRuntimes = new Set<string>()
 
-  private constructor(readonly root: string) {
+  private constructor(
+    readonly root: string,
+    readonly profile: Profile,
+  ) {
     this.vibestHome = path.join(root, "vibest")
     this.herdrSession = path.basename(root)
     this.hcSocket = path.join(root, "hc.sock")
+    this.shellDir = path.join(root, "shell")
     this.config = {
       pi: path.join(root, "pi-agent"),
       claude: path.join(root, "claude"),
@@ -92,20 +116,16 @@ export class World {
     this.origin = path.join(root, "shop-origin.git")
   }
 
-  static async create(): Promise<World> {
+  static async create(profile: Profile = "user"): Promise<World> {
     const tmpBase = process.platform === "darwin" ? "/tmp" : os.tmpdir()
     const root = await fsPromises.mkdtemp(path.join(tmpBase, "vbe-"))
     await fsPromises.chmod(root, 0o700)
-    const w = new World(root)
-    for (const dir of [w.vibestHome, ...Object.values(w.config), path.join(root, "tmp")])
-      await fsPromises.mkdir(dir, { mode: 0o700 })
-    await fsPromises.writeFile(
-      path.join(w.config.cursor, "cli-config.json"),
-      JSON.stringify({
-        version: 1,
-        permissions: { allow: [`Shell(${binary} report)`, "Shell(vibest report)"], deny: [] },
-      }),
-    )
+    const w = new World(root, profile)
+    for (const dir of [w.vibestHome, path.join(root, "tmp")]) await fsPromises.mkdir(dir, { mode: 0o700 })
+    await claudeShadow(w.config.claude, profile)
+    await fsPromises.mkdir(w.config.pi, { mode: 0o700 })
+    await cursorShadow(w.config.cursor, profile, binary)
+    await zshKeepingHistoryInTheWorld(w.shellDir)
     await w.sh(root, ["git", "init", "-q", "--bare", w.origin])
     await w.sh(root, ["git", "init", "-q", "-b", "main", w.repository])
     await fsPromises.writeFile(path.join(w.repository, "README.md"), "# shop\n")
@@ -117,16 +137,8 @@ export class World {
   }
 
   env(extra: Record<string, string | undefined> = {}): Record<string, string> {
-    const env: Record<string, string | undefined> = {}
-    for (const [k, v] of Object.entries(process.env))
-      if (
-        !k.startsWith("VIBEST_") &&
-        !k.startsWith("HERDR_") &&
-        !k.startsWith("HC_") &&
-        k !== "PI_PACKAGE_DIR" &&
-        k !== "CLAUDE_CODE_CHILD_SESSION"
-      )
-        env[k] = v
+    const login = loginEnv()
+    const env: Record<string, string | undefined> = { ...login }
     Object.assign(
       env,
       {
@@ -134,14 +146,11 @@ export class World {
         PI_CODING_AGENT_DIR: this.config.pi,
         CLAUDE_CONFIG_DIR: this.config.claude,
         CURSOR_CONFIG_DIR: this.config.cursor,
-        PATH: [path.dirname(binary), path.join(this.home, ".local", "bin"), process.env.PATH].join(":"),
+        PATH: [path.dirname(binary), login.PATH].join(":"),
         TMPDIR: path.join(this.root, "tmp"),
+        HISTFILE: path.join(this.shellDir, ".bash_history"),
+        ZDOTDIR: this.shellDir,
         HC_SOCKET: this.hcSocket,
-        GIT_AUTHOR_NAME: "e2e",
-        GIT_AUTHOR_EMAIL: "e2e@example.invalid",
-        GIT_COMMITTER_NAME: "e2e",
-        GIT_COMMITTER_EMAIL: "e2e@example.invalid",
-        GIT_CONFIG_GLOBAL: "/dev/null",
         npm_config_registry: `http://127.0.0.1:${this.releases.port}`,
         VIBEST_DOWNLOAD_URL: `http://127.0.0.1:${this.releases.port}`,
       },
@@ -155,7 +164,7 @@ export class World {
   async run(
     cwd: string,
     argv: ReadonlyArray<string>,
-    options: { env?: Record<string, string | undefined>; stdin?: string; timeoutMs?: number } = {},
+    options: { env?: Record<string, string | undefined>; stdin?: string; timeoutMs?: number; unlogged?: boolean } = {},
   ): Promise<Ran> {
     const env = this.env(options.env)
     if (process.platform === "darwin" && ["cursor-agent", "agent"].includes(path.basename(argv[0]!)))
@@ -180,7 +189,13 @@ export class World {
       p.exited,
     ])
     const result = { code, stdout, stderr }
-    this.log.push({ argv: argv.map(redact), cwd, result })
+    this.log.push({
+      argv: argv.map(redact),
+      cwd,
+      result: options.unlogged
+        ? { code, stdout: `<${stdout.length} bytes not kept>`, stderr: `<${stderr.length} bytes not kept>` }
+        : result,
+    })
     return result
   }
 
@@ -203,7 +218,13 @@ export class World {
 
   vibest(
     args: ReadonlyArray<string>,
-    options: { cwd?: string; env?: Record<string, string | undefined>; stdin?: string; timeoutMs?: number } = {},
+    options: {
+      cwd?: string
+      env?: Record<string, string | undefined>
+      stdin?: string
+      timeoutMs?: number
+      unlogged?: boolean
+    } = {},
   ) {
     return this.run(options.cwd ?? this.repository, [binary, ...this.withSession(args)], options)
   }
@@ -280,6 +301,17 @@ export class World {
     }
   }
 
+  async daemon(options: Parameters<World["vibest"]>[1] = {}) {
+    await this.stopDaemon()
+    await this.ok(["daemon"], options)
+  }
+
+  async killDaemon(pid: number | undefined) {
+    expect(pid !== undefined, "no vibestd pid")
+    process.kill(pid!, "SIGKILL")
+    await until("vibestd gone", () => !alive(pid!), 10_000)
+  }
+
   async close() {
     await this.stopDaemon()
     const startedHerdrSession = await fsPromises
@@ -345,16 +377,47 @@ export const until = async (what: string, ok: () => Promise<boolean> | boolean, 
     if (Date.now() > deadline) fail(`timed out waiting for ${what}`)
 }
 
-const agentEnv = (process.env.VIBEST_E2E_ENV ?? "")
-  .split("\n")
-  .map((l) => l.trim())
-  .filter((l) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
+const secrets = () => [
+  ...(process.env.VIBEST_E2E_ENV ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
+    .map((pair) => pair.slice(pair.indexOf("=") + 1)),
+  ...Object.entries(loginEnv())
+    .filter(([name, value]) => secretName.test(name) && value.length >= 6)
+    .map(([, value]) => value),
+]
 
-export const redact = (text: string) =>
-  agentEnv.reduce((t, pair) => {
-    const value = pair.slice(pair.indexOf("=") + 1)
-    return value === "" ? t : t.split(value).join("<redacted>")
-  }, text)
+const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+export const privateValues = await userPrivateValues()
+
+export const privateIn = (text: string, words: ReadonlyArray<string> = privateValues) =>
+  words.filter((w) => new RegExp(`(?<![\\w-])${escaped(w)}(?![\\w-])`).test(text))
+
+export const redactWith = (text: string, exact: ReadonlyArray<string>, words: ReadonlyArray<string>) =>
+  words.reduce(
+    (t, w) => t.replace(new RegExp(`(?<![\\w-])${escaped(w)}(?![\\w-])`, "g"), "<redacted>"),
+    exact.reduce((t, value) => (value === "" ? t : t.split(value).join("<redacted>")), text),
+  )
+
+export const redact = (text: string) => redactWith(text, secrets(), privateValues)
+
+export const writeEvidence = (file: string, text: string) => fsPromises.writeFile(file, redact(text))
+
+export const copyEvidence = async (from: string, to: string, words: ReadonlyArray<string> = privateValues) => {
+  for (const e of await fsPromises.readdir(from, { recursive: true, withFileTypes: true })) {
+    if (!e.isFile()) continue
+    const source = path.join(e.parentPath, e.name)
+    const target = path.join(to, path.relative(from, source))
+    await fsPromises.mkdir(path.dirname(target), { recursive: true })
+    await fsPromises.writeFile(
+      target,
+      redactWith(await fsPromises.readFile(source, "latin1"), secrets(), words),
+      "latin1",
+    )
+  }
+}
 
 export const knownSessions = async (
   w: World,
@@ -444,7 +507,7 @@ export const vibestd = async (w: World, repo: string, method: string, params: un
 export const transcript = async (w: World, cwd: string, claudeConfig = path.join(w.home, ".claude")) => {
   const dir = path.join(claudeConfig, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
   const files = (await fsPromises.readdir(dir).catch(() => [] as Array<string>)).filter((f) => f.endsWith(".jsonl"))
-  const entries: Array<{ type?: string; raw: string; text: string }> = []
+  const entries: Array<{ type?: string | undefined; raw: string; text: string }> = []
   for (const f of files)
     for (const raw of (await fsPromises.readFile(path.join(dir, f), "utf8")).split("\n").filter(Boolean)) {
       const e = JSON.parse(raw) as { type?: string; message?: { content?: unknown } }
