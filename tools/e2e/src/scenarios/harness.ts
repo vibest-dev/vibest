@@ -66,7 +66,9 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "H1",
-    title: "harness list (from vibestd): one entry per harness; a missing CLI says so",
+    covers: ["H2", "H3"],
+    title:
+      "H1 harness list (from vibestd): one entry per harness, a missing CLI says so; H2 harness models: a non-empty list for each installed harness; H3 doctor: grouped, one line per harness for vibest (binary, plugin, models) and one for herdr seeing its state, then a verdict",
     run: async (w) => {
       const all = await listed(w)
       expect(
@@ -79,14 +81,8 @@ const checks: ReadonlyArray<Check> = [
         expect(e.available === (e.error === null), `${e.harness}: available ${e.available}, error ${e.error}`)
         if (!onPath) expect(!!e.error?.includes("not on PATH"), `${e.harness}: missing without saying why`)
       }
-    },
-  },
-  {
-    id: "H2",
-    title: "harness models: a non-empty list for each installed harness",
-    run: async (w) => {
-      const installed = (await listed(w)).filter((e) => e.available).map((e) => e.harness)
-      if (installed.length === 0) throw new Skip("no harness CLI on PATH")
+      const installed = all.filter((e) => e.available).map((e) => e.harness)
+      expect(installed.length > 0, "H2: no harness CLI on PATH")
       for (const h of installed) {
         const r = await w.json<Models>(["harness", "models", h], { timeoutMs: 120_000, unlogged: true })
         expect(
@@ -94,13 +90,6 @@ const checks: ReadonlyArray<Check> = [
           `${h}: ${r.models.length} models, errors ${JSON.stringify(r.errors ?? [])}`,
         )
       }
-    },
-  },
-  {
-    id: "H3",
-    title:
-      "doctor: grouped, one line per harness for vibest (binary, plugin, models) and one for herdr seeing its state, then a verdict",
-    run: async (w) => {
       const out = await w.ok(["doctor"], { timeoutMs: 120_000 })
       for (const h of HARNESSES) {
         expect(new RegExp(`^  [✓✗] ${h} +\\d+ models|^  ✗ ${h} `, "m").test(out), `no agent line for ${h}:\n${out}`)

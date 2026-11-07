@@ -29,54 +29,44 @@ const raw = (w: World, request: object) =>
 const checks: ReadonlyArray<Check> = [
   {
     id: "D1",
-    title: "status without a daemon reports not running and starts nothing",
+    covers: ["D2", "D3", "D4"],
+    title:
+      "D1 status without a daemon reports not running and starts nothing; D2 daemon starts vibestd in the background; a second daemon starts no other; D3 a foreground vibestd while one runs does not take over: it says so and exits; the first keeps running; D4 daemon restart when idle replaces vibestd",
     run: async (w) => {
-      expect((await running(w)).status === "not running", "status says running before any start")
-      expect((await w.daemonPid()) === undefined, "a vibestd.pid appeared")
-    },
-  },
-  {
-    id: "D2",
-    title: "daemon starts vibestd in the background; a second daemon starts no other",
-    run: async (w) => {
-      await w.ok(["daemon"])
-      const first = await running(w)
-      expect(first.status === "running" && typeof first.pid === "number", `not running: ${JSON.stringify(first)}`)
-      await w.ok(["daemon"])
-      const second = await running(w)
-      expect(second.pid === first.pid, `pid changed: ${first.pid} → ${second.pid}`)
-      expect((await w.daemonPid()) === first.pid, "vibestd.pid does not name the running vibestd")
-    },
-  },
-  {
-    id: "D3",
-    title: "a foreground vibestd while one runs does not take over: it says so and exits; the first keeps running",
-    run: async (w) => {
-      await w.ok(["daemon"])
-      const before = (await running(w)).pid
-      const r = await w.run(w.repository, [binary, "daemon", "--foreground"], { timeoutMs: 15_000 })
-      expect(
-        r.code === 0 && /already running/.test(r.stdout + r.stderr),
-        `second vibestd: ${r.code} ${r.stdout}${r.stderr}`,
-      )
-      expect((await running(w)).pid === before, "the first vibestd changed")
-    },
-  },
-  {
-    id: "D4",
-    title: "daemon restart when idle replaces vibestd",
-    run: async (w) => {
-      await w.ok(["daemon"])
-      const before = (await running(w)).pid!
       {
-        const r = await w.tty(["daemon", "restart"], "y\n")
-        expect(r.code === 0, `daemon restart exited ${r.code}: ${r.stdout}${r.stderr}`)
+        expect((await running(w)).status === "not running", "status says running before any start")
+        expect((await w.daemonPid()) === undefined, "a vibestd.pid appeared")
       }
-      await until("a new vibestd", async () => {
-        const d = await running(w)
-        return d.status === "running" && d.pid !== before
-      })
-      expect(!alive(before), `old vibestd ${before} still alive`)
+      {
+        await w.ok(["daemon"])
+        const first = await running(w)
+        expect(first.status === "running" && typeof first.pid === "number", `not running: ${JSON.stringify(first)}`)
+        await w.ok(["daemon"])
+        const second = await running(w)
+        expect(second.pid === first.pid, `pid changed: ${first.pid} → ${second.pid}`)
+        expect((await w.daemonPid()) === first.pid, "vibestd.pid does not name the running vibestd")
+      }
+      {
+        const before = (await running(w)).pid
+        const r = await w.run(w.repository, [binary, "daemon", "--foreground"], { timeoutMs: 15_000 })
+        expect(
+          r.code === 0 && /already running/.test(r.stdout + r.stderr),
+          `second vibestd: ${r.code} ${r.stdout}${r.stderr}`,
+        )
+        expect((await running(w)).pid === before, "the first vibestd changed")
+      }
+      {
+        const before = (await running(w)).pid!
+        {
+          const r = await w.tty(["daemon", "restart"], "y\n")
+          expect(r.code === 0, `daemon restart exited ${r.code}: ${r.stdout}${r.stderr}`)
+        }
+        await until("a new vibestd", async () => {
+          const d = await running(w)
+          return d.status === "running" && d.pid !== before
+        })
+        expect(!alive(before), `old vibestd ${before} still alive`)
+      }
     },
   },
   {

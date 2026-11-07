@@ -282,54 +282,10 @@ const heldSubagent = async (w: World, pastWindow: boolean) => {
 
 const checks: ReadonlyArray<Check> = [
   {
-    id: "S11",
-    title:
-      "Claude main agent: a subagent's result arrives over HTTP as one line with its full text as prompt context, after /clear too, and after the main agent is stopped (SIGTERM) and `vibest` resumes it in the same pane",
-    run: async (w) => {
-      for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      const model = delegatingModel("pi")
-      let c: Awaited<ReturnType<typeof claudeMain>> | undefined
-      try {
-        c = await claudeMain(w, "cmain", model)
-        const title = "Answer the probe"
-        const sub = await c.start(title, "cmone")
-        await c.result(sub, title, "cmone", 0)
-        const round = async (marker: string) => {
-          const before = c!.delivered(sub)
-          await w.ok(["send", sub, "--", ask(marker)], { cwd: c!.repo })
-          await c!.result(sub, title, marker, before)
-        }
-
-        const first = c.conversation()
-        await c.typeIn("/clear")
-        await until("the conversation after /clear", () => c!.conversation() !== first, 60_000)
-        await round("cmtwo")
-
-        const cleared = c.conversation()
-        const pid = await c.claudePid()
-        expect(pid !== undefined, "no claude process in the main agent's pane")
-        process.kill(pid!, "SIGTERM")
-        await until("the main agent's Claude exited", async () => (await c!.claudePid()) === undefined, 30_000).catch(
-          async (e: Error) => {
-            throw new Error(
-              `${e.message}; pid ${pid} alive ${alive(pid!)}, now ${await c!.claudePid()}; its screen:\n${await c!.screen()}`,
-            )
-          },
-        )
-        await c.typeIn([vibestTyped, ...c.flags].join(" "))
-        await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
-        await round("cmthree")
-        expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
-      } finally {
-        model.stop()
-        await c?.close()
-      }
-    },
-  },
-  {
     id: "S15",
+    covers: ["S11"],
     title:
-      "Claude main agent over HTTP: two subagents' lines and contexts match one to one, a result arriving mid-turn still arrives, a lease goes back to pending once its poller leaves, curl --unix-socket poll / ack / project and protocol mismatch, and delivery after `vibest daemon restart`",
+      "Claude main agent over HTTP: two subagents' lines and contexts match one to one, a result arriving mid-turn still arrives, a lease goes back to pending once its poller leaves, curl --unix-socket poll / ack / project and protocol mismatch, and delivery after `vibest daemon restart`; S11: a result still arrives as one line with its context after /clear, and after the main agent is stopped (SIGTERM) and `vibest` resumes it in the same pane",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude", "curl"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -364,6 +320,31 @@ const checks: ReadonlyArray<Check> = [
           const n = entries.filter((e) => e.type === "user" && e.text.includes(line)).length
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
+
+        const round = async (marker: string) => {
+          const before = c!.delivered(b)
+          await w.ok(["send", b, "--", ask(marker)], { cwd: c!.repo })
+          await c!.result(b, "Answer probe beta", marker, before)
+        }
+        const first = c.conversation()
+        await c.typeIn("/clear")
+        await until("the conversation after /clear", () => c!.conversation() !== first, 60_000)
+        await round("cmcleared")
+        const cleared = c.conversation()
+        const pid = await c.claudePid()
+        expect(pid !== undefined, "no claude process in the main agent's pane")
+        process.kill(pid!, "SIGTERM")
+        await until("the main agent's Claude exited", async () => (await c!.claudePid()) === undefined, 30_000).catch(
+          async (e: Error) => {
+            throw new Error(
+              `${e.message}; pid ${pid} alive ${alive(pid!)}, now ${await c!.claudePid()}; its screen:\n${await c!.screen()}`,
+            )
+          },
+        )
+        await c.typeIn([vibestTyped, ...c.flags].join(" "))
+        await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
+        await round("cmresumed")
+        expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
 
         await c.typeIn(`Wait for the go file: ${wait}`)
         await until(

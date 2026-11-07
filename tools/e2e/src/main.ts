@@ -56,7 +56,8 @@ if (!["gate", "slow", "agent", "all"].includes(tier)) {
 }
 const only = args.filter((a) => a !== "--strict")
 const groupOf = (a: string, c: (typeof checks)[number]) => c.id.startsWith(`${a}-`)
-const unknown = only.filter((a) => !(a in areas) && !checks.some((c) => c.id === a || groupOf(a, c)))
+const named = (a: string, c: (typeof checks)[number]) => c.id === a || (c.check.covers ?? []).includes(a)
+const unknown = only.filter((a) => !(a in areas) && !checks.some((c) => named(a, c) || groupOf(a, c)))
 if (unknown.length) {
   console.error(`unknown ${unknown.join(", ")}; areas: ${Object.keys(areas).join(", ")}`)
   process.exit(1)
@@ -64,7 +65,7 @@ if (unknown.length) {
 const inTier = (c: (typeof checks)[number]) => tier === "all" || (c.check.tier ?? "gate") === tier
 const selected = checks.filter((c) =>
   only.length
-    ? only.includes(c.id) || ((only.includes(c.area) || only.some((a) => groupOf(a, c))) && inTier(c))
+    ? only.some((a) => named(a, c)) || ((only.includes(c.area) || only.some((a) => groupOf(a, c))) && inTier(c))
     : inTier(c),
 )
 
