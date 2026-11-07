@@ -1,4 +1,5 @@
 import type { HarnessOption } from "@vibest/plugin"
+import type { HarnessChoice } from "@vibest/protocol/rpc"
 import { VibestCommand } from "@vibest/schema/layout"
 import { HARNESS_IDS, type HarnessId, HarnessUnavailable, isHarnessId } from "@vibest/schema/session"
 import { Clock, Config, Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
@@ -72,10 +73,8 @@ export interface HarnessAdapter {
 }
 
 export const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
-export const anthropicOnly = (harness: string) => (provider: string | null) =>
-  provider && provider !== "anthropic"
-    ? `${harness} has no provider option; only "anthropic" (or none) is accepted, got "${provider}"`
-    : undefined
+export const noProvider = (harness: string) => (provider: string | null) =>
+  provider ? `${harness} has no provider option` : undefined
 
 export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 
@@ -194,14 +193,26 @@ export const preflight = Effect.fn("preflight")(function* (
   return models
 })
 
-export const harnessOptions = Effect.forEach(
+export const harnessCatalog = Effect.forEach(
   HARNESS_IDS,
   (id) =>
     preflight(id, null, null).pipe(
-      Effect.map((): HarnessOption => ({ harness: id, available: true })),
+      Effect.map((models): HarnessChoice => ({
+        harness: id,
+        problem: null,
+        models: models.map((m) => ({ provider: m.provider, model: m.model, name: m.name, default: m.default })),
+      })),
       Effect.catchTag("HarnessUnavailable", (e) =>
-        Effect.succeed<HarnessOption>({ harness: id, available: false, problem: e.message }),
+        Effect.succeed<HarnessChoice>({ harness: id, problem: e.message, models: [] }),
       ),
     ),
   { concurrency: "unbounded" },
+)
+
+export const harnessOptions = Effect.map(harnessCatalog, (choices) =>
+  choices.map((c): HarnessOption =>
+    c.problem === null
+      ? { harness: c.harness, available: true }
+      : { harness: c.harness, available: false, problem: c.problem },
+  ),
 )

@@ -402,6 +402,36 @@ export const herdr = (socket: string, method: string, params: object) =>
     }).catch(reject)
   })
 
+const firstAnswer = (w: World, request: object) =>
+  new Promise<{ result?: unknown; error?: unknown }>((resolve, reject) => {
+    let buffer = ""
+    Bun.connect({
+      unix: path.join(w.vibestHome, "vibest.sock"),
+      socket: {
+        open: (s) => void s.write(`${JSON.stringify(request)}\n`),
+        data: (s, chunk) => {
+          buffer += Buffer.from(chunk).toString("utf8")
+          const line = buffer.split("\n").find((l, i, all) => i < all.length - 1 && l.trim() !== "")
+          if (line === undefined) return
+          s.end()
+          resolve(JSON.parse(line) as { result?: unknown; error?: unknown })
+        },
+        error: (_s, e) => reject(e),
+      },
+    }).catch(reject)
+  })
+
+export const vibestd = async (w: World, repo: string, method: string, params: unknown) => {
+  const ping = await firstAnswer(w, { jsonrpc: "2.0", id: 1, method: "Ping", params: null, headers: [] })
+  const protocol = String((ping.result as { protocol?: number } | undefined)?.protocol)
+  const headers = [
+    ["vibest-protocol", protocol],
+    ["vibest-caller", "cli"],
+    ["vibest-repository", repo],
+  ]
+  return firstAnswer(w, { jsonrpc: "2.0", id: 1, method, params, headers })
+}
+
 export const transcript = async (w: World, cwd: string, claudeConfig = path.join(w.home, ".claude")) => {
   const dir = path.join(claudeConfig, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))
   const files = (await fsPromises.readdir(dir).catch(() => [] as Array<string>)).filter((f) => f.endsWith(".jsonl"))

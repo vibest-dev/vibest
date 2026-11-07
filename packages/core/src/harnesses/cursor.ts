@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Path } from "effect"
 
-import { anthropicOnly, type HarnessAdapter, opt } from "../harness.ts"
+import { noProvider, type HarnessAdapter, opt } from "../harness.ts"
 import type { RawModel } from "../models.ts"
 import { hostPlatform } from "../paths.ts"
 
@@ -38,7 +38,7 @@ export const cursor: HarnessAdapter = {
   interruptKey: "ctrl+c",
   resultField: "text",
   ready: "runtime",
-  checkProvider: anthropicOnly("cursor"),
+  checkProvider: noProvider("cursor"),
   launchArgs: (i) => [
     ...(i.resume && i.sessionId ? [`--resume=${i.sessionId}`] : []),
     "--add-dir",

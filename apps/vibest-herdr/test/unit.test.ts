@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite"
 import url from "node:url"
 
 import { assert, describe, it, layer } from "@effect/vitest"
+import { projectActivity, raisesSeen, unseenDone } from "@vibest/core/activity"
 import { Bus } from "@vibest/core/bus"
 import { APPLICATION_ID, Db, encodeAddress, SCHEMA_VERSION, type SessionRow } from "@vibest/core/db"
 import {
@@ -10,8 +11,12 @@ import {
   Harnesses,
   HarnessUnavailable,
   HARNESS_IDS,
+  type HarnessId,
   hasNewline,
   type LaunchInput,
+  noProvider,
+  harnessCatalog,
+  harnessOptions,
   preflight,
 } from "@vibest/core/harness"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
@@ -19,12 +24,13 @@ import { claudeMenuKey, claudeModels } from "@vibest/core/harnesses/claude"
 import { cursorModels } from "@vibest/core/harnesses/cursor"
 import { piModels } from "@vibest/core/harnesses/pi"
 import * as Launch from "@vibest/core/launch"
-import { listAllModels, normalizeModels } from "@vibest/core/models"
+import { catalogModels, listModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { envelope, isUsageLimitError, outcome, parseReport, turnEndFrom, turnEndOf } from "@vibest/core/results"
 import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { copyIncluded, git, gitState, mainCheckout, repositoryDirectoryName } from "@vibest/core/worktree"
+import type { HarnessChoice } from "@vibest/protocol/rpc"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID, newId, shortId } from "@vibest/schema/id"
@@ -1115,7 +1121,8 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       yield* Effect.gen(function* () {
         const harness = yield* Harness.make()
         yield* Effect.flip(harness.models("pi", null))
-        yield* listAllModels(["claude", "cursor"], null)
+        const adapters = yield* Harnesses
+        yield* Effect.forEach(["claude", "cursor"] as const, (h) => Effect.flip(listModels(adapters.get(h), null)))
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ HOME: home }), { asPrimary: true })),
@@ -1138,8 +1145,6 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         const harness = yield* Harness.make()
         const error = yield* Effect.flip(harness.models("cursor", null))
         assert.include(error.message, "Library/Keychains")
-        const all = yield* listAllModels(["cursor"], null)
-        assert.include(all.errors[0], "Library/Keychains")
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ HOME: home }), { asPrimary: true })),
@@ -1172,6 +1177,106 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       assert.strictEqual(yield* reported(keychain), `cursor model discovery failed: ${keychain}`)
       assert.strictEqual(yield* reported(query), `cursor model discovery failed: ${query}`)
       assert.strictEqual(yield* reported(auth), `cursor model discovery failed: ${auth}`)
+    }),
+  )
+
+  it("a project shows what needs the user most: blocked, then an unseen done, then working, else idle", () => {
+    assert.strictEqual(projectActivity(["idle", "working", "done", "blocked"]), "blocked")
+    assert.strictEqual(projectActivity(["working", "done", "idle"]), "done")
+    assert.strictEqual(projectActivity(["idle", "working", "unknown"]), "working")
+    assert.strictEqual(projectActivity(["idle", "unknown"]), "idle")
+    assert.strictEqual(projectActivity([]), "idle")
+  })
+
+  it("an idle session is done only while its turn is past the mark; no mark (or no runtime support) is never done", () => {
+    assert.strictEqual(unseenDone("idle", { turn: 3, seen: 2 }), "done")
+    assert.strictEqual(unseenDone("idle", { turn: 3, seen: 3 }), "idle")
+    assert.strictEqual(unseenDone("idle", { turn: 3, seen: null }), "idle")
+    assert.strictEqual(unseenDone("idle", undefined), "idle")
+    assert.strictEqual(unseenDone("working", { turn: 3, seen: 0 }), "working")
+    assert.strictEqual(unseenDone("blocked", { turn: 3, seen: 0 }), "blocked")
+  })
+
+  it("the seen mark only rises, never past the turn the runtime counted; a missing mark may be set", () => {
+    assert.isTrue(raisesSeen({ turn: 3, seen: 2 }, 3))
+    assert.isFalse(raisesSeen({ turn: 3, seen: 3 }, 3))
+    assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 1))
+    assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 4))
+    assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 2.5))
+    assert.isTrue(raisesSeen({ turn: 3, seen: null }, 0))
+    assert.isFalse(raisesSeen({ turn: 3, seen: null }, -1))
+    assert.isFalse(raisesSeen({ turn: 3, seen: null }, 1.5))
+  })
+
+  it("models --provider: only Pi filters by provider; Claude and Cursor refuse any provider and keep provider null", () => {
+    const adapters = {
+      get: (id: HarnessId) => ({ binary: id, checkProvider: id === "pi" ? () => undefined : noProvider(id) }),
+    }
+    const choices: ReadonlyArray<HarnessChoice> = [
+      { harness: "claude", problem: null, models: [{ provider: null, model: "opus", name: "Opus", default: true }] },
+      {
+        harness: "pi",
+        problem: null,
+        models: [
+          { provider: "openai", model: "gpt", name: "GPT", default: true },
+          { provider: "anthropic", model: "sonnet", name: "Sonnet", default: false },
+        ],
+      },
+    ]
+    assert.deepStrictEqual(catalogModels(choices, adapters, "anthropic"), {
+      models: [{ harness: "pi", provider: "anthropic", model: "sonnet", name: "Sonnet", default: false }],
+      errors: ["claude: claude has no provider option"],
+    })
+    assert.deepStrictEqual(catalogModels(choices, adapters, "google"), {
+      models: [],
+      errors: ["claude: claude has no provider option", 'pi: pi lists no models for provider "google"'],
+    })
+    assert.deepStrictEqual(
+      catalogModels(choices, adapters, null).models.map((m) => [m.harness, m.provider]),
+      [
+        ["claude", null],
+        ["pi", "openai"],
+        ["pi", "anthropic"],
+      ],
+    )
+    assert.strictEqual(noProvider("cursor")("anthropic"), "cursor has no provider option")
+    assert.isUndefined(noProvider("cursor")(null))
+  })
+
+  it.effect("the harness catalog and the start options agree: a harness off PATH has a problem and no models", () =>
+    Effect.gen(function* () {
+      const [catalog, options] = yield* Effect.all([harnessCatalog, harnessOptions]).pipe(
+        Effect.provide(
+          Layer.succeed(Harness, {
+            available: (id) => Effect.succeed(id !== "cursor"),
+            plugin: (id) => Effect.succeed(`/vibest/harnesses/${id}`),
+            models: (id) =>
+              Effect.succeed([
+                { harness: id, provider: "p", model: `${id}-1`, name: "One", description: "d", default: true },
+              ]),
+          }),
+        ),
+      )
+      assert.deepStrictEqual(
+        catalog.find((c) => c.harness === "pi"),
+        { harness: "pi", problem: null, models: [{ provider: "p", model: "pi-1", name: "One", default: true }] },
+      )
+      assert.deepStrictEqual(
+        catalog.find((c) => c.harness === "cursor"),
+        {
+          harness: "cursor",
+          problem: "cursor-agent is not on PATH",
+          models: [],
+        },
+      )
+      assert.deepStrictEqual(
+        options,
+        catalog.map((c) =>
+          c.problem === null
+            ? { harness: c.harness, available: true }
+            : { harness: c.harness, available: false, problem: c.problem },
+        ),
+      )
     }),
   )
 

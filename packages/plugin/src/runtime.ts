@@ -33,8 +33,14 @@ export interface RuntimeReport {
   readonly checks: ReadonlyArray<RuntimeCheck>
 }
 
+export interface Seen {
+  readonly turn: number
+  readonly seen: number | null
+}
+
 export type RuntimeEvent =
   | { readonly type: "exited"; readonly terminal: Terminal }
+  | { readonly type: "seen"; readonly terminal: Terminal }
   | { readonly type: "state"; readonly terminal: Terminal; readonly state: AgentState }
   | { readonly type: "reset"; readonly machine: string }
 
@@ -68,6 +74,8 @@ export interface Runtime {
 
   readonly state?: (terminal: Terminal) => Effect.Effect<AgentState, RuntimeError>
   readonly session?: (terminal: Terminal) => Effect.Effect<string | null, RuntimeError>
+  readonly seen?: (terminal: Terminal) => Effect.Effect<Seen, RuntimeError>
+  readonly see?: (terminal: Terminal, turn: number) => Effect.Effect<void, RuntimeError>
   readonly run?: (terminal: Terminal, argv: ReadonlyArray<string>) => Effect.Effect<void, RuntimeError>
   readonly exec?: (
     machine: Machine,

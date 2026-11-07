@@ -2548,13 +2548,17 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "claude refuses a non-anthropic provider before anything is created",
+    "claude and cursor refuse any provider, anthropic too, before anything is created",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const error = yield* Effect.flip(
-        (yield* Sessions).spawn({ ...(yield* spawnInput(yield* makeRepository, "claude")), provider: "openai" }),
-      )
-      assert.strictEqual(error._tag, "HarnessUnavailable")
+      for (const harness of ["claude", "cursor"] as const)
+        for (const provider of ["openai", "anthropic"]) {
+          const error = yield* Effect.flip(
+            (yield* Sessions).spawn({ ...(yield* spawnInput(yield* makeRepository, harness)), provider }),
+          )
+          assert.strictEqual(error._tag, "HarnessUnavailable")
+          assert.isTrue(error.message.startsWith(`${harness} has no provider option`), error.message)
+        }
       assert.strictEqual(yield* herdr.callCount, 0)
     }),
   )

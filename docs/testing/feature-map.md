@@ -86,7 +86,7 @@ Cursor writes no terminal status: its plugin reports to vibestd over RPC (I10).
 
 | ID  | Capability                                                                                                | Method | Pass when                                                           |
 | --- | --------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------- |
-| H1  | `harness list`: binary, on PATH, default model, per harness                                               | script | one entry per harness (Claude, Pi, Cursor); a missing CLI says so   |
+| H1  | `harness list` (vibestd `Harnesses.List`): binary, startable, default model, per harness                  | script | one entry per harness (Claude, Pi, Cursor); a missing CLI says so   |
 | H2  | `harness models <harness>` / `models`                                                                     | script | non-empty list for each installed harness; a missing one is skipped |
 | H3  | `doctor`: grouped (coding agents, herdr, vibestd, plugins), a fix line under each problem, then a verdict | script | one agent line per harness; a herdr line per usable harness         |
 | H4  | Cursor discovery and subscription probes under a temporary macOS HOME                                     | script | no Cursor starts with an empty Keychains directory; SSH is cleared  |
@@ -168,3 +168,4 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S32 | Send repeated with one request id: the same answer, one row, one delivery, one result                                                                                                    | exits: `tools/e2e` S32                                               |
 | S33 | herdr-core runtime: Pi main agent and subagents in hc, results and send, status, herdr-app labels and parent                                                                             | hc: `tools/e2e` S33                                                  |
 | S34 | herdr-core runtime: `vibest --runtime hc` typed in the user's hc terminal starts the main agent in place                                                                                 | hc: `tools/e2e` S34                                                  |
+| S36 | herdr-core runtime: an unwatched subagent turn end is `done` in Watch (session and project); `Session.Seen` writes `herdr.seen` and it is idle                                           | hc: `tools/e2e` S36                                                  |

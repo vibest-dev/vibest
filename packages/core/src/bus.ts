@@ -31,6 +31,7 @@ export type LiveEvent =
       readonly state: Runtime.AgentState
     }
   | { readonly type: "live.exited"; readonly runtime: string; readonly terminal: Runtime.Terminal }
+  | { readonly type: "live.seen"; readonly runtime: string; readonly terminal: Runtime.Terminal }
   | { readonly type: "live.reset"; readonly runtime: string; readonly machine: string }
   | { readonly type: "live.turn_start"; readonly sessionId: string; readonly at: number }
   | { readonly type: "live.drain" }

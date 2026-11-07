@@ -31,6 +31,8 @@ const live = (kind: string, event: RuntimeEvent): LiveEvent => {
       return { type: "live.state", runtime: kind, terminal: event.terminal, state: event.state }
     case "exited":
       return { type: "live.exited", runtime: kind, terminal: event.terminal }
+    case "seen":
+      return { type: "live.seen", runtime: kind, terminal: event.terminal }
     case "reset":
       return { type: "live.reset", runtime: kind, machine: event.machine }
   }
