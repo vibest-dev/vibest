@@ -791,6 +791,10 @@ func (a *App) paneContainer(c *ui.Context, w float32) {
 		box.Background(th.Terminal.Background)
 	}
 	box.Children(func() {
+		if p, ok := a.harnessPlaceholderProject(); ok {
+			a.harnessPlaceholder(c, p)
+			return
+		}
 		if p, ok := a.vibestModel.Projects[a.emptyProject]; ok {
 			ui.Text(c, "Select an agent in "+p.Name()+", or start one from the project menu.").TextColor(th.Secondary)
 			return

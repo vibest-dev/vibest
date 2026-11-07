@@ -4,11 +4,21 @@ The sidebar has exactly one row per vibestd project: its name and one aggregate
 agent status. There are no disclosure buttons, nested sessions, repository folds,
 or machine/workspace trees. Projects without a directory use their ID as the name.
 
-Status comes from vibestd Watch and the existing shared seen rule, not from Core's
-agent-status report. Priority is error, waiting for you, working, then unseen done;
-otherwise the slot is empty. The status is also an accessibility description.
-Selecting a project does not mark every agent seen: only agents actually visited
-or drawn in the focused window use the existing acknowledgment rules.
+Status is the project's Watch `activity`: blocked, done, working, then idle.
+The desktop does not rank sessions itself. The status is also an accessibility
+description. Selecting a project does not mark every agent seen: `Session.Seen`
+is sent only for a session whose terminal is drawn in the focused window, once
+per turn.
+
+## No main agent
+
+A project with no entry session shows a placeholder instead of a terminal: the
+harnesses from `Harnesses.List`, a problem in grey with no Start, and models
+grouped by provider with the default selected. Start runs
+`vibest --harness … --runtime hc` through Launch, with the chosen provider and
+model. A project whose entry session exists but is stopped still starts with
+plain `vibest`, which keeps that harness and session. A vibestd without the
+`projects` or `harnesses` capability is shown as older than this app.
 
 ## Agent tabs
 
