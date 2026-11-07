@@ -84,10 +84,12 @@ without a `close`, and `process` on it reports `running: false`, then `not_found
 Several runtimes run at once, on any machine; core routes every call by the Agent's own `runtime.kind`. Each runtime
 product keeps one instance per machine (one herdr session `vibest`, one rex server, one tern daemon).
 
-- A runtime plugin declares the environment variables its terminal sets (`CALLER_ENV`) and a priority beside them. The
-  CLI does not name those variables. Every declared variable set and non-empty means vibest is inside that runtime.
-  One match: that runtime. Several: the lowest priority wins (hc is 0, herdr is 1). No process tree, tty match,
-  ancestor walk, or detection RPC, and no fallback to herdr or to whichever runtime is the only one online.
+- A runtime plugin declares `caller` on the plugin: its runtime `kind`, the environment variables its terminal sets,
+  a `priority`, and how to read the terminal from those values. The CLI and core only iterate the plugins they were
+  given. They name no runtime, variable, or priority, so another runtime plugin needs no change there. Every declared
+  variable set and non-empty means vibest is inside that runtime. One match: that runtime. Several: the lowest
+  priority wins (hc is 0, herdr is 1). No process tree, tty match, ancestor walk, or detection RPC, and no fallback
+  to herdr or to whichever runtime is the only one online.
 - The main agent (`vibest`) starts in that terminal. `vibest --runtime <kind>` overrides the detection and, when this
   terminal is not that runtime's, opens one there. None detected and no `--runtime`: refused, saying to pass
   `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over a

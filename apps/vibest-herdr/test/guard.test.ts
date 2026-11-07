@@ -565,10 +565,11 @@ describe("wizard entry", () => {
           readLine: Effect.die("readline"),
           display: () => Effect.void,
         })
-        const host = new Proxy({} as Host, {
-          get: () => () => {
+        const host = new Proxy({ builtinPlugins: [] } as unknown as Host, {
+          get: (target, prop, receiver) => {
+            if (prop in target) return Reflect.get(target, prop, receiver)
             touched.host = true
-            return Effect.die("host")
+            return () => Effect.die("host")
           },
         })
         const exit = yield* Command.runWith(
@@ -719,10 +720,11 @@ describe("vibest --session inside herdr", () => {
         const repo = yield* makeRepository.pipe(Effect.provide(Platform.services))
         const back = process.cwd()
         process.chdir(repo)
-        const host = new Proxy({} as Host, {
-          get: () => () => {
+        const host = new Proxy({ builtinPlugins: [] } as unknown as Host, {
+          get: (target, prop, receiver) => {
+            if (prop in target) return Reflect.get(target, prop, receiver)
             touched.host = true
-            return Effect.die("host")
+            return () => Effect.die("host")
           },
         })
         const exit = yield* Command.runWith(
@@ -779,8 +781,9 @@ describe("vibest --session inside herdr", () => {
       const secret = "probe-value-9f3c"
       const herdr: Array<string> = []
       let cwdAfter = ""
-      const host = new Proxy({} as Host, {
-        get: () => () => Effect.die("host"),
+      const host = new Proxy({ builtinPlugins: [] } as unknown as Host, {
+        get: (target, prop, receiver) =>
+          prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })
       const exit = yield* Command.runWith(
         Cli.command(host, () => {}),

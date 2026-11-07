@@ -6,6 +6,7 @@ import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } fr
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { CallerEnv } from "@vibest/client/client"
 import { SocketConnector } from "@vibest/client/socket-connector"
+import { callerKeys } from "@vibest/core/caller"
 import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
 import { CLAUDE_CREDENTIALS, claudeCredentialsFile, type KeychainPlatform, securityArgs } from "@vibest/core/keychain"
 import { type Candidate, type PluginLoader } from "@vibest/core/plugins"
@@ -13,9 +14,7 @@ import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibe
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
-import { CALLER_ENV as HC_CALLER_ENV } from "@vibest/runtime-herdr-core/caller"
 import { plugin as runtimeHcPlugin } from "@vibest/runtime-herdr-core/plugin"
-import { CALLER_ENV as HERDR_CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
 import type { Host } from "@vibest/server/daemon"
@@ -46,12 +45,11 @@ const user = Layer.succeed(UserPlatform, {
   },
 })
 
-export const services = Layer.mergeAll(
+const platform = Layer.mergeAll(
   BunServices.layer,
   unrefStdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector, (endpoint) => BunSocket.makeNet({ path: endpoint })),
-  Layer.succeed(CallerEnv, [...HERDR_CALLER_ENV, ...HC_CALLER_ENV]),
   user,
 )
 
@@ -222,6 +220,8 @@ const builtinPlugins: ReadonlyArray<Candidate> = [
   { source: "builtin:runtime-herdr-core", revision: "runtime-herdr-core", options: {}, plugin: runtimeHcPlugin },
   { source: "builtin:runtime-choice", revision: "runtime-choice", options: {}, plugin: choicePlugin() },
 ]
+
+export const services = Layer.mergeAll(platform, Layer.succeed(CallerEnv, callerKeys(builtinPlugins)))
 
 export const daemon: Omit<Host, "runtime"> = {
   sqlite,

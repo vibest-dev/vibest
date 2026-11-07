@@ -15,25 +15,17 @@ import {
   startDaemon,
   withVibest,
 } from "@vibest/client/client"
+import { callerByKind, callerHits, callerKeys } from "@vibest/core/caller"
 import * as Guard from "@vibest/core/guard"
 import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
 import { listAllModels } from "@vibest/core/models"
 import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
-import { describeSpawn } from "@vibest/core/plugins"
+import { describeSpawn, type Candidate } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
 import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
-import * as HcCaller from "@vibest/runtime-herdr-core/caller"
-import { KIND as HC_KIND } from "@vibest/runtime-herdr-core/terminal-runtime"
-import {
-  CALLER_ENV as HERDR_CALLER_ENV,
-  CALLER_PRIORITY as HERDR_PRIORITY,
-  ambientHerdr,
-  callerMachine,
-  callerTerminal,
-} from "@vibest/runtime-herdr/caller"
-import { KIND as HERDR_KIND } from "@vibest/runtime-herdr/terminal-runtime"
+import { callerMachine } from "@vibest/runtime-herdr/caller"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
@@ -63,8 +55,6 @@ export { compareVersions }
 import { LaunchFailed } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { Forbidden, type Ping, VERSION } from "@vibest/protocol/rpc"
-
-const CALLER_ENV = [...HERDR_CALLER_ENV, ...HcCaller.CALLER_ENV]
 
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
 
@@ -409,26 +399,15 @@ export const mainPlace = (o: {
     : { in: "terminal", runtime: chosen.kind, terminal: chosen.terminal }
 }
 
-const envPresent = (keys: ReadonlyArray<string>) =>
+const readCallerEnv = (plugins: ReadonlyArray<Candidate>) =>
   Effect.gen(function* () {
-    for (const key of keys) {
-      const value = Option.getOrUndefined(yield* Config.option(Config.String(key)))
-      if (value === undefined || value === "") return false
-    }
-    return true
+    const env: Record<string, string | undefined> = {}
+    for (const key of callerKeys(plugins)) env[key] = Option.getOrUndefined(yield* Config.option(Config.String(key)))
+    return env
   })
 
-const callerHits = Effect.gen(function* () {
-  const hits: Array<CallerHit> = []
-  if (yield* envPresent(HcCaller.CALLER_ENV))
-    hits.push({ kind: HC_KIND, priority: HcCaller.CALLER_PRIORITY, terminal: yield* HcCaller.callerTerminal })
-  if (yield* envPresent(HERDR_CALLER_ENV))
-    hits.push({ kind: HERDR_KIND, priority: HERDR_PRIORITY, terminal: yield* callerTerminal })
-  return hits
-})
-
 const startMain =
-  (exec: Exec) =>
+  (exec: Exec, plugins: ReadonlyArray<Candidate>) =>
   (o: {
     readonly fresh: boolean
     readonly harness: Option.Option<HarnessId>
@@ -474,16 +453,17 @@ const startMain =
       })
       if (marked && foreignSession !== undefined) return yield* foreignSession
       if (marked && (yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
-      const place = mainPlace({ marked, runtime: runtimeKind, hits: yield* callerHits })
+      const detected = yield* readCallerEnv(plugins)
+      const place = mainPlace({ marked, runtime: runtimeKind, hits: yield* callerHits(plugins, detected) })
       if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
       const machine = yield* callerMachine(Option.getOrUndefined(o.session))
       if (place.in === "terminal") {
         if (foreignSession !== undefined) return yield* foreignSession
-        if (!marked && place.runtime === HERDR_KIND) {
-          const here = yield* ambientHerdr
-          if (here === undefined)
+        if (!marked) {
+          const spec = callerByKind(plugins, place.runtime)
+          if (spec?.ready !== undefined && !(yield* spec.ready(detected)))
             return yield* new LaunchFailed({
-              message: "this pane's herdr session could not be named; run vibest outside herdr",
+              message: spec.missing ?? `this ${place.runtime} terminal could not be named`,
             })
         }
         if ((yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
@@ -525,7 +505,7 @@ const startMain =
           root,
           provider: chosen.provider ?? null,
           model: chosen.model ?? null,
-          passEnv: CALLER_ENV,
+          passEnv: callerKeys(plugins),
           session,
         }).pipe(Effect.provide(Harness.layer))
         return yield* Effect.sync(() => exec(main.file, main.args, { ...passed, ...main.env }))
@@ -902,7 +882,7 @@ const guard = Command.make("guard", { harness: hookHarness }, (o) =>
   ),
 )
 
-const integrationStart = (exec: Exec) =>
+const integrationStart = (exec: Exec, passEnv: ReadonlyArray<string>) =>
   Command.make("start", { id }, (o) =>
     Effect.gen(function* () {
       const got = yield* Effect.flatMap(caller, (c) =>
@@ -920,7 +900,7 @@ const integrationStart = (exec: Exec) =>
         root,
         provider: got.provider,
         model: got.model,
-        passEnv: CALLER_ENV,
+        passEnv,
         session: Effect.succeed({
           sessionId: o.id,
           harnessSessionId: got.harnessSessionId,
@@ -933,12 +913,12 @@ const integrationStart = (exec: Exec) =>
     }),
   ).pipe(Command.withDescription("Internal: the main agent's harness started again in its shell, on its conversation"))
 
-const integration = (exec: Exec) =>
+const integration = (exec: Exec, passEnv: ReadonlyArray<string>) =>
   Command.make("integration").pipe(
     Command.withDescription(
       "Internal: called by vibest's plugin in each harness (user prompt, turn-end result, pre-tool guard) and by a main agent's restart; not for direct use",
     ),
-    Command.withSubcommands([guard, prompt, stop, integrationStart(exec)]),
+    Command.withSubcommands([guard, prompt, stop, integrationStart(exec, passEnv)]),
   )
 
 type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }
@@ -1459,8 +1439,9 @@ const update = Command.make(
   ),
 )
 
-export const command = (host: Daemon.Host, exec: Exec) =>
-  Command.make("vibest", mainFlags, startMain(exec)).pipe(
+export const command = (host: Daemon.Host, exec: Exec) => {
+  const loaded = host.builtinPlugins
+  return Command.make("vibest", mainFlags, startMain(exec, loaded)).pipe(
     Command.withDescription(
       "vibest: in a project directory, open its main agent here (--new: a new conversation); the main agent runs subagents in herdr panes",
     ),
@@ -1480,12 +1461,13 @@ export const command = (host: Daemon.Host, exec: Exec) =>
       project,
       plugins,
       subscriptions,
-      integration(exec),
+      integration(exec, callerKeys(loaded)),
       doctor,
       update,
       herdrCommands(userOnly),
     ]),
   )
+}
 
 export const printFailure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
