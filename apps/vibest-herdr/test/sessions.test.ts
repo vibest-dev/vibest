@@ -447,6 +447,36 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a delivery waiting on the exit does not resume once that exit has failed the queued send",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const opens = () => Effect.map(herdr.callsTo("open"), (calls) => calls.length)
+      const before = yield* opens()
+      const stateHeld = yield* herdr.hold("state", id)
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      const checking = yield* Effect.forkChild(sessions.check(id))
+      yield* stateHeld.reached
+      const processHeld = yield* herdr.hold("process", id)
+      yield* stateHeld.release()
+      yield* processHeld.reached
+      yield* sessions.send(id, "queued")
+      for (let i = 0; i < 30; i++) yield* Effect.yieldNow
+      assert.lengthOf(yield* db.pendingInbox(id), 1)
+      yield* processHeld.release()
+      yield* Fiber.join(checking)
+      for (let i = 0; i < 30; i++) yield* Effect.yieldNow
+      yield* settled
+      assert.deepInclude(yield* db.getSession(id), { turnState: "failed" })
+      assert.isNotNull((yield* db.getSession(id))!.exitedAt)
+      assert.lengthOf(yield* db.pendingInbox(id), 0)
+      assert.lengthOf(yield* db.inboxWithStatus(id, "failed"), 1)
+      assert.strictEqual(yield* opens(), before)
+      assert.isTrue((yield* sqlNotices(id)).some((text) => text.includes("exited before it was delivered")))
+    }),
+  )
+
+  test(
     "two concurrent removes: one removes, the other is refused as already being removed",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
