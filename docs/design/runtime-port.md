@@ -94,7 +94,8 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   written. No process tree, tty match, ancestor walk, or detection RPC, and no fallback to herdr or to whichever
   runtime is the only one online. After vibestd loads plugins it drops every loaded caller variable from its own
   environment, so a process it starts does not inherit a user runtime's variables. The CLI still starts vibestd
-  without the builtin caller variables.
+  without the builtin caller variables. A plugin cannot read its own caller variables inside vibestd, because
+  those are removed; it connects through another variable, as hc uses `HC_SOCKET` rather than `HC_TERMINAL_SOCKET`.
 - The main agent (`vibest`) starts in that terminal. `vibest --runtime <kind>` overrides the detection and, when this
   terminal is not that runtime's, opens one there. None detected and no `--runtime`: refused, saying to pass
   `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over

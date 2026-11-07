@@ -1,13 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Bus } from "@vibest/core/bus"
-import { callerHits, callerKeys, OnCallerPlugins } from "@vibest/core/caller"
+import { callerHits, callerKeys } from "@vibest/core/caller"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
-import { Layout } from "@vibest/core/paths"
-import { Builtins, PluginLoader, Plugins, type Candidate } from "@vibest/core/plugins"
-import { Runtimes } from "@vibest/core/runtimes"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { Layout, VibestCommand } from "@vibest/core/paths"
+import { PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { Plugin } from "@vibest/plugin"
-import type { Host } from "@vibest/server/daemon"
+import { run as runDaemon, type Host } from "@vibest/server/daemon"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Logger, Path } from "effect"
 import { Command } from "effect/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -232,6 +229,13 @@ describe("caller plugins", () => {
     )
   })
 
+  it("builtin plugins list herdr-core before herdr", () => {
+    const sources = Platform.daemon.builtinPlugins.map((plugin) => plugin.source)
+    const hc = sources.indexOf("builtin:runtime-herdr-core")
+    const herdr = sources.indexOf("builtin:runtime-herdr")
+    assert.ok(hc >= 0 && herdr > hc)
+  })
+
   it.live("a user runtime env key does not reach a process vibestd starts", () =>
     Effect.gen(function* () {
       const key = "VIBEST_USER_RUNTIME_ID"
@@ -249,16 +253,13 @@ describe("caller plugins", () => {
       yield* fs.makeDirectory(base, { recursive: true })
       const dir = yield* fs.makeTempDirectoryScoped({ directory: base })
       yield* fs.makeDirectory(path.join(dir, "plugins"))
-      const user = runtime("user", [key])
-      yield* Plugins.layer.pipe(
-        Layer.provide(Layer.succeed(PluginLoader, { ...Platform.plugins, prepare: Effect.void })),
-        Layer.provide(Layer.succeed(Builtins, [user])),
-        Layer.provide(Layer.succeed(OnCallerPlugins, Platform.daemon.clearCallerEnv)),
-        Layer.provide(Subscriptions.layer),
-        Layer.provide(Layer.effect(Layout, Layout.make(dir))),
-        Layer.provide(Runtimes.layer),
-        Layer.provide(Bus.layer),
-        Layer.build,
+      const host: Host = { ...Platform.daemon, builtinPlugins: [runtime("user", [key])] }
+      const layout = yield* Layout.make(dir)
+      yield* runDaemon(host).pipe(
+        Effect.provideService(Layout, layout),
+        Effect.provideService(VibestCommand, ["/bin/vibest"]),
+        Effect.provide(builtinHarnesses),
+        Effect.forkScoped,
       )
       yield* Effect.gen(function* () {
         while (process.env[key] !== undefined) yield* Effect.sleep("20 millis")

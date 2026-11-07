@@ -1,6 +1,7 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { daemonEnv } from "@vibest/client/client"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
+import type { CallerHit } from "@vibest/core/caller"
 import { coordinator, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
 import * as Launch from "@vibest/core/launch"
@@ -631,8 +632,8 @@ describe("wizard entry", () => {
 })
 
 describe("where vibest starts the main agent", () => {
-  const hc = { kind: "hc", priority: 0, terminal: "t4@/run/hc/default.sock" }
-  const herdr = { kind: "herdr", priority: 1, terminal: "vibest/p1" }
+  const hc = { kind: "hc", terminal: "t4@/run/hc/default.sock" } satisfies CallerHit
+  const herdr = { kind: "herdr", terminal: "vibest/p1" } satisfies CallerHit
   it("no detected runtime is refused, and --runtime launches one", () => {
     const refused = Cli.mainPlace({ marked: false, runtime: undefined, hits: [] })
     assert.strictEqual(refused.in, "refused")
@@ -679,7 +680,7 @@ describe("where vibest starts the main agent", () => {
       runtime: "hc",
     })
   })
-  it("a pane vibestd opened uses the runtime it named, not a stale higher-priority environment", () => {
+  it("a pane vibestd opened uses the runtime it named, not another runtime earlier in the load order", () => {
     assert.deepStrictEqual(Cli.mainPlace({ marked: true, runtime: "herdr", hits: [hc, herdr] }), {
       in: "terminal",
       runtime: "herdr",
