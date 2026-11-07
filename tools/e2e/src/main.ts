@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "./check.ts"
+import { cached, cacheKeys, remember } from "./runner/cache.ts"
 import { changedUserFiles, herdrSessionsLeft, userFileHashes } from "./runner/invariants.ts"
 import { lastMs, pool, saveMs } from "./runner/pool.ts"
 import daemon from "./scenarios/daemon.ts"
@@ -16,7 +17,7 @@ import restart from "./scenarios/restart.ts"
 import start from "./scenarios/start.ts"
 import terminalStatus from "./scenarios/terminal-status.ts"
 import update from "./scenarios/update.ts"
-import { binary, checkout, harnesses, redact, Skip, World } from "./world.ts"
+import { binary, checkout, harnesses, method, redact, Skip, World } from "./world.ts"
 
 const areas: Record<string, ReadonlyArray<Check>> = {
   daemon,
@@ -36,6 +37,7 @@ const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) 
 
 const args = process.argv.slice(2)
 const strict = args.includes("--strict")
+const noCache = args.includes("--no-cache")
 const valueOf = (flag: string) => {
   const at = args.indexOf(flag)
   if (at === -1) return undefined
@@ -54,7 +56,7 @@ if (!["gate", "slow", "agent", "all"].includes(tier)) {
   console.error("--tier is gate, slow, agent or all")
   process.exit(1)
 }
-const only = args.filter((a) => a !== "--strict")
+const only = args.filter((a) => a !== "--strict" && a !== "--no-cache")
 const groupOf = (a: string, c: (typeof checks)[number]) => c.id.startsWith(`${a}-`)
 const named = (a: string, c: (typeof checks)[number]) => c.id === a || (c.check.covers ?? []).includes(a)
 const unknown = only.filter((a) => !(a in areas) && !checks.some((c) => named(a, c) || groupOf(a, c)))
@@ -76,7 +78,7 @@ for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
   }
 }
 
-type Outcome = "pass" | "fail" | "skip" | "flaky-under-load"
+type Outcome = "pass" | "cached" | "fail" | "skip" | "flaky-under-load"
 type Result = {
   id: string
   area: string
@@ -135,9 +137,29 @@ const print = (r: Result) =>
   )
 
 const t0 = Date.now()
-const known = await lastMs()
-const longestFirst = [...selected].sort((a, b) => (known[b.id] ?? 60_000) - (known[a.id] ?? 60_000))
 const results = new Map<string, Result>()
+const keyOf = await cacheKeys({ binary, harnesses, method, userFiles: userFilesBefore })
+const keys = new Map(await Promise.all(selected.map(async (c) => [c.id, await keyOf(c.area, c.id)] as const)))
+const cacheable = (c: (typeof checks)[number]) => !noCache && (c.check.tier ?? "gate") !== "agent"
+for (const c of selected)
+  if (cacheable(c) && (await cached(keys.get(c.id)!))) {
+    const r: Result = {
+      id: c.id,
+      area: c.area,
+      tier: c.check.tier ?? "gate",
+      title: c.check.title,
+      outcome: "cached",
+      startedAt: new Date().toISOString(),
+      ms: 0,
+      root: "",
+    }
+    results.set(c.id, r)
+    print(r)
+  }
+const known = await lastMs()
+const longestFirst = selected
+  .filter((c) => !results.has(c.id))
+  .sort((a, b) => (known[b.id] ?? 60_000) - (known[a.id] ?? 60_000))
 await pool(
   longestFirst,
   async (c) => {
@@ -155,6 +177,8 @@ for (const c of selected.filter((c) => results.get(c.id)?.outcome === "fail")) {
 }
 const ordered = selected.map((c) => results.get(c.id)!)
 await saveMs(Object.fromEntries(ordered.filter((r) => r.outcome === "pass").map((r) => [r.id, r.ms])))
+for (const c of selected)
+  if (cacheable(c) && results.get(c.id)?.outcome === "pass") await remember(keys.get(c.id)!, c.id)
 
 const changed = changedUserFiles(userFilesBefore, await userFileHashes())
 const invariants = changed.length ? [`user files changed during the run: ${changed.join(", ")}`] : []
@@ -165,6 +189,6 @@ await fs.writeFile(
 )
 const count = (o: Outcome) => ordered.filter((r) => r.outcome === o).length
 console.log(
-  `\n${count("pass")} passed, ${count("fail")} failed, ${count("flaky-under-load")} flaky under load, ${count("skip")} skipped in ${((Date.now() - t0) / 1000).toFixed(0)} s; evidence in ${path.relative(checkout, evidence)}`,
+  `\n${count("pass")} passed, ${count("cached")} cached, ${count("fail")} failed, ${count("flaky-under-load")} flaky under load, ${count("skip")} skipped in ${((Date.now() - t0) / 1000).toFixed(0)} s; evidence in ${path.relative(checkout, evidence)}`,
 )
 process.exit(count("fail") || count("flaky-under-load") || invariants.length || (strict && count("skip")) ? 1 : 0)
