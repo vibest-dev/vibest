@@ -88,10 +88,10 @@ const checks: ReadonlyArray<Check> = [
       const installed = (await listed(w)).filter((e) => e.available).map((e) => e.harness)
       if (installed.length === 0) throw new Skip("no harness CLI on PATH")
       for (const h of installed) {
-        const r = await w.json<Models>(["harness", "models", h], { timeoutMs: 120_000 })
+        const r = await w.json<Models>(["harness", "models", h], { timeoutMs: 120_000, unlogged: true })
         expect(
           r.models.length > 0 && r.models.every((m) => m.harness === h),
-          `${h}: ${JSON.stringify(r).slice(0, 400)}`,
+          `${h}: ${r.models.length} models, errors ${JSON.stringify(r.errors ?? [])}`,
         )
       }
     },

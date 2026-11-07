@@ -4,6 +4,7 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import { claudeShadow, cursorShadow, type Profile } from "./world/shadow.ts"
 import { loginEnv, secretName } from "./world/user-env.ts"
 
 export const checkout = path.resolve(import.meta.dirname, "../../..")
@@ -83,7 +84,10 @@ export class World {
   readonly hcSocket: string
   readonly ownRuntimes = new Set<string>()
 
-  private constructor(readonly root: string) {
+  private constructor(
+    readonly root: string,
+    readonly profile: Profile,
+  ) {
     this.vibestHome = path.join(root, "vibest")
     this.herdrSession = path.basename(root)
     this.hcSocket = path.join(root, "hc.sock")
@@ -96,20 +100,15 @@ export class World {
     this.origin = path.join(root, "shop-origin.git")
   }
 
-  static async create(): Promise<World> {
+  static async create(profile: Profile = "user"): Promise<World> {
     const tmpBase = process.platform === "darwin" ? "/tmp" : os.tmpdir()
     const root = await fsPromises.mkdtemp(path.join(tmpBase, "vbe-"))
     await fsPromises.chmod(root, 0o700)
-    const w = new World(root)
-    for (const dir of [w.vibestHome, ...Object.values(w.config), path.join(root, "tmp")])
-      await fsPromises.mkdir(dir, { mode: 0o700 })
-    await fsPromises.writeFile(
-      path.join(w.config.cursor, "cli-config.json"),
-      JSON.stringify({
-        version: 1,
-        permissions: { allow: [`Shell(${binary} report)`, "Shell(vibest report)"], deny: [] },
-      }),
-    )
+    const w = new World(root, profile)
+    for (const dir of [w.vibestHome, path.join(root, "tmp")]) await fsPromises.mkdir(dir, { mode: 0o700 })
+    await claudeShadow(w.config.claude, profile)
+    await fsPromises.mkdir(w.config.pi, { mode: 0o700 })
+    await cursorShadow(w.config.cursor, profile, binary)
     await w.sh(root, ["git", "init", "-q", "--bare", w.origin])
     await w.sh(root, ["git", "init", "-q", "-b", "main", w.repository])
     await fsPromises.writeFile(path.join(w.repository, "README.md"), "# shop\n")
@@ -146,7 +145,7 @@ export class World {
   async run(
     cwd: string,
     argv: ReadonlyArray<string>,
-    options: { env?: Record<string, string | undefined>; stdin?: string; timeoutMs?: number } = {},
+    options: { env?: Record<string, string | undefined>; stdin?: string; timeoutMs?: number; unlogged?: boolean } = {},
   ): Promise<Ran> {
     const env = this.env(options.env)
     if (process.platform === "darwin" && ["cursor-agent", "agent"].includes(path.basename(argv[0]!)))
@@ -171,7 +170,13 @@ export class World {
       p.exited,
     ])
     const result = { code, stdout, stderr }
-    this.log.push({ argv: argv.map(redact), cwd, result })
+    this.log.push({
+      argv: argv.map(redact),
+      cwd,
+      result: options.unlogged
+        ? { code, stdout: `<${stdout.length} bytes not kept>`, stderr: `<${stderr.length} bytes not kept>` }
+        : result,
+    })
     return result
   }
 
@@ -185,7 +190,13 @@ export class World {
 
   vibest(
     args: ReadonlyArray<string>,
-    options: { cwd?: string; env?: Record<string, string | undefined>; stdin?: string; timeoutMs?: number } = {},
+    options: {
+      cwd?: string
+      env?: Record<string, string | undefined>
+      stdin?: string
+      timeoutMs?: number
+      unlogged?: boolean
+    } = {},
   ) {
     return this.run(options.cwd ?? this.repository, [binary, ...this.withSession(args)], options)
   }

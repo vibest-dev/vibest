@@ -1,7 +1,7 @@
-import fs from "node:fs/promises"
 import path from "node:path"
 
 import { vibestTyped, type World } from "./world.ts"
+import { claudeShadow, FAKE_ANTHROPIC_KEY, piShadow } from "./world/shadow.ts"
 
 export type Message = { role: string; content: unknown }
 
@@ -41,25 +41,8 @@ const toolCall = (id: string, name: string, input: object) =>
     ],
   }) + done("tool_calls")
 
-export const piDir = async (w: World, name: string, url: string) => {
-  const dir = path.join(w.root, name)
-  await fs.mkdir(dir, { recursive: true })
-  await fs.writeFile(
-    path.join(dir, "models.json"),
-    JSON.stringify({
-      providers: {
-        fake: {
-          baseUrl: url,
-          apiKey: "fake",
-          api: "openai-completions",
-          models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
-        },
-      },
-    }),
-  )
-  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }))
-  return dir
-}
+export const piDir = (w: World, name: string, url: string) =>
+  piShadow(path.join(w.root, name), w.profile, { fake: { baseUrl: url } })
 
 export const delegatingModel = (sub: string, options: { readonly heldMs?: number } = {}) => {
   const seen: Array<string> = []
@@ -335,27 +318,12 @@ export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<S
   return { requests, url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
 }
 
-const autoModeOff = {
-  disableAutoMode: "disable",
-  permissions: { defaultMode: "default", disableAutoMode: "disable" },
-}
-
 export const claudeConfigOf = (flags: ReadonlyArray<string>) =>
   flags.find((f) => f.startsWith("CLAUDE_CONFIG_DIR="))!.slice("CLAUDE_CONFIG_DIR=".length)
 
 export const claudeEnv = async (w: World, name: string, url: string, dir = path.join(w.root, `claude-${name}`)) => {
-  await fs.mkdir(dir, { recursive: true })
-  const key = "sk-ant-e2e-fake-0123456789abcdefghijklmnop"
-  await fs.writeFile(
-    path.join(dir, ".claude.json"),
-    JSON.stringify({
-      hasCompletedOnboarding: true,
-      customApiKeyResponses: { approved: [key.slice(-20)], rejected: [] },
-    }),
+  await claudeShadow(dir, w.profile)
+  return [`CLAUDE_CONFIG_DIR=${dir}`, `ANTHROPIC_BASE_URL=${url}`, `ANTHROPIC_API_KEY=${FAKE_ANTHROPIC_KEY}`].flatMap(
+    (pair) => ["--env", pair],
   )
-  await fs.writeFile(path.join(dir, "settings.json"), JSON.stringify(autoModeOff))
-  return [`CLAUDE_CONFIG_DIR=${dir}`, `ANTHROPIC_BASE_URL=${url}`, `ANTHROPIC_API_KEY=${key}`].flatMap((pair) => [
-    "--env",
-    pair,
-  ])
 }

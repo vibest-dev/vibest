@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { answerFolderTrust } from "../drivers/claude.ts"
 import {
   ask,
   claudeConfigOf,
@@ -98,16 +99,7 @@ const claudeMain = async (
     const r = await herdr(socket, "pane.read", { pane_id: pane(), source: "visible", strip_ansi: true })
     return String((r.read as { text?: string } | undefined)?.text ?? "")
   }
-  await until(
-    "Claude's trust question or its input box",
-    async () => /trust this folder|❯\s*$/m.test(await screen()),
-    60_000,
-  )
-  for (let i = 0; i < 10 && /trust this folder/.test(await screen()); i++) {
-    const yes = /^\s*❯.*Yes, I trust this folder/m.test(await screen())
-    await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [yes ? "enter" : "down"] })
-    await Bun.sleep(1_000)
-  }
+  await answerFolderTrust(screen, (key) => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [key] }))
   await until("the main agent's first poll", () => conversation() !== null, 120_000).catch(async (e: Error) => {
     const peek = await w.vibest(["peek", main, "--lines", "40"], { cwd: repo })
     const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")

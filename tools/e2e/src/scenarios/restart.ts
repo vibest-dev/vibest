@@ -2,12 +2,14 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
+import { answerFolderTrust } from "../drivers/claude.ts"
 import {
   ask,
   claudeEnv,
   fakeAnthropic,
   holdsSlowResultModel,
   lastUser,
+  piDir,
   text,
   usageLimitedModel,
 } from "../fake-model.ts"
@@ -26,6 +28,7 @@ import {
   until,
   type World,
 } from "../world.ts"
+import { piShadow } from "../world/shadow.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type Row = { id: string; harness_session_id: string | null; pid: number | null; version: string | null }
@@ -82,17 +85,12 @@ const usageLimitMove = async (
   const plugin = path.join(w.vibestHome, "plugins", `${o.name}.ts`)
   try {
     const repo = await project(w, o.name)
-    const agentDir = path.join(w.root, `pi-${o.name}`)
-    await fs.mkdir(agentDir, { recursive: true })
-    const provider = (base: string) => ({
-      baseUrl: `http://127.0.0.1:${model.port}/${base}`,
-      apiKey: "fake",
-      api: "openai-completions",
-      models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
-    })
-    await fs.writeFile(
-      path.join(agentDir, "models.json"),
-      JSON.stringify({ providers: { first: provider("v1"), second: provider("v2") } }),
+    const base = `http://127.0.0.1:${model.port}`
+    const agentDir = await piShadow(
+      path.join(w.root, `pi-${o.name}`),
+      w.profile,
+      { first: { baseUrl: `${base}/v1` }, second: { baseUrl: `${base}/v2` } },
+      undefined,
     )
     await fs.mkdir(path.dirname(plugin), { recursive: true })
     await fs.writeFile(plugin, o.plugin)
@@ -157,25 +155,7 @@ const checks: ReadonlyArray<Check> = [
       const session = `${w.herdrSession}-restart`
       try {
         const repo = await project(w, "restart")
-        const agentDir = path.join(w.root, "pi-restart")
-        await fs.mkdir(agentDir, { recursive: true })
-        await fs.writeFile(
-          path.join(agentDir, "models.json"),
-          JSON.stringify({
-            providers: {
-              fake: {
-                baseUrl: model.url,
-                apiKey: "fake",
-                api: "openai-completions",
-                models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
-              },
-            },
-          }),
-        )
-        await fs.writeFile(
-          path.join(agentDir, "settings.json"),
-          JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }),
-        )
+        const agentDir = await piDir(w, "pi-restart", model.url)
         const { old, wrapper, point, env } = await oldInstall(w, "restart")
         const piEnv = `PI_CODING_AGENT_DIR=${agentDir}`
         const vibest = (args: ReadonlyArray<string>, timeoutMs = 60_000) =>
@@ -349,25 +329,7 @@ const checks: ReadonlyArray<Check> = [
       const session = `${w.herdrSession}-drestart`
       try {
         const repo = await project(w, "drestart")
-        const agentDir = path.join(w.root, "pi-drestart")
-        await fs.mkdir(agentDir, { recursive: true })
-        await fs.writeFile(
-          path.join(agentDir, "models.json"),
-          JSON.stringify({
-            providers: {
-              fake: {
-                baseUrl: model.url,
-                apiKey: "fake",
-                api: "openai-completions",
-                models: [{ id: "m", contextWindow: 100_000, maxTokens: 1000 }],
-              },
-            },
-          }),
-        )
-        await fs.writeFile(
-          path.join(agentDir, "settings.json"),
-          JSON.stringify({ defaultProvider: "fake", defaultModel: "m" }),
-        )
+        const agentDir = await piDir(w, "pi-drestart", model.url)
         const { old, wrapper, point, env } = await oldInstall(w, "drestart")
         const ok = async (args: ReadonlyArray<string>) => {
           const r = await w.run(repo, [wrapper, ...args], { env, timeoutMs: 60_000 })
@@ -523,16 +485,7 @@ const checks: ReadonlyArray<Check> = [
         await vibest(["daemon"])
         await vibest(["--harness", "claude", ...flags, "--session", session, "--headless"])
         await until("the main agent's row", () => pane() !== "", 60_000)
-        await until(
-          "Claude's trust question or its input box",
-          async () => /trust this folder|❯\s*$/m.test(await screen()),
-          60_000,
-        )
-        for (let i = 0; i < 10 && /trust this folder/.test(await screen()); i++) {
-          const yes = /^\s*❯.*Yes, I trust this folder/m.test(await screen())
-          await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [yes ? "enter" : "down"] })
-          await Bun.sleep(1_000)
-        }
+        await answerFolderTrust(screen, (key) => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [key] }))
         await until(
           "the main agent polls on the old integration",
           () => main()?.version === install.old && main()?.conversation != null && main()?.pid != null,

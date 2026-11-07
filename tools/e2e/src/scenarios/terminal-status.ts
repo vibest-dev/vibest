@@ -2,8 +2,8 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { piDir } from "../fake-model.ts"
 import { binary, checkout, expect, row, Skip, until } from "../world.ts"
+import { piShadow } from "../world/shadow.ts"
 
 type CoreTerminal = { address: string; reported: boolean; status?: { state: string; kind?: string; app?: string } }
 
@@ -407,7 +407,7 @@ const checks: ReadonlyArray<Check> = [
           await hc("kill", terminal)
         }
         owner = "pi"
-        const piConfig = await piDir(w, "pi-status", model.url + "/v1")
+        const piConfig = await piShadow(env.PI_CODING_AGENT_DIR, "first-run", { fake: { baseUrl: model.url + "/v1" } })
         await fs.mkdir(path.join(piConfig, "extensions"))
         await fs.copyFile(
           path.join(checkout, "tools/e2e/src/fixtures/status-prompts.ts"),

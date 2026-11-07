@@ -3,19 +3,24 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-const userFiles = [".claude/settings.json", ".cursor/hooks.json", ".pi/agent/settings.json"].map((p) =>
-  path.join(os.homedir(), p),
-)
+import { userFilesRead } from "../world/shadow.ts"
+
+const contentHash = async (file: string, keys: ReadonlyArray<string> | undefined) => {
+  const bytes = await fs.readFile(file).catch(() => undefined)
+  if (bytes === undefined) return "missing"
+  const hashed =
+    keys === undefined
+      ? bytes
+      : JSON.stringify(keys.map((k) => [k, (JSON.parse(bytes.toString("utf8")) as Record<string, unknown>)[k]]))
+  return crypto.createHash("sha256").update(hashed).digest("hex")
+}
 
 export const userFileHashes = async () =>
   Object.fromEntries(
     await Promise.all(
-      userFiles.map(async (file) => [
-        file,
-        await fs.readFile(file).then(
-          (bytes) => crypto.createHash("sha256").update(bytes).digest("hex"),
-          () => "missing",
-        ),
+      userFilesRead.map(async ({ file, keys }) => [
+        keys === undefined ? file : `${file} (${keys.join(", ")})`,
+        await contentHash(file, keys),
       ]),
     ),
   ) as Record<string, string>
