@@ -3,11 +3,16 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
-import { expect, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { expect, row, SESSIONS, Skip, until, vibestd, type World } from "../world.ts"
 import { project } from "./inbox.ts"
 
 type Entry = { id: string; agent: string; status: string; turnState: string }
 type Sample = { at: number; end: number; status: string; turnState: string }
+type Watched = {
+  _tag: string
+  projects: Array<{ id: string; activity: string }>
+  sessions: Array<{ id: string; projectId: string; status: string; turn: number | null }>
+}
 type HcListed = { address: string; name?: string | null; state: string }
 type HcTerminal = {
   address: string
@@ -58,6 +63,14 @@ const isolatedCore = async (w: World, piAgentDir: string, tag: string) => {
 }
 
 const addressOf = (id: string) => id.slice(0, id.indexOf("@"))
+
+const configureRuntime = async (w: World, runtime: string | undefined) => {
+  const file = path.join(w.vibestHome, "vibest.json")
+  const before = await fs.readFile(file, "utf8").catch(() => undefined)
+  const config = before === undefined ? {} : (JSON.parse(before) as Record<string, unknown>)
+  await fs.writeFile(file, JSON.stringify({ ...config, runtime }))
+  return () => (before === undefined ? fs.rm(file, { force: true }) : fs.writeFile(file, before))
+}
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -359,6 +372,88 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         model.stop()
         await w.stopDaemon()
+        await core.stop()
+      }
+    },
+  },
+  {
+    id: "S36",
+    title:
+      "herdr-core runtime: a subagent turn that ended unwatched is done in Watch, for it and its project; Session.Seen raises herdr.seen to that turn and it is idle",
+    run: async (w) => {
+      for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = delegatingModel("pi")
+      w.ownRuntimes.add("hc")
+      await w.stopDaemon()
+      const piAgentDir = await piDir(w, "pi-hc-seen", model.url)
+      const env = `PI_CODING_AGENT_DIR=${piAgentDir}`
+      const core = await isolatedCore(w, piAgentDir, "hc-seen")
+      const restore = await configureRuntime(w, "hc")
+      try {
+        const repo = await project(w, "hc-seen")
+        await w.ok(["--harness", "pi", "--runtime", "hc", "--headless", "--env", env], {
+          cwd: repo,
+          timeoutMs: 60_000,
+          env: { CLAUDE_CONFIG_DIR: undefined },
+        })
+        await until(
+          "the main agent in vibest ls",
+          async () => (await w.json<Array<Entry>>(["ls"], { cwd: repo })).some((e) => e.agent === "main"),
+          60_000,
+        )
+        const sub = (
+          JSON.parse(
+            await w.ok(
+              ["run", "pi", "--runtime", "hc", "--env", env, "--title", "Check seen state", "--", ask("seen")],
+              {
+                cwd: repo,
+                timeoutMs: 60_000,
+              },
+            ),
+          ) as { id: string }
+        ).id
+        let last: Watched | undefined
+        const snapshot = async () => {
+          const answer = await vibestd(w, repo, "Watch", null)
+          const first = (answer.result as Array<Watched> | undefined)?.[0]
+          expect(first?._tag === "Snapshot", `Watch did not answer a Snapshot: ${JSON.stringify(answer).slice(0, 400)}`)
+          last = first
+          return first!
+        }
+        const subOf = (watched: Watched) => watched.sessions.find((s) => s.id === sub)
+        await until(
+          "the subagent done in Watch after its turn",
+          async () => {
+            const s = subOf(await snapshot())
+            return s?.status === "done" && (s.turn ?? 0) >= 1
+          },
+          180_000,
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}; last Watch: ${JSON.stringify(last)}\nterminals:\n${await core.screens()}`)
+        })
+        const { turn, projectId } = subOf(last!)!
+        expect(
+          last!.projects.find((p) => p.id === projectId)?.activity === "done",
+          `the project is not done: ${JSON.stringify(last!.projects)}`,
+        )
+        const marked = await vibestd(w, repo, "Session.Seen", { id: sub, turn })
+        expect(marked.error === undefined, `Session.Seen: ${JSON.stringify(marked)}`)
+        await until(
+          "the subagent idle after Session.Seen",
+          async () => subOf(await snapshot())?.status === "idle",
+          30_000,
+        ).catch((e: Error) => {
+          throw new Error(`${e.message}; last Watch: ${JSON.stringify(last)}`)
+        })
+        const at = JSON.parse(
+          row<{ runtime: string }>(w, `SELECT runtime FROM ${SESSIONS} s WHERE id = ?`, sub)?.runtime ?? "{}",
+        ) as { id?: string }
+        const labels = (await core.get(addressOf(at.id!))).labels
+        expect(labels["herdr.seen"] === String(turn), `herdr.seen ${labels["herdr.seen"]}, turn ${turn}`)
+      } finally {
+        model.stop()
+        await w.stopDaemon()
+        await restore()
         await core.stop()
       }
     },

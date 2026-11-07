@@ -1,5 +1,6 @@
 import {
   CALLER_HEADER,
+  MISMATCH_ACTION,
   PROTOCOL,
   PROTOCOL_HEADER,
   protocolMismatch,
@@ -57,17 +58,21 @@ export class IncompatibleDaemon extends Schema.TaggedError<IncompatibleDaemon>()
   daemonProtocol: Schema.NullOr(Schema.Number),
   daemon: DaemonIdentity,
   client: Schema.Struct({ version: Schema.String, command: Schema.Array(Schema.String) }),
+  missing: Schema.optional(Schema.String),
 }) {
   override get message() {
     const got = this.daemonProtocol === null ? "no protocol" : `protocol ${this.daemonProtocol}`
     const self = `vibest ${this.client.version} (${this.client.command.map(shellQuote).join(" ")})`
+    const byHand = stopByHand(this.socket, this.daemon.pid).replace(/^To replace it, /, "")
+    if (this.missing !== undefined)
+      return `vibestd is older (${this.daemonVersion || "unknown"}); run ${MISMATCH_ACTION}. ${described(this.daemonVersion, this.daemon)} on ${this.socket} has no ${this.missing}, which ${self} needs. If \`vibest daemon restart\` cannot replace it: ${byHand}.`
     const mismatch = protocolMismatch(
       PROTOCOL,
       this.daemonProtocol ?? 0,
       this.daemonVersion || "unknown",
       this.client.version,
     )
-    return `${mismatch.message}. ${described(this.daemonVersion, this.daemon)} on ${this.socket} speaks ${got}; ${self} speaks protocol ${PROTOCOL}. If \`vibest daemon restart\` cannot replace it: ${stopByHand(this.socket, this.daemon.pid).replace(/^To replace it, /, "")}. A package-version difference alone does not require a restart.`
+    return `${mismatch.message}. ${described(this.daemonVersion, this.daemon)} on ${this.socket} speaks ${got}; ${self} speaks protocol ${PROTOCOL}. If \`vibest daemon restart\` cannot replace it: ${byHand}. A package-version difference alone does not require a restart.`
   }
 }
 
@@ -152,9 +157,9 @@ export const hookCall = (
   )
   return Effect.gen(function* () {
     const first = yield* once
-    if (Exit.isSuccess(first) || !Option.exists(Cause.findErrorOption(first.cause), notConnected)) return
+    if (Exit.isSuccess(first) || !Option.exists(Cause.findErrorOption(first.cause), notConnected)) return first
     yield* Effect.sleep(HOOK_RETRY_DELAY)
-    yield* once
+    return yield* once
   })
 }
 
@@ -187,8 +192,14 @@ export const accepts = (socket: string) =>
     Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.succeed(true) }),
   )
 
-export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArray<string>) =>
-  ping.protocol === PROTOCOL
+export interface Needs {
+  readonly capability: string
+  readonly method: string
+}
+
+export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArray<string>, needs?: Needs) => {
+  const lacks = needs !== undefined && ping.capabilities?.[needs.capability] !== true
+  return ping.protocol === PROTOCOL && !lacks
     ? undefined
     : new IncompatibleDaemon({
         socket,
@@ -196,7 +207,9 @@ export const incompatibleDaemon = (socket: string, ping: Ping, self: ReadonlyArr
         daemonProtocol: ping.protocol ?? null,
         daemon: { pid: ping.pid, instance: ping.instance, command: ping.command, startedAt: ping.startedAt },
         client: { version: VERSION, command: self },
+        ...(ping.protocol === PROTOCOL && needs !== undefined ? { missing: needs.method } : {}),
       })
+}
 
 export const CallerEnv = Context.Reference<ReadonlyArray<string>>("vibest/CallerEnv", { defaultValue: () => [] })
 
@@ -316,7 +329,7 @@ export const startDaemon = Effect.gen(function* () {
 export const withVibest = <A, E, R>(
   claim: Claim,
   f: (client: VibestClient, ping: Ping) => Effect.Effect<A, E, R>,
-  options?: { readonly start?: boolean },
+  options?: { readonly start?: boolean; readonly needs?: Needs },
 ) =>
   Effect.gen(function* () {
     const layout = yield* Layout
@@ -335,7 +348,7 @@ export const withVibest = <A, E, R>(
         socket: layout.socket,
         message: `vibestd did not answer Ping on ${layout.socket}`,
       })
-    const incompatible = incompatibleDaemon(layout.socket, ping, yield* VibestCommand)
+    const incompatible = incompatibleDaemon(layout.socket, ping, yield* VibestCommand, options?.needs)
     if (incompatible) return yield* incompatible
     return yield* RpcClient.withHeaders(
       connect(layout.socket).pipe(Effect.flatMap((client) => f(client, ping))),

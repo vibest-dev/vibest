@@ -20,18 +20,19 @@ import { callerByKind, callerHits, callerKeys, type CallerHit } from "@vibest/co
 import * as Guard from "@vibest/core/guard"
 import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
-import { listAllModels } from "@vibest/core/models"
+import { catalogModels } from "@vibest/core/models"
 import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { makeSources } from "@vibest/core/plugin-sources"
 import { DEFAULT_TIMEOUT, describeSpawn, PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
-import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
+import { jsonObject, promptOf } from "@vibest/core/results"
 import { callerMachine } from "@vibest/runtime-herdr/caller"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
   Cause,
+  Clock,
   Config,
   Console,
   Duration,
@@ -690,9 +691,22 @@ const report = Command.make("report", { message: text("message") }, (o) =>
   ),
 )
 
-const providerFlag = Flag.String("provider").pipe(Flag.withDescription("Only this provider's models"), Flag.optional)
+const providerFlag = Flag.String("provider").pipe(
+  Flag.withDescription("Only this provider's models; a harness with no provider option refuses it"),
+  Flag.optional,
+)
+const catalog = Effect.flatMap(caller, (c) =>
+  withVibest(c.claim, (client) => client["Harnesses.List"](), {
+    start: !c.agent,
+    needs: { capability: "harnesses", method: "Harnesses.List" },
+  }),
+)
 const modelsOf = (harnesses: ReadonlyArray<HarnessId>, provider: Option.Option<string>) =>
-  listAllModels(harnesses, Option.getOrNull(provider)).pipe(Effect.flatMap(json))
+  Effect.gen(function* () {
+    const adapters = yield* Harnesses
+    const choices = (yield* catalog).filter((c) => harnesses.includes(c.harness))
+    yield* json(catalogModels(choices, adapters, Option.getOrNull(provider)))
+  })
 
 const models = Command.make(
   "models",
@@ -717,40 +731,31 @@ const models = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "The models each harness accepts, as the harness reports them: start a session with one entry's harness, provider (null: leave it out) and model. Local, does not need vibestd",
+    "The models each harness accepts, as the harness reports them: start a session with one entry's harness, provider (null: leave it out) and model",
   ),
 )
 
 const harness = Command.make("harness").pipe(
-  Command.withDescription("The harnesses vibest runs; local, does not need vibestd"),
+  Command.withDescription("The harnesses vibest runs"),
   Command.withSubcommands([
     Command.make("list", {}, () =>
-      Effect.forEach(
-        HARNESS_IDS,
-        (h) =>
-          Effect.gen(function* () {
-            const host = yield* Harness
-            const summary = { harness: h, binary: (yield* Harnesses).get(h).binary }
-            if (!(yield* host.available(h)))
-              return { ...summary, available: false, defaultModel: null, error: `${summary.binary} is not on PATH` }
-            return yield* host.models(h, null).pipe(
-              Effect.map((models) => ({
-                ...summary,
-                available: true,
-                defaultModel: models.find((m) => m.default)?.model ?? null,
-                error: null,
-              })),
-              Effect.catchTag("HarnessUnavailable", (e) =>
-                Effect.succeed({ ...summary, available: true, defaultModel: null, error: e.message }),
-              ),
-            )
-          }),
-        { concurrency: "unbounded" },
-      ).pipe(Effect.flatMap(json), Effect.provide(Harness.layer)),
+      Effect.gen(function* () {
+        const adapters = yield* Harnesses
+        const choices = yield* catalog
+        yield* json(
+          choices.map((c) => ({
+            harness: c.harness,
+            binary: adapters.get(c.harness).binary,
+            available: c.problem === null,
+            defaultModel: c.models.find((m) => m.default)?.model ?? null,
+            error: c.problem,
+          })),
+        )
+      }),
     ).pipe(
       Command.withAlias("ls"),
       Command.withDescription(
-        "Each harness: its binary, whether it is on PATH and the model it runs by default (null: the harness chooses, or error says why it could not be asked)",
+        "Each harness: its binary, whether vibest can start it and the model it runs by default (null: the harness chooses; error says why it cannot be started)",
       ),
     ),
     Command.make("models", { harness: Argument.Literals("harness", HARNESS_IDS), provider: providerFlag }, (o) =>
@@ -828,6 +833,7 @@ const notify = (
   adapter: HarnessAdapter,
   sessionId: string,
   raw: string,
+  what: string,
   send: (client: VibestClient) => Effect.Effect<void, unknown>,
 ) =>
   Effect.gen(function* () {
@@ -839,56 +845,82 @@ const notify = (
       sessionId,
       ...(harnessSessionId ? { harnessSessionId } : {}),
     })
-    yield* hookCall(layout.socket, headers, send)
-  }).pipe(Effect.ignore)
+    const exit = yield* hookCall(layout.socket, headers, send)
+    if (Exit.isSuccess(exit)) return
+    const at = new Date(yield* Clock.currentTimeMillis).toISOString()
+    const cause = Cause.squash(exit.cause)
+    return yield* Effect.fail(
+      `${at} vibest: ${adapter.id} ${what} of session ${sessionId} did not reach vibestd: ${cause instanceof Error ? cause.message : String(cause)}`,
+    )
+  })
+
+const hookSession = Effect.gen(function* () {
+  const agent = yield* nonempty("VIBEST_AGENT")
+  const sessionId = yield* nonempty("VIBEST_SESSION_ID")
+  return agent && sessionId ? { agent, sessionId } : undefined
+})
 
 export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
   Effect.gen(function* () {
-    const agent = yield* nonempty("VIBEST_AGENT")
-    const sessionId = yield* nonempty("VIBEST_SESSION_ID")
-    if (!agent || !sessionId) return
+    const who = yield* hookSession
+    if (!who) return
     const event = jsonObject(raw)
-    if (!event || !adapter.turnEnd?.(event, agent === "coordinator")) return
-    yield* writeTerminalStatus("idle")
-    yield* notify(adapter, sessionId, raw, (client) => client.TurnEnd({ sessionId, harness: adapter.id, event: raw }))
-  }).pipe(Effect.ignore)
+    if (!event || !adapter.turnEnd?.(event, who.agent === "coordinator")) return
+    yield* notify(adapter, who.sessionId, raw, "turn end", (client) =>
+      client.TurnEnd({ sessionId: who.sessionId, harness: adapter.id, event: raw }),
+    )
+  })
 
 export const integrationPrompt = (adapter: HarnessAdapter, raw: string) =>
   Effect.gen(function* () {
-    const agent = yield* nonempty("VIBEST_AGENT")
-    const sessionId = yield* nonempty("VIBEST_SESSION_ID")
-    if (!agent || !sessionId) return
-    if (promptOf(adapter, agent, raw) === undefined) return
-    yield* writeTerminalStatus("working")
-    yield* notify(adapter, sessionId, raw, (client) => client.Prompt({ sessionId, harness: adapter.id, event: raw }))
-  }).pipe(Effect.ignore)
+    const who = yield* hookSession
+    if (!who || promptOf(adapter, who.agent, raw) === undefined) return
+    yield* notify(adapter, who.sessionId, raw, "turn start", (client) =>
+      client.Prompt({ sessionId: who.sessionId, harness: adapter.id, event: raw }),
+    )
+  })
+
+export const integrationReady = (adapter: HarnessAdapter, raw: string) =>
+  Effect.gen(function* () {
+    const who = yield* hookSession
+    if (!who) return
+    yield* notify(adapter, who.sessionId, raw, "ready report", (client) =>
+      client["Session.Ready"]({ id: who.sessionId }),
+    )
+  })
 
 const hookHarness = Flag.Literals("harness", HARNESS_IDS).pipe(Flag.withDescription("The harness whose hook this is"))
 
-const stop = Command.make("stop", { harness: hookHarness }, (o) =>
-  Effect.gen(function* () {
-    yield* integrationStop(
-      (yield* Harnesses).get(o.harness),
-      yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin)),
-    )
-  }).pipe(Effect.ignore),
-).pipe(
-  Command.withDescription(
-    "A harness plugin's turn-end bridge: its turn-end event JSON on stdin. Does not start vibestd; failures exit 0",
-  ),
+const hookCommand = <E, R>(
+  name: string,
+  report: (adapter: HarnessAdapter, raw: string) => Effect.Effect<void, E, R>,
+  description: string,
+) =>
+  Command.make(name, { harness: hookHarness }, (o) =>
+    Effect.gen(function* () {
+      yield* report(
+        (yield* Harnesses).get(o.harness),
+        yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin)),
+      )
+    }),
+  ).pipe(Command.withDescription(description))
+
+const stop = hookCommand(
+  "stop",
+  integrationStop,
+  "A harness plugin's turn-end bridge: its turn-end event JSON on stdin. Does not start vibestd; exits non-zero when the report did not reach vibestd",
 )
 
-const prompt = Command.make("prompt", { harness: hookHarness }, (o) =>
-  Effect.gen(function* () {
-    yield* integrationPrompt(
-      (yield* Harnesses).get(o.harness),
-      yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin)),
-    )
-  }).pipe(Effect.ignore),
-).pipe(
-  Command.withDescription(
-    "A harness plugin's user-prompt bridge: the prompt event JSON on stdin. Does not start vibestd; failures exit 0",
-  ),
+const prompt = hookCommand(
+  "prompt",
+  integrationPrompt,
+  "A harness plugin's turn-start bridge: its prompt or activity event JSON on stdin. Does not start vibestd; exits non-zero when the report did not reach vibestd",
+)
+
+const ready = hookCommand(
+  "ready",
+  integrationReady,
+  "A harness plugin's session-start bridge: tells vibestd the session takes input. Does not start vibestd; exits non-zero when the report did not reach vibestd",
 )
 
 const guard = Command.make("guard", { harness: hookHarness }, (o) =>
@@ -944,7 +976,7 @@ const integration = (exec: Exec, host: Daemon.Host) =>
     Command.withDescription(
       "Internal: called by vibest's plugin in each harness (user prompt, turn-end result, pre-tool guard) and by a main agent's restart; not for direct use",
     ),
-    Command.withSubcommands([guard, prompt, stop, integrationStart(exec, host)]),
+    Command.withSubcommands([guard, prompt, stop, ready, integrationStart(exec, host)]),
   )
 
 type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }

@@ -1,7 +1,8 @@
+import type { HarnessChoice } from "@vibest/protocol/rpc"
 import { Config, Effect, Option, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, HarnessUnavailable } from "./harness.ts"
+import { type HarnessAdapter, HARNESS_IDS, type HarnessId, HarnessUnavailable } from "./harness.ts"
 
 export const Model = Schema.Struct({
   harness: Schema.Literals(HARNESS_IDS),
@@ -104,14 +105,25 @@ export const listModels = Effect.fn("listModels")(function* (adapter: HarnessAda
   return models
 })
 
-export const listAllModels = (harnesses: ReadonlyArray<HarnessId>, provider: string | null) =>
-  Effect.forEach(
-    harnesses,
-    (h) => Effect.result(Effect.flatMap(Harnesses, (all) => listModels(all.get(h), provider))),
-    { concurrency: "unbounded" },
-  ).pipe(
-    Effect.map((results) => ({
-      models: results.flatMap((r) => (r._tag === "Success" ? r.success : [])),
-      errors: results.flatMap((r) => (r._tag === "Failure" ? [`${r.failure.harness}: ${r.failure.message}`] : [])),
-    })),
-  )
+export const catalogModels = (
+  choices: ReadonlyArray<HarnessChoice>,
+  adapters: { readonly get: (id: HarnessId) => Pick<HarnessAdapter, "binary" | "checkProvider"> },
+  provider: string | null,
+) => {
+  const models: Array<Omit<Model, "description">> = []
+  const errors: Array<string> = []
+  for (const c of choices) {
+    const adapter = adapters.get(c.harness)
+    const problem = c.problem ?? (provider === null ? undefined : adapter.checkProvider(provider))
+    if (problem !== undefined) {
+      errors.push(`${c.harness}: ${problem}`)
+      continue
+    }
+    const kept = c.models
+      .filter((m) => provider === null || m.provider === provider)
+      .map((m) => ({ harness: c.harness, ...m }))
+    if (kept.length === 0) errors.push(`${c.harness}: ${adapter.binary} lists no models for provider "${provider}"`)
+    models.push(...kept)
+  }
+  return { models, errors }
+}

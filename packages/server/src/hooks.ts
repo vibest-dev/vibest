@@ -11,6 +11,7 @@ export const turnEnd = (db: Db["Service"], adapter: HarnessAdapter, who: HookCal
     const end = turnEndOf(adapter, who.agent, raw, yield* Clock.currentTimeMillis)
     if (!end) return
     yield* db.reportTurn(who.id, end)
+    yield* db.updateSession(who.id, { status: "idle" })
     yield* Effect.log(`turn end ${who.id} (${end.harness}${end.interrupted ? ", interrupted" : ""})`)
   })
 

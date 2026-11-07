@@ -1,7 +1,7 @@
 import pkg from "../package.json" with { type: "json" }
 
 export const HOOK = `#!/bin/sh
-# @vibest/cursor ${pkg.version}: \`vibest integration guard\` before a tool call, \`vibest integration prompt\` when the user submits, \`vibest integration stop\` at a turn end.
+# @vibest/cursor ${pkg.version}: \`vibest integration guard\` before a tool call, \`ready\` at the session start, \`prompt\` when a turn starts or works, \`stop\` at its response.
 # The vibest vibestd started this agent with (VIBEST_COMMAND, a JSON argv), not the first vibest on PATH. A value this
 # cannot read safely (not a JSON array of plain strings: a backslash in it) falls back to PATH.
 vibest() {
@@ -29,14 +29,9 @@ case "\${1:-}" in
     if [ -z "\${VIBEST_AGENT:-}" ]; then cat >/dev/null; echo '{"permission":"allow"}'; exit 0; fi
     vibest integration guard --harness cursor || { echo "vibest integration guard failed; the tool call is refused." >&2; exit 2; }
     ;;
-  prompt)
-    # beforeSubmitPrompt can block the prompt. A missed report must not: the turn still runs.
+  ready | prompt | stop)
     if [ -z "\${VIBEST_AGENT:-}" ] || [ -z "\${VIBEST_SESSION_ID:-}" ]; then cat >/dev/null; exit 0; fi
-    vibest integration prompt --harness cursor >/dev/null 2>&1 || true
-    ;;
-  stop)
-    if [ -z "\${VIBEST_AGENT:-}" ] || [ -z "\${VIBEST_SESSION_ID:-}" ]; then cat >/dev/null; exit 0; fi
-    vibest integration stop --harness cursor >/dev/null 2>&1 || true
+    vibest integration "$1" --harness cursor >/dev/null 2>>"\${VIBEST_HOME:-$HOME/.vibest}/vibestd.log" || exit 1
     ;;
 esac
 exit 0
@@ -50,10 +45,12 @@ export const files: Readonly<Record<string, string>> = {
     {
       version: 1,
       hooks: {
+        sessionStart: [hook("ready")],
         preToolUse: [{ ...hook("guard"), failClosed: true }],
         beforeSubmitPrompt: [hook("prompt")],
+        afterAgentThought: [hook("prompt")],
+        postToolUse: [hook("prompt")],
         afterAgentResponse: [hook("stop")],
-        stop: [hook("stop")],
       },
     },
     null,

@@ -222,14 +222,36 @@ export type InboxMessage = typeof InboxMessage.Type
 
 export const SessionStatusInfo = Schema.Struct({ ...SessionInfo.fields, result: Schema.NullOr(InboxMessage) })
 
+export const HarnessModel = Schema.Struct({
+  provider: Schema.NullOr(Schema.String),
+  model: Schema.String,
+  name: Schema.String,
+  default: Schema.Boolean,
+})
+
+export const HarnessChoice = Schema.Struct({
+  harness: Schema.Literals(HARNESS_IDS),
+  problem: Schema.NullOr(Schema.String),
+  models: Schema.Array(HarnessModel),
+})
+export type HarnessChoice = typeof HarnessChoice.Type
+
+export const ProjectActivity = Schema.Literals(["blocked", "done", "working", "idle"])
+export type ProjectActivity = typeof ProjectActivity.Type
+
 export const ProjectRow = Schema.Struct({
   id: Schema.String,
   directory: Schema.NullOr(Schema.String),
   entrySessionId: Schema.NullOr(Schema.String),
+  activity: ProjectActivity,
 })
 export type ProjectRow = typeof ProjectRow.Type
 
-export const WatchSession = Schema.Struct({ ...SessionInfo.fields, parentId: Schema.NullOr(Schema.String) })
+export const WatchSession = Schema.Struct({
+  ...SessionInfo.fields,
+  parentId: Schema.NullOr(Schema.String),
+  turn: Schema.NullOr(Schema.Number),
+})
 export type WatchSession = typeof WatchSession.Type
 
 export const WatchEvent = Schema.Union([
@@ -288,6 +310,7 @@ export class VibestRpcs extends RpcGroup.make(
     ),
   ),
   protocol(Rpc.make("Plugins", { success: Schema.Array(PluginInfo) })),
+  protocol(Rpc.make("Harnesses.List", { success: Schema.Array(HarnessChoice) })),
   protocol(
     Rpc.make("Runtimes.Doctor", {
       payload: { harnesses: Schema.Array(Schema.String) },
@@ -378,6 +401,14 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(Rpc.make("Inbox.Subscribe", { success: Schema.String, error: Schema.Union([Forbidden]), stream: true })),
   scoped(Rpc.make("Watch", { success: WatchEvent, error: Schema.Union([Forbidden, WatchLagged]), stream: true })),
+  scoped(
+    admitted(
+      Rpc.make("Session.Seen", {
+        payload: { id: Schema.String, turn: Schema.Number },
+        error: Schema.Union([Forbidden, NoSuchSession, RuntimeUnreachable]),
+      }),
+    ),
+  ),
   protocol(
     admitted(
       Rpc.make("TurnEnd", {
@@ -583,6 +614,7 @@ export class VibestRpcs extends RpcGroup.make(
 export const ACCESS = {
   Ping: "open",
   Plugins: "open",
+  "Harnesses.List": "open",
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
   Republish: "open",
@@ -596,6 +628,7 @@ export const ACCESS = {
   Get: "agent",
   "Inbox.Subscribe": "coordinator",
   Watch: "cli",
+  "Session.Seen": "cli",
   "Project.Open": "cli",
   "Project.CoordinatorSession": "agent",
   "Project.StartMain": "agent",
@@ -618,4 +651,12 @@ export const ACCESS = {
   "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self"
 >
 
-export const CAPABILITIES = { http: true, handoff: true, requests: true, watch: true, spawnRuntime: true } as const
+export const CAPABILITIES = {
+  http: true,
+  handoff: true,
+  requests: true,
+  watch: true,
+  projects: true,
+  harnesses: true,
+  spawnRuntime: true,
+} as const

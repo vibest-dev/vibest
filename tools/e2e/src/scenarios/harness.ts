@@ -66,20 +66,19 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "H1",
-    title: "harness list: one entry per harness; a missing CLI says so",
+    title: "harness list (from vibestd): one entry per harness; a missing CLI says so",
     run: async (w) => {
       const all = await listed(w)
       expect(
         HARNESSES.every((h) => all.some((e) => e.harness === h)) && all.length === HARNESSES.length,
         `entries: ${JSON.stringify(all)}`,
       )
-      for (const e of all)
-        expect(
-          e.available === (Bun.which(e.binary) !== null),
-          `${e.harness}: available ${e.available}, on PATH ${Bun.which(e.binary)}`,
-        )
-      for (const e of all.filter((e) => !e.available))
-        expect(!!e.error?.includes("not on PATH"), `${e.harness}: missing without saying why`)
+      for (const e of all) {
+        const onPath = Bun.which(e.binary) !== null
+        expect(!e.available || onPath, `${e.harness}: available but not on PATH`)
+        expect(e.available === (e.error === null), `${e.harness}: available ${e.available}, error ${e.error}`)
+        if (!onPath) expect(!!e.error?.includes("not on PATH"), `${e.harness}: missing without saying why`)
+      }
     },
   },
   {
