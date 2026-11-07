@@ -135,6 +135,8 @@ func (a *App) View(c *ui.Context) {
 		a.syncNative()
 	}
 	c.SetTheme(th.Widget())
+	c.SetMenuPresentation(ui.PopoverMenus)
+	c.SetMenuPainter(menuSkin(c))
 	for _, u := range a.open {
 		c.Services().OpenURL(u)
 		a.opened = u
