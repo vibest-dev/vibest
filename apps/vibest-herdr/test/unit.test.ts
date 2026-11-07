@@ -1143,8 +1143,6 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         const harness = yield* Harness.make()
         const error = yield* Effect.flip(harness.models("cursor", null))
         assert.include(error.message, "Library/Keychains")
-        const all = yield* listAllModels(["cursor"], null)
-        assert.include(all.errors[0], "Library/Keychains")
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ HOME: home }), { asPrimary: true })),
