@@ -20,6 +20,7 @@ import { HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { Harness, type HarnessId, isHarnessId } from "../harness.ts"
+import { cursor } from "../harnesses/cursor.ts"
 import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Keychain } from "../keychain.ts"
 import { claudeAccount, claudeUsage, cursorAccount, cursorUsage, num, piAccount, record } from "./index.ts"
 
@@ -75,7 +76,9 @@ const parseJson = (text: string | undefined): unknown => {
 const runCli = (command: string, args: ReadonlyArray<string>, cwd: string) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const handle = yield* spawner.spawn(ChildProcess.make(command, [...args], { stdin: "ignore", cwd }))
+    const handle = yield* spawner.spawn(
+      ChildProcess.make(command, [...args], { stdin: "ignore", cwd, env: { HOME: cwd }, extendEnv: true }),
+    )
     const [stdout] = yield* Effect.all(
       [Stream.mkString(Stream.decodeText(handle.stdout)), Stream.runDrain(handle.stderr), handle.exitCode],
       { concurrency: "unbounded" },
@@ -239,6 +242,8 @@ export class Subscriptions extends Context.Service<
 
     const pollCursor = Effect.gen(function* () {
       const cwd = yield* homeDir
+      const problem = yield* cursor.checkEnvironment?.(cwd) ?? Effect.succeed(undefined)
+      if (problem) return yield* modify("cursor", "", (prev, now) => keep(prev, now, problem, "cursor", ""))
       const status = parseJson(yield* runCli("cursor-agent", ["status", "--format", "json"], cwd))
       if (status === undefined)
         return yield* modify("cursor", "", (prev, now) => keep(prev, now, "cursor-agent status failed", "cursor", ""))

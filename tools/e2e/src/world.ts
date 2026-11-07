@@ -140,6 +140,8 @@ export class World {
       },
       extra,
     )
+    if (env.HOME !== this.home)
+      for (const name of ["SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY", "SSH2_CLIENT", "SSH2_TTY"]) delete env[name]
     return Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined))
   }
 
@@ -148,9 +150,18 @@ export class World {
     argv: ReadonlyArray<string>,
     options: { env?: Record<string, string | undefined>; stdin?: string; timeoutMs?: number } = {},
   ): Promise<Ran> {
+    const env = this.env(options.env)
+    if (process.platform === "darwin" && ["cursor-agent", "agent"].includes(path.basename(argv[0]!)))
+      expect(
+        !!env.HOME &&
+          fs
+            .statSync(path.join(env.HOME, "Library", "Keychains", "login.keychain-db"), { throwIfNoEntry: false })
+            ?.isFile() === true,
+        "Refusing to start Cursor: HOME lacks Library/Keychains/login.keychain-db; use the macOS login home",
+      )
     const p = Bun.spawn([...argv], {
       cwd,
-      env: this.env(options.env),
+      env,
       stdin: options.stdin === undefined ? "ignore" : new TextEncoder().encode(options.stdin),
       stdout: "pipe",
       stderr: "pipe",

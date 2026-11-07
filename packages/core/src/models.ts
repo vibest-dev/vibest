@@ -69,13 +69,20 @@ export const listModels = Effect.fn("listModels")(function* (adapter: HarnessAda
   const providerError = checkProvider(provider)
   if (providerError) return yield* unavailable(providerError)
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const cwd = yield* Config.String("HOME").pipe(Effect.orDie)
+  const cwd = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
+  const problem = yield* adapter.checkEnvironment?.(cwd) ?? Effect.succeed(undefined)
+  if (problem) return yield* unavailable(problem)
   const stdin =
     lister.request === undefined
       ? "ignore"
       : Stream.concat(Stream.make(new TextEncoder().encode(lister.request)), Stream.never)
   const lines = yield* spawner
-    .streamLines(ChildProcess.make(binary, lister.args(provider), { stdin, cwd }), { includeStderr: true })
+    .streamLines(
+      ChildProcess.make(binary, lister.args(provider), { stdin, cwd, env: { HOME: cwd }, extendEnv: true }),
+      {
+        includeStderr: true,
+      },
+    )
     .pipe(
       Stream.scan(
         (): ReadonlyArray<string> => [],

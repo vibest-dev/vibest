@@ -1101,10 +1101,18 @@ describe("HarnessAdapter", () => {
 layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) => {
   it.effect("model listings run in the user's home, not the caller's working directory", () =>
     Effect.gen(function* () {
+      const home = yield* tempDirectory("model-home-")
+      const fs = yield* FileSystem.FileSystem
+      yield* fs.makeDirectory(`${home}/Library/Keychains`, { recursive: true })
+      yield* fs.writeFileString(`${home}/Library/Keychains/login.keychain-db`, "fake keychain; no real CLI")
       const cwds: Array<string | undefined> = []
       const spawner = ChildProcessSpawner.make((command) =>
         Effect.suspend(() => {
-          if (command._tag === "StandardCommand") cwds.push(command.options.cwd)
+          if (command._tag === "StandardCommand") {
+            cwds.push(command.options.cwd)
+            assert.strictEqual(command.options.env?.HOME, home)
+            assert.strictEqual(command.options.extendEnv, true)
+          }
           return Effect.fail(PlatformError.badArgument({ module: "test", method: "spawn" }))
         }),
       )
@@ -1115,12 +1123,37 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
         yield* Effect.forEach(["claude", "cursor"] as const, (h) => Effect.flip(listModels(adapters.get(h), null)))
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-        Effect.provide(
-          ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ HOME: "/home/someone" }), { asPrimary: true }),
-        ),
+        Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ HOME: home }), { asPrimary: true })),
       )
-      assert.notStrictEqual(process.cwd(), "/home/someone")
-      assert.deepStrictEqual(cwds, ["/home/someone", "/home/someone", "/home/someone"])
+      assert.notStrictEqual(process.cwd(), home)
+      assert.deepStrictEqual(cwds, [home, home, home])
+    }),
+  )
+
+  it.effect("Cursor discovery refuses missing and empty Keychains directories on macOS", () =>
+    Effect.gen(function* () {
+      if (process.platform !== "darwin") return
+      const home = yield* tempDirectory("cursor-home-")
+      const commands: Array<string> = []
+      const spawner = ChildProcessSpawner.make((command) => {
+        if (command._tag === "StandardCommand") commands.push(command.command)
+        return Effect.fail(PlatformError.badArgument({ module: "test", method: "spawn" }))
+      })
+      const check = Effect.gen(function* () {
+        const harness = yield* Harness.make()
+        const error = yield* Effect.flip(harness.models("cursor", null))
+        assert.include(error.message, "Library/Keychains")
+        const all = yield* listAllModels(["cursor"], null)
+        assert.include(all.errors[0], "Library/Keychains")
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ HOME: home }), { asPrimary: true })),
+      )
+      yield* check
+      const fs = yield* FileSystem.FileSystem
+      yield* fs.makeDirectory(`${home}/Library/Keychains`, { recursive: true })
+      yield* check
+      assert.deepStrictEqual(commands, [])
     }),
   )
 
