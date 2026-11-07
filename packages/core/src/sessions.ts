@@ -887,7 +887,7 @@ export class Sessions extends Context.Service<
         if (state !== undefined && session.status !== state) yield* db.updateSession(session.id, { status: state })
         if (state === "working" || state === "blocked") yield* Ref.set(r.sawWorking, true)
         if ((yield* collectResult(h, session)) !== "none") return
-        if (seen === "absent" || (state === undefined && !(yield* alive(h, terminal)))) {
+        if ((seen === "absent" || state === undefined) && !(yield* alive(h, terminal))) {
           const cutOff = session.startedAt === null
           if (open && !cutOff)
             yield* finish(session, "failed", "", "the session exited (its terminal is gone or its process with it)")
@@ -988,7 +988,7 @@ export class Sessions extends Context.Service<
         const seen = yield* agentState(h, terminal)
         const state = stateOf(seen)
         if (state !== undefined && state !== "unknown" && busy(state)) return
-        if (seen === "absent" || (state === "unknown" && !(yield* alive(h, terminal)))) {
+        if ((seen === "absent" || state === "unknown") && !(yield* alive(h, terminal))) {
           if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId)
             return yield* new NoSuchSession({
               id,

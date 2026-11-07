@@ -90,6 +90,14 @@ const agentKindOf = (binary: string): string | undefined => {
 
 export const agentName = (id: string) => `s-${id.replaceAll("-", "").slice(0, 30)}`
 
+export const processStillRunning = (
+  info: {
+    readonly shell_pid?: number | null
+    readonly foreground_processes?: ReadonlyArray<{ readonly pid: number }> | null
+  },
+  launchPending: boolean,
+): boolean => launchPending || (info.foreground_processes ?? []).some((process) => process.pid !== info.shell_pid)
+
 const agentNameOf = (env: Readonly<Record<string, string>>) => {
   const id = env["VIBEST_SESSION_ID"]
   return id !== undefined && ID.test(id) ? agentName(id) : `vbt-${randomId().replaceAll("-", "").slice(0, 28)}`
@@ -478,9 +486,15 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         const h = yield* client(place.session)
         const r = yield* failWith(h.call("pane.process_info", { pane_id: place.paneId }))
         if (r.type !== "pane_process_info") return { running: false }
-        const info = r.process_info
-        const others = (info.foreground_processes ?? []).filter((p) => p.pid !== info.shell_pid)
-        return { running: others.length > 0 }
+        const pending =
+          place.name === undefined
+            ? false
+            : yield* agentNamed(h, place.name).pipe(
+                Effect.map(
+                  (agent) => agent !== undefined && agent.pane_id === place.paneId && agent.launch_pending === true,
+                ),
+              )
+        return { running: processStillRunning(r.process_info, pending) }
       })
 
     const stillOurs = (h: HerdrShape, paneId: string, name: string | undefined) =>

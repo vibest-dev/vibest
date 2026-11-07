@@ -368,7 +368,9 @@ How `packages/core/src/sessions.ts` keeps these:
   runs twice. A refused text undoes the round unless the integration wrote a result anyway or a usage-limit move
   will try the next harness; a broken connection is not a refusal (the text may have arrived), so the round stays.
 - A check decides nothing for an exited session (the next Message resumes it), an archived one, or one whose harness
-  vibestd is restarting. Unreachable or `unknown` status is no answer. A turn counts as worked when it was seen
+  vibestd is restarting. Unreachable or `unknown` status is no answer. No agent, while that terminal's process is
+  running, is not an exit: the shell may still be starting it. A terminal the runtime cannot find is. A turn counts
+  as worked when it was seen
   working, a turn start of this round was reported, or after a restart when it was typed or a row was delivered into
   it. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
   after the hook grace. A prompt that failed part way closes the turn so the queue moves again.

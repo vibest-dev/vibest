@@ -64,6 +64,55 @@ const terminalReads = Effect.gen(function* () {
   return ours(yield* herdr.callsTo("state")) + ours(yield* herdr.callsTo("process"))
 })
 
+describe("reconcile: a terminal whose agent has not started", () => {
+  test(
+    "a runtime that reports the terminal alive with no agent process yet is left running; a terminal it cannot find is ended",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      const alive = "bbbbbbbb-bbbb-4bbb-8bbb-000000000001"
+      const gone = "bbbbbbbb-bbbb-4bbb-8bbb-000000000002"
+      yield* herdr.addPane("w8:starting", "w8", repo)
+      const row = {
+        agent: "general" as const,
+        name: "starting",
+        harnessId: "pi" as const,
+        provider: null,
+        model: null,
+        harnessSessionId: null,
+        runtime: TEST_HERDR,
+        status: "unknown" as const,
+        startedAt: 1,
+        exitedAt: null,
+        turnState: "open" as const,
+        turnPromptedAt: 1,
+        metadata: {},
+        createdAt: 1,
+        lastActive: 1,
+      }
+      yield* db.insertSession(
+        { ...row, id: alive, address: { machine: "local", id: "w8:starting" } },
+        projectId,
+        undefined,
+        repo,
+      )
+      yield* db.insertSession(
+        { ...row, id: gone, name: "gone", address: { machine: "local", id: "w8:gone" } },
+        projectId,
+        undefined,
+        repo,
+      )
+      yield* Sessions.make({ maxSessions: undefined })
+      yield* until(db.getSession(gone), (session) => session?.exitedAt != null)
+      yield* settled
+      assert.isNull((yield* db.getSession(alive))!.exitedAt)
+      assert.strictEqual((yield* db.getSession(alive))!.turnState, "open")
+    }),
+  )
+})
+
 describe("reconcile: one look at every live session at start, when a runtime registers, and on live.reset; nothing reads a runtime in between", () => {
   test(
     "50 idle sessions: one read each when the next vibestd starts over their rows, then none over an idle hour",
