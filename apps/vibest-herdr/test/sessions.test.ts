@@ -477,6 +477,24 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a harness whose reported pid has died is exited even when the runtime still says the terminal is running",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const processes = yield* FakeProcesses
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const pid = (yield* db.getSession(id))!.metadata.pid
+      assert.isTrue(typeof pid === "number" && pid > 0)
+      yield* herdr.updateAgent(id, (agent) => ({ ...agent, status: "unknown", alive: true }))
+      yield* processes.set(pid!, "exited")
+      yield* sessions.check(id)
+      yield* settled
+      const row = (yield* db.getSession(id))!
+      assert.isNotNull(row.exitedAt)
+      assert.strictEqual(row.turnState, "failed")
+    }),
+  )
+
+  test(
     "two concurrent removes: one removes, the other is refused as already being removed",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

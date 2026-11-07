@@ -372,7 +372,9 @@ How `packages/core/src/sessions.ts` keeps these:
   queued sends; it decides only after that, and the next message is what resumes it. Unreachable or `unknown` status
   is no answer. No agent, while that terminal's process is
   running, is not an exit: the shell may still be starting it. That keep arms one re-check after the start
-  timeout; the re-check still exits only if the runtime then reports the process gone. A terminal the runtime cannot
+  timeout; the re-check still exits only if the runtime then reports the process gone. A harness whose reported
+  pid has died is an exit even when that report still says the terminal is running: a launch herdr has not finished
+  keeps saying so after the process was killed. A terminal the runtime cannot
   find is. A turn counts
   as worked when it was seen
   working, a turn start of this round was reported, or after a restart when it was typed or a row was delivered into
