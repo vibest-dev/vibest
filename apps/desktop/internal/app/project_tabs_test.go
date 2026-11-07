@@ -9,30 +9,18 @@ import (
 	"vibest-desktop/internal/vibest"
 )
 
-func TestProjectAggregatePrioritiesAndSharedSeen(t *testing.T) {
+func TestProjectActivityIsTheWatchField(t *testing.T) {
 	a := newChromeTestApp()
-	a.coreState.Terminals = map[string]core.Terminal{
-		"new":  {Turn: 3, Labels: map[string]string{seenLabel: "2"}},
-		"seen": {Turn: 3, Labels: map[string]string{seenLabel: "3"}},
+	for _, activity := range []string{"blocked", "done", "working", "idle"} {
+		g := vibest.Group{Project: vibest.Project{Activity: activity}, Rows: []vibest.Row{
+			{Session: vibestSession("s", "s", "p1", "blocked", "a", nil, 0)},
+		}}
+		if got := a.projectStatus(g); got != activity {
+			t.Fatalf("activity %s showed %s", activity, got)
+		}
 	}
-	for _, tc := range []struct {
-		states        []string
-		address, want string
-	}{
-		{nil, "new", "idle"},
-		{[]string{"idle"}, "new", "done"},
-		{[]string{"done"}, "seen", "idle"},
-		{[]string{"done", "working"}, "new", "working"},
-		{[]string{"working", "blocked"}, "new", "blocked"},
-		{[]string{"blocked", "error"}, "seen", "error"},
-	} {
-		g := vibest.Group{}
-		for _, status := range tc.states {
-			g.Rows = append(g.Rows, vibest.Row{Session: vibestSession(status, status, "p1", status, tc.address, nil, 0)})
-		}
-		if got := a.projectStatus(g); got != tc.want {
-			t.Fatalf("%v/%s: %s, want %s", tc.states, tc.address, got, tc.want)
-		}
+	if got := a.projectStatus(vibest.Group{Rows: []vibest.Row{{Session: vibestSession("s", "s", "p1", "blocked", "a", nil, 0)}}}); got != "idle" {
+		t.Fatalf("missing activity showed %s", got)
 	}
 }
 

@@ -15,7 +15,7 @@ const (
 )
 
 type seenWindow struct {
-	seenThisTurn map[string]uint64
+	seenThisTurn map[string]float64
 	seenFrame    map[string]bool
 }
 
@@ -39,31 +39,55 @@ func turnUnseen(t core.Terminal, fallback uint64) bool {
 func pinned(t core.Terminal) bool { return t.Labels[pinnedLabel] != "" }
 
 func (a *App) lookedAt(address string) {
-	if !a.windowFocused || a.coreClient == nil {
+	if !a.windowFocused {
 		return
 	}
-	t, ok := a.coreState.Terminals[address]
-	if !ok {
+	s, ok := a.sessionForTerminal(address)
+	if !ok || s.Turn == nil {
 		return
 	}
+	turn := *s.Turn
 	if a.seenFrame == nil {
-		a.seenFrame, a.seenThisTurn = map[string]bool{}, map[string]uint64{}
+		a.seenFrame, a.seenThisTurn = map[string]bool{}, map[string]float64{}
 	}
-	a.seenFrame[address] = true
-	if turn, looked := a.seenThisTurn[address]; looked && turn == t.Turn {
+	a.seenFrame[s.ID] = true
+	if prev, looked := a.seenThisTurn[s.ID]; looked && prev == turn {
 		return
 	}
-	a.seenThisTurn[address] = t.Turn
-	if seen, ok := labelSeen(t); ok && seen >= t.Turn {
-		return
+	a.seenThisTurn[s.ID] = turn
+	a.markSeen(s, turn)
+}
+
+func (a *App) sessionForTerminal(address string) (vibest.Session, bool) {
+	var found vibest.Session
+	ok := false
+	for _, s := range a.vibestModel.Sessions {
+		got, match := a.sessionAddress(s)
+		if !match || got != address {
+			continue
+		}
+		if !ok || s.ID < found.ID {
+			found, ok = s, true
+		}
 	}
-	a.writeLabel(address, seenLabel, strconv.FormatUint(t.Turn, 10))
+	return found, ok
+}
+
+func (a *App) markSeen(s vibest.Session, turn float64) {
+	dir := "/"
+	if p, ok := a.vibestModel.Projects[s.ProjectID]; ok && directory(p) != "" {
+		dir = directory(p)
+	}
+	id := s.ID
+	a.vibestQuiet(func(ctx context.Context, c *vibest.Client) error {
+		return c.Seen(ctx, dir, vibest.SeenParams{ID: id, Turn: turn})
+	})
 }
 
 func (a *App) endSeenFrame() {
-	for address := range a.seenThisTurn {
-		if !a.seenFrame[address] {
-			delete(a.seenThisTurn, address)
+	for id := range a.seenThisTurn {
+		if !a.seenFrame[id] {
+			delete(a.seenThisTurn, id)
 		}
 	}
 	clear(a.seenFrame)
@@ -81,14 +105,6 @@ func (a *App) writeLabel(address, key, value string) {
 	}()
 }
 
-func withSeenZero(labels map[string]string) map[string]string {
-	out := map[string]string{seenLabel: "0"}
-	for k, v := range labels {
-		out[k] = v
-	}
-	return out
-}
-
 func (a *App) sessionAddress(s vibest.Session) (string, bool) {
 	return s.CoreAddress(a.socket)
 }
@@ -100,23 +116,6 @@ func (a *App) sessionTerminal(s vibest.Session) (core.Terminal, bool) {
 	}
 	t, ok := a.coreState.Terminals[address]
 	return t, ok
-}
-
-func (a *App) sessionStatus(s vibest.Session) string {
-	if s.Status == "working" || s.Status == "blocked" || s.Status == "error" {
-		return s.Status
-	}
-	t, ok := a.sessionTerminal(s)
-	if !ok {
-		return s.Status
-	}
-	if _, labelled := labelSeen(t); !labelled {
-		return s.Status
-	}
-	if turnUnseen(t, 0) {
-		return "done"
-	}
-	return "idle"
 }
 
 func (a *App) sessionPinned(s vibest.Session) bool {

@@ -23,7 +23,7 @@ const (
 
 func blockedLeadSnapshot() json.RawMessage {
 	session := `{"id":"` + watchMain + `","name":"lead","agent":"main","harness":"pi","provider":null,"model":null,"status":"blocked","startedAt":null,"exitedAt":null,"turnState":"open","projectId":"` + watchProject + `","runtime":"hc","address":{"machine":"local","id":"a"},"worktree":"/fixture/repo","repositoryRoot":null,"git":null,"createdAt":1,"lastActive":1,"task":null,"latest":null,"parentId":null}`
-	event := `{"_tag":"Snapshot","projects":[{"id":"` + watchProject + `","directory":"/fixture/repo","entrySessionId":"` + watchMain + `"}],"sessions":[` + session + `]}`
+	event := `{"_tag":"Snapshot","projects":[{"id":"` + watchProject + `","directory":"/fixture/repo","entrySessionId":"` + watchMain + `","activity":"blocked"}],"sessions":[` + session + `]}`
 	line, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "chunk": true, "id": 1, "result": []json.RawMessage{json.RawMessage(event)}})
 	return line
 }
@@ -78,5 +78,22 @@ func TestAVibestdWithoutWatchAsksForAnUpdateAndStops(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("vibestd 0.0.1-old cannot stream changes: run vibest update") {
 		t.Fatalf("%v", tt.Texts())
+	}
+}
+
+func TestAVibestdWithoutDesktopCapabilitiesAsksForAnUpdate(t *testing.T) {
+	for _, caps := range []string{`{"watch":true}`, `{"watch":true,"projects":true}`} {
+		t.Run(caps, func(t *testing.T) {
+			server := vibestfake.Serve(t, vibestfake.Script{
+				json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"Ping","params":null,"headers":[]}`),
+				json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"protocol":5,"version":"0.0.1-old","capabilities":` + caps + `}}`),
+			})
+			a, _, tt := coreActivityUIWith(t, func(f *coreAppFixture) { f.vibest = server.Path })
+			awaitCoreApp(t, a, func() bool { return a.vibestNote != "" })
+			tt.Frame()
+			if !tt.HasText("vibestd is older than this app: run vibest update") {
+				t.Fatalf("%v", tt.Texts())
+			}
+		})
 	}
 }

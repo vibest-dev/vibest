@@ -1,13 +1,21 @@
 package app
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	"vibest-desktop/internal/core"
+	"vibest-desktop/internal/vibest"
 )
 
 func seenWrites(f *coreAppFixture) []string {
@@ -26,92 +34,152 @@ func seenWrites(f *coreAppFixture) []string {
 	return out
 }
 
-func awaitSeen(t *testing.T, a *App, tt *ui.Tester, f *coreAppFixture, want ...string) {
+func recordSeen(t *testing.T) (string, func() []string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "vibest-seen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	path := filepath.Join(dir, "vibest.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	var mu sync.Mutex
+	var got []string
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				r := bufio.NewReader(conn)
+				for {
+					line, err := r.ReadBytes('\n')
+					if err != nil {
+						return
+					}
+					var req struct {
+						ID     uint64
+						Method string
+						Params struct {
+							ID   string  `json:"id"`
+							Turn float64 `json:"turn"`
+						}
+						Headers [][2]string
+					}
+					if json.Unmarshal(line, &req) != nil || req.Method != "Session.Seen" {
+						if req.ID != 0 {
+							fmt.Fprintf(conn, "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":null}\n", req.ID)
+						}
+						continue
+					}
+					repo := ""
+					for _, h := range req.Headers {
+						if h[0] == "vibest-repository" {
+							repo = h[1]
+						}
+					}
+					mu.Lock()
+					got = append(got, req.Params.ID+" "+strconv.FormatFloat(req.Params.Turn, 'f', -1, 64)+" "+repo)
+					mu.Unlock()
+					fmt.Fprintf(conn, "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":null}\n", req.ID)
+				}
+			}()
+		}
+	}()
+	return path, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		out := append([]string(nil), got...)
+		slices.Sort(out)
+		return out
+	}
+}
+
+func awaitSeenCalls(t *testing.T, tt *ui.Tester, calls func() []string, want ...string) {
 	t.Helper()
 	slices.Sort(want)
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		tt.Frame()
-		got := seenWrites(f)
+		got := calls()
 		if slices.Equal(got, want) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("seen writes %v, want %v", got, want)
+			t.Fatalf("seen calls %v, want %v", got, want)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }
 
-func setRecord(f *coreAppFixture, kind, address string, change func(*core.Terminal)) {
-	f.mu.Lock()
-	r := f.terminals[address]
-	f.mu.Unlock()
-	change(&r)
-	f.report(kind, r)
-}
-
-func TestSeenIsRaisedOncePerTurnForAgentsOnScreenWithTheWindowInFront(t *testing.T) {
+func TestSeenIsSentOncePerTurnForADrawnSession(t *testing.T) {
 	a, f, tt := coreActivityUI(t)
-	awaitSeen(t, a, tt, f, "a=1", "b=2")
+	path, calls := recordSeen(t)
+	useVibest(a, path)
+	turn := 1.0
+	main := vibestSession("main", "lead", "p1", "idle", "a", nil, 1)
+	main.Turn = &turn
+	blank := vibestSession("blank", "blank", "p1", "idle", "b", nil, 2)
+	hiddenTurn := 4.0
+	hidden := vibestSession("hid", "hidden", "p1", "idle", "c", nil, 3)
+	hidden.Turn = &hiddenTurn
+	applyVibest(a, shippingSnapshot(main, blank, hidden))
+	awaitSeenCalls(t, tt, calls, "main 1 /code/Shipping")
 	for range 5 {
 		tt.Frame()
 	}
-	awaitSeen(t, a, tt, f, "a=1", "b=2")
-
-	setRecord(f, "labels", "a", func(r *core.Terminal) { r.Labels = map[string]string{"herdr.seen": "0"} })
-	for range 5 {
-		tt.Frame()
-		time.Sleep(10 * time.Millisecond)
+	if got := calls(); !slices.Equal(got, []string{"main 1 /code/Shipping"}) {
+		t.Fatalf("repeated frames sent again: %v", got)
 	}
-	awaitSeen(t, a, tt, f, "a=1", "b=2")
 
 	a.Focus(false)
 	tt.SetFocused(false)
 	tt.Frame()
-	setRecord(f, "turn", "a", func(r *core.Terminal) { r.Turn = 5 })
+	five := 5.0
+	main.Turn = &five
+	applyVibest(a, vibest.Event{Tag: "Session", Session: &main})
 	for range 5 {
 		tt.Frame()
 		time.Sleep(10 * time.Millisecond)
 	}
-	awaitSeen(t, a, tt, f, "a=1", "b=2")
-
+	if got := calls(); !slices.Equal(got, []string{"main 1 /code/Shipping"}) {
+		t.Fatalf("unfocused window sent seen: %v", got)
+	}
 	a.Focus(true)
 	tt.SetFocused(true)
-	awaitSeen(t, a, tt, f, "a=1", "a=5", "b=2")
-}
-
-func TestPaneNotOnScreenIsNotSeen(t *testing.T) {
-	a, f, tt := coreActivityUI(t)
-	awaitSeen(t, a, tt, f, "a=1", "b=2")
-	for range 5 {
-		tt.Frame()
-		time.Sleep(10 * time.Millisecond)
-	}
-	if got := seenWrites(f); slices.ContainsFunc(got, func(s string) bool { return s[0] == 'c' || s[0] == 'd' }) {
-		t.Fatalf("terminals in other tabs marked seen: %v", got)
+	awaitSeenCalls(t, tt, calls, "main 1 /code/Shipping", "main 5 /code/Shipping")
+	if got := seenWrites(f); len(got) != 0 {
+		t.Fatalf("desktop wrote herdr.seen: %v", got)
 	}
 }
 
-func TestDoneAndPinFollowTheSharedLabels(t *testing.T) {
+func TestWatchStatusIsShownAndPinWritesTheSharedLabel(t *testing.T) {
 	a, f, tt := coreActivityUIWith(t, func(f *coreAppFixture) {
 		f.terminals["e"] = core.Terminal{Address: "e", State: "live", Turn: 3, Labels: map[string]string{"herdr.seen": "2"}}
 		f.terminals["g"] = core.Terminal{Address: "g", State: "live", Turn: 3, Labels: map[string]string{"herdr.seen": "3", "herdr.pinned": "1"}}
 	})
-	applyVibest(a, shippingSnapshot(
+	snap := shippingSnapshot(
 		vibestSession("main", "lead", "p1", "idle", "e", nil, 1),
 		vibestSession("late", "pinned-one", "p1", "done", "g", nil, 2),
-	))
+	)
+	snap.Projects[0].Activity = "done"
+	applyVibest(a, snap)
 	tt.Frame()
 	if _, done := tt.Find("session activity: done"); !done {
-		t.Fatalf("turn 3 over seen 2 is not done: %v", tt.Texts())
+		t.Fatalf("project activity done is not shown: %v", tt.Texts())
 	}
 	openShipping(t, a, tt)
 	if find(t, tt, "pinned-one").X >= find(t, tt, "lead").X {
 		t.Fatal("the pinned session is not first")
 	}
-	if got := a.sessionStatus(vibestSession("late", "pinned-one", "p1", "done", "g", nil, 2)); got != "idle" {
-		t.Fatalf("a seen turn shows %q, want idle", got)
+	if _, done := tt.Find("session activity: done"); !done {
+		t.Fatal("a seen label cleared the status Watch reported")
 	}
 	if err := tt.RightClick("session: lead"); err != nil {
 		t.Fatal(err)
@@ -132,4 +200,7 @@ func TestDoneAndPinFollowTheSharedLabels(t *testing.T) {
 		}
 		return false
 	})
+	if got := seenWrites(f); len(got) != 0 {
+		t.Fatalf("desktop wrote herdr.seen: %v", got)
+	}
 }

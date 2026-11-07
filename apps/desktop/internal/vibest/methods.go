@@ -90,6 +90,33 @@ func (c *Client) Launch(ctx context.Context, directory string, params LaunchPara
 	return out, c.Call(ctx, "Launch", directory, params, &out)
 }
 
+type HarnessModel struct {
+	Provider *string `json:"provider"`
+	Model    string  `json:"model"`
+	Name     string  `json:"name"`
+	Default  bool    `json:"default"`
+}
+
+type HarnessChoice struct {
+	Harness string         `json:"harness"`
+	Problem *string        `json:"problem"`
+	Models  []HarnessModel `json:"models"`
+}
+
+func (c *Client) Harnesses(ctx context.Context) ([]HarnessChoice, error) {
+	var out []HarnessChoice
+	return out, c.Call(ctx, "Harnesses.List", "/", nil, &out)
+}
+
+type SeenParams struct {
+	ID   string  `json:"id"`
+	Turn float64 `json:"turn"`
+}
+
+func (c *Client) Seen(ctx context.Context, directory string, params SeenParams) error {
+	return c.Call(ctx, "Session.Seen", directory, params, nil)
+}
+
 type StopCoordinatorParams struct {
 	Runtime string `json:"runtime"`
 	Address string `json:"address"`

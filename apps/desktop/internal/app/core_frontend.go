@@ -511,7 +511,6 @@ func (a *App) coreCreate(workspace, pane, direction string) {
 
 func (a *App) coreRunCapture(s *core.Session, intent uint64, n *coreCapture, o core.TerminalRunParams, outcome string, insert func(*core.Layout, core.Pane, core.Terminal) error) {
 	before := s.State().Terminals
-	o.Labels = withSeenZero(o.Labels)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

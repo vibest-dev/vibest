@@ -1,8 +1,8 @@
 # Activity and deliberate visits
 
-Project rows aggregate their Watch sessions: error, waiting for you, working, then
-unseen done, in that order. Agent tabs show the individual session status. Working,
-waiting and error come only from vibestd; Core supplies the shared seen/pinned labels.
+Project rows show the activity Watch reports: blocked, done, working, then idle.
+Agent tabs show that session's Watch status, including done. Neither is derived
+from Core. Pinning still uses the shared `herdr.pinned` label.
 The sidebar has no machine/workspace hierarchy or separate Agents roster. See
 [sidebar actions and grouping](sidebar.md).
 
@@ -68,16 +68,11 @@ Capture with `THEME_SHOTS=/tmp/activity-shots go test ./internal/app -run '^Test
 The ordinary suite also checks built-in themes at 1x/2x and uses the headless
 clock to verify animation, stopping and stable slot geometry.
 
-## Seen and pinned shared with other herdr clients
+## Seen and pinned
 
-The labels of herdr-app `docs/labels.md` carry seen and pinned state across
-clients. `herdr.seen=<turn>` is written for a terminal while its pane is drawn
-and the window is in front, only to raise it or when it is missing, and once per
-turn while it stays on screen: a "mark unread" from another client is not
-overruled until the pane leaves the screen or the window loses focus and the
-agent is looked at again. A terminal this app starts gets `herdr.seen=0`. Where
-the label is present it decides the Done mark (`turn > herdr.seen`) for the
-workspace and tab marks and for a vibest session that vibestd reports neither
-working, blocked nor error; without it the deliberate-visit rules above stay in force.
-`herdr.pinned=1` (written by Pin and Unpin on a agent tab or project submenu; Unpin writes it
-empty) puts a session first among its sibling content tabs.
+When a session's terminal is drawn and the window is focused, the desktop calls
+`Session.Seen` with that session and the turn Watch last reported, once per turn
+while it stays on screen. A null turn is not marked. vibestd raises the mark;
+this app does not write `herdr.seen`. `herdr.pinned=1` (written by Pin and Unpin
+on an agent tab or project submenu; Unpin writes it empty) puts a session first
+among its sibling content tabs.

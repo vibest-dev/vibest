@@ -43,6 +43,7 @@ type Session struct {
 	Task           *string         `json:"task"`
 	Latest         *Latest         `json:"latest"`
 	ParentID       *string         `json:"parentId"`
+	Turn           *float64        `json:"turn"`
 }
 
 func (s Session) CoreAddress(socket string) (string, bool) {
@@ -72,6 +73,7 @@ type Project struct {
 	ID             string  `json:"id"`
 	Directory      *string `json:"directory"`
 	EntrySessionID *string `json:"entrySessionId"`
+	Activity       string  `json:"activity"`
 }
 
 func (p Project) Name() string {

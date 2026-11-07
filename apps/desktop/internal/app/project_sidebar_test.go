@@ -52,10 +52,12 @@ func TestProjectSidebarIsFlatAndAgentsAreTabs(t *testing.T) {
 	main := "main"
 	other := vibestSession("h", "in-herdr", "p1", "idle", "ws1:p3", nil, 3)
 	other.Runtime = "herdr"
-	applyVibest(a, shippingSnapshot(
+	snap := shippingSnapshot(
 		vibestSession("main", "lead", "p1", "working", "a", nil, 1),
 		vibestSession("sub", "reviewer", "p1", "blocked", "b", &main, 2), other,
-	))
+	)
+	snap.Projects[0].Activity = "blocked"
+	applyVibest(a, snap)
 	tt.Frame()
 	find(t, tt, "project: Shipping")
 	find(t, tt, "Terminals")

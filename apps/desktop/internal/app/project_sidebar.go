@@ -17,14 +17,20 @@ import (
 const ProjectLabel = "vibest.project"
 
 type projectWindow struct {
-	vibestSocket  string
-	dialVibest    func(context.Context, string) (*vibest.Client, error)
-	vibestModel   vibest.Model
-	vibestNote    string
-	vibestCommand []string
-	emptyProject  string
-	projectOpened func()
-	folderPicker  func(start string, run func(string)) bool
+	vibestSocket   string
+	dialVibest     func(context.Context, string) (*vibest.Client, error)
+	vibestModel    vibest.Model
+	vibestNote     string
+	vibestCommand  []string
+	emptyProject   string
+	pickingHarness string
+	harnessChoices []vibest.HarnessChoice
+	harnessPick    map[string]string
+	harnessNote    string
+	harnessLoading bool
+	harnessAsked   bool
+	projectOpened  func()
+	folderPicker   func(start string, run func(string)) bool
 	seenWindow
 }
 
@@ -88,6 +94,10 @@ func (a *App) vibestWatch(ctx context.Context, socket string, dial func(context.
 		a.setVibestNote("vibestd " + ping.Version + " cannot stream changes: run vibest update")
 		return false, true
 	}
+	if !ping.Capabilities["projects"] || !ping.Capabilities["harnesses"] {
+		a.setVibestNote("vibestd is older than this app: run vibest update")
+		return false, true
+	}
 	a.mu.Lock()
 	a.vibestCommand = ping.Command
 	a.mu.Unlock()
@@ -140,6 +150,23 @@ func (a *App) vibestDo(action func(context.Context, *vibest.Client) error) {
 	}()
 }
 
+func (a *App) vibestQuiet(action func(context.Context, *vibest.Client) error) {
+	socket, dial := a.vibestSocket, a.dialVibest
+	if socket == "" || dial == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		c, err := dial(ctx, socket)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		_ = action(ctx, c)
+	}()
+}
+
 func vibestMessage(err error) string {
 	var failure *vibest.Error
 	if errors.As(err, &failure) {
@@ -179,6 +206,11 @@ func (a *App) mainRunning(p vibest.Project) bool {
 }
 
 func (a *App) projectStartMain(p vibest.Project) {
+	if p.EntrySessionID == nil {
+		a.pickingHarness = p.ID
+		a.projectSelect(p)
+		return
+	}
 	argv := a.vibestCommand
 	if len(argv) == 0 {
 		argv = []string{"vibest"}
@@ -401,14 +433,12 @@ func (a *App) sessionMenu(m *ui.Menu, p vibest.Project, r vibest.Row) {
 }
 
 func (a *App) projectStatus(g vibest.Group) string {
-	status := "idle"
-	rank := map[string]int{"done": 1, "working": 2, "blocked": 3, "error": 4}
-	for _, r := range g.Rows {
-		if next := a.sessionStatus(r.Session); rank[next] > rank[status] {
-			status = next
-		}
+	switch g.Project.Activity {
+	case "blocked", "done", "working", "idle":
+		return g.Project.Activity
+	default:
+		return "idle"
 	}
-	return status
 }
 
 func statusDescription(status string) string {

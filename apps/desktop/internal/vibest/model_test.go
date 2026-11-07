@@ -111,6 +111,12 @@ func TestWatchEventsDecodeFromThePlannedShape(t *testing.T) {
 	if got := shape(m.Groups(nil)[0]); got != "a: s" {
 		t.Fatal(got)
 	}
+	line = `{"_tag":"Snapshot","projects":[{"id":"p","directory":"/a","entrySessionId":null,"activity":"done"}],"sessions":[{"id":"s","name":"n","agent":"a","harness":"pi","provider":null,"model":null,"status":"done","startedAt":null,"exitedAt":null,"turnState":"none","projectId":"p","runtime":"hc","address":{"machine":"local","id":"t1"},"worktree":"/a","repositoryRoot":null,"git":null,"createdAt":1,"lastActive":1,"task":null,"latest":null,"parentId":null,"turn":3}]}`
+	strictDecode(t, json.RawMessage(line), &e)
+	m.Apply(e)
+	if m.Projects["p"].Activity != "done" || m.Sessions["s"].Turn == nil || *m.Sessions["s"].Turn != 3 || m.Sessions["s"].Status != "done" {
+		t.Fatalf("%+v %+v", m.Projects["p"], m.Sessions["s"])
+	}
 }
 
 func TestPinnedSessionsGoFirstAmongTheirSiblings(t *testing.T) {

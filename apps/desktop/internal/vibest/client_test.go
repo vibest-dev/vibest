@@ -49,7 +49,7 @@ func TestProtocolMatchesTheContract(t *testing.T) {
 	if contract.Protocol != Protocol {
 		t.Fatalf("contract protocol %d, client %d", contract.Protocol, Protocol)
 	}
-	for method, stream := range map[string]bool{"Ping": false, "Project.Open": false, "Launch": false, "Remove": false, "Watch": true} {
+	for method, stream := range map[string]bool{"Ping": false, "Project.Open": false, "Launch": false, "Remove": false, "Watch": true, "Harnesses.List": false, "Session.Seen": false} {
 		m, ok := contract.Methods[method]
 		if !ok || m.Stream != stream {
 			t.Errorf("%s: in contract %v, stream %v, want stream %v", method, ok, m.Stream, stream)
@@ -287,7 +287,45 @@ func TestWatchReplaysTheRecordedSnapshotAndDeltas(t *testing.T) {
 func TestPingReportsTheWatchCapability(t *testing.T) {
 	c := dial(t, vibestfake.Load(t, "ping.ndjson"))
 	got, err := c.Ping(timeout(t))
-	if err != nil || !got.Capabilities["watch"] {
+	if err != nil || !got.Capabilities["watch"] || !got.Capabilities["projects"] || !got.Capabilities["harnesses"] {
 		t.Fatalf("%+v %v", got, err)
 	}
+}
+
+func TestHarnessesListAndSessionSeenMatchTheWire(t *testing.T) {
+	provider := "anthropic"
+	choices := []HarnessChoice{{Harness: "pi", Models: []HarnessModel{{Provider: &provider, Model: "sonnet", Name: "Sonnet", Default: true}}}}
+	listed, err := json.Marshal(choices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := dial(t, vibestfake.Script{
+		rpcLine("Harnesses.List", "/", nil),
+		json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":` + string(listed) + `}`),
+	})
+	got, err := c.Harnesses(timeout(t))
+	if err != nil || len(got) != 1 || got[0].Harness != "pi" || got[0].Problem != nil || len(got[0].Models) != 1 || !got[0].Models[0].Default || got[0].Models[0].Provider == nil || *got[0].Models[0].Provider != "anthropic" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	c = dial(t, vibestfake.Script{
+		rpcLine("Session.Seen", "/code/Shipping", SeenParams{ID: "main", Turn: 2}),
+		json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":null}`),
+	})
+	if err := c.Seen(timeout(t), "/code/Shipping", SeenParams{ID: "main", Turn: 2}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func rpcLine(method, repository string, params any) json.RawMessage {
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  method,
+		"params":  params,
+		"headers": [][2]string{{"vibest-protocol", "5"}, {"vibest-caller", "cli"}, {"vibest-repository", repository}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return body
 }

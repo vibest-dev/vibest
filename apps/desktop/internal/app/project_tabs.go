@@ -276,7 +276,7 @@ func (a *App) projectTabs(c *ui.Context) bool {
 	for _, e := range a.projectTabEntries(p) {
 		key, status := "terminal/"+e.address, a.coreState.Terminals[e.address].Activity()
 		if e.session != nil {
-			key, status = "session/"+e.session.Session.ID, a.sessionStatus(e.session.Session)
+			key, status = "session/"+e.session.Session.ID, e.session.Session.Status
 		}
 		a.projectTab(c, key, e.name, e.address, status, func() { a.openProjectEntry(p, e) }, func(m *ui.Menu) {
 			if e.session != nil {
