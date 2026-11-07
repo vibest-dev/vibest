@@ -323,6 +323,14 @@ const checks: ReadonlyArray<Check> = [
           },
         )
         const sub = model.sessionId()
+        await until(
+          "the inherited subagent's terminal",
+          () => {
+            const at = runtimeOf(sub)
+            return at.kind === "hc" && at.id !== undefined && at.id !== ""
+          },
+          60_000,
+        )
         const subAt = runtimeOf(sub)
         expect(
           subAt.kind === "hc" && subAt.id?.endsWith(`@${w.hcSocket}`) === true,
