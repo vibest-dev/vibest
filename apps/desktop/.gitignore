@@ -1,0 +1,6 @@
+out/
+build/
+.mygo/
+reports/
+third_party/
+__pycache__/

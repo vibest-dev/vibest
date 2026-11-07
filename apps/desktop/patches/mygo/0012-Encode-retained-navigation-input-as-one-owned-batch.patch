@@ -1,0 +1,231 @@
+diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
+--- a/plugins/terminal/terminal.go
++++ b/plugins/terminal/terminal.go
+@@ -278,3 +278,6 @@
++	// TextInputReady gates native text eligibility without disabling selection,
++	// pointer input or local commands. Nil keeps the normal terminal behavior.
++	TextInputReady func() bool
+ 	// OnKey sees a key press before Keybinds and before the terminal
+ 	// encodes it, on the main thread, and reports whether it took the key;
+ 	// a key taken sends nothing, neither the text it types nor its
+diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
+--- a/plugins/terminal/view.go
++++ b/plugins/terminal/view.go
+@@ -44,7 +44,9 @@
+ 	}
+ 	e.Cursor(cursor)
+ 	e.HandleInput(v.input)
+-	e.TextCaret(v.caret())
++	if ready := t.opts.TextInputReady; ready == nil || ready() {
++		e.TextCaret(v.caret())
++	}
+ 	e.Draw(v.paint)
+ 	e.ContextMenu(v.menu)
+ 	return e
+@@ -146,7 +148,10 @@
+ 	t        *Terminal
+ 	services ui.Services
+ 	// lang is the window's language, for the menu's items.
+-	lang string
++	lang       string
++	batch      []byte
++	batchLimit int
++	batchFull  bool
+ 
+ 	theme   *Theme
+ 	applied *Theme // the theme the emulator has
+@@ -675,7 +680,6 @@
+ 		v.pending = &pendingKey{key: k, taken: true}
+ 		return true
+ 	}
+-	mac := goos == "darwin"
+ 	mods, key := ev.Mods, ev.Key
+ 	if b, ok := t.binding(mods, key); ok {
+ 		if v.perform(b.Action, b.Performable) || !b.Performable {
+@@ -685,8 +689,15 @@
+ 			return true
+ 		}
+ 	}
++	return v.terminalKeyDown(ev)
++}
++
++func (v *view) terminalKeyDown(ev ui.InputEvent) bool {
++	t := v.t
++	mac := goos == "darwin"
++	mods, key := ev.Mods, ev.Key
+ 	if mods&ui.Super != 0 {
+-		return false // the app's shortcuts
++		return false
+ 	}
+ 	k, unshifted := vtKey(key)
+ 	if k == vt.KeyUnidentified {
+@@ -917,7 +928,7 @@
+ 	if len(b) == 0 {
+ 		return false
+ 	}
+-	t.in.push(append([]byte(nil), b...))
++	v.sendInput(b)
+ 	if press {
+ 		t.term.ScrollToBottom()
+ 		t.term.SetSelection(nil)
+@@ -934,7 +945,7 @@
+ 		t.term.SetSelection(nil)
+ 	}
+ 	t.mu.Unlock()
+-	t.Send([]byte(text))
++	v.sendInput([]byte(text))
+ 	v.blinkStart = time.Now()
+ }
+ 
+diff --git a/plugins/terminal/input_batch.go b/plugins/terminal/input_batch.go
+new file mode 100644
+--- /dev/null
++++ b/plugins/terminal/input_batch.go
+@@ -0,0 +1,86 @@
++package terminal
++
++import (
++	"github.com/egoist/mygo/plugins/terminal/internal/vt"
++	"github.com/egoist/mygo/ui"
++)
++
++// Input retains a human key/text event before a destination view is ready.
++// Paste marks InputText as already-snapshotted paste text, never a clipboard read.
++type Input struct {
++	ui.InputEvent
++	Paste bool
++}
++
++// SendInput encodes retained events with this view's current parsed modes and
++// enqueues one atomic batch ahead of later input. The caller must first validate
++// the original destination; CaptureInput still supplies the dispatch-time lease.
++// UI thread only. It does not run application shortcuts or terminal key bindings.
++func (t *Terminal) SendInput(events []Input) bool {
++	if t.v == nil {
++		return false
++	}
++	limit := t.in.limit
++	if limit <= 0 {
++		limit = 1 << 20
++	}
++	if len(events) > 4096 {
++		return false
++	}
++	v := *t.v
++	defer func() { t.v.keys = v.keys }()
++	v.batch = make([]byte, 0)
++	v.batchLimit = limit
++	v.batchFull = false
++	for _, e := range events {
++		if len(e.Text) > limit {
++			return false
++		}
++		if e.Paste {
++			t.mu.Lock()
++			if t.term == nil {
++				t.mu.Unlock()
++				return false
++			}
++			data := vt.EncodePaste(e.Text, t.term.Mode(vt.ModeBracketedPaste))
++			t.mu.Unlock()
++			v.sendInput(data)
++		} else {
++			switch e.Kind {
++			case ui.InputText:
++				if e.Key != ui.KeyUnknown {
++					key := e.InputEvent
++					key.Kind = ui.InputKeyDown
++					v.terminalKeyDown(key)
++				}
++				v.typed(e.Text)
++			case ui.InputKeyDown:
++				v.terminalKeyDown(e.InputEvent)
++			case ui.InputKeyUp:
++				v.keyUp(e.InputEvent)
++			default:
++				return false
++			}
++		}
++		if v.batchFull {
++			return false
++		}
++	}
++	if len(v.batch) > 0 && !t.in.pushDone(v.batch, nil) {
++		return false
++	}
++	t.v.pending = v.pending
++	t.v.keys = v.keys
++	return true
++}
++func (v *view) sendInput(p []byte) {
++	if v.batch != nil {
++		if len(v.batch)+len(p) > v.batchLimit {
++			v.batchFull = true
++			return
++		}
++		v.batch = append(v.batch, p...)
++		return
++	}
++	v.t.in.push(append([]byte(nil), p...))
++}
+diff --git a/plugins/terminal/input_batch_test.go b/plugins/terminal/input_batch_test.go
+new file mode 100644
+--- /dev/null
++++ b/plugins/terminal/input_batch_test.go
+@@ -0,0 +1,56 @@
++package terminal
++
++import (
++	"github.com/egoist/mygo/ui"
++	"io"
++	"os"
++	"testing"
++)
++
++func TestCapturedNavigationBatchUsesParsedModesAndFIFO(t *testing.T) {
++	if os.Getenv("MYGO_GHOSTTY_VT") == "" {
++		t.Fatal("explicit verified software VT library required")
++	}
++	loadLib(t)
++	conn := newPipe()
++	term, err := New(Options{Conn: conn, CaptureInput: func() io.Writer { return conn }})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer term.Close()
++	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
++	tt.Frame()
++	term.Feed([]byte("\x1b[?1h\x1b[?2004h"))
++	events := []Input{{InputEvent: ui.InputEvent{Kind: ui.InputText, Key: ui.KeyA, Mods: ui.Shift, Text: "A"}}, {InputEvent: ui.InputEvent{Kind: ui.InputKeyDown, Key: ui.KeyUp}}, {InputEvent: ui.InputEvent{Kind: ui.InputText, Text: "one\ntwo"}, Paste: true}}
++	if !term.SendInput(events) {
++		t.Fatal("batch rejected")
++	}
++	tt.Type("after")
++	if got := conn.take(term); got != "A\x1bOA\x1b[200~one\ntwo\x1b[201~after" {
++		t.Fatalf("encoded/order=%q", got)
++	}
++}
++func TestCapturedNavigationBatchRejectsWholePrefix(t *testing.T) {
++	if os.Getenv("MYGO_GHOSTTY_VT") == "" {
++		t.Fatal("explicit verified software VT library required")
++	}
++	loadLib(t)
++	conn := newPipe()
++	term, err := New(Options{Conn: conn, InputLimit: 4, CaptureInput: func() io.Writer { return conn }})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer term.Close()
++	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
++	tt.Frame()
++	if term.SendInput([]Input{{InputEvent: ui.InputEvent{Kind: ui.InputText, Text: "abc"}}, {InputEvent: ui.InputEvent{Kind: ui.InputText, Text: "def"}}}) {
++		t.Fatal("oversize batch accepted")
++	}
++	if got := conn.take(term); got != "" {
++		t.Fatalf("prefix escaped: %q", got)
++	}
++	tt.Type("ok")
++	if got := conn.take(term); got != "ok" {
++		t.Fatalf("refusal poisoned later input: %q", got)
++	}
++}

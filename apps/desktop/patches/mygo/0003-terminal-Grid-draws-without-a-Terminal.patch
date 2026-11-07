@@ -1,0 +1,73 @@
+diff --git a/plugins/terminal/grid.go b/plugins/terminal/grid.go
+--- a/plugins/terminal/grid.go
++++ b/plugins/terminal/grid.go
+@@ -55,8 +55,7 @@
+ // selection's and its cursor's.
+ func NewGrid(theme *Theme) *Grid {
+ 	g := &Grid{}
+-	// draw reads the options of a terminal: the defaults.
+-	g.v = view{t: &Terminal{}, theme: theme, colors: vt.Colors{Foreground: rgb(theme.Foreground), Background: rgb(theme.Background)}}
++	g.v = view{theme: theme, colors: vt.Colors{Foreground: rgb(theme.Foreground), Background: rgb(theme.Background)}}
+ 	g.v.shaped.init(4096)
+ 	return g
+ }
+diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
+--- a/plugins/terminal/paint.go
++++ b/plugins/terminal/paint.go
+@@ -160,6 +160,7 @@
+ 	}
+ 	v.scrollbar = t.term.Scrollbar()
+ 	contrast := t.opts.MinimumContrast
++	v.transparent, v.padding = t.opts.Transparent, t.opts.PaddingColor
+ 	tc, tr := t.term.Size()
+ 	v.matches, v.matchBuf = t.viewportMatches(v.matches, v.matchBuf, tc, tr)
+ 	if !held {
+@@ -562,10 +563,10 @@
+ 	base := float32(v.baseline) / s
+ 	// A transparent terminal still draws a background a program set (OSC
+ 	// 11), as Ghostty shows it.
+-	if !v.t.opts.Transparent || v.colors.Background != rgb(v.theme.Background) {
++	if !v.transparent || v.colors.Background != rgb(v.theme.Background) {
+ 		p.Fill(r, color(v.colors.Background), 0)
+ 	}
+-	if v.t.opts.PaddingColor != PaddingBackground {
++	if v.padding != PaddingBackground {
+ 		v.extendPadding(p, r, ox, oy, cw, ch)
+ 	}
+ 	selection := v.theme.Selection
+@@ -702,7 +703,7 @@
+ 	if len(v.lines) == 0 {
+ 		return
+ 	}
+-	always := v.t.opts.PaddingColor == PaddingExtendAlways
++	always := v.padding == PaddingExtendAlways
+ 	extends := func(line *rowCache) bool { return always || line.filled }
+ 	cols := v.cols
+ 	left, right := r.X, r.X+r.W
+diff --git a/plugins/terminal/view.go b/plugins/terminal/view.go
+--- a/plugins/terminal/view.go
++++ b/plugins/terminal/view.go
+@@ -164,6 +164,10 @@
+ 	fitW                   int
+ 	ox, oy                 int
+ 	cols, rows             int
++
++	// Options.Transparent and Options.PaddingColor, as of the last paint.
++	transparent bool
++	padding     PaddingColor
+ 
+ 	colors    vt.Colors
+ 	contrast  float32 // Options.MinimumContrast, as of the last paint
+diff --git a/plugins/terminal/grid_test.go b/plugins/terminal/grid_test.go
+--- a/plugins/terminal/grid_test.go
++++ b/plugins/terminal/grid_test.go
+@@ -65,6 +65,9 @@
+ func TestGridCursorApart(t *testing.T) {
+ 	theme := DarkTheme()
+ 	g := NewGrid(theme)
++	if g.v.t != nil {
++		t.Fatal("Grid depends on a Terminal")
++	}
+ 	g.Focused = true
+ 	g.Cursor = GridCursor{X: 1, Visible: true}
+ 	withCursor := false

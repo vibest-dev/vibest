@@ -1,0 +1,49 @@
+diff --git a/plugins/terminal/automatic_input_test.go b/plugins/terminal/automatic_input_test.go
+--- a/plugins/terminal/automatic_input_test.go
++++ b/plugins/terminal/automatic_input_test.go
+@@ -76,3 +76,25 @@
+ 		t.Fatalf("got %q", out.String())
+ 	}
+ }
++
++func TestCancelingInputKeepsQueuedEmulatorReplies(t *testing.T) {
++	var out bytes.Buffer
++	term := &Terminal{}
++	term.in.capture = func() io.Writer { return kindWriter{&out} }
++	term.in.push([]byte("typed"))
++	term.in.pushAutomatic([]byte("\x1b[?62c"))
++	term.in.push([]byte("more"))
++	term.CancelInput()
++	done := make(chan struct{})
++	term.in.pushOwned(nil, func() { close(done) }, kindWriter{&out})
++	go term.in.run(io.Discard)
++	defer term.in.close()
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("queue blocked")
++	}
++	if out.String() != "A:\x1b[?62c;D:;" {
++		t.Fatalf("got %q", out.String())
++	}
++}
+diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
+--- a/plugins/terminal/terminal.go
++++ b/plugins/terminal/terminal.go
+@@ -1194,7 +1194,15 @@
+ 	t.mu.Lock()
+ 	t.offer, t.clipReads, t.replying = nil, nil, false
+ 	t.in.mu.Lock()
+-	t.in.queue, t.in.bytes = nil, 0
++	kept, bytes := t.in.queue[:0], 0
++	for _, item := range t.in.queue {
++		if item.automatic {
++			kept = append(kept, item)
++			bytes += len(item.p)
++		}
++	}
++	clear(t.in.queue[len(kept):])
++	t.in.queue, t.in.bytes = kept, bytes
+ 	t.in.mu.Unlock()
+ 	t.mu.Unlock()
+ 	if v := t.v; v != nil {

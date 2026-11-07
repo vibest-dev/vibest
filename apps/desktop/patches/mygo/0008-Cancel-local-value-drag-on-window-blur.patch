@@ -1,0 +1,74 @@
+diff --git a/ui/input.go b/ui/input.go
+--- a/ui/input.go
++++ b/ui/input.go
+@@ -153,6 +153,10 @@
+ 		rt.modsChanged(0)
+ 		clear(rt.byPosition)
+ 		rt.releaseKeys()
++		if d := rt.drag; d != nil && !d.native {
++			rt.dragCancel()
++			rt.drag = nil
++		}
+ 		if p := rt.pressed; p != nil {
+ 			x, y := p.local(rt.pointerX, rt.pointerY)
+ 			rt.endPress(p.input, x, y)
+diff --git a/ui/dragdrop_blur_test.go b/ui/dragdrop_blur_test.go
+new file mode 100644
+--- /dev/null
++++ b/ui/dragdrop_blur_test.go
+@@ -0,0 +1,55 @@
++package ui
++
++import (
++	"slices"
++	"testing"
++
++	"github.com/egoist/mygo/internal/platform"
++)
++
++func TestBlurCancelsLocalValueDrag(t *testing.T) {
++	for _, escape := range []bool{false, true} {
++		t.Run(map[bool]string{false: "active", true: "escaped"}[escape], func(t *testing.T) {
++			var dropped []string
++			clicks := 0
++			tt := coreNewTester(func(c *context) {
++				coreColumn(c).Gap(20).Padding(20).Children(func() {
++					for _, name := range []string{"first", "second"} {
++						if coreBox(c).Size(100, 40).Label(name).Drag(name).Clicked() {
++							clicks++
++						}
++					}
++					if v, ok := coreDrop[string](coreBox(c).Size(100, 80).Label("target")); ok {
++						dropped = append(dropped, v)
++					}
++				})
++			}, 400, 400)
++			first, _ := tt.Find("first")
++			second, _ := tt.Find("second")
++			target, _ := tt.Find("target")
++			tt.Press(first.X+10, first.Y+10)
++			tt.Move(target.X+10, target.Y+10)
++			if tt.rt.drag == nil || tt.rt.drag.over == 0 {
++				t.Fatal("fixture did not drag over a valid drop target")
++			}
++			if escape {
++				tt.Key(0, KeyEscape)
++			}
++			// Blur cancels immediately, without using pointerUp's drop path.
++			tt.rt.event(platform.SurfaceEvent{Kind: platform.SurfaceBlur})
++			if tt.rt.drag != nil || tt.rt.pressed != nil {
++				t.Fatal("blur retained a local drag or pointer capture")
++			}
++			tt.Frame()
++			tt.SetFocused(true)
++			if len(dropped) != 0 || clicks != 0 {
++				t.Fatalf("blur activated the abandoned source: drops=%v clicks=%d", dropped, clicks)
++			}
++			// The first fresh gesture belongs to its own source, not the old one.
++			drag(tt, second.X+10, second.Y+10, target.X+10, target.Y+10)
++			if !slices.Equal(dropped, []string{"second"}) || clicks != 0 {
++				t.Fatalf("first fresh drag: drops=%v clicks=%d", dropped, clicks)
++			}
++		})
++	}
++}

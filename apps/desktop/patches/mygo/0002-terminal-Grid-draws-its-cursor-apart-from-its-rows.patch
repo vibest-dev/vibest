@@ -1,0 +1,141 @@
+diff --git a/plugins/terminal/grid.go b/plugins/terminal/grid.go
+--- a/plugins/terminal/grid.go
++++ b/plugins/terminal/grid.go
+@@ -1,6 +1,7 @@
+ package terminal
+ 
+ import (
++	"math"
+ 	"slices"
+ 	"unicode/utf8"
+ 
+@@ -22,7 +23,7 @@
+ 	// hollow without it.
+ 	Focused bool
+ 	// Cursor is the cursor, and Preedit an input method's composition,
+-	// shown at the cursor in place of it.
++	// shown at the cursor in place of it, as DrawCursor draws them.
+ 	Cursor  GridCursor
+ 	Preedit string
+ 
+@@ -130,8 +131,18 @@
+ 	b.flush()
+ }
+ 
+-// Draw draws the rows, the cursor and the preedit in r, from its top left.
++// Draw draws the rows in r, from its top left, without the cursor.
+ func (g *Grid) Draw(p *ui.Painter, r ui.Rect) {
++	v := &g.v
++	v.cursor, v.focused, v.preedit = vt.Cursor{}, g.Focused, ""
++	v.draw(p, r)
++}
++
++// DrawCursor draws the cursor, or the preedit, of the rows Draw draws in
++// r, and nothing else: over them, or over a part of them alone, as an
++// image of the cursor's cell drawn apart, so that the rows need not be
++// drawn again when the cursor moves or hides.
++func (g *Grid) DrawCursor(p *ui.Painter, r ui.Rect) {
+ 	v := &g.v
+ 	c := g.Cursor
+ 	style := vt.CursorBlock
+@@ -143,5 +154,12 @@
+ 	}
+ 	v.cursor = vt.Cursor{X: c.X, Y: c.Y, InView: c.Y >= 0 && c.Y < len(v.lines), Visible: c.Visible, Style: style}
+ 	v.focused, v.preedit = g.Focused, g.Preedit
+-	v.draw(p, r)
++	s := v.scale
++	cw, ch := float32(v.cellW)/s, float32(v.cellH)/s
++	ox, oy := float32(math.Round(float64(r.X*s)))/s, float32(math.Round(float64(r.Y*s)))/s
++	cur, curColor, curText, block := v.cursorRect(ox, oy, cw, ch)
++	if block {
++		p.Fill(cur, curColor, 0)
++	}
++	v.drawCursor(p, cur, curColor, curText, block, ox, oy, cw, ch, float32(v.baseline)/s)
+ }
+diff --git a/plugins/terminal/grid_test.go b/plugins/terminal/grid_test.go
+--- a/plugins/terminal/grid_test.go
++++ b/plugins/terminal/grid_test.go
+@@ -59,3 +59,51 @@
+ 		t.Fatalf("CellSize %dx%d, grid %dx%d, view %dx%d", w, h, g.v.cellW, g.v.cellH, term.v.cellW, term.v.cellH)
+ 	}
+ }
++
++// TestGridCursorApart: Draw leaves the cursor out, and DrawCursor draws
++// it alone, the character under a block in the cursor's text color.
++func TestGridCursorApart(t *testing.T) {
++	theme := DarkTheme()
++	g := NewGrid(theme)
++	g.Focused = true
++	g.Cursor = GridCursor{X: 1, Visible: true}
++	withCursor := false
++	tt := ui.NewTester(func(c *ui.Context) {
++		ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
++			g.SetFont(Font{}, p.Scale())
++			g.Resize(1)
++			g.SetRow(0, []Cell{{Text: "a", FG: theme.Foreground}, {Text: "M", FG: theme.Foreground}}, 0, 0)
++			g.Draw(p, r)
++			if withCursor {
++				g.DrawCursor(p, r)
++			}
++		})
++	}, 200, 100)
++	tt.Frame()
++	cw, ch := float32(g.v.cellW), float32(g.v.cellH)
++	at := func(x, y float32) ui.Color {
++		c := tt.Image().RGBAAt(int(x), int(y))
++		return ui.RGB(c.R, c.G, c.B)
++	}
++	if c := at(cw+1, 1); c != theme.Background {
++		t.Fatalf("Draw drew %v at the cursor's corner, want the background %v", c, theme.Background)
++	}
++	withCursor = true
++	tt.Frame()
++	cur := theme.Cursor
++	if cur.A == 0 {
++		cur = theme.Foreground
++	}
++	if c := at(cw+1, 1); c != cur {
++		t.Fatalf("DrawCursor drew %v at the cursor's corner, want %v", c, cur)
++	}
++	ink := false
++	for x := cw; x < 2*cw; x++ {
++		for y := float32(0); y < ch; y++ {
++			ink = ink || at(x, y) != cur
++		}
++	}
++	if !ink {
++		t.Fatal("the block cursor hides the character under it")
++	}
++}
+diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
+--- a/plugins/terminal/paint.go
++++ b/plugins/terminal/paint.go
+@@ -642,11 +642,19 @@
+ 	if h := v.hover; h.on() && h.row < len(v.lines) {
+ 		v.drawDeco(p, deco{h.x0, h.x1, vt.UnderlineSingle, v.linkColor(&v.lines[h.row], h)}, ox, oy+float32(h.row)*ch, cw, ch, base)
+ 	}
++	v.drawCursor(p, cur, curColor, curText, block, ox, oy, cw, ch, base)
++	v.drawScrollbar(p, r)
++}
++
++// drawCursor draws, over the text, the cursor cursorRect returned (a
++// filled block is filled before the text) or the text under a filled
++// block in the cursor's text color; and the preedit.
++func (v *view) drawCursor(p *ui.Painter, cur ui.Rect, curColor, curText ui.Color, block bool, ox, oy, cw, ch, base float32) {
+ 	if cur.W > 0 && !block {
+ 		if v.focused || v.cursor.Style != vt.CursorBlock {
+ 			p.Fill(cur, curColor, 0)
+ 		} else {
+-			p.Stroke(cur, curColor, 0, 1/s)
++			p.Stroke(cur, curColor, 0, 1/v.scale)
+ 		}
+ 	}
+ 	if block && v.cursor.Y < len(v.lines) {
+@@ -671,7 +679,6 @@
+ 	if v.preedit != "" && v.focused {
+ 		v.drawPreedit(p, ox, oy, cw, ch, base)
+ 	}
+-	v.drawScrollbar(p, r)
+ }
+ 
+ // searchColors returns the colors of the search's matches and their text,

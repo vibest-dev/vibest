@@ -1,0 +1,148 @@
+diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
+--- a/plugins/terminal/terminal.go
++++ b/plugins/terminal/terminal.go
+@@ -268,6 +268,9 @@
+ 	// opens with the system (Context.OpenURL), and a path it leaves does
+ 	// nothing.
+ 	OpenLink func(link string) bool
++	// OnDropFiles may consume original paths before shell quoting or clipboard
++	// offering. It runs on the UI thread; true suppresses the default paste.
++	OnDropFiles func(paths []string) bool
+ 	// OnPaste sees a paste of the clipboard (ActionPaste's keys, a Paste
+ 	// menu item, a secondary click with RightClickPaste) before the
+ 	// program gets it, on the main thread, with every format the
+@@ -1485,17 +1488,22 @@
+ // pushDone queues p, and done to run once it is written, on the queue's
+ // goroutine.
+ func (q *inputQueue) pushDone(p []byte, done func()) bool {
++	var writer io.Writer
++	if q.capture != nil {
++		writer = q.capture()
++		if writer == nil {
++			return false
++		}
++	}
++	return q.pushOwned(p, done, writer)
++}
++
++func (q *inputQueue) pushOwned(p []byte, done func(), writer io.Writer) bool {
+ 	q.mu.Lock()
+ 	defer q.mu.Unlock()
+ 	q.init()
+ 	if !q.closed {
+-		var writer io.Writer
+ 		if q.capture != nil {
+-			writer = q.capture()
+-			// Owner-aware clients must not retain an unbounded input backlog.
+-			if writer == nil {
+-				return false
+-			}
+ 			limit := q.limit
+ 			if limit == 0 {
+ 				limit = 1 << 20
+diff --git a/plugins/terminal/paste.go b/plugins/terminal/paste.go
+--- a/plugins/terminal/paste.go
++++ b/plugins/terminal/paste.go
+@@ -305,6 +305,9 @@
+ 	if len(paths) == 0 {
+ 		return
+ 	}
++	if on := t.opts.OnDropFiles; on != nil && on(paths) {
++		return
++	}
+ 	escaped := make([]string, len(paths))
+ 	for i, p := range paths {
+ 		escaped[i] = t.quoting.quote(p)
+diff --git a/plugins/terminal/capture_paste.go b/plugins/terminal/capture_paste.go
+new file mode 100644
+--- /dev/null
++++ b/plugins/terminal/capture_paste.go
+@@ -0,0 +1,29 @@
++package terminal
++
++import (
++	"github.com/egoist/mygo/plugins/terminal/internal/vt"
++	"io"
++)
++
++// CapturePaste binds the destination before a clipboard provider or file
++// conversion runs. The returned UI-thread callback keeps that original writer
++// on the existing bounded FIFO; owner-aware connections validate it at dispatch.
++func (t *Terminal) CapturePaste() func(string) bool {
++	var writer io.Writer
++	if t.in.capture != nil {
++		writer = t.in.capture()
++		if writer == nil {
++			return nil
++		}
++	}
++	return func(text string) bool {
++		t.mu.Lock()
++		if t.term == nil {
++			t.mu.Unlock()
++			return false
++		}
++		data := vt.EncodePaste(text, t.term.Mode(vt.ModeBracketedPaste))
++		t.mu.Unlock()
++		return t.in.pushOwned(data, nil, writer)
++	}
++}
+diff --git a/plugins/terminal/drop_owner_test.go b/plugins/terminal/drop_owner_test.go
+new file mode 100644
+--- /dev/null
++++ b/plugins/terminal/drop_owner_test.go
+@@ -0,0 +1,54 @@
++package terminal
++
++import (
++	"bytes"
++	"github.com/egoist/mygo/transfer"
++	"io"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++func TestCapturedInputDropPolicyPrecedesConversion(t *testing.T) {
++	calls := 0
++	term := &Terminal{opts: Options{OnDropFiles: func(paths []string) bool {
++		calls++
++		if len(paths) != 2 || paths[1] != "bad\npath" {
++			t.Fatal("original paths changed")
++		}
++		return true
++	}, OnPaste: func(transfer.Data) bool { t.Fatal("consumed drop became paste"); return true }}}
++	term.dropFiles([]string{"relative", "bad\npath"})
++	if calls != 1 || len(term.in.queue) != 0 {
++		t.Fatal("drop bypassed source policy")
++	}
++	fallback := false
++	term.opts.OnDropFiles = func([]string) bool { return false }
++	term.opts.OnPaste = func(transfer.Data) bool { fallback = true; return true }
++	term.dropFiles([]string{"/inert/not-read"})
++	if !fallback {
++		t.Fatal("unconsumed drop lost ordinary paste policy")
++	}
++}
++
++func TestCapturedInputOwnedPasteCannotRecaptureLaterOwner(t *testing.T) {
++	var generation atomic.Uint64
++	var out bytes.Buffer
++	generation.Store(1)
++	q := inputQueue{capture: func() io.Writer { return capturedWriter{&generation, generation.Load(), &out} }}
++	original := q.capture()
++	generation.Store(3)
++	q.pushOwned([]byte("stale"), nil, original)
++	done := make(chan struct{})
++	q.pushDone([]byte("later"), func() { close(done) })
++	go q.run(io.Discard)
++	defer q.close()
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("queue blocked")
++	}
++	if out.String() != "later" {
++		t.Fatal("paste captured a later owner", out.String())
++	}
++}

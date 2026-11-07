@@ -1,0 +1,14 @@
+# Desktop
+
+Rules for `apps/desktop`, the Go app on MyGo that shows vibestd's projects and sessions beside the terminals of a herdr core.
+
+1. A session tab shows what vibestd reports through `Watch`: its name is the vibest session title, and its status, including done, is vibestd's session status. A project row shows that project's `activity`. Neither falls back to the core's status or to `herdr.seen`. From the core it reads only `herdr.pinned`. vibestd owns session state; a second source would disagree with the results agents get. hc terminal names are for herdr-app only.
+2. The desktop writes to the core only its own `vibest-desktop-layout` document (`doc.set` with the version it read) and the shared `herdr.pinned` label (`terminal.label`). It does not write `herdr.seen`. A session whose terminal is drawn in a focused window is marked with `Session.Seen`, once per turn Watch reported. It never writes the `herdr-app` document or any other label. herdr-app shares the core; the pin label is shared so both apps agree on what was pinned.
+3. Session actions are vibestd RPCs. A main agent ends with `Project.StopCoordinator` (runtime and the address as a JSON string), a subagent with `Remove`. vibestd refuses `Remove` for a main session with NoSuchSession.
+4. Core compatibility is the protocol generation the core reports on `hello`: any version with the pinned generation is accepted, another generation gets the mismatch screen with Retry. The Go types in `internal/core/hc_generated.go` come only from `go run ./scripts/hcgen` over the pinned schema in `packages/effect-herdr-core-sdk/schema/`; never edit them by hand. `make vet` runs `hcgen -check`, so the desktop and the TypeScript SDK follow one pin.
+5. No polling. Live data comes from the vibestd `Watch` stream and the core's `events.subscribe`. Allowed: a reconnect with backoff after a failure, a short retry after `ErrBusy`, and a blocking read. A loop that looks again on a clock shows stale state between ticks and costs work when nothing changed.
+6. No code comments, Go included. `pnpm lint` runs `bun tools/check/go-comments.ts apps/desktop`. Reasons go where [no-comments.md](no-comments.md) says.
+7. MyGo is the official version named in `apps/desktop/patches/mygo/BASE` plus the tracked patches beside it, applied by `scripts/patch-mygo.sh` (every `make` target runs it first). A change to MyGo is a new patch there, never an edit in `third_party/mygo`: the script checks that tree against its stamp and refuses to build over edits of its own.
+8. A change is done when `make test`, `make vet`, the Go comment check and the pnpm gates pass, and the isolated demo (`apps/desktop/scripts/demo.sh`, its own core, vibestd and fake model) shows it working. Never point the desktop at the user's core or `~/.vibest` to try a change.
+
+Status: in force on `feat/desktop`.

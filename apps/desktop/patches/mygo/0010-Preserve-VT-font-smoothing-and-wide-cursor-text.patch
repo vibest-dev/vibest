@@ -1,0 +1,54 @@
+diff --git a/plugins/terminal/font.go b/plugins/terminal/font.go
+--- a/plugins/terminal/font.go
++++ b/plugins/terminal/font.go
+@@ -43,6 +43,8 @@
+ 	// the text's color and the system's setting. It changes nothing on
+ 	// Linux and Windows.
+ 	Thicken bool
++	// Antialiased draws without macOS font smoothing, as ui.Font.Antialiased.
++	Antialiased bool
+ }
+ 
+ // fontKey is a Font at a scale, with the defaults, comparable.
+@@ -55,12 +57,12 @@
+ 	lineHeight float32
+ 	thicken    bool
+ 	scale      float32
+-	// flat draws without font smoothing (Grid.Antialiased); View never does.
++	// flat draws without font smoothing (Font or Grid.Antialiased).
+ 	flat bool
+ }
+ 
+ func (f *Font) key(scale float32) fontKey {
+-	k := fontKey{family: f.Family, size: f.Size, weight: f.Weight, features: featureList(f.Features), cellWidth: f.CellWidth, lineHeight: f.LineHeight, thicken: f.Thicken, scale: scale}
++	k := fontKey{family: f.Family, size: f.Size, weight: f.Weight, features: featureList(f.Features), cellWidth: f.CellWidth, lineHeight: f.LineHeight, thicken: f.Thicken, scale: scale, flat: f.Antialiased}
+ 	if runtime.GOOS == "darwin" {
+ 		k.features = unkerned(k.features)
+ 	}
+diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
+--- a/plugins/terminal/paint.go
++++ b/plugins/terminal/paint.go
+@@ -669,17 +669,21 @@
+ 	if block && v.cursor.Y < len(v.lines) {
+ 		// The text under a block cursor, in the cursor's text color.
+ 		line := &v.lines[v.cursor.Y]
++		x := v.cursor.X
++		if v.cursor.WideTail && x > 0 {
++			x--
++		}
+ 		ry := oy + float32(v.cursor.Y)*ch
+ 		p.Clip(cur, 0, func() {
+ 			for _, run := range line.runs {
+ 				for i, col := range run.cols {
+-					if int(col) == v.cursor.X {
++					if int(col) == x {
+ 						p.Glyphs(run.glyphs[i:i+1], ox, ry+base, curText)
+ 					}
+ 				}
+ 			}
+ 			for _, b := range line.boxes {
+-				if b.x == v.cursor.X {
++				if b.x == x {
+ 					drawBox(p, b.r, ui.Rect{X: ox + float32(b.x)*cw, Y: ry, W: cw, H: ch}, curText)
+ 				}
+ 			}

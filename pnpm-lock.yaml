@@ -219,6 +219,15 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.0))
 
+  apps/desktop:
+    devDependencies:
+      '@vibest/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      effect-herdr-core-sdk:
+        specifier: workspace:*
+        version: link:../../packages/effect-herdr-core-sdk
+
   apps/vibest-herdr:
     devDependencies:
       '@effect/platform-bun':

@@ -1,0 +1,521 @@
+diff --git a/plugins/terminal/font.go b/plugins/terminal/font.go
+--- a/plugins/terminal/font.go
++++ b/plugins/terminal/font.go
+@@ -55,6 +55,8 @@
+ 	lineHeight float32
+ 	thicken    bool
+ 	scale      float32
++	// flat draws without font smoothing (Grid.Antialiased); View never does.
++	flat bool
+ }
+ 
+ func (f *Font) key(scale float32) fontKey {
+@@ -87,7 +89,7 @@
+ 	if i&1 != 0 {
+ 		w = min(max(w+300, 700), 900)
+ 	}
+-	return ui.Font{Family: k.family, Size: k.size, Weight: w, Italic: i&2 != 0, Features: k.features, Thicken: k.thicken}
++	return ui.Font{Family: k.family, Size: k.size, Weight: w, Italic: i&2 != 0, Features: k.features, Thicken: k.thicken, Antialiased: k.flat}
+ }
+ 
+ // featureList converts features as Font.Features has them into the list
+diff --git a/plugins/terminal/grid.go b/plugins/terminal/grid.go
+new file mode 100644
+--- /dev/null
++++ b/plugins/terminal/grid.go
+@@ -0,0 +1,147 @@
++package terminal
++
++import (
++	"slices"
++	"unicode/utf8"
++
++	"github.com/egoist/mygo/plugins/terminal/internal/vt"
++	"github.com/egoist/mygo/ui"
++)
++
++// Grid draws cells another terminal emulator keeps, as View draws a
++// Terminal's: in the cells of the font, with its shaping, the characters
++// a terminal draws itself (box drawing, blocks, Powerline's separators),
++// the selection, the cursor and an input method's composition. It parses
++// no output and takes no input: its owner keeps the cells, their number
++// and the keyboard. Main thread only.
++type Grid struct {
++	// Antialiased draws the glyphs without font smoothing, as
++	// ui.Font.Antialiased. Set it before SetFont.
++	Antialiased bool
++	// Focused shows the cursor filled and the preedit; a block cursor is
++	// hollow without it.
++	Focused bool
++	// Cursor is the cursor, and Preedit an input method's composition,
++	// shown at the cursor in place of it.
++	Cursor  GridCursor
++	Preedit string
++
++	v     view
++	cells [][]Cell // what each row was made from
++}
++
++// Cell is a cell of a Grid, its colors resolved.
++type Cell struct {
++	// Text is the cell's character, a grapheme cluster; "" in the cell a
++	// wide character covers. Wide tells that it takes the next cell too.
++	Text string
++	Wide bool
++	// FG is the text's color and BG the background's, when HasBG: the
++	// theme's otherwise.
++	FG, BG                                 ui.Color
++	HasBG                                  bool
++	Bold, Italic, Underline, Strikethrough bool
++}
++
++// GridCursor is the cursor of a Grid, at column X of row Y.
++type GridCursor struct {
++	X, Y    int
++	Visible bool
++	Style   CursorStyle
++}
++
++// NewGrid returns a Grid that draws with theme's default colors, its
++// selection's and its cursor's.
++func NewGrid(theme *Theme) *Grid {
++	g := &Grid{}
++	// draw reads the options of a terminal: the defaults.
++	g.v = view{t: &Terminal{}, theme: theme, colors: vt.Colors{Foreground: rgb(theme.Foreground), Background: rgb(theme.Background)}}
++	g.v.shaped.init(4096)
++	return g
++}
++
++// SetFont sets the font at a scale, the device pixels of a DIP of the
++// painter Draw draws with, and returns the size of a cell in those
++// pixels, which CellSize returns too.
++func (g *Grid) SetFont(f Font, scale float32) (w, h int) {
++	k := f.key(scale)
++	k.flat = g.Antialiased
++	if k != g.v.font {
++		g.v.setFont(k) // which forgets the rows: Resize makes them again
++	}
++	return g.v.cellW, g.v.cellH
++}
++
++// Resize sets the number of rows. The columns are the cells each row has.
++func (g *Grid) Resize(rows int) {
++	v := &g.v
++	if len(v.lines) != rows {
++		v.lines = append(v.lines[:0], make([]rowCache, rows)...)
++		g.cells = append(g.cells[:0], make([][]Cell, rows)...)
++	}
++	v.rows = rows
++}
++
++// SetRow sets the cells of row y, with columns x0 to x1, x1 excluded,
++// selected. A row of the cells it had keeps what it drew.
++func (g *Grid) SetRow(y int, cells []Cell, x0, x1 int) {
++	v := &g.v
++	line := &v.lines[y]
++	if !line.ok || !slices.Equal(g.cells[y], cells) {
++		g.cells[y] = append(g.cells[y][:0], cells...)
++		g.buildRow(line, cells)
++	}
++	line.selA, line.selB, line.sel = x0, x1-1, x1 > x0
++}
++
++func (g *Grid) buildRow(line *rowCache, cells []Cell) {
++	b := g.v.newRow(line)
++	var buf []rune
++	for x := 0; x < len(cells); x++ {
++		c := cells[x]
++		if c.Text == "" {
++			continue
++		}
++		w := 1
++		if c.Wide {
++			w = 2
++		}
++		st := resolved{fg: c.FG, bg: c.BG, shapeFg: c.FG, hasBg: c.HasBG, strike: c.Strikethrough}
++		if c.Bold {
++			st.variant |= 1
++		}
++		if c.Italic {
++			st.variant |= 2
++		}
++		if c.Underline {
++			st.underline = vt.UnderlineSingle
++		}
++		first, size := utf8.DecodeRuneInString(c.Text)
++		cp := b.cell(x, w, st, first)
++		buf = buf[:0]
++		if cp != ' ' && size < len(c.Text) {
++			buf = append(buf, []rune(c.Text)...)
++		} else {
++			buf = append(buf, cp)
++		}
++		b.text(x, w, buf)
++		x += w - 1
++	}
++	b.flush()
++}
++
++// Draw draws the rows, the cursor and the preedit in r, from its top left.
++func (g *Grid) Draw(p *ui.Painter, r ui.Rect) {
++	v := &g.v
++	c := g.Cursor
++	style := vt.CursorBlock
++	switch c.Style {
++	case CursorBar:
++		style = vt.CursorBar
++	case CursorUnderline:
++		style = vt.CursorUnderline
++	}
++	v.cursor = vt.Cursor{X: c.X, Y: c.Y, InView: c.Y >= 0 && c.Y < len(v.lines), Visible: c.Visible, Style: style}
++	v.focused, v.preedit = g.Focused, g.Preedit
++	v.draw(p, r)
++}
+diff --git a/plugins/terminal/grid_test.go b/plugins/terminal/grid_test.go
+new file mode 100644
+--- /dev/null
++++ b/plugins/terminal/grid_test.go
+@@ -0,0 +1,61 @@
++package terminal
++
++import (
++	"reflect"
++	"testing"
++
++	"github.com/egoist/mygo/ui"
++)
++
++// TestGridRowAsView: a Grid given the cells a Terminal holds makes the
++// row View makes of them: backgrounds, runs, lines, drawn characters and
++// wide characters. A row of the same cells keeps what it made.
++func TestGridRowAsView(t *testing.T) {
++	theme := DarkTheme()
++	term, err := New(Options{Conn: newPipe(), Theme: theme})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer term.Close()
++	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill() }, 400, 200)
++	term.Feed([]byte("\x1b[1mab\x1b[0m 中─\x1b[4mu\x1b[0m\x1b[48;2;200;0;0m x\x1b[0m\x1b[9ms\x1b[0mé👍█"))
++	tt.Frame()
++	term.mu.Lock()
++	want := term.v.lines[0]
++	term.mu.Unlock()
++
++	fg, red := theme.Foreground, ui.RGB(200, 0, 0)
++	cells := []Cell{
++		{Text: "a", FG: fg, Bold: true}, {Text: "b", FG: fg, Bold: true}, {Text: " ", FG: fg},
++		{Text: "中", Wide: true, FG: fg}, {}, {Text: "─", FG: fg}, {Text: "u", FG: fg, Underline: true},
++		{Text: " ", FG: fg, BG: red, HasBG: true}, {Text: "x", FG: fg, BG: red, HasBG: true},
++		{Text: "s", FG: fg, Strikethrough: true}, {Text: "é", FG: fg}, {Text: "👍", Wide: true, FG: fg}, {}, {Text: "█", FG: fg},
++	}
++	g := NewGrid(theme)
++	g.SetFont(Font{}, 1)
++	g.Resize(1)
++	g.SetRow(0, cells, 0, 0)
++	got := g.v.lines[0]
++	type row struct {
++		bgs   []bgSpan
++		runs  []glyphRun
++		decos []deco
++		boxes []boxCell
++		wide  []int16
++	}
++	pick := func(r rowCache) row { return row{r.bgs, r.runs, r.decos, r.boxes, r.wide} }
++	if len(want.runs) < 2 || len(want.boxes) != 2 || len(want.wide) != 2 || len(want.decos) != 2 || len(want.bgs) != 1 {
++		t.Fatalf("the view's row is not the one this test means: %+v", pick(want))
++	}
++	if w, gr := pick(want), pick(got); !reflect.DeepEqual(w, gr) {
++		t.Fatalf("grid row\n%+v\nview row\n%+v", gr, w)
++	}
++	runs := &g.v.lines[0].runs[0]
++	g.SetRow(0, cells, 1, 3)
++	if line := g.v.lines[0]; &line.runs[0] != runs || !line.sel || line.selA != 1 || line.selB != 2 {
++		t.Fatalf("same cells: rebuilt %v, selection %v %d..%d", &line.runs[0] != runs, line.sel, line.selA, line.selB)
++	}
++	if w, h := CellSize(Font{}, 1); w != g.v.cellW || h != g.v.cellH || w != term.v.cellW || h != term.v.cellH {
++		t.Fatalf("CellSize %dx%d, grid %dx%d, view %dx%d", w, h, g.v.cellW, g.v.cellH, term.v.cellW, term.v.cellH)
++	}
++}
+diff --git a/plugins/terminal/paint.go b/plugins/terminal/paint.go
+--- a/plugins/terminal/paint.go
++++ b/plugins/terminal/paint.go
+@@ -84,27 +84,48 @@
+ 	fk := f.key(scale)
+ 	t.mu.Unlock()
+ 	if fk != v.font {
+-		v.font, v.scale = fk, scale
+-		for i := range v.fonts {
+-			v.fonts[i] = fk.variant(i)
+-		}
+-		m := v.fonts[0].Metrics()
+-		adv := float32(0)
+-		for _, g := range ui.Shape(asciiPrintable, v.fonts[0]) {
+-			adv = max(adv, g.Advance)
+-		}
+-		v.fitW = max(int(math.Ceil(float64(adv*scale-0.05))), 1)
+-		v.cellW = max(int(math.Ceil(float64(adv*fk.cellWidth*scale-0.05))), 1)
+-		v.cellH = max(int(math.Ceil(float64((m.Ascent+m.Descent+m.LineGap)*fk.lineHeight*scale-0.05))), 1)
+-		v.baseline = int(math.Round(float64((float32(v.cellH)-(m.Ascent+m.Descent)*scale)/2 + m.Ascent*scale)))
+-		v.shaped.clear()
+-		v.lines = v.lines[:0]
++		v.setFont(fk)
+ 	}
+ 	v.size = [2]float32{r.W, r.H}
+ 	px, py := t.opts.padding()
+ 	v.ox, v.oy = int(math.Round(float64(px*scale))), int(math.Round(float64(py*scale)))
+ 	w, h := int(math.Round(float64(r.W*scale)))-2*v.ox, int(math.Round(float64(r.H*scale)))-2*v.oy
+ 	v.cols, v.rows = max(w/v.cellW, 1), max(h/v.cellH, 1)
++}
++
++// setFont takes a font and measures its cell, and forgets what the old
++// one drew.
++func (v *view) setFont(fk fontKey) {
++	v.font, v.scale = fk, fk.scale
++	for i := range v.fonts {
++		v.fonts[i] = fk.variant(i)
++	}
++	v.cellW, v.cellH, v.baseline, v.fitW = fk.cell(v.fonts[0])
++	v.shaped.clear()
++	v.lines = v.lines[:0]
++}
++
++// cell returns the size of a cell of the font, whose regular face is f,
++// and the baseline in it, in device pixels.
++func (k fontKey) cell(f ui.Font) (w, h, baseline, fit int) {
++	m := f.Metrics()
++	adv := float32(0)
++	for _, g := range ui.Shape(asciiPrintable, f) {
++		adv = max(adv, g.Advance)
++	}
++	fit = max(int(math.Ceil(float64(adv*k.scale-0.05))), 1)
++	w = max(int(math.Ceil(float64(adv*k.cellWidth*k.scale-0.05))), 1)
++	h = max(int(math.Ceil(float64((m.Ascent+m.Descent+m.LineGap)*k.lineHeight*k.scale-0.05))), 1)
++	baseline = int(math.Round(float64((float32(h)-(m.Ascent+m.Descent)*k.scale)/2 + m.Ascent*k.scale)))
++	return w, h, baseline, fit
++}
++
++// CellSize returns the size of a cell of the font at a scale, in device
++// pixels per DIP, as View and Grid make it, in device pixels.
++func CellSize(f Font, scale float32) (w, h int) {
++	k := f.key(scale)
++	w, h, _, _ = k.cell(k.variant(0))
++	return w, h
+ }
+ 
+ const asciiPrintable = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+@@ -268,18 +289,16 @@
+ 
+ // buildRow makes the cache of the render state's current row.
+ func (v *view) buildRow(line *rowCache, rs *vt.RenderState, cols int) {
+-	*line = rowCache{ok: true, bgs: line.bgs[:0], runs: line.runs[:0], decos: line.decos[:0], boxes: line.boxes[:0], wide: line.wide[:0], holders: line.holders[:0], filled: true}
++	b := v.newRow(line)
+ 	cells := rs.RowCells()
+ 	line.selA, line.selB, line.sel = rs.RowSelection()
+-	def := resolved{fg: color(v.colors.Foreground), bg: color(v.colors.Background)}
+-	def.shapeFg = def.fg
+ 	var styles []struct {
+ 		id uint16
+ 		r  resolved
+ 	}
+ 	styleOf := func(c vt.Cell, x int) resolved {
+ 		if c.Style == 0 {
+-			return def
++			return b.def
+ 		}
+ 		for _, s := range styles {
+ 			if s.id == c.Style {
+@@ -293,17 +312,6 @@
+ 		}{c.Style, r})
+ 		return r
+ 	}
+-	var run struct {
+-		text    []rune
+-		cols    []int16 // the column of each rune
+-		widths  []int8
+-		fg      ui.Color
+-		variant int
+-	}
+-	flush := func() {
+-		v.shapeRun(line, run.text, run.cols, run.widths, run.fg, run.variant)
+-		run.text, run.cols, run.widths = run.text[:0], run.cols[:0], run.widths[:0]
+-	}
+ 	var buf []rune
+ 	for x := 0; x < len(cells) && x < cols; x++ {
+ 		c := cells[x]
+@@ -313,7 +321,6 @@
+ 		w := 1
+ 		if c.Wide == vt.WideChar {
+ 			w = 2
+-			line.wide = append(line.wide, int16(x))
+ 		}
+ 		st := styleOf(c, x)
+ 		if c.HasBackground {
+@@ -322,25 +329,6 @@
+ 				bg = v.colors.Palette[c.Background.R]
+ 			}
+ 			st.bg, st.hasBg = color(bg), true
+-		}
+-		if !st.hasBg || st.bg == def.bg {
+-			line.filled = false
+-		}
+-		if st.hasBg && st.bg != def.bg {
+-			if n := len(line.bgs); n > 0 && line.bgs[n-1].x1 == x && line.bgs[n-1].c == st.bg {
+-				line.bgs[n-1].x1, line.bgs[n-1].cursor = x+w, false
+-			} else {
+-				line.bgs = append(line.bgs, bgSpan{x, x + w, st.bg, st.inverse})
+-			}
+-		}
+-		if st.underline != 0 {
+-			v.addDeco(line, x, x+w, st.underline, st.ulColor())
+-		}
+-		if st.strike {
+-			v.addDeco(line, x, x+w, decoStrike, st.fg)
+-		}
+-		if st.overline {
+-			v.addDeco(line, x, x+w, decoOverline, st.fg)
+ 		}
+ 		cp := c.Codepoint
+ 		if cp == 0 || st.invisible {
+@@ -358,24 +346,7 @@
+ 			line.holders = addHolder(line.holders, x, readHolder(rs.CellStyle(x), marks))
+ 			cp = ' '
+ 		}
+-		if noMinContrast(cp) {
+-			st.fg = st.shapeFg
+-		}
+-		if drawn(cp) {
+-			line.boxes = append(line.boxes, boxCell{x, cp, st.fg})
+-			cp = ' '
+-		}
+-		if len(run.text) > 0 && (st.variant != run.variant || st.fg != run.fg) {
+-			if cp == ' ' {
+-				// A space draws nothing: it can join any run.
+-				st.variant, st.fg = run.variant, run.fg
+-			} else {
+-				flush()
+-			}
+-		}
+-		if len(run.text) == 0 {
+-			run.fg, run.variant = st.fg, st.variant
+-		}
++		cp = b.cell(x, w, st, cp)
+ 		buf = buf[:0]
+ 		if c.Grapheme && cp != ' ' {
+ 			buf = rs.CellGraphemes(x, buf)
+@@ -383,17 +354,104 @@
+ 		if len(buf) == 0 {
+ 			buf = append(buf, cp)
+ 		}
+-		for i, r := range buf {
+-			run.text = append(run.text, r)
+-			run.cols = append(run.cols, int16(x))
+-			ww := int8(0) // the runes after the first share its cell
+-			if i == 0 {
+-				ww = int8(w)
+-			}
+-			run.widths = append(run.widths, ww)
+-		}
+-	}
+-	flush()
++		b.text(x, w, buf)
++	}
++	b.flush()
++}
++
++// rowBuilder makes the cache of a row from its cells, left to right.
++type rowBuilder struct {
++	v    *view
++	line *rowCache
++	def  resolved // the default colors
++	run  struct {
++		text    []rune
++		cols    []int16 // the column of each rune
++		widths  []int8
++		fg      ui.Color
++		variant int
++	}
++}
++
++// newRow starts the cache of a row anew in line.
++func (v *view) newRow(line *rowCache) *rowBuilder {
++	*line = rowCache{ok: true, bgs: line.bgs[:0], runs: line.runs[:0], decos: line.decos[:0], boxes: line.boxes[:0], wide: line.wide[:0], holders: line.holders[:0], filled: true}
++	b := &rowBuilder{v: v, line: line, def: resolved{fg: color(v.colors.Foreground), bg: color(v.colors.Background)}}
++	b.def.shapeFg = b.def.fg
++	return b
++}
++
++// cell adds the background, the lines and a drawn character of the cell at
++// column x, w columns wide, of style st and character cp, and returns the
++// character the font shows: ' ' for none.
++func (b *rowBuilder) cell(x, w int, st resolved, cp rune) rune {
++	v, line := b.v, b.line
++	if w == 2 {
++		line.wide = append(line.wide, int16(x))
++	}
++	if !st.hasBg || st.bg == b.def.bg {
++		line.filled = false
++	}
++	if st.hasBg && st.bg != b.def.bg {
++		if n := len(line.bgs); n > 0 && line.bgs[n-1].x1 == x && line.bgs[n-1].c == st.bg {
++			line.bgs[n-1].x1, line.bgs[n-1].cursor = x+w, false
++		} else {
++			line.bgs = append(line.bgs, bgSpan{x, x + w, st.bg, st.inverse})
++		}
++	}
++	if st.underline != 0 {
++		v.addDeco(line, x, x+w, st.underline, st.ulColor())
++	}
++	if st.strike {
++		v.addDeco(line, x, x+w, decoStrike, st.fg)
++	}
++	if st.overline {
++		v.addDeco(line, x, x+w, decoOverline, st.fg)
++	}
++	if cp == 0 || st.invisible {
++		cp = ' '
++	}
++	if noMinContrast(cp) {
++		st.fg = st.shapeFg
++	}
++	if drawn(cp) {
++		line.boxes = append(line.boxes, boxCell{x, cp, st.fg})
++		cp = ' '
++	}
++	run := &b.run
++	if len(run.text) > 0 && (st.variant != run.variant || st.fg != run.fg) {
++		if cp == ' ' {
++			// A space draws nothing: it can join any run.
++			st.variant, st.fg = run.variant, run.fg
++		} else {
++			b.flush()
++		}
++	}
++	if len(run.text) == 0 {
++		run.fg, run.variant = st.fg, st.variant
++	}
++	return cp
++}
++
++// text adds the runes of the cell at column x, w columns wide, to the run.
++func (b *rowBuilder) text(x, w int, runes []rune) {
++	run := &b.run
++	for i, r := range runes {
++		run.text = append(run.text, r)
++		run.cols = append(run.cols, int16(x))
++		ww := int8(0) // the runes after the first share its cell
++		if i == 0 {
++			ww = int8(w)
++		}
++		run.widths = append(run.widths, ww)
++	}
++}
++
++// flush shapes the run so far.
++func (b *rowBuilder) flush() {
++	run := &b.run
++	b.v.shapeRun(b.line, run.text, run.cols, run.widths, run.fg, run.variant)
++	run.text, run.cols, run.widths = run.text[:0], run.cols[:0], run.widths[:0]
+ }
+ 
+ func (r resolved) ulColor() ui.Color {

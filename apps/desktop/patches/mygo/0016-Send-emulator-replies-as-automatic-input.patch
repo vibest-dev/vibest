@@ -1,0 +1,149 @@
+diff --git a/plugins/terminal/automatic_input_test.go b/plugins/terminal/automatic_input_test.go
+new file mode 100644
+--- /dev/null
++++ b/plugins/terminal/automatic_input_test.go
+@@ -0,0 +1,57 @@
++package terminal
++
++import (
++	"bytes"
++	"io"
++	"testing"
++	"time"
++)
++
++type kindWriter struct{ out *bytes.Buffer }
++
++func (w kindWriter) Write(p []byte) (int, error) {
++	w.out.WriteString("D:" + string(p) + ";")
++	return len(p), nil
++}
++
++func (w kindWriter) WriteAutomatic(p []byte) (int, error) {
++	w.out.WriteString("A:" + string(p) + ";")
++	return len(p), nil
++}
++
++func TestEmulatorRepliesGoAsAutomaticInputInOrderWithTyping(t *testing.T) {
++	var out bytes.Buffer
++	q := inputQueue{capture: func() io.Writer { return kindWriter{&out} }}
++	q.push([]byte("a"))
++	q.pushAutomatic([]byte("\x1b[48;24;80t"))
++	done := make(chan struct{})
++	q.pushDone([]byte("b"), func() { close(done) })
++	go q.run(io.Discard)
++	defer q.close()
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("queue blocked")
++	}
++	if out.String() != "D:a;A:\x1b[48;24;80t;D:b;" {
++		t.Fatalf("got %q", out.String())
++	}
++}
++
++func TestEmulatorRepliesFallBackToWriteWithoutAutomaticWriter(t *testing.T) {
++	var out bytes.Buffer
++	q := inputQueue{capture: func() io.Writer { return &out }}
++	q.pushAutomatic([]byte("r"))
++	done := make(chan struct{})
++	q.pushDone([]byte("k"), func() { close(done) })
++	go q.run(io.Discard)
++	defer q.close()
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("queue blocked")
++	}
++	if out.String() != "rk" {
++		t.Fatalf("got %q", out.String())
++	}
++}
+diff --git a/plugins/terminal/terminal.go b/plugins/terminal/terminal.go
+--- a/plugins/terminal/terminal.go
++++ b/plugins/terminal/terminal.go
+@@ -648,7 +648,7 @@
+ 	t.term, err = vt.NewTerminal(80, 24, vt.Effects{
+ 		WritePTY: func(p []byte) {
+ 			if !t.replying {
+-				t.in.push(append([]byte(nil), p...))
++				t.in.pushAutomatic(append([]byte(nil), p...))
+ 				return
+ 			}
+ 			t.replying = false
+@@ -1072,7 +1072,7 @@
+ 	if theme.dark() {
+ 		n = 1
+ 	}
+-	t.in.push([]byte(fmt.Sprintf("\x1b[?997;%dn", n)))
++	t.in.pushAutomatic([]byte(fmt.Sprintf("\x1b[?997;%dn", n)))
+ }
+ 
+ // SetTheme changes the colors, as Options.Theme and DarkTheme.
+@@ -1476,9 +1476,14 @@
+ 
+ // queued is input to write, and what to run once it is written.
+ type queued struct {
+-	writer io.Writer
+-	p      []byte
+-	done   func()
++	writer    io.Writer
++	p         []byte
++	done      func()
++	automatic bool
++}
++
++type AutomaticWriter interface {
++	WriteAutomatic(p []byte) (int, error)
+ }
+ 
+ func (q *inputQueue) init() {
+@@ -1502,7 +1507,23 @@
+ 	return q.pushOwned(p, done, writer)
+ }
+ 
++func (q *inputQueue) pushAutomatic(p []byte) bool {
++	var writer io.Writer
++	if q.capture != nil {
++		writer = q.capture()
++		if writer == nil {
++			return false
++		}
++	}
++	return q.pushItem(queued{writer: writer, p: p, automatic: true})
++}
++
+ func (q *inputQueue) pushOwned(p []byte, done func(), writer io.Writer) bool {
++	return q.pushItem(queued{writer: writer, p: p, done: done})
++}
++
++func (q *inputQueue) pushItem(item queued) bool {
++	p := item.p
+ 	q.mu.Lock()
+ 	defer q.mu.Unlock()
+ 	q.init()
+@@ -1520,7 +1541,7 @@
+ 			}
+ 		}
+ 		q.bytes += len(p)
+-		q.queue = append(q.queue, queued{writer: writer, p: p, done: done})
++		q.queue = append(q.queue, item)
+ 		q.cond.Signal()
+ 		return true
+ 	}
+@@ -1557,7 +1578,13 @@
+ 			writer = item.writer
+ 		}
+ 		if len(item.p) > 0 || item.writer != nil {
+-			n, err := writer.Write(item.p)
++			var n int
++			var err error
++			if aw, ok := writer.(AutomaticWriter); ok && item.automatic {
++				n, err = aw.WriteAutomatic(item.p)
++			} else {
++				n, err = writer.Write(item.p)
++			}
+ 			if err == nil && n != len(item.p) {
+ 				err = io.ErrShortWrite
+ 			}
