@@ -4,7 +4,7 @@ import * as VibestPlugin from "@vibest/plugin"
 import { Effect, Layer } from "effect"
 import { defaultSocketPath, Hc, SocketConnector } from "effect-herdr-core-sdk"
 
-import { CALLER_ENV, CALLER_PRIORITY, terminalFrom } from "./caller.ts"
+import { CALLER_ENV, terminalFrom } from "./caller.ts"
 import { KIND, make } from "./terminal-runtime.ts"
 
 const platform = Layer.mergeAll(
@@ -17,7 +17,6 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   caller: {
     kind: KIND,
     env: CALLER_ENV,
-    priority: CALLER_PRIORITY,
     terminal: (env) => Effect.succeed(terminalFrom(env)),
   },
   effect: (context) =>

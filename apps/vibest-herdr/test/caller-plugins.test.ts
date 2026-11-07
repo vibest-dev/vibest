@@ -1,19 +1,23 @@
 import { assert, describe, it } from "@effect/vitest"
-import { callerHits, callerKeys } from "@vibest/core/caller"
+import { Bus } from "@vibest/core/bus"
+import { callerHits, callerKeys, OnCallerPlugins } from "@vibest/core/caller"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout } from "@vibest/core/paths"
-import { PluginLoader, type Candidate } from "@vibest/core/plugins"
+import { Builtins, PluginLoader, Plugins, type Candidate } from "@vibest/core/plugins"
+import { Runtimes } from "@vibest/core/runtimes"
+import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin"
 import type { Host } from "@vibest/server/daemon"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Logger, Path } from "effect"
 import { Command } from "effect/cli"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
 import { callerPlugins, command, mainPlace } from "../src/cli.ts"
 import { makeRepository } from "./fakes.ts"
 
-const runtime = (kind: string, priority: number, env: ReadonlyArray<string>): Candidate => ({
+const runtime = (kind: string, env: ReadonlyArray<string>): Candidate => ({
   source: kind,
   revision: "-",
   options: {},
@@ -22,7 +26,6 @@ const runtime = (kind: string, priority: number, env: ReadonlyArray<string>): Ca
     caller: {
       kind,
       env,
-      priority,
       terminal: (values) => Effect.succeed(env.map((key) => values[key]).join("/")),
     },
     effect: () => Effect.void,
@@ -30,9 +33,9 @@ const runtime = (kind: string, priority: number, env: ReadonlyArray<string>): Ca
 })
 
 const plugins = [
-  runtime("hc", 0, ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"]),
-  runtime("herdr", 1, ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"]),
-  runtime("rex", -1, ["REX_PANE"]),
+  runtime("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"]),
+  runtime("herdr", ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"]),
+  runtime("rex", ["REX_PANE"]),
 ]
 
 const ternSource = `import { Plugin } from "@vibest/plugin"
@@ -42,7 +45,6 @@ export default Plugin.define({
   caller: {
     kind: "tern",
     env: ["TERN_ID", "TERN_SOCK"],
-    priority: 2,
     terminal: () => Effect.succeed(undefined),
   },
   effect: () => Effect.void,
@@ -50,26 +52,10 @@ export default Plugin.define({
 `
 
 describe("caller plugins", () => {
-  it.effect("a third runtime plugin is selected by the priority it declares", () =>
+  it.effect("the first detected plugin in load order wins", () =>
     Effect.gen(function* () {
       const hits = yield* callerHits(plugins, {
         REX_PANE: "rex-9",
-        HC_TERMINAL_ID: "t1",
-        HC_TERMINAL_SOCKET: "/hc.sock",
-        HERDR_PANE_ID: "p1",
-        HERDR_SOCKET_PATH: "/herdr.sock",
-      })
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
-        in: "terminal",
-        runtime: "rex",
-        terminal: "rex-9",
-      })
-    }),
-  )
-
-  it.effect("without that plugin's environment the next declared priority wins", () =>
-    Effect.gen(function* () {
-      const hits = yield* callerHits(plugins, {
         HC_TERMINAL_ID: "t1",
         HC_TERMINAL_SOCKET: "/hc.sock",
         HERDR_PANE_ID: "p1",
@@ -83,25 +69,61 @@ describe("caller plugins", () => {
     }),
   )
 
+  it.effect("without an earlier plugin's environment the next one in load order wins", () =>
+    Effect.gen(function* () {
+      const hits = yield* callerHits(plugins, {
+        REX_PANE: "rex-9",
+        HERDR_PANE_ID: "p1",
+        HERDR_SOCKET_PATH: "/herdr.sock",
+      })
+      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+        in: "terminal",
+        runtime: "herdr",
+        terminal: "p1//herdr.sock",
+      })
+    }),
+  )
+
   it.effect("an empty declared variable is not that runtime", () =>
     Effect.gen(function* () {
       const hits = yield* callerHits(plugins, { REX_PANE: "", HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: "/hc.sock" })
-      assert.strictEqual(mainPlace({ marked: false, runtime: undefined, hits }).in === "terminal", true)
       const place = mainPlace({ marked: false, runtime: undefined, hits })
       assert.strictEqual(place.in === "terminal" ? place.runtime : "", "hc")
     }),
   )
 
-  it.effect("terminal() runs only for the priority winner, or the runtime --runtime names", () =>
+  it.effect("a caller without a string kind, an env array, and a terminal function is skipped", () =>
+    Effect.gen(function* () {
+      const loose = (id: string, caller: object): Candidate => ({
+        source: id,
+        revision: "-",
+        options: {},
+        plugin: Plugin.define({
+          id,
+          caller: caller as Plugin.Caller,
+          effect: () => Effect.void,
+        }),
+      })
+      const hits = yield* callerHits(
+        [
+          loose("no-kind", { env: ["TERN_ID"], terminal: () => Effect.succeed("t") }),
+          loose("bad-env", { kind: "tern", env: "TERN_ID", terminal: () => Effect.succeed("t") }),
+          loose("no-terminal", { kind: "tern", env: ["TERN_ID"] }),
+          runtime("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"]),
+        ],
+        { TERN_ID: "t9", HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: "/hc.sock" },
+      )
+      assert.deepStrictEqual(
+        hits.map((hit) => hit.kind),
+        ["hc"],
+      )
+    }),
+  )
+
+  it.effect("terminal() runs only for the first detected runtime, or the runtime --runtime names", () =>
     Effect.gen(function* () {
       const calls: Array<string> = []
-      const watch = (
-        kind: string,
-        priority: number,
-        env: ReadonlyArray<string>,
-        terminal: string,
-        fail = false,
-      ): Candidate => ({
+      const watch = (kind: string, env: ReadonlyArray<string>, terminal: string, fail = false): Candidate => ({
         source: kind,
         revision: "-",
         options: {},
@@ -110,7 +132,6 @@ describe("caller plugins", () => {
           caller: {
             kind,
             env,
-            priority,
             terminal: () => {
               calls.push(kind)
               return fail ? Effect.fail(`${kind} down`) : Effect.succeed(terminal)
@@ -127,8 +148,8 @@ describe("caller plugins", () => {
       }
       const hits = yield* callerHits(
         [
-          watch("hc", 0, ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"], "hc-term"),
-          watch("herdr", 1, ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"], "herdr-term", true),
+          watch("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"], "hc-term"),
+          watch("herdr", ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"], "herdr-term", true),
         ],
         env,
       )
@@ -141,8 +162,8 @@ describe("caller plugins", () => {
       calls.length = 0
       const named = yield* callerHits(
         [
-          watch("hc", 0, ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"], "hc-term", true),
-          watch("herdr", 1, ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"], "herdr-term"),
+          watch("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"], "hc-term", true),
+          watch("herdr", ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"], "herdr-term"),
         ],
         env,
         "herdr",
@@ -169,7 +190,7 @@ describe("caller plugins", () => {
         path.join(dir, "vibest.json"),
         '{ "runtime": "rex", "plugins": ["./tern.ts", "./not-a-plugin"] }\n',
       )
-      const hc = runtime("hc", 0, ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"])
+      const hc = runtime("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"])
       const loaded = yield* callerPlugins([hc]).pipe(
         Effect.provideService(PluginLoader, Platform.plugins),
         Effect.provide(Layer.effect(Layout, Layout.make(dir))),
@@ -210,4 +231,42 @@ describe("caller plugins", () => {
       Effect.provide(Platform.services),
     )
   })
+
+  it.live("a user runtime env key does not reach a process vibestd starts", () =>
+    Effect.gen(function* () {
+      const key = "VIBEST_USER_RUNTIME_ID"
+      const previous = process.env[key]
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env[key]
+          else process.env[key] = previous
+        }),
+      )
+      process.env[key] = "leaked"
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const base = path.join(import.meta.dirname, ".tmp")
+      yield* fs.makeDirectory(base, { recursive: true })
+      const dir = yield* fs.makeTempDirectoryScoped({ directory: base })
+      yield* fs.makeDirectory(path.join(dir, "plugins"))
+      const user = runtime("user", [key])
+      yield* Plugins.layer.pipe(
+        Layer.provide(Layer.succeed(PluginLoader, { ...Platform.plugins, prepare: Effect.void })),
+        Layer.provide(Layer.succeed(Builtins, [user])),
+        Layer.provide(Layer.succeed(OnCallerPlugins, Platform.daemon.clearCallerEnv)),
+        Layer.provide(Subscriptions.layer),
+        Layer.provide(Layer.effect(Layout, Layout.make(dir))),
+        Layer.provide(Runtimes.layer),
+        Layer.provide(Bus.layer),
+        Layer.build,
+      )
+      yield* Effect.gen(function* () {
+        while (process.env[key] !== undefined) yield* Effect.sleep("20 millis")
+      }).pipe(Effect.timeoutOrElse({ duration: "5 seconds", orElse: () => Effect.die("caller env was not dropped") }))
+      const out = yield* (yield* ChildProcessSpawner.ChildProcessSpawner).string(
+        ChildProcess.make("sh", ["-c", `printf %s "\${${key}-}"`]),
+      )
+      assert.strictEqual(out, "")
+    }).pipe(Effect.provide(Platform.services)),
+  )
 })

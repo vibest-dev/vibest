@@ -658,11 +658,16 @@ describe("where vibest starts the main agent", () => {
       "refused",
     )
   })
-  it("two detected runtimes follow the plugins' priority, and --runtime overrides", () => {
-    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: undefined, hits: [herdr, hc] }), {
+  it("two detected runtimes follow load order, and --runtime overrides", () => {
+    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: undefined, hits: [hc, herdr] }), {
       in: "terminal",
       runtime: "hc",
       terminal: hc.terminal,
+    })
+    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: undefined, hits: [herdr, hc] }), {
+      in: "terminal",
+      runtime: "herdr",
+      terminal: herdr.terminal,
     })
     assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: "herdr", hits: [herdr, hc] }), {
       in: "terminal",

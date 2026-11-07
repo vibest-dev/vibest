@@ -1,17 +1,28 @@
-import { Effect } from "effect"
+import { Context, Effect } from "effect"
 
 import type { Candidate } from "./plugin-sources.ts"
 
 export interface CallerHit {
   readonly kind: string
-  readonly priority: number
   readonly terminal: string | undefined
 }
+
+export const OnCallerPlugins = Context.Reference<(plugins: ReadonlyArray<Candidate>) => void>(
+  "vibest/OnCallerPlugins",
+  {
+    defaultValue: () => () => {},
+  },
+)
 
 const caller = (plugin: Candidate["plugin"]) => {
   if (!("effect" in plugin) || plugin.caller === undefined) return undefined
   const spec = plugin.caller
-  return typeof spec.terminal === "function" && Array.isArray(spec.env) ? spec : undefined
+  return typeof spec.kind === "string" &&
+    spec.kind !== "" &&
+    typeof spec.terminal === "function" &&
+    Array.isArray(spec.env)
+    ? spec
+    : undefined
 }
 
 export const callerKeys = (plugins: ReadonlyArray<Candidate>): ReadonlyArray<string> => [
@@ -32,20 +43,17 @@ export const callerHits = (
   Effect.gen(function* () {
     const matches: Array<{
       readonly kind: string
-      readonly priority: number
       readonly terminal: NonNullable<ReturnType<typeof caller>>["terminal"]
     }> = []
     for (const candidate of plugins) {
       const spec = caller(candidate.plugin)
       if (spec === undefined || !present(spec.env, env)) continue
-      matches.push({ kind: spec.kind, priority: spec.priority, terminal: spec.terminal })
+      matches.push({ kind: spec.kind, terminal: spec.terminal })
     }
-    const ranked = [...matches].sort((a, b) => a.priority - b.priority || a.kind.localeCompare(b.kind))
-    const chosen = runtime === undefined ? ranked[0] : ranked.find((hit) => hit.kind === runtime)
+    const chosen = runtime === undefined ? matches[0] : matches.find((hit) => hit.kind === runtime)
     const terminal = chosen === undefined ? undefined : yield* chosen.terminal(env)
-    return ranked.map((hit) => ({
+    return matches.map((hit) => ({
       kind: hit.kind,
-      priority: hit.priority,
       terminal: hit === chosen ? terminal : undefined,
     }))
   })

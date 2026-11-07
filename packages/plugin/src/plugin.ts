@@ -5,7 +5,6 @@ import type { Context } from "./index.ts"
 export interface Caller {
   readonly kind: string
   readonly env: ReadonlyArray<string>
-  readonly priority: number
   readonly terminal: (
     env: Readonly<Record<string, string | undefined>>,
   ) => Effect.Effect<string | undefined, unknown, never>

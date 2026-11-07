@@ -7,7 +7,7 @@ import { Context, Effect, FileSystem, Layer } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 
-import { CALLER_ENV, CALLER_PRIORITY, readyFrom, terminalFrom } from "./caller.ts"
+import { CALLER_ENV, readyFrom, terminalFrom } from "./caller.ts"
 import { HerdrPool } from "./pool.ts"
 import { KIND, fromPool } from "./terminal-runtime.ts"
 
@@ -26,7 +26,6 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   caller: {
     kind: KIND,
     env: CALLER_ENV,
-    priority: CALLER_PRIORITY,
     terminal: (env) => terminalFrom(env).pipe(Effect.provide(callerServices)),
     ready: (env) => readyFrom(env).pipe(Effect.provide(platform)),
     missing: "this pane's herdr session could not be named; run vibest outside herdr",

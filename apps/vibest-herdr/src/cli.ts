@@ -365,16 +365,12 @@ export type MainPlace =
   | { readonly in: "launch"; readonly runtime: string }
   | { readonly in: "refused"; readonly message: string }
 
-const byPriority = (hits: ReadonlyArray<CallerHit>) =>
-  [...hits].sort((a, b) => a.priority - b.priority || a.kind.localeCompare(b.kind))
-
 export const mainPlace = (o: {
   readonly marked: boolean
   readonly runtime: string | undefined
   readonly hits: ReadonlyArray<CallerHit>
 }): MainPlace => {
-  const ranked = byPriority(o.hits)
-  const named = (kind: string) => ranked.find((hit) => hit.kind === kind)
+  const named = (kind: string) => o.hits.find((hit) => hit.kind === kind)
   const here = (kind: string): MainPlace => {
     const hit = named(kind)
     if (hit === undefined)
@@ -396,7 +392,7 @@ export const mainPlace = (o: {
       ? { in: "refused", message: `this ${o.runtime} terminal could not be named` }
       : { in: "terminal", runtime: o.runtime, terminal: hit.terminal }
   }
-  const chosen = ranked[0]
+  const chosen = o.hits[0]
   if (chosen === undefined)
     return { in: "refused", message: "no runtime was detected in this environment; pass --runtime" }
   return chosen.terminal === undefined

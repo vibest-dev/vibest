@@ -16,6 +16,7 @@ import {
   Stream,
 } from "effect"
 
+import { OnCallerPlugins } from "./caller.ts"
 import { type Candidate, makeSources, makeWatcher, messageOf, PluginLoader } from "./plugin-sources.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
@@ -474,7 +475,10 @@ export class Plugins extends Context.Service<
           rewatched = true
           read = yield* sources.read
         }
-        yield* host.activate([...builtins, ...read.candidates])
+        const loaded = [...builtins, ...read.candidates]
+        yield* host.activate(loaded)
+        const clear = yield* OnCallerPlugins
+        clear(loaded)
         if (rewatched)
           yield* Effect.sleep(RECHECK).pipe(Effect.andThen(Effect.sync(() => notify())), Effect.forkIn(scope))
       }).pipe(Effect.catchCause((cause) => Effect.logError("plugins: reload failed", cause)))

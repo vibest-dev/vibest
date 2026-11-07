@@ -85,17 +85,20 @@ Several runtimes run at once, on any machine; core routes every call by the Agen
 product keeps one instance per machine (one herdr session `vibest`, one rex server, one tern daemon).
 
 - A runtime plugin declares `caller` on the plugin: its runtime `kind`, the environment variables its terminal sets,
-  a `priority`, and how to read the terminal from those values. The CLI and core only iterate the plugins they were
-  given for detection. They name no runtime kind, variable, or priority there, so another runtime plugin needs no
-  change to be detected. The machine target is still herdr's: `vibest` and `vibest run` take it from `callerMachine`
-  in `@vibest/runtime-herdr/caller`, and `--session` names a herdr session. Every declared
-  variable set and non-empty means vibest is inside that runtime. One match: that runtime. Several: the lowest
-  priority wins (hc is 0, herdr is 1). No process tree, tty match, ancestor walk, or detection RPC, and no fallback
-  to herdr or to whichever runtime is the only one online.
+  and how to read the terminal from those values. Plugins declare no priority; load order decides. The CLI and core
+  only iterate the plugins they were given for detection. They name no runtime kind or variable there, so another
+  runtime plugin needs no change to be detected. The machine target is still herdr's: `vibest` and `vibest run` take
+  it from `callerMachine` in `@vibest/runtime-herdr/caller`, and `--session` names a herdr session. Every declared
+  variable set and non-empty means vibest is inside that runtime. One match: that runtime. Several: the first in load
+  order wins. Builtins are fixed, herdr-core before herdr, then the plugins directory, then vibest.json in the order
+  written. No process tree, tty match, ancestor walk, or detection RPC, and no fallback to herdr or to whichever
+  runtime is the only one online. After vibestd loads plugins it drops every loaded caller variable from its own
+  environment, so a process it starts does not inherit a user runtime's variables. The CLI still starts vibestd
+  without the builtin caller variables.
 - The main agent (`vibest`) starts in that terminal. `vibest --runtime <kind>` overrides the detection and, when this
   terminal is not that runtime's, opens one there. None detected and no `--runtime`: refused, saying to pass
-  `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over a
-  stale higher-priority environment the shell inherited.
+  `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over
+  another runtime's variables the shell inherited.
 - A subagent (`vibest run`) takes `--runtime <kind>` on `Spawn`. Without it, it runs in its parent's runtime. The
   parent lookup includes the coordinator, because `getSession` leaves the live main row out. If that runtime is not
   online, the start fails with the runtime's reason. No other fallback. A user plugin on `agent.start.before` may

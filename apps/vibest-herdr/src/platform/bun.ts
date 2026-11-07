@@ -216,10 +216,14 @@ const lock: Host["lock"] = (file) =>
 
 const builtinPlugins: ReadonlyArray<Candidate> = [
   { source: "builtin:harness-choice", revision: "harness-choice", options: {}, plugin: harnessChoicePlugin },
-  { source: "builtin:runtime-herdr", revision: "runtime-herdr", options: {}, plugin: runtimeHerdrPlugin },
   { source: "builtin:runtime-herdr-core", revision: "runtime-herdr-core", options: {}, plugin: runtimeHcPlugin },
+  { source: "builtin:runtime-herdr", revision: "runtime-herdr", options: {}, plugin: runtimeHerdrPlugin },
   { source: "builtin:runtime-choice", revision: "runtime-choice", options: {}, plugin: choicePlugin() },
 ]
+
+const clearCallerEnv = (plugins: ReadonlyArray<Candidate>) => {
+  for (const key of callerKeys(plugins)) delete process.env[key]
+}
 
 export const services = Layer.mergeAll(platform, Layer.succeed(CallerEnv, callerKeys(builtinPlugins)))
 
@@ -229,6 +233,7 @@ export const daemon: Omit<Host, "runtime"> = {
   httpServer: (path) => BunHttpServer.layerServer({ unix: path }),
   plugins,
   builtinPlugins,
+  clearCallerEnv,
   processes,
   keychain,
   lock,
