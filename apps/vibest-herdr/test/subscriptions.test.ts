@@ -9,7 +9,19 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin"
 import * as Server from "@vibest/server/server"
-import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
+import {
+  ByteSize,
+  ConfigProvider,
+  Context,
+  Effect,
+  Fiber,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  Path,
+  Stream,
+} from "effect"
 import { Sink } from "effect"
 import { Headers, HttpClient, HttpClientResponse } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
@@ -130,6 +142,26 @@ const home = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   return yield* fs.makeTempDirectoryScoped({ prefix: "vibest-subs-" })
 }).pipe(Effect.provide(Platform.services), Effect.orDie)
+
+const clockSafeKeychain = FileSystem.makeNoop({
+  stat: () =>
+    Effect.succeed({
+      type: "File",
+      mtime: Option.none(),
+      atime: Option.none(),
+      birthtime: Option.none(),
+      dev: 0,
+      ino: Option.none(),
+      mode: 0,
+      nlink: Option.none(),
+      uid: Option.none(),
+      gid: Option.none(),
+      rdev: Option.none(),
+      size: ByteSize.zero,
+      blksize: Option.none(),
+      blocks: Option.none(),
+    }),
+})
 
 describe("subscription polls and vibest subscriptions over fake CLIs, keychain and HTTP: nothing touches the network", () => {
   it.effect("an expired or missing token skips the endpoint and keeps the last limits", () =>
@@ -359,9 +391,15 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
 
   it.effect("a failed GetHardLimit is an error and does not mark Cursor limited", () =>
     Effect.gen(function* () {
+      const dir = yield* home
+      yield* Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        yield* fs.makeDirectory(`${dir}/Library/Keychains`, { recursive: true })
+        yield* fs.writeFileString(`${dir}/Library/Keychains/login.keychain-db`, "fake keychain; no real CLI")
+      }).pipe(Effect.provide(Platform.services))
       const fake = fakeMachine({
         installed: ["cursor"],
-        home: yield* home,
+        home: dir,
         commands: {
           "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
           "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
@@ -416,7 +454,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           yield* TestClock.adjust("10 seconds")
           yield* Fiber.join(pending)
           return (yield* subs.list).find((entry) => entry.harness === "cursor")!
-        }),
+        }).pipe(Effect.provideService(FileSystem.FileSystem, clockSafeKeychain)),
       )
       assert.include(row.error ?? "", "GetHardLimit answered 500")
       assert.include(row.error ?? "", "usage endpoint failed")
