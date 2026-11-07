@@ -16,6 +16,7 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Logger,
   Path,
   Schedule,
   Scope,
@@ -577,6 +578,28 @@ describe("plugins: supervisor", () => {
       assert.strictEqual(watchers.open - before, 2, "x/ is no longer watched")
       yield* Scope.close(scope, Exit.void)
       assert.strictEqual(watchers.open, before, "vibestd's end closes every watcher")
+    }),
+  )
+
+  live(
+    "an old runtime key warns once and is otherwise ignored",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* packageHome
+      const logs: Array<string> = []
+      yield* fs.writeFileString(path.join(dir, "vibest.json"), '{ "runtime": "hc", "plugins": [] }\n')
+      const plugins = yield* supervise(dir).pipe(
+        Effect.provide(Logger.layer([Logger.make((entry) => void logs.push(String(entry.message)))])),
+      )
+      assert.strictEqual((yield* plugins.start(event)).runtime, undefined)
+      const warnings = () => logs.filter((line) => line.includes('"runtime" is ignored'))
+      assert.strictEqual(warnings().length, 1)
+      const reads = vibestJsonReads.count
+      yield* fs.writeFileString(path.join(dir, "vibest.json"), '{ "runtime": "herdr", "plugins": [] }\n')
+      yield* pastRescan
+      assert.isAbove(vibestJsonReads.count, reads)
+      assert.strictEqual(warnings().length, 1)
     }),
   )
 

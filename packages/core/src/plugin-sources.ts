@@ -76,6 +76,7 @@ export const makeSources = Effect.fnUntraced(function* (timeout: Duration.Input)
   const loader = yield* PluginLoader
   const imported = new Map<string, Imported>()
   let lastConfig: ConfigFile = { plugins: [] }
+  let warnedConfiguredRuntime = false
 
   const sha = (bytes: Uint8Array) => crypto.digest("SHA-256", bytes).pipe(Effect.map(Hex.encode))
   const utf8 = (s: string) => new TextEncoder().encode(s)
@@ -192,6 +193,20 @@ export const makeSources = Effect.fnUntraced(function* (timeout: Duration.Input)
     const text = yield* fs.readFileString(layout.config).pipe(Effect.option)
     if (Option.isNone(text)) return (lastConfig = { plugins: [] })
     return yield* Effect.try(() => loader.parseJsonc(text.value)).pipe(
+      Effect.tap((raw) =>
+        Effect.gen(function* () {
+          const configured =
+            raw !== null &&
+            typeof raw === "object" &&
+            "runtime" in raw &&
+            (raw as { readonly runtime?: unknown }).runtime !== undefined
+          if (!configured || warnedConfiguredRuntime) return
+          warnedConfiguredRuntime = true
+          yield* Effect.logWarning(
+            `${layout.config}: "runtime" is ignored; run vibest in the runtime's terminal, or pass --runtime`,
+          )
+        }),
+      ),
       Effect.flatMap(Schema.decodeUnknownEffect(ConfigFile)),
       Effect.tap((config) => Effect.sync(() => (lastConfig = config))),
       Effect.tapError((e) =>
