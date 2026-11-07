@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "./check.ts"
-import { cached, cacheKeys, remember } from "./runner/cache.ts"
+import { cached, cacheKeys, rememberPasses } from "./runner/cache.ts"
 import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
 import { lastMs, pool, saveMs } from "./runner/pool.ts"
 import daemon from "./scenarios/daemon.ts"
@@ -179,8 +179,6 @@ for (const c of selected.filter((c) => results.get(c.id)?.outcome === "fail")) {
 }
 const ordered = selected.map((c) => results.get(c.id)!)
 await saveMs(Object.fromEntries(ordered.filter((r) => r.outcome === "pass").map((r) => [r.id, r.ms])))
-for (const c of selected)
-  if (cacheable(c) && results.get(c.id)?.outcome === "pass") await remember(keys.get(c.id)!, c.id)
 
 const changed = changedUserFiles(userFilesBefore, await userFileHashes())
 const typedIntoHistory = await historyNaming(worlds)
@@ -202,6 +200,12 @@ const invariants = [
   ...(leaked.length ? [`evidence holds a user model, provider or account value: ${leaked.join(", ")}`] : []),
 ]
 for (const line of invariants) console.log(`FAIL ${line}`)
+await rememberPasses(
+  selected
+    .filter((c) => cacheable(c) && results.get(c.id)?.outcome === "pass")
+    .map((c) => ({ key: keys.get(c.id)!, id: c.id })),
+  invariants,
+)
 await fs.writeFile(
   path.join(evidence, "report.json"),
   redact(

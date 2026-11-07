@@ -27,6 +27,7 @@ import {
   until,
   vibestTyped,
   type World,
+  writeEvidence,
 } from "../world.ts"
 
 type Entry = { id: string; agent: string }
@@ -790,7 +791,7 @@ const checks: ReadonlyArray<Check> = [
           turnEndToDeliveringMs: stats(delivery),
           paneCloseToProcessEndMs: stats(closes),
         }
-        await fs.writeFile(path.join(evidence, "latency.json"), `${JSON.stringify(out, null, 2)}\n`)
+        await writeEvidence(path.join(evidence, "latency.json"), `${JSON.stringify(out, null, 2)}\n`)
         console.log(`S26 ${JSON.stringify(out)}`)
       } finally {
         model.stop()

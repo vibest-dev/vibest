@@ -14,7 +14,19 @@ import {
   subagentFolder,
   text,
 } from "../fake-model.ts"
-import { agentName, compiled, expect, harnesses, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import {
+  agentName,
+  compiled,
+  expect,
+  harnesses,
+  herdr,
+  row,
+  SESSIONS,
+  Skip,
+  until,
+  type World,
+  writeEvidence,
+} from "../world.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
@@ -312,7 +324,7 @@ const checks: ReadonlyArray<Check> = [
           const tried = (await Promise.all(files.map((f) => fs.readFile(path.join(transcripts, f), "utf8")))).some(
             (t) => /"tool_use".*herdr pane list/.test(t),
           )
-          await fs.writeFile(path.join(evidence, "I5-herdr-call.json"), `${JSON.stringify({ tried, transcripts })}\n`)
+          await writeEvidence(path.join(evidence, "I5-herdr-call.json"), `${JSON.stringify({ tried, transcripts })}\n`)
           expect(/<status>completed<\/status>/.test(message), message)
           expect(
             /<harness>cursor<\/harness>/.test(message) && /<result>[\s\S]*\bpong\b[\s\S]*<\/result>/.test(message),

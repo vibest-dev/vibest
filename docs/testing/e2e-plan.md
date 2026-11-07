@@ -85,8 +85,9 @@ and `integration stop` ends cleanly. Pi only: the coordinator TUI (tool groups, 
 
 - **Pool.** Checks run in parallel in a pool shared by every worktree and every `pnpm e2e` on the machine: its slots are
   lock files under `<git-common-dir>/vibest-e2e/slots`, CPU count − 2 of them, and a check starts only while the one-minute
-  load average is below the CPU count (one always runs when no slot is busy). `--jobs N` sets N slots and drops the load
-  gate. Checks start longest first, by the duration each last took (`vibest-e2e/timings.json`).
+  load average is below the CPU count (one always runs when no slot is busy). `--jobs N` runs ungated: N checks at a
+  time, with no load gate, ignoring the machine cap (it never waits for slots other runs hold). Checks start longest
+  first, by the duration each last took (`vibest-e2e/timings.json`).
 - **Flaky under load.** A failed check is run again alone. If it then passes it is reported `flaky-under-load`, which
   still fails the run.
 - **Tiers.** `gate` (the default), `slow` (S18-slow, herdr's full 120 s window) and `agent` (I5: a real model; an agent

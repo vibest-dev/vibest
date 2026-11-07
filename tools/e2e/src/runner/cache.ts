@@ -103,7 +103,12 @@ export const cached = (key: string) =>
     () => false,
   )
 
-export const remember = async (key: string, id: string) => {
-  await fs.mkdir(dir, { recursive: true })
-  await fs.writeFile(path.join(dir, key), `${id}\n`)
+export const rememberPasses = async (
+  passes: ReadonlyArray<{ readonly key: string; readonly id: string }>,
+  invariants: ReadonlyArray<string>,
+  into = dir,
+) => {
+  if (invariants.length > 0) return
+  await fs.mkdir(into, { recursive: true })
+  for (const { key, id } of passes) await fs.writeFile(path.join(into, key), `${id}\n`)
 }

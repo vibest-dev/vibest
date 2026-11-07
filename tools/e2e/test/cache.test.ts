@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { cacheKeys, scenario, writtenByHarness } from "../src/runner/cache.ts"
+import { cacheKeys, rememberPasses, scenario, writtenByHarness } from "../src/runner/cache.ts"
 
 const temp = () => fs.mkdtemp(path.join(os.tmpdir(), "vbe-cache-test-"))
 
@@ -62,4 +62,16 @@ describe("cache key", () => {
     )("daemon", "D1")
     expect(after).not.toBe(before)
   }, 60_000)
+
+  test("a run whose invariants failed caches none of its passes", async () => {
+    const into = path.join(await temp(), "cache")
+    const passes = [
+      { key: "k1", id: "D1" },
+      { key: "k2", id: "S1" },
+    ]
+    await rememberPasses(passes, ["evidence holds a user model, provider or account value: H1.json"], into)
+    expect(await fs.readdir(into).catch(() => [])).toEqual([])
+    await rememberPasses(passes, [], into)
+    expect((await fs.readdir(into)).sort()).toEqual(["k1", "k2"])
+  })
 })

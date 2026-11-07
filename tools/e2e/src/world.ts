@@ -394,6 +394,22 @@ export const redactWith = (text: string, exact: ReadonlyArray<string>, words: Re
 
 export const redact = (text: string) => redactWith(text, secrets(), privateValues)
 
+export const writeEvidence = (file: string, text: string) => fsPromises.writeFile(file, redact(text))
+
+export const copyEvidence = async (from: string, to: string, words: ReadonlyArray<string> = privateValues) => {
+  for (const e of await fsPromises.readdir(from, { recursive: true, withFileTypes: true })) {
+    if (!e.isFile()) continue
+    const source = path.join(e.parentPath, e.name)
+    const target = path.join(to, path.relative(from, source))
+    await fsPromises.mkdir(path.dirname(target), { recursive: true })
+    await fsPromises.writeFile(
+      target,
+      redactWith(await fsPromises.readFile(source, "latin1"), secrets(), words),
+      "latin1",
+    )
+  }
+}
+
 export const knownSessions = async (
   w: World,
   sessions: Record<string, string>,
