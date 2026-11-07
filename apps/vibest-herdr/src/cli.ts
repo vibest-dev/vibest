@@ -28,11 +28,12 @@ import * as HcCaller from "@vibest/runtime-herdr-core/caller"
 import { KIND as HC_KIND } from "@vibest/runtime-herdr-core/terminal-runtime"
 import {
   CALLER_ENV as HERDR_CALLER_ENV,
+  CALLER_PRIORITY as HERDR_PRIORITY,
   ambientHerdr,
   callerMachine,
   callerTerminal,
-  inPane,
 } from "@vibest/runtime-herdr/caller"
+import { KIND as HERDR_KIND } from "@vibest/runtime-herdr/terminal-runtime"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
@@ -343,41 +344,83 @@ const mainFlags = {
   ),
   runtime: Flag.String("runtime").pipe(
     Flag.withDescription(
-      "The terminal runtime the main agent runs in (a kind from `vibest status`; default: the choice plugin's)",
+      "The terminal runtime the main agent runs in. Overrides the runtime this terminal's environment detects; required when none is detected",
     ),
     Flag.optional,
   ),
   inParent: Flag.String("in-parent").pipe(Flag.withHidden, Flag.optional),
 }
 
+export type CallerHit = {
+  readonly kind: string
+  readonly priority: number
+  readonly terminal: string | undefined
+}
+
 export type MainPlace =
-  | { readonly in: "hc"; readonly terminal: string }
-  | { readonly in: "caller" }
-  | { readonly in: "launch" }
+  | { readonly in: "terminal"; readonly runtime: string; readonly terminal: string }
+  | { readonly in: "launch"; readonly runtime: string }
   | { readonly in: "refused"; readonly message: string }
+
+const byPriority = (hits: ReadonlyArray<CallerHit>) =>
+  [...hits].sort((a, b) => a.priority - b.priority || a.kind.localeCompare(b.kind))
 
 export const mainPlace = (o: {
   readonly marked: boolean
   readonly runtime: string | undefined
-  readonly hcTerminal: string | undefined
-  readonly herdrPane: boolean
+  readonly hits: ReadonlyArray<CallerHit>
 }): MainPlace => {
-  if (o.marked) {
-    if (o.runtime !== HC_KIND) return { in: "caller" }
-    return o.hcTerminal !== undefined
-      ? { in: "hc", terminal: o.hcTerminal }
-      : { in: "refused", message: "vibestd opened this terminal in herdr-core, but it carries no HC_TERMINAL_ID" }
+  const ranked = byPriority(o.hits)
+  const named = (kind: string) => ranked.find((hit) => hit.kind === kind)
+  const here = (kind: string): MainPlace => {
+    const hit = named(kind)
+    if (hit === undefined)
+      return {
+        in: "refused",
+        message: `vibestd opened this terminal in ${kind}, but that runtime's environment is not set`,
+      }
+    if (hit.terminal === undefined) return { in: "refused", message: `this ${kind} terminal could not be named` }
+    return { in: "terminal", runtime: kind, terminal: hit.terminal }
   }
-  if (o.runtime === undefined && o.hcTerminal !== undefined && o.herdrPane)
-    return {
-      in: "refused",
-      message:
-        "this terminal carries both herdr-core's HC_TERMINAL_ID and herdr's HERDR_PANE_ID, so vibest cannot tell which one runs it; say which with --runtime hc or --runtime herdr",
-    }
-  if ((o.runtime === undefined || o.runtime === HC_KIND) && o.hcTerminal !== undefined)
-    return { in: "hc", terminal: o.hcTerminal }
-  return o.herdrPane ? { in: "caller" } : { in: "launch" }
+  if (o.marked)
+    return o.runtime === undefined
+      ? { in: "refused", message: "vibestd opened this terminal without naming its runtime" }
+      : here(o.runtime)
+  if (o.runtime !== undefined) {
+    const hit = named(o.runtime)
+    if (hit === undefined) return { in: "launch", runtime: o.runtime }
+    return hit.terminal === undefined
+      ? { in: "refused", message: `this ${o.runtime} terminal could not be named` }
+      : { in: "terminal", runtime: o.runtime, terminal: hit.terminal }
+  }
+  const chosen = ranked[0]
+  if (chosen === undefined)
+    return { in: "refused", message: "no runtime was detected in this environment; pass --runtime" }
+  return chosen.terminal === undefined
+    ? {
+        in: "refused",
+        message: `${chosen.kind} is detected in this environment, but its terminal could not be named; pass --runtime`,
+      }
+    : { in: "terminal", runtime: chosen.kind, terminal: chosen.terminal }
 }
+
+const envPresent = (keys: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    for (const key of keys) {
+      const value = Option.getOrUndefined(yield* Config.option(Config.String(key)))
+      if (value === undefined || value === "") return false
+    }
+    return true
+  })
+
+const callerHits = Effect.gen(function* () {
+  const hits: Array<CallerHit> = []
+  if (yield* envPresent(HcCaller.CALLER_ENV))
+    hits.push({ kind: HC_KIND, priority: HcCaller.CALLER_PRIORITY, terminal: yield* HcCaller.callerTerminal })
+  if (yield* envPresent(HERDR_CALLER_ENV))
+    hits.push({ kind: HERDR_KIND, priority: HERDR_PRIORITY, terminal: yield* callerTerminal })
+  return hits
+})
 
 const startMain =
   (exec: Exec) =>
@@ -417,28 +460,29 @@ const startMain =
         ...(o.fresh ? ["--new"] : []),
       ]
       const marked = Option.contains(o.inParent, root)
-      const place = mainPlace({
-        marked,
-        runtime: runtimeKind,
-        hcTerminal: yield* HcCaller.callerTerminal,
-        herdrPane: yield* inPane,
+      const foreignSession = Option.match(o.session, {
+        onNone: () => undefined,
+        onSome: (name) =>
+          new LaunchFailed({
+            message: `--session ${name} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
+          }),
       })
+      if (marked && foreignSession !== undefined) return yield* foreignSession
+      if (marked && (yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
+      const place = mainPlace({ marked, runtime: runtimeKind, hits: yield* callerHits })
       if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
-      const inHc = place.in === "hc" ? place.terminal : undefined
-      const here = !marked && place.in === "caller" ? yield* ambientHerdr : undefined
       const machine = yield* callerMachine(Option.getOrUndefined(o.session))
-      const inPlace = marked || inHc !== undefined || here !== undefined
-      if (inPlace) {
-        if (Option.isSome(o.session))
-          return yield* new LaunchFailed({
-            message: `--session ${o.session.value} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
-          })
+      if (place.in === "terminal") {
+        if (foreignSession !== undefined) return yield* foreignSession
+        if (!marked && place.runtime === HERDR_KIND) {
+          const here = yield* ambientHerdr
+          if (here === undefined)
+            return yield* new LaunchFailed({
+              message: "this pane's herdr session could not be named; run vibest outside herdr",
+            })
+        }
         if ((yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
-        const terminal = inHc ?? (yield* callerTerminal)
-        if (terminal === undefined)
-          return yield* new LaunchFailed({
-            message: "this pane's herdr session could not be named; run vibest outside herdr",
-          })
+        const terminal = place.terminal
         if (!(yield* probe((yield* Layout).socket))) yield* startDaemon
         const claim = (yield* caller).claim
         const chosen = yield* withVibest(claim, (client) =>
@@ -446,7 +490,7 @@ const startMain =
             harness,
             provider,
             model,
-            runtime: inHc !== undefined ? HC_KIND : runtimeKind,
+            runtime: place.runtime,
           }),
         )
         if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`main agent: ${describeSpawn(chosen)}`)
@@ -481,17 +525,16 @@ const startMain =
         }).pipe(Effect.provide(Harness.layer))
         return yield* Effect.sync(() => exec(main.file, main.args, { ...passed, ...main.env }))
       }
-      const inHerdr = here !== undefined
       const opened = yield* withVibest((yield* caller).claim, (client) =>
         client.Launch({
           argv: again,
-          focus: inHerdr || !o.headless,
+          focus: !o.headless,
           machine,
-          ...(runtimeKind !== undefined ? { runtime: runtimeKind } : {}),
+          runtime: place.runtime,
         }),
       )
       yield* Console.log(`the main agent is starting in ${opened.place}`)
-      if (inHerdr || o.headless || !opened.attach) return
+      if (o.headless || !opened.attach) return
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const [file, ...args] = opened.attach
       yield* spawner.exitCode(

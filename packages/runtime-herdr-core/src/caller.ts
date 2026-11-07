@@ -3,6 +3,7 @@ import { Config, Effect, Option } from "effect"
 import { terminalId } from "./terminal-runtime.ts"
 
 export const CALLER_ENV = ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"] as const
+export const CALLER_PRIORITY = 0
 
 const env = (name: string) =>
   Config.option(Config.String(name)).pipe(

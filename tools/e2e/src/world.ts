@@ -178,11 +178,20 @@ export class World {
   }
 
   withSession(args: ReadonlyArray<string>): ReadonlyArray<string> {
-    if (args.includes("--session")) return args
-    if (args[0] === "run") return ["run", "--session", this.herdrSession, ...args.slice(1)]
-    if (args.length === 0 || (args[0]!.startsWith("-") && args[0] !== "--version" && args[0] !== "--help"))
-      return ["--session", this.herdrSession, ...args]
-    return args
+    const launch =
+      args[0] === "run" ||
+      args.length === 0 ||
+      (args[0]!.startsWith("-") && args[0] !== "--version" && args[0] !== "--help")
+    if (!launch) return args
+    const sessioned = args.includes("--session")
+      ? args
+      : args[0] === "run"
+        ? ["run", "--session", this.herdrSession, ...args.slice(1)]
+        : ["--session", this.herdrSession, ...args]
+    if (sessioned.includes("--runtime")) return sessioned
+    return sessioned[0] === "run"
+      ? ["run", "--runtime", "herdr", ...sessioned.slice(1)]
+      : ["--runtime", "herdr", ...sessioned]
   }
 
   vibest(

@@ -15,6 +15,7 @@ export const callerMachine = (named?: string) =>
   callerLocation(named).pipe(Effect.map((location) => ({ id: "local", target: encodeTarget(location) })))
 
 export const CALLER_ENV = ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"] as const
+export const CALLER_PRIORITY = 1
 
 const SessionList = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
