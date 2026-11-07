@@ -78,11 +78,12 @@ export const acquire = async (
   gated: boolean,
   dir = slots,
   cap = machineSlots,
+  admitsMore = loadAdmitsMore,
 ): Promise<() => Promise<void>> => {
   await fs.mkdir(dir, { recursive: true })
   for (;;) {
     const busy = await taken(dir)
-    if (!gated || busy === 0 || (busy < cap && loadAdmitsMore()))
+    if (!gated || busy === 0 || (busy < cap && admitsMore()))
       for (let k = 0; k <= busy; k++)
         if (await claim(dir, String(k), `${process.pid} ${id}`))
           return () => fs.rm(path.join(dir, String(k)), { force: true })

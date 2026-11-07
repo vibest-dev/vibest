@@ -43,9 +43,10 @@ describe("slot pool", () => {
   test("a gated run waits while the machine's slots are full, whatever cap the other runs used", async () => {
     const dir = await temp()
     for (const n of ["0", "1", "5"]) await fs.writeFile(path.join(dir, n), `${process.pid} OTHER`)
-    expect(await within(acquire("G", true, dir, 3), 600)).toBe(false)
+    const idle = () => true
+    expect(await within(acquire("G", true, dir, 3, idle), 600)).toBe(false)
     await fs.rm(path.join(dir, "5"))
-    const release = await acquire("G", true, dir, 3)
+    const release = await acquire("G", true, dir, 3, idle)
     expect(await fs.readFile(path.join(dir, "2"), "utf8")).toBe(`${process.pid} G`)
     await release()
   })
