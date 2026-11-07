@@ -6,7 +6,8 @@
     "requests": true,
     "watch": true,
     "projects": true,
-    "harnesses": true
+    "harnesses": true,
+    "spawnRuntime": true
   },
   "methods": {
     "Agents.Outdated": {
@@ -8996,6 +8997,16 @@
             "anyOf": [
               {
                 "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string"
               },
               {
                 "type": "null"

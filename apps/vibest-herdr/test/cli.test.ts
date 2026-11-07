@@ -55,7 +55,7 @@ describe("vibest CLI", () => {
         vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args, stdin)
 
       const task = `it's "$HOME" and \`x\`\nsecond line`
-      const spawned = yield* run(["run", "pi", "-"], task)
+      const spawned = yield* run(["run", "--runtime", "herdr", "pi", "-"], task)
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = decodeJson(spawned.stdout) as { id: string }
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
@@ -107,7 +107,9 @@ describe("vibest CLI", () => {
       assert.strictEqual((yield* run(["frobnicate"])).code, 2)
       assert.strictEqual((yield* run(["status", id])).code, 2)
 
-      const { id: other } = decodeJson((yield* run(["run", "pi", "-"], "other")).stdout) as { id: string }
+      const { id: other } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "-"], "other")).stdout) as {
+        id: string
+      }
       yield* until(db.getSession(other), (w) => w?.turnState === "open")
       yield* db.updateSession(id, { status: "unknown", exitedAt: 1 })
       const ids = (args: ReadonlyArray<string>) =>
@@ -134,7 +136,9 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const { id } = decodeJson((yield* vibest(repo, cli, ["run", "pi", "do it"])).stdout) as { id: string }
+      const { id } = decodeJson((yield* vibest(repo, cli, ["run", "--runtime", "herdr", "pi", "do it"])).stdout) as {
+        id: string
+      }
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       const asSession = (sessionId: string, args: ReadonlyArray<string>) =>
         Effect.flatMap(db.sessionIdentity(sessionId), (row) =>
@@ -291,7 +295,7 @@ describe("vibest CLI", () => {
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
       const run = (args: ReadonlyArray<string>) => vibest(repo, cli, args)
-      const { id } = decodeJson((yield* run(["run", "pi", "do it"])).stdout) as { id: string }
+      const { id } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "do it"])).stdout) as { id: string }
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       const reported = yield* vibest(
         repo,
@@ -340,7 +344,15 @@ describe("vibest CLI", () => {
       const secret = "probe-value-9f3c"
       const run = (args: ReadonlyArray<string>) =>
         vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home, VIBEST_NO_UPDATE_CHECK: "1" }, args)
-      const started = yield* run(["--harness", "pi", "--headless", "--env", "MAIN_PROBE=" + secret])
+      const started = yield* run([
+        "--runtime",
+        "herdr",
+        "--harness",
+        "pi",
+        "--headless",
+        "--env",
+        "MAIN_PROBE=" + secret,
+      ])
       assert.strictEqual(started.code, 0, started.stderr)
       assert.notInclude(started.stdout, secret)
       assert.notInclude(started.stderr, secret)
@@ -574,6 +586,78 @@ describe("vibest CLI without vibestd", () => {
         assert.strictEqual(r.code, 1, r.stdout)
         assert.lengthOf(d.sends, 1)
         assert.isUndefined(d.sends[0]!.request)
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
+
+  const spawnProbe = (capabilities: Record<string, boolean>, args: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const home = yield* tempDirectory("vibest-spawn-runtime-")
+      const calls: Array<{ method: string | undefined; params: { runtime?: string } | undefined }> = []
+      const server = net.createServer((sock) => {
+        let buf = ""
+        sock.on("data", (chunk) => {
+          buf += chunk.toString()
+          for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
+            const req = JSON.parse(buf.slice(0, nl)) as {
+              id?: string
+              method?: string
+              params?: { runtime?: string }
+            }
+            buf = buf.slice(nl + 1)
+            calls.push({ method: req.method, params: req.params })
+            const reply = (body: object) => sock.write(JSON.stringify({ jsonrpc: "2.0", id: req.id, ...body }) + "\n")
+            if (req.method === "Ping")
+              reply({ result: { protocol: PROTOCOL, version: VERSION, runtimes: [], capabilities } })
+            else if (req.method === "Spawn")
+              reply({
+                result: {
+                  id: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
+                  harness: "pi",
+                  decidedBy: {},
+                  trace: [],
+                },
+              })
+          }
+        })
+      })
+      yield* Effect.acquireRelease(
+        Effect.callback<void>((resume) => void server.listen(`${home}/vibest.sock`, () => resume(Effect.void))),
+        () => Effect.sync(() => server.close()),
+      )
+      return { calls, run: vibest(home, { HOME: home, VIBEST_HOME: home }, args) }
+    })
+
+  it.effect(
+    "vibest run --runtime is refused when vibestd has no spawnRuntime capability, and is sent when it does",
+    () =>
+      Effect.gen(function* () {
+        const missing = yield* spawnProbe({ http: true, handoff: true, requests: true, watch: true }, [
+          "run",
+          "--runtime",
+          "herdr",
+          "pi",
+          "do it",
+        ])
+        const refused = yield* missing.run
+        assert.notStrictEqual(refused.code, 0, refused.stdout)
+        assert.match(refused.stderr, /does not take --runtime/)
+        assert.notInclude(
+          missing.calls.map((call) => call.method),
+          "Spawn",
+        )
+        const plain = yield* spawnProbe({ http: true, handoff: true, requests: true, watch: true }, [
+          "run",
+          "pi",
+          "do it",
+        ])
+        const spawned = yield* plain.run
+        assert.strictEqual(spawned.code, 0, spawned.stderr)
+        assert.strictEqual(plain.calls.find((call) => call.method === "Spawn")?.params?.runtime ?? null, null)
+        const capable = yield* spawnProbe({ spawnRuntime: true }, ["run", "--runtime", "herdr", "pi", "do it"])
+        const accepted = yield* capable.run
+        assert.strictEqual(accepted.code, 0, accepted.stderr)
+        assert.strictEqual(capable.calls.find((call) => call.method === "Spawn")?.params?.runtime, "herdr")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     TIMEOUT,
   )

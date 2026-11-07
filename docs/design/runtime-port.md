@@ -85,14 +85,30 @@ without a `close`, and `process` on it reports `running: false`, then `not_found
 Several runtimes run at once, on any machine; core routes every call by the Agent's own `runtime.kind`. Each runtime
 product keeps one instance per machine (one herdr session `vibest`, one rex server, one tern daemon).
 
-- Each Agent gets its runtime in `agent.start.before` (`event.runtime`, beside `machine` and `harness`). The builtin
-  plugin: the parent's runtime when it is online on the chosen machine (the subagent opens beside its parent), else
-  the configured `runtime`, else herdr, else the only one online. Core checks after the chain: that runtime online on
-  that machine, else refuses with the reason. A runtime a caller or another plugin already set (`vibest
-  --runtime`, a user plugin) stands. The configured `runtime` is vibest.json's top-level key, read by the product on
-  every start (an edit applies to the next one) and handed to the plugin, which ships with the herdr product.
-- The main Agent: `vibest --runtime <kind>`, else the configured `runtime`, else herdr, else the only one online.
-- None online: refused, listing each runtime and why. vibest never installs a runtime locally.
+- A runtime plugin declares `caller` on the plugin: its runtime `kind`, the environment variables its terminal sets,
+  and how to read the terminal from those values. Plugins declare no priority; load order decides. The CLI and core
+  only iterate the plugins they were given for detection. They name no runtime kind or variable there, so another
+  runtime plugin needs no change to be detected. The machine target is still herdr's: `vibest` and `vibest run` take
+  it from `callerMachine` in `@vibest/runtime-herdr/caller`, and `--session` names a herdr session. Every declared
+  variable set and non-empty means vibest is inside that runtime. One match: that runtime. Several: the first in load
+  order wins. Builtins are fixed, herdr-core before herdr, then the plugins directory, then vibest.json in the order
+  written. No process tree, tty match, ancestor walk, or detection RPC, and no fallback to herdr or to whichever
+  runtime is the only one online. After vibestd loads plugins it drops every loaded caller variable from its own
+  environment, so a process it starts does not inherit a user runtime's variables. The CLI still starts vibestd
+  without the builtin caller variables. A plugin cannot read its own caller variables inside vibestd, because
+  those are removed; it connects through another variable, as hc uses `HC_SOCKET` rather than `HC_TERMINAL_SOCKET`.
+- The main agent (`vibest`) starts in that terminal. `vibest --runtime <kind>` overrides the detection and, when this
+  terminal is not that runtime's, opens one there. None detected and no `--runtime`: refused, saying to pass
+  `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over
+  another runtime's variables the shell inherited.
+- A subagent (`vibest run`) takes `--runtime <kind>` on `Spawn`. Without it, it runs in its parent's runtime. The
+  parent lookup includes the coordinator, because `getSession` leaves the live main row out. If that runtime is not
+  online, the start fails with the runtime's reason. No other fallback. A user plugin on `agent.start.before` may
+  still set `event.runtime`. A runtime already set stands.
+- vibest.json's `runtime` key is not a choice. The first time vibestd reads a file that still has it, it warns once
+  and ignores the key.
+- Core checks after the chain: the chosen runtime online on that machine, else refuses with the reason. vibest never
+  installs a runtime locally.
 
 ## 5. Agent state, one direction
 
@@ -139,14 +155,12 @@ it tests terminal reports, not exit-event recovery. Raw output and timestamped i
 evidence files, never the runner terminal. Claude ignores keys at its first dialog draw; the check waits for
 visible dialog text, pauses, reads it again, then answers only the scratch action.
 
-Coordinator coverage is blocked until herdr-core caller detection lands: the CLI caller detector still requires herdr
-identity even when a different runtime opened its terminal. Do not forge that identity in E2E. Once native HC
-caller detection lands, add this check: launch a real Claude and Pi coordinator through built `vibest --harness
-<harness> --runtime hc --headless` in the isolated core; hold its fake model and assert native working, complete
-it and assert native done, then start another turn and interrupt it to assert idle, with the loaded vibest
-integration and no competing OSC writer. This is independent of worker result coverage. In the same follow-up,
-remove Cursor's coordinator exclusion from terminal status reporting and verify working/idle there; terminal
-status must not inherit the coordinator exclusion used for result reporting.
+Caller detection is the environment keys in §4. Do not forge a herdr identity in E2E. Still open: launch a real
+Claude and Pi coordinator with built `vibest --harness <harness>` inside an isolated hc terminal; hold its fake model
+and assert native working, complete it and assert native done, then start another turn and interrupt it to assert
+idle, with the loaded vibest integration and no competing OSC writer. This is independent of worker result coverage.
+In the same follow-up, remove Cursor's coordinator exclusion from terminal status reporting and verify working/idle
+there; terminal status must not inherit the coordinator exclusion used for result reporting.
 
 The fake HTTP 401 authentication_error check records Claude's actual retry/working classification; it does not
 claim that every provider 401 opens an auth dialog.

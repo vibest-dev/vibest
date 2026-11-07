@@ -85,7 +85,6 @@ const checks: ReadonlyArray<Check> = [
       const piAgentDir = await piDir(w, "pi-hc", model.url)
       const env = `PI_CODING_AGENT_DIR=${piAgentDir}`
       const core = await isolatedCore(w, piAgentDir, "hc")
-      const restore = await configureRuntime(w, "hc")
       try {
         const repo = await project(w, "hc")
         await w.ok(["--harness", "pi", "--runtime", "hc", "--headless", "--env", env], {
@@ -122,7 +121,7 @@ const checks: ReadonlyArray<Check> = [
             await Bun.sleep(100)
           }
         })()
-        await w.ok(["run", "pi", "--env", env, "--title", "Fix login bug", ask("zero")], {
+        await w.ok(["run", "pi", "--runtime", "hc", "--env", env, "--title", "Fix login bug", ask("zero")], {
           cwd: repo,
           timeoutMs: 60_000,
         })
@@ -216,7 +215,6 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         model.stop()
         await w.stopDaemon()
-        await restore()
         await core.stop()
       }
     },
@@ -285,6 +283,100 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
+    id: "S35",
+    title:
+      "herdr-core runtime: vibest typed into an isolated hc terminal with no --runtime starts the main agent there; the subagent it starts inherits hc; vibest run --runtime herdr places a subagent in this run's herdr",
+    run: async (w) => {
+      for (const bin of ["pi", "hc", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = delegatingModel("pi")
+      w.ownRuntimes.add("hc")
+      await w.stopDaemon()
+      const piAgentDir = await piDir(w, "pi-follow", model.url)
+      const env = `PI_CODING_AGENT_DIR=${piAgentDir}`
+      const core = await isolatedCore(w, piAgentDir, "follow")
+      try {
+        const repo = await project(w, "follow")
+        const opened = await core.hc("run", "--bg", "--keep", "--name", "caller", "--json")
+        expect(opened.code === 0, `hc run: ${opened.stderr}${opened.stdout}`)
+        const caller = await core.get("caller")
+        const typed = await core.hc("send", "caller", `cd ${repo} && vibest --harness pi --env ${env}`)
+        expect(typed.code === 0, `hc send: ${typed.stderr}`)
+        const runtimeOf = (id: string) =>
+          JSON.parse(
+            row<{ runtime: string }>(w, `SELECT runtime FROM ${SESSIONS} s WHERE id = ?`, id)?.runtime ?? "{}",
+          ) as {
+            kind?: string
+            id?: string
+          }
+        let main = ""
+        await until(
+          "the main agent in vibest ls",
+          async () => {
+            main = (await w.json<Array<Entry>>(["ls"], { cwd: repo })).find((e) => e.agent === "main")?.id ?? ""
+            return main !== ""
+          },
+          90_000,
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}\nterminals:\n${await core.screens()}`)
+        })
+        const mainAt = runtimeOf(main)
+        expect(
+          mainAt.kind === "hc" && mainAt.id === `${caller.address}@${w.hcSocket}`,
+          `the main agent runs in ${JSON.stringify(mainAt)}, not in ${caller.address} on ${w.hcSocket}`,
+        )
+        await w.ok(["run", "pi", "--runtime", "hc", "--env", env, "--title", "Wake parent", ask("zero")], {
+          cwd: repo,
+          timeoutMs: 60_000,
+        })
+        await until("the main agent starts a subagent", () => model.sessionId() !== "", 180_000).catch(
+          async (e: Error) => {
+            throw new Error(
+              `${e.message}; the model saw: ${JSON.stringify(model.seen, null, 1)}\nterminals:\n${await core.screens()}`,
+            )
+          },
+        )
+        const sub = model.sessionId()
+        await until(
+          "the inherited subagent's terminal",
+          () => {
+            const at = runtimeOf(sub)
+            return at.kind === "hc" && at.id !== undefined && at.id !== ""
+          },
+          60_000,
+        )
+        const subAt = runtimeOf(sub)
+        expect(
+          subAt.kind === "hc" && subAt.id?.endsWith(`@${w.hcSocket}`) === true,
+          `the subagent runs in ${JSON.stringify(subAt)}`,
+        )
+        const subTerminal = await core.get(addressOf(subAt.id!))
+        expect(
+          subTerminal.parent === caller.address,
+          `the subagent's parent is ${subTerminal.parent}, not ${caller.address}`,
+        )
+        const placed = JSON.parse(
+          await w.ok(["run", "pi", "--runtime", "herdr", "--env", env, "--title", "Place in herdr", ask("side")], {
+            cwd: repo,
+            timeoutMs: 90_000,
+          }),
+        ) as { id: string }
+        await until(
+          "the herdr subagent's terminal",
+          () => runtimeOf(placed.id).id?.startsWith(`${w.herdrSession}/`) === true,
+          60_000,
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}; runtime ${JSON.stringify(runtimeOf(placed.id))}`)
+        })
+        const herdrAt = runtimeOf(placed.id)
+        expect(herdrAt.kind === "herdr", `the herdr subagent runs in ${JSON.stringify(herdrAt)}`)
+      } finally {
+        model.stop()
+        await w.stopDaemon()
+        await core.stop()
+      }
+    },
+  },
+  {
     id: "S36",
     title:
       "herdr-core runtime: a subagent turn that ended unwatched is done in Watch, for it and its project; Session.Seen raises herdr.seen to that turn and it is idle",
@@ -311,10 +403,13 @@ const checks: ReadonlyArray<Check> = [
         )
         const sub = (
           JSON.parse(
-            await w.ok(["run", "pi", "--env", env, "--title", "Check seen state", "--", ask("seen")], {
-              cwd: repo,
-              timeoutMs: 60_000,
-            }),
+            await w.ok(
+              ["run", "pi", "--runtime", "hc", "--env", env, "--title", "Check seen state", "--", ask("seen")],
+              {
+                cwd: repo,
+                timeoutMs: 60_000,
+              },
+            ),
           ) as { id: string }
         ).id
         let last: Watched | undefined

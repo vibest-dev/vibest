@@ -140,6 +140,7 @@ export interface SpawnInput {
   readonly agent?: string | undefined
   readonly peer?: string | undefined
   readonly archive?: boolean | undefined
+  readonly runtime?: string | undefined
   readonly parentSessionId?: string | undefined
   readonly request?: string | undefined
 }
@@ -667,7 +668,17 @@ export class Sessions extends Context.Service<
       const spawn = Effect.fn("Sessions.spawn")(function* (input: SpawnInput) {
         const root = input.root
         const agent = input.agent ?? "general"
-        const parent = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
+        const worker = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
+        const main =
+          worker === undefined && input.parentSessionId !== undefined
+            ? yield* db.coordinatorOf(input.projectId)
+            : undefined
+        const parentRuntime =
+          worker !== undefined
+            ? worker.runtime || undefined
+            : main !== undefined && main.id === input.parentSessionId
+              ? main.runtime || undefined
+              : undefined
         const decision = yield* plugins.start({
           project: root,
           agentType: agent,
@@ -682,8 +693,8 @@ export class Sessions extends Context.Service<
           ),
           attempts: [],
           machine: { id: input.machine.id },
-          runtime: undefined,
-          parentRuntime: parent?.runtime,
+          runtime: input.runtime,
+          parentRuntime,
           machines: yield* machinesListing,
         })
         const { provider, model } = decision
@@ -722,7 +733,7 @@ export class Sessions extends Context.Service<
               Effect.mapError((e) => refuse(`${root}: ${e.message}`)),
             )
             const base = {
-              ...(Object.keys(decision.decidedBy).length > 0 ? { routing } : {}),
+              routing,
               ...(input.archive ? { archive: true } : {}),
             }
             let cwd = shared

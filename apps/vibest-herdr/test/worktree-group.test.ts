@@ -14,7 +14,15 @@ const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   Effect.map(
     projectOf(repo),
     (projectId) =>
-      ({ machine: { id: "local" }, root: repo, projectId, name: "task", prompt: "do it", harness }) as const,
+      ({
+        machine: { id: "local" },
+        root: repo,
+        projectId,
+        name: "task",
+        prompt: "do it",
+        harness,
+        runtime: "herdr",
+      }) as const,
   )
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>

@@ -26,28 +26,24 @@ const SessionList = Schema.decodeUnknownEffect(
   ),
 )
 
-export const callerTerminal = Effect.gen(function* () {
-  const paneId = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_PANE_ID")))
-  const socketPath = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_SOCKET_PATH")))
-  if (paneId === undefined || paneId === "" || socketPath === undefined || socketPath === "") return undefined
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const out = yield* spawner.string(ChildProcess.make("herdr", ["session", "list", "--json"]))
-  const list = yield* SessionList(out)
-  const session = list.sessions.find((s) => s.socket_path === socketPath)
-  return session === undefined ? undefined : `${session.name}/${paneId}`
-})
+export const terminalFrom = (env: Readonly<Record<string, string | undefined>>) =>
+  Effect.gen(function* () {
+    const paneId = env.HERDR_PANE_ID
+    const socketPath = env.HERDR_SOCKET_PATH
+    if (paneId === undefined || paneId === "" || socketPath === undefined || socketPath === "") return undefined
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const out = yield* spawner.string(ChildProcess.make("herdr", ["session", "list", "--json"]))
+    const list = yield* SessionList(out)
+    const session = list.sessions.find((s) => s.socket_path === socketPath)
+    return session === undefined ? undefined : `${session.name}/${paneId}`
+  })
 
-export const ambientHerdr = Effect.gen(function* () {
-  const socket = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_SOCKET_PATH")))
-  const pane = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_PANE_ID")))
-  if (socket === undefined || pane === undefined) return undefined
-  const client = yield* Herdr.make(socket)
-  yield* Herdr.verifyProtocol(client)
-  return { h: client, paneId: pane } as const
-})
-
-export const inPane = Effect.gen(function* () {
-  const set = (name: string) =>
-    Config.option(Config.String(name)).pipe(Effect.map((value) => Option.isSome(value) && value.value !== ""))
-  return (yield* set("HERDR_PANE_ID")) && (yield* set("HERDR_SOCKET_PATH"))
-})
+export const readyFrom = (env: Readonly<Record<string, string | undefined>>) =>
+  Effect.gen(function* () {
+    const socket = env.HERDR_SOCKET_PATH
+    const pane = env.HERDR_PANE_ID
+    if (socket === undefined || socket === "" || pane === undefined || pane === "") return false
+    const client = yield* Herdr.make(socket)
+    yield* Herdr.verifyProtocol(client)
+    return true
+  })

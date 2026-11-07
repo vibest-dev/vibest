@@ -1,5 +1,6 @@
 import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
+import { OnCallerPlugins } from "@vibest/core/caller"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harness } from "@vibest/core/harness"
@@ -47,6 +48,7 @@ export interface Host {
   readonly httpServer: (path: string) => Layer.Layer<HttpServer, unknown>
   readonly plugins: PluginLoader["Service"]
   readonly builtinPlugins: ReadonlyArray<Candidate>
+  readonly clearCallerEnv: (plugins: ReadonlyArray<Candidate>) => void
   readonly processes: ProcessPlatform
   readonly keychain: KeychainPlatform
   readonly lock: (
@@ -82,6 +84,7 @@ const services = (host: Host, layout: Layout["Service"]) =>
       Plugins.layer.pipe(
         Layer.provide(Layer.succeed(Builtins, host.builtinPlugins)),
         Layer.provide(Layer.succeed(PluginLoader, host.plugins)),
+        Layer.provide(Layer.succeed(OnCallerPlugins, host.clearCallerEnv)),
       ),
     ),
     Layer.provideMerge(Subscriptions.live),

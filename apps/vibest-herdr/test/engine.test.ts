@@ -37,6 +37,7 @@ const working = Effect.gen(function* () {
     projectId,
     name: "task",
     prompt: "do it",
+    runtime: "herdr",
     harness: "pi",
   })
   yield* until(db.getSession(id), (row) => !!row && row.startedAt !== null)
@@ -134,6 +135,7 @@ describe("session handlers", () => {
           projectId,
           name: "task",
           prompt: "do it",
+          runtime: "herdr",
           harness: "pi",
         })
         yield* held.reached

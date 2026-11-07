@@ -54,6 +54,7 @@ const busyPiSubagent = Effect.gen(function* () {
     projectId: key,
     name: "t",
     prompt: "do it",
+    runtime: "herdr",
     harness: "pi",
   })
   yield* until(db.getSession(id), (w) => !!w && w.startedAt !== null)

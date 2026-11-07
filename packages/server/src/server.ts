@@ -687,6 +687,7 @@ export const handlers = VibestRpcs.toLayer(
             agent: input.agent,
             peer: input.peer === undefined ? undefined : yield* db.resolveSession(input.peer),
             archive: input.archive,
+            runtime: input.runtime,
             parentSessionId: c._tag === "Coordinator" ? c.sessionId : undefined,
             request: input.request,
           })

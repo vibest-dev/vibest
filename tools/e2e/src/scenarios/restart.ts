@@ -33,6 +33,14 @@ type Agent = { name?: string | null; pane_id: string; agent?: string | null }
 
 const OLD = "0.0.0-old"
 
+const ensureRuntime = (args: ReadonlyArray<string>): ReadonlyArray<string> => {
+  if (args.includes("--runtime")) return args
+  if (args[0] === "run") return ["run", "--runtime", "herdr", ...args.slice(1)]
+  if (args.length === 0 || (args[0]!.startsWith("-") && args[0] !== "--version" && args[0] !== "--help"))
+    return ["--runtime", "herdr", ...args]
+  return args
+}
+
 const oldInstall = async (w: World, name: string) => {
   const old = path.join(w.root, `${name}-old`)
   await fs.mkdir(path.join(old, "bin"), { recursive: true })
@@ -181,7 +189,7 @@ const checks: ReadonlyArray<Check> = [
         const { old, wrapper, point, env } = await oldInstall(w, "restart")
         const piEnv = `PI_CODING_AGENT_DIR=${agentDir}`
         const vibest = (args: ReadonlyArray<string>, timeoutMs = 60_000) =>
-          w.run(repo, [wrapper, ...args], { env, timeoutMs })
+          w.run(repo, [wrapper, ...ensureRuntime(args)], { env, timeoutMs })
         const ok = async (args: ReadonlyArray<string>, timeoutMs?: number) => {
           const r = await vibest(args, timeoutMs)
           expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
@@ -372,7 +380,7 @@ const checks: ReadonlyArray<Check> = [
         )
         const { old, wrapper, point, env } = await oldInstall(w, "drestart")
         const ok = async (args: ReadonlyArray<string>) => {
-          const r = await w.run(repo, [wrapper, ...args], { env, timeoutMs: 60_000 })
+          const r = await w.run(repo, [wrapper, ...ensureRuntime(args)], { env, timeoutMs: 60_000 })
           expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
           return r.stdout
         }
@@ -482,7 +490,7 @@ const checks: ReadonlyArray<Check> = [
         const configTheResumeCheckReads = w.config.claude
         const flags = await claudeEnv(w, "cupdate", model.url, configTheResumeCheckReads)
         const vibest = async (args: ReadonlyArray<string>, timeoutMs = 120_000) => {
-          const r = await w.run(repo, [install.wrapper, ...args], { env: install.env, timeoutMs })
+          const r = await w.run(repo, [install.wrapper, ...ensureRuntime(args)], { env: install.env, timeoutMs })
           expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
           return r.stdout
         }

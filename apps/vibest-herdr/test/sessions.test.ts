@@ -56,7 +56,15 @@ const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   Effect.map(
     projectOf(repo),
     (projectId) =>
-      ({ machine: { id: "local" }, root: repo, projectId, name: "task", prompt: "do it", harness }) as const,
+      ({
+        machine: { id: "local" },
+        root: repo,
+        projectId,
+        name: "task",
+        prompt: "do it",
+        harness,
+        runtime: "herdr",
+      }) as const,
   )
 
 const claudeEnd = (reason: string) =>

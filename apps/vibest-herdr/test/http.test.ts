@@ -92,6 +92,7 @@ const project = Effect.gen(function* () {
     projectId: key,
     name: "Fix the guard",
     prompt: "do it",
+    runtime: "herdr",
     harness: "claude",
   })
   const projectId = main.projectId

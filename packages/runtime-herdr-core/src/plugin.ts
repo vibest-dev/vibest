@@ -4,7 +4,8 @@ import * as VibestPlugin from "@vibest/plugin"
 import { Effect, Layer } from "effect"
 import { defaultSocketPath, Hc, SocketConnector } from "effect-herdr-core-sdk"
 
-import { make } from "./terminal-runtime.ts"
+import { CALLER_ENV, terminalFrom } from "./caller.ts"
+import { KIND, make } from "./terminal-runtime.ts"
 
 const platform = Layer.mergeAll(
   Layer.succeed(SocketConnector, (endpoint: string) => NodeSocket.makeNet({ path: endpoint })),
@@ -13,6 +14,11 @@ const platform = Layer.mergeAll(
 
 export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   id: "runtime-herdr-core",
+  caller: {
+    kind: KIND,
+    env: CALLER_ENV,
+    terminal: (env) => Effect.succeed(terminalFrom(env)),
+  },
   effect: (context) =>
     Effect.gen(function* () {
       const socket = yield* defaultSocketPath().pipe(Effect.provide(platform), Effect.orDie)
