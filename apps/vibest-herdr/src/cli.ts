@@ -23,7 +23,7 @@ import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writ
 import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
-import { jsonObject, promptOf, writeTerminalStatus } from "@vibest/core/results"
+import { jsonObject, promptOf } from "@vibest/core/results"
 import * as HcCaller from "@vibest/runtime-herdr-core/caller"
 import { KIND as HC_KIND } from "@vibest/runtime-herdr-core/terminal-runtime"
 import {
@@ -37,6 +37,7 @@ import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
   Cause,
+  Clock,
   Config,
   Console,
   Duration,
@@ -775,6 +776,7 @@ const notify = (
   adapter: HarnessAdapter,
   sessionId: string,
   raw: string,
+  what: string,
   send: (client: VibestClient) => Effect.Effect<void, unknown>,
 ) =>
   Effect.gen(function* () {
@@ -786,56 +788,82 @@ const notify = (
       sessionId,
       ...(harnessSessionId ? { harnessSessionId } : {}),
     })
-    yield* hookCall(layout.socket, headers, send)
-  }).pipe(Effect.ignore)
+    const exit = yield* hookCall(layout.socket, headers, send)
+    if (Exit.isSuccess(exit)) return
+    const at = new Date(yield* Clock.currentTimeMillis).toISOString()
+    const cause = Cause.squash(exit.cause)
+    return yield* Effect.fail(
+      `${at} vibest: ${adapter.id} ${what} of session ${sessionId} did not reach vibestd: ${cause instanceof Error ? cause.message : String(cause)}`,
+    )
+  })
+
+const hookSession = Effect.gen(function* () {
+  const agent = yield* nonempty("VIBEST_AGENT")
+  const sessionId = yield* nonempty("VIBEST_SESSION_ID")
+  return agent && sessionId ? { agent, sessionId } : undefined
+})
 
 export const integrationStop = (adapter: HarnessAdapter, raw: string) =>
   Effect.gen(function* () {
-    const agent = yield* nonempty("VIBEST_AGENT")
-    const sessionId = yield* nonempty("VIBEST_SESSION_ID")
-    if (!agent || !sessionId) return
+    const who = yield* hookSession
+    if (!who) return
     const event = jsonObject(raw)
-    if (!event || !adapter.turnEnd?.(event, agent === "coordinator")) return
-    yield* writeTerminalStatus("idle")
-    yield* notify(adapter, sessionId, raw, (client) => client.TurnEnd({ sessionId, harness: adapter.id, event: raw }))
-  }).pipe(Effect.ignore)
+    if (!event || !adapter.turnEnd?.(event, who.agent === "coordinator")) return
+    yield* notify(adapter, who.sessionId, raw, "turn end", (client) =>
+      client.TurnEnd({ sessionId: who.sessionId, harness: adapter.id, event: raw }),
+    )
+  })
 
 export const integrationPrompt = (adapter: HarnessAdapter, raw: string) =>
   Effect.gen(function* () {
-    const agent = yield* nonempty("VIBEST_AGENT")
-    const sessionId = yield* nonempty("VIBEST_SESSION_ID")
-    if (!agent || !sessionId) return
-    if (promptOf(adapter, agent, raw) === undefined) return
-    yield* writeTerminalStatus("working")
-    yield* notify(adapter, sessionId, raw, (client) => client.Prompt({ sessionId, harness: adapter.id, event: raw }))
-  }).pipe(Effect.ignore)
+    const who = yield* hookSession
+    if (!who || promptOf(adapter, who.agent, raw) === undefined) return
+    yield* notify(adapter, who.sessionId, raw, "turn start", (client) =>
+      client.Prompt({ sessionId: who.sessionId, harness: adapter.id, event: raw }),
+    )
+  })
+
+export const integrationReady = (adapter: HarnessAdapter, raw: string) =>
+  Effect.gen(function* () {
+    const who = yield* hookSession
+    if (!who) return
+    yield* notify(adapter, who.sessionId, raw, "ready report", (client) =>
+      client["Session.Ready"]({ id: who.sessionId }),
+    )
+  })
 
 const hookHarness = Flag.Literals("harness", HARNESS_IDS).pipe(Flag.withDescription("The harness whose hook this is"))
 
-const stop = Command.make("stop", { harness: hookHarness }, (o) =>
-  Effect.gen(function* () {
-    yield* integrationStop(
-      (yield* Harnesses).get(o.harness),
-      yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin)),
-    )
-  }).pipe(Effect.ignore),
-).pipe(
-  Command.withDescription(
-    "A harness plugin's turn-end bridge: its turn-end event JSON on stdin. Does not start vibestd; failures exit 0",
-  ),
+const hookCommand = <E, R>(
+  name: string,
+  report: (adapter: HarnessAdapter, raw: string) => Effect.Effect<void, E, R>,
+  description: string,
+) =>
+  Command.make(name, { harness: hookHarness }, (o) =>
+    Effect.gen(function* () {
+      yield* report(
+        (yield* Harnesses).get(o.harness),
+        yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin)),
+      )
+    }),
+  ).pipe(Command.withDescription(description))
+
+const stop = hookCommand(
+  "stop",
+  integrationStop,
+  "A harness plugin's turn-end bridge: its turn-end event JSON on stdin. Does not start vibestd; exits non-zero when the report did not reach vibestd",
 )
 
-const prompt = Command.make("prompt", { harness: hookHarness }, (o) =>
-  Effect.gen(function* () {
-    yield* integrationPrompt(
-      (yield* Harnesses).get(o.harness),
-      yield* Stream.mkString(Stream.decodeText((yield* Stdio.Stdio).stdin)),
-    )
-  }).pipe(Effect.ignore),
-).pipe(
-  Command.withDescription(
-    "A harness plugin's user-prompt bridge: the prompt event JSON on stdin. Does not start vibestd; failures exit 0",
-  ),
+const prompt = hookCommand(
+  "prompt",
+  integrationPrompt,
+  "A harness plugin's turn-start bridge: its prompt or activity event JSON on stdin. Does not start vibestd; exits non-zero when the report did not reach vibestd",
+)
+
+const ready = hookCommand(
+  "ready",
+  integrationReady,
+  "A harness plugin's session-start bridge: tells vibestd the session takes input. Does not start vibestd; exits non-zero when the report did not reach vibestd",
 )
 
 const guard = Command.make("guard", { harness: hookHarness }, (o) =>
@@ -890,7 +918,7 @@ const integration = (exec: Exec) =>
     Command.withDescription(
       "Internal: called by vibest's plugin in each harness (user prompt, turn-end result, pre-tool guard) and by a main agent's restart; not for direct use",
     ),
-    Command.withSubcommands([guard, prompt, stop, integrationStart(exec)]),
+    Command.withSubcommands([guard, prompt, stop, ready, integrationStart(exec)]),
   )
 
 type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }

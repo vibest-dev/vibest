@@ -944,14 +944,12 @@ describe("HarnessAdapter", () => {
     assert.notInclude(dashLeadingArgs, "--yolo")
   })
 
-  it("cursor reports its turn ends", () => {
+  it("cursor reports its turn end at its response; its stop hook is not one", () => {
     const turnEnd = ADAPTERS.cursor.turnEnd!
     const reply = { hook_event_name: "afterAgentResponse", text: "done" }
     assert.deepStrictEqual(turnEnd(reply, false), { result: reply })
-    assert.isUndefined(turnEnd({ hook_event_name: "stop", status: "completed" }, false))
-    assert.deepStrictEqual(turnEnd({ hook_event_name: "stop", status: "aborted" }, false), {
-      result: { hook_event_name: "stop", status: "aborted", error: "the turn ended with status aborted" },
-    })
+    for (const status of ["completed", "aborted", "error"])
+      assert.isUndefined(turnEnd({ hook_event_name: "stop", status }, false))
     assert.isUndefined(turnEnd(reply, true))
   })
 
@@ -1016,13 +1014,17 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(userPrompt({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" }, false))
   })
 
-  it("cursor reads a user prompt from beforeSubmitPrompt", () => {
+  it("cursor reads a user prompt from beforeSubmitPrompt, and a thought or tool result as a turn at work", () => {
     const userPrompt = ADAPTERS.cursor.userPrompt!
     const event = { hook_event_name: "beforeSubmitPrompt", prompt: "look here" }
     assert.deepStrictEqual(userPrompt(event, false), { text: "look here" })
     assert.isUndefined(userPrompt(event, true))
     assert.isUndefined(userPrompt({ hook_event_name: "beforeSubmitPrompt", prompt: "  " }, false))
     assert.isUndefined(userPrompt({ hook_event_name: "afterAgentResponse", prompt: "look here" }, false))
+    for (const hook_event_name of ["afterAgentThought", "postToolUse"]) {
+      assert.deepStrictEqual(userPrompt({ hook_event_name }, false), { text: "" })
+      assert.isUndefined(userPrompt({ hook_event_name }, true))
+    }
   })
 
   it("Coordinator argv: rules, the inspection tools and file tools for the project folder, no MCP server at all; cursor cannot be one", () => {

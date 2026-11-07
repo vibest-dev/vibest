@@ -6,29 +6,13 @@ import { claude } from "@vibest/core/harnesses/claude"
 import { cursor } from "@vibest/core/harnesses/cursor"
 import { Layout } from "@vibest/core/paths"
 import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
-import { ConfigProvider, Effect, Fiber, FileSystem, Path } from "effect"
+import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
-import { beforeEach, vi } from "vitest"
 
 import * as Platform from "#platform"
 
-import { integrationPrompt, integrationStop } from "../src/cli.ts"
-import { tempDirectory, until, untilVirtual } from "./fakes.ts"
-
-const statusReports = vi.hoisted(() => [] as Array<string>)
-vi.mock("@vibest/core/results", async (importOriginal) => {
-  const results = await importOriginal<typeof import("@vibest/core/results")>()
-  return {
-    ...results,
-    writeTerminalStatus: (...[state]: Parameters<typeof results.writeTerminalStatus>) =>
-      Effect.sync(() => {
-        statusReports.push(state)
-      }),
-  }
-})
-beforeEach(() => {
-  statusReports.length = 0
-})
+import { integrationPrompt, integrationReady, integrationStop } from "../src/cli.ts"
+import { tempDirectory, untilVirtual } from "./fakes.ts"
 
 const stopAt = (home: string, env: Record<string, string>, raw: string) =>
   integrationStop(claude, raw).pipe(
@@ -126,19 +110,21 @@ layer(Platform.services)("claude integration stop", (it) => {
     }),
   )
 
-  it.effect("a down vibestd: nothing is written and no daemon is started", () =>
+  it.effect("a down vibestd: the report fails with the cause, nothing is written and no daemon is started", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const home = yield* tempDirectory("s-")
       const stopping = yield* Effect.forkChild(
-        stopAt(home, { VIBEST_AGENT: "session", VIBEST_SESSION_ID: "w1" }, JSON.stringify(event)),
+        stopAt(home, { VIBEST_AGENT: "session", VIBEST_SESSION_ID: "w1" }, JSON.stringify(event)).pipe(Effect.exit),
       )
       yield* untilVirtual(
         Effect.sync(() => stopping.pollUnsafe()),
         (exit) => exit !== undefined,
       )
-      yield* Fiber.join(stopping)
+      const exit = yield* Fiber.join(stopping)
+      assert.isTrue(Exit.isFailure(exit))
+      assert.match(String(Exit.isFailure(exit) && exit.cause), /claude turn end of session w1 did not reach vibestd/)
       assert.isFalse(yield* fs.exists(path.join(home, "results")))
       assert.isFalse(yield* fs.exists(path.join(home, "vibestd.log")))
       assert.isFalse(yield* fs.exists(path.join(home, "vibestd.pid")))
@@ -167,7 +153,7 @@ layer(Platform.services)("claude integration stop", (it) => {
         const dropped = yield* tempDirectory("d-")
         const seen: string[] = []
         yield* listen(path.join(dropped, "vibest.sock"), seen, (n) => (n === 1 ? "drop" : true))
-        yield* stopAt(dropped, worker, JSON.stringify(event))
+        yield* stopAt(dropped, worker, JSON.stringify(event)).pipe(Effect.exit)
         assert.deepStrictEqual(
           rpc(seen).map((r) => r.method),
           ["TurnEnd"],
@@ -175,7 +161,7 @@ layer(Platform.services)("claude integration stop", (it) => {
         const hung = yield* tempDirectory("h-")
         const once: string[] = []
         yield* listen(path.join(hung, "vibest.sock"), once, () => "hang")
-        yield* TestClock.withLive(stopAt(hung, worker, JSON.stringify(event)))
+        yield* TestClock.withLive(stopAt(hung, worker, JSON.stringify(event)).pipe(Effect.exit))
         assert.deepStrictEqual(
           rpc(once).map((r) => r.method),
           ["TurnEnd"],
@@ -246,69 +232,49 @@ layer(Platform.services)("claude integration stop", (it) => {
     }),
   )
 
-  it.effect("Cursor reports working before a held Prompt RPC completes", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path
-      const home = yield* tempDirectory("c-")
-      const lines: Array<string> = []
-      yield* listen(path.join(home, "vibest.sock"), lines, () => "hang")
-      const sending = yield* integrationPrompt(
-        cursor,
-        JSON.stringify({ hook_event_name: "beforeSubmitPrompt", prompt: "go" }),
-      ).pipe(
-        Effect.provideServiceEffect(Layout, Layout.make(home)),
-        Effect.provide(
-          ConfigProvider.layer(ConfigProvider.fromUnknown({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" })),
-        ),
-        Effect.forkChild,
-      )
-      yield* until(
-        Effect.sync(() => rpc(lines).length),
-        (n) => n === 1,
-      )
-      assert.deepStrictEqual(statusReports, ["working"])
-      yield* Fiber.interrupt(sending)
-    }),
-  )
-
-  it.effect("Cursor reports idle only for accepted response/stop events and never guesses blocked", () =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path
-      const home = yield* tempDirectory("c-")
-      const lines: Array<string> = []
-      yield* listen(path.join(home, "vibest.sock"), lines)
-      const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
-      const invoke = (stop: boolean, raw: string, env: Record<string, string> = worker) =>
-        (stop ? integrationStop(cursor, raw) : integrationPrompt(cursor, raw)).pipe(
-          Effect.provideServiceEffect(Layout, Layout.make(home)),
-          Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
-        )
-      for (const event of [
-        { hook_event_name: "afterAgentResponse", text: "done" },
-        { hook_event_name: "stop", status: "aborted" },
-      ])
-        yield* invoke(true, JSON.stringify(event))
-      assert.deepStrictEqual(statusReports, ["idle", "idle"])
-      statusReports.length = 0
-      for (const stop of [false, true]) {
-        for (const raw of [
-          "",
-          "null",
-          "[]",
-          "broken",
-          JSON.stringify({ hook_event_name: "preToolUse" }),
-          JSON.stringify({ hook_event_name: "stop", status: "completed" }),
-          JSON.stringify({ hook_event_name: "beforeSubmitPrompt", prompt: " " }),
+  it.effect(
+    "Cursor: session start is Session.Ready, a thought, a tool result or a typed prompt is Prompt, a response is TurnEnd, its stop and anything else nothing",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path
+        const home = yield* tempDirectory("c-")
+        const lines: Array<string> = []
+        yield* listen(path.join(home, "vibest.sock"), lines)
+        const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
+        const invoke = (report: typeof integrationStop, event: unknown, env: Record<string, string> = worker) =>
+          report(cursor, typeof event === "string" ? event : JSON.stringify(event)).pipe(
+            Effect.provideServiceEffect(Layout, Layout.make(home)),
+            Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))),
+          )
+        yield* invoke(integrationReady, { hook_event_name: "sessionStart" })
+        for (const event of [
+          { hook_event_name: "afterAgentThought", text: "hm" },
+          { hook_event_name: "postToolUse", tool_name: "Shell" },
+          { hook_event_name: "beforeSubmitPrompt", prompt: "go" },
         ])
-          yield* invoke(stop, raw)
-        const raw = JSON.stringify(
-          stop ? { hook_event_name: "afterAgentResponse" } : { hook_event_name: "beforeSubmitPrompt", prompt: "go" },
+          yield* invoke(integrationPrompt, event)
+        yield* invoke(integrationStop, { hook_event_name: "afterAgentResponse", text: "done" })
+        for (const report of [integrationPrompt, integrationStop]) {
+          for (const raw of [
+            "",
+            "null",
+            "[]",
+            "broken",
+            { hook_event_name: "preToolUse" },
+            { hook_event_name: "stop", status: "aborted" },
+            { hook_event_name: "stop", status: "completed" },
+          ])
+            yield* invoke(report, raw)
+          for (const env of [{}, { VIBEST_AGENT: "general" }, { VIBEST_SESSION_ID: "w1" }])
+            yield* invoke(report, { hook_event_name: "afterAgentResponse", text: "done" }, env)
+        }
+        yield* invoke(integrationReady, { hook_event_name: "sessionStart" }, { VIBEST_AGENT: "general" })
+        assert.deepStrictEqual(
+          rpc(lines).map((r) => r.method),
+          ["Session.Ready", "Prompt", "Prompt", "Prompt", "TurnEnd"],
         )
-        for (const env of [{}, { VIBEST_AGENT: "general" }, { VIBEST_SESSION_ID: "w1" }]) yield* invoke(stop, raw, env)
-      }
-      assert.deepStrictEqual(statusReports, [])
-      assert.strictEqual(rpc(lines).length, 2)
-    }),
+        assert.deepStrictEqual(rpc(lines)[0]?.params, { id: "w1" })
+      }),
   )
 
   it.effect("Cursor's hook sends its conversation id with the session's headers", () =>
