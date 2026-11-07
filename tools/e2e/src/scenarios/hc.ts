@@ -347,12 +347,15 @@ const checks: ReadonlyArray<Check> = [
             timeoutMs: 90_000,
           }),
         ) as { id: string }
-        await until("the herdr subagent recorded", () => runtimeOf(placed.id).kind === "herdr", 60_000)
+        await until(
+          "the herdr subagent's terminal",
+          () => runtimeOf(placed.id).id?.startsWith(`${w.herdrSession}/`) === true,
+          60_000,
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}; runtime ${JSON.stringify(runtimeOf(placed.id))}`)
+        })
         const herdrAt = runtimeOf(placed.id)
-        expect(
-          herdrAt.id?.startsWith(`${w.herdrSession}/`) === true,
-          `the herdr subagent is at ${herdrAt.id}, not in this run's herdr session ${w.herdrSession}`,
-        )
+        expect(herdrAt.kind === "herdr", `the herdr subagent runs in ${JSON.stringify(herdrAt)}`)
       } finally {
         model.stop()
         await w.stopDaemon()
