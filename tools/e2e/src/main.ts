@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "./check.ts"
 import { cached, cacheKeys, remember } from "./runner/cache.ts"
-import { changedUserFiles, herdrSessionsLeft, userFileHashes } from "./runner/invariants.ts"
+import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
 import { lastMs, pool, saveMs } from "./runner/pool.ts"
 import daemon from "./scenarios/daemon.ts"
 import exits from "./scenarios/exits.ts"
@@ -17,7 +17,7 @@ import restart from "./scenarios/restart.ts"
 import start from "./scenarios/start.ts"
 import terminalStatus from "./scenarios/terminal-status.ts"
 import update from "./scenarios/update.ts"
-import { binary, checkout, harnesses, method, redact, Skip, World } from "./world.ts"
+import { binary, checkout, compiled, harnesses, method, privateIn, redact, Skip, World } from "./world.ts"
 
 const areas: Record<string, ReadonlyArray<Check>> = {
   daemon,
@@ -94,11 +94,13 @@ type Result = {
 const run = `${new Date().toISOString().replace(/[:.]/g, "-")}-${method}`
 const evidence = path.join(checkout, "tools/e2e/evidence", run)
 await fs.mkdir(evidence, { recursive: true })
+const worlds: Array<string> = []
 const userFilesBefore = await userFileHashes()
 
 const once = async ({ area, check }: (typeof checks)[number], evidenceName: string): Promise<Result> => {
   const startedAt = new Date()
   const world = await World.create()
+  worlds.push(world.root)
   let outcome: Outcome = "pass"
   let detail: string | undefined
   const problem = (text: string) => {
@@ -138,7 +140,7 @@ const print = (r: Result) =>
 
 const t0 = Date.now()
 const results = new Map<string, Result>()
-const keyOf = await cacheKeys({ binary, harnesses, method, userFiles: userFilesBefore })
+const keyOf = await cacheKeys({ binaries: [binary, compiled], harnesses, method, userFiles: userFilesBefore })
 const keys = new Map(await Promise.all(selected.map(async (c) => [c.id, await keyOf(c.area, c.id)] as const)))
 const cacheable = (c: (typeof checks)[number]) => !noCache && (c.check.tier ?? "gate") !== "agent"
 for (const c of selected)
@@ -181,11 +183,30 @@ for (const c of selected)
   if (cacheable(c) && results.get(c.id)?.outcome === "pass") await remember(keys.get(c.id)!, c.id)
 
 const changed = changedUserFiles(userFilesBefore, await userFileHashes())
-const invariants = changed.length ? [`user files changed during the run: ${changed.join(", ")}`] : []
+const typedIntoHistory = await historyNaming(worlds)
+const leaked = (
+  await Promise.all(
+    (await fs.readdir(evidence, { recursive: true, withFileTypes: true }))
+      .filter((e) => e.isFile())
+      .map(async (e) => {
+        const file = path.join(e.parentPath, e.name)
+        return privateIn(await fs.readFile(file, "utf8")).length > 0 ? [path.relative(evidence, file)] : []
+      }),
+  )
+).flat()
+const invariants = [
+  ...(changed.length ? [`user files changed during the run: ${changed.join(", ")}`] : []),
+  ...(typedIntoHistory.length
+    ? [`commands typed in this run's worlds reached the user's shell history: ${typedIntoHistory.join(", ")}`]
+    : []),
+  ...(leaked.length ? [`evidence holds a user model, provider or account value: ${leaked.join(", ")}`] : []),
+]
 for (const line of invariants) console.log(`FAIL ${line}`)
 await fs.writeFile(
   path.join(evidence, "report.json"),
-  JSON.stringify({ wallMs: Date.now() - t0, userFiles: userFilesBefore, invariants, results: ordered }, null, 2),
+  redact(
+    JSON.stringify({ wallMs: Date.now() - t0, userFiles: userFilesBefore, invariants, results: ordered }, null, 2),
+  ),
 )
 const count = (o: Outcome) => ordered.filter((r) => r.outcome === o).length
 console.log(

@@ -6,6 +6,7 @@ of every other gate.
 ```sh
 pnpm verify          # everything
 pnpm verify daemon integration   # install as a user, then only these areas of E2E checks
+pnpm verify --no-cache           # before a release: every check runs, the whole gate on both installs
 ```
 
 A failed build, typecheck, test, pack or install stops the run; a failed E2E leg does not stop the other leg, and the

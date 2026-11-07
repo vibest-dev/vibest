@@ -2,19 +2,22 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import { keptForAModel } from "./user-env.ts"
+
 export type Profile = "user" | "first-run"
 
 export const FAKE_ANTHROPIC_KEY = "sk-ant-e2e-fake-0123456789abcdefghijklmnop"
 
-const home = os.homedir()
-const user = {
+export const userPaths = (home: string) => ({
   claudeSettings: path.join(home, ".claude", "settings.json"),
   claudeState: path.join(home, ".claude.json"),
   piSettings: path.join(home, ".pi", "agent", "settings.json"),
   piTrust: path.join(home, ".pi", "agent", "trust.json"),
   cursorConfig: path.join(home, ".cursor", "cli-config.json"),
   cursorHooks: path.join(home, ".cursor", "hooks.json"),
-}
+})
+type UserPaths = ReturnType<typeof userPaths>
+const user = userPaths(os.homedir())
 
 const CLAUDE_SETTINGS = ["permissions", "env", "language", "worktree", "autoMode", "attribution", "cleanupPeriodDays"]
 const CLAUDE_STATE = [
@@ -34,7 +37,7 @@ const PI_SETTINGS = [
   "tuiMode",
   "theme",
 ]
-const CURSOR_BEHAVIOUR = ["approvalMode", "sandbox", "permissions", "network"]
+const CURSOR_BEHAVIOUR = ["version", "approvalMode", "sandbox", "permissions", "network"]
 
 export const userFilesRead: ReadonlyArray<{ readonly file: string; readonly keys?: ReadonlyArray<string> }> = [
   { file: user.claudeSettings, keys: CLAUDE_SETTINGS },
@@ -74,7 +77,7 @@ const fakeModelCannotAnswerAutoModeClassifier = {
   permissions: { defaultMode: "default", disableAutoMode: "disable" },
 }
 
-export const claudeShadow = async (dir: string, profile: Profile) => {
+export const claudeShadow = async (dir: string, profile: Profile, from: UserPaths = user) => {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 })
   const keyApproved = { customApiKeyResponses: { approved: [FAKE_ANTHROPIC_KEY.slice(-20)], rejected: [] } }
   if (profile === "first-run") {
@@ -82,23 +85,59 @@ export const claudeShadow = async (dir: string, profile: Profile) => {
     await writeJson(path.join(dir, "settings.json"), fakeModelCannotAnswerAutoModeClassifier)
     return dir
   }
-  const settings = pick(await readJson(user.claudeSettings), CLAUDE_SETTINGS)
+  const settings = pick(await readJson(from.claudeSettings), CLAUDE_SETTINGS)
   const permissions = (settings.permissions ?? {}) as Record<string, unknown>
   await writeJson(path.join(dir, "settings.json"), {
     ...settings,
-    env: localNeverProxied({ ...((settings.env ?? {}) as Record<string, unknown>) }),
+    env: localNeverProxied(
+      Object.fromEntries(
+        Object.entries((settings.env ?? {}) as Record<string, unknown>).filter(([name]) => keptForAModel(name)),
+      ),
+    ),
     disableAutoMode: fakeModelCannotAnswerAutoModeClassifier.disableAutoMode,
     permissions: { ...permissions, ...fakeModelCannotAnswerAutoModeClassifier.permissions },
   })
   await writeJson(path.join(dir, ".claude.json"), {
     hasCompletedOnboarding: true,
-    ...pick(await readJson(user.claudeState), CLAUDE_STATE),
+    ...pick(await readJson(from.claudeState), CLAUDE_STATE),
     ...keyApproved,
   })
   return dir
 }
 
 export type PiProvider = { readonly baseUrl: string; readonly models?: ReadonlyArray<string> }
+
+const strings = (...values: ReadonlyArray<unknown>): Array<string> =>
+  values.flatMap((v) => (typeof v === "string" ? [v] : Array.isArray(v) ? strings(...v) : []))
+
+export const userPrivateValues = async (from: UserPaths = user) => {
+  const [claude, pi, cursor] = await Promise.all([
+    readJson(from.claudeSettings),
+    readJson(from.piSettings),
+    readJson(from.cursorConfig),
+  ])
+  const field = (o: unknown, key: string) =>
+    o !== null && typeof o === "object" ? (o as Record<string, unknown>)[key] : undefined
+  const cursorModel = field(cursor, "model")
+  return [
+    ...new Set(
+      strings(
+        claude.model,
+        pi.defaultProvider,
+        pi.defaultModel,
+        field(cursorModel, "modelId"),
+        field(cursorModel, "displayModelId"),
+        field(cursorModel, "displayName"),
+        field(cursorModel, "displayNameShort"),
+        field(field(cursor, "selectedModel"), "modelId"),
+        cursor.modelSelectionHistory,
+        cursor.exploreSubagentModel,
+        field(cursor.authInfo, "email"),
+        field(cursor.authInfo, "authId"),
+      ).filter((v) => v.length >= 3),
+    ),
+  ]
+}
 
 export const piShadow = async (
   dir: string,
@@ -130,9 +169,9 @@ export const piShadow = async (
   return dir
 }
 
-export const cursorShadow = async (dir: string, profile: Profile, vibest: string) => {
+export const cursorShadow = async (dir: string, profile: Profile, vibest: string, from: UserPaths = user) => {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 })
-  const own = profile === "user" ? await readJson(user.cursorConfig) : {}
+  const own = profile === "user" ? pick(await readJson(from.cursorConfig), CURSOR_BEHAVIOUR) : {}
   await writeJson(
     path.join(dir, "cli-config.json"),
     Object.keys(own).length > 0

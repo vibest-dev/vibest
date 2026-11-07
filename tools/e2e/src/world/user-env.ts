@@ -1,26 +1,29 @@
 import childProcess from "node:child_process"
 import os from "node:os"
+import path from "node:path"
 
-const shellSessionState = /^(_|PWD|OLDPWD|SHLVL|FNM_MULTISHELL_PATH|__MISE_.*|_P9K_.*|P9K_.*)$/
+const shellSessionState = /^(_|PWD|OLDPWD|SHLVL|HISTFILE|FNM_MULTISHELL_PATH|__MISE_.*|_P9K_.*|P9K_.*)$/
 const runnerOnly = /^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_.*|VIBEST_.*|HERDR_.*|HC_.*|PI_PACKAGE_DIR)$/
-const realModelAccess =
-  /^(ANTHROPIC_.*|OPENAI_.*|GEMINI_.*|GOOGLE_API_KEY|XAI_.*|OPENROUTER_.*|CURSOR_API_KEY|.*_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)$/
+export const realModelAccess =
+  /^(ANTHROPIC_.*|OPENAI_.*|GEMINI_.*|GOOGLE_.*|XAI_.*|OPENROUTER_.*|CURSOR_API_KEY|.*_API_KEY|CLAUDE_CODE_.*|AWS_.*|VERTEX_.*|CLOUD_ML_.*|.*_MODEL|.*_BASE_URL)$/
 export const secretName = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|PROXY/i
+export const keptForAModel = (name: string) =>
+  !realModelAccess.test(name) && !(secretName.test(name) && !/PROXY/i.test(name))
 
-const capture = () => {
-  const shell = process.env.SHELL || "/bin/zsh"
+export const capture = (home = os.homedir(), shell = process.env.SHELL || "/bin/zsh") => {
   const base = {
-    HOME: os.homedir(),
+    HOME: home,
     USER: os.userInfo().username,
     LOGNAME: os.userInfo().username,
     SHELL: shell,
     TERM: "xterm-256color",
     LANG: process.env.LANG || "en_US.UTF-8",
     PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+    HISTFILE: "/dev/null",
   }
-  const r = childProcess.spawnSync(shell, ["-l", "-i", "-c", "env -0"], {
+  const r = childProcess.spawnSync(shell, ["-l", "-i", "-c", "unset HISTFILE; env -0"], {
     env: base,
-    cwd: os.homedir(),
+    cwd: home,
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 10_000,
   })
@@ -42,3 +45,9 @@ const capture = () => {
 let captured: Readonly<Record<string, string>> | undefined
 
 export const loginEnv = (): Readonly<Record<string, string>> => (captured ??= capture())
+
+export const historyFiles = (home = os.homedir()) => [
+  path.join(home, ".zsh_history"),
+  path.join(home, ".bash_history"),
+  path.join(home, ".local", "share", "fish", "fish_history"),
+]

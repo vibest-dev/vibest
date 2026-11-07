@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { userFilesRead } from "../world/shadow.ts"
+import { historyFiles } from "../world/user-env.ts"
 
 const contentHash = async (file: string, keys: ReadonlyArray<string> | undefined) => {
   const bytes = await fs.readFile(file).catch(() => undefined)
@@ -24,6 +25,16 @@ export const userFileHashes = async () =>
       ]),
     ),
   ) as Record<string, string>
+
+export const historyNaming = async (worlds: ReadonlyArray<string>, files = historyFiles()) =>
+  (
+    await Promise.all(
+      files.map(async (file) => {
+        const text = await fs.readFile(file, "latin1").catch(() => "")
+        return worlds.some((w) => text.includes(path.basename(w))) ? [file] : []
+      }),
+    )
+  ).flat()
 
 export const changedUserFiles = (before: Record<string, string>, after: Record<string, string>) =>
   Object.keys(before).filter((file) => before[file] !== after[file])

@@ -4,7 +4,7 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { claudeShadow, cursorShadow, type Profile } from "./world/shadow.ts"
+import { claudeShadow, cursorShadow, type Profile, userPrivateValues } from "./world/shadow.ts"
 import { loginEnv, secretName } from "./world/user-env.ts"
 
 export const checkout = path.resolve(import.meta.dirname, "../../..")
@@ -42,6 +42,20 @@ export const vibestTyped = `'${binary.replaceAll("'", "'\\''")}'`
 export const buildVersion = (
   JSON.parse(fs.readFileSync(path.join(checkout, "apps/vibest-herdr/package.json"), "utf8")) as { version: string }
 ).version
+
+const zshKeepingHistoryInTheWorld = async (dir: string) => {
+  await fsPromises.mkdir(dir, { mode: 0o700 })
+  const user = (file: string) =>
+    `ZDOTDIR=$__vbe_user\n[[ -r $ZDOTDIR/${file} ]] && source $ZDOTDIR/${file}\nZDOTDIR=$__vbe_zdot\n`
+  const history = "HISTFILE=$__vbe_zdot/.zsh_history\n"
+  await fsPromises.writeFile(
+    path.join(dir, ".zshenv"),
+    "__vbe_zdot=$ZDOTDIR\nZDOTDIR=$HOME\n[[ -r $HOME/.zshenv ]] && source $HOME/.zshenv\n__vbe_user=$ZDOTDIR\nZDOTDIR=$__vbe_zdot\n",
+  )
+  await fsPromises.writeFile(path.join(dir, ".zprofile"), user(".zprofile"))
+  await fsPromises.writeFile(path.join(dir, ".zshrc"), user(".zshrc") + history)
+  await fsPromises.writeFile(path.join(dir, ".zlogin"), user(".zlogin") + history)
+}
 
 const releaseStandIn = () =>
   Bun.serve({
@@ -82,6 +96,7 @@ export class World {
   private readonly releases = releaseStandIn()
   readonly herdrSession: string
   readonly hcSocket: string
+  readonly shellDir: string
   readonly ownRuntimes = new Set<string>()
 
   private constructor(
@@ -91,6 +106,7 @@ export class World {
     this.vibestHome = path.join(root, "vibest")
     this.herdrSession = path.basename(root)
     this.hcSocket = path.join(root, "hc.sock")
+    this.shellDir = path.join(root, "shell")
     this.config = {
       pi: path.join(root, "pi-agent"),
       claude: path.join(root, "claude"),
@@ -109,6 +125,7 @@ export class World {
     await claudeShadow(w.config.claude, profile)
     await fsPromises.mkdir(w.config.pi, { mode: 0o700 })
     await cursorShadow(w.config.cursor, profile, binary)
+    await zshKeepingHistoryInTheWorld(w.shellDir)
     await w.sh(root, ["git", "init", "-q", "--bare", w.origin])
     await w.sh(root, ["git", "init", "-q", "-b", "main", w.repository])
     await fsPromises.writeFile(path.join(w.repository, "README.md"), "# shop\n")
@@ -131,6 +148,8 @@ export class World {
         CURSOR_CONFIG_DIR: this.config.cursor,
         PATH: [path.dirname(binary), login.PATH].join(":"),
         TMPDIR: path.join(this.root, "tmp"),
+        HISTFILE: path.join(this.shellDir, ".bash_history"),
+        ZDOTDIR: this.shellDir,
         HC_SOCKET: this.hcSocket,
         npm_config_registry: `http://127.0.0.1:${this.releases.port}`,
         VIBEST_DOWNLOAD_URL: `http://127.0.0.1:${this.releases.port}`,
@@ -360,8 +379,20 @@ const secrets = () => [
     .map(([, value]) => value),
 ]
 
-export const redact = (text: string) =>
-  secrets().reduce((t, value) => (value === "" ? t : t.split(value).join("<redacted>")), text)
+const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+export const privateValues = await userPrivateValues()
+
+export const privateIn = (text: string, words: ReadonlyArray<string> = privateValues) =>
+  words.filter((w) => new RegExp(`(?<![\\w-])${escaped(w)}(?![\\w-])`).test(text))
+
+export const redactWith = (text: string, exact: ReadonlyArray<string>, words: ReadonlyArray<string>) =>
+  words.reduce(
+    (t, w) => t.replace(new RegExp(`(?<![\\w-])${escaped(w)}(?![\\w-])`, "g"), "<redacted>"),
+    exact.reduce((t, value) => (value === "" ? t : t.split(value).join("<redacted>")), text),
+  )
+
+export const redact = (text: string) => redactWith(text, secrets(), privateValues)
 
 export const knownSessions = async (
   w: World,

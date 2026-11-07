@@ -5,7 +5,8 @@ import os from "node:os"
 import path from "node:path"
 
 const root = path.resolve(import.meta.dirname, "../../..")
-const only = process.argv.slice(2)
+const noCache = process.argv.includes("--no-cache")
+const only = process.argv.slice(2).filter((a) => a !== "--no-cache")
 const NPM_SMOKE = ["I1", "I2", "U1", "U9", "U10", "H1"]
 
 type Options = { cwd?: string; env?: NodeJS.ProcessEnv }
@@ -104,12 +105,12 @@ const common = childProcess.execFileSync("git", ["rev-parse", "--path-format=abs
 const layoutFile = path.join(common.trim(), "vibest-e2e", "npm-layout")
 const layout = layoutOf(npm)
 const layoutKnown = fs.existsSync(layoutFile) && fs.readFileSync(layoutFile, "utf8") === layout
-const npmChecks = only.length > 0 ? only : layoutKnown ? NPM_SMOKE : []
+const npmChecks = only.length > 0 || noCache ? only : layoutKnown ? NPM_SMOKE : []
 
 const e2e = (method: string, install: string, ids: ReadonlyArray<string>) =>
   run(
     `e2e on the ${method} install${ids === NPM_SMOKE ? ` (smoke: ${ids.join(" ")})` : ""}`,
-    ["bun", "tools/e2e/src/main.ts", "--strict", ...ids],
+    ["bun", "tools/e2e/src/main.ts", "--strict", ...(noCache ? ["--no-cache"] : []), ...ids],
     {
       env: { ...process.env, VIBEST_E2E_METHOD: method, VIBEST_E2E_INSTALL: install },
     },

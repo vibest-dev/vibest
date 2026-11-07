@@ -37,35 +37,52 @@ const version = async (argv: ReadonlyArray<string>, env: Record<string, string>)
   if (bin === null) return `${argv[0]} missing`
   const p = Bun.spawn([bin, ...argv.slice(1)], { env, stdout: "pipe", stderr: "pipe", stdin: "ignore" })
   const [out] = await Promise.all([new Response(p.stdout).text(), p.exited])
-  return `${argv[0]} ${out.trim()}`
+  return `${argv[0]} ${out.match(/\d+\.\d+\.\d+[\w.+-]*/)?.[0] ?? out.trim()}`
 }
 
-const scenario = async (file: string, seen: Set<string>): Promise<string> => {
+const closure = async (file: string, seen: Set<string>) => {
+  if (seen.has(file)) return
   seen.add(file)
-  const text = await fs.readFile(path.join(src, "scenarios", file), "utf8")
-  const imported = [...text.matchAll(/from "\.\/([\w-]+\.ts)"/g)].map((m) => m[1]!).filter((f) => !seen.has(f))
-  return sha(text, ...(await Promise.all(imported.map((f) => scenario(f, seen)))))
+  const text = await fs.readFile(file, "utf8")
+  for (const m of text.matchAll(/(?:from|import)\s*\(?\s*"(\.{1,2}\/[^"]+\.ts)"/g))
+    await closure(path.resolve(path.dirname(file), m[1]!), seen)
 }
+
+export const scenario = async (file: string) => {
+  const files = new Set<string>()
+  await closure(file, files)
+  const sorted = [...files].sort()
+  return sha(
+    ...sorted.map((f) => path.relative(path.dirname(file), f)),
+    ...(await Promise.all(sorted.map((f) => fs.readFile(f)))),
+  )
+}
+
+export const writtenByHarness = (rel: string) => /^claude\/(tsconfig\.json$|\.claude-plugin\/types\/)/.test(rel)
 
 const stablePath = (p: string) => p.replace(/fnm_multishells\/[^/:]+/g, "fnm_multishells")
 
 export const cacheKeys = async (o: {
-  readonly binary: string
+  readonly binaries: ReadonlyArray<string>
   readonly harnesses: string
   readonly method: string
   readonly userFiles: Record<string, string>
 }) => {
   const env = await loginEnv()
-  const [binary, harnesses, runner, versions] = await Promise.all([
-    Bun.file(o.binary)
-      .arrayBuffer()
-      .then((b) => sha(new Uint8Array(b))),
-    tree(o.harnesses),
+  const [binaries, harnesses, runner, versions] = await Promise.all([
+    Promise.all(
+      [...new Set(o.binaries)].map((file) =>
+        Bun.file(file)
+          .arrayBuffer()
+          .then((b) => sha(new Uint8Array(b))),
+      ),
+    ),
+    tree(o.harnesses, writtenByHarness),
     tree(src, (rel) => rel.startsWith("scenarios/")),
     Promise.all(TOOLS.map((argv) => version(argv, env))),
   ])
   const base = sha(
-    binary,
+    ...binaries,
     harnesses,
     runner,
     ...versions,
@@ -75,7 +92,7 @@ export const cacheKeys = async (o: {
   )
   const areas = new Map<string, Promise<string>>()
   return (area: string, id: string) => {
-    if (!areas.has(area)) areas.set(area, scenario(`${area}.ts`, new Set()))
+    if (!areas.has(area)) areas.set(area, scenario(path.join(src, "scenarios", `${area}.ts`)))
     return areas.get(area)!.then((file) => sha(base, file, id))
   }
 }
