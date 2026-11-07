@@ -244,6 +244,7 @@ describe("Watch", () => {
       const capabilities = (yield* (yield* client).Ping()).capabilities
       assert.strictEqual(capabilities?.["watch"], true)
       assert.strictEqual(capabilities?.["projects"], true)
+      assert.strictEqual(capabilities?.["harnesses"], true)
     }),
   )
 })

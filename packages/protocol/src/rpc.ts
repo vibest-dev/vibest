@@ -650,4 +650,11 @@ export const ACCESS = {
   "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self"
 >
 
-export const CAPABILITIES = { http: true, handoff: true, requests: true, watch: true, projects: true } as const
+export const CAPABILITIES = {
+  http: true,
+  handoff: true,
+  requests: true,
+  watch: true,
+  projects: true,
+  harnesses: true,
+} as const

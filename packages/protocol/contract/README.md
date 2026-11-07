@@ -32,7 +32,7 @@ drawn in the focused window, send `Session.Seen` (`cli`) `{id, turn}` with the `
 turn; vibestd writes only a mark that rises, so a stale or repeated call changes nothing, and the result comes back
 through Watch.
 
-`Harnesses.List` (`open`): one entry per harness, `{harness, problem, models}`. `problem` is null when vibestd can
+`Harnesses.List` (`open`, capability `harnesses`): one entry per harness, `{harness, problem, models}`. `problem` is null when vibestd can
 start that harness, else the reason to show; `models` (empty with a problem) are `{provider, model, name, default}`,
 provider null meaning the harness's default provider and `default` the model it runs when none is given. A start
 passes the chosen `harness`, `provider` and `model` to `vibest` unchanged.

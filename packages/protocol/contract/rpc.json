@@ -5,7 +5,8 @@
     "handoff": true,
     "requests": true,
     "watch": true,
-    "projects": true
+    "projects": true,
+    "harnesses": true
   },
   "methods": {
     "Agents.Outdated": {

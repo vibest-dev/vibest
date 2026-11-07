@@ -917,6 +917,38 @@ describe("vibest.sock", () => {
         incompatibleDaemon(newer.layout.socket, { protocol: PROTOCOL, version: "9.9.9", runtimes: [] }, ["vibest"]),
         undefined,
       )
+      const needs = { capability: "harnesses", method: "Harnesses.List" }
+      const lacking = yield* serve({ protocol: PROTOCOL, version: "0.9.0", runtimes: [], capabilities: {} })
+      const lackRefused = yield* Effect.exit(
+        withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.die("must not call"), {
+          start: false,
+          needs,
+        }).pipe(Effect.provideService(Layout, lacking.layout)),
+      )
+      assert.strictEqual(failureTag(lackRefused), "IncompatibleDaemon")
+      const lackSaid = String(Exit.isFailure(lackRefused) && Cause.pretty(lackRefused.cause))
+      assert.include(lackSaid, "vibestd is older (0.9.0); run vibest update")
+      assert.include(lackSaid, "has no Harnesses.List")
+      assert.include(lackSaid, "vibest daemon restart")
+      assert.strictEqual(
+        yield* withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.succeed("no need"), {
+          start: false,
+        }).pipe(Effect.provideService(Layout, lacking.layout)),
+        "no need",
+      )
+      const having = yield* serve({
+        protocol: PROTOCOL,
+        version: "0.9.0",
+        runtimes: [],
+        capabilities: { harnesses: true },
+      })
+      assert.strictEqual(
+        yield* withVibest({ _tag: "cli", repositoryRoot: repo }, () => Effect.succeed("ok"), {
+          start: false,
+          needs,
+        }).pipe(Effect.provideService(Layout, having.layout)),
+        "ok",
+      )
     }),
   )
 
