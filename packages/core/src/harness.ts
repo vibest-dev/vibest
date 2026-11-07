@@ -52,6 +52,9 @@ export interface HarnessAdapter {
   readonly launchArgs: (input: LaunchInput) => ReadonlyArray<string>
   readonly coordinatorArgs?: (input: CoordinatorInput) => ReadonlyArray<string>
   readonly models: ModelLister
+  readonly checkEnvironment?: (
+    home: string,
+  ) => Effect.Effect<string | undefined, never, FileSystem.FileSystem | Path.Path>
   readonly guardAnswer?: (reason: string | undefined) => unknown
   readonly turnEnd?: (
     event: Readonly<Record<string, unknown>>,
@@ -155,6 +158,8 @@ export class Harness extends Context.Service<
             if (hit && now - hit.at < Duration.toMillis(MODELS_TTL)) return hit.models
             const models = yield* listModels(harnesses.get(id), provider).pipe(
               Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+              Effect.provideService(FileSystem.FileSystem, fs),
+              Effect.provideService(Path.Path, path),
             )
             cache.set(key, { at: now, models })
             return models
