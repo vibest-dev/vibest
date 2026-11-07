@@ -246,6 +246,33 @@ describe("send to an agent herdr started", () => {
   )
 })
 
+describe("open an agent", () => {
+  it.effect("asks herdr's agent.start with a 120 s window and returns its terminal once agent.start resolves", () =>
+    Effect.gen(function* () {
+      const { runtime, calls } = yield* scriptedRuntime((method) => {
+        if (method === "worktree.list") return Effect.succeed({ source: { source_workspace_id: "w1" } })
+        if (method === "tab.create") return Effect.succeed({ root_pane: { pane_id: "w1:p2" } })
+        if (method === "pane.get") return Effect.succeed({ pane: { tab_id: "w1:t2" } })
+        return Effect.succeed({})
+      })
+      const id = "abcd1234-abcd-4abc-8abc-abcd1234abcd"
+      const terminal = yield* runtime.open(
+        { id: "local" },
+        { project: "/p", cwd: "/p", argv: ["pi", "--x"], env: { VIBEST_SESSION_ID: id }, label: "pi" },
+      )
+      const start = calls.find((c) => c.method === "agent.start")
+      assert.deepStrictEqual(start?.params, {
+        name: TerminalRuntime.agentName(id),
+        kind: "pi",
+        pane_id: "w1:p2",
+        args: ["--x"],
+        timeout_ms: 120_000,
+      })
+      assert.strictEqual(terminal.id, `s/w1:p2/${TerminalRuntime.agentName(id)}`)
+    }).pipe(Effect.provide(Platform.services)),
+  )
+})
+
 describe("pane events", () => {
   it.effect("a pane.agent_status_changed subscription frame (its data has no type) is a state event", () =>
     Effect.gen(function* () {

@@ -651,8 +651,9 @@ export default Plugin.define({
           await until("the move to the second login", () => row().provider === "second", 120_000).catch(fail)
           await until("the round fails", () => status().some((m) => m.status === "failed"), 120_000).catch(fail)
           const moved = row()
-          const thirdStartWindowMs = 10_000
-          await Bun.sleep(thirdStartWindowMs)
+          await until("the round's no-harness-left result", () =>
+            results().some((r) => r.includes("no harness left")),
+          ).catch(fail)
           expect(status().length === 1, `one round: ${JSON.stringify(status())}`)
           expect(status()[0]!.status === "failed", `the round: ${JSON.stringify(status())}`)
           const said = results()

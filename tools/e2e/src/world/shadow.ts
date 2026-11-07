@@ -37,9 +37,9 @@ const PI_SETTINGS = [
 const CURSOR_BEHAVIOUR = ["approvalMode", "sandbox", "permissions", "network"]
 
 export const userFilesRead: ReadonlyArray<{ readonly file: string; readonly keys?: ReadonlyArray<string> }> = [
-  { file: user.claudeSettings },
+  { file: user.claudeSettings, keys: CLAUDE_SETTINGS },
   { file: user.claudeState, keys: CLAUDE_STATE },
-  { file: user.piSettings },
+  { file: user.piSettings, keys: PI_SETTINGS },
   { file: user.piTrust },
   { file: user.cursorConfig, keys: CURSOR_BEHAVIOUR },
   { file: user.cursorHooks },

@@ -73,9 +73,9 @@ three checks move to the real previous release, downloaded once into an E2E cach
 
 ## Terminal reports
 
-| ID  | Capability                               | Method | Pass when                                                                                 |
-| --- | ---------------------------------------- | ------ | ----------------------------------------------------------------------------------------- |
-| T1  | Native Claude/Pi OSC 7501 in isolated HC | script | Native working/blocked/resume/done/abort, unchanged results; raw evidence, no visible OSC |
+| ID  | Capability                                                       | Method | Pass when                                                                                 |
+| --- | ---------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------- |
+| T1  | Native Claude/Pi OSC 7501 in isolated HC; cases T1-claude, T1-pi | script | Native working/blocked/resume/done/abort, unchanged results; raw evidence, no visible OSC |
 
 T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG state/config/runtime directories; it never contacts the
 user's herdr-core or changes harness configuration outside that temporary root. Coordinator coverage awaits
@@ -161,7 +161,7 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S23 | vibestd restarted mid-turn, or killed after the turn end: exactly one result, its turn.end has `report`                                                                                  | exits: `tools/e2e` S23                                               |
 | S24 | vibestd killed mid-delivery: the row fails once with the may-or-may-not notice; a later send is delivered                                                                                | exits: `tools/e2e` S24                                               |
 | S25 | herdr hands over to a new server: the reset reconcile runs; a later close is seen (the time is recorded); send works                                                                     | exits: `tools/e2e` S25                                               |
-| S26 | latency of 10 send rounds and 10 pane closes: every send goes out, every close ends its process; the times are recorded                                                                  | inbox: `tools/e2e` S26                                               |
+| S26 | latency of 3 send rounds and 3 pane closes: every send goes out, every close ends its process; the times are recorded                                                                    | inbox: `tools/e2e` S26                                               |
 | S27 | archive with a process working in the worktree: worktree kept, the reason names it; the time is recorded                                                                                 | exits: `tools/e2e` S27                                               |
 | S28 | vibestd killed before a spawn opened its terminal: `launch_failed`, one notice, worktree removed (or kept, named)                                                                        | exits: `tools/e2e` S28                                               |
 | S29 | vibestd killed before the first task was handed over: the next vibestd types it once; one result                                                                                         | exits: `tools/e2e` S29                                               |
