@@ -95,7 +95,7 @@ func (a *App) launchHarness(p vibest.Project, h vibest.HarnessChoice) {
 	if len(argv) == 0 {
 		argv = []string{"vibest"}
 	}
-	argv = append(argv, "--harness", h.Harness, "--runtime", "hc")
+	argv = append(argv, "--harness", h.Harness)
 	if key := a.harnessPick[h.Harness]; key != "" {
 		for _, m := range h.Models {
 			if modelKey(m) != key {

@@ -14,9 +14,8 @@ per turn.
 
 A project with no entry session shows a placeholder instead of a terminal: the
 harnesses from `Harnesses.List`, a problem in grey with no Start, and models
-grouped by provider with the default selected. Start runs
-`vibest --harness … --runtime hc` through Launch, with the chosen provider and
-model. A project whose entry session exists but is stopped still starts with
+grouped by provider with the default selected. Start runs `vibest --harness …` through Launch on the hc runtime, with the
+chosen provider and model. A project whose entry session exists but is stopped still starts with
 plain `vibest`, which keeps that harness and session. A vibestd without the
 `projects` or `harnesses` capability is shown as older than this app.
 

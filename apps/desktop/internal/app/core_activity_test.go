@@ -64,6 +64,27 @@ func TestCoreActivityAggregatePriorities(t *testing.T) {
 	}
 }
 
+func TestVisitClearsALabelledCompletionWithoutLoweringTheLabel(t *testing.T) {
+	labelled := core.Terminal{Turn: 5, Labels: map[string]string{seenLabel: "2"}}
+	if !turnUnseen(labelled, 0) {
+		t.Fatal("a label behind the turn is not unseen")
+	}
+	if turnUnseen(labelled, 5) {
+		t.Fatal("a visit at the turn leaves a lower label unseen")
+	}
+	if !turnUnseen(labelled, 4) {
+		t.Fatal("a visit still behind the turn clears it")
+	}
+	atLabel := core.Terminal{Turn: 5, Labels: map[string]string{seenLabel: "5"}}
+	if turnUnseen(atLabel, 2) {
+		t.Fatal("a lower visit undoes the label")
+	}
+	plain := core.Terminal{Turn: 3}
+	if !turnUnseen(plain, 0) || turnUnseen(plain, 3) {
+		t.Fatal("a missing label still follows the visit")
+	}
+}
+
 func reportActivity(t *testing.T, a *App, f *coreAppFixture, id, state string, turn uint64, reported bool) {
 	t.Helper()
 	f.mu.Lock()

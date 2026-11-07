@@ -35,6 +35,10 @@ func seenWrites(f *coreAppFixture) []string {
 }
 
 func recordSeen(t *testing.T) (string, func() []string) {
+	return recordSeenCalls(t, 0)
+}
+
+func recordSeenCalls(t *testing.T, failFirst int) (string, func() []string) {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "vibest-seen")
 	if err != nil {
@@ -49,6 +53,7 @@ func recordSeen(t *testing.T) (string, func() []string) {
 	t.Cleanup(func() { ln.Close() })
 	var mu sync.Mutex
 	var got []string
+	var n int
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -85,8 +90,14 @@ func recordSeen(t *testing.T) (string, func() []string) {
 						}
 					}
 					mu.Lock()
+					n++
+					fail := n <= failFirst
 					got = append(got, req.Params.ID+" "+strconv.FormatFloat(req.Params.Turn, 'f', -1, 64)+" "+repo)
 					mu.Unlock()
+					if fail {
+						fmt.Fprintf(conn, "{\"jsonrpc\":\"2.0\",\"id\":%d,\"error\":{\"_tag\":\"Cause\",\"code\":0,\"message\":\"down\",\"data\":[{\"_tag\":\"Fail\",\"error\":{\"_tag\":\"RuntimeUnreachable\",\"message\":\"down\"}}]}}\n", req.ID)
+						return
+					}
 					fmt.Fprintf(conn, "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":null}\n", req.ID)
 				}
 			}()
@@ -156,6 +167,23 @@ func TestSeenIsSentOncePerTurnForADrawnSession(t *testing.T) {
 	awaitSeenCalls(t, tt, calls, "main 1 /code/Shipping", "main 5 /code/Shipping")
 	if got := seenWrites(f); len(got) != 0 {
 		t.Fatalf("desktop wrote herdr.seen: %v", got)
+	}
+}
+
+func TestSeenRetriesWhenTheCallFails(t *testing.T) {
+	a, _, tt := coreActivityUI(t)
+	path, calls := recordSeenCalls(t, 1)
+	useVibest(a, path)
+	turn := 1.0
+	main := vibestSession("main", "lead", "p1", "idle", "a", nil, 1)
+	main.Turn = &turn
+	applyVibest(a, shippingSnapshot(main))
+	awaitSeenCalls(t, tt, calls, "main 1 /code/Shipping", "main 1 /code/Shipping")
+	for range 5 {
+		tt.Frame()
+	}
+	if got := calls(); len(got) != 2 {
+		t.Fatalf("retried after success: %v", got)
 	}
 }
 

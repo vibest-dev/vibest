@@ -16,6 +16,7 @@ const (
 
 type seenWindow struct {
 	seenThisTurn map[string]float64
+	seenPending  map[string]float64
 	seenFrame    map[string]bool
 }
 
@@ -30,7 +31,7 @@ func labelSeen(t core.Terminal) (uint64, bool) {
 
 func turnUnseen(t core.Terminal, fallback uint64) bool {
 	seen, ok := labelSeen(t)
-	if !ok {
+	if !ok || fallback > seen {
 		seen = fallback
 	}
 	return t.Turn > 0 && t.Turn > seen
@@ -48,13 +49,18 @@ func (a *App) lookedAt(address string) {
 	}
 	turn := *s.Turn
 	if a.seenFrame == nil {
-		a.seenFrame, a.seenThisTurn = map[string]bool{}, map[string]float64{}
+		a.seenFrame = map[string]bool{}
+		a.seenThisTurn = map[string]float64{}
+		a.seenPending = map[string]float64{}
 	}
 	a.seenFrame[s.ID] = true
 	if prev, looked := a.seenThisTurn[s.ID]; looked && prev == turn {
 		return
 	}
-	a.seenThisTurn[s.ID] = turn
+	if prev, waiting := a.seenPending[s.ID]; waiting && prev == turn {
+		return
+	}
+	a.seenPending[s.ID] = turn
 	a.markSeen(s, turn)
 }
 
@@ -79,9 +85,33 @@ func (a *App) markSeen(s vibest.Session, turn float64) {
 		dir = directory(p)
 	}
 	id := s.ID
-	a.vibestQuiet(func(ctx context.Context, c *vibest.Client) error {
-		return c.Seen(ctx, dir, vibest.SeenParams{ID: id, Turn: turn})
-	})
+	socket, dial := a.vibestSocket, a.dialVibest
+	if socket == "" || dial == nil {
+		delete(a.seenPending, id)
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		c, err := dial(ctx, socket)
+		if err == nil {
+			defer c.Close()
+			err = c.Seen(ctx, dir, vibest.SeenParams{ID: id, Turn: turn})
+		}
+		a.mu.Lock()
+		if a.seenPending[id] == turn {
+			delete(a.seenPending, id)
+		}
+		if err == nil {
+			if a.seenThisTurn == nil {
+				a.seenThisTurn = map[string]float64{}
+			}
+			if prev, ok := a.seenThisTurn[id]; !ok || turn > prev {
+				a.seenThisTurn[id] = turn
+			}
+		}
+		a.mu.Unlock()
+	}()
 }
 
 func (a *App) endSeenFrame() {

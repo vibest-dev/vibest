@@ -150,23 +150,6 @@ func (a *App) vibestDo(action func(context.Context, *vibest.Client) error) {
 	}()
 }
 
-func (a *App) vibestQuiet(action func(context.Context, *vibest.Client) error) {
-	socket, dial := a.vibestSocket, a.dialVibest
-	if socket == "" || dial == nil {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		c, err := dial(ctx, socket)
-		if err != nil {
-			return
-		}
-		defer c.Close()
-		_ = action(ctx, c)
-	}()
-}
-
 func vibestMessage(err error) string {
 	var failure *vibest.Error
 	if errors.As(err, &failure) {

@@ -31,7 +31,7 @@ func TestProjectWithoutAnEntrySessionListsHarnessesAndLaunchesTheChoice(t *testi
 		runtime := "hc"
 		return vibestfake.Script{
 			vibestRequest("Launch", "/code/Shipping", vibest.LaunchParams{
-				Argv:    []string{"vibest", "--harness", "pi", "--runtime", "hc", "--provider", "anthropic", "--model", model},
+				Argv:    []string{"vibest", "--harness", "pi", "--provider", "anthropic", "--model", model},
 				Runtime: &runtime,
 			}),
 			json.RawMessage(`{"jsonrpc":"2.0","id":1,"result":{"runtime":"hc","terminal":"t9","place":"hc","attach":null}}`),
