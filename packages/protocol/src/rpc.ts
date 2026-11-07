@@ -222,6 +222,20 @@ export type InboxMessage = typeof InboxMessage.Type
 
 export const SessionStatusInfo = Schema.Struct({ ...SessionInfo.fields, result: Schema.NullOr(InboxMessage) })
 
+export const HarnessModel = Schema.Struct({
+  provider: Schema.NullOr(Schema.String),
+  model: Schema.String,
+  name: Schema.String,
+  default: Schema.Boolean,
+})
+
+export const HarnessChoice = Schema.Struct({
+  harness: Schema.Literals(HARNESS_IDS),
+  problem: Schema.NullOr(Schema.String),
+  models: Schema.Array(HarnessModel),
+})
+export type HarnessChoice = typeof HarnessChoice.Type
+
 export const ProjectRow = Schema.Struct({
   id: Schema.String,
   directory: Schema.NullOr(Schema.String),
@@ -287,6 +301,7 @@ export class VibestRpcs extends RpcGroup.make(
     ),
   ),
   protocol(Rpc.make("Plugins", { success: Schema.Array(PluginInfo) })),
+  protocol(Rpc.make("Harnesses.List", { success: Schema.Array(HarnessChoice) })),
   protocol(
     Rpc.make("Runtimes.Doctor", {
       payload: { harnesses: Schema.Array(Schema.String) },
@@ -582,6 +597,7 @@ export class VibestRpcs extends RpcGroup.make(
 export const ACCESS = {
   Ping: "open",
   Plugins: "open",
+  "Harnesses.List": "open",
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
   Republish: "open",

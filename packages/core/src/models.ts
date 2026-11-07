@@ -1,7 +1,7 @@
 import { Config, Effect, Option, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, HarnessUnavailable } from "./harness.ts"
+import { type HarnessAdapter, HARNESS_IDS, type HarnessId, HarnessUnavailable } from "./harness.ts"
 
 export const Model = Schema.Struct({
   harness: Schema.Literals(HARNESS_IDS),
@@ -96,15 +96,3 @@ export const listModels = Effect.fn("listModels")(function* (adapter: HarnessAda
     return yield* unavailable(`${binary} lists no models${provider ? ` for provider "${provider}"` : ""}`)
   return models
 })
-
-export const listAllModels = (harnesses: ReadonlyArray<HarnessId>, provider: string | null) =>
-  Effect.forEach(
-    harnesses,
-    (h) => Effect.result(Effect.flatMap(Harnesses, (all) => listModels(all.get(h), provider))),
-    { concurrency: "unbounded" },
-  ).pipe(
-    Effect.map((results) => ({
-      models: results.flatMap((r) => (r._tag === "Success" ? r.success : [])),
-      errors: results.flatMap((r) => (r._tag === "Failure" ? [`${r.failure.harness}: ${r.failure.message}`] : [])),
-    })),
-  )

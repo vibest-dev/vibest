@@ -2,7 +2,7 @@ import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
+import { harnessCatalog, harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import * as Launch from "@vibest/core/launch"
@@ -622,6 +622,8 @@ export const handlers = VibestRpcs.toLayer(
         }),
 
       Plugins: () => plugins.list,
+
+      "Harnesses.List": () => harnessCatalog,
 
       "Runtimes.Doctor": ({ harnesses }) =>
         Effect.flatMap(runtimes.statuses({ id: "local" }), (rows) =>

@@ -18,7 +18,6 @@ import {
 import * as Guard from "@vibest/core/guard"
 import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
-import { listAllModels } from "@vibest/core/models"
 import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
@@ -638,8 +637,22 @@ const report = Command.make("report", { message: text("message") }, (o) =>
 )
 
 const providerFlag = Flag.String("provider").pipe(Flag.withDescription("Only this provider's models"), Flag.optional)
+const catalog = vibest((client) => client["Harnesses.List"]())
 const modelsOf = (harnesses: ReadonlyArray<HarnessId>, provider: Option.Option<string>) =>
-  listAllModels(harnesses, Option.getOrNull(provider)).pipe(Effect.flatMap(json))
+  catalog.pipe(
+    Effect.map((choices) => {
+      const chosen = choices.filter((c) => harnesses.includes(c.harness))
+      return {
+        models: chosen.flatMap((c) =>
+          c.models
+            .filter((m) => Option.isNone(provider) || m.provider === provider.value)
+            .map((m) => ({ harness: c.harness, ...m })),
+        ),
+        errors: chosen.flatMap((c) => (c.problem === null ? [] : [`${c.harness}: ${c.problem}`])),
+      }
+    }),
+    Effect.flatMap(json),
+  )
 
 const models = Command.make(
   "models",
@@ -664,40 +677,31 @@ const models = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "The models each harness accepts, as the harness reports them: start a session with one entry's harness, provider (null: leave it out) and model. Local, does not need vibestd",
+    "The models each harness accepts, as the harness reports them: start a session with one entry's harness, provider (null: leave it out) and model",
   ),
 )
 
 const harness = Command.make("harness").pipe(
-  Command.withDescription("The harnesses vibest runs; local, does not need vibestd"),
+  Command.withDescription("The harnesses vibest runs"),
   Command.withSubcommands([
     Command.make("list", {}, () =>
-      Effect.forEach(
-        HARNESS_IDS,
-        (h) =>
-          Effect.gen(function* () {
-            const host = yield* Harness
-            const summary = { harness: h, binary: (yield* Harnesses).get(h).binary }
-            if (!(yield* host.available(h)))
-              return { ...summary, available: false, defaultModel: null, error: `${summary.binary} is not on PATH` }
-            return yield* host.models(h, null).pipe(
-              Effect.map((models) => ({
-                ...summary,
-                available: true,
-                defaultModel: models.find((m) => m.default)?.model ?? null,
-                error: null,
-              })),
-              Effect.catchTag("HarnessUnavailable", (e) =>
-                Effect.succeed({ ...summary, available: true, defaultModel: null, error: e.message }),
-              ),
-            )
-          }),
-        { concurrency: "unbounded" },
-      ).pipe(Effect.flatMap(json), Effect.provide(Harness.layer)),
+      Effect.gen(function* () {
+        const adapters = yield* Harnesses
+        const choices = yield* catalog
+        yield* json(
+          choices.map((c) => ({
+            harness: c.harness,
+            binary: adapters.get(c.harness).binary,
+            available: c.problem === null,
+            defaultModel: c.models.find((m) => m.default)?.model ?? null,
+            error: c.problem,
+          })),
+        )
+      }),
     ).pipe(
       Command.withAlias("ls"),
       Command.withDescription(
-        "Each harness: its binary, whether it is on PATH and the model it runs by default (null: the harness chooses, or error says why it could not be asked)",
+        "Each harness: its binary, whether vibest can start it and the model it runs by default (null: the harness chooses; error says why it cannot be started)",
       ),
     ),
     Command.make("models", { harness: Argument.Literals("harness", HARNESS_IDS), provider: providerFlag }, (o) =>

@@ -12,6 +12,8 @@ import {
   HARNESS_IDS,
   hasNewline,
   type LaunchInput,
+  harnessCatalog,
+  harnessOptions,
   preflight,
 } from "@vibest/core/harness"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
@@ -19,7 +21,7 @@ import { claudeMenuKey, claudeModels } from "@vibest/core/harnesses/claude"
 import { cursorModels } from "@vibest/core/harnesses/cursor"
 import { piModels } from "@vibest/core/harnesses/pi"
 import * as Launch from "@vibest/core/launch"
-import { listAllModels, normalizeModels } from "@vibest/core/models"
+import { listModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { envelope, isUsageLimitError, outcome, parseReport, turnEndFrom, turnEndOf } from "@vibest/core/results"
@@ -1105,7 +1107,8 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       yield* Effect.gen(function* () {
         const harness = yield* Harness.make()
         yield* Effect.flip(harness.models("pi", null))
-        yield* listAllModels(["claude", "cursor"], null)
+        const adapters = yield* Harnesses
+        yield* Effect.forEach(["claude", "cursor"] as const, (h) => Effect.flip(listModels(adapters.get(h), null)))
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provide(
@@ -1137,6 +1140,43 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
       assert.strictEqual(yield* reported(keychain), `cursor model discovery failed: ${keychain}`)
       assert.strictEqual(yield* reported(query), `cursor model discovery failed: ${query}`)
       assert.strictEqual(yield* reported(auth), `cursor model discovery failed: ${auth}`)
+    }),
+  )
+
+  it.effect("the harness catalog and the start options agree: a harness off PATH has a problem and no models", () =>
+    Effect.gen(function* () {
+      const [catalog, options] = yield* Effect.all([harnessCatalog, harnessOptions]).pipe(
+        Effect.provide(
+          Layer.succeed(Harness, {
+            available: (id) => Effect.succeed(id !== "cursor"),
+            plugin: (id) => Effect.succeed(`/vibest/harnesses/${id}`),
+            models: (id) =>
+              Effect.succeed([
+                { harness: id, provider: "p", model: `${id}-1`, name: "One", description: "d", default: true },
+              ]),
+          }),
+        ),
+      )
+      assert.deepStrictEqual(
+        catalog.find((c) => c.harness === "pi"),
+        { harness: "pi", problem: null, models: [{ provider: "p", model: "pi-1", name: "One", default: true }] },
+      )
+      assert.deepStrictEqual(
+        catalog.find((c) => c.harness === "cursor"),
+        {
+          harness: "cursor",
+          problem: "cursor-agent is not on PATH",
+          models: [],
+        },
+      )
+      assert.deepStrictEqual(
+        options,
+        catalog.map((c) =>
+          c.problem === null
+            ? { harness: c.harness, available: true }
+            : { harness: c.harness, available: false, problem: c.problem },
+        ),
+      )
     }),
   )
 

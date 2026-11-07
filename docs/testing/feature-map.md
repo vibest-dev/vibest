@@ -92,7 +92,7 @@ the typed prompt lands in the middle of the scripted hook sequence. I5 is the re
 
 | ID  | Capability                                                                                                | Method | Pass when                                                           |
 | --- | --------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------- |
-| H1  | `harness list`: binary, on PATH, default model, per harness                                               | script | one entry per harness (Claude, Pi, Cursor); a missing CLI says so   |
+| H1  | `harness list` (vibestd `Harnesses.List`): binary, startable, default model, per harness                  | script | one entry per harness (Claude, Pi, Cursor); a missing CLI says so   |
 | H2  | `harness models <harness>` / `models`                                                                     | script | non-empty list for each installed harness; a missing one is skipped |
 | H3  | `doctor`: grouped (coding agents, herdr, vibestd, plugins), a fix line under each problem, then a verdict | script | one agent line per harness; a herdr line per usable harness         |
 

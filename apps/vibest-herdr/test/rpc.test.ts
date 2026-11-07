@@ -480,6 +480,7 @@ describe("vibest.sock", () => {
         ...protectedCalls(bare).map(([method]) => method),
         "Ping",
         "Plugins",
+        "Harnesses.List",
         "Runtimes.Doctor",
         "Subscriptions",
         "Republish",

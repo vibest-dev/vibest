@@ -24,3 +24,8 @@ session `List({ all: true })` answers, each with its `parentId`; after it come `
 `SessionEnded` as they commit. A session that leaves the `List` set is `SessionEnded`; the same row may come again.
 When the client stops acknowledging, the stream fails with `WatchLagged` instead of buffering without bound; on that
 or any other end, reconnect and take the new `Snapshot` as the truth.
+
+`Harnesses.List` (`open`): one entry per harness, `{harness, problem, models}`. `problem` is null when vibestd can
+start that harness, else the reason to show; `models` (empty with a problem) are `{provider, model, name, default}`,
+provider null meaning the harness's default provider and `default` the model it runs when none is given. A start
+passes the chosen `harness`, `provider` and `model` to `vibest` unchanged.
