@@ -6,6 +6,7 @@ import { awaitEvent, Bus } from "./bus.ts"
 import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
 import type { HarnessAdapter, HarnessId } from "./harness.ts"
 import type { Inbox } from "./inbox.ts"
+import { VibestCommand } from "./paths.ts"
 import { errorMessage } from "./plugins.ts"
 import type { Processes } from "./processes.ts"
 import type { Restarting } from "./restarting.ts"
@@ -262,7 +263,7 @@ export const sessionRestart = (deps: {
         pid: main.pid,
         harnessSessionId: main.harnessSessionId,
         interrupted,
-        argv: Effect.succeed(["vibest", "integration", "start", id]),
+        argv: Effect.map(VibestCommand, (vibest) => [...vibest, "integration", "start", id]),
         liveNow: Effect.gen(function* () {
           const row = yield* db.coordinatorOf(projectId)
           return row?.id === id ? { ...row, ready: yield* db.readyAt(id) } : undefined

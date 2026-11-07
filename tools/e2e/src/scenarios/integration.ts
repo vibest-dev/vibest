@@ -14,8 +14,8 @@ import {
   subagentFolder,
   text,
 } from "../fake-model.ts"
-import { agentName, compiled, expect, harnesses, herdr, Skip, until, type World } from "../world.ts"
-import { project as newRepository } from "./inbox.ts"
+import { agentName, compiled, expect, harnesses, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
 
@@ -72,6 +72,73 @@ const withSession = async (
 }
 
 const checks: ReadonlyArray<Check> = [
+  {
+    id: "I11",
+    title:
+      "another vibest first on PATH (an older install): a Pi main agent, a Pi subagent and a Claude subagent still reach this build's vibestd through their integrations, and the other vibest never runs",
+    run: async (w) => {
+      for (const bin of ["pi", "claude", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const other = path.join(w.root, "other-vibest")
+      const ran = path.join(w.root, "other-vibest-ran")
+      await fs.mkdir(other, { recursive: true })
+      await fs.writeFile(
+        path.join(other, "vibest"),
+        `#!/bin/sh\necho "$@" >> '${ran}'\necho "not the vibest under test" >&2\nexit 1\n`,
+        { mode: 0o755 },
+      )
+      const zdot = path.join(w.root, "zdotdir-other")
+      await fs.mkdir(zdot, { recursive: true })
+      const env = { PATH: `${other}:${w.env().PATH}`, ZDOTDIR: zdot }
+      const pi = fakeOpenAI(
+        (who, _dir, _done, last) => (who === "pi" && last === undefined ? "pong\nstatus: completed" : "ok"),
+        {},
+      )
+      const claude = fakeAnthropic((r) =>
+        r.tools.length > 0 && subagentFolder(r.system) !== undefined ? "pong\nstatus: completed" : "ok",
+      )
+      const session = `${w.herdrSession}-other`
+      try {
+        const piEnv = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-other", pi.url)}`
+        await w.stopDaemon()
+        await w.ok(["daemon"], { env })
+        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", piEnv], { env, timeoutMs: 90_000 })
+        const run = async (flags: ReadonlyArray<string>) =>
+          (
+            JSON.parse(
+              await w.ok(["run", ...flags, "--session", session, "--", "Answer once."], { env, timeoutMs: 120_000 }),
+            ) as { id: string }
+          ).id
+        const subs = [
+          await run(["pi", "--env", piEnv]),
+          await run(["claude", ...(await claudeEnv(w, "other", claude.url))]),
+        ]
+        for (const id of subs) {
+          await until(`${id}'s result`, async () => (await turnState(w, id)) === "completed", 120_000)
+          expect(/pong/.test((await latest(w, id))?.message ?? ""), `${id}: ${(await latest(w, id))?.message}`)
+        }
+        const main = (await w.json<Array<{ id: string; agent: string }>>(["ls"])).find((e) => e.agent === "main")
+        expect(main !== undefined, "no main agent")
+        await until(
+          "the Pi main agent's ready report",
+          () =>
+            row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, main!.id)
+              ?.c != null,
+          60_000,
+        )
+        expect(
+          !(await Bun.file(ran).exists()),
+          `the other vibest ran: ${await Bun.file(ran)
+            .text()
+            .catch(() => "")}`,
+        )
+      } finally {
+        pi.stop()
+        claude.stop()
+        await w.stopDaemon()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
   {
     id: "I1",
     title:
