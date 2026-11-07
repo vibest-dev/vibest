@@ -122,7 +122,7 @@ describe("Shell denials", () => {
         assert.match(reason ?? "", /^vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT/, command)
   })
 
-  it("refuse vibest integration stop and prompt, the harness's turn-end and user-prompt hooks, however they are wrapped", () => {
+  it("refuse vibest integration stop, prompt and ready, the harness's hooks, however they are wrapped", () => {
     for (const command of [
       "vibest integration stop",
       "/usr/bin/bun /src/main.ts integration stop",
@@ -136,6 +136,8 @@ describe("Shell denials", () => {
         assert.match(reason ?? "", /^vibest integration stop is the harness's turn-end hook/, command)
     for (const reason of both("vibest integration prompt --harness claude"))
       assert.match(reason ?? "", /^vibest integration prompt is the harness's user-prompt hook/)
+    for (const reason of both("vibest integration ready --harness cursor"))
+      assert.match(reason ?? "", /^vibest integration ready is the harness's session-start hook/)
   })
 
   it("the coordinator also does not start harness CLIs (they would report as it) or run gh's credential and config commands", () => {

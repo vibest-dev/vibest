@@ -26,7 +26,7 @@ const run = (event: string, env: Record<string, string>, stdin = "{}") => {
   const hooks = JSON.parse(files["hooks/hooks.json"]!).hooks as Record<string, Array<{ command: string }>>
   const p = Bun.spawnSync(["sh", "-c", hooks[event]![0]!.command], {
     cwd: dir,
-    env: { PATH: `${bin}:/usr/bin:/bin`, ...env },
+    env: { PATH: `${bin}:/usr/bin:/bin`, VIBEST_HOME: dir, ...env },
     stdin: new TextEncoder().encode(stdin),
   })
   return {
@@ -42,7 +42,8 @@ describe("@vibest/cursor", () => {
   it("outside a vibest agent: allows without asking vibest, and reports nothing", () => {
     assert.deepStrictEqual(run("preToolUse", {}), { code: 0, stdout: '{"permission":"allow"}', calls: "" })
     assert.deepStrictEqual(run("beforeSubmitPrompt", {}, '{"prompt":"look"}'), { code: 0, stdout: "", calls: "" })
-    assert.deepStrictEqual(run("stop", {}), { code: 0, stdout: "", calls: "" })
+    assert.deepStrictEqual(run("afterAgentResponse", {}), { code: 0, stdout: "", calls: "" })
+    assert.deepStrictEqual(run("sessionStart", {}), { code: 0, stdout: "", calls: "" })
   })
 
   it("a vibest agent's tool call: vibest's answer, and a refusal when vibest fails", () => {
@@ -58,19 +59,50 @@ describe("@vibest/cursor", () => {
   it("runs the vibest in VIBEST_COMMAND, not the one on PATH; an argv it cannot read safely falls back to PATH", () => {
     const own = path.join(dir, "own vibest")
     fs.writeFileSync(own, `#!/bin/sh\necho "own $* <$(cat)>" >> ${calls}\n`, { mode: 0o755 })
-    const viaSh = run("stop", { ...agent, VIBEST_COMMAND: JSON.stringify(["sh", own]) }, "{}")
+    const viaSh = run("afterAgentResponse", { ...agent, VIBEST_COMMAND: JSON.stringify(["sh", own]) }, "{}")
     assert.strictEqual(viaSh.calls, "own integration stop --harness cursor <{}>")
-    const escaped = run("stop", { ...agent, VIBEST_COMMAND: '["/x\\"y"]' }, "{}")
+    const escaped = run("afterAgentResponse", { ...agent, VIBEST_COMMAND: '["/x\\"y"]' }, "{}")
     assert.strictEqual(escaped.calls, "integration stop --harness cursor <{}>")
   })
 
-  it("a vibest agent's turn end and prompt go to `vibest integration stop` and `prompt`, and never fail the hook or block the prompt", () => {
+  it("a vibest agent's session start, turn activity and response go to `vibest integration ready`, `prompt` and `stop`; Cursor's own stop is not hooked", () => {
+    const hooks = JSON.parse(files["hooks/hooks.json"]!).hooks as Record<string, unknown>
+    assert.deepStrictEqual(Object.keys(hooks).sort(), [
+      "afterAgentResponse",
+      "afterAgentThought",
+      "beforeSubmitPrompt",
+      "postToolUse",
+      "preToolUse",
+      "sessionStart",
+    ])
+    const home = path.join(dir, "home")
+    fs.mkdirSync(home, { recursive: true })
     for (const [event, stdin, command] of [
-      ["afterAgentResponse", '{"text":"done"}', "stop"],
+      ["sessionStart", '{"session_id":"c"}', "ready"],
       ["beforeSubmitPrompt", '{"prompt":"look"}', "prompt"],
-    ] as const) {
-      const r = run(event, { ...agent, FAKE_EXIT: "1", FAKE_OUT: "noise" }, stdin)
-      assert.deepStrictEqual(r, { code: 0, stdout: "", calls: `integration ${command} --harness cursor <${stdin}>` })
-    }
+      ["afterAgentThought", '{"text":"hm"}', "prompt"],
+      ["postToolUse", '{"tool_name":"Shell"}', "prompt"],
+      ["afterAgentResponse", '{"text":"done"}', "stop"],
+    ] as const)
+      assert.deepStrictEqual(run(event, { ...agent, VIBEST_HOME: home, FAKE_OUT: "noise" }, stdin), {
+        code: 0,
+        stdout: "",
+        calls: `integration ${command} --harness cursor <${stdin}>`,
+      })
+  })
+
+  it("a report vibest could not deliver fails the hook and its error lands in vibestd.log", () => {
+    const home = path.join(dir, "failing")
+    fs.mkdirSync(home, { recursive: true })
+    fs.writeFileSync(
+      path.join(bin, "failing"),
+      "#!/bin/sh\ncat >/dev/null\necho 'vibest: not delivered' >&2\nexit 1\n",
+      {
+        mode: 0o755,
+      },
+    )
+    const r = run("afterAgentResponse", { ...agent, VIBEST_HOME: home, VIBEST_COMMAND: '["failing"]' }, "{}")
+    assert.deepStrictEqual(r, { code: 1, stdout: "", calls: "" })
+    assert.strictEqual(fs.readFileSync(path.join(home, "vibestd.log"), "utf8"), "vibest: not delivered\n")
   })
 })

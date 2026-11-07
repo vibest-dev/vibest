@@ -1,5 +1,3 @@
-import { Effect, FileSystem } from "effect"
-
 import { type HarnessAdapter, type HarnessId } from "./harness.ts"
 
 export const jsonObject = (raw: string): Record<string, unknown> | undefined => {
@@ -15,19 +13,8 @@ export const jsonObject = (raw: string): Record<string, unknown> | undefined => 
 export const promptOf = (adapter: HarnessAdapter, agent: string, raw: string) => {
   const event = jsonObject(raw)
   const prompt = event && adapter.userPrompt?.(event, agent === "coordinator")
-  return prompt?.text.trim() ? prompt.text : undefined
+  return prompt?.text
 }
-
-export const writeTerminalStatus = (
-  ...[state, kind]: [state: "working" | "idle"] | [state: "blocked", kind?: "permission" | "question" | "auth"]
-) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    yield* Effect.gen(function* () {
-      const handle = yield* fs.open("/dev/tty", { flag: "w" })
-      yield* handle.write(new TextEncoder().encode(`\x1b]7501;state=${state}${kind ? `:kind=${kind}` : ""}\x1b\\`))
-    }).pipe(Effect.scoped, Effect.option)
-  }).pipe(Effect.ignore)
 
 export const isUsageLimitError = (error: string | undefined) => {
   const head = error?.split(":")[0]

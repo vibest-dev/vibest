@@ -99,6 +99,13 @@ export class World {
     const w = new World(root)
     for (const dir of [w.vibestHome, ...Object.values(w.config), path.join(root, "tmp")])
       await fsPromises.mkdir(dir, { mode: 0o700 })
+    await fsPromises.writeFile(
+      path.join(w.config.cursor, "cli-config.json"),
+      JSON.stringify({
+        version: 1,
+        permissions: { allow: [`Shell(${binary} report)`, "Shell(vibest report)"], deny: [] },
+      }),
+    )
     await w.sh(root, ["git", "init", "-q", "--bare", w.origin])
     await w.sh(root, ["git", "init", "-q", "-b", "main", w.repository])
     await fsPromises.writeFile(path.join(w.repository, "README.md"), "# shop\n")

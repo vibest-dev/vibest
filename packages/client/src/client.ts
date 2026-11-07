@@ -152,9 +152,9 @@ export const hookCall = (
   )
   return Effect.gen(function* () {
     const first = yield* once
-    if (Exit.isSuccess(first) || !Option.exists(Cause.findErrorOption(first.cause), notConnected)) return
+    if (Exit.isSuccess(first) || !Option.exists(Cause.findErrorOption(first.cause), notConnected)) return first
     yield* Effect.sleep(HOOK_RETRY_DELAY)
-    yield* once
+    return yield* once
   })
 }
 

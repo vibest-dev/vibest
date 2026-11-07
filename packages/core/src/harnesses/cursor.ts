@@ -53,15 +53,12 @@ export const cursor: HarnessAdapter = {
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
   conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),
   userPrompt: (event, coordinator) => {
-    if (coordinator || event.hook_event_name !== "beforeSubmitPrompt") return undefined
-    if (typeof event.prompt !== "string" || event.prompt.trim() === "") return undefined
+    if (coordinator) return undefined
+    if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }
+    if (event.hook_event_name !== "beforeSubmitPrompt" || typeof event.prompt !== "string" || !event.prompt.trim())
+      return undefined
     return { text: event.prompt }
   },
-  turnEnd: (event, coordinator) => {
-    if (coordinator) return undefined
-    if (event.hook_event_name === "afterAgentResponse") return { result: event }
-    if (event.hook_event_name !== "stop" || typeof event.status !== "string" || event.status === "completed")
-      return undefined
-    return { result: { ...event, error: `the turn ended with status ${event.status}` } }
-  },
+  turnEnd: (event, coordinator) =>
+    !coordinator && event.hook_event_name === "afterAgentResponse" ? { result: event } : undefined,
 }

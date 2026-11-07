@@ -228,6 +228,8 @@ export const shellBlock = (
       return "vibest integration stop is the harness's turn-end hook, not an agent command."
     if (at !== -1 && words[at + 1] === "prompt")
       return "vibest integration prompt is the harness's user-prompt hook, not an agent command."
+    if (at !== -1 && words[at + 1] === "ready")
+      return "vibest integration ready is the harness's session-start hook, not an agent command."
   }
   return undefined
 }

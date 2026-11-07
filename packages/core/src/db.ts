@@ -1658,6 +1658,17 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
+    markWorking: (id: string) =>
+      tx(
+        Effect.gen(function* () {
+          const turn = yield* openTurn(id)
+          if (turn === undefined) return
+          const reported =
+            yield* sql`SELECT 1 FROM event WHERE session_id = ${id} AND type = 'turn.reported' AND id > ${turn} LIMIT 1`
+          if (reported.length === 0) yield* updateSession(id, { status: "working" })
+        }),
+      ).pipe(Effect.orDie),
+
     reportTurn: (id: string, end: TurnEnded) =>
       tx(
         Effect.gen(function* () {
