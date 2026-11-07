@@ -414,6 +414,7 @@ export const handlers = VibestRpcs.toLayer(
         ? { id: "local" }
         : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
     const projectLocked = keyedLock<string>()
+    const seenLocked = keyedLock<string>()
 
     const runningCoordinator = (projectId: string, terminal: string) =>
       Effect.gen(function* () {
@@ -903,8 +904,11 @@ export const handlers = VibestRpcs.toLayer(
           const see = rt.value.see
           const unreachable = (e: { readonly message: string }) =>
             new RuntimeUnreachable({ session: id, message: e.message })
-          const now = yield* rt.value.seen(address).pipe(Effect.mapError(unreachable))
-          if (raisesSeen(now, turn)) yield* see(address, turn).pipe(Effect.mapError(unreachable))
+          const seen = rt.value.seen
+          yield* Effect.gen(function* () {
+            const now = yield* seen(address).pipe(Effect.mapError(unreachable))
+            if (raisesSeen(now, turn)) yield* see(address, turn).pipe(Effect.mapError(unreachable))
+          }).pipe(seenLocked.withLock(`${at.runtime}\n${address.machine}\n${address.id}`))
         }),
 
       "Inbox.Subscribe": () =>

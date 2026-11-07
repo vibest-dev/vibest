@@ -45,6 +45,7 @@ export interface RuntimeCalls {
   readonly close: { readonly terminal: string }
   readonly run: { readonly terminal: string; readonly argv: ReadonlyArray<string> }
   readonly present: { readonly terminal: string; readonly info: Readonly<Record<string, string>> }
+  readonly see: { readonly terminal: string; readonly turn: number }
 }
 
 type Entry = { [M in keyof RuntimeCalls]: { readonly method: M; readonly params: RuntimeCalls[M] } }[keyof RuntimeCalls]
@@ -457,7 +458,13 @@ export class FakeRuntime extends Context.Service<
         present: (terminal, info) =>
           call("present", { terminal: terminal.id, info: { ...info } }, terminal.id, Effect.void),
         seen: (terminal) => markOf(terminal.id),
-        see: (terminal, turn) => mark(terminal.id, (now) => ({ ...now, seen: turn })),
+        see: (terminal, turn) =>
+          call(
+            "see",
+            { terminal: terminal.id, turn },
+            terminal.id,
+            mark(terminal.id, (now) => ({ ...now, seen: turn })),
+          ),
         attach: () => ["fake", "attach"],
       }
 

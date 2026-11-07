@@ -185,6 +185,29 @@ describe("Watch", () => {
   )
 
   test(
+    "overlapping Session.Seen calls on one terminal run one after another, so the mark ends at the higher turn",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { repo, coordinator } = yield* withMain
+      const { next, c } = yield* watching(repo)
+      yield* next(isSnapshot)
+      const { id } = yield* coordinator.Spawn({ harness: "pi", prompt: "do it" })
+      yield* next((e): e is WatchEvent => e._tag === "Session" && e.session.id === id && e.session.status === "working")
+      const terminal = (yield* herdr.terminalOf(id))!
+      yield* Effect.repeat(herdr.finishTurn(terminal.id), { times: 5 })
+      const held = yield* herdr.hold("see", terminal.id)
+      const five = yield* c["Session.Seen"]({ id, turn: 5 }).pipe(Effect.forkScoped)
+      yield* held.reached
+      const six = yield* c["Session.Seen"]({ id, turn: 6 }).pipe(Effect.forkScoped)
+      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 200)))
+      yield* held.release()
+      yield* Fiber.join(five)
+      yield* Fiber.join(six)
+      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { turn: 6, seen: 6 })
+    }),
+  )
+
+  test(
     "Watch is the user's: a main agent is refused",
     Effect.gen(function* () {
       const { coordinator } = yield* withMain

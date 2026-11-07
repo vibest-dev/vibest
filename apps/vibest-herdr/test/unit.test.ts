@@ -6,11 +6,13 @@ import { projectActivity, raisesSeen, unseenDone } from "@vibest/core/activity"
 import { Bus } from "@vibest/core/bus"
 import { APPLICATION_ID, Db, encodeAddress, SCHEMA_VERSION, type SessionRow } from "@vibest/core/db"
 import {
+  anthropicOnly,
   type CoordinatorInput,
   Harness,
   Harnesses,
   HarnessUnavailable,
   HARNESS_IDS,
+  type HarnessId,
   hasNewline,
   type LaunchInput,
   harnessCatalog,
@@ -22,12 +24,13 @@ import { claudeMenuKey, claudeModels } from "@vibest/core/harnesses/claude"
 import { cursorModels } from "@vibest/core/harnesses/cursor"
 import { piModels } from "@vibest/core/harnesses/pi"
 import * as Launch from "@vibest/core/launch"
-import { listModels, normalizeModels } from "@vibest/core/models"
+import { catalogModels, listModels, normalizeModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory, shellQuote } from "@vibest/core/paths"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { envelope, isUsageLimitError, outcome, parseReport, turnEndFrom, turnEndOf } from "@vibest/core/results"
 import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { copyIncluded, git, gitState, mainCheckout, repositoryDirectoryName } from "@vibest/core/worktree"
+import type { HarnessChoice } from "@vibest/protocol/rpc"
 import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID, newId, shortId } from "@vibest/schema/id"
@@ -1168,6 +1171,37 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
     assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 4))
     assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 2.5))
     assert.isTrue(raisesSeen({ turn: 3, seen: null }, 0))
+    assert.isFalse(raisesSeen({ turn: 3, seen: null }, -1))
+    assert.isFalse(raisesSeen({ turn: 3, seen: null }, 1.5))
+  })
+
+  it("models --provider: a harness whose models name no provider takes the requested one through its checkProvider", () => {
+    const adapters = {
+      get: (id: HarnessId) => ({
+        binary: id,
+        checkProvider: id === "pi" ? () => undefined : anthropicOnly(id),
+      }),
+    }
+    const choices: ReadonlyArray<HarnessChoice> = [
+      { harness: "claude", problem: null, models: [{ provider: null, model: "opus", name: "Opus", default: true }] },
+      { harness: "pi", problem: null, models: [{ provider: "openai", model: "gpt", name: "GPT", default: true }] },
+    ]
+    assert.deepStrictEqual(catalogModels(choices, adapters, "anthropic"), {
+      models: [{ harness: "claude", provider: "anthropic", model: "opus", name: "Opus", default: true }],
+      errors: ['pi: pi lists no models for provider "anthropic"'],
+    })
+    const openai = catalogModels(choices, adapters, "openai")
+    assert.deepStrictEqual(openai.models, [
+      { harness: "pi", provider: "openai", model: "gpt", name: "GPT", default: true },
+    ])
+    assert.deepStrictEqual(
+      openai.errors,
+      [anthropicOnly("claude")("openai")].map((e) => `claude: ${e}`),
+    )
+    assert.deepStrictEqual(
+      catalogModels(choices, adapters, null).models.map((m) => m.provider),
+      [null, "openai"],
+    )
   })
 
   it.effect("the harness catalog and the start options agree: a harness off PATH has a problem and no models", () =>

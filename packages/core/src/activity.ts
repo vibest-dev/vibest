@@ -13,4 +13,4 @@ export const projectActivity = (statuses: Iterable<AgentStatus>): ProjectActivit
 }
 
 export const raisesSeen = (now: Runtime.Seen, turn: number) =>
-  Number.isInteger(turn) && turn <= now.turn && (now.seen === null || turn > now.seen)
+  Number.isInteger(turn) && turn >= 0 && turn <= now.turn && (now.seen === null || turn > now.seen)

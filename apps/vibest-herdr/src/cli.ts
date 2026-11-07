@@ -18,6 +18,7 @@ import {
 import * as Guard from "@vibest/core/guard"
 import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
+import { catalogModels } from "@vibest/core/models"
 import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
@@ -639,20 +640,11 @@ const report = Command.make("report", { message: text("message") }, (o) =>
 const providerFlag = Flag.String("provider").pipe(Flag.withDescription("Only this provider's models"), Flag.optional)
 const catalog = vibest((client) => client["Harnesses.List"]())
 const modelsOf = (harnesses: ReadonlyArray<HarnessId>, provider: Option.Option<string>) =>
-  catalog.pipe(
-    Effect.map((choices) => {
-      const chosen = choices.filter((c) => harnesses.includes(c.harness))
-      return {
-        models: chosen.flatMap((c) =>
-          c.models
-            .filter((m) => Option.isNone(provider) || m.provider === provider.value)
-            .map((m) => ({ harness: c.harness, ...m })),
-        ),
-        errors: chosen.flatMap((c) => (c.problem === null ? [] : [`${c.harness}: ${c.problem}`])),
-      }
-    }),
-    Effect.flatMap(json),
-  )
+  Effect.gen(function* () {
+    const adapters = yield* Harnesses
+    const choices = (yield* catalog).filter((c) => harnesses.includes(c.harness))
+    yield* json(catalogModels(choices, adapters, Option.getOrNull(provider)))
+  })
 
 const models = Command.make(
   "models",

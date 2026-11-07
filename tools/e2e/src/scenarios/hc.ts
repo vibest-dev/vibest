@@ -285,7 +285,7 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
-    id: "S35",
+    id: "S36",
     title:
       "herdr-core runtime: a subagent turn that ended unwatched is done in Watch, for it and its project; Session.Seen raises herdr.seen to that turn and it is idle",
     run: async (w) => {

@@ -1,3 +1,4 @@
+import type { HarnessChoice } from "@vibest/protocol/rpc"
 import { Config, Effect, Option, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
@@ -96,3 +97,26 @@ export const listModels = Effect.fn("listModels")(function* (adapter: HarnessAda
     return yield* unavailable(`${binary} lists no models${provider ? ` for provider "${provider}"` : ""}`)
   return models
 })
+
+export const catalogModels = (
+  choices: ReadonlyArray<HarnessChoice>,
+  adapters: { readonly get: (id: HarnessId) => Pick<HarnessAdapter, "binary" | "checkProvider"> },
+  provider: string | null,
+) => {
+  const models: Array<Omit<Model, "description">> = []
+  const errors: Array<string> = []
+  for (const c of choices) {
+    const adapter = adapters.get(c.harness)
+    const problem = c.problem ?? (provider === null ? undefined : adapter.checkProvider(provider))
+    if (problem !== undefined) {
+      errors.push(`${c.harness}: ${problem}`)
+      continue
+    }
+    const kept = c.models
+      .map((m) => ({ harness: c.harness, ...m, provider: m.provider ?? provider }))
+      .filter((m) => provider === null || m.provider === provider)
+    if (kept.length === 0) errors.push(`${c.harness}: ${adapter.binary} lists no models for provider "${provider}"`)
+    models.push(...kept)
+  }
+  return { models, errors }
+}
