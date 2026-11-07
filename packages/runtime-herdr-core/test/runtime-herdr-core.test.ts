@@ -57,7 +57,12 @@ const withRuntime = <A, E>(
     const connector = yield* SocketConnector
     const connect = (at: string) => Effect.runSync(Hc.make(at).pipe(Effect.provideService(SocketConnector, connector)))
     const hc = connect(socketPath)
-    const runtime = yield* make({ connect, socket: socketPath, scope: yield* Effect.scope })
+    const runtime = yield* make({
+      connect,
+      socket: socketPath,
+      scope: yield* Effect.scope,
+      typedLaunch: "2 seconds",
+    })
     return yield* body(runtime, hc)
   }).pipe(Effect.scoped, Effect.provide(HcBun.layer))
 

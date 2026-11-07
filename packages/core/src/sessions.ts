@@ -117,6 +117,7 @@ interface Tracked {
   readonly blockedNotified: Ref.Ref<boolean>
   readonly prompting: Ref.Ref<boolean>
   readonly stopping: Ref.Ref<boolean>
+  readonly launchRechecked: Ref.Ref<boolean>
 }
 
 const newTracked: Effect.Effect<Tracked> = Effect.all({
@@ -125,6 +126,7 @@ const newTracked: Effect.Effect<Tracked> = Effect.all({
   blockedNotified: Ref.make(false),
   prompting: Ref.make(false),
   stopping: Ref.make(false),
+  launchRechecked: Ref.make(false),
 })
 
 export interface SpawnInput {
@@ -898,22 +900,30 @@ export class Sessions extends Context.Service<
         if (state !== undefined && session.status !== state) yield* db.updateSession(session.id, { status: state })
         if (state === "working" || state === "blocked") yield* Ref.set(r.sawWorking, true)
         if ((yield* collectResult(h, session)) !== "none") return
-        if (seen === "absent" || (state === undefined && !(yield* alive(h, terminal)))) {
-          const cutOff = session.startedAt === null
-          if (open && !cutOff)
-            yield* finish(session, "failed", "", "the session exited (its terminal is gone or its process with it)")
-          if (session.exitedAt === null) {
-            yield* db.updateSession(id, {
-              status: "unknown",
-              exitedAt: yield* Clock.currentTimeMillis,
-              ...(cutOff ? { end: "launch_failed" as const } : {}),
-            })
-            yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
+        if (state === undefined) {
+          const terminalRunning = yield* alive(h, terminal)
+          const reportedPid = session.metadata.pid
+          const harnessGone =
+            terminalRunning && typeof reportedPid === "number" && (yield* processes.liveness(reportedPid)) === "exited"
+          if (harnessGone || !terminalRunning) {
+            const cutOff = session.startedAt === null
+            if (open && !cutOff)
+              yield* finish(session, "failed", "", "the session exited (its terminal is gone or its process with it)")
+            if (session.exitedAt === null) {
+              yield* db.updateSession(id, {
+                status: "unknown",
+                exitedAt: yield* Clock.currentTimeMillis,
+                ...(cutOff ? { end: "launch_failed" as const } : {}),
+              })
+              yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
+            }
+            if (cutOff) yield* undoCutOffStart(h, session)
+            yield* dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
+            return
           }
-          if (cutOff) yield* undoCutOffStart(h, session)
-          yield* dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
-          return
-        }
+          if (!(yield* Ref.getAndSet(r.launchRechecked, true)))
+            yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkLocked(id))
+        } else yield* Ref.set(r.launchRechecked, false)
         if (!harnesses.get(session.harnessId).ownSessionId && h.session !== undefined) {
           const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
           if (sessionId !== null && sessionId !== session.harnessSessionId)
@@ -997,9 +1007,10 @@ export class Sessions extends Context.Service<
         const h = yield* live(session)
         const terminal = session.address
         const seen = yield* agentState(h, terminal)
-        const state = stateOf(seen)
-        if (state !== undefined && state !== "unknown" && busy(state)) return
-        if (seen === "absent" || (state === "unknown" && !(yield* alive(h, terminal)))) {
+        const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
+        if (state !== undefined && busy(state)) return
+        if (state === undefined && !(yield* alive(h, terminal))) {
+          if (session.exitedAt !== null && (yield* db.pendingInbox(id)).length === 0) return
           if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId)
             return yield* new NoSuchSession({
               id,

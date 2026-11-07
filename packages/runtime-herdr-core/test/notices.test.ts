@@ -20,13 +20,13 @@ import { Hc, SocketConnector } from "effect-herdr-core-sdk"
 import * as HcBun from "effect-herdr-core-sdk/bun"
 import * as Socket from "effect/socket/Socket"
 
-import { make, terminalId } from "../src/terminal-runtime.ts"
+import { LABEL, TYPED_LAUNCH_MS, make, terminalId } from "../src/terminal-runtime.ts"
 
 const shell = { argv: ["/bin/zsh"], cwd: "/tmp", name: "zsh", pid: 100 }
 const sleeping = { argv: ["sleep", "5"], cwd: "/tmp", name: "sleep", pid: 101 }
 type Foreground = typeof shell
 
-const recordedTerminal = (foreground: Foreground) =>
+const recordedTerminal = (foreground: Foreground, labels: Readonly<Record<string, string>>) =>
   JSON.stringify({
     address: "t1",
     argv: ["/bin/zsh"],
@@ -39,7 +39,7 @@ const recordedTerminal = (foreground: Foreground) =>
     foreground,
     identity: "ghostty",
     keep: true,
-    labels: { "vibest.runtime": "hc" },
+    labels,
     name: "probe1",
     notify: false,
     parent: null,
@@ -86,6 +86,7 @@ const fakeCore = Effect.gen(function* () {
   const dir = yield* fs.makeTempDirectoryScoped({ prefix: "vibest-hc-rt-" })
   const socketPath = path.join(dir, "hc.sock")
   const foreground = yield* Ref.make<Foreground>(shell)
+  const labels = yield* Ref.make<Record<string, string>>({ "vibest.runtime": "hc" })
   const calls = yield* Ref.make<ReadonlyArray<string>>([])
   const subscribers = yield* Queue.unbounded<Subscriber>()
 
@@ -103,19 +104,28 @@ const fakeCore = Effect.gen(function* () {
           ),
         ),
       ).pipe(Stream.splitLines, Stream.runHead)
-      const request = yield* Request(Option.getOrElse(line, () => ""))
+      const text = Option.getOrElse(line, () => "")
+      const request = yield* Request(text)
       yield* Ref.update(calls, (all) => [...all, request.method])
       const reply = (result: string) => writer.write(`{"id":${request.id},"jsonrpc":"2.0","result":${result}}\n`)
+      const terminalJson = Effect.gen(function* () {
+        return recordedTerminal(yield* Ref.get(foreground), yield* Ref.get(labels))
+      })
       if (request.method === "events.subscribe") {
-        yield* reply(`{"channel":null,"seq":0,"terminals":[${recordedTerminal(yield* Ref.get(foreground))}]}`)
+        yield* reply(`{"channel":null,"seq":0,"terminals":[${yield* terminalJson}]}`)
         const closed = yield* Deferred.make<void>()
         yield* Queue.offer(subscribers, {
-          push: (text) => writer.write(`${text}\n`).pipe(Effect.orDie),
+          push: (pushed) => writer.write(`${pushed}\n`).pipe(Effect.orDie),
           close: Deferred.succeed(closed, undefined).pipe(Effect.asVoid),
         })
         yield* Deferred.await(closed)
-      } else if (request.method === "terminal.get") yield* reply(recordedTerminal(yield* Ref.get(foreground)))
+      } else if (request.method === "terminal.get") yield* reply(yield* terminalJson)
       else if (request.method === "terminal.send") yield* reply('{"started":null,"status":null,"turn":0}')
+      else if (request.method === "terminal.label") {
+        const params = (JSON.parse(text) as { params?: { labels?: Record<string, string> } }).params
+        if (params?.labels !== undefined) yield* Ref.update(labels, (cur) => ({ ...cur, ...params.labels }))
+        yield* reply(yield* terminalJson)
+      }
       yield* writer.write(new Socket.CloseEvent())
     }).pipe(Effect.scoped, Effect.ignore)
 
@@ -141,7 +151,10 @@ const fakeCore = Effect.gen(function* () {
     follow,
     runtime,
     foreground,
+    labels,
     calls,
+    connect,
+    socketPath,
     subscriber: Queue.take(subscribers),
     next: Queue.take(seen),
     terminal,
@@ -209,6 +222,53 @@ describe("runtime-herdr-core against a fake core", () => {
       assert.deepStrictEqual(yield* core.next, { type: "reset", machine: "local" })
       yield* core.subscriber
       assert.deepStrictEqual(yield* core.next, { type: "reset", machine: "local" })
+    }),
+  )
+
+  live(
+    "a typed label keeps the shell running for every reader until it expires, including a runtime started later",
+    Effect.gen(function* () {
+      const core = yield* fakeCore
+      yield* core.follow
+      assert.isFalse((yield* core.runtime.process(core.terminal)).running)
+      yield* core.runtime.run!(core.terminal, ["echo", "hi"])
+      assert.isTrue((yield* core.runtime.process(core.terminal)).running)
+      assert.isTrue((yield* core.runtime.process(core.terminal)).running)
+      const restarted = yield* make({
+        connect: core.connect,
+        socket: core.socketPath,
+        scope: yield* Effect.scope,
+      })
+      assert.isTrue((yield* restarted.process(core.terminal)).running)
+      yield* Ref.update(core.labels, (cur) => ({ ...cur, [LABEL.typed]: String(Date.now() - TYPED_LAUNCH_MS - 1) }))
+      assert.isFalse((yield* core.runtime.process(core.terminal)).running)
+      assert.isFalse((yield* restarted.process(core.terminal)).running)
+      yield* Ref.set(core.foreground, sleeping)
+      assert.isTrue((yield* core.runtime.process(core.terminal)).running)
+    }),
+  )
+
+  live(
+    "a foreground that leaves the shell clears vibest.typed, so a later shell is not a pending launch",
+    Effect.gen(function* () {
+      const core = yield* fakeCore
+      const sub = yield* core.follow
+      yield* core.runtime.run!(core.terminal, ["echo", "hi"])
+      assert.notStrictEqual((yield* Ref.get(core.labels))[LABEL.typed], "")
+      yield* sub.push(foregroundEvent(1, sleeping))
+      const cleared = yield* Effect.gen(function* () {
+        const deadline = Date.now() + 2_000
+        for (;;) {
+          if ((yield* Ref.get(core.labels))[LABEL.typed] === "") return true
+          if (Date.now() > deadline) return false
+          yield* Effect.sleep("20 millis")
+        }
+      })
+      assert.isTrue(cleared)
+      yield* Ref.set(core.foreground, shell)
+      assert.isFalse((yield* core.runtime.process(core.terminal)).running)
+      const restarted = yield* make({ connect: core.connect, socket: core.socketPath, scope: yield* Effect.scope })
+      assert.isFalse((yield* restarted.process(core.terminal)).running)
     }),
   )
 

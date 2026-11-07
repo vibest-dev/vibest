@@ -242,8 +242,11 @@ fragile.
   and a long multi-line text loses its first chunks.
 - **run.** A harness in a named terminal goes through `agent.start` again. Any other command is typed only once
   every foreground process of the pane is a shell: its own, or one a wrapper left (`sh -c '"$@"; exec $SHELL'`).
-  `process` counts as running anything in the foreground besides the pane's shell. Commands are typed as POSIX shell
-  words (`shellQuote`); fish reads backslashes inside single quotes as escapes, so such an argument is misread there.
+  `process` counts as running anything in the foreground besides the pane's shell, and a named agent whose launch is
+  still pending: the shell may still be starting, so no agent process exists yet, and a reconcile must not read that
+  pane as exited. A pane `process_info` cannot find is `not_found`, so a closed pane is still seen at once. Commands
+  are typed as POSIX shell words (`shellQuote`); fish reads backslashes inside single quotes as escapes, so such an
+  argument is misread there.
 - **close.** herdr closes a workspace with its last pane, and a main checkout's workspace takes its linked
   worktrees' workspaces with it. So the last pane of a workspace that is not listed, or whose worktree is a main
   checkout, is moved alone into a workspace of its own first; a workspace without a worktree closes at most itself.

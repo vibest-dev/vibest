@@ -27,7 +27,22 @@ export const LABEL = {
   space: "herdr.space",
   tab: "herdr.tab",
   seen: "herdr.seen",
+  typed: "vibest.typed",
 } as const
+
+export const TYPED_LAUNCH_MS = 120_000
+
+export const shellTypedRecently = (
+  labels: Readonly<Record<string, string>> | undefined,
+  atShellNow: boolean,
+  now: number,
+  windowMs: number,
+): boolean => {
+  if (!atShellNow) return false
+  const typed = labels?.[LABEL.typed]
+  if (typed === undefined || !/^\d+$/.test(typed)) return false
+  return now - Number(typed) < windowMs
+}
 
 const SEEN_EVENTS = new Set(["turn", "labels"])
 
@@ -116,9 +131,11 @@ export const make = (deps: {
   readonly connect: (socketPath: string) => HcShape
   readonly socket: string
   readonly scope: Scope.Scope
+  readonly typedLaunch?: Duration.Input
 }): Effect.Effect<Runtime> =>
   Effect.gen(function* () {
     const { connect, scope } = deps
+    const typedLaunchMs = Duration.toMillis(deps.typedLaunch ?? Duration.millis(TYPED_LAUNCH_MS))
     const events = yield* PubSub.unbounded<RuntimeEvent>()
     const cores = new Map<string, Core>()
     const home = connect(deps.socket)
@@ -175,7 +192,9 @@ export const make = (deps: {
       if (type === "foreground") {
         if (!atShell(data as api.Foreground)) {
           core.busy.add(terminal)
-          return Effect.void
+          return core.hc
+            .call("terminal.label", { terminal, labels: { [LABEL.typed]: "" } })
+            .pipe(Effect.asVoid, Effect.ignore)
         }
         return core.busy.has(terminal) ? exited(socket, core, terminal) : wake(core, terminal)
       }
@@ -255,7 +274,8 @@ export const make = (deps: {
       Effect.gen(function* () {
         const near = input.near !== undefined ? parseTerminalId(input.near.id, deps.socket) : undefined
         const socket = near?.socket ?? deps.socket
-        const { hc } = yield* coreAt(socket)
+        const core = yield* coreAt(socket)
+        const hc = core.hc
         const project = input.env["VIBEST_PROJECT_ID"]
         const session = input.env["VIBEST_SESSION_ID"]
         let attempt = 0
@@ -270,6 +290,7 @@ export const make = (deps: {
                 [LABEL.seen]: "0",
                 ...(project !== undefined ? { [LABEL.project]: project } : {}),
                 ...(session !== undefined ? { [LABEL.session]: session } : {}),
+                ...(input.argv.length > 0 ? { [LABEL.typed]: String(Date.now()) } : {}),
               },
               keep: true,
               no_notify: true,
@@ -283,10 +304,11 @@ export const make = (deps: {
           ),
         )
         const terminal: Terminal = { machine: machine.id, id: terminalId(socket, started.address) }
-        if (input.argv.length > 0)
+        if (input.argv.length > 0) {
           yield* typeLine(hc, started.address, input.argv).pipe(
             Effect.tapError(() => close(terminal).pipe(Effect.ignore)),
           )
+        }
         return terminal
       })
 
@@ -317,13 +339,14 @@ export const make = (deps: {
 
     const process: Runtime["process"] = (terminal) =>
       get(terminal).pipe(
-        Effect.map((t) =>
-          t.state === "live"
-            ? { running: !atShell(t.foreground) }
-            : t.exit_code === null || t.exit_code === undefined
+        Effect.map((t) => {
+          if (t.state !== "live")
+            return t.exit_code === null || t.exit_code === undefined
               ? { running: false }
-              : { running: false, exitCode: t.exit_code },
-        ),
+              : { running: false, exitCode: t.exit_code }
+          if (!atShell(t.foreground)) return { running: true }
+          return { running: shellTypedRecently(t.labels, true, Date.now(), typedLaunchMs) }
+        }),
       )
 
     const close: Runtime["close"] = (terminal) =>
@@ -380,6 +403,9 @@ export const make = (deps: {
         const { hc, core, address } = yield* reach(terminal)
         yield* backToShell(core, address, terminal)
         yield* typeLine(hc, address, argv)
+        yield* failWith(
+          hc.call("terminal.label", { terminal: address, labels: { [LABEL.typed]: String(Date.now()) } }),
+        ).pipe(Effect.asVoid)
       })
 
     const seen: NonNullable<Runtime["seen"]> = (terminal) => get(terminal).pipe(Effect.map(seenOf))
