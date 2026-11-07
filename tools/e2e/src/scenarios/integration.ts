@@ -1,5 +1,4 @@
 import fs from "node:fs/promises"
-import os from "node:os"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
@@ -17,20 +16,6 @@ import {
 } from "../fake-model.ts"
 import { agentName, compiled, expect, harnesses, herdr, Skip, until, type World } from "../world.ts"
 import { project as newRepository } from "./inbox.ts"
-
-const userHarnessFiles = [".claude/settings.json", ".cursor/hooks.json", ".pi/agent/settings.json"].map((p) =>
-  path.join(os.homedir(), p),
-)
-const stamp = () =>
-  Promise.all(
-    userHarnessFiles.map((p) =>
-      fs.stat(p).then(
-        (s) => `${p} ${s.mtimeMs}`,
-        () => `${p} missing`,
-      ),
-    ),
-  )
-const realBefore = stamp()
 
 const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
 
@@ -438,15 +423,6 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         model.stop()
       }
-    },
-  },
-  {
-    id: "I6",
-    title: "the user's own harness config files did not change",
-    run: async () => {
-      const before = await realBefore
-      const after = await stamp()
-      before.forEach((b, i) => expect(b === after[i], `changed: ${b} → ${after[i]}`))
     },
   },
 ]

@@ -83,6 +83,7 @@ const checks: ReadonlyArray<Check> = [
     id: "D5",
     title: "a request without the protocol header, or an old one, is refused",
     run: async (w) => {
+      await w.ok(["daemon"])
       for (const headers of [undefined, [["vibest-protocol", "0"]]]) {
         const reply = await raw(w, {
           jsonrpc: "2.0",
@@ -100,6 +101,7 @@ const checks: ReadonlyArray<Check> = [
     id: "D6",
     title: "a caller claiming a session that does not exist is refused",
     run: async (w) => {
+      await w.ok(["daemon"])
       const r = await w.vibest(["ls"], { env: { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "deadbeef" } })
       expect(r.code !== 0, `ls as an unknown session exited 0: ${r.stdout}`)
       expect(/InvalidCaller|Forbidden|NoSuchSession/.test(r.stderr), `unexpected refusal: ${r.stderr}`)
