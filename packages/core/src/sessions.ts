@@ -117,6 +117,7 @@ interface Tracked {
   readonly blockedNotified: Ref.Ref<boolean>
   readonly prompting: Ref.Ref<boolean>
   readonly stopping: Ref.Ref<boolean>
+  readonly launchRechecked: Ref.Ref<boolean>
 }
 
 const newTracked: Effect.Effect<Tracked> = Effect.all({
@@ -125,6 +126,7 @@ const newTracked: Effect.Effect<Tracked> = Effect.all({
   blockedNotified: Ref.make(false),
   prompting: Ref.make(false),
   stopping: Ref.make(false),
+  launchRechecked: Ref.make(false),
 })
 
 export interface SpawnInput {
@@ -908,7 +910,8 @@ export class Sessions extends Context.Service<
             yield* dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
             return
           }
-          yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkLocked(id))
+          if (!(yield* Ref.getAndSet(r.launchRechecked, true)))
+            yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkLocked(id))
         }
         if (!harnesses.get(session.harnessId).ownSessionId && h.session !== undefined) {
           const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
@@ -993,9 +996,9 @@ export class Sessions extends Context.Service<
         const h = yield* live(session)
         const terminal = session.address
         const seen = yield* agentState(h, terminal)
-        const state = stateOf(seen)
-        if (state !== undefined && state !== "unknown" && busy(state)) return
-        if ((seen === "absent" || state === "unknown") && !(yield* alive(h, terminal))) {
+        const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
+        if (state !== undefined && busy(state)) return
+        if (state === undefined && !(yield* alive(h, terminal))) {
           if (session.exitedAt !== null && (yield* db.pendingInbox(id)).length === 0) return
           if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId)
             return yield* new NoSuchSession({

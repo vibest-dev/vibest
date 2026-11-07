@@ -74,8 +74,8 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
 
   it.live(
     "passes the shared runtime contract",
-    () => withRuntime((runtime) => runtimeContract(runtime, { cwd: fs.realpathSync(root), timeout: "30 seconds" })),
-    120_000,
+    () => withRuntime((runtime) => runtimeContract(runtime, { cwd: fs.realpathSync(root), timeout: "150 seconds" })),
+    200_000,
   )
 
   it.live(
@@ -182,7 +182,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
   )
 
   it.live(
-    "labels a main agent's terminal for herdr-app and reports the typed program's exit",
+    "labels a main agent's terminal for herdr-app and keeps the shell running while vibest.typed is fresh",
     () =>
       withRuntime((runtime, hc) =>
         Effect.gen(function* () {
@@ -208,7 +208,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
           })
           yield* runtime.run!(main, ["sleep", "1"])
           yield* until(Ref.get(seen), (all) => all.includes(`exited:${main.id}`), "no exited event after sleep ended")
-          assert.isFalse((yield* runtime.process(main)).running)
+          assert.isTrue((yield* runtime.process(main)).running)
           yield* runtime.close(main)
         }),
       ),

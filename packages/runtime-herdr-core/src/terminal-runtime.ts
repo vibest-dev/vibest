@@ -27,7 +27,21 @@ export const LABEL = {
   space: "herdr.space",
   tab: "herdr.tab",
   seen: "herdr.seen",
+  typed: "vibest.typed",
 } as const
+
+export const TYPED_LAUNCH_MS = 120_000
+
+export const shellTypedRecently = (
+  labels: Readonly<Record<string, string>> | undefined,
+  atShellNow: boolean,
+  now: number,
+): boolean => {
+  if (!atShellNow) return false
+  const typed = labels?.[LABEL.typed]
+  if (typed === undefined || !/^\d+$/.test(typed)) return false
+  return now - Number(typed) < TYPED_LAUNCH_MS
+}
 
 const SEEN_EVENTS = new Set(["turn", "labels"])
 
@@ -109,7 +123,6 @@ const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
 type Core = {
   readonly hc: HcShape
   readonly busy: Set<string>
-  readonly pending: Set<string>
   readonly waiting: Map<string, Set<Deferred.Deferred<void>>>
 }
 
@@ -130,7 +143,6 @@ export const make = (deps: {
       })
     const exited = (socket: string, core: Core, address: string) => {
       core.busy.delete(address)
-      core.pending.delete(address)
       return wake(core, address).pipe(
         Effect.andThen(
           PubSub.publish(events, { type: "exited", terminal: { machine: "local", id: terminalId(socket, address) } }),
@@ -177,7 +189,6 @@ export const make = (deps: {
       if (type === "foreground") {
         if (!atShell(data as api.Foreground)) {
           core.busy.add(terminal)
-          core.pending.delete(terminal)
           return Effect.void
         }
         return core.busy.has(terminal) ? exited(socket, core, terminal) : wake(core, terminal)
@@ -215,7 +226,6 @@ export const make = (deps: {
         const core: Core = {
           hc: socket === deps.socket ? home : connect(socket),
           busy: new Set(),
-          pending: new Set(),
           waiting: new Map(),
         }
         cores.set(socket, core)
@@ -275,6 +285,7 @@ export const make = (deps: {
                 [LABEL.seen]: "0",
                 ...(project !== undefined ? { [LABEL.project]: project } : {}),
                 ...(session !== undefined ? { [LABEL.session]: session } : {}),
+                ...(input.argv.length > 0 ? { [LABEL.typed]: String(Date.now()) } : {}),
               },
               keep: true,
               no_notify: true,
@@ -292,7 +303,6 @@ export const make = (deps: {
           yield* typeLine(hc, started.address, input.argv).pipe(
             Effect.tapError(() => close(terminal).pipe(Effect.ignore)),
           )
-          core.pending.add(started.address)
         }
         return terminal
       })
@@ -323,21 +333,16 @@ export const make = (deps: {
       )
 
     const process: Runtime["process"] = (terminal) =>
-      Effect.gen(function* () {
-        const { hc, core, address } = yield* reach(terminal)
-        const t = yield* failWith(hc.call("terminal.get", { terminal: address }))
-        if (t.state !== "live") {
-          core.pending.delete(address)
-          return t.exit_code === null || t.exit_code === undefined
-            ? { running: false }
-            : { running: false, exitCode: t.exit_code }
-        }
-        if (!atShell(t.foreground)) {
-          core.pending.delete(address)
-          return { running: true }
-        }
-        return { running: core.pending.delete(address) }
-      })
+      get(terminal).pipe(
+        Effect.map((t) => {
+          if (t.state !== "live")
+            return t.exit_code === null || t.exit_code === undefined
+              ? { running: false }
+              : { running: false, exitCode: t.exit_code }
+          if (!atShell(t.foreground)) return { running: true }
+          return { running: shellTypedRecently(t.labels, true, Date.now()) }
+        }),
+      )
 
     const close: Runtime["close"] = (terminal) =>
       Effect.gen(function* () {
@@ -393,7 +398,9 @@ export const make = (deps: {
         const { hc, core, address } = yield* reach(terminal)
         yield* backToShell(core, address, terminal)
         yield* typeLine(hc, address, argv)
-        core.pending.add(address)
+        yield* failWith(
+          hc.call("terminal.label", { terminal: address, labels: { [LABEL.typed]: String(Date.now()) } }),
+        ).pipe(Effect.asVoid)
       })
 
     const seen: NonNullable<Runtime["seen"]> = (terminal) => get(terminal).pipe(Effect.map(seenOf))
