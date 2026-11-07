@@ -5,7 +5,7 @@ import { Layout } from "@vibest/core/paths"
 import { PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { Plugin } from "@vibest/plugin"
 import type { Host } from "@vibest/server/daemon"
-import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path } from "effect"
+import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Logger, Path } from "effect"
 import { Command } from "effect/cli"
 
 import * as Platform from "#platform"
@@ -156,15 +156,19 @@ describe("caller plugins", () => {
     }),
   )
 
-  it.live("a runtime plugin from vibest.json is detected, and its environment keys join the caller keys", () =>
-    Effect.gen(function* () {
+  it.live("a runtime plugin from vibest.json is detected, and its environment keys join the caller keys", () => {
+    const logs: Array<string> = []
+    return Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const base = path.join(import.meta.dirname, ".tmp")
       yield* fs.makeDirectory(base, { recursive: true })
       const dir = yield* fs.makeTempDirectoryScoped({ directory: base })
       yield* fs.writeFileString(path.join(dir, "tern.ts"), ternSource)
-      yield* fs.writeFileString(path.join(dir, "vibest.json"), '{ "plugins": ["./tern.ts"] }\n')
+      yield* fs.writeFileString(
+        path.join(dir, "vibest.json"),
+        '{ "runtime": "rex", "plugins": ["./tern.ts", "./not-a-plugin"] }\n',
+      )
       const hc = runtime("hc", 0, ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"])
       const loaded = yield* callerPlugins([hc]).pipe(
         Effect.provideService(PluginLoader, Platform.plugins),
@@ -196,6 +200,14 @@ describe("caller plugins", () => {
       const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "started"
       assert.match(message, /this tern terminal could not be named/)
       assert.notMatch(message, /environment is not set/)
-    }).pipe(Effect.provide(builtinHarnesses), Effect.provide(Platform.services)),
-  )
+      assert.deepStrictEqual(
+        logs.filter((line) => /runtime|plugin|vibest\.json/i.test(line)),
+        [],
+      )
+    }).pipe(
+      Effect.provide(Logger.layer([Logger.make((entry) => void logs.push(String(entry.message)))])),
+      Effect.provide(builtinHarnesses),
+      Effect.provide(Platform.services),
+    )
+  })
 })

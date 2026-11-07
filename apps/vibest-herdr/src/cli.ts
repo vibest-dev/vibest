@@ -418,7 +418,7 @@ export const callerPlugins = (builtins: ReadonlyArray<Candidate>) =>
   Effect.gen(function* () {
     const loader = yield* PluginLoader
     yield* loader.prepare
-    const read = yield* (yield* makeSources(DEFAULT_TIMEOUT)).read
+    const read = yield* (yield* makeSources(DEFAULT_TIMEOUT, { quiet: true })).read
     return [...builtins, ...read.candidates]
   })
 

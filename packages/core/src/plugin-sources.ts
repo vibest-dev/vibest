@@ -69,7 +69,10 @@ type Imported = {
   readonly plugin: Candidate["plugin"]
 }
 
-export const makeSources = Effect.fnUntraced(function* (timeout: Duration.Input) {
+export const makeSources = Effect.fnUntraced(function* (
+  timeout: Duration.Input,
+  options?: { readonly quiet?: boolean },
+) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const crypto = yield* Crypto.Crypto
@@ -78,6 +81,8 @@ export const makeSources = Effect.fnUntraced(function* (timeout: Duration.Input)
   const imported = new Map<string, Imported>()
   let lastConfig: ConfigFile = { plugins: [] }
   let warnedConfiguredRuntime = false
+  const quiet = options?.quiet === true
+  const warn = (message: string) => (quiet ? Effect.void : Effect.logWarning(message))
 
   const sha = (bytes: Uint8Array) => crypto.digest("SHA-256", bytes).pipe(Effect.map(Hex.encode))
   const utf8 = (s: string) => new TextEncoder().encode(s)
@@ -171,7 +176,7 @@ export const makeSources = Effect.fnUntraced(function* (timeout: Duration.Input)
       const file = yield* entry(target).pipe(Effect.orElseSucceed(() => undefined))
       if (file !== target) listings.add(target)
       if (file === undefined) {
-        yield* Effect.logWarning(`plugin ${target} has no server.* or index.* entry; skipped`)
+        yield* warn(`plugin ${target} has no server.* or index.* entry; skipped`)
         return undefined
       }
       const { graph, revision, plugin } = yield* importEntry(file)
@@ -203,16 +208,12 @@ export const makeSources = Effect.fnUntraced(function* (timeout: Duration.Input)
             (raw as { readonly runtime?: unknown }).runtime !== undefined
           if (!configured || warnedConfiguredRuntime) return
           warnedConfiguredRuntime = true
-          yield* Effect.logWarning(
-            `${layout.config}: "runtime" is ignored; run vibest in the runtime's terminal, or pass --runtime`,
-          )
+          yield* warn(`${layout.config}: "runtime" is ignored; run vibest in the runtime's terminal, or pass --runtime`)
         }),
       ),
       Effect.flatMap(Schema.decodeUnknownEffect(ConfigFile)),
       Effect.tap((config) => Effect.sync(() => (lastConfig = config))),
-      Effect.tapError((e) =>
-        Effect.logWarning(`${layout.config} ignored, keeping its last valid plugins: ${messageOf(e)}`),
-      ),
+      Effect.tapError((e) => warn(`${layout.config} ignored, keeping its last valid plugins: ${messageOf(e)}`)),
       Effect.orElseSucceed(() => lastConfig),
     )
   })
@@ -243,7 +244,7 @@ export const makeSources = Effect.fnUntraced(function* (timeout: Duration.Input)
       const resolved = target.startsWith("file://") ? target.slice("file://".length) : path.resolve(layout.home, target)
       paths.add(resolved)
       if (!SOURCE.test(resolved) && !(yield* isDirectory(resolved))) {
-        yield* Effect.logWarning(`vibest.json: plugin path must be a directory or a .ts/.js file: ${resolved}`)
+        yield* warn(`vibest.json: plugin path must be a directory or a .ts/.js file: ${resolved}`)
         continue
       }
       configured.push({ type: "add", target: resolved, options })
