@@ -27,6 +27,17 @@ const piProject = async (w: World, name: string) => {
     timeoutMs: 90_000,
   })
   const q = <A>(sql: string, ...args: Array<string | number>) => row<A>(w, sql, ...args)
+  const directory = await fs.realpath(repo)
+  await until(
+    "the main agent's conversation",
+    () =>
+      q<{ c: string | null }>(
+        `SELECT s.harness_session_id AS c FROM ${SESSIONS} s JOIN project p ON p.entry_session_id = s.id
+          WHERE p.directory = ?`,
+        directory,
+      )?.c != null,
+    60_000,
+  )
   const runSub = async (task: string, ...flags: Array<string>) =>
     (
       JSON.parse(
