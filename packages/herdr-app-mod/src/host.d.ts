@@ -33,6 +33,7 @@ interface Chain {
 declare module "gpui-kit" {
   export abstract class View {
     init(props: unknown, cx: Cx): void
+    close?(cx: Cx): void | Promise<void>
     abstract render(cx: Cx): unknown
   }
   export function div(): Chain

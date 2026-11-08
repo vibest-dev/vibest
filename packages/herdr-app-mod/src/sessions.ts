@@ -109,6 +109,13 @@ export const commandNote = (
   return (trimmed === "" ? fallback : trimmed).slice(0, 180)
 }
 
+export const settleList = (result: {
+  readonly code: number
+  readonly stdout: string
+  readonly stderr: string
+}): { readonly ok: true; readonly stdout: string } | { readonly ok: false; readonly note: string } =>
+  result.code === 0 ? { ok: true, stdout: result.stdout } : { ok: false, note: commandNote(result, "vibest ls failed") }
+
 export const statusVerdict = (stdout: string): StatusVerdict | undefined => {
   let value: unknown
   try {

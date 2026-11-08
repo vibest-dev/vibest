@@ -1,6 +1,6 @@
 import { h_flex, v_flex } from "gpui-base"
 import { div, View } from "gpui-kit"
-import { appHome, exec, panes, run, terminals, theme } from "herdr"
+import { appHome, exec, panes, terminals, theme } from "herdr"
 
 import {
   cliArgv,
@@ -8,7 +8,6 @@ import {
   commandNote,
   completePull,
   coreTerminals,
-  focusAtClick,
   groupSessions,
   idlePull,
   modelPanes,
@@ -19,6 +18,7 @@ import {
   requestPull,
   rowTitle,
   type SessionRow,
+  settleList,
   snapshotNote,
   statusText,
   statusVerdict,
@@ -40,7 +40,7 @@ export default class VibestSessions extends View {
     this.request(cx)
   }
 
-  close(): void {
+  close(_cx: Cx): void {
     this.pull = closePull(this.pull)
   }
 
@@ -68,8 +68,8 @@ export default class VibestSessions extends View {
         if (verdict === undefined) note = "vibest status was not understood"
         else if (!verdict.list) note = verdict.message
         else {
-          const listed = await exec("env", cliArgv("ls"), { cwd })
-          if (listed.code !== 0) note = commandNote(listed, "vibest ls failed")
+          const listed = settleList(await exec("env", cliArgv("ls"), { cwd }))
+          if (!listed.ok) note = listed.note
           else {
             const parsed = parseSessions(listed.stdout)
             if (parsed === undefined) note = "vibest ls was not understood"
@@ -131,26 +131,12 @@ export default class VibestSessions extends View {
           .text_color(colors.dim ?? "")
           .child(session.id.slice(0, 8)),
       )
-    if (place.action === "none")
-      return row.child(
-        div()
-          .flex_none()
-          .text_color(colors.dim ?? "")
-          .child(place.reason),
-      )
-    return row
-      .cursor_pointer()
-      .hover((el) => el.bg(colors.hover ?? ""))
-      .on_click(() => {
-        const now = focusAtClick(session, terminals(), panes(), windowCoreSocket)
-        if (now !== undefined) run(now.command, now.args)
-      })
-      .child(
-        div()
-          .flex_none()
-          .text_color(colors.foreground ?? "")
-          .child("Focus"),
-      )
+    return row.child(
+      div()
+        .flex_none()
+        .text_color(colors.dim ?? "")
+        .child(place.action === "none" ? place.reason : "core not proven"),
+    )
   }
 
   render(_cx: Cx): Chain {

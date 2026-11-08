@@ -16,15 +16,25 @@ Rows show the daemon's `status` and `turnState`, not Herdr `agents()` and not th
 
 ## Focus
 
-Not called. `terminals()` is `hc ls` (address, labels, no socket). `hc()` runs the hc CLI; that is not documented as this window's core. `machines()` names a machine, not a socket. Until the host gives the socket for a terminal, a matching `t7` and `vibest.session` is not proof.
+There is no Focus control. `terminals()` is `hc ls` (address and labels, no socket). `hc()` is not documented as this window's core. `machines()` names a machine, not a socket. herdr-app 0.1.13 has no gateway core id to compare with `<address>@<socket>`. The row says why focus is off, usually `core not proven`.
 
-The match that would be safe, and is what the tests encode, is all of: `runtime` `hc`, `address.machine` `local`, `address.id` parsed as `<address>@<socket>` the way `parseTerminalId` does in `packages/runtime-herdr-core/src/terminal-runtime.ts`, the window socket equal to that socket, exactly one terminal with that address and `labels["vibest.session"]` equal to the session id, and a model pane from `panes()` showing it. The click reads `terminals()` and `panes()` again. The only command on that path is `pane.focus`. The mod passes no window socket, so the row says `core not proven`.
+A later host that passed the window socket could focus only when that socket equals the session socket, `runtime` is `hc`, `address.machine` is `local`, the address has no `/`, exactly one terminal has that address and `vibest.session` equal to the session id, and a pane already shows it. The same `t7` and a copied session label on another socket do not match. The command would be `pane.focus` only, read again at click time. This mod does not call it.
 
 `terminal.keep` is not used. herdr-app 0.1.13 says it gives a running terminal a pane, and `AGENTS.md` says it enables core keep and can stay `pending` until the machine applies it. `terminal.open` and `agent.focus` are not used. A remote machine stays "on another machine" even when the socket path text matches. A legacy Herdr id is not an hc address.
 
 The runtime is gpui-kit JavaScript. It does not load `@vibest/client`, Effect, or Node, and it does not open a TCP bridge. `net.connect` is TCP only. `fetch` is HTTP, not vibestd's Unix socket.
 
 This has not been loaded in a running window. `herdr-app check` renders the module once; it does not prove the panel, and it does not prove the read is read-only on a live daemon. The no-start proof is the CLI test above.
+
+## Build and check
+
+```sh
+pnpm --filter @vibest/herdr-app-mod build
+herdr-app check packages/herdr-app-mod
+```
+
+`herdr-app check` writes `gpui-kit.d.ts` beside the mod. That file is generated and gitignored. Check does not run the `cx.spawn` read. Copying into `~/.config/herdr-app/mods` is not done here.
+ove.
 
 ## Build and check
 

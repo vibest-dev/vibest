@@ -1,9 +1,9 @@
-// src/mod.ts
+// packages/herdr-app-mod/src/mod.ts
 import { h_flex, v_flex } from "gpui-base";
 import { div, View } from "gpui-kit";
-import { appHome, exec, panes, run, terminals, theme } from "herdr";
+import { appHome, exec, panes, terminals, theme } from "herdr";
 
-// src/sessions.ts
+// packages/herdr-app-mod/src/sessions.ts
 var SESSION_LABEL = "vibest.session";
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
 var cliArgv = (command) => [
@@ -42,18 +42,13 @@ var placeSession = (session, terminals, panes, windowSocket) => {
     return { action: "none", reason: "no pane to focus" };
   return { action: "focus", terminal: found.address };
 };
-var focusAtClick = (session, terminalsNow, panesNow, windowSocket) => {
-  const place = placeSession(session, coreTerminals(terminalsNow), modelPanes(panesNow), windowSocket);
-  if (place.action !== "focus")
-    return;
-  return { command: "pane.focus", args: { terminal: place.terminal } };
-};
 var commandNote = (result, fallback) => {
   if (result.code === 0)
     return "";
   const trimmed = (result.stderr || result.stdout).trim();
   return (trimmed === "" ? fallback : trimmed).slice(0, 180);
 };
+var settleList = (result) => result.code === 0 ? { ok: true, stdout: result.stdout } : { ok: false, note: commandNote(result, "vibest ls failed") };
 var statusVerdict = (stdout) => {
   let value;
   try {
@@ -202,7 +197,7 @@ var closePull = (pull) => ({
   again: false
 });
 
-// src/mod.ts
+// packages/herdr-app-mod/src/mod.ts
 var windowCoreSocket = undefined;
 
 class VibestSessions extends View {
@@ -217,7 +212,7 @@ class VibestSessions extends View {
     this.pull = idlePull();
     this.request(cx);
   }
-  close() {
+  close(_cx) {
     this.pull = closePull(this.pull);
   }
   request(cx) {
@@ -247,9 +242,9 @@ class VibestSessions extends View {
         else if (!verdict.list)
           note = verdict.message;
         else {
-          const listed = await exec("env", cliArgv("ls"), { cwd });
-          if (listed.code !== 0)
-            note = commandNote(listed, "vibest ls failed");
+          const listed = settleList(await exec("env", cliArgv("ls"), { cwd }));
+          if (!listed.ok)
+            note = listed.note;
           else {
             const parsed = parseSessions(listed.stdout);
             if (parsed === undefined)
@@ -283,13 +278,7 @@ class VibestSessions extends View {
   sessionRow(colors, session) {
     const place = placeSession(session, coreTerminals(terminals()), modelPanes(panes()), windowCoreSocket);
     const row = h_flex().id(`session-${session.id}`).gap(6).px(2).py(2).items_center().rounded(4).child(div().flex_1().truncate().text_color(colors.foreground ?? "").child(rowTitle(session))).child(div().flex_none().text_color(colors.dim ?? "").child(`${session.harness} ${statusText(session)}`)).child(div().flex_none().text_color(colors.dim ?? "").child(session.id.slice(0, 8)));
-    if (place.action === "none")
-      return row.child(div().flex_none().text_color(colors.dim ?? "").child(place.reason));
-    return row.cursor_pointer().hover((el) => el.bg(colors.hover ?? "")).on_click(() => {
-      const now = focusAtClick(session, terminals(), panes(), windowCoreSocket);
-      if (now !== undefined)
-        run(now.command, now.args);
-    }).child(div().flex_none().text_color(colors.foreground ?? "").child("Focus"));
+    return row.child(div().flex_none().text_color(colors.dim ?? "").child(place.action === "none" ? place.reason : "core not proven"));
   }
   render(_cx) {
     const colors = theme();

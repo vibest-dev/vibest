@@ -16,6 +16,7 @@ import {
   projectHeading,
   requestPull,
   type SessionRow,
+  settleList,
   statusText,
   statusVerdict,
 } from "../src/sessions.ts"
@@ -90,6 +91,9 @@ describe("herdr-app mod", () => {
       "DaemonUnavailable: vibestd is unreachable on /tmp/vibest.sock (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon",
     )
     assert.equal(commandNote({ code: 1, stdout: "", stderr: "" }, "vibest could not be run"), "vibest could not be run")
+    const unknown = settleList({ code: 2, stdout: "", stderr: "Unknown option: --no-start" })
+    assert.deepEqual(unknown, { ok: false, note: "Unknown option: --no-start" })
+    assert.equal("args" in unknown, false)
     assert.deepEqual(statusVerdict(JSON.stringify(runningStatus)), { list: true })
     assert.deepEqual(
       statusVerdict(
@@ -186,6 +190,9 @@ describe("herdr-app mod", () => {
     })
     assert.equal(focusAtClick(row, [], panes, socket), undefined)
     assert.equal(focusAtClick(row, terminals, panes, undefined), undefined)
+    const copied = [{ address: "t7", labels: { "vibest.session": row.id } }]
+    assert.deepEqual(placeSession(row, copied, panes, socket), { action: "focus", terminal: "t7" })
+    assert.equal(focusAtClick(row, copied, panes, "/tmp/other-core.sock"), undefined)
   })
 
   it("drops a snapshot when a newer read or unload wins", () => {
