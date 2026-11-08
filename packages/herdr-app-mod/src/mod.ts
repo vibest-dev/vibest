@@ -1,21 +1,19 @@
 import { h_flex, v_flex } from "gpui-base"
 import { div, View } from "gpui-kit"
-import { appHome, exec, panes, terminals, theme } from "herdr"
+import { appHome, exec, theme } from "herdr"
 
 import {
   cliArgv,
   closePull,
   commandNote,
   completePull,
-  coreTerminals,
   groupSessions,
   idlePull,
-  modelPanes,
   parseSessions,
-  placeSession,
   projectHeading,
   type Pull,
   requestPull,
+  rowNote,
   rowTitle,
   type SessionRow,
   settleList,
@@ -23,8 +21,6 @@ import {
   statusText,
   statusVerdict,
 } from "./sessions.ts"
-
-const windowCoreSocket = undefined
 
 export default class VibestSessions extends View {
   sessions!: readonly SessionRow[]
@@ -104,7 +100,6 @@ export default class VibestSessions extends View {
   }
 
   sessionRow(colors: Record<string, string>, session: SessionRow): Chain {
-    const place = placeSession(session, coreTerminals(terminals()), modelPanes(panes()), windowCoreSocket)
     const row = h_flex()
       .id(`session-${session.id}`)
       .gap(6)
@@ -135,7 +130,7 @@ export default class VibestSessions extends View {
       div()
         .flex_none()
         .text_color(colors.dim ?? "")
-        .child(place.action === "none" ? place.reason : "core not proven"),
+        .child(rowNote(session)),
     )
   }
 

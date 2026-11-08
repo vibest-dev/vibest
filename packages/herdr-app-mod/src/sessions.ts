@@ -1,12 +1,11 @@
-export const SESSION_LABEL = "vibest.session"
-
 const STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"] as const
 
 export const cliArgv = (command: "status" | "ls"): string[] => [
   ...STRIPPED.flatMap((name) => ["-u", name]),
+  ...(command === "status" ? ["VIBEST_NO_UPDATE_CHECK=1"] : []),
   "vibest",
   command,
-  ...(command === "ls" ? ["--no-start"] : []),
+  ...(command === "ls" ? ["--no-start", "--all-projects"] : []),
 ]
 
 export interface SessionRow {
@@ -25,20 +24,6 @@ export interface SessionRow {
   readonly repositoryRoot: string | null
 }
 
-export interface CoreTerminal {
-  readonly address: string
-  readonly labels: Readonly<Record<string, string>>
-}
-
-export interface ModelPane {
-  readonly pane: string
-  readonly terminal: string | null
-}
-
-export type Placement =
-  | { readonly action: "focus"; readonly terminal: string }
-  | { readonly action: "none"; readonly reason: string }
-
 export interface SessionGroup {
   readonly projectId: string
   readonly label: string
@@ -56,48 +41,11 @@ export interface Pull {
 
 export const idlePull = (): Pull => ({ token: 0, closed: false, running: false, again: false })
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
-const text = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined)
-
-export const parseOwnedAddress = (id: string): { readonly address: string; readonly socket: string } | undefined => {
-  const at = id.indexOf("@")
-  if (at <= 0 || at === id.length - 1) return undefined
-  return { address: id.slice(0, at), socket: id.slice(at + 1) }
-}
-
-export const placeSession = (
-  session: SessionRow,
-  terminals: readonly CoreTerminal[],
-  panes: readonly ModelPane[],
-  windowSocket: string | undefined,
-): Placement => {
-  if (session.runtime !== "hc") return { action: "none", reason: `runtime ${session.runtime || "unknown"}` }
-  if (session.machine !== "local") return { action: "none", reason: "on another machine" }
-  if (session.socket === "" || session.coreAddress === "" || session.coreAddress.includes("/"))
-    return { action: "none", reason: "no local terminal" }
-  if (windowSocket === undefined || windowSocket === "") return { action: "none", reason: "core not proven" }
-  if (windowSocket !== session.socket) return { action: "none", reason: "other core" }
-  const matches = terminals.filter(
-    (terminal) => terminal.address === session.coreAddress && terminal.labels[SESSION_LABEL] === session.id,
-  )
-  if (matches.length > 1) return { action: "none", reason: "ambiguous" }
-  const found = matches[0]
-  if (found === undefined) return { action: "none", reason: "not in this window" }
-  if (!panes.some((pane) => pane.terminal === found.address)) return { action: "none", reason: "no pane to focus" }
-  return { action: "focus", terminal: found.address }
-}
-
-export const focusAtClick = (
-  session: SessionRow,
-  terminalsNow: unknown,
-  panesNow: unknown,
-  windowSocket: string | undefined,
-): { readonly command: "pane.focus"; readonly args: { readonly terminal: string } } | undefined => {
-  const place = placeSession(session, coreTerminals(terminalsNow), modelPanes(panesNow), windowSocket)
-  if (place.action !== "focus") return undefined
-  return { command: "pane.focus", args: { terminal: place.terminal } }
+export const rowNote = (session: SessionRow): string => {
+  if (session.runtime !== "hc") return `runtime ${session.runtime || "unknown"}`
+  if (session.machine !== "local") return "on another machine"
+  if (session.socket === "" || session.coreAddress.includes("/")) return "no local terminal"
+  return "core not proven"
 }
 
 export const commandNote = (
@@ -115,6 +63,17 @@ export const settleList = (result: {
   readonly stderr: string
 }): { readonly ok: true; readonly stdout: string } | { readonly ok: false; readonly note: string } =>
   result.code === 0 ? { ok: true, stdout: result.stdout } : { ok: false, note: commandNote(result, "vibest ls failed") }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const text = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined)
+
+export const parseOwnedAddress = (id: string): { readonly address: string; readonly socket: string } | undefined => {
+  const at = id.indexOf("@")
+  if (at <= 0 || at === id.length - 1) return undefined
+  return { address: id.slice(0, at), socket: id.slice(at + 1) }
+}
 
 export const statusVerdict = (stdout: string): StatusVerdict | undefined => {
   let value: unknown
@@ -180,30 +139,6 @@ export const parseSessions = (stdout: string): readonly SessionRow[] | undefined
     rows.push(row)
   }
   return rows
-}
-
-export const coreTerminals = (value: unknown): CoreTerminal[] => {
-  if (!Array.isArray(value)) return []
-  const terminals: CoreTerminal[] = []
-  for (const item of value) {
-    if (!isRecord(item) || typeof item.address !== "string") continue
-    const labels: Record<string, string> = {}
-    if (isRecord(item.labels)) {
-      for (const [key, label] of Object.entries(item.labels)) if (typeof label === "string") labels[key] = label
-    }
-    terminals.push({ address: item.address, labels })
-  }
-  return terminals
-}
-
-export const modelPanes = (value: unknown): ModelPane[] => {
-  if (!Array.isArray(value)) return []
-  const panes: ModelPane[] = []
-  for (const item of value) {
-    if (!isRecord(item) || typeof item.pane !== "string") continue
-    panes.push({ pane: item.pane, terminal: typeof item.terminal === "string" ? item.terminal : null })
-  }
-  return panes
 }
 
 export const statusText = (row: SessionRow): string =>

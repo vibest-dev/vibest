@@ -667,6 +667,10 @@ const ls = Command.make(
       Flag.withDescription("Do not start vibestd when it is not running"),
       Flag.withDefault(false),
     ),
+    allProjects: Flag.Boolean("all-projects").pipe(
+      Flag.withDescription("Every project, not only the checkout this command is run in"),
+      Flag.withDefault(false),
+    ),
   },
   (o) =>
     Effect.gen(function* () {
@@ -676,16 +680,21 @@ const ls = Command.make(
       yield* withVibest(
         who.claim,
         (client) =>
-          client.List({ stopped: o.all, ...(outsideProject ? { all: true } : {}) }).pipe(
-            Effect.map((sessions) => sessions.map(titled)),
-            Effect.flatMap(json),
-          ),
+          client
+            .List({
+              stopped: o.all,
+              ...(outsideProject || o.allProjects ? { all: true } : {}),
+            })
+            .pipe(
+              Effect.map((sessions) => sessions.map(titled)),
+              Effect.flatMap(json),
+            ),
         { start: !who.agent && !o.noStart },
       )
     }),
 ).pipe(
   Command.withDescription(
-    "Your sessions that have not exited, as JSON: each task (cut to 500 characters), its live status, and its latest result (--all: exited ones too; --no-start: do not start vibestd). vibest result keeps the full task",
+    "Your sessions that have not exited, as JSON: each task (cut to 500 characters), its live status, and its latest result (--all: exited ones too; --all-projects: every project; --no-start: do not start vibestd). vibest result keeps the full task",
   ),
 )
 

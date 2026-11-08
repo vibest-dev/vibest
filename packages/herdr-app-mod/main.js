@@ -1,46 +1,26 @@
-// packages/herdr-app-mod/src/mod.ts
+// src/mod.ts
 import { h_flex, v_flex } from "gpui-base";
 import { div, View } from "gpui-kit";
-import { appHome, exec, panes, terminals, theme } from "herdr";
+import { appHome, exec, theme } from "herdr";
 
-// packages/herdr-app-mod/src/sessions.ts
-var SESSION_LABEL = "vibest.session";
+// src/sessions.ts
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
 var cliArgv = (command) => [
   ...STRIPPED.flatMap((name) => ["-u", name]),
+  ...command === "status" ? ["VIBEST_NO_UPDATE_CHECK=1"] : [],
   "vibest",
   command,
-  ...command === "ls" ? ["--no-start"] : []
+  ...command === "ls" ? ["--no-start", "--all-projects"] : []
 ];
 var idlePull = () => ({ token: 0, closed: false, running: false, again: false });
-var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-var text = (value) => typeof value === "string" ? value : undefined;
-var parseOwnedAddress = (id) => {
-  const at = id.indexOf("@");
-  if (at <= 0 || at === id.length - 1)
-    return;
-  return { address: id.slice(0, at), socket: id.slice(at + 1) };
-};
-var placeSession = (session, terminals, panes, windowSocket) => {
+var rowNote = (session) => {
   if (session.runtime !== "hc")
-    return { action: "none", reason: `runtime ${session.runtime || "unknown"}` };
+    return `runtime ${session.runtime || "unknown"}`;
   if (session.machine !== "local")
-    return { action: "none", reason: "on another machine" };
-  if (session.socket === "" || session.coreAddress === "" || session.coreAddress.includes("/"))
-    return { action: "none", reason: "no local terminal" };
-  if (windowSocket === undefined || windowSocket === "")
-    return { action: "none", reason: "core not proven" };
-  if (windowSocket !== session.socket)
-    return { action: "none", reason: "other core" };
-  const matches = terminals.filter((terminal) => terminal.address === session.coreAddress && terminal.labels[SESSION_LABEL] === session.id);
-  if (matches.length > 1)
-    return { action: "none", reason: "ambiguous" };
-  const found = matches[0];
-  if (found === undefined)
-    return { action: "none", reason: "not in this window" };
-  if (!panes.some((pane) => pane.terminal === found.address))
-    return { action: "none", reason: "no pane to focus" };
-  return { action: "focus", terminal: found.address };
+    return "on another machine";
+  if (session.socket === "" || session.coreAddress.includes("/"))
+    return "no local terminal";
+  return "core not proven";
 };
 var commandNote = (result, fallback) => {
   if (result.code === 0)
@@ -49,6 +29,14 @@ var commandNote = (result, fallback) => {
   return (trimmed === "" ? fallback : trimmed).slice(0, 180);
 };
 var settleList = (result) => result.code === 0 ? { ok: true, stdout: result.stdout } : { ok: false, note: commandNote(result, "vibest ls failed") };
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var text = (value) => typeof value === "string" ? value : undefined;
+var parseOwnedAddress = (id) => {
+  const at = id.indexOf("@");
+  if (at <= 0 || at === id.length - 1)
+    return;
+  return { address: id.slice(0, at), socket: id.slice(at + 1) };
+};
 var statusVerdict = (stdout) => {
   let value;
   try {
@@ -120,34 +108,6 @@ var parseSessions = (stdout) => {
   }
   return rows;
 };
-var coreTerminals = (value) => {
-  if (!Array.isArray(value))
-    return [];
-  const terminals = [];
-  for (const item of value) {
-    if (!isRecord(item) || typeof item.address !== "string")
-      continue;
-    const labels = {};
-    if (isRecord(item.labels)) {
-      for (const [key, label] of Object.entries(item.labels))
-        if (typeof label === "string")
-          labels[key] = label;
-    }
-    terminals.push({ address: item.address, labels });
-  }
-  return terminals;
-};
-var modelPanes = (value) => {
-  if (!Array.isArray(value))
-    return [];
-  const panes = [];
-  for (const item of value) {
-    if (!isRecord(item) || typeof item.pane !== "string")
-      continue;
-    panes.push({ pane: item.pane, terminal: typeof item.terminal === "string" ? item.terminal : null });
-  }
-  return panes;
-};
 var statusText = (row) => row.turnState === "" || row.turnState === "none" ? row.status : `${row.status}/${row.turnState}`;
 var rowTitle = (row) => row.title || row.agent || row.id.slice(0, 8);
 var snapshotNote = (asOf) => `Snapshot ${asOf} UTC, not a watch.`;
@@ -197,9 +157,7 @@ var closePull = (pull) => ({
   again: false
 });
 
-// packages/herdr-app-mod/src/mod.ts
-var windowCoreSocket = undefined;
-
+// src/mod.ts
 class VibestSessions extends View {
   sessions;
   note;
@@ -276,9 +234,8 @@ class VibestSessions extends View {
     }
   }
   sessionRow(colors, session) {
-    const place = placeSession(session, coreTerminals(terminals()), modelPanes(panes()), windowCoreSocket);
     const row = h_flex().id(`session-${session.id}`).gap(6).px(2).py(2).items_center().rounded(4).child(div().flex_1().truncate().text_color(colors.foreground ?? "").child(rowTitle(session))).child(div().flex_none().text_color(colors.dim ?? "").child(`${session.harness} ${statusText(session)}`)).child(div().flex_none().text_color(colors.dim ?? "").child(session.id.slice(0, 8)));
-    return row.child(div().flex_none().text_color(colors.dim ?? "").child(place.action === "none" ? place.reason : "core not proven"));
+    return row.child(div().flex_none().text_color(colors.dim ?? "").child(rowNote(session)));
   }
   render(_cx) {
     const colors = theme();

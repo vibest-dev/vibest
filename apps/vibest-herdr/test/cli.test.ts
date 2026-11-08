@@ -168,7 +168,16 @@ describe("vibest CLI", () => {
         reported.map((r) => /<message>\n([\s\S]*)\n<\/message>/.exec(r.message)?.[1]),
         ["- fix the bug\n- then test", "--help", "--model x"],
       )
-      for (const args of [["ls"], ["interrupt", id], ["send", id, "x"], ["run", "pi", "x"], ["project", "info"]]) {
+      for (const args of [
+        ["ls"],
+        ["ls", "--no-start"],
+        ["ls", "--all-projects"],
+        ["ls", "--no-start", "--all-projects"],
+        ["interrupt", id],
+        ["send", id, "x"],
+        ["run", "pi", "x"],
+        ["project", "info"],
+      ]) {
         const r = yield* asSession(id, args)
         assert.deepStrictEqual([r.code, r.stdout], [1, ""], args.join(" "))
         assert.match(r.stderr, /^Forbidden: /, args.join(" "))
@@ -332,6 +341,39 @@ describe("vibest CLI", () => {
       }>`SELECT kind, content AS message FROM inbox WHERE sender_session_id = ${id} AND kind IN ('report', 'result') ORDER BY id`
       assert.isTrue(history.some((row) => row.kind === "report" && row.message.includes("prior note")))
       assert.isTrue(history.some((row) => row.kind === "result" && row.message.includes("kept finding")))
+    }),
+  )
+
+  test(
+    "ls --all-projects lists every project from inside a checkout; --all is still exited sessions",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const layout = yield* Layout
+      const repo = yield* makeRepository
+      const other = yield* makeRepository
+      const cli = { HOME: layout.home, VIBEST_HOME: layout.home, VIBEST_NO_UPDATE_CHECK: "1" }
+      const here = (
+        decodeJson((yield* vibest(repo, cli, ["run", "--runtime", "herdr", "pi", "here"])).stdout) as { id: string }
+      ).id
+      const there = (
+        decodeJson((yield* vibest(other, cli, ["run", "--runtime", "herdr", "pi", "there"])).stdout) as { id: string }
+      ).id
+      yield* until(db.getSession(here), (w) => w?.turnState === "open")
+      yield* until(db.getSession(there), (w) => w?.turnState === "open")
+      const ids = (args: ReadonlyArray<string>) =>
+        vibest(repo, cli, args).pipe(
+          Effect.map((r) => {
+            assert.strictEqual(r.code, 0, r.stderr)
+            return (decodeJson(r.stdout) as { id: string }[]).map((row) => row.id).sort()
+          }),
+        )
+      assert.deepStrictEqual(yield* ids(["ls", "--no-start"]), [here])
+      assert.deepStrictEqual(yield* ids(["ls", "--no-start", "--all-projects"]), [here, there].sort())
+      yield* db.updateSession(here, { status: "unknown", exitedAt: 1 })
+      assert.deepStrictEqual(yield* ids(["ls", "--no-start"]), [])
+      assert.deepStrictEqual(yield* ids(["ls", "--no-start", "--all"]), [here])
+      assert.deepStrictEqual(yield* ids(["ls", "--no-start", "--all-projects"]), [there])
+      assert.deepStrictEqual(yield* ids(["ls", "--all", "--all-projects", "--no-start"]), [here, there].sort())
     }),
   )
 
@@ -520,6 +562,41 @@ describe("vibest CLI without vibestd", () => {
             }),
           ),
         )
+      }).pipe(Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
+
+  it.effect(
+    "VIBEST_NO_UPDATE_CHECK=1 does not write update-check.json when the install would check",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const bare = yield* tempDirectory("vibest-update-bare-")
+        const bareHome = path.join(bare, "vibest")
+        const wrote = yield* vibest(
+          bare,
+          { HOME: bare, VIBEST_HOME: bareHome, VIBEST_HARNESSES: path.join(bare, "harnesses") },
+          ["status"],
+        )
+        assert.strictEqual(wrote.code, 0, wrote.stderr)
+        assert.isTrue(yield* fs.exists(path.join(bareHome, "update-check.json")))
+        const quiet = yield* tempDirectory("vibest-update-quiet-")
+        const quietHome = path.join(quiet, "vibest")
+        const status = yield* vibest(
+          quiet,
+          {
+            HOME: quiet,
+            VIBEST_HOME: quietHome,
+            VIBEST_HARNESSES: path.join(quiet, "harnesses"),
+            VIBEST_NO_UPDATE_CHECK: "1",
+          },
+          ["status"],
+        )
+        assert.strictEqual(status.code, 0, status.stderr)
+        const body = decodeJson(status.stdout) as { daemon: { status: string } }
+        assert.strictEqual(body.daemon.status, "not running")
+        assert.isFalse(yield* fs.exists(quietHome))
       }).pipe(Effect.provide(Platform.services)),
     TIMEOUT,
   )
