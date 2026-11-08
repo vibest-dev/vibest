@@ -3,8 +3,10 @@ import { assert, describe, it } from "@effect/vitest"
 import {
   cliArgv,
   closePull,
+  commandNote,
   completePull,
   coreTerminals,
+  focusAtClick,
   groupSessions,
   idlePull,
   modelPanes,
@@ -73,7 +75,21 @@ describe("herdr-app mod", () => {
       "VIBEST_PROJECT_ID",
       "vibest",
       "ls",
+      "--no-start",
     ])
+    assert.equal(
+      commandNote(
+        {
+          code: 1,
+          stdout: "",
+          stderr:
+            "DaemonUnavailable: vibestd is unreachable on /tmp/vibest.sock (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon",
+        },
+        "vibest ls failed",
+      ),
+      "DaemonUnavailable: vibestd is unreachable on /tmp/vibest.sock (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon",
+    )
+    assert.equal(commandNote({ code: 1, stdout: "", stderr: "" }, "vibest could not be run"), "vibest could not be run")
     assert.deepEqual(statusVerdict(JSON.stringify(runningStatus)), { list: true })
     assert.deepEqual(
       statusVerdict(
@@ -116,27 +132,27 @@ describe("herdr-app mod", () => {
     assert.deepEqual(parseOwnedAddress(`t7@${socket}`), { address: "t7", socket })
   })
 
-  it("focuses only a local herdr-core pane with the same address and session label", () => {
+  it("focuses only the proven core, and a click uses the terminals at that moment", () => {
     const row = session()
-    const terminals = [
-      { address: "t7", labels: { "vibest.session": row.id } },
-      { address: "t8", labels: { "vibest.session": row.id } },
-    ]
+    const terminals = [{ address: "t7", labels: { "vibest.session": row.id } }]
     const panes = [{ pane: "p1", terminal: "t7" }]
-    assert.deepEqual(placeSession(row, terminals, panes), { action: "focus", terminal: "t7" })
-    assert.deepEqual(placeSession(row, [{ address: "t8", labels: { "vibest.session": row.id } }], panes), {
+    const otherCore = "/tmp/other-core.sock"
+    assert.deepEqual(placeSession(row, terminals, panes, undefined), { action: "none", reason: "core not proven" })
+    assert.deepEqual(placeSession(row, terminals, panes, otherCore), { action: "none", reason: "other core" })
+    assert.deepEqual(placeSession(row, terminals, panes, socket), { action: "focus", terminal: "t7" })
+    assert.deepEqual(placeSession(row, [{ address: "t7", labels: {} }], panes, socket), {
       action: "none",
       reason: "not in this window",
     })
-    assert.deepEqual(placeSession(row, [{ address: "t7", labels: {} }], panes), {
+    assert.deepEqual(placeSession(row, [{ address: "t7", labels: { "vibest.session": "other" } }], panes, socket), {
       action: "none",
       reason: "not in this window",
     })
-    assert.deepEqual(placeSession(row, [{ address: "t7", labels: { "vibest.session": "other" } }], panes), {
+    assert.deepEqual(placeSession(row, [{ address: "t8", labels: { "vibest.session": row.id } }], panes, socket), {
       action: "none",
       reason: "not in this window",
     })
-    assert.deepEqual(placeSession(session({ machine: "vps", coreAddress: "t7", socket }), terminals, panes), {
+    assert.deepEqual(placeSession(session({ machine: "vps" }), terminals, panes, socket), {
       action: "none",
       reason: "on another machine",
     })
@@ -148,21 +164,28 @@ describe("herdr-app mod", () => {
           { address: "t7", labels: { "vibest.session": row.id } },
         ],
         panes,
+        socket,
       ),
       { action: "none", reason: "ambiguous" },
     )
-    assert.deepEqual(placeSession(row, terminals, [{ pane: "p9", terminal: "t8" }]), {
+    assert.deepEqual(placeSession(row, terminals, [{ pane: "p9", terminal: "t8" }], socket), {
       action: "none",
       reason: "no pane to focus",
     })
-    assert.deepEqual(placeSession(session({ runtime: "herdr", coreAddress: "", socket: "" }), terminals, panes), {
-      action: "none",
-      reason: "runtime herdr",
-    })
-    assert.deepEqual(placeSession(session({ coreAddress: "vps/t7" }), terminals, panes), {
+    assert.deepEqual(
+      placeSession(session({ runtime: "herdr", coreAddress: "", socket: "" }), terminals, panes, socket),
+      { action: "none", reason: "runtime herdr" },
+    )
+    assert.deepEqual(placeSession(session({ coreAddress: "vps/t7" }), terminals, panes, socket), {
       action: "none",
       reason: "no local terminal",
     })
+    assert.deepEqual(focusAtClick(row, terminals, panes, socket), {
+      command: "pane.focus",
+      args: { terminal: "t7" },
+    })
+    assert.equal(focusAtClick(row, [], panes, socket), undefined)
+    assert.equal(focusAtClick(row, terminals, panes, undefined), undefined)
   })
 
   it("drops a snapshot when a newer read or unload wins", () => {

@@ -444,6 +444,25 @@ describe("vibest CLI without vibestd", () => {
   )
 
   it.effect(
+    "vibest ls --no-start does not start vibestd when nothing is listening",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const home = yield* tempDirectory("vibest-ls-nostart-")
+        const vibestHome = path.join(home, "vibest")
+        const listed = yield* vibest(home, { HOME: home, VIBEST_HOME: vibestHome }, ["ls", "--no-start"])
+        assert.deepStrictEqual([listed.code, listed.stdout], [1, ""])
+        assert.match(
+          listed.stderr,
+          /^DaemonUnavailable: vibestd is unreachable on .*; ask the user to check it, or to run: vibest daemon/,
+        )
+        assert.isFalse(yield* fs.exists(vibestHome))
+      }).pipe(Effect.provide(Platform.services)),
+    TIMEOUT,
+  )
+
+  it.effect(
     "help and version only print: vibestd is not contacted or started and no file changes",
     () =>
       Effect.gen(function* () {

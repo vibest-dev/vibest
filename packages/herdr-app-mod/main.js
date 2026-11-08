@@ -1,15 +1,16 @@
-// packages/herdr-app-mod/src/mod.ts
+// src/mod.ts
 import { h_flex, v_flex } from "gpui-base";
 import { div, View } from "gpui-kit";
 import { appHome, exec, panes, run, terminals, theme } from "herdr";
 
-// packages/herdr-app-mod/src/sessions.ts
+// src/sessions.ts
 var SESSION_LABEL = "vibest.session";
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
 var cliArgv = (command) => [
   ...STRIPPED.flatMap((name) => ["-u", name]),
   "vibest",
-  command
+  command,
+  ...command === "ls" ? ["--no-start"] : []
 ];
 var idlePull = () => ({ token: 0, closed: false, running: false, again: false });
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -20,13 +21,17 @@ var parseOwnedAddress = (id) => {
     return;
   return { address: id.slice(0, at), socket: id.slice(at + 1) };
 };
-var placeSession = (session, terminals, panes) => {
+var placeSession = (session, terminals, panes, windowSocket) => {
   if (session.runtime !== "hc")
     return { action: "none", reason: `runtime ${session.runtime || "unknown"}` };
   if (session.machine !== "local")
     return { action: "none", reason: "on another machine" };
   if (session.socket === "" || session.coreAddress === "" || session.coreAddress.includes("/"))
     return { action: "none", reason: "no local terminal" };
+  if (windowSocket === undefined || windowSocket === "")
+    return { action: "none", reason: "core not proven" };
+  if (windowSocket !== session.socket)
+    return { action: "none", reason: "other core" };
   const matches = terminals.filter((terminal) => terminal.address === session.coreAddress && terminal.labels[SESSION_LABEL] === session.id);
   if (matches.length > 1)
     return { action: "none", reason: "ambiguous" };
@@ -36,6 +41,18 @@ var placeSession = (session, terminals, panes) => {
   if (!panes.some((pane) => pane.terminal === found.address))
     return { action: "none", reason: "no pane to focus" };
   return { action: "focus", terminal: found.address };
+};
+var focusAtClick = (session, terminalsNow, panesNow, windowSocket) => {
+  const place = placeSession(session, coreTerminals(terminalsNow), modelPanes(panesNow), windowSocket);
+  if (place.action !== "focus")
+    return;
+  return { command: "pane.focus", args: { terminal: place.terminal } };
+};
+var commandNote = (result, fallback) => {
+  if (result.code === 0)
+    return "";
+  const trimmed = (result.stderr || result.stdout).trim();
+  return (trimmed === "" ? fallback : trimmed).slice(0, 180);
 };
 var statusVerdict = (stdout) => {
   let value;
@@ -185,12 +202,8 @@ var closePull = (pull) => ({
   again: false
 });
 
-// packages/herdr-app-mod/src/mod.ts
-var clip = (value) => {
-  const trimmed = value.trim();
-  return (trimmed === "" ? "vibest failed" : trimmed).slice(0, 180);
-};
-var failed = (value, fallback) => clip(value.stderr || value.stdout || fallback);
+// src/mod.ts
+var windowCoreSocket = undefined;
 
 class VibestSessions extends View {
   sessions;
@@ -226,7 +239,7 @@ class VibestSessions extends View {
       const cwd = appHome();
       const status = await exec("env", cliArgv("status"), { cwd });
       if (status.code !== 0)
-        note = failed(status, "vibest status failed");
+        note = commandNote(status, "vibest status failed");
       else {
         const verdict = statusVerdict(status.stdout);
         if (verdict === undefined)
@@ -236,7 +249,7 @@ class VibestSessions extends View {
         else {
           const listed = await exec("env", cliArgv("ls"), { cwd });
           if (listed.code !== 0)
-            note = failed(listed, "vibest ls failed");
+            note = commandNote(listed, "vibest ls failed");
           else {
             const parsed = parseSessions(listed.stdout);
             if (parsed === undefined)
@@ -250,7 +263,7 @@ class VibestSessions extends View {
         }
       }
     } catch (error) {
-      note = clip(error instanceof Error ? error.message : "vibest could not be run");
+      note = commandNote({ code: 1, stdout: "", stderr: error instanceof Error ? error.message : "vibest could not be run" }, "vibest could not be run");
     }
     const done = completePull(this.pull, token);
     this.pull = done.pull;
@@ -268,13 +281,14 @@ class VibestSessions extends View {
     }
   }
   sessionRow(colors, session) {
-    const place = placeSession(session, coreTerminals(terminals()), modelPanes(panes()));
+    const place = placeSession(session, coreTerminals(terminals()), modelPanes(panes()), windowCoreSocket);
     const row = h_flex().id(`session-${session.id}`).gap(6).px(2).py(2).items_center().rounded(4).child(div().flex_1().truncate().text_color(colors.foreground ?? "").child(rowTitle(session))).child(div().flex_none().text_color(colors.dim ?? "").child(`${session.harness} ${statusText(session)}`)).child(div().flex_none().text_color(colors.dim ?? "").child(session.id.slice(0, 8)));
     if (place.action === "none")
       return row.child(div().flex_none().text_color(colors.dim ?? "").child(place.reason));
-    const terminal = place.terminal;
     return row.cursor_pointer().hover((el) => el.bg(colors.hover ?? "")).on_click(() => {
-      run("pane.focus", { terminal });
+      const now = focusAtClick(session, terminals(), panes(), windowCoreSocket);
+      if (now !== undefined)
+        run(now.command, now.args);
     }).child(div().flex_none().text_color(colors.foreground ?? "").child("Focus"));
   }
   render(_cx) {

@@ -5,8 +5,10 @@ import { appHome, exec, panes, run, terminals, theme } from "herdr"
 import {
   cliArgv,
   closePull,
+  commandNote,
   completePull,
   coreTerminals,
+  focusAtClick,
   groupSessions,
   idlePull,
   modelPanes,
@@ -22,13 +24,7 @@ import {
   statusVerdict,
 } from "./sessions.ts"
 
-const clip = (value: string): string => {
-  const trimmed = value.trim()
-  return (trimmed === "" ? "vibest failed" : trimmed).slice(0, 180)
-}
-
-const failed = (value: { readonly code: number; readonly stdout: string; readonly stderr: string }, fallback: string) =>
-  clip(value.stderr || value.stdout || fallback)
+const windowCoreSocket = undefined
 
 export default class VibestSessions extends View {
   sessions!: readonly SessionRow[]
@@ -66,14 +62,14 @@ export default class VibestSessions extends View {
     try {
       const cwd = appHome()
       const status = await exec("env", cliArgv("status"), { cwd })
-      if (status.code !== 0) note = failed(status, "vibest status failed")
+      if (status.code !== 0) note = commandNote(status, "vibest status failed")
       else {
         const verdict = statusVerdict(status.stdout)
         if (verdict === undefined) note = "vibest status was not understood"
         else if (!verdict.list) note = verdict.message
         else {
           const listed = await exec("env", cliArgv("ls"), { cwd })
-          if (listed.code !== 0) note = failed(listed, "vibest ls failed")
+          if (listed.code !== 0) note = commandNote(listed, "vibest ls failed")
           else {
             const parsed = parseSessions(listed.stdout)
             if (parsed === undefined) note = "vibest ls was not understood"
@@ -86,7 +82,10 @@ export default class VibestSessions extends View {
         }
       }
     } catch (error) {
-      note = clip(error instanceof Error ? error.message : "vibest could not be run")
+      note = commandNote(
+        { code: 1, stdout: "", stderr: error instanceof Error ? error.message : "vibest could not be run" },
+        "vibest could not be run",
+      )
     }
     const done = completePull(this.pull, token)
     this.pull = done.pull
@@ -105,7 +104,7 @@ export default class VibestSessions extends View {
   }
 
   sessionRow(colors: Record<string, string>, session: SessionRow): Chain {
-    const place = placeSession(session, coreTerminals(terminals()), modelPanes(panes()))
+    const place = placeSession(session, coreTerminals(terminals()), modelPanes(panes()), windowCoreSocket)
     const row = h_flex()
       .id(`session-${session.id}`)
       .gap(6)
@@ -139,12 +138,12 @@ export default class VibestSessions extends View {
           .text_color(colors.dim ?? "")
           .child(place.reason),
       )
-    const terminal = place.terminal
     return row
       .cursor_pointer()
       .hover((el) => el.bg(colors.hover ?? ""))
       .on_click(() => {
-        run("pane.focus", { terminal })
+        const now = focusAtClick(session, terminals(), panes(), windowCoreSocket)
+        if (now !== undefined) run(now.command, now.args)
       })
       .child(
         div()

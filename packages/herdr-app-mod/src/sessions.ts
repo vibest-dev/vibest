@@ -6,6 +6,7 @@ export const cliArgv = (command: "status" | "ls"): string[] => [
   ...STRIPPED.flatMap((name) => ["-u", name]),
   "vibest",
   command,
+  ...(command === "ls" ? ["--no-start"] : []),
 ]
 
 export interface SessionRow {
@@ -70,11 +71,14 @@ export const placeSession = (
   session: SessionRow,
   terminals: readonly CoreTerminal[],
   panes: readonly ModelPane[],
+  windowSocket: string | undefined,
 ): Placement => {
   if (session.runtime !== "hc") return { action: "none", reason: `runtime ${session.runtime || "unknown"}` }
   if (session.machine !== "local") return { action: "none", reason: "on another machine" }
   if (session.socket === "" || session.coreAddress === "" || session.coreAddress.includes("/"))
     return { action: "none", reason: "no local terminal" }
+  if (windowSocket === undefined || windowSocket === "") return { action: "none", reason: "core not proven" }
+  if (windowSocket !== session.socket) return { action: "none", reason: "other core" }
   const matches = terminals.filter(
     (terminal) => terminal.address === session.coreAddress && terminal.labels[SESSION_LABEL] === session.id,
   )
@@ -83,6 +87,26 @@ export const placeSession = (
   if (found === undefined) return { action: "none", reason: "not in this window" }
   if (!panes.some((pane) => pane.terminal === found.address)) return { action: "none", reason: "no pane to focus" }
   return { action: "focus", terminal: found.address }
+}
+
+export const focusAtClick = (
+  session: SessionRow,
+  terminalsNow: unknown,
+  panesNow: unknown,
+  windowSocket: string | undefined,
+): { readonly command: "pane.focus"; readonly args: { readonly terminal: string } } | undefined => {
+  const place = placeSession(session, coreTerminals(terminalsNow), modelPanes(panesNow), windowSocket)
+  if (place.action !== "focus") return undefined
+  return { command: "pane.focus", args: { terminal: place.terminal } }
+}
+
+export const commandNote = (
+  result: { readonly code: number; readonly stdout: string; readonly stderr: string },
+  fallback: string,
+): string => {
+  if (result.code === 0) return ""
+  const trimmed = (result.stderr || result.stdout).trim()
+  return (trimmed === "" ? fallback : trimmed).slice(0, 180)
 }
 
 export const statusVerdict = (stdout: string): StatusVerdict | undefined => {

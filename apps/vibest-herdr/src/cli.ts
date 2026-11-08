@@ -663,19 +663,29 @@ const ls = Command.make(
       Flag.withDescription("Exited sessions too"),
       Flag.withDefault(false),
     ),
+    noStart: Flag.Boolean("no-start").pipe(
+      Flag.withDescription("Do not start vibestd when it is not running"),
+      Flag.withDefault(false),
+    ),
   },
   (o) =>
     Effect.gen(function* () {
       const cwd = (yield* Path.Path).resolve(".")
       const outsideProject = Option.isNone(yield* projectRoot(cwd).pipe(Effect.option))
-      yield* vibest((client) => client.List({ stopped: o.all, ...(outsideProject ? { all: true } : {}) })).pipe(
-        Effect.map((sessions) => sessions.map(titled)),
-        Effect.flatMap(json),
+      const who = yield* caller
+      yield* withVibest(
+        who.claim,
+        (client) =>
+          client.List({ stopped: o.all, ...(outsideProject ? { all: true } : {}) }).pipe(
+            Effect.map((sessions) => sessions.map(titled)),
+            Effect.flatMap(json),
+          ),
+        { start: !who.agent && !o.noStart },
       )
     }),
 ).pipe(
   Command.withDescription(
-    "Your sessions that have not exited, as JSON: each task (cut to 500 characters), its live status, and its latest result (--all: exited ones too). vibest result keeps the full task",
+    "Your sessions that have not exited, as JSON: each task (cut to 500 characters), its live status, and its latest result (--all: exited ones too; --no-start: do not start vibestd). vibest result keeps the full task",
   ),
 )
 

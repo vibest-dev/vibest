@@ -1,47 +1,36 @@
 # @vibest/herdr-app-mod
 
-A [herdr-app](https://github.com/herdrdev/herdr-app) mod that lists live vibest sessions from vibestd and focuses a pane that already shows that session's terminal.
+A [herdr-app](https://github.com/herdrdev/herdr-app) mod that lists live vibest sessions from vibestd. It does not focus a terminal: herdr-app 0.1.13 does not say which core a `t7` belongs to, and two cores can both have that address.
 
-API: **herdr-app 0.1.13** (`herdr-app --version` on this machine). The calls below are the ones in `~/.config/herdr-app/herdr.d.ts` and `~/.config/herdr-app/AGENTS.md` written by that app (upstream `defaults/AGENTS.md`). This is not a herdr-core plugin and not a legacy Herdr integration (`herdr-plugin.toml` in `docs/design/herdr-surface.md`, herdr 0.9.5).
+API: **herdr-app 0.1.13** (`herdr-app --version`). The host calls are the ones in `~/.config/herdr-app/herdr.d.ts` and `AGENTS.md` written by that app (upstream `defaults/AGENTS.md`). This is not a herdr-core plugin and not a legacy Herdr integration (`herdr-plugin.toml` in `docs/design/herdr-surface.md`, herdr 0.9.5).
 
-## What a read does
+## Read
 
-The first time the panel is shown, and when **Refresh** is clicked, it runs:
+The panel reads once when it is shown, and again when **Refresh** is clicked. There is no timer. Herdr re-renders the panel when its own terminals change; the session rows do not. A line under the title is the snapshot time. A newer Refresh, or the copy closing, drops an older result instead of painting it. `exec` is the host's: 30 seconds and 8 MiB (`herdr.d.ts`). The host has no cancel handle, so a closed copy ignores the result and does not start a second timer around the process.
 
-`exec("env", ["-u", "VIBEST_SESSION_ID", "-u", "VIBEST_AGENT", "-u", "VIBEST_PROJECT_ID", "vibest", "status"], { cwd: appHome() })`
+Each read is `vibest status`, then `vibest ls --no-start`, via `exec("env", ["-u", "VIBEST_SESSION_ID", "-u", "VIBEST_AGENT", "-u", "VIBEST_PROJECT_ID", "vibest", ...], { cwd: appHome() })`. `status` never starts vibestd (`apps/vibest-herdr/src/cli.ts`). `ls` without `--no-start` does, when the caller is not a session and the daemon is down (`withVibest` in `packages/client/src/client.ts`). `--no-start` uses that client's `start: false`. The CLI test `vibest ls --no-start does not start vibestd when nothing is listening` checks exit 1, empty stdout, `DaemonUnavailable`, and that the vibest home was not created. A status check before `ls` is not what makes this safe.
 
-`herdr.d.ts` bounds `exec` at 30 seconds and 8 MiB. There is no timer. Herdr re-renders the panel when its own terminals and panes change; the session list does not. The line under the title is a snapshot time, not a watch.
+`status` on the installed vibest 0.0.1-beta.17, with vibestd already running, exited 0 and printed `daemon.status`, `daemon.version`, `daemon.sameVersion`, `daemon.protocol`, and `client.version`. The CLI test for a dead socket expects exit 0 and `{ daemon: { status: "not running", socket }, runtimes: null }` without creating the home. If `sameVersion` is not true, or `protocol` is missing, the panel shows that and does not list. `ls` prints a JSON array and renames `name` to `title`. `cwd` is `appHome()`, so `List` asks for every project and does not create one. A non-zero exit is shown from stderr (a disappeared daemon is `DaemonUnavailable`). A body that is not that JSON is an error, not a partial list.
 
-`vibest status` exits 0 and does not start vibestd or create its home. Checked against the installed `vibest` 0.0.1-beta.17 while vibestd was running (JSON `daemon.status`, `daemon.version`, `daemon.sameVersion`, `daemon.protocol`, `client.version`) and against `apps/vibest-herdr/test/cli.test.ts`, which expects `{ daemon: { status: "not running", socket }, runtimes: null }` and an unchanged home when nothing is listening. A status that is not `running`, or whose `sameVersion` is not true, or which has no numeric `protocol`, is shown and `vibest ls` is not run.
+Rows show the daemon's `status` and `turnState`, not Herdr `agents()` and not the screen.
 
-`vibest ls` is the same `exec`, with `ls` instead of `status`. The CLI prints a JSON array and renames `name` to `title` (`titled` in `apps/vibest-herdr/src/cli.ts`). `cwd` is `appHome()`, outside a project, so `List` is asked for every project and does not create one. The three variables are removed so an inherited agent environment is not the caller (`List` is refused for a session). `vibest ls` itself starts vibestd when the caller is not a session and the daemon is down (`withVibest` in `packages/client/src/client.ts`). This panel does not call it unless status just said `running`. If vibestd exits in that gap, that start can still happen.
+## Focus
 
-Rows show the daemon's `status` and `turnState`. Nothing is read from the terminal screen, and Herdr's `agents()` status is not shown. A bad status or list (not the JSON above) is an error, not a partial list.
+Not called. `terminals()` is `hc ls` (address, labels, no socket). `hc()` runs the hc CLI; that is not documented as this window's core. `machines()` names a machine, not a socket. Until the host gives the socket for a terminal, a matching `t7` and `vibest.session` is not proof.
 
-## What a click does
+The match that would be safe, and is what the tests encode, is all of: `runtime` `hc`, `address.machine` `local`, `address.id` parsed as `<address>@<socket>` the way `parseTerminalId` does in `packages/runtime-herdr-core/src/terminal-runtime.ts`, the window socket equal to that socket, exactly one terminal with that address and `labels["vibest.session"]` equal to the session id, and a model pane from `panes()` showing it. The click reads `terminals()` and `panes()` again. The only command on that path is `pane.focus`. The mod passes no window socket, so the row says `core not proven`.
 
-A click runs `pane.focus` `{ terminal }` only when all of these hold:
+`terminal.keep` is not used. herdr-app 0.1.13 says it gives a running terminal a pane, and `AGENTS.md` says it enables core keep and can stay `pending` until the machine applies it. `terminal.open` and `agent.focus` are not used. A remote machine stays "on another machine" even when the socket path text matches. A legacy Herdr id is not an hc address.
 
-- `runtime` is `hc` and `address.machine` is `local` (a remote machine is shown as "on another machine", even when its socket path text matches a local one)
-- `address.id` is `<address>@<socket>` (`terminalId` in `packages/runtime-herdr-core/src/terminal-runtime.ts`) and the address has no `/`
-- exactly one `terminals()` entry has that address and `labels["vibest.session"]` equal to the session id (a label with no matching address does not count; two matches are "ambiguous")
-- a model pane from `panes()` already shows that address
+The runtime is gpui-kit JavaScript. It does not load `@vibest/client`, Effect, or Node, and it does not open a TCP bridge. `net.connect` is TCP only. `fetch` is HTTP, not vibestd's Unix socket.
 
-`terminal.keep` is not used. herdr-app 0.1.13 describes it as giving a running terminal a pane, and `AGENTS.md` says it enables core keep and can report `pending: true` until the machine applies it. `terminal.open` and `agent.focus` are not used either. A matched terminal with no pane says "no pane to focus".
-
-The mod runtime is gpui-kit JavaScript (`main.js`, `mod.json`). It does not load `@vibest/client`, Effect, or Node. `net.connect` is TCP only (`gpui-kit.d.ts`). `fetch` is HTTP, not vibestd's Unix socket.
+This has not been loaded in a running window. `herdr-app check` renders the module once; it does not prove the panel, and it does not prove the read is read-only on a live daemon. The no-start proof is the CLI test above.
 
 ## Build and check
-
-From the repository:
 
 ```sh
 pnpm --filter @vibest/herdr-app-mod build
 herdr-app check packages/herdr-app-mod
 ```
 
-`herdr-app check` loads the mod once and renders it. It does not install it. It writes `gpui-kit.d.ts` beside the mod for the editor; that file is generated and not part of this package. The first render starts the read with `cx.spawn`, which check does not run.
-
-To show it, copy this directory to `~/.config/herdr-app/mods/vibest` (or `$HERDR_APP_HOME/mods/vibest`) yourself. The first time Herdr sees the folder it docks one copy on the right (`mod.json`). Saving a file reloads it. This package does not write that directory.
-
-`herdr-app check` does not prove the panel in a running window.
+`herdr-app check` writes `gpui-kit.d.ts` beside the mod. That file is generated and gitignored. Check does not run the `cx.spawn` read. Copying into `~/.config/herdr-app/mods` is not done here.
