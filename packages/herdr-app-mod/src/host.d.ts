@@ -26,7 +26,7 @@ interface Chain {
   child(value: unknown): Chain
   children(value: readonly unknown[]): Chain
   hover(style: (el: Chain) => Chain): Chain
-  on_click(handle: () => void): Chain
+  on_click(handle: (event: unknown, cx: Cx) => void): Chain
   when(cond: unknown, apply: (el: Chain) => Chain): Chain
 }
 

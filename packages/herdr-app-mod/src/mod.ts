@@ -4,20 +4,22 @@ import { appHome, exec, panes, run, terminals, theme } from "herdr"
 
 import {
   cliArgv,
+  closePull,
+  completePull,
   coreTerminals,
-  focusOf,
   groupSessions,
-  matchTerminal,
+  idlePull,
   modelPanes,
-  parseDaemonRunning,
   parseSessions,
-  REFRESH_MS,
-  rowTitle,
-  type CoreTerminal,
-  type ModelPane,
+  placeSession,
   projectHeading,
+  type Pull,
+  requestPull,
+  rowTitle,
   type SessionRow,
+  snapshotNote,
   statusText,
+  statusVerdict,
 } from "./sessions.ts"
 
 const clip = (value: string): string => {
@@ -25,70 +27,85 @@ const clip = (value: string): string => {
   return (trimmed === "" ? "vibest failed" : trimmed).slice(0, 180)
 }
 
+const failed = (value: { readonly code: number; readonly stdout: string; readonly stderr: string }, fallback: string) =>
+  clip(value.stderr || value.stdout || fallback)
+
 export default class VibestSessions extends View {
   sessions!: readonly SessionRow[]
   note!: string
-  refreshing!: boolean
+  asOf!: string
+  pull!: Pull
 
   init(_props: unknown, cx: Cx): void {
     this.sessions = []
-    this.note = "Loading…"
-    this.refreshing = false
-    const pull = (current: Cx) => {
-      current.spawn(async (spawned) => {
-        await this.refresh(spawned)
-      })
-    }
-    cx.timer.every(REFRESH_MS, pull)
-    pull(cx)
+    this.note = "Reading vibestd…"
+    this.asOf = ""
+    this.pull = idlePull()
+    this.request(cx)
   }
 
-  async refresh(cx: Cx): Promise<void> {
-    if (this.refreshing) return
-    this.refreshing = true
+  close(): void {
+    this.pull = closePull(this.pull)
+  }
+
+  request(cx: Cx): void {
+    const next = requestPull(this.pull)
+    const started = !this.pull.running && next.running
+    this.pull = next
+    if (!started) return
+    const token = next.token
+    cx.spawn(async (spawned) => {
+      await this.read(spawned, token)
+    })
+  }
+
+  async read(cx: Cx, token: number): Promise<void> {
+    let note = ""
+    let asOf = ""
+    let sessions: readonly SessionRow[] = []
     try {
       const cwd = appHome()
       const status = await exec("env", cliArgv("status"), { cwd })
-      if (status.code !== 0) this.fail(clip(status.stderr || status.stdout || "vibest status failed"))
+      if (status.code !== 0) note = failed(status, "vibest status failed")
       else {
-        const running = parseDaemonRunning(status.stdout)
-        if (running === undefined) this.fail("vibest status was not understood")
-        else if (!running) this.fail("vibestd is not running")
+        const verdict = statusVerdict(status.stdout)
+        if (verdict === undefined) note = "vibest status was not understood"
+        else if (!verdict.list) note = verdict.message
         else {
           const listed = await exec("env", cliArgv("ls"), { cwd })
-          if (listed.code !== 0) this.fail(clip(listed.stderr || listed.stdout || "vibest ls failed"))
+          if (listed.code !== 0) note = failed(listed, "vibest ls failed")
           else {
-            const sessions = parseSessions(listed.stdout)
-            if (sessions === undefined) this.fail("vibest ls was not understood")
+            const parsed = parseSessions(listed.stdout)
+            if (parsed === undefined) note = "vibest ls was not understood"
             else {
-              this.sessions = sessions
-              this.note = sessions.length === 0 ? "No live sessions" : ""
+              sessions = parsed
+              asOf = new Date().toISOString().slice(11, 19)
+              note = parsed.length === 0 ? "No live sessions." : ""
             }
           }
         }
       }
-      cx.notify()
     } catch (error) {
-      this.fail(clip(error instanceof Error ? error.message : "vibest could not be run"))
+      note = clip(error instanceof Error ? error.message : "vibest could not be run")
+    }
+    const done = completePull(this.pull, token)
+    this.pull = done.pull
+    if (done.apply) {
+      this.sessions = sessions
+      this.note = note
+      this.asOf = asOf
       cx.notify()
-    } finally {
-      this.refreshing = false
+    }
+    if (this.pull.running) {
+      const follow = this.pull.token
+      cx.spawn(async (spawned) => {
+        await this.read(spawned, follow)
+      })
     }
   }
 
-  fail(note: string): void {
-    this.note = note
-    this.sessions = []
-  }
-
-  sessionRow(
-    colors: Record<string, string>,
-    session: SessionRow,
-    found: readonly CoreTerminal[],
-    open: readonly ModelPane[],
-  ): Chain {
-    const terminal = matchTerminal(session, found)
-    const focus = terminal === undefined ? undefined : focusOf(terminal.address, open)
+  sessionRow(colors: Record<string, string>, session: SessionRow): Chain {
+    const place = placeSession(session, coreTerminals(terminals()), modelPanes(panes()))
     const row = h_flex()
       .id(`session-${session.id}`)
       .gap(6)
@@ -96,13 +113,6 @@ export default class VibestSessions extends View {
       .py(2)
       .items_center()
       .rounded(4)
-      .child(
-        div()
-          .w(8)
-          .flex_none()
-          .text_color(colors[session.status] ?? colors.muted ?? "")
-          .child("●"),
-      )
       .child(
         div()
           .flex_1()
@@ -122,33 +132,37 @@ export default class VibestSessions extends View {
           .text_color(colors.dim ?? "")
           .child(session.id.slice(0, 8)),
       )
-    if (focus === undefined)
+    if (place.action === "none")
       return row.child(
         div()
           .flex_none()
           .text_color(colors.dim ?? "")
-          .child("not in this window"),
+          .child(place.reason),
       )
-    const action = focus
+    const terminal = place.terminal
     return row
       .cursor_pointer()
       .hover((el) => el.bg(colors.hover ?? ""))
       .on_click(() => {
-        run(action.command, action.args)
+        run("pane.focus", { terminal })
       })
+      .child(
+        div()
+          .flex_none()
+          .text_color(colors.foreground ?? "")
+          .child("Focus"),
+      )
   }
 
   render(_cx: Cx): Chain {
     const colors = theme()
-    const found = coreTerminals(terminals())
-    const open = modelPanes(panes())
     const rows = groupSessions(this.sessions).flatMap((group) => [
       div()
         .id(`project-${group.projectId}`)
         .truncate()
         .text_color(colors.dim ?? "")
         .child(projectHeading(group.projectId, group.label)),
-      ...group.sessions.map((session) => this.sessionRow(colors, session, found, open)),
+      ...group.sessions.map((session) => this.sessionRow(colors, session)),
     ])
     return v_flex()
       .id("vibest-sessions")
@@ -159,16 +173,43 @@ export default class VibestSessions extends View {
       .text_size(12)
       .overflow_y_scrollbar()
       .child(
-        div()
-          .font_semibold()
-          .text_color(colors.foreground ?? "")
-          .child("Vibest"),
+        h_flex()
+          .gap(8)
+          .items_center()
+          .child(
+            div()
+              .font_semibold()
+              .text_color(colors.foreground ?? "")
+              .child("Vibest"),
+          )
+          .child(div().flex_1())
+          .child(
+            div()
+              .id("vibest-refresh")
+              .px(6)
+              .py(2)
+              .rounded(4)
+              .cursor_pointer()
+              .text_color(colors.foreground ?? "")
+              .hover((el) => el.bg(colors.hover ?? ""))
+              .on_click((_event, clicked) => {
+                this.request(clicked)
+              })
+              .child("Refresh"),
+          ),
       )
       .when(this.note !== "", (el) =>
         el.child(
           div()
             .text_color(colors.muted ?? "")
             .child(this.note),
+        ),
+      )
+      .when(this.asOf !== "", (el) =>
+        el.child(
+          div()
+            .text_color(colors.dim ?? "")
+            .child(snapshotNote(this.asOf)),
         ),
       )
       .children(rows)
