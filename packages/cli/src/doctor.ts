@@ -7,9 +7,8 @@ import { Console, Effect, Option } from "effect"
 import { Command } from "effect/cli"
 import { RpcClient } from "effect/rpc"
 
-import { extraVibests, updateNotice } from "./update.ts"
+import { extraVibests, type Finding, updateNotice } from "./update.ts"
 
-export type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }
 const MARKS = { ok: "✓", problem: "✗", note: "·" } as const
 
 export const doctor = Command.make("doctor", {}, () =>

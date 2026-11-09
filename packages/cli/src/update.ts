@@ -20,8 +20,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient } from "effect/rpc"
 
 import { userOnly } from "./caller.ts"
-import type { Finding } from "./doctor.ts"
 import { type ReplaceFailed, replaceAnyway, replaceDaemon, compareVersions, versionOf } from "./replace.ts"
+
+export type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }
 
 export const ownerOf = (real: string) => {
   if (real.includes("/.bun/install/global/node_modules/")) return { kind: "bun" } as const

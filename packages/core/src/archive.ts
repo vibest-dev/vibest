@@ -3,14 +3,13 @@ import { Cause, Clock, Context, Duration, Effect, FileSystem, Ref } from "effect
 import type { Scope } from "effect"
 
 import type { Db, InboxRow, SessionRow } from "./db.ts"
-import type { keyedLock } from "./keyed-lock.ts"
+import { directoryLock, type keyedLock } from "./keyed-lock.ts"
 import type { sessionPlacement } from "./placement.ts"
 import { errorMessage } from "./plugins.ts"
 import { type sessionPrompting, STOP_WAIT } from "./prompting.ts"
 import type * as Remove from "./remove.ts"
 import { agentState, type Runtimes, type Runtime, type AgentSeen } from "./runtimes.ts"
-import type { Platform, Tracked } from "./sessions.ts"
-import { directoryLock } from "./spawn.ts"
+import type { Platform, Tracked } from "./session-types.ts"
 
 export const sessionArchive = (deps: {
   readonly db: Db["Service"]

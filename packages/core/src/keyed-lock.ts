@@ -1,5 +1,7 @@
 import { Effect, Semaphore } from "effect"
 
+export const directoryLock = (directory: string) => `directory:${directory}`
+
 export const keyedLock = <K>() => {
   const entries = new Map<K, { readonly lock: Semaphore.Semaphore; holdersAndWaiters: number }>()
   const withLock =

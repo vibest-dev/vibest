@@ -26,8 +26,8 @@ export const sameCoordinator = (
   )
 }
 
-export const LS_TASK = 500
-export const taskForLs = (task: string | null) =>
+const LS_TASK = 500
+const taskForLs = (task: string | null) =>
   task !== null && task.length > LS_TASK ? `${task.slice(0, LS_TASK - 1)}…` : task
 
 export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo => ({
@@ -54,7 +54,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
   latest: brief?.latest ?? null,
 })
 
-export const mainInfo = (m: CoordinatorRow, status: AgentStatus): SessionInfo => ({
+const mainInfo = (m: CoordinatorRow, status: AgentStatus): SessionInfo => ({
   id: m.id,
   name: "main",
   agent: "main",
@@ -78,7 +78,7 @@ export const mainInfo = (m: CoordinatorRow, status: AgentStatus): SessionInfo =>
   latest: null,
 })
 
-export const mainStatus = (h: Runtime, terminal: Terminal): Effect.Effect<AgentStatus> =>
+const mainStatus = (h: Runtime, terminal: Terminal): Effect.Effect<AgentStatus> =>
   Effect.gen(function* () {
     const seen = yield* agentState(h, terminal).pipe(Effect.option)
     if (Option.isSome(seen) && seen.value !== "absent") return seen.value

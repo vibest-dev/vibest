@@ -15,16 +15,14 @@ import {
   isHarnessId,
   preflight,
 } from "./harness.ts"
-import type { keyedLock } from "./keyed-lock.ts"
+import { directoryLock, type keyedLock } from "./keyed-lock.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, type Layout, safeRepositoryDirectory } from "./paths.ts"
 import type { sessionPlacement } from "./placement.ts"
 import { describeSpawn, type Plugins, type Routing } from "./plugins.ts"
 import { listProjectRepositories } from "./project-create.ts"
 import { type Machine, machinesListing as machines, type Runtimes } from "./runtimes.ts"
-import type { Platform } from "./sessions.ts"
+import type { Platform } from "./session-types.ts"
 import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
-
-export const directoryLock = (directory: string) => `directory:${directory}`
 
 export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
 export const allocationNameSource: { leaves: ReadonlyArray<string> | undefined } = { leaves: undefined }

@@ -29,7 +29,7 @@ import {
   type Terminal,
   type AgentSeen,
 } from "./runtimes.ts"
-import type { Platform, Tracked } from "./sessions.ts"
+import type { Platform, Tracked } from "./session-types.ts"
 import type { Git } from "./worktree.ts"
 
 export const READY_TIMEOUT = Duration.seconds(60)

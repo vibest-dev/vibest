@@ -30,7 +30,7 @@ import {
 import { Effect, Layer, Option } from "effect"
 import * as Headers from "effect/http/Headers"
 
-export const SETTLEMENTS: ReadonlySet<string> = new Set(["TurnEnd", "Prompt"])
+const SETTLEMENTS: ReadonlySet<string> = new Set(["TurnEnd", "Prompt"])
 
 export const AdmissionLive = Layer.effect(
   Admission,

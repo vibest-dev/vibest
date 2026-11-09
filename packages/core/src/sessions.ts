@@ -61,6 +61,7 @@ import {
   stateOf,
   type Terminal,
 } from "./runtimes.ts"
+import type { Platform, Tracked } from "./session-types.ts"
 import { sessionSpawn, type SpawnInput, type Spawned } from "./spawn.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
@@ -86,17 +87,6 @@ export { allocationNameSource, peerAdmitPause, type SpawnInput, type Spawned } f
 export const START_TIMEOUT = Duration.seconds(120)
 export const HOOK_GRACE = Duration.seconds(10)
 export const TAIL_LINES = 30
-
-export type Platform = FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner | Git
-
-export interface Tracked {
-  readonly sawWorking: Ref.Ref<boolean>
-  readonly endedAt: Ref.Ref<number | undefined>
-  readonly blockedNotified: Ref.Ref<boolean>
-  readonly prompting: Ref.Ref<boolean>
-  readonly stopping: Ref.Ref<boolean>
-  readonly launchRechecked: Ref.Ref<boolean>
-}
 
 const newTracked: Effect.Effect<Tracked> = Effect.all({
   sawWorking: Ref.make(false),

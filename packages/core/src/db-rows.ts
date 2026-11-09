@@ -9,13 +9,13 @@ import type { TurnEnded } from "./results.ts"
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
 export const encodeAddress = Schema.encodeSync(AddressJson)
 
-export const Live = {
+const Live = {
   integration: Schema.optional(Schema.Struct({ version: Schema.String, protocol: Schema.Number })),
   pid: Schema.optional(Schema.Number),
   ready: Schema.optional(Schema.Number),
 }
 
-export const Metadata = Schema.Struct({
+const Metadata = Schema.Struct({
   ...Live,
   routing: Schema.optional(Routing),
   archive: Schema.optional(Schema.Boolean),

@@ -30,7 +30,7 @@ import { Routing } from "./plugins.ts"
 
 export const TO_SESSION = `('task', 'send')`
 
-export const TxBuffer = Context.Reference<
+const TxBuffer = Context.Reference<
   { readonly events: Array<EngineEvent>; readonly fiberId: number; closed: boolean } | undefined
 >("vibest/TxBuffer", { defaultValue: () => undefined })
 
