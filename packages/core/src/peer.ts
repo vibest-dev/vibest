@@ -1,16 +1,14 @@
 import type { PayloadOf } from "@vibest/protocol/rpc"
 import {
-  AmbiguousPeer,
   NoCommit,
   NoProject,
-  NoSuchPeer,
   OUTBOX_ITEM_MAX,
   type OutboxItem,
   PROMPT_MAX,
   PromptTooLarge,
 } from "@vibest/schema/machine"
 import { NoRuntime } from "@vibest/schema/session"
-import { Context, Deferred, Effect, Layer, Stream } from "effect"
+import { Context, Effect, Layer, Stream } from "effect"
 
 import { Bus } from "./bus.ts"
 import { Db, type OutboxRow } from "./db.ts"
@@ -32,18 +30,6 @@ const make = Effect.gen(function* () {
   const sessions = yield* Sessions
   const self = yield* VibestdIdentity
   const git = yield* Git
-  const open = new Map<string, Set<Deferred.Deferred<void>>>()
-
-  const resolvePeer = (input: string) =>
-    Effect.gen(function* () {
-      const rows = yield* db.peers
-      const exact = rows.find((p) => p.id === input)
-      if (exact !== undefined) return exact.id
-      const matches = rows.filter((p) => (input.length >= 8 && p.id.startsWith(input)) || p.name === input)
-      if (matches.length === 0) return yield* new NoSuchPeer({ peer: input })
-      if (matches.length > 1) return yield* new AmbiguousPeer({ peer: input, matches: matches.map((p) => p.id) })
-      return matches[0]!.id
-    })
 
   return {
     spawn: (peer: string, project: string, input: PayloadOf<"Peer.Spawn">) =>
@@ -97,15 +83,6 @@ const make = Effect.gen(function* () {
       Stream.unwrap(
         Effect.gen(function* () {
           const subscription = yield* bus.subscribe
-          const stop = yield* Deferred.make<void>()
-          const streams = open.get(peer) ?? new Set()
-          open.set(peer, streams.add(stop))
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              streams.delete(stop)
-              if (streams.size === 0 && open.get(peer) === streams) open.delete(peer)
-            }),
-          )
           const sent = new Set<string>()
           const batch = Effect.gen(function* () {
             const rows = yield* db.outboxOf(peer)
@@ -121,23 +98,11 @@ const make = Effect.gen(function* () {
           return Stream.concat(Stream.make(undefined), wake).pipe(
             Stream.mapEffect(() => batch),
             Stream.flattenIterable,
-            Stream.interruptWhen(Deferred.await(stop)),
           )
         }),
       ),
 
     ack: (peer: string, ids: ReadonlyArray<string>) => db.ackOutbox(peer, ids),
-
-    list: Effect.map(db.peers, (rows) => rows.map((row) => ({ ...row, connected: (open.get(row.id)?.size ?? 0) > 0 }))),
-
-    remove: (input: string) =>
-      Effect.gen(function* () {
-        const id = yield* resolvePeer(input)
-        const outbox = yield* db.removePeer(id)
-        for (const stop of open.get(id) ?? []) yield* Deferred.succeed(stop, undefined)
-        open.delete(id)
-        return { outbox }
-      }),
   }
 })
 

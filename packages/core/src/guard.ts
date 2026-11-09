@@ -200,7 +200,7 @@ const vibestArgs = (vibest: ReadonlyArray<string>, argv: ReadonlyArray<string>) 
 
 const HERDR_CONTROL = new Set(["agent", "pane", "tab", "workspace", "worktree", "server", "session"])
 export const HARNESS_CLIS = new Set(["pi", "claude", "cursor-agent"])
-const USER_MACHINE_COMMANDS = new Set(["connect", "machine", "peer"])
+const USER_MACHINE_COMMANDS = new Set(["connect", "machine"])
 const GH_UNSAFE = new Set(["alias", "extension", "ext", "config", "auth"])
 const firstWord = (words: ReadonlyArray<string>) => words.find((w) => !w.startsWith("-")) ?? ""
 

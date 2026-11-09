@@ -41,7 +41,7 @@ import { RpcClientError as ClientError } from "effect/rpc"
 import { caller, json, userOnly, vibest } from "./caller.ts"
 import { doctor } from "./doctor.ts"
 import { herdrCommands } from "./herdr-plugin.ts"
-import { connectCommand, machine, peer, projectAdd } from "./machine-commands.ts"
+import { connectCommand, machine, projectAdd } from "./machine-commands.ts"
 import { replaceDaemon } from "./replace.ts"
 import { LEFT, noticeFrom, restartAgents, update, updateNotice } from "./update.ts"
 
@@ -833,7 +833,6 @@ export const command = (host: Daemon.Host, exec: Exec) =>
       herdrCommands(userOnly),
       connectCommand,
       machine,
-      peer,
     ]),
   )
 

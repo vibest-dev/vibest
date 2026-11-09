@@ -55,21 +55,6 @@ export class NoProject extends Schema.TaggedError<NoProject>()("NoProject", { me
 
 export class NoCommit extends Schema.TaggedError<NoCommit>()("NoCommit", { message: Schema.String }) {}
 
-export class NoSuchPeer extends Schema.TaggedError<NoSuchPeer>()("NoSuchPeer", { peer: Schema.String }) {
-  override get message() {
-    return `no peer ${this.peer} (vibest peer ls)`
-  }
-}
-
-export class AmbiguousPeer extends Schema.TaggedError<AmbiguousPeer>()("AmbiguousPeer", {
-  peer: Schema.String,
-  matches: Schema.Array(Schema.String),
-}) {
-  override get message() {
-    return `${this.peer} names several peers (${this.matches.map((id) => id.slice(0, 8)).join(", ")}); use more of the id`
-  }
-}
-
 export const OUTBOX_ITEM_MAX = 1024 * 1024
 
 export const PROMPT_MAX = 1024 * 1024
@@ -89,14 +74,3 @@ export const OutboxItem = Schema.Struct({
   cut: Schema.optional(Schema.Boolean),
 })
 export type OutboxItem = typeof OutboxItem.Type
-
-export const PeerInfo = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  callsMe: Schema.String,
-  connectedAt: Schema.Number,
-  connected: Schema.Boolean,
-  outbox: Schema.Number,
-  open: Schema.Number,
-})
-export type PeerInfo = typeof PeerInfo.Type

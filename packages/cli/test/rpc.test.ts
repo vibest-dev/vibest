@@ -422,8 +422,6 @@ describe("vibest.sock", () => {
         ],
         ["Peer.Outbox", Stream.runDrain(c["Peer.Outbox"](undefined))],
         ["Peer.Ack", c["Peer.Ack"]({ ids: [] })],
-        ["Peers.List", c["Peers.List"]()],
-        ["Peers.Remove", c["Peers.Remove"]({ peer: "p" })],
       ]
       const bare = yield* client
       for (const [method, call] of protectedCalls(bare))

@@ -642,44 +642,22 @@ describe("another machine's vibestd runs agents here", () => {
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
-  it.effect(
-    "peer rm drops the outbox and later results; archive drops the session's rows; a peer may not call Peers.*",
-    () =>
-      Effect.gen(function* () {
-        const b = yield* peerB
-        const a = randomId()
-        const call = yield* b.as(a, "aproj")
-        const kept = yield* b.spawn(call)
-        const archived = yield* b.spawn(call)
-        yield* finish(b.db, kept.session, "waiting")
-        yield* finish(b.db, archived.session, "archived")
-        const row = (yield* b.db.getSession(archived.session))!
-        yield* b.db.updateSession(archived.session, { metadata: { ...row.metadata, archived: true } })
-        assert.deepStrictEqual(
-          (yield* b.run(outboxRows)).map((r) => r.sessionId),
-          [kept.session],
-        )
-        const open = yield* call.outbox.pipe(Stream.runCollect, Effect.forkScoped)
-        const [listed] = yield* until(b.cli(b.raw["Peers.List"]()), (rows) => rows[0]?.connected === true)
-        assert.strictEqual(listed!.id, a)
-        assert.strictEqual(listed!.callsMe, "mb")
-        assert.strictEqual(listed!.outbox, 1)
-        assert.strictEqual(failureTag(yield* Effect.exit(call(b.raw["Peers.List"]()))), "InvalidCaller")
-        const unknown = yield* Effect.flip(b.cli(b.raw["Peers.Remove"]({ peer: "nobody" })))
-        assert.strictEqual(unknown._tag, "NoSuchPeer")
-        assert.deepStrictEqual(yield* b.cli(b.raw["Peers.Remove"]({ peer: a.slice(0, 8) })), { outbox: 1 })
-        assert.lengthOf(yield* Fiber.join(open), 1, "peer rm ends its stream")
-        assert.deepStrictEqual(yield* b.cli(b.raw["Peers.List"]()), [])
-        yield* finish(b.db, kept.session, "after rm")
-        assert.deepStrictEqual(yield* b.run(outboxRows), [], "not queued after peer rm")
-        assert.strictEqual((yield* b.db.latestInbox(kept.session, "result"))?.message, "after rm")
-        assert.strictEqual(failureTag(yield* Effect.exit(call(b.raw.List({})))), "InvalidCaller", "Hello again first")
-        yield* b.as(a, "aproj")
-        assert.deepStrictEqual(
-          (yield* b.cli(b.raw["Peers.List"]())).map((p) => p.outbox),
-          [0],
-        )
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  it.effect("archive drops the session's rows; a peer may not call Machine.*", () =>
+    Effect.gen(function* () {
+      const b = yield* peerB
+      const call = yield* b.as(randomId(), "aproj")
+      const kept = yield* b.spawn(call)
+      const archived = yield* b.spawn(call)
+      yield* finish(b.db, kept.session, "waiting")
+      yield* finish(b.db, archived.session, "archived")
+      const row = (yield* b.db.getSession(archived.session))!
+      yield* b.db.updateSession(archived.session, { metadata: { ...row.metadata, archived: true } })
+      assert.deepStrictEqual(
+        (yield* b.run(outboxRows)).map((r) => r.sessionId),
+        [kept.session],
+      )
+      assert.strictEqual(failureTag(yield* Effect.exit(call(b.raw["Machine.List"]()))), "InvalidCaller")
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })
 

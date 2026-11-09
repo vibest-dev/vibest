@@ -10,7 +10,7 @@ import type { ProjectMoved } from "@vibest/schema/session"
 import { Effect, Stream } from "effect"
 
 type Routed = "Send" | "Interrupt" | "Remove" | "Get" | "Peek"
-type CliOnly = "Peers.List" | "Peers.Remove" | "Machine.Add" | "Machine.List" | "Machine.Remove"
+type CliOnly = "Machine.Add" | "Machine.List" | "Machine.Remove"
 type Agent = Extract<CallerShape, { _tag: "Cli" | "Coordinator" }>
 type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
@@ -149,11 +149,6 @@ export const remoteHandlers = <R>(deps: {
 
         "Peer.Ack": ({ ids }: PayloadOf<"Peer.Ack">) =>
           Effect.flatMap(peerOf("Peer.Ack"), (peer) => peers.ack(peer, ids)),
-
-        "Peers.List": () => cliOnly("Peers.List").pipe(Effect.andThen(peers.list)),
-
-        "Peers.Remove": ({ peer }: PayloadOf<"Peers.Remove">) =>
-          cliOnly("Peers.Remove").pipe(Effect.andThen(peers.remove(peer))),
 
         "Machine.Add": ({ name, target }: PayloadOf<"Machine.Add">) =>
           cliOnly("Machine.Add").pipe(Effect.andThen(machines.add(name, target))),

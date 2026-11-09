@@ -84,15 +84,12 @@ type Deps = {
 }
 
 export const remoteQueries = ({ sql, now, tx, notify, present, queuedBy, insertInbox }: Deps) => {
-  const startedBy = (session: Statement.Fragment, peer: Statement.Fragment, project?: string) =>
-    sql`EXISTS (SELECT 1 FROM event pe WHERE pe.session_id = ${session} AND pe.type = 'peer.start'
-      AND json_extract(pe.data, '$.peer') = ${peer}${project === undefined ? sql`` : sql` AND json_extract(pe.data, '$.project') = ${project}`})`
-
   const machineColumns = sql`name, target, vibestd_id, connected_at, created_at`
 
   return {
     ofPeer: (session: Statement.Fragment, scope: { readonly peer: string; readonly project: string }) =>
-      startedBy(session, sql`${scope.peer}`, scope.project),
+      sql`EXISTS (SELECT 1 FROM event pe WHERE pe.session_id = ${session} AND pe.type = 'peer.start'
+        AND json_extract(pe.data, '$.peer') = ${scope.peer} AND json_extract(pe.data, '$.project') = ${scope.project})`,
 
     queueForPeer: (
       origin: PeerStart,
@@ -211,27 +208,6 @@ export const remoteQueries = ({ sql, now, tx, notify, present, queuedBy, insertI
         (ids.length === 0
           ? Effect.void
           : sql`DELETE FROM outbox WHERE peer_id = ${peer} AND ${sql.in("id", ids)}`.pipe(Effect.asVoid)
-        ).pipe(Effect.orDie),
-
-      peers: sql<{
-        id: string
-        name: string
-        callsMe: string
-        connectedAt: number
-        outbox: number
-        open: number
-      }>`SELECT p.id, p.name, p.calls_me, p.connected_at,
-          (SELECT count(*) FROM outbox o WHERE o.peer_id = p.id) AS outbox,
-          (SELECT count(*) FROM session s WHERE s.ended_at IS NULL AND ${startedBy(sql`s.id`, sql`p.id`)}) AS open
-        FROM peer p ORDER BY p.connected_at DESC, p.id`.pipe(Effect.orDie),
-
-      removePeer: (id: string) =>
-        tx(
-          Effect.gen(function* () {
-            const dropped = yield* sql<{ id: string }>`DELETE FROM outbox WHERE peer_id = ${id} RETURNING id`
-            yield* sql`DELETE FROM peer WHERE id = ${id}`
-            return dropped.length
-          }),
         ).pipe(Effect.orDie),
 
       notePeer: (peer: { readonly id: string; readonly name: string; readonly callsMe: string }) =>

@@ -6,7 +6,6 @@ import { ask, delegatingModel, piDir } from "../fake-model.ts"
 import { alive, binary, expect, readDb, row, Skip, until, type World } from "../world.ts"
 
 type Machine = { name: string; id: string; state: string; reason?: string }
-type Peer = { id: string; name: string; callsMe: string; outbox: number }
 type Listed = { id: string; machine?: string; runtime?: string }
 
 const sh = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
@@ -185,7 +184,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M1",
     title:
-      "machine add over a fake ssh records B's id, B lists A as a peer, a second name for the same B is refused; vibest run --machine without --runtime starts a session on B in the runtime of A's main agent and none on A, A's main agent gets one notice with B's text, B's outbox empties; send, result, peek and archive forward to B",
+      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime starts a session on B in the runtime of A's main agent and none on A, A's main agent gets one notice with B's text, B's outbox empties; send, result, peek and archive forward to B",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -206,11 +205,10 @@ const checks: ReadonlyArray<Check> = [
           30_000,
         )
         expect(m?.state === "connected" && m.id === b.id, `machine ls: ${JSON.stringify(m)}`)
-        const peers = JSON.parse(await s.okB(["peer", "ls"])) as Array<Peer>
-        expect(
-          peers.length === 1 && peers[0]!.id === a.id && peers[0]!.callsMe === "mb",
-          `peer ls: ${JSON.stringify(peers)}`,
+        const peer = s.bDb<{ id: string; callsMe: string; n: number }>(
+          "SELECT id, calls_me AS callsMe, (SELECT count(*) FROM peer) AS n FROM peer",
         )
+        expect(peer?.n === 1 && peer.id === a.id && peer.callsMe === "mb", `B's peer rows: ${JSON.stringify(peer)}`)
         const again = await s.onA(["machine", "add", "mb-again", "b-host"])
         expect(again.code !== 0 && again.stderr.includes("already added as mb"), `second add: ${again.stderr}`)
 
@@ -294,7 +292,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "M3",
-    title: "two A's on one B: B lists two peers; the second A gets nothing from the first's task and cannot list it",
+    title: "two A's on one B: B records two peers; the second A gets nothing from the first's task and cannot list it",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -306,8 +304,8 @@ const checks: ReadonlyArray<Check> = [
         await fs.mkdir(a2.VIBEST_HOME, { recursive: true })
         const added = await w.run(w.repository, [binary, "machine", "add", "mb", "b-host"], { env: a2 })
         expect(added.code === 0, `second A machine add: ${added.stderr}`)
-        const peers = JSON.parse(await s.okB(["peer", "ls"])) as Array<Peer>
-        expect(peers.length === 2, `peer ls: ${JSON.stringify(peers)}`)
+        const peers = s.bDb<{ n: number }>("SELECT count(*) AS n FROM peer")?.n
+        expect(peers === 2, `B's peer rows: ${peers}`)
         const listed = await w.run(w.repository, [binary, "ls"], { env: a2 })
         expect(
           listed.code === 0 && !listed.stdout.includes(address.slice(3)),
@@ -324,7 +322,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M4",
     title:
-      "forget: machine rm with a task held open; its result waits in B's outbox; machine add under another name delivers it once; peer rm on B drops a peer's outbox",
+      "forget: machine rm with a task held open; its result waits in B's outbox; machine add under another name delivers it once",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -342,16 +340,6 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         expect(s.notices(address, "heldfour") === 0, "a notice under the old name")
-        const next = await s.run("heldfive", "mb2")
-        await until("B's model got the next task", () => s!.subs.asked("heldfive"), 120_000)
-        await s.okA(["machine", "rm", "mb2"])
-        s.subs.release("heldfive")
-        await until("B's outbox row", () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 1, 60_000)
-        const a = await s.identity(w.vibestHome)
-        const removed = JSON.parse(await s.okB(["peer", "rm", a.id])) as { outbox: number }
-        expect(removed.outbox === 1, `peer rm: ${JSON.stringify(removed)}`)
-        expect(s.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 0, "outbox kept rows")
-        expect(s.notices(next, "heldfive") === 0, "a dropped result arrived")
       } finally {
         await s?.stop()
       }
@@ -360,7 +348,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M5",
     title:
-      "clear failures: an unknown machine, vibest missing on the target, ssh exiting 255, the target being this vibestd, a different vibestd behind the target, a commit B does not have, and agents running vibest connect, machine add or peer rm",
+      "clear failures: an unknown machine, vibest missing on the target, ssh exiting 255, the target being this vibestd, a different vibestd behind the target, a commit B does not have, and agents running vibest connect or machine add",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -385,7 +373,7 @@ const checks: ReadonlyArray<Check> = [
         await failed(["run", "--machine", "mb", "--runtime", "hc", "pi", "--", "x"], "push it and fetch it there")
 
         const agent = { VIBEST_SESSION_ID: crypto.randomUUID() }
-        for (const args of [["connect"], ["machine", "add", "x", "b-host"], ["peer", "rm", "x"]]) {
+        for (const args of [["connect"], ["machine", "add", "x", "b-host"]]) {
           const r = await w.run(w.repository, [binary, ...args], { env: { ...s.aEnv, ...agent } })
           expect(
             r.code !== 0 && /agent may not run|only the user/.test(r.stderr),

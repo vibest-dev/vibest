@@ -49,9 +49,10 @@ that id has a `peer` row, and refuses every method not in `PEER_CALLS` (`package
 scopes by mistake, not by trust: whoever can run the ssh command already acts as that user on B.
 
 `Peer.Hello { id, name, callsMe }` answers B's `{ id, name, version }` and upserts the `peer` row (not for B's own
-id: A refuses dialing itself).
+id: A refuses dialing itself). As in herdr-core, B has no command to show or forget the vibestds that dial it: the
+`peer` table is the line's own record, and the user manages machines from A (`vibest machine`).
 
-`vibest connect`, `vibest machine` and `vibest peer` are the user's: `userOnly` refuses them for agents, and the
+`vibest connect` and `vibest machine` are the user's: `userOnly` refuses them for agents, and the
 guard refuses them in an agent's shell.
 
 ## Machines: A dials B
@@ -97,14 +98,12 @@ B's own inbox delivery and no outbox row is written for it.
 
 Every result and notice of a peer session with a `report_to` goes to B's `outbox` in the transaction that writes it. B still writes the
 inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
-B's own delivery never sees it. With no `peer` row (after `vibest peer rm`) nothing is queued. `Peer.Outbox` streams
+B's own delivery never sees it. With no `peer` row nothing is queued. `Peer.Outbox` streams
 the peer's rows in `created_at` order (insertion order on a tie), then each new one after its commit; an item over
-1 MiB is sent cut with `cut: true`. `Peer.Ack { ids }` deletes them. Archiving a peer session deletes its rows, and
-`vibest peer rm` deletes the peer row and its outbox in one transaction and ends its open streams.
+1 MiB is sent cut with `cut: true`. `Peer.Ack { ids }` deletes them. Archiving a peer session deletes its rows.
 
 `List`, `Get`, `Send`, `Interrupt`, `Remove` and `Peek` from a peer resolve a session id only among sessions whose
-`peer.start` has that peer and that project; any other session is `NoSuchSession`. `vibest peer ls` shows each peer
-with whether a stream is open now, its undelivered rows and its open sessions.
+`peer.start` has that peer and that project; any other session is `NoSuchSession`.
 
 ## A: remote sessions
 

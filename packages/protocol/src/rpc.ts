@@ -1,6 +1,5 @@
 import {
   AlreadyAdded,
-  AmbiguousPeer,
   ListedMachine,
   MachineFailed,
   MachineIncompatible,
@@ -8,9 +7,7 @@ import {
   MachineUnavailable,
   NoCommit,
   NoProject,
-  NoSuchPeer,
   OutboxItem,
-  PeerInfo,
   PromptTooLarge,
   UnknownMachine,
 } from "@vibest/schema/machine"
@@ -760,14 +757,6 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(Rpc.make("Peer.Outbox", { success: OutboxItem, error: Forbidden, stream: true })),
   scoped(Rpc.make("Peer.Ack", { payload: { ids: Schema.Array(Schema.String) }, error: Forbidden })),
-  scoped(Rpc.make("Peers.List", { success: Schema.Array(PeerInfo), error: Forbidden })),
-  scoped(
-    Rpc.make("Peers.Remove", {
-      payload: { peer: Schema.String },
-      success: Schema.Struct({ outbox: Schema.Number }),
-      error: Schema.Union([Forbidden, NoSuchPeer, AmbiguousPeer]),
-    }),
-  ),
   scoped(
     Rpc.make("Machine.Add", {
       payload: { name: Schema.String, target: Schema.String },
@@ -832,8 +821,6 @@ export const ACCESS = {
   "Peer.Spawn": "peer",
   "Peer.Outbox": "peer",
   "Peer.Ack": "peer",
-  "Peers.List": "cli",
-  "Peers.Remove": "cli",
   "Machine.Add": "cli",
   "Machine.List": "cli",
   "Machine.Remove": "cli",

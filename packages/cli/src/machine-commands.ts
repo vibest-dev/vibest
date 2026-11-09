@@ -60,36 +60,6 @@ export const machine = Command.make("machine").pipe(
   ]),
 )
 
-export const peer = Command.make("peer").pipe(
-  Command.withDescription("Other machines' vibestds that dial this one (vibest machine add there)"),
-  Command.withSubcommands([
-    Command.make("ls", {}, () =>
-      userOnly("peer ls").pipe(Effect.andThen(vibest((client) => client["Peers.List"]())), Effect.flatMap(json)),
-    ).pipe(
-      Command.withDescription(
-        "The vibestds that dial this one: name, the name they call this machine, connected or last connected, undelivered results and open sessions (JSON)",
-      ),
-    ),
-    Command.make(
-      "rm",
-      {
-        peer: Argument.String("peer").pipe(
-          Argument.withDescription("Its id, a unique id prefix of 8 or more, or its name"),
-        ),
-      },
-      (o) =>
-        userOnly("peer rm").pipe(
-          Effect.andThen(vibest((client) => client["Peers.Remove"]({ peer: o.peer }))),
-          Effect.flatMap(json),
-        ),
-    ).pipe(
-      Command.withDescription(
-        "Forget a peer and drop its undelivered results; its sessions keep running here and their later results are not queued",
-      ),
-    ),
-  ]),
-)
-
 export const projectAdd = <A, E, R>(openProject: (client: VibestClient) => Effect.Effect<A, E, R>) =>
   Command.make("add", { directory: Argument.String("directory").pipe(Argument.withDefault(".")) }, (o) =>
     Effect.gen(function* () {
