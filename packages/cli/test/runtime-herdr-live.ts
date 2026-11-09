@@ -1,6 +1,7 @@
 import childProcess from "node:child_process"
 import crypto from "node:crypto"
 import fs from "node:fs"
+import path from "node:path"
 
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
@@ -12,7 +13,9 @@ import { ChildProcessSpawner } from "effect/process"
 import * as Platform from "#platform"
 
 export const herdrOnPath = childProcess.spawnSync("herdr", ["--version"], { stdio: "ignore" }).status === 0
-export const piOnPath = childProcess.spawnSync("pi", ["--version"], { stdio: "ignore" }).status === 0
+export const piOnPath = (process.env.PATH ?? "")
+  .split(":")
+  .some((dir) => dir !== "" && fs.existsSync(path.join(dir, "pi")))
 export const barePiArgv = ["pi", "--no-extensions", "--no-mcp", "--no-skills", "--no-session"]
 export const coldPiStartupAttempts = 1400
 
