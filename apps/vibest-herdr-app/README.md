@@ -48,6 +48,10 @@ root (row)
 The top bar's Files, Diff and Agents buttons select that child of `right-panel` and show it; pressing the shown one
 hides the panel.
 
+Terminals and the right panel share one grid: `workspace-body` has 8 px padding and an 8 px gap, terminal panes are
+cards with an 8 px gap, a 1 px `border` edge and 10 px corners (`lone: true` frames a single pane too), and the
+right panel has no frame of its own, because the shipped Diff and Files mods, like the Agents part, draw that same card.
+
 ## Mod
 
 One mod, `vibest`, draws each part named by its `props.part`. `src/` is split by part:

@@ -49,21 +49,21 @@
         {
           "id": "workspace-body",
           "type": "row",
-          "divider": { "width": 1, "color": "border" },
+          "padding": 8,
+          "gap": 8,
           "children": [
             {
               "id": "terminals",
               "type": "block",
-              "padding": 8,
               "content": {
                 "tab": "active",
                 "pane": {
                   "gap": 8,
-                  "radius": 8,
+                  "radius": 10,
                   "background": "background",
                   "border": { "width": 1, "color": "border" },
                   "focus": { "width": 1, "color": "input" },
-                  "lone": false
+                  "lone": true
                 }
               }
             },

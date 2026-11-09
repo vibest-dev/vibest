@@ -199,7 +199,7 @@ class AgentList {
       div().id(`project-${group.projectId}`).truncate().text_color(colors.dim).child(projectHeading(group.projectId, group.label)),
       ...group.sessions.map((session) => this.sessionRow(colors, session))
     ]);
-    return v_flex().id("agents").size_full().bg(colors.surface).p(10).gap(6).text_size(12).overflow_y_scrollbar().child(h_flex().gap(8).items_center().child(div().font_semibold().text_color(colors.foreground).child("Agents")).child(div().flex_1()).child(div().id("agents-refresh").px(6).py(2).rounded(4).cursor_pointer().text_color(colors.foreground).hover((el) => el.bg(colors.hover)).on_click((_event, clicked) => {
+    return v_flex().id("agents").size_full().bg(colors.background).border(1).border_color(colors.border).rounded(10).p(10).gap(6).text_size(12).overflow_y_scrollbar().child(h_flex().gap(8).items_center().child(div().font_semibold().text_color(colors.foreground).child("Agents")).child(div().flex_1()).child(div().id("agents-refresh").px(6).py(2).rounded(4).cursor_pointer().text_color(colors.foreground).hover((el) => el.bg(colors.hover)).on_click((_event, clicked) => {
       this.request(clicked);
     }).child("Refresh"))).when(this.note !== "", (el) => el.child(div().text_color(colors.muted).child(this.note))).when(this.asOf !== "", (el) => el.child(div().text_color(colors.dim).child(snapshotNote(this.asOf)))).children(rows);
   }
