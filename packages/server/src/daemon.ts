@@ -3,6 +3,7 @@ import { Bus } from "@vibest/core/bus"
 import { OnCallerPlugins } from "@vibest/core/caller"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
+import { Git } from "@vibest/core/git"
 import { Harness } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Keychain, type KeychainPlatform } from "@vibest/core/keychain"
@@ -80,6 +81,7 @@ const services = (host: Host, layout: Layout["Service"]) =>
   ).pipe(
     Layer.provideMerge(Sessions.layer),
     Layer.provideMerge(Processes.layer(host.processes)),
+    Layer.provideMerge(Git.layer),
     Layer.provideMerge(
       Plugins.layer.pipe(
         Layer.provide(Layer.succeed(Builtins, host.builtinPlugins)),

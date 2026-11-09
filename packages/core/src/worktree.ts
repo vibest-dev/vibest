@@ -1,38 +1,9 @@
-import { NotInRepository } from "@vibest/schema/session"
-import { Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect"
+
+import { Git } from "./git.ts"
+
 export { NotInRepository } from "@vibest/schema/session"
-
-export class GitError extends Schema.TaggedError<GitError>()("GitError", {
-  args: Schema.Array(Schema.String),
-  message: Schema.String,
-}) {}
-
-const gitRaw = (cwd: string, args: ReadonlyArray<string>, input?: string, ok: ReadonlyArray<number> = [0]) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const stdin = input === undefined ? {} : { stdin: Stream.make(new TextEncoder().encode(input)) }
-    const handle = yield* spawner.spawn(ChildProcess.make("git", ["--no-optional-locks", ...args], { cwd, ...stdin }))
-    const [stdout, stderr, exitCode] = yield* Effect.all(
-      [
-        Stream.mkString(Stream.decodeText(handle.stdout)),
-        Stream.mkString(Stream.decodeText(handle.stderr)),
-        handle.exitCode,
-      ],
-      { concurrency: "unbounded" },
-    )
-    if (!ok.includes(exitCode)) return yield* new GitError({ args, message: stderr.trim() || `exit ${exitCode}` })
-    return stdout
-  }).pipe(
-    Effect.scoped,
-    Effect.catchTag("PlatformError", (e) => Effect.fail(new GitError({ args, message: e.message }))),
-  )
-
-export const git = Effect.fn("git")(function* (cwd: string, ...args: string[]) {
-  return (yield* gitRaw(cwd, args)).trim()
-})
-
-const tryGit = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orElseSucceed(() => undefined))
+export { Git, GitError, type GitState } from "./git.ts"
 
 const gitDirectory = (p: string) =>
   Effect.gen(function* () {
@@ -47,20 +18,7 @@ const gitDirectory = (p: string) =>
     return p
   })
 
-export const mainCheckout = Effect.fn("mainCheckout")(function* (dir: string) {
-  const cwd = yield* gitDirectory(dir).pipe(Effect.catchTag("PlatformError", (e) => Effect.die(e)))
-  if (cwd === undefined) return yield* new NotInRepository({ path: dir })
-  const out = yield* git(
-    dir,
-    "rev-parse",
-    "--path-format=absolute",
-    "--show-toplevel",
-    "--git-dir",
-    "--git-common-dir",
-  ).pipe(Effect.mapError(() => new NotInRepository({ path: dir })))
-  const [top = "", gitDir, common = ""] = out.split("\n")
-  return gitDir === common ? top : (yield* Path.Path).dirname(common)
-})
+export const mainCheckout = (dir: string) => Git.use((git) => git.mainCheckout(dir))
 
 const remoteRepositoryName = (url: string) => {
   const bare = url
@@ -73,7 +31,7 @@ const remoteRepositoryName = (url: string) => {
 
 export const repositoryDirectoryName = Effect.fn("repositoryDirectoryName")(function* (dir: string) {
   const main = yield* mainCheckout(dir)
-  const remote = yield* tryGit(main, "config", "--get", "remote.origin.url")
+  const remote = yield* Git.use((git) => git.originUrl(main))
   return remote ? remoteRepositoryName(remote) : (yield* Path.Path).basename(main)
 })
 
@@ -84,33 +42,15 @@ export const allocationParentBlocked = Effect.fn("allocationParentBlocked")(func
   return yield* fs.exists((yield* Path.Path).join(dir, ".git"))
 })
 
-export const addWorktree = Effect.fn("addWorktree")(function* (root: string, path: string) {
-  yield* git(root, "worktree", "add", "--detach", path)
-})
+export const addWorktree = (root: string, path: string) => Git.use((git) => git.addWorktree(root, path))
+
+export const removeWorktree = (root: string, path: string) => Git.use((git) => git.removeWorktree(root, path))
 
 export class CopyFailed extends Schema.TaggedError<CopyFailed>()("CopyFailed", {
   source: Schema.String,
   destination: Schema.String,
   message: Schema.String,
 }) {}
-
-const nul = (out: string) => out.split("\0").filter(Boolean)
-
-const ignoredIn = (cwd: string, paths: ReadonlyArray<string>) =>
-  paths.length === 0
-    ? Effect.succeed([])
-    : gitRaw(cwd, ["check-ignore", "-z", "--stdin"], paths.map((f) => `${f}\0`).join(""), [0, 1]).pipe(Effect.map(nul))
-
-const worktreeIncludes = Effect.fn("worktreeIncludes")(function* (root: string) {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const include = path.join(root, ".worktreeinclude")
-  if (!(yield* fs.exists(include))) return []
-  const named = nul(
-    yield* gitRaw(root, ["ls-files", "-z", "--others", "--ignored", `--exclude-from=${include}`]),
-  ).filter((f) => !f.endsWith("/"))
-  return yield* ignoredIn(root, named)
-})
 
 const linkTarget = (p: string) =>
   Effect.gen(function* () {
@@ -154,14 +94,15 @@ export const copyIncluded = Effect.fn("copyIncluded")(function* (root: string, w
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const open: string[] = []
-  for (const f of yield* worktreeIncludes(root)) {
+  const git = yield* Git
+  for (const f of yield* git.includedFiles(root)) {
     const dst = path.join(worktree, f)
     const taken = yield* Effect.gen(function* () {
       return (yield* linkOnPath(worktree, f)) || (yield* fs.exists(dst)) || Option.isSome(yield* linkTarget(dst))
     }).pipe(Effect.mapError(copyFailed(path.join(root, f), dst)))
     if (!taken) open.push(f)
   }
-  const ignored = new Set(yield* ignoredIn(worktree, open))
+  const ignored = new Set(yield* git.ignored(worktree, open))
   const copied: string[] = []
   for (const f of open.filter((f) => ignored.has(f))) {
     const src = path.join(root, f)
@@ -178,21 +119,4 @@ export const copyIncluded = Effect.fn("copyIncluded")(function* (root: string, w
   return copied
 })
 
-export interface GitState {
-  readonly branch: string
-  readonly pushed: boolean
-  readonly saved: boolean
-  readonly why: string
-}
-
-export const gitState = Effect.fn("gitState")(function* (worktree: string) {
-  if ((yield* gitDirectory(worktree)) === undefined) return undefined
-  const branch = (yield* tryGit(worktree, "branch", "--show-current")) ?? ""
-  const dirty = !!(yield* tryGit(worktree, "status", "--porcelain", "--untracked-files=all"))
-  const contained =
-    !!branch || !!(yield* tryGit(worktree, "for-each-ref", "--contains", "HEAD", "refs/heads", "refs/remotes"))
-  const upstream = branch ? yield* tryGit(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") : undefined
-  const pushed = !!upstream && (yield* tryGit(worktree, "rev-list", "--count", "@{upstream}..HEAD")) === "0"
-  const why = dirty ? "uncommitted changes" : !contained ? "commits not on any branch" : ""
-  return { branch, pushed, saved: !why, why } satisfies GitState
-})
+export const gitState = (worktree: string) => Git.use((git) => git.state(worktree))

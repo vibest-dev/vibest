@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
+import { Git } from "@vibest/core/git"
 import { Harness } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
 import { Layout } from "@vibest/core/paths"
@@ -13,7 +14,6 @@ import {
   projectRoot,
 } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
-import { git } from "@vibest/core/worktree"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
@@ -23,9 +23,19 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { liveDaemon } from "../src/herdr-plugin.ts"
-import { authed, FakeRuntime, runVibest, testLayer, type TestServices, until, writeResult, projectOf } from "./fakes.ts"
+import {
+  authed,
+  FakeRuntime,
+  gitCli,
+  runVibest,
+  testLayer,
+  type TestServices,
+  until,
+  writeResult,
+  projectOf,
+} from "./fakes.ts"
 
-const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
+const sh = (cwd: string, ...args: string[]) => gitCli(cwd, ...args).pipe(Effect.orDie)
 
 const scopedRealPathTempDirectory = (prefix: string) =>
   Effect.gen(function* () {
@@ -35,10 +45,10 @@ const scopedRealPathTempDirectory = (prefix: string) =>
 
 const test = <E>(
   name: string,
-  program: Effect.Effect<void, E, Layer.Success<typeof Platform.services> | Scope.Scope>,
+  program: Effect.Effect<void, E, Layer.Success<typeof Platform.services> | Git | Scope.Scope>,
   timeout?: number,
 ) => {
-  const run = () => program.pipe(Effect.provide(Platform.services))
+  const run = () => program.pipe(Effect.provide(Git.layer.pipe(Layer.provideMerge(Platform.services))))
   return timeout === undefined ? it.effect(name, run) : it.effect(name, run, timeout)
 }
 

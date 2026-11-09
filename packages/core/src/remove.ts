@@ -9,7 +9,7 @@ import { Processes, validPid } from "./processes.ts"
 import { listProjectRepositories, workspaceGit } from "./project-create.ts"
 import { agentState, type Runtime, type Terminal } from "./runtimes.ts"
 import { removeSystemPrompt } from "./system-prompt.ts"
-import { git, gitState, mainCheckout } from "./worktree.ts"
+import { Git, gitState, mainCheckout, removeWorktree } from "./worktree.ts"
 export { RemoveOutcome } from "@vibest/schema/remove"
 
 type ProcessState = RemoveOutcome["processes"]
@@ -165,13 +165,7 @@ export const make = Effect.gen(function* () {
       const linked = (repoRoot: string, path: string) =>
         Effect.gen(function* () {
           const at = yield* fs.realPath(path).pipe(Effect.orElseSucceed(() => path))
-          const lines = (yield* git(repoRoot, "worktree", "list", "--porcelain").pipe(
-            Effect.orElseSucceed(() => ""),
-          )).split("\n")
-          return lines
-            .filter((line) => line.startsWith("worktree "))
-            .slice(1)
-            .includes(`worktree ${at}`)
+          return (yield* Git.use((git) => git.linkedWorktrees(repoRoot))).includes(at)
         })
       const keepWorktree = Effect.gen(function* () {
         if (input.keepWorktree) return "worktree kept as asked (--keep-worktree)"
@@ -194,7 +188,7 @@ export const make = Effect.gen(function* () {
               shared = true
               return { stop: true, reason: again }
             }
-            const refused = yield* git(repoRoot, "worktree", "remove", path).pipe(
+            const refused = yield* removeWorktree(repoRoot, path).pipe(
               Effect.as(undefined),
               Effect.catchTag("GitError", (e) => Effect.succeed(e.message)),
             )

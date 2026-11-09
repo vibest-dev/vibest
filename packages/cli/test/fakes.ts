@@ -5,6 +5,7 @@ import { readPing } from "@vibest/client/client"
 import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
+import { Git } from "@vibest/core/git"
 import { Harness, Harnesses, HARNESS_IDS, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
 import * as BuiltinHarnesses from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
@@ -18,7 +19,6 @@ import { Runtimes, registry } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
-import { git } from "@vibest/core/worktree"
 import type * as VibestPlugin from "@vibest/plugin"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
@@ -112,7 +112,23 @@ export const nextTurnStart = (subscription: PubSub.Subscription<EngineEvent>, id
     ),
   )
 
-export const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
+export const gitCli = (cwd: string, ...args: string[]) =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const handle = yield* spawner.spawn(ChildProcess.make("git", args, { cwd }))
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        Stream.mkString(Stream.decodeText(handle.stdout)),
+        Stream.mkString(Stream.decodeText(handle.stderr)),
+        handle.exitCode,
+      ],
+      { concurrency: "unbounded" },
+    )
+    if (exitCode !== 0) return yield* Effect.fail(new Error(stderr.trim() || `exit ${exitCode}`))
+    return stdout.trim()
+  }).pipe(Effect.scoped)
+
+export const sh = (cwd: string, ...args: string[]) => gitCli(cwd, ...args).pipe(Effect.orDie)
 
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
@@ -439,6 +455,7 @@ const over = (options: TestOptions) => {
       Layer.provideMerge(ownTmpdir),
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
+      Layer.provideMerge(Git.layer),
       Layer.provideMerge(Platform.services),
       Layer.provideMerge(Bus.layer),
     ),
