@@ -591,10 +591,7 @@ describe("multi-repository isolated workspace", () => {
       const { id } = yield* authed(
         raw,
         sessionHeaders({ sessionId, repositoryRoot: app, projectId: String(projectId) }),
-      ).Spawn({
-        harness: "pi",
-        prompt: "do it",
-      })
+      ).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
       const row = (yield* db.getSession(id))!
       assert.strictEqual(row.projectId, (yield* db.projectAt(root))?.id)
@@ -622,7 +619,7 @@ describe("multi-repository isolated workspace", () => {
       const raw = yield* connect((yield* Layout).socket)
       const cli = authed(raw, cliHeaders(root))
       yield* cli["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "coord" })
-      const { id } = yield* authed(raw, cliHeaders(workspace)).Spawn({ harness: "pi", prompt: "do it" })
+      const { id } = yield* authed(raw, cliHeaders(workspace)).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => row?.turnState === "open")
       assert.strictEqual((yield* db.getSession(id))!.projectId, (yield* db.projectAt(root))?.id)
       assert.isUndefined(yield* db.projectAt(workspace))

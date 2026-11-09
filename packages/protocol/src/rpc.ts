@@ -18,7 +18,6 @@ import {
   NoRuntime,
   RuntimeAddress,
   RuntimeIncompatible,
-  RuntimeMachine,
   RuntimeUnreachable,
   SessionBusy,
   TurnState,
@@ -281,8 +280,7 @@ export class VibestRpcs extends RpcGroup.make(
           model: Schema.optional(Schema.String),
           env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
           agent: Schema.optional(Schema.String),
-          machine: Schema.optional(RuntimeMachine),
-          callerEnv: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+          callerEnv: Schema.Record(Schema.String, Schema.String),
           runtimeSession: Schema.optional(Schema.String),
           peer: Schema.optional(Schema.String),
           archive: Schema.optional(Schema.Boolean),
@@ -331,8 +329,7 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           argv: Schema.Array(Schema.String),
           focus: Schema.Boolean,
-          machine: Schema.optional(RuntimeMachine),
-          callerEnv: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+          callerEnv: Schema.Record(Schema.String, Schema.String),
           runtimeSession: Schema.optional(Schema.String),
           runtime: Schema.optional(Schema.String),
         },
@@ -438,13 +435,11 @@ export class VibestRpcs extends RpcGroup.make(
           harness: Schema.Literals(HARNESS_IDS),
           fresh: Schema.Boolean,
           terminal: Schema.String,
-          machine: Schema.optional(RuntimeMachine),
           runtime: Schema.optional(Schema.String),
           provider: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
           routing: Schema.optional(Routing),
           pid: Schema.optional(Schema.Number),
-          env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
         },
         success: Schema.Struct({
           sessionId: Schema.String,
@@ -548,7 +543,7 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(
     Rpc.make("Project.RunningCoordinator", {
-      payload: { terminal: Schema.String, machine: Schema.optional(RuntimeMachine) },
+      payload: { terminal: Schema.String },
       success: Schema.NullOr(
         Schema.Struct({
           harness: Schema.Literals(HARNESS_IDS),

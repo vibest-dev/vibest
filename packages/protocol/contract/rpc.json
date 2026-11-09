@@ -1,5 +1,5 @@
 {
-  "protocol": 5,
+  "protocol": 6,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -2563,47 +2563,11 @@
           "focus": {
             "type": "boolean"
           },
-          "machine": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "target": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "id"
-                ],
-                "additionalProperties": true
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "callerEnv": {
-            "anyOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "runtimeSession": {
             "anyOf": [
@@ -2628,7 +2592,8 @@
         },
         "required": [
           "argv",
-          "focus"
+          "focus",
+          "callerEnv"
         ],
         "additionalProperties": true
       },
@@ -4316,35 +4281,6 @@
           "terminal": {
             "type": "string"
           },
-          "machine": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "target": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "id"
-                ],
-                "additionalProperties": true
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "runtime": {
             "anyOf": [
               {
@@ -4521,19 +4457,6 @@
                     ]
                   }
                 ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "env": {
-            "anyOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
               },
               {
                 "type": "null"
@@ -6400,35 +6323,6 @@
         "properties": {
           "terminal": {
             "type": "string"
-          },
-          "machine": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "target": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "id"
-                ],
-                "additionalProperties": true
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
@@ -9677,47 +9571,11 @@
               }
             ]
           },
-          "machine": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "target": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "id"
-                ],
-                "additionalProperties": true
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "callerEnv": {
-            "anyOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "runtimeSession": {
             "anyOf": [
@@ -9771,7 +9629,8 @@
           }
         },
         "required": [
-          "prompt"
+          "prompt",
+          "callerEnv"
         ],
         "additionalProperties": true
       },

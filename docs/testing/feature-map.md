@@ -63,6 +63,7 @@ three checks move to the real previous release, downloaded once into an E2E cach
 | P2  | `project search` over `docs`, `memories`, `artifacts`                   | script | hits `kind/path:line: text`                          |
 | P7  | a moved checkout: `vibest` asks `[Y/n]`, y moves it                     | script | same project id, new path, memories, worktree ok     |
 | P8  | Pi main, Pi and Claude subagents use the folder with file tools (fakes) | script | each writes and reads `artifacts/`; other project no |
+| P9  | `project create` through vibestd, relative paths                        | script | both folders; an agent refused; a full dir kept      |
 
 ## Plugins
 
@@ -175,3 +176,5 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S34 | herdr-core runtime: `vibest --runtime hc` typed in the user's hc terminal starts the main agent in place                                                                                 | hc: `tools/e2e` S34                                                  |
 | S35 | herdr-core: `vibest` in an isolated hc terminal, no `--runtime`, starts the main agent and its subagent there; `vibest run --runtime herdr` places one in this run's herdr               | hc: `tools/e2e` S35                                                  |
 | S36 | herdr-core runtime: an unwatched subagent turn end is `done` in Watch (session and project); `Session.Seen` writes `herdr.seen` and it is idle                                           | hc: `tools/e2e` S36                                                  |
+| S37 | `vibest ls` outside a project lists every project; a git repo that is no project is empty, and the CLI runs no git                                                                       | project: `tools/e2e` S37                                             |
+| S38 | herdr open-main focuses the main agent's pane through vibestd                                                                                                                            | project: `tools/e2e` S38                                             |

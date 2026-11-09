@@ -16,15 +16,7 @@ import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
 import { Restarting } from "@vibest/core/restarting"
 import { envelope } from "@vibest/core/results"
-import {
-  agentState,
-  type Machine,
-  machinesListing,
-  NoRuntime,
-  Runtimes,
-  type Runtime,
-  type Terminal,
-} from "@vibest/core/runtimes"
+import { agentState, machinesListing, NoRuntime, Runtimes, type Runtime, type Terminal } from "@vibest/core/runtimes"
 import { NoSuchSession, runtimeEnv, type SessionView, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { NotInRepository } from "@vibest/core/worktree"
@@ -389,19 +381,13 @@ export const handlers = VibestRpcs.toLayer(
 
     const scope = (method: MethodOf<"agent">) => agent(method).pipe(Effect.flatMap((c) => projectOf(c, method)))
 
-    const machineOf = (machine: { readonly id: string; readonly target?: string | undefined } | undefined): Machine =>
-      machine === undefined
-        ? { id: "local" }
-        : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
     const machineFromCaller = (input: {
-      readonly machine?: { readonly id: string; readonly target?: string | undefined } | undefined
-      readonly callerEnv?: Readonly<Record<string, string>> | undefined
+      readonly callerEnv: Readonly<Record<string, string>>
       readonly runtimeSession?: string | undefined
     }) =>
       Effect.gen(function* () {
-        if (input.callerEnv === undefined && input.runtimeSession === undefined) return machineOf(input.machine)
         const specs = yield* plugins.callers
-        const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv ?? {}), input.runtimeSession)
+        const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv), input.runtimeSession)
         return { id: "local", ...(target !== undefined ? { target } : {}) }
       })
     const projectLocked = keyedLock<string>()
@@ -705,10 +691,10 @@ export const handlers = VibestRpcs.toLayer(
 
       Republish: () => sessions.republish,
 
-      Launch: ({ argv, focus, machine, runtime, callerEnv, runtimeSession }) =>
+      Launch: ({ argv, focus, runtime, callerEnv, runtimeSession }) =>
         Effect.gen(function* () {
           const { id, directory: root } = yield* scope("Launch")
-          const at = yield* machineFromCaller({ machine, callerEnv, runtimeSession })
+          const at = yield* machineFromCaller({ callerEnv, runtimeSession })
           const current = yield* db.coordinatorOf(id)
           const asked = Launch.flagValue(argv, "--harness")
           const decision = yield* plugins.start({
@@ -1061,7 +1047,7 @@ export const handlers = VibestRpcs.toLayer(
           return { directory: project.directory, place }
         }),
 
-      "Project.CoordinatorSession": ({ harness, fresh, terminal, machine, runtime, provider, model, routing, pid }) =>
+      "Project.CoordinatorSession": ({ harness, fresh, terminal, runtime, provider, model, routing, pid }) =>
         Effect.gen(function* () {
           const { id: projectId, directory } = yield* scope("Project.CoordinatorSession")
           const kind = runtime ?? (yield* onlyRuntime)?.kind
@@ -1078,7 +1064,7 @@ export const handlers = VibestRpcs.toLayer(
                   method: "Project.CoordinatorSession",
                   message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
                 })
-              const address = { machine: machineOf(machine).id, id: terminal }
+              const address = { machine: "local", id: terminal }
               let claimed:
                 | {
                     readonly sessionId: string

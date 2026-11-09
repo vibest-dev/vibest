@@ -19,8 +19,7 @@ import * as Guard from "@vibest/core/guard"
 import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId } from "@vibest/core/harness"
 import { catalogModels } from "@vibest/core/models"
 import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
-import { makeSources } from "@vibest/core/plugin-sources"
-import { DEFAULT_TIMEOUT, describeSpawn, PluginLoader, type Candidate } from "@vibest/core/plugins"
+import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
 import { jsonObject, promptOf } from "@vibest/core/results"
 import { shortId } from "@vibest/schema/id"
@@ -347,14 +346,6 @@ const mainFlags = {
   ),
   inParent: Flag.String("in-parent").pipe(Flag.withHidden, Flag.optional),
 }
-
-export const callerPlugins = (builtins: ReadonlyArray<Candidate>) =>
-  Effect.gen(function* () {
-    const loader = yield* PluginLoader
-    yield* loader.prepare
-    const read = yield* (yield* makeSources(DEFAULT_TIMEOUT, { quiet: true })).read
-    return [...builtins, ...read.candidates]
-  })
 
 const callerEnvOf = (): Record<string, string> =>
   Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))

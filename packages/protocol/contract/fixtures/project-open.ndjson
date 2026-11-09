@@ -1,6 +1,6 @@
-{"jsonrpc":"2.0","id":1,"method":"Project.Open","params":{},"headers":[["vibest-protocol","5"],["vibest-caller","cli"],["vibest-repository","/fixture/repo"]]}
+{"jsonrpc":"2.0","id":1,"method":"Project.Open","params":{},"headers":[["vibest-protocol","6"],["vibest-caller","cli"],["vibest-repository","/fixture/repo"]]}
 {"jsonrpc":"2.0","id":1,"result":{"projectId":"00000000-0000-4000-8000-000000000001","directory":"/fixture/repo"}}
-{"jsonrpc":"2.0","id":2,"method":"Project.Open","params":{},"headers":[["vibest-protocol","5"],["vibest-caller","cli"],["vibest-repository","/fixture/repo"]]}
+{"jsonrpc":"2.0","id":2,"method":"Project.Open","params":{},"headers":[["vibest-protocol","6"],["vibest-caller","cli"],["vibest-repository","/fixture/repo"]]}
 {"jsonrpc":"2.0","id":2,"result":{"projectId":"00000000-0000-4000-8000-000000000001","directory":"/fixture/repo"}}
-{"jsonrpc":"2.0","id":3,"method":"Project.Open","params":{},"headers":[["vibest-protocol","5"],["vibest-caller","cli"],["vibest-repository","/fixture/plain"]]}
+{"jsonrpc":"2.0","id":3,"method":"Project.Open","params":{},"headers":[["vibest-protocol","6"],["vibest-caller","cli"],["vibest-repository","/fixture/plain"]]}
 {"jsonrpc":"2.0","id":3,"error":{"_tag":"Cause","code":0,"message":"[{\"_tag\":\"Fail\",\"error\":{\"_tag\":\"NotInRepository\",\"path\":\"/fixture/plain\"}}]","data":[{"_tag":"Fail","error":{"_tag":"NotInRepository","path":"/fixture/plain"}}]}}

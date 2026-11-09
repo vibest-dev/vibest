@@ -88,7 +88,7 @@ describe("Watch", () => {
         [[main, "main", null]],
       )
 
-      const { id } = yield* coordinator.Spawn({ harness: "pi", prompt: "do it" })
+      const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       const spawned = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
           e._tag === "Session" && e.session.id === id && e.session.turnState === "open",
@@ -138,7 +138,7 @@ describe("Watch", () => {
     "a session started while Watch reads its Snapshot is in the Snapshot or arrives after it",
     Effect.gen(function* () {
       const { repo, coordinator } = yield* withMain
-      const spawn = yield* coordinator.Spawn({ harness: "pi", prompt: "race" }).pipe(Effect.forkScoped)
+      const spawn = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "race" }).pipe(Effect.forkScoped)
       const { next } = yield* watching(repo)
       const snapshot = yield* next(isSnapshot)
       const { id } = yield* Fiber.join(spawn)
@@ -155,7 +155,7 @@ describe("Watch", () => {
       const { repo, project, coordinator } = yield* withMain
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
-      const { id } = yield* coordinator.Spawn({ harness: "pi", prompt: "do it" })
+      const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       const isSession = (status: string, turn: number) => (e: WatchEvent) =>
         e._tag === "Session" && e.session.id === id && e.session.status === status && e.session.turn === turn
       yield* next((e): e is WatchEvent => isSession("working", 0)(e))
@@ -191,7 +191,7 @@ describe("Watch", () => {
       const { repo, coordinator } = yield* withMain
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
-      const { id } = yield* coordinator.Spawn({ harness: "pi", prompt: "do it" })
+      const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* next((e): e is WatchEvent => e._tag === "Session" && e.session.id === id && e.session.status === "working")
       const terminal = (yield* herdr.terminalOf(id))!
       yield* Effect.repeat(herdr.finishTurn(terminal.id), { times: 5 })

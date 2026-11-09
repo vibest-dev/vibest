@@ -1010,8 +1010,8 @@ id a harness made for a coordinator; the last report wins). Of the rest:
 - `Launch` opens `vibest`'s main agent outside the repository's workspace: a tab there, or a new workspace at its
   root, whose shell runs argv. `Project.Open` finds or makes the project of the directory (`move` answers a
   `ProjectMoved`). `Project.StartMain` picks the main agent's harness, provider, model and runtime and writes
-  nothing. `Project.CoordinatorSession` then upserts the coordinator row at its terminal, with the caller's PID
-  (it execs the harness, so it is the harness's) and `--env` held in memory only, for a restart in place.
+  nothing. `Project.CoordinatorSession` then upserts the coordinator row at its terminal and returns the harness
+  command the CLI execs, with the caller's PID. A pane vibestd opened already has the identity variables in its shell.
   `Project.RunningCoordinator` finds a coordinator in another pane; `Project.StopCoordinator` sends SIGTERM to its
   recorded PID only, keeps its terminal, and answers `stopped`, `running` (nothing changed), `moved` (the row is no
   longer there) or `unsupported` (with the reason).

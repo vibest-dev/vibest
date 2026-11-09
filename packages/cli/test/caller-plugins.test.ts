@@ -2,7 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { callerHits, callerKeys, callerTarget, mainPlace, type CallerHit } from "@vibest/core/caller"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { PluginLoader, type Candidate } from "@vibest/core/plugins"
+import { makeSources } from "@vibest/core/plugin-sources"
+import { DEFAULT_TIMEOUT, PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { Plugin } from "@vibest/plugin"
 import { run as runDaemon, type Host } from "@vibest/server/daemon"
 import { Effect, FileSystem, Layer, Path } from "effect"
@@ -10,7 +11,13 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import { callerPlugins } from "../src/cli.ts"
+const callerPlugins = (builtins: ReadonlyArray<Candidate>) =>
+  Effect.gen(function* () {
+    const loader = yield* PluginLoader
+    yield* loader.prepare
+    const read = yield* (yield* makeSources(DEFAULT_TIMEOUT, { quiet: true })).read
+    return [...builtins, ...read.candidates]
+  })
 
 const runtime = (kind: string, env: ReadonlyArray<string>): Candidate => ({
   source: kind,
