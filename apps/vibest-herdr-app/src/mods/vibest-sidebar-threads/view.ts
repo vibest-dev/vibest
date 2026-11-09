@@ -24,7 +24,8 @@ export class ThreadsView {
     const t = this.t
     const active = projects.find((p) => p.active)
     return h_flex()
-      .pr(8)
+      .pr(12)
+      .pt(8)
       .pb(8)
       .gap(4)
       .items_center()
@@ -34,7 +35,7 @@ export class ThreadsView {
           .id("search")
           .flex_1()
           .h(32)
-          .px(8)
+          .px(10)
           .gap(8)
           .items_center()
           .rounded(6)
