@@ -196,8 +196,7 @@ export default class Files extends View {
           const active = f.path === tabs.active
           return h_flex()
             .id(`ft-${i}`)
-            .flex_shrink(1)
-            .min_w(80)
+            .flex_none()
             .h(24)
             .pl(8)
             .pr(4)
@@ -209,7 +208,7 @@ export default class Files extends View {
             .text_color(active ? t.foreground : t.muted)
             .hover((s) => s.bg(t.hover).text_color(t.foreground))
             .on_click((_e, cx) => this.setTabs(selectFile(this.tabs, f.path), cx))
-            .child(div().flex_1().min_w(0).max_w(180).truncate().child(fileName(f.path)))
+            .child(div().max_w(180).truncate().child(fileName(f.path)))
             .child(
               div()
                 .id(`ft-x-${i}`)
@@ -227,7 +226,7 @@ export default class Files extends View {
         }),
       )
     return h_flex()
-      .h(32)
+      .h(40)
       .flex_none()
       .px(6)
       .gap(4)
