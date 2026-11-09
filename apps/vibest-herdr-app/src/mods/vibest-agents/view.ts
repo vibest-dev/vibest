@@ -48,7 +48,7 @@ export const agentsView = (t: Theme, shown: LsResult, refresh: (cx: Context) => 
     .text_size(TEXT)
     .child(
       h_flex()
-        .h(30)
+        .h(32)
         .flex_none()
         .px(14)
         .gap(8)

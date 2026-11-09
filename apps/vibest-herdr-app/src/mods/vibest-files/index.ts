@@ -183,7 +183,7 @@ export default class Files extends View {
   header(t: Theme): Element {
     const tabs = this.tabs
     return h_flex()
-      .h(30)
+      .h(32)
       .flex_none()
       .px(6)
       .gap(2)
