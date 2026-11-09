@@ -84,7 +84,8 @@
               ]
             }
           ]
-        }
+        },
+        { "id": "bottom-gap", "type": "block", "size": { "px": 0 }, "content": { "mod": "vibest-gap" } }
       ]
     }
   ]
