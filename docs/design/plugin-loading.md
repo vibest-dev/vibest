@@ -2,6 +2,21 @@
 
 Implementation notes for the [plugin architecture](architecture.md#7-plugin-architecture-effect-only).
 
+## Order and boundary
+
+Builtin plugins load first, in the order of `pre` in `packages/builtins/src/index.ts` (`harness-pi`, `harness-claude`,
+`harness-cursor`, `runtime-herdr-core`, `runtime-herdr`, `runtime-choice`), then the plugins directory, then
+`vibest.json` in the order written. Registration order is detection order for runtime callers (herdr-core before
+herdr) and the order of `transform`s on a registry, so a user plugin sees and may change the builtin definitions.
+`vibest plugins` lists them in that order.
+
+Builtin plugins and harness integrations are written like a user plugin: `packages/plugin-harnesses`,
+`packages/runtime-herdr`, `packages/runtime-herdr-core` and `packages/integration/*/src` import only `@vibest/plugin`,
+`@vibest/schema`, `@vibest/protocol` and `@vibest/client`, and `packages/builtins` never imports core, server or the
+CLI. `.oxlintrc.json` enforces it with `no-restricted-imports` overrides (static, type-only and dynamic imports alike),
+and `vibest/no-restricted-disable` reports a disable comment for that rule. What a builtin needs from the platform
+(child processes, files, HTTP) it provides itself from `@effect/platform-node-shared`.
+
 ## Loading and watching
 
 In `plugin-sources.ts`: a half-saved `vibest.json` keeps its last parsed plugin list. An

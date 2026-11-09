@@ -8,12 +8,13 @@ question 3 (§12, §17).
 
 ## 1. Principles
 
-1. **Simple, clear, extensible.** One interface, `Runtime`: seven required members, the rest optional. The API
+1. **Simple, clear, extensible.** One interface, `RuntimeDefinition`: seven required members, the rest optional. The API
    ships with vibest and has no version of its own: additions are optional members; a breaking change ships in a
    vibest release and plugins update with it. Core checks whether an optional
    member exists, never which runtime it is. One error type with a `code`.
-2. **Runtimes are plugins, several at once.** A runtime plugin registers a `Runtime` (`context.runtime.register`, beside
-   `context.agent.hook`). It is a provider core calls, not a hook listener. herdr, rex and tern ship as builtin
+2. **Runtimes are plugins, several at once.** A runtime plugin adds a `RuntimeDefinition` with an `id`
+   (`context.runtime.transform((editor) => editor.add(definition))`, beside `context.agent.hook`); another plugin may
+   `update` or `remove` it the same way, and removing the plugin restores what it changed. It is a provider core calls, not a hook listener. herdr, rex and tern ship as builtin
    runtime plugins; a new product is a new plugin, never a core change.
 3. **vibest saves machines, the runtime connects.** Core has no ssh, Tailscale or socket code. Connections are the
    plugin's: it opens, reuses and re-opens them per machine in its own scope.
@@ -32,7 +33,7 @@ An Agent row stores `runtime { kind, address: Terminal }` (JSON, no DDL); equal 
 
 ## 3. The interface
 
-Required: `kind`, `status(machine)`, `events` (exited, state, reset, and seen from a runtime with `seen`: core reads a
+Required: `id`, `status(machine)`, `events` (exited, state, reset, and seen from a runtime with `seen`: core reads a
 runtime only when one arrives, and once at start and on a reset), and on terminals `open`, `send`, `read`, `process`, `close`. `open`'s input
 beside the placement (`project`, `cwd`, `argv`, `env`, `label`) carries `near` (beside that terminal when possible),
 `split` (a split beside `near` instead of a tab of its own, `vibest run --peer`) and `focus` (the user is waiting to
@@ -82,28 +83,29 @@ without a `close`, and `process` on it reports `running: false`, then `not_found
 
 ## 4. Choosing a runtime
 
-Several runtimes run at once, on any machine; core routes every call by the Agent's own `runtime.kind`. Each runtime
+Several runtimes run at once, on any machine; core routes every call by the Agent's own runtime `id`. Each runtime
 product keeps one instance per machine (one herdr session `vibest`, one rex server, one tern daemon).
 
-- A runtime plugin declares `caller` on the plugin: its runtime `kind`, the environment variables its terminal sets,
-  and how to read the terminal from those values. Plugins declare no priority; load order decides. Without
-  `--runtime`, vibest uses the runtime of the terminal it was started in. When a terminal carries both herdr-core and
-  herdr variables (they are inherited), hc wins because the builtin runtime-herdr-core loads before runtime-herdr.
-  The CLI and core only iterate the plugins they were given for detection. They name no runtime kind or variable
-  there, so another runtime plugin needs no change to be detected. The CLI sends its environment to vibestd, which keeps only the keys the runtime plugin declared and asks that
-  plugin for the machine target. `--session` is an opaque runtime session name.
+- A runtime definition may carry a `caller` (`RuntimeCaller`): the environment variables its terminal sets, and how to
+  read the terminal (and optionally a machine target) from those values. Definitions declare no priority;
+  registration order decides. Without `--runtime`, vibest uses the runtime of the terminal it was started in. When a
+  terminal carries both herdr-core and herdr variables (they are inherited), hc wins because the builtin
+  runtime-herdr-core registers before runtime-herdr. The CLI and core name no runtime id or variable for detection:
+  vibestd reads the callers of the registered definitions (`Runtimes.callers`), so another runtime plugin needs no
+  change to be detected. The CLI sends its environment to vibestd, which keeps only the keys some definition's caller
+  declared and asks that definition for the machine target. `--session` is an opaque runtime session name.
   Every declared variable set and non-empty means vibest is inside that runtime. One match: that runtime. Several: the
-  first in load order wins. Builtins are fixed, herdr-core before herdr, then the plugins directory, then vibest.json
+  first registered wins. Builtins come first (herdr-core before herdr), then the plugins directory, then vibest.json
   in the order written. No process tree, tty match, ancestor walk, or detection RPC, and no fallback to herdr or to
-  whichever runtime is the only one online. After vibestd loads plugins it drops every loaded caller variable from
-  its own environment, so a process it starts does not inherit a user runtime's variables. The CLI still starts
-  vibestd without the builtin caller variables. A plugin cannot read its own caller variables inside vibestd, because
-  those are removed; it connects through another variable, as hc uses `HC_SOCKET` rather than `HC_TERMINAL_SOCKET`.
-- The main agent (`vibest`) starts in that terminal. `vibest --runtime <kind>` overrides the detection and, when this
+  whichever runtime is the only one online. Whenever the registered definitions change, vibestd drops every caller
+  variable they declare from its own environment (the platform's `HostEnv.drop`), so a process it starts does not
+  inherit a runtime's variables. A plugin cannot read its own caller variables inside vibestd, because those are
+  removed; it connects through another variable, as hc uses `HC_SOCKET` rather than `HC_TERMINAL_SOCKET`.
+- The main agent (`vibest`) starts in that terminal. `vibest --runtime <id>` overrides the detection and, when this
   terminal is not that runtime's, opens one there. None detected and no `--runtime`: refused, saying to pass
   `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over
   another runtime's variables the shell inherited.
-- A subagent (`vibest run`) takes `--runtime <kind>` on `Spawn`. Without it, it runs in its parent's runtime. The
+- A subagent (`vibest run`) takes `--runtime <id>` on `Spawn`. Without it, it runs in its parent's runtime. The
   parent lookup includes the coordinator, because `getSession` leaves the live main row out. If that runtime is not
   online, the start fails with the runtime's reason. No other fallback. A user plugin on `agent.start.before` may
   still set `event.runtime`. A runtime already set stands.
@@ -205,8 +207,8 @@ Out of scope now: Agents on a remote machine starting their own subagents, load 
 Core has one machine today, `local` (`core/runtimes.ts`): a runtime that registers or comes back publishes one
 `live.reset` for it, `readFile` reads the local file system (another machine will read through the runtime's `exec`,
 else the hidden-terminal fallback), and `machines[]` lists only `local`. A runtime with several machines publishes one
-reset per machine. Runtime plugins register and unregister one at a time (one supervisor consumer), and a
-registration's events end with its plugin's scope.
+reset per machine. The runtime registry follows every committed change: a definition that appears starts its event
+merge and a reset, one that is removed (its transform disposed or its plugin unloaded) stops its merge.
 
 ## 8. Order of work
 

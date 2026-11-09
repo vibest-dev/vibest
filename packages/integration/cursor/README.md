@@ -2,8 +2,10 @@
 
 vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`):
 
-- **the tool guard**: before each tool call of a vibest agent, `vibest integration guard --harness cursor` decides; it
-  refuses an agent driving herdr itself or reading the project store's files directly. It runs fail-closed.
+- **the tool guard**: before each tool call of a vibest agent, `vibest integration guard --harness cursor` asks vibestd
+  (`Integration.Guard`), which runs the guard rules and answers in Cursor's shape (the `cursor` definition's
+  `guardAnswer`); it refuses an agent driving herdr itself or reading the project store's files directly. It runs
+  fail-closed.
 - **readiness**: `sessionStart` goes to `vibest integration ready --harness cursor`; vibestd types the first task only
   after it.
 - **a turn at work**: `afterAgentThought`, `postToolUse` and `beforeSubmitPrompt` go to
