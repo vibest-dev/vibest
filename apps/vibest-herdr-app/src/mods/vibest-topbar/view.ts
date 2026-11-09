@@ -10,6 +10,7 @@ import { type Breadcrumb, RIGHT_PANEL, type TopbarState } from "./topbar-state.t
 export interface TopbarWindow {
   readonly inset: number
   readonly buttons: boolean
+  readonly shift: number
 }
 
 const panelButton = (t: Theme, shown: string | null, child: string, name: string): Element => {
@@ -58,10 +59,10 @@ const breadcrumbView = (t: Theme, crumb: Breadcrumb): Element =>
 export const topbarView = (t: Theme, state: TopbarState, win: TopbarWindow): Element =>
   h_flex()
     .w_full()
-    .h(32)
+    .h(32 + win.shift)
     .min_w(0)
     .pl(win.inset)
-    .pt(8)
+    .pt(8 + win.shift)
     .gap(12)
     .items_center()
     .bg(t.chrome)
