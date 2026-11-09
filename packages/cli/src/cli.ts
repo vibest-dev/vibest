@@ -460,15 +460,10 @@ const send = Command.make("send", { id, message: text("message") }, (o) =>
 
 const status = Command.make("status", {}, () =>
   Effect.gen(function* () {
-    yield* updateNotice
     const layout = yield* Layout
     const info = yield* Daemon.readDaemonInfo(layout.daemonInfo)
-    const ping = yield* connect(layout.socket).pipe(
-      Effect.flatMap((client) => client.Ping(undefined)),
-      Effect.timeout("1 second"),
-      Effect.option,
-      Effect.scoped,
-    )
+    const ping = yield* readPing(layout.socket)
+    yield* noticeFrom(Effect.succeed(ping))
     yield* json({
       client: { version: VERSION, command: yield* VibestCommand },
       daemon: Option.match(ping, {
@@ -1052,13 +1047,16 @@ const extraVibests = Effect.gen(function* () {
   )
 })
 
-const updateNotice = Effect.gen(function* () {
-  if (Option.isSome(yield* Config.option(Config.String("VIBEST_AGENT")))) return
-  if (Option.isSome(yield* Config.option(Config.String("VIBEST_NO_UPDATE_CHECK")))) return
-  const latest = Option.getOrUndefined(yield* readPing((yield* Layout).socket))?.update?.latest
-  if (latest && compareVersions(VERSION, latest) < 0)
-    yield* Console.error(`vibest ${latest} is available (this is ${VERSION}); update with: vibest update`)
-}).pipe(Effect.ignore)
+const noticeFrom = <E, R>(ping: Effect.Effect<Option.Option<Ping>, E, R>) =>
+  Effect.gen(function* () {
+    if (Option.isSome(yield* Config.option(Config.String("VIBEST_AGENT")))) return
+    if (Option.isSome(yield* Config.option(Config.String("VIBEST_NO_UPDATE_CHECK")))) return
+    const latest = Option.getOrUndefined(yield* ping)?.update?.latest
+    if (latest && compareVersions(VERSION, latest) < 0)
+      yield* Console.error(`vibest ${latest} is available (this is ${VERSION}); update with: vibest update`)
+  }).pipe(Effect.ignore)
+
+const updateNotice = noticeFrom(Effect.flatMap(Layout, (layout) => readPing(layout.socket)))
 
 const runInherit = (argv: ReadonlyArray<string>, env: Record<string, string> = {}) =>
   Effect.gen(function* () {
