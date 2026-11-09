@@ -10,7 +10,8 @@ const header = (t: Theme): Element => {
   const w = window()
   const inset = w?.platform === "macos" && !w.fullscreen ? TRAFFIC_LIGHTS_INSET : 8
   return h_flex()
-    .size_full()
+    .w_full()
+    .h(32)
     .pl(inset)
     .pr(12)
     .pt(8)
