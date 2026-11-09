@@ -1,4 +1,4 @@
-import type { SessionRow } from "./vibest-ls.ts"
+import type { SessionRow } from "./ls.ts"
 
 export interface SessionGroup {
   readonly projectId: string

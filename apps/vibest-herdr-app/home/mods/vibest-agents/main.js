@@ -29,7 +29,7 @@ var closePull = (pull) => ({
   again: false
 });
 
-// src/panel/agents/vibest-ls.ts
+// src/panel/agents/ls.ts
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
 var LS_ARGV = [...STRIPPED.flatMap((name) => ["-u", name]), "vibest", "ls"];
 var commandNote = (result, fallback) => {

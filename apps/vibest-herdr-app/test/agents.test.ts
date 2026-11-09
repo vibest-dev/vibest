@@ -1,5 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
 
+import {
+  commandNote,
+  LS_ARGV,
+  lsFailure,
+  parseOwnedAddress,
+  parseSessions,
+  readLsResult,
+  type SessionRow,
+} from "../src/panel/agents/ls.ts"
 import { closePull, completePull, idlePull, requestPull } from "../src/panel/agents/pull.ts"
 import {
   groupSessions,
@@ -10,15 +19,6 @@ import {
   sessionStatus,
   shortId,
 } from "../src/panel/agents/sessions.ts"
-import {
-  commandNote,
-  LS_ARGV,
-  lsFailure,
-  parseOwnedAddress,
-  parseSessions,
-  readLsResult,
-  type SessionRow,
-} from "../src/panel/agents/vibest-ls.ts"
 
 const socket = "/run/user/501/herdr-core/default.sock"
 

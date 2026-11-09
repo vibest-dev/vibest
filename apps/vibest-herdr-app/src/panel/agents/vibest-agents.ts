@@ -2,8 +2,8 @@ import { type AsyncContext, type Context, type Element, View } from "gpui-kit"
 import { appHome, exec } from "herdr"
 
 import { themeColors } from "../../shared/theme-colors.ts"
+import { LS_ARGV, type LsResult, lsFailure, readLsResult } from "./ls.ts"
 import { closePull, completePull, idlePull, type Pull, requestPull } from "./pull.ts"
-import { LS_ARGV, type LsResult, lsFailure, readLsResult } from "./vibest-ls.ts"
 import { agentsView } from "./view.ts"
 
 export default class Agents extends View {

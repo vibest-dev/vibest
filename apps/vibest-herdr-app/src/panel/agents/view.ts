@@ -2,6 +2,7 @@ import { h_flex, v_flex } from "gpui-base"
 import { type Context, div, type Element } from "gpui-kit"
 
 import type { Theme } from "../../shared/theme-colors.ts"
+import type { LsResult, SessionRow } from "./ls.ts"
 import {
   groupSessions,
   projectHeading,
@@ -11,7 +12,6 @@ import {
   shortId,
   snapshotNote,
 } from "./sessions.ts"
-import type { LsResult, SessionRow } from "./vibest-ls.ts"
 
 const sessionRow = (t: Theme, session: SessionRow): Element =>
   h_flex()
