@@ -1,4 +1,4 @@
-# @vibest/herdr-app
+# vibest-herdr-app
 
 Vibest's own interface for [herdr-app](https://herdr.dev) **0.1.13**: a layout, two themes and one mod. The layout
 started from T3 Code's look: herdr spaces are projects and their tabs are threads in a 256 px sidebar; a 52 px top
@@ -63,12 +63,12 @@ another mod's folder, so `scripts/build.ts` bundles `src/main.ts` into `home/mod
 ## Build, test, install
 
 ```sh
-pnpm --filter @vibest/herdr-app build   # rewrites home/mods/vibest/main.js; commit it
-pnpm --filter @vibest/herdr-app test    # vitest over the threads and agents models
-herdr-app check packages/herdr-app/home/mods/vibest
+pnpm --filter vibest-herdr-app build   # rewrites home/mods/vibest/main.js; commit it
+pnpm --filter vibest-herdr-app test    # vitest over the threads and agents models
+herdr-app check apps/vibest-herdr-app/home/mods/vibest
 
 H=${HERDR_APP_HOME:-~/.config/herdr-app}
-cp -R packages/herdr-app/home/* "$H/"
+cp -R apps/vibest-herdr-app/home/* "$H/"
 herdr-app do layout.switch --name vibest
 ```
 
