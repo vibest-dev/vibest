@@ -185,17 +185,21 @@ export const locate = (
   )
 
 export const mirror = (
-  machine: VibestPlugin.Domain<"machine">,
+  machine: VibestPlugin.MachineDomain,
   hc: Hc,
   resets: Stream.Stream<unknown>,
 ): Effect.Effect<void, never, Scope.Scope> =>
   Effect.gen(function* () {
     const held = new Map<string, Event>()
-    yield* machine.hook("connect", (event) =>
-      Effect.sync(() => held.set(event.name, event)).pipe(Effect.andThen(connect(hc, event))),
+    yield* machine.hook(
+      "connect",
+      (event) => Effect.sync(() => held.set(event.name, event)).pipe(Effect.andThen(connect(hc, event))),
+      { runtime: KIND },
     )
-    yield* machine.hook("remove", (event) =>
-      Effect.sync(() => held.delete(event.name)).pipe(Effect.andThen(remove(hc, event))),
+    yield* machine.hook(
+      "remove",
+      (event) => Effect.sync(() => held.delete(event.name)).pipe(Effect.andThen(remove(hc, event))),
+      { runtime: KIND },
     )
     yield* resets.pipe(
       Stream.runForEach(() =>

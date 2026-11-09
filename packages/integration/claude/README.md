@@ -62,6 +62,9 @@ The generated files are ignored by Git. `test/distribution.test.ts` packs this p
 
 ## Use
 
+The launch side (arguments, models, resume, subscription reading) is the `claude` harness definition, added by the
+builtin plugin `harness-claude` in `packages/plugin-harnesses`; this package is only what runs inside Claude.
+
 Nothing to install. vibest starts each Claude session (and a Claude coordinator) with
 `claude --plugin-dir <@vibest/cli>/harnesses/claude`, which loads the plugin for that session only. vibest writes
 nothing into `~/.claude`. Plain `claude` sessions never load it, and in a Claude process without `VIBEST_AGENT` and

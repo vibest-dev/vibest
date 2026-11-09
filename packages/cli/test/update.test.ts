@@ -2,7 +2,6 @@ import http from "node:http"
 import net from "node:net"
 
 import { assert, describe, it } from "@effect/vitest"
-import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { checkEveryHour, installMethod, isSemver, UpdateCheck } from "@vibest/core/update-check"
@@ -354,7 +353,7 @@ describe("vibest update", () => {
           ["update"],
         )
         assert.match(agent.stderr, /^Forbidden: an agent may not run vibest update/)
-      }).pipe(Effect.scoped, Effect.provide(Layer.merge(Platform.services, builtinHarnesses))),
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     60_000,
   )
 })

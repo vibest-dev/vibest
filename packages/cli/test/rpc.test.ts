@@ -412,6 +412,7 @@ describe("vibest.sock", () => {
         ["Session.Ready", c["Session.Ready"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
         ["Agents.Outdated", c["Agents.Outdated"]()],
         ["Agents.Restart", c["Agents.Restart"]({ ids: [id] })],
+        ["Integration.Guard", c["Integration.Guard"]({ harness: "pi", agent: "general", input: "{}" })],
         ["Peer.Hello", c["Peer.Hello"]({ id, name: "x", callsMe: "y" })],
         ["Machine.Add", c["Machine.Add"]({ name: "m", target: "h" })],
         ["Machine.List", c["Machine.List"]()],
@@ -427,7 +428,7 @@ describe("vibest.sock", () => {
       for (const [method, call] of protectedCalls(bare))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected", method)
       const w = yield* asSession(yield* client, id)
-      for (const [method, call] of protectedCalls(w).filter(([m]) => m !== "Report"))
+      for (const [method, call] of protectedCalls(w).filter(([m]) => m !== "Report" && m !== "Integration.Guard"))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
 
       yield* a["Session.Ready"]({ id: (yield* db.coordinatorOf((yield* db.getSession(id))!.projectId))!.id })
@@ -604,11 +605,14 @@ describe("vibest.sock", () => {
 
   const seenDirectory = { project: "" }
   test(
-    "Project.StartMain schedules with the project directory, not its key; with no harness it takes the builtin default until a main agent exists",
+    "Project.StartMain schedules with the project directory, not its key; with no harness it fails until a main agent exists, then takes its harness",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
-      assert.strictEqual((yield* c["Project.StartMain"]({ runtime: "herdr" })).harness, "pi")
+      const first = yield* Effect.flip(c["Project.StartMain"]({ runtime: "herdr" }))
+      assert.strictEqual(first._tag, "LaunchFailed")
+      assert.match(first.message, /no harness to inherit/)
+      assert.strictEqual((yield* c["Project.StartMain"]({ runtime: "herdr", harness: "pi" })).harness, "pi")
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
       assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
       yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })

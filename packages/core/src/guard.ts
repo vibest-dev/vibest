@@ -1,5 +1,6 @@
 import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
 
+import { Harnesses } from "./harness.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 
 export interface ToolCall {
@@ -199,7 +200,6 @@ const vibestArgs = (vibest: ReadonlyArray<string>, argv: ReadonlyArray<string>) 
 }
 
 const HERDR_CONTROL = new Set(["agent", "pane", "tab", "workspace", "worktree", "server", "session"])
-export const HARNESS_CLIS = new Set(["pi", "claude", "cursor-agent"])
 const USER_MACHINE_COMMANDS = new Set(["connect", "machine"])
 const GH_UNSAFE = new Set(["alias", "extension", "ext", "config", "auth"])
 const firstWord = (words: ReadonlyArray<string>) => words.find((w) => !w.startsWith("-")) ?? ""
@@ -208,6 +208,7 @@ export const shellBlock = (
   command: string,
   vibest: ReadonlyArray<string>,
   coordinator: boolean,
+  harnessClis: ReadonlySet<string> = new Set(),
 ): string | undefined => {
   for (const p of programsOf(command)) {
     const [program = "", ...rest] = p.argv
@@ -215,7 +216,7 @@ export const shellBlock = (
     if (name === "herdr" && HERDR_CONTROL.has(firstWord(rest)))
       return "Agents must not control herdr agents, panes, tabs, workspaces or worktrees; vibest manages them."
     if (name === "herdr" && !coordinator) return "Sessions do not run herdr; vibest manages it."
-    if (coordinator && HARNESS_CLIS.has(name))
+    if (coordinator && harnessClis.has(name))
       return `The coordinator does not start ${name} itself: it would inherit the coordinator's identity and report its turns as the coordinator's. Start agents with vibest run.`
     if (coordinator && name === "gh" && GH_UNSAFE.has(firstWord(rest)))
       return `gh ${firstWord(rest)} changes gh's credentials or what it runs; ask the user to.`
@@ -303,7 +304,7 @@ export const toolPath = (raw: string, base: string, home: string) =>
 
 export type Rules = (
   call: ToolCall,
-) => Effect.Effect<string | undefined, Config.ConfigError, Layout | Path.Path | FileSystem.FileSystem>
+) => Effect.Effect<string | undefined, Config.ConfigError, Layout | Path.Path | FileSystem.FileSystem | Harnesses>
 
 const inside = (p: string, dir: string, sep: string) => p === dir || p.startsWith(dir + sep)
 
@@ -343,7 +344,8 @@ export const coordinator: Rules = (call) =>
     if (SHELL_TOOLS.has(tool)) {
       const command = shellCommand(call.input)
       if (command === undefined) return "The shell call has no command string; refused."
-      return shellBlock(command, yield* VibestCommand, true)
+      const clis = new Set((yield* Harnesses).all.map((definition) => definition.binary))
+      return shellBlock(command, yield* VibestCommand, true, clis)
     }
     if (!fileWritingTool(call.tool)) return undefined
     const own = yield* projectDir

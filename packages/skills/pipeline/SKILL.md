@@ -10,7 +10,7 @@ Plan → the user agrees → implement → review until the reviewer approves �
 ## 1. Plan
 
 ```
-vibest run <harness> --title 'Plan <topic>' -- 'Write an implementation plan for: <goal, paths, constraints>. Read the code. Report the approach, the files to change, the steps, how to verify, and open questions. Do not modify files.'
+vibest run [<harness>] --title 'Plan <topic>' -- 'Write an implementation plan for: <goal, paths, constraints>. Read the code. Report the approach, the files to change, the steps, how to verify, and open questions. Do not modify files.'
 ```
 
 Its id is <planner id>. Tell the user the plan is being written and end your turn. Do not pass `--archive-on-completion`: the user has not agreed yet, and a completed result would archive the session before they can answer.
@@ -24,7 +24,7 @@ Show the plan in full, including open questions. Do not implement until the user
 Save the agreed plan, verbatim, with your file tool as `$VIBEST_PROJECT_DIR/artifacts/pipeline-<topic>-plan.md` (a new file name if that one exists). Then:
 
 ```
-vibest run <harness> --title 'Implement <topic>' -- 'Implement the plan at <absolute plan path> exactly. Run the tests and typecheck, commit on a branch, push, and report the branch and hash. Do not open a pull request.'
+vibest run [<harness>] --title 'Implement <topic>' -- 'Implement the plan at <absolute plan path> exactly. Run the tests and typecheck, commit on a branch, push, and report the branch and hash. Do not open a pull request.'
 ```
 
 Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name. Do not pass `--archive-on-completion`: this session stays for review and the pull request. When it reports, check the diff and the tests yourself before review.
@@ -35,7 +35,7 @@ Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJEC
 Read-only here is the prompt you pass, plus the peer git rule the session already has: no commit, and nothing that moves HEAD, a branch, or the index.
 
 ```
-vibest run <harness> --title 'Review <topic>' --peer <implementer id> -- 'Review the change on this branch against the plan at <absolute plan path>. Run git diff main...HEAD. Do not modify files, commit, or move HEAD. Look for bugs, missing tests, and departures from the plan; run the tests. Start with "verdict: approve" or "verdict: changes requested", then each comment with file and line.'
+vibest run [<harness>] --title 'Review <topic>' --peer <implementer id> -- 'Review the change on this branch against the plan at <absolute plan path>. Run git diff main...HEAD. Do not modify files, commit, or move HEAD. Look for bugs, missing tests, and departures from the plan; run the tests. Start with "verdict: approve" or "verdict: changes requested", then each comment with file and line.'
 ```
 
 Its id is <reviewer id>. Do not pass `--archive-on-completion`: later rounds go to this reviewer with `vibest send`.

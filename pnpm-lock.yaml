@@ -219,6 +219,24 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.0))
 
+  packages/builtins:
+    dependencies:
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../plugin
+      '@vibest/plugin-harnesses':
+        specifier: workspace:*
+        version: link:../plugin-harnesses
+      '@vibest/runtime-herdr':
+        specifier: workspace:*
+        version: link:../runtime-herdr
+      '@vibest/runtime-herdr-core':
+        specifier: workspace:*
+        version: link:../runtime-herdr-core
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+
   packages/cli:
     devDependencies:
       '@effect/platform-bun':
@@ -227,6 +245,9 @@ importers:
       '@effect/sql-sqlite-bun':
         specifier: 'catalog:'
         version: 4.0.2(effect@4.0.2)
+      '@vibest/builtins':
+        specifier: workspace:*
+        version: link:../builtins
       '@vibest/client':
         specifier: workspace:*
         version: link:../client
@@ -236,9 +257,9 @@ importers:
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
-      '@vibest/plugin-harness-choice':
+      '@vibest/plugin-harnesses':
         specifier: workspace:*
-        version: link:../plugin-harness-choice
+        version: link:../plugin-harnesses
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -338,9 +359,6 @@ importers:
       '@vibest/client':
         specifier: workspace:*
         version: link:../../client
-      '@vibest/core':
-        specifier: workspace:*
-        version: link:../../core
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../../protocol
@@ -360,6 +378,9 @@ importers:
       '@vibest/cli':
         specifier: workspace:*
         version: link:../../cli
+      '@vibest/core':
+        specifier: workspace:*
+        version: link:../../core
       '@vibest/server':
         specifier: workspace:*
         version: link:../../server
@@ -370,11 +391,17 @@ importers:
         specifier: 4.0.2
         version: 4.0.2
 
-  packages/plugin-harness-choice:
+  packages/plugin-harnesses:
     dependencies:
+      '@effect/platform-node-shared':
+        specifier: 4.0.2
+        version: 4.0.2(effect@4.0.2)
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../schema
       effect:
         specifier: 4.0.2
         version: 4.0.2
@@ -393,9 +420,6 @@ importers:
       '@effect/platform-node-shared':
         specifier: 4.0.2
         version: 4.0.2(effect@4.0.2)
-      '@vibest/core':
-        specifier: workspace:*
-        version: link:../core
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin

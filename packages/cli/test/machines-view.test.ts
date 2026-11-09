@@ -42,46 +42,54 @@ const viewPlugin = (s: Side) =>
     id: `view-${s.id}`,
     effect: (ctx) =>
       Effect.gen(function* () {
-        yield* ctx.runtime.register({
-          kind: "view",
-          status: () => Effect.succeed({ status: "online" as const }),
-          open: unused,
-          send: unused,
-          read: () => Effect.succeed("screen of B"),
-          process: unused,
-          close: unused,
-          events: Stream.never,
-          link: () => Effect.succeed(s.link),
-          locate: (machine, sessions) =>
-            Effect.sync(() => {
-              const name = s.mirror.get(machine.link?.core ?? "")
-              return name === undefined
-                ? { missing: true, terminals: new Map() }
-                : {
-                    missing: false,
-                    as: name,
-                    terminals: new Map(sessions.map((id) => [id, { machine: "local", id: `${name}/${id}` }])),
-                  }
-            }),
-        })
-        yield* ctx.machine.hook("connect", (event) =>
-          Effect.suspend(() => {
-            s.connects.push(event)
-            if (s.hang) return Effect.never
-            const core = coreOf(event)
-            if (s.refuse) event.notes.push({ message: "cannot add", fix: "add by hand" })
-            else if (core !== undefined && !s.mirror.has(core)) {
-              s.mirror.set(core, event.name)
-              event.notes.push({ message: `added ${event.name}` })
-            }
-            return Effect.void
+        yield* ctx.runtime.transform((editor) =>
+          editor.add({
+            id: "view",
+            status: () => Effect.succeed({ status: "online" as const }),
+            open: unused,
+            send: unused,
+            read: () => Effect.succeed("screen of B"),
+            process: unused,
+            close: unused,
+            events: Stream.never,
+            link: () => Effect.succeed(s.link),
+            locate: (machine, sessions) =>
+              Effect.sync(() => {
+                const name = s.mirror.get(machine.link?.core ?? "")
+                return name === undefined
+                  ? { missing: true, terminals: new Map() }
+                  : {
+                      missing: false,
+                      as: name,
+                      terminals: new Map(sessions.map((id) => [id, { machine: "local", id: `${name}/${id}` }])),
+                    }
+              }),
           }),
         )
-        yield* ctx.machine.hook("remove", (event) =>
-          Effect.sync(() => {
-            s.removes.push(event)
-            s.mirror.delete(coreOf(event) ?? "")
-          }),
+        yield* ctx.machine.hook(
+          "connect",
+          (event) =>
+            Effect.suspend(() => {
+              s.connects.push(event)
+              if (s.hang) return Effect.never
+              const core = coreOf(event)
+              if (s.refuse) event.notes.push({ message: "cannot add", fix: "add by hand" })
+              else if (core !== undefined && !s.mirror.has(core)) {
+                s.mirror.set(core, event.name)
+                event.notes.push({ message: `added ${event.name}` })
+              }
+              return Effect.void
+            }),
+          { runtime: "view" },
+        )
+        yield* ctx.machine.hook(
+          "remove",
+          (event) =>
+            Effect.sync(() => {
+              s.removes.push(event)
+              s.mirror.delete(coreOf(event) ?? "")
+            }),
+          { runtime: "view" },
         )
       }),
   })
@@ -94,7 +102,8 @@ const crasher = Plugin.define({
 const counting = (seen: Array<string>) =>
   Plugin.define({
     id: "counting",
-    effect: (ctx) => ctx.machine.hook("connect", (event) => Effect.sync(() => seen.push(event.name))),
+    effect: (ctx) =>
+      ctx.machine.hook("connect", (event) => Effect.sync(() => seen.push(event.name)), { runtime: "other" }),
   })
 
 const pair = (extra: ReadonlyArray<Plugin.Plugin> = [], options: { readonly late?: boolean } = {}) =>
@@ -230,7 +239,7 @@ describe("another machine's terminals here", () => {
   )
 
   it.effect(
-    "a runtime plugin loaded after machine add: connect reaches only it, with no reconnect; ls then shows the address",
+    "a runtime plugin loaded after machine add: connect reaches only hooks for its runtime, with no reconnect; ls then shows the address",
     () =>
       runs(
         Effect.gen(function* () {
@@ -245,7 +254,7 @@ describe("another machine's terminals here", () => {
             Effect.sync(() => A.connects.length),
             (n) => n === 1,
           )
-          assert.deepStrictEqual(seen, ["mb"], "the plugin loaded before is not called again")
+          assert.deepStrictEqual(seen, ["mb"], "a hook for another runtime is not called again")
           assert.strictEqual(net.argv.length, dials, "no reconnect")
           assert.deepStrictEqual((yield* listed(spawned.id)).address, {
             machine: "local",

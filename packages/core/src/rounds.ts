@@ -1,4 +1,4 @@
-import { NoSuchSession, NotReady } from "@vibest/schema/session"
+import { type HarnessUnavailable, NoSuchSession, NotReady } from "@vibest/schema/session"
 import { Clock, Effect, Exit, Ref } from "effect"
 import type { FileSystem } from "effect"
 
@@ -13,7 +13,7 @@ import {
   type TurnState,
   failureOf,
 } from "./db.ts"
-import type { HarnessAdapter } from "./harness.ts"
+import type { HarnessDefinition } from "./host.ts"
 import { nextBatch } from "./inbox.ts"
 import type { LimitMove } from "./move.ts"
 import { workspaceGit } from "./project-create.ts"
@@ -44,9 +44,9 @@ export const sessionRounds = (deps: {
     readonly beginUserTurn: (id: string, text: string, patch: SessionPatch) => Effect.Effect<boolean>
   }
   readonly harnesses: {
-    readonly all: ReadonlyArray<HarnessAdapter>
-    readonly get: (id: SessionRow["harnessId"]) => HarnessAdapter
-    readonly find: (id: string | null | undefined) => HarnessAdapter | undefined
+    readonly all: ReadonlyArray<HarnessDefinition>
+    readonly get: (id: SessionRow["harnessId"]) => Effect.Effect<HarnessDefinition, HarnessUnavailable>
+    readonly find: (id: string | null | undefined) => HarnessDefinition | undefined
   }
   readonly track: (id: string) => Effect.Effect<{ readonly prompting: Ref.Ref<boolean> }>
   readonly lock: (id: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
@@ -64,7 +64,7 @@ export const sessionRounds = (deps: {
     text: string,
     onHandover?: Effect.Effect<void>,
     options?: { readonly keepRound?: boolean },
-  ) => Effect.Effect<string | undefined, NotReady | RuntimeError, FileSystem.FileSystem>
+  ) => Effect.Effect<string | undefined, NotReady | RuntimeError | HarnessUnavailable, FileSystem.FileSystem>
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
   const { db, harnesses } = deps
@@ -192,10 +192,9 @@ export const sessionRounds = (deps: {
 
   const collectResult = Effect.fn("Sessions.collectResult")(function* (h: Runtime | undefined, session: SessionRow) {
     const terminal = session.address
-    const found = yield* db.latestReport(
-      session.id,
-      harnesses.get(session.harnessId).ready === "integration" ? "ready" : "start",
-    )
+    const adapter = harnesses.find(session.harnessId)
+    if (adapter === undefined) return "none" as const
+    const found = yield* db.latestReport(session.id, adapter.ready === "integration" ? "ready" : "start")
     if (found === undefined) return "none" as const
     if (found.harness !== session.harnessId) return "none" as const
     if (session.turnState === "open") {
@@ -210,7 +209,7 @@ export const sessionRounds = (deps: {
       yield* deps.limitMove.rerun(h, session, terminal.id === "" ? undefined : terminal, "", false, found.error)
       return "delivered" as const
     }
-    if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId && found.conversationId)
+    if (!adapter.ownSessionId && !session.harnessSessionId && found.conversationId)
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
     yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.at, found.id)
     return "delivered" as const

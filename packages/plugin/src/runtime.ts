@@ -1,4 +1,6 @@
-import { type Effect, Schema, type Stream } from "effect"
+import { type Effect, Schema, type Stream, type Types } from "effect"
+
+import type { Transform } from "./registration.ts"
 
 export interface Machine {
   readonly id: string
@@ -52,8 +54,19 @@ export type RuntimeEvent =
   | { readonly type: "state"; readonly terminal: Terminal; readonly state: AgentState }
   | { readonly type: "reset"; readonly machine: string }
 
-export interface Runtime {
-  readonly kind: string
+export type CallerValues = Readonly<Record<string, string | undefined>>
+
+export interface RuntimeCaller {
+  readonly env: ReadonlyArray<string>
+  readonly terminal: (env: CallerValues) => Effect.Effect<string | undefined, unknown>
+  readonly ready?: (env: CallerValues) => Effect.Effect<boolean, unknown>
+  readonly missing?: string
+  readonly target?: (env: CallerValues, named?: string) => string | undefined
+}
+
+export interface RuntimeDefinition {
+  readonly id: string
+  readonly caller?: RuntimeCaller
   readonly status: (machine: Machine) => Effect.Effect<MachineStatus>
 
   readonly open: (
@@ -99,6 +112,15 @@ export interface Runtime {
   readonly locate?: (machine: Machine, sessions: ReadonlyArray<string>) => Effect.Effect<Located>
 }
 
-export interface RuntimeRegistry {
-  readonly register: (runtime: Runtime) => Effect.Effect<void>
+export interface RuntimeEditor {
+  list(): ReadonlyArray<RuntimeDefinition>
+  get(id: string): RuntimeDefinition | undefined
+  add(definition: RuntimeDefinition): void
+  update(id: string, update: (definition: Types.Mutable<RuntimeDefinition>) => void): void
+  remove(id: string): void
+}
+
+export interface RuntimeDomain {
+  readonly transform: Transform<RuntimeEditor>
+  readonly reload: () => Effect.Effect<void>
 }

@@ -6,7 +6,6 @@ import { Layout } from "@vibest/core/paths"
 import { PluginLoader } from "@vibest/core/plugin-sources"
 import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
-import { Plugin } from "@vibest/plugin"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import { HANDOFF_ENV } from "@vibest/server/daemon"
@@ -31,6 +30,7 @@ import {
   resultText,
   systemPromptFile,
   projectOf,
+  callerPlugin,
 } from "./fakes.ts"
 
 const served = Server.layer.pipe(
@@ -49,6 +49,32 @@ const coordinatorUpdate = (agent: string, args: ReadonlyArray<string>) =>
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 describe("vibest CLI", () => {
+  test(
+    "vibest run without a harness starts on the main agent's harness; auto is an unknown harness; a harness name alone is a missing prompt",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const layout = yield* Layout
+      const repo = yield* makeRepository
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "claude", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "w1:p1" },
+      })
+      const run = (args: ReadonlyArray<string>) => vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args)
+      const inherited = yield* run(["run", "--runtime", "herdr", "--", "do it"])
+      assert.strictEqual(inherited.code, 0, inherited.stderr)
+      const { id } = decodeJson(inherited.stdout) as { id: string }
+      assert.strictEqual((yield* db.getSession(id))?.harnessId, "claude")
+      const auto = yield* run(["run", "--runtime", "herdr", "auto", "--", "do it"])
+      assert.notStrictEqual(auto.code, 0)
+      assert.include(auto.stderr, "no plugin provides harness auto")
+      const before = (yield* db.listSessions()).length
+      const forgotten = yield* run(["run", "--runtime", "herdr", "claude"])
+      assert.notStrictEqual(forgotten.code, 0)
+      assert.include(forgotten.stderr, "the prompt is missing: claude is a harness")
+      assert.strictEqual((yield* db.listSessions()).length, before)
+    }),
+  )
+
   test(
     "plain CLI: run, status, send and ls print JSON; input is literal; empty input and unknown commands fail",
     Effect.gen(function* () {
@@ -645,7 +671,7 @@ describe("vibest CLI without vibestd", () => {
   )
 
   it.effect(
-    "integration guard fails with no answer when no vibest agent runs it, or on input it cannot read; the plugin refuses the call then",
+    "integration guard fails with no answer when no vibest agent runs it, or when vibestd cannot check the call; the plugin refuses the call then",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -656,10 +682,10 @@ describe("vibest CLI without vibestd", () => {
         assert.notStrictEqual(noAgent.code, 0, noAgent.stderr)
         assert.strictEqual(noAgent.stdout, "")
         assert.match(noAgent.stderr, /VIBEST_AGENT/)
-        const unreadable = yield* guard({ VIBEST_AGENT: "general", VIBEST_PROJECT_DIR: cwd }, "not json")
-        assert.notStrictEqual(unreadable.code, 0, unreadable.stderr)
-        assert.strictEqual(unreadable.stdout, "")
-        assert.match(unreadable.stderr, /JSON/)
+        const unchecked = yield* guard({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "s1" }, "not json")
+        assert.notStrictEqual(unchecked.code, 0, unchecked.stderr)
+        assert.strictEqual(unchecked.stdout, "")
+        assert.match(unchecked.stderr, /vibestd/)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     TIMEOUT,
   )
@@ -745,14 +771,9 @@ it.effect("vibest execs the daemon command over the process environment and neve
         Layer.provideMerge(
           testLayer({
             plugins: [
-              Plugin.define({
-                id: "runtime-herdr",
-                caller: {
-                  kind: "herdr",
-                  env: ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"],
-                  terminal: (env) => Effect.succeed(env.HERDR_PANE_ID),
-                },
-                effect: () => Effect.void,
+              callerPlugin("herdr", {
+                env: ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"],
+                terminal: (env) => Effect.succeed(env.HERDR_PANE_ID),
               }),
             ],
           }),

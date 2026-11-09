@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@effect/platform-node-shared": "catalog:",
-    "@vibest/core": "workspace:*",
     "@vibest/plugin": "workspace:*",
     "@vibest/schema": "workspace:*",
     "effect": "catalog:",

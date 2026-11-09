@@ -5,22 +5,16 @@ import os from "node:os"
 
 import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { CallerEnv } from "@vibest/client/client"
+import { pre } from "@vibest/builtins"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
-import { callerKeys } from "@vibest/core/caller"
 import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
 import { MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
-import { CLAUDE_CREDENTIALS, claudeCredentialsFile, type KeychainPlatform, securityArgs } from "@vibest/core/keychain"
 import type { MachineTransport } from "@vibest/core/machines"
-import { type Candidate, type PluginLoader } from "@vibest/core/plugins"
+import { type PluginLoader } from "@vibest/core/plugins"
 import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibest/core/processes"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
-import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
-import { plugin as runtimeHcPlugin } from "@vibest/runtime-herdr-core/plugin"
-import { choicePlugin } from "@vibest/runtime-herdr/choice"
-import { plugin as runtimeHerdrPlugin } from "@vibest/runtime-herdr/plugin"
 import type { Host } from "@vibest/server/daemon"
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
@@ -150,34 +144,6 @@ const terminate = (pid: number) => {
 
 const processes: ProcessPlatform = { liveness, terminate, pid: process.pid, uid: process.getuid?.() }
 
-const securityPassword = (service: string) =>
-  Effect.promise(async () => {
-    const proc = Bun.spawn([...securityArgs(service)], { stdin: "ignore", stdout: "pipe", stderr: "ignore" })
-    const timer = setTimeout(() => proc.kill(), 10_000)
-    try {
-      const [code, text] = await Promise.all([proc.exited, new Response(proc.stdout).text()])
-      const value = text.replace(/\n$/, "")
-      return code === 0 && value !== "" ? value : undefined
-    } finally {
-      clearTimeout(timer)
-    }
-  }).pipe(Effect.orElseSucceed(() => undefined))
-
-const credentialFile = (file: string) =>
-  Effect.promise(async () => {
-    const stored = Bun.file(file)
-    return (await stored.exists()) ? await stored.text() : undefined
-  }).pipe(Effect.orElseSucceed(() => undefined))
-
-const keychain: KeychainPlatform = {
-  password: (service) =>
-    process.platform === "darwin"
-      ? securityPassword(service)
-      : service === CLAUDE_CREDENTIALS && process.env.HOME
-        ? credentialFile(claudeCredentialsFile(process.env.HOME))
-        : Effect.succeed(undefined),
-}
-
 const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
 })
@@ -259,28 +225,20 @@ const transport: MachineTransport["Service"] = (argv) =>
     }),
   )
 
-const builtinPlugins: ReadonlyArray<Candidate> = [
-  { source: "builtin:harness-choice", revision: "harness-choice", options: {}, plugin: harnessChoicePlugin },
-  { source: "builtin:runtime-herdr-core", revision: "runtime-herdr-core", options: {}, plugin: runtimeHcPlugin },
-  { source: "builtin:runtime-herdr", revision: "runtime-herdr", options: {}, plugin: runtimeHerdrPlugin },
-  { source: "builtin:runtime-choice", revision: "runtime-choice", options: {}, plugin: choicePlugin() },
-]
-
-const clearCallerEnv = (plugins: ReadonlyArray<Candidate>) => {
-  for (const key of callerKeys(plugins)) delete process.env[key]
+const dropEnv = (names: ReadonlyArray<string>) => {
+  for (const name of names) delete process.env[name]
 }
 
-export const services = Layer.mergeAll(platform, Layer.succeed(CallerEnv, callerKeys(builtinPlugins)))
+export const services = platform
 
 export const daemon: Omit<Host, "runtime"> = {
   sqlite,
   socketServer: (path) => BunSocketServer.layer({ path }),
   httpServer: (path) => BunHttpServer.layerServer({ unix: path }),
   plugins,
-  builtinPlugins,
-  clearCallerEnv,
+  builtins: pre,
+  env: { drop: dropEnv },
   processes,
-  keychain,
   lock,
   checkDatabase,
   host: { name: os.hostname(), id: hostId },

@@ -7,7 +7,7 @@ import { AgentRefused, Plugin } from "@vibest/plugin"
 import { Effect } from "effect"
 
 import glmOnly from "../../../packages/plugin/examples/glm-only.ts"
-import { harnessChoice } from "./fakes.ts"
+import { harnessesLayer } from "./fakes.ts"
 
 const candidate = (id: string, plugin: Plugin.Plugin, options: Record<string, unknown> = {}): Candidate => ({
   source: id,
@@ -52,10 +52,11 @@ const failed = {
 }
 
 const run = <A, E, R>(plugins: ReadonlyArray<Candidate>, f: (p: Plugins["Service"]) => Effect.Effect<A, E, R>) =>
-  Plugins.make([harnessChoice, ...plugins]).pipe(
+  Plugins.make(plugins).pipe(
     Effect.flatMap(f),
     Effect.scoped,
     Effect.provide(Subscriptions.layer),
+    Effect.provide(harnessesLayer()),
     Effect.provide(Runtimes.layer),
     Effect.provide(Bus.layer),
   )
@@ -97,7 +98,6 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
             assert.deepStrictEqual(
               d.trace.map((t) => [t.plugin, t.outcome, t.changes]),
               [
-                ["harness-choice", "ok", []],
                 ["A", "ok", [{ field: "model", from: "requested", to: "a" }]],
                 ["B", "ok", [{ field: "model", from: "a", to: "b", overwrote: "A" }]],
               ],
@@ -133,7 +133,6 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
           assert.deepStrictEqual(
             (yield* p.list).map((q) => [q.id, q.refused, q.calls]),
             [
-              ["harness-choice", 0, 1],
               ["budget", 1, 1],
               ["after", 0, 0],
             ],

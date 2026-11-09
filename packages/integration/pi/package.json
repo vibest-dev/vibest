@@ -26,7 +26,6 @@
   "dependencies": {
     "@effect/platform-node-shared": "catalog:",
     "@vibest/client": "workspace:*",
-    "@vibest/core": "workspace:*",
     "@vibest/protocol": "workspace:*",
     "@vibest/schema": "workspace:*",
     "effect": "catalog:"
@@ -35,6 +34,7 @@
     "@earendil-works/pi-coding-agent": "catalog:",
     "@earendil-works/pi-tui": "1.2.0",
     "@vibest/cli": "workspace:*",
+    "@vibest/core": "workspace:*",
     "@vibest/server": "workspace:*"
   },
   "peerDependencies": {

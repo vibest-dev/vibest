@@ -1,6 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { cursor } from "@vibest/core/harnesses/cursor"
+import { Harnesses } from "@vibest/core/harness"
 import { Sessions } from "@vibest/core/sessions"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { prompt, turnEnd } from "@vibest/server/hooks"
@@ -8,7 +8,17 @@ import { Clock, Effect, Fiber, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import { FakeRuntime, makeRepository, settled, TURNS, until, untilVirtual, writeResult, projectOf } from "./fakes.ts"
+import {
+  CURSOR,
+  FakeRuntime,
+  makeRepository,
+  settled,
+  TURNS,
+  until,
+  untilVirtual,
+  writeResult,
+  projectOf,
+} from "./fakes.ts"
 import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
@@ -516,15 +526,15 @@ describe.concurrent("Sessions", () => {
       assert.isFalse((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("enter")))
       yield* turnEnd(
         db,
-        cursor,
+        CURSOR,
         { id, agent: "general" },
         JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }),
       )
       const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
-      yield* prompt(sessions, cursor, { id, agent: "general" }, thought)
+      yield* prompt(sessions, db, CURSOR, { id, agent: "general" }, thought)
       assert.strictEqual((yield* db.getSession(id))!.status, "idle")
       yield* untilVirtual(db.getSession(id), (w) => w?.turnState === "completed")
-      yield* prompt(sessions, cursor, { id, agent: "general" }, thought)
+      yield* prompt(sessions, db, CURSOR, { id, agent: "general" }, thought)
       yield* settled
       assert.strictEqual((yield* db.getSession(id))!.status, "idle")
       yield* sessions.send(id, "next")
@@ -533,6 +543,28 @@ describe.concurrent("Sessions", () => {
       assert.include(stopped.message, "interrupted")
       assert.isTrue((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("ctrl+c")))
       assert.deepInclude(yield* db.getSession(id), { status: "idle", turnState: "interrupted" })
+    }),
+  )
+
+  test(
+    "a send to a session whose harness no plugin provides any more fails with HarnessUnavailable in its notice",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions } = yield* spawnWorking(yield* makeRepository)
+      yield* writeResult(id, "pi", { text: "status: completed" })
+      yield* herdr.endTurn(id)
+      yield* sessions.check(id)
+      const harnesses = yield* Harnesses
+      yield* harnesses.transform((editor) => editor.remove("pi"))
+      assert.strictEqual((yield* Effect.flip(harnesses.get("pi")))._tag, "HarnessUnavailable")
+      yield* sessions.send(id, "hello")
+      const [notice] = yield* until(sqlNotices(id), (rows) => rows.length === 1)
+      assert.match(
+        notice!,
+        new RegExp(`^A message to ${id} was not delivered: no plugin provides harness pi; loaded: `),
+      )
+      assert.strictEqual(notice!.split("\n\n").at(-1), "hello")
+      yield* sessions.check(id)
     }),
   )
 

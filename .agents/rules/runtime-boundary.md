@@ -1,6 +1,6 @@
 # Runtime Boundary
 
-The terminal runtime (herdr today) is a plugin behind `Runtime` in `@vibest/plugin`. This is not the Bun boundary; for that see [bun-runtime-boundary.md](bun-runtime-boundary.md).
+The terminal runtime (herdr and hc today) is a plugin that adds a `RuntimeDefinition` (`@vibest/plugin`) with `context.runtime.transform`; core routes by its `id` and detects the caller's terminal from its optional `caller`. This is not the Bun boundary; for that see [bun-runtime-boundary.md](bun-runtime-boundary.md).
 
 1. Core, environment names, headers and the protocol carry no runtime-specific names: no herdr pane ids, no `HERDR_*` outside `packages/runtime-herdr`. A terminal `{machine, id}` is opaque to core.
 2. Runtime data travels as one opaque field: `VIBEST_RUNTIME` in the environment and the `vibest-runtime` header, for example `{"runtime":"herdr","machine":"local","terminal":"<id>"}`. It carries the terminal when it is known; a subagent env is fixed before its pane opens, so its `VIBEST_RUNTIME` has no terminal.

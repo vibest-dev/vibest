@@ -70,7 +70,6 @@ export const sessionPlacement = (deps: {
     readonly readDirectory: (path: string) => Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError>
   }
   readonly path: { readonly dirname: (path: string) => string }
-  readonly harnesses: { readonly get: (id: SessionRow["harnessId"]) => { readonly systemPromptInPrompt: boolean } }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
   readonly vibestEnv: (session: SessionRow) => Readonly<Record<string, string>>
   readonly launchArgv: (
@@ -151,7 +150,7 @@ export const sessionPlacement = (deps: {
       readonly endedByCaller?: boolean
     },
   ) {
-    const near = input.near !== undefined ? input.near : yield* nearMain(session, h.kind)
+    const near = input.near !== undefined ? input.near : yield* nearMain(session, h.id)
     const choice = {
       harnessId: session.harnessId,
       provider: session.provider,

@@ -1,7 +1,9 @@
+import type { Harness } from "@vibest/plugin"
 import { Config, Effect, FileSystem, Path, Ref, Schema } from "effect"
 
-import { noProvider, type HarnessAdapter, opt, type Startup } from "../harness.ts"
-import { findMessage, jsonLines, type RawModel, withConfigured } from "../models.ts"
+import { findMessage, jsonLines, noProvider, opt, withConfigured } from "./models.ts"
+import { platform } from "./platform.ts"
+import { claudeSubscription } from "./subscriptions/claude.ts"
 
 const CLAUDE_MENUS = [
   { menu: "trust", pattern: /trust this folder/i, accept: /^\s*❯.*Yes, I trust this folder/im },
@@ -13,7 +15,7 @@ export const claudeMenuKey = (screen: string, answered: ReadonlyArray<string>) =
   return m && { menu: m.menu, key: m.accept.test(screen) ? ("enter" as const) : ("down" as const) }
 }
 
-const claudeStartup: Startup = Effect.map(
+const claudeStartup: NonNullable<Harness.HarnessDefinition["startup"]> = Effect.map(
   Ref.make<ReadonlyArray<string>>([]),
   (answered) => (pane) =>
     Effect.gen(function* () {
@@ -88,7 +90,7 @@ const claudeApplied = findMessage(
 
 const ANTHROPIC_RECOMMENDED_ENTRY = "default"
 
-export const claudeModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawModel> | undefined => {
+export const claudeModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
   const init = claudeInit(lines)
   const settings = claudeApplied(lines)
   if (!init || !settings) return undefined
@@ -107,7 +109,7 @@ export const claudeModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawMod
   )
 }
 
-export const claude: HarnessAdapter = {
+export const claude: Harness.HarnessDefinition = {
   id: "claude",
   binary: "claude",
   ownSessionId: true,
@@ -172,5 +174,6 @@ export const claude: HarnessAdapter = {
   canResume: (root, sessionId) =>
     Effect.flatMap(transcript(root, sessionId), (file) =>
       Effect.flatMap(FileSystem.FileSystem, (fs) => fs.exists(file)),
-    ).pipe(Effect.orDie),
+    ).pipe(Effect.provide(platform), Effect.orDie),
+  subscription: (home) => claudeSubscription(home).pipe(Effect.provide(platform)),
 }

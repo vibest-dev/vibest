@@ -14,10 +14,9 @@ import {
   SocketConnector,
   withVibest,
 } from "@vibest/client/client"
-import * as Guard from "@vibest/core/guard"
-import { Layout, VibestCommand } from "@vibest/core/paths"
 import { VERSION } from "@vibest/protocol/rpc"
-import { Cause, Config, Deferred, Effect, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
+import { Layout, VibestCommand } from "@vibest/schema/layout"
+import { Cause, Config, Deferred, Effect, Exit, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect"
 
 import { Pi } from "./pi.ts"
 import toolGroups from "./tui/tool-groups.ts"
@@ -27,13 +26,29 @@ export const skillsDir = path.join(path.dirname(url.fileURLToPath(import.meta.ur
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
-const guarded = (rules: Guard.Rules) =>
+const COORDINATOR = "coordinator"
+
+const guarded = (agent: string, sessionId: string | undefined) =>
   Effect.gen(function* () {
     const pi = yield* Pi
+    const layout = yield* Layout
     yield* pi.handle("tool_call", (e, ctx) =>
-      rules({ tool: e.toolName, input: e.input, cwd: ctx.cwd }).pipe(
-        Effect.map((reason) => (reason ? { block: true, reason } : undefined)),
-      ),
+      Effect.gen(function* () {
+        const headers = yield* claimHeaders(
+          sessionId ? { _tag: "session", sessionId, pluginVersion: VERSION } : { _tag: "cli", repositoryRoot: ctx.cwd },
+        )
+        const input = encodeJson({ tool_name: e.toolName, tool_input: e.input, cwd: ctx.cwd })
+        const exit = yield* hookCall(layout.socket, headers, (client) =>
+          client["Integration.Guard"]({ harness: "pi", agent, input }),
+        )
+        if (Exit.isFailure(exit))
+          return {
+            block: true,
+            reason: `vibest could not check this tool call (${Cause.pretty(exit.cause)}); it is refused.`,
+          }
+        const reason = exit.value.answer
+        return typeof reason === "string" && reason ? { block: true, reason } : undefined
+      }),
     )
   })
 
@@ -211,10 +226,10 @@ export const extension = Layer.unwrap(
   Effect.gen(function* () {
     const agent = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT")))
     if (!agent) return Layer.empty
-    const guarding: Role = Layer.effectDiscard(guarded(Guard.rulesOf(agent)))
     const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID")))
+    const guarding: Role = Layer.effectDiscard(guarded(agent, sessionId))
     const guard = sessionId ? Layer.merge(guarding, ready(sessionId)) : guarding
-    if (agent === Guard.COORDINATOR) return coordinator.pipe(Layer.provideMerge(guard))
+    if (agent === COORDINATOR) return coordinator.pipe(Layer.provideMerge(guard))
     return sessionId ? session(sessionId).pipe(Layer.provideMerge(guard)) : guard
   }),
 )

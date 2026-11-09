@@ -1,0 +1,21 @@
+{
+  "name": "@vibest/plugin-harnesses",
+  "version": "0.0.1-beta.17",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/plugin-harnesses"
+  },
+  "dependencies": {
+    "@effect/platform-node-shared": "catalog:",
+    "@vibest/plugin": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "effect": "catalog:"
+  }
+}

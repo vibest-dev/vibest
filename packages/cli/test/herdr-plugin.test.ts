@@ -386,31 +386,38 @@ const served = Server.layer.pipe(
 )
 
 describe("herdr open-main", () => {
-  it.effect("focuses a running main agent, and launches one when there is none", () =>
-    Effect.gen(function* () {
-      const layout = yield* Layout
-      const db = yield* Db
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const env = {
-        HOME: layout.home,
-        VIBEST_HOME: layout.home,
-        HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_cwd: repo }),
-      }
-      const none = yield* runVibest(repo, env, ["herdr", "open-main"])
-      assert.strictEqual(none.code, 0, none.stderr)
-      assert.match(none.stdout, /^opened /)
-      assert.ok((yield* herdr.callsTo("open")).length > 0)
-      const projectId = yield* projectOf(repo)
-      yield* db.coordinatorLaunch(projectId, "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "test/main" },
-      })
-      yield* herdr.seedAgent("test/main")
-      const again = yield* runVibest(repo, env, ["herdr", "open-main"])
-      assert.strictEqual(again.code, 0, again.stderr)
-      assert.match(again.stdout, /^focused /)
-      assert.strictEqual((yield* herdr.callsTo("focus")).at(-1)?.terminal, "test/main")
-    }).pipe(Effect.provide(served)),
+  it.effect(
+    "refuses a project that never had a main agent, launches the last one's harness, and focuses a running one",
+    () =>
+      Effect.gen(function* () {
+        const layout = yield* Layout
+        const db = yield* Db
+        const herdr = yield* FakeRuntime
+        const repo = yield* makeRepository
+        const env = {
+          HOME: layout.home,
+          VIBEST_HOME: layout.home,
+          HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_cwd: repo }),
+        }
+        const never = yield* runVibest(repo, env, ["herdr", "open-main"])
+        assert.notStrictEqual(never.code, 0)
+        assert.match(never.stderr, /no harness to inherit/)
+        assert.strictEqual((yield* herdr.callsTo("open")).length, 0)
+        const projectId = yield* projectOf(repo)
+        yield* db.coordinatorLaunch(projectId, "pi", false, {
+          runtime: "herdr",
+          address: { machine: "local", id: "test/main" },
+        })
+        const stopped = yield* runVibest(repo, env, ["herdr", "open-main"])
+        assert.strictEqual(stopped.code, 0, stopped.stderr)
+        assert.match(stopped.stdout, /^opened /)
+        assert.ok((yield* herdr.callsTo("open")).length > 0)
+        const main = (yield* db.coordinatorOf(projectId))!.address!.id
+        yield* herdr.seedAgent(main)
+        const again = yield* runVibest(repo, env, ["herdr", "open-main"])
+        assert.strictEqual(again.code, 0, again.stderr)
+        assert.match(again.stdout, /^focused /)
+        assert.strictEqual((yield* herdr.callsTo("focus")).at(-1)?.terminal, main)
+      }).pipe(Effect.provide(served)),
   )
 })

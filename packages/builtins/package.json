@@ -1,5 +1,5 @@
 {
-  "name": "@vibest/plugin-harness-choice",
+  "name": "@vibest/builtins",
   "version": "0.0.1-beta.17",
   "private": true,
   "license": "MIT",
@@ -8,11 +8,13 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsrs --noEmit --fast",
-    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/plugin-harness-choice"
+    "typecheck": "tsrs --noEmit --fast"
   },
   "dependencies": {
     "@vibest/plugin": "workspace:*",
+    "@vibest/plugin-harnesses": "workspace:*",
+    "@vibest/runtime-herdr": "workspace:*",
+    "@vibest/runtime-herdr-core": "workspace:*",
     "effect": "catalog:"
   }
 }

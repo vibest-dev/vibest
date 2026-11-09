@@ -183,8 +183,9 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
 - **The hooks.** `machine.connect` ("make sure your runtime has this machine") and `machine.remove` ("make sure it
   does not") carry `{name, target, vibestd, runtimes, notes}`. `connect` fires inside `Machine.Add` after the row is
   stored (its notes go into the answer), at every reconnect and every connect after vibestd starts, after each plugin
-  activation for every connected machine (only to the plugins that activation started), and at the moment of use
-  (below, only to the plugin that registered that runtime kind). `remove` fires in `Machine.Remove` after the row is
+  commit of the runtime registry for every connected machine (only to the hooks scoped to a runtime that commit added or
+  replaced, plus unscoped ones), and at the moment of use (below, only to the hooks scoped to that runtime, plus
+  unscoped ones). `remove` fires in `Machine.Remove` after the row is
   deleted, with the last Hello's runtimes (none after a vibestd restart with B unreachable); its notes go into the
   answer. A hook never fails a command; its trouble is a note with a fix. Fires and uses for one machine run one at a
   time under a per-machine lock, and a hook may hold it up to its 30 s bound, so an `ls` can wait behind a reconnect's
@@ -192,7 +193,7 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
 - **`ensure`: check and repair at the moment of use.** Before `List` and `Get` rewrite a remote row of runtime kind
   `k`, before `Peek` names the terminal, before `machine ls` shows "here", and before `run --machine` sends
   `Peer.Spawn` with runtime `k`, A asks its runtime of kind `k` with `locate` where B's terminals are. `missing` (the
-  runtime has no machine with the link's id) fires `connect` to the owner plugin and asks again. Still missing: the
+  runtime has no machine with the link's id) fires `connect` for that runtime and asks again. Still missing: the
   note is kept for 30 s, during which `ls`, `Get`, `Peek` and `machine ls` show it without trying again; `run
   --machine` always tries, and still starts the agent, answering the note in `notes`. The pause starts when the
   repair gives up, so a hook that hangs to its 30 s bound is not run again by the next `ls`.

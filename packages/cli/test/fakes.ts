@@ -4,8 +4,8 @@ import { readPing } from "@vibest/client/client"
 import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { Harness, Harnesses, HARNESS_IDS, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
-import * as BuiltinHarnesses from "@vibest/core/harnesses"
+import { Harness, Harnesses, HarnessUnavailable, makeHarnesses } from "@vibest/core/harness"
+import type { HarnessDefinition, HarnessesShape, RuntimeDefinition, RuntimesShape } from "@vibest/core/host"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
 import { Machines, MachineTransport } from "@vibest/core/machines"
@@ -18,12 +18,11 @@ import { Remote } from "@vibest/core/remote"
 import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
 import { turnEndFrom } from "@vibest/core/results"
-import { Runtimes, registry } from "@vibest/core/runtimes"
+import { make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
-import type * as VibestPlugin from "@vibest/plugin"
-import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
+import * as VibestPlugin from "@vibest/plugin"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { randomId } from "@vibest/schema/id"
 import { readDaemonInfo } from "@vibest/server/daemon"
@@ -43,6 +42,7 @@ import {
   PubSub,
   Ref,
   Schema,
+  type Scope,
   Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -52,7 +52,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { FakeGit } from "./fake-git.ts"
-import { FakeRuntime, type FakeRuntimeOptions } from "./fake-runtime.ts"
+import { FakeRuntime, type FakeRuntimeOptions, KIND } from "./fake-runtime.ts"
 
 export { FakeGit, FakeRuntime }
 
@@ -86,7 +86,7 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
 
 export const writeResult = (id: string, harness: string, payload: object, offsetMs = 1000) =>
   Effect.gen(function* () {
-    const adapter = (yield* Harnesses).get(harness as HarnessId)
+    const adapter = yield* (yield* Harnesses).get(harness)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
     yield* (yield* Db).reportTurn(id, turnEndFrom(adapter, payload as Record<string, unknown>, at))
   })
@@ -317,8 +317,8 @@ export class FakeProcesses extends Context.Service<
 }
 
 export interface TestOptions extends FakeRuntimeOptions {
-  readonly hooked?: ReadonlyArray<HarnessId>
-  readonly unusable?: ReadonlyArray<HarnessId>
+  readonly hooked?: ReadonlyArray<string>
+  readonly unusable?: ReadonlyArray<string>
   readonly models?: ReadonlyArray<string>
   readonly maxSessions?: number
   readonly plugins?: ReadonlyArray<
@@ -326,20 +326,178 @@ export interface TestOptions extends FakeRuntimeOptions {
     | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
   >
   readonly pluginTimeout?: Duration.Input
-  readonly sshHosts?: Readonly<Record<string, string>>
+  readonly activateLate?: boolean
   readonly db?: (db: Db["Service"]) => Db["Service"]
-  readonly missingBinary?: ReadonlyArray<HarnessId>
+  readonly missingBinary?: ReadonlyArray<string>
+  readonly harnesses?: ReadonlyArray<HarnessDefinition>
+  readonly sshHosts?: Readonly<Record<string, string>>
   readonly transport?: MachineTransport["Service"]
   readonly sessions?: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]
 }
 
 const noTransport: MachineTransport["Service"] = () => Effect.fail(new Error("no machine transport in this test"))
 
+const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
+
+const providerModel = (provider: string | null, model: string | null) =>
+  model ? [...opt("--provider", provider), "--model", model] : []
+
+export const PI: HarnessDefinition = {
+  id: "pi",
+  binary: "pi",
+  ownSessionId: true,
+  systemPromptInPrompt: false,
+  interruptKey: "esc",
+  resultField: "text",
+  inbox: "subscribe",
+  ready: "integration",
+  launchArgs: (i) => [
+    "--session-id",
+    i.sessionId!,
+    "--append-system-prompt",
+    i.systemPromptFile,
+    "-e",
+    `${i.pluginDir}/extension.mjs`,
+    ...providerModel(i.provider, i.model),
+  ],
+  coordinatorArgs: (i) => [
+    ...opt("--session-id", i.sessionId),
+    "--system-prompt",
+    i.systemPromptFile,
+    "-e",
+    `${i.pluginDir}/extension.mjs`,
+    ...providerModel(i.provider, i.model),
+  ],
+  models: { args: () => [], answer: () => undefined },
+  turnEnd: (event, coordinator) =>
+    coordinator || event.type !== "agent_settled"
+      ? undefined
+      : { result: { text: typeof event.text === "string" ? event.text : "", error: "", aborted: false } },
+  userPrompt: (event, coordinator) =>
+    coordinator || event.type !== "input" || typeof event.text !== "string" || event.text.trim() === ""
+      ? undefined
+      : { text: event.text },
+}
+
+const noProvider = (harness: string) => (provider: string | null) =>
+  provider ? `${harness} has no provider option` : undefined
+
+export const CLAUDE: HarnessDefinition = {
+  id: "claude",
+  binary: "claude",
+  ownSessionId: true,
+  systemPromptInPrompt: false,
+  interruptKey: "esc",
+  resultField: "last_assistant_message",
+  inbox: "poll",
+  ready: "integration",
+  checkProvider: noProvider("claude"),
+  launchArgs: (i) => [
+    ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),
+    "--append-system-prompt-file",
+    i.systemPromptFile,
+    "--plugin-dir",
+    i.pluginDir,
+    ...opt("--model", i.model),
+  ],
+  coordinatorArgs: (i) => [
+    ...opt("--resume", i.sessionId),
+    "--append-system-prompt-file",
+    i.systemPromptFile,
+    "--plugin-dir",
+    i.pluginDir,
+    ...opt("--model", i.model),
+  ],
+  models: { args: () => [], answer: () => undefined },
+  turnEnd: (event, coordinator) =>
+    coordinator || event.hook_event_name !== "TurnComplete"
+      ? undefined
+      : {
+          result:
+            event.reason === "answer"
+              ? event
+              : event.reason === "aborted"
+                ? {
+                    ...event,
+                    aborted: true,
+                    error: "interrupted",
+                    error_details: "the turn was stopped in its terminal (Esc) before it ended",
+                  }
+                : { ...event, error: "error", error_details: "the turn ended on an API error" },
+        },
+  userPrompt: (event, coordinator) =>
+    coordinator || event.hook_event_name !== "PromptSubmit" || typeof event.text !== "string" || !event.text.trim()
+      ? undefined
+      : { text: event.text },
+}
+
+export const CURSOR: HarnessDefinition = {
+  id: "cursor",
+  binary: "cursor-agent",
+  ownSessionId: false,
+  systemPromptInPrompt: true,
+  interruptKey: "ctrl+c",
+  resultField: "text",
+  ready: "runtime",
+  checkProvider: noProvider("cursor"),
+  launchArgs: (i) => [
+    ...(i.resume && i.sessionId ? [`--resume=${i.sessionId}`] : []),
+    "--plugin-dir",
+    i.pluginDir,
+    ...opt("--model", i.model),
+  ],
+  models: { args: () => [], answer: () => undefined },
+  guardAnswer: (reason) =>
+    reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
+  conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),
+  turnEnd: (event, coordinator) =>
+    !coordinator && event.hook_event_name === "afterAgentResponse" ? { result: event } : undefined,
+  userPrompt: (event, coordinator) => {
+    if (coordinator) return undefined
+    if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }
+    return event.hook_event_name === "beforeSubmitPrompt" && typeof event.prompt === "string" && event.prompt.trim()
+      ? { text: event.prompt }
+      : undefined
+  },
+}
+
+export const HARNESSES: ReadonlyArray<HarnessDefinition> = [PI, CLAUDE, CURSOR]
+
+export const harnessesFrom = (
+  definitions: ReadonlyArray<HarnessDefinition> = HARNESSES,
+): Effect.Effect<HarnessesShape, never, Scope.Scope> =>
+  Effect.tap(makeHarnesses, (harnesses) =>
+    harnesses.transform((editor) => definitions.forEach((definition) => editor.add(definition))),
+  )
+
+export const harnessesLayer = (definitions: ReadonlyArray<HarnessDefinition> = HARNESSES) =>
+  Layer.effect(Harnesses, harnessesFrom(definitions))
+
+export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCaller) =>
+  VibestPlugin.Plugin.define({
+    id: `runtime-${id}-caller`,
+    effect: (context) =>
+      context.runtime
+        .transform((editor) => {
+          const own = editor.get(id)
+          if (own === undefined) editor.add({ ...editor.get(KIND)!, id, caller })
+          else editor.update(id, (definition) => (definition.caller = caller))
+        })
+        .pipe(Effect.asVoid),
+  })
+
+export const runtimesFrom = (
+  definitions: ReadonlyArray<RuntimeDefinition>,
+): Effect.Effect<RuntimesShape, never, Bus | Scope.Scope> =>
+  Effect.tap(makeRuntimes, (runtimes) =>
+    runtimes.transform((editor) => definitions.forEach((definition) => editor.add(definition))),
+  )
+
 const harnessOf = (options: TestOptions) =>
   Layer.succeed(Harness, {
     available: (id) => Effect.succeed(!(options.missingBinary ?? []).includes(id)),
     plugin: (id) =>
-      (options.hooked ?? HARNESS_IDS).includes(id)
+      (options.hooked ?? (options.harnesses ?? HARNESSES).map((h) => h.id)).includes(id)
         ? Effect.succeed(`/vibest/harnesses/${id}`)
         : Effect.fail(
             new HarnessUnavailable({
@@ -358,13 +516,6 @@ const harnessOf = (options: TestOptions) =>
           ),
   })
 
-export const harnessChoice: Candidate = {
-  source: "builtin:harness-choice",
-  revision: "harness-choice",
-  options: {},
-  plugin: harnessChoicePlugin,
-}
-
 type PluginEntry = NonNullable<TestOptions["plugins"]>[number]
 
 const candidateOf = (entry: PluginEntry): Candidate => {
@@ -381,7 +532,7 @@ export class PluginHost extends Context.Service<
 const over = (options: TestOptions) => {
   const runtime = Layer.effect(
     Runtimes,
-    Effect.flatMap(FakeRuntime, (fake) => registry([fake.runtime])),
+    Effect.flatMap(FakeRuntime, (fake) => runtimesFrom([fake.runtime])),
   )
   const home = Layer.effect(Layout, tempDirectory("vibest-home-").pipe(Effect.flatMap(Layout.make)))
   const ownTmpdir = Layer.unwrap(
@@ -392,14 +543,16 @@ const over = (options: TestOptions) => {
     ),
   )
   const candidates: ReadonlyArray<Candidate> = [
-    harnessChoice,
     { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
     ...(options.plugins ?? []).map(candidateOf),
   ]
   const plugins = Layer.effectContext(
     Effect.gen(function* () {
       const host = yield* makeHost(options.pluginTimeout ? { timeout: options.pluginTimeout } : {})
-      yield* host.activate(candidates)
+      if (options.activateLate) {
+        host.ready.closeUnsafe()
+        yield* host.activate(candidates).pipe(Effect.andThen(host.ready.open), Effect.forkScoped)
+      } else yield* host.activate(candidates)
       return Context.make(Plugins, host.service).pipe(
         Context.add(PluginHost, {
           load: (added) => host.activate([...candidates, ...added.map(candidateOf)]),
@@ -440,7 +593,7 @@ const over = (options: TestOptions) => {
       ),
       Layer.provideMerge(runtime),
       Layer.provideMerge(harnessOf(options)),
-      Layer.provideMerge(BuiltinHarnesses.layer),
+      Layer.provideMerge(harnessesLayer(options.harnesses)),
       Layer.provideMerge(
         Layer.effect(
           Processes,

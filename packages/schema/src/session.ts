@@ -38,9 +38,7 @@ export const InboxRow = Schema.Struct({
 })
 export type InboxRow = typeof InboxRow.Type
 
-export const HARNESS_IDS = ["pi", "claude", "cursor"] as const
-export type HarnessId = (typeof HARNESS_IDS)[number]
-export const isHarnessId = (s: string): s is HarnessId => (HARNESS_IDS as ReadonlyArray<string>).includes(s)
+export type HarnessId = string
 
 export class HarnessUnavailable extends Schema.TaggedError<HarnessUnavailable>()("HarnessUnavailable", {
   harness: Schema.String,
@@ -99,7 +97,7 @@ export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", {
 }) {}
 export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {}) {
   override get message() {
-    return "no harness chosen: pass harness, or install a routing plugin"
+    return "no harness to inherit: name one, for example `vibest run claude -- <prompt>`"
   }
 }
 

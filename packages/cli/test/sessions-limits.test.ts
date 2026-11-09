@@ -1,7 +1,5 @@
 import { assert, describe } from "@effect/vitest"
-import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
-import { AgentRefused } from "@vibest/core/plugins"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, Plugin } from "@vibest/plugin"
@@ -12,7 +10,6 @@ import { TestClock } from "effect/testing"
 import { FakeRuntime, makeRepository, TURNS, writeResult, resultText, systemPromptFile } from "./fakes.ts"
 import {
   harnessOf,
-  spawnInput,
   spawnWorking,
   sessionWorktree,
   test,
@@ -47,24 +44,6 @@ describe.concurrent("Sessions", () => {
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi"],
       )
-    }),
-  )
-
-  test(
-    "an explicit harness limited before start is refused with that limit and starts nothing",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const db = yield* Db
-      yield* (yield* Subscriptions).report({ harness: "pi", limits: [limited] })
-      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
-        Effect.filterOrFail(
-          (e): e is AgentRefused => e._tag === "AgentRefused",
-          () => new Error("not refused"),
-        ),
-      )
-      assert.deepInclude(refused, { plugin: "harness-choice", reason: "pi: 5h limit exhausted, no reset time" })
-      assert.strictEqual(yield* herdr.callCount, 0)
-      assert.deepStrictEqual(yield* db.listSessions(), [])
     }),
   )
 

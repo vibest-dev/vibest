@@ -5,7 +5,6 @@ import { assert, layer } from "@effect/vitest"
 import { accepts, cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
-import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
 import { PingResult, VERSION } from "@vibest/protocol/rpc"
@@ -135,7 +134,7 @@ const REPLACE_TIMEOUT_MS = 120_000
 
 const fixtureTiming: Timing = { reply: Duration.millis(400), observe: Duration.millis(400) }
 
-layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
+layer(Platform.services)(
   "self-healing: vibest replaces a vibestd for the user on an interactive terminal, in a temp VIBEST_HOME",
   (it) => {
     it.effect(

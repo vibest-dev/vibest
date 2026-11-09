@@ -3,23 +3,15 @@ import { Database } from "bun:sqlite"
 import { assert, layer } from "@effect/vitest"
 import { projectActivity, raisesSeen, unseenDone } from "@vibest/core/activity"
 import { Db } from "@vibest/core/db"
-import {
-  Harness,
-  Harnesses,
-  HarnessUnavailable,
-  type HarnessId,
-  noProvider,
-  harnessCatalog,
-  harnessOptions,
-  preflight,
-} from "@vibest/core/harness"
-import { layer as builtinHarnesses } from "@vibest/core/harnesses"
+import { Harness, Harnesses, HarnessUnavailable, harnessCatalog, harnessOptions, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
-import { catalogModels, listModels } from "@vibest/core/models"
+import { forProvider, listModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory } from "@vibest/core/paths"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { turnEndFrom, turnEndOf } from "@vibest/core/results"
 import { copyIncluded, mainCheckout, repositoryDirectoryName } from "@vibest/core/worktree"
+import { claude, cursor, pi } from "@vibest/plugin-harnesses"
+import { noProvider } from "@vibest/plugin-harnesses/models"
 import type { HarnessChoice } from "@vibest/protocol/rpc"
 import { ID } from "@vibest/schema/id"
 import { ConfigProvider, Effect, FileSystem, Layer, Path, PlatformError } from "effect"
@@ -27,10 +19,10 @@ import { ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import { FakeGit, makeRepository, tempDirectory } from "./fakes.ts"
+import { FakeGit, harnessesLayer, makeRepository, tempDirectory } from "./fakes.ts"
 import { database } from "./unit-helpers.ts"
 
-layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)), builtinHarnesses))(
+layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)), harnessesLayer([pi, claude, cursor])))(
   "on the platform",
   (it) => {
     it.effect("model listings run in the user's home, not the caller's working directory", () =>
@@ -54,7 +46,9 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
           const harness = yield* Harness.make()
           yield* Effect.flip(harness.models("pi", null))
           const adapters = yield* Harnesses
-          yield* Effect.forEach(["claude", "cursor"] as const, (h) => Effect.flip(listModels(adapters.get(h), null)))
+          yield* Effect.forEach(["claude", "cursor"] as const, (h) =>
+            adapters.get(h).pipe(Effect.flatMap((adapter) => Effect.flip(listModels(adapter, null)))),
+          )
         }).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ HOME: home }), { asPrimary: true })),
@@ -141,13 +135,19 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
     })
 
     it("models --provider: only Pi filters by provider; Claude and Cursor refuse any provider and keep provider null", () => {
-      const adapters = {
-        get: (id: HarnessId) => ({ binary: id, checkProvider: id === "pi" ? () => undefined : noProvider(id) }),
+      const definitions = {
+        find: (id: string) => ({ checkProvider: id === "pi" ? () => undefined : noProvider(id) }),
       }
       const choices: ReadonlyArray<HarnessChoice> = [
-        { harness: "claude", problem: null, models: [{ provider: null, model: "opus", name: "Opus", default: true }] },
+        {
+          harness: "claude",
+          binary: "claude",
+          problem: null,
+          models: [{ provider: null, model: "opus", name: "Opus", default: true }],
+        },
         {
           harness: "pi",
+          binary: "pi",
           problem: null,
           models: [
             { provider: "openai", model: "gpt", name: "GPT", default: true },
@@ -155,21 +155,18 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
           ],
         },
       ]
-      assert.deepStrictEqual(catalogModels(choices, adapters, "anthropic"), {
-        models: [{ harness: "pi", provider: "anthropic", model: "sonnet", name: "Sonnet", default: false }],
-        errors: ["claude: claude has no provider option"],
-      })
-      assert.deepStrictEqual(catalogModels(choices, adapters, "google"), {
-        models: [],
-        errors: ["claude: claude has no provider option", 'pi: pi lists no models for provider "google"'],
-      })
+      assert.deepStrictEqual(forProvider(choices, definitions, "anthropic"), [
+        { harness: "claude", binary: "claude", problem: "claude has no provider option", models: [] },
+        {
+          harness: "pi",
+          binary: "pi",
+          problem: null,
+          models: [{ provider: "anthropic", model: "sonnet", name: "Sonnet", default: false }],
+        },
+      ])
       assert.deepStrictEqual(
-        catalogModels(choices, adapters, null).models.map((m) => [m.harness, m.provider]),
-        [
-          ["claude", null],
-          ["pi", "openai"],
-          ["pi", "anthropic"],
-        ],
+        forProvider(choices, definitions, "google").map((c) => c.problem),
+        ["claude has no provider option", 'pi lists no models for provider "google"'],
       )
       assert.strictEqual(noProvider("cursor")("anthropic"), "cursor has no provider option")
       assert.isUndefined(noProvider("cursor")(null))
@@ -191,12 +188,18 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
         )
         assert.deepStrictEqual(
           catalog.find((c) => c.harness === "pi"),
-          { harness: "pi", problem: null, models: [{ provider: "p", model: "pi-1", name: "One", default: true }] },
+          {
+            harness: "pi",
+            binary: "pi",
+            problem: null,
+            models: [{ provider: "p", model: "pi-1", name: "One", default: true }],
+          },
         )
         assert.deepStrictEqual(
           catalog.find((c) => c.harness === "cursor"),
           {
             harness: "cursor",
+            binary: "cursor-agent",
             problem: "cursor-agent is not on PATH",
             models: [],
           },
@@ -215,21 +218,24 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
     it.effect("turn ends: text field per harness; error marks failure; a junk hook input is no turn end", () =>
       Effect.gen(function* () {
         const harnesses = yield* Harnesses
-        assert.deepInclude(turnEndFrom(harnesses.get("claude"), { last_assistant_message: "hi" }, 5), {
+        assert.deepInclude(turnEndFrom(yield* harnesses.get("claude"), { last_assistant_message: "hi" }, 5), {
           harness: "claude",
           at: 5,
           text: "hi",
           error: undefined,
           interrupted: false,
         })
-        assert.deepInclude(turnEndFrom(harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1), {
-          error: "boom: why",
-        })
+        assert.deepInclude(
+          turnEndFrom(yield* harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1),
+          {
+            error: "boom: why",
+          },
+        )
         for (const bad of ["--flag", "-f", "--yolo", "--force", "a b", ""])
-          assert.deepInclude(turnEndFrom(harnesses.get("cursor"), { text: "x", conversation_id: bad }, 1), {
+          assert.deepInclude(turnEndFrom(yield* harnesses.get("cursor"), { text: "x", conversation_id: bad }, 1), {
             conversationId: undefined,
           })
-        assert.isUndefined(turnEndOf(harnesses.get("claude"), "general", "{", 1))
+        assert.isUndefined(turnEndOf(yield* harnesses.get("claude"), "general", "{", 1))
       }),
     )
 

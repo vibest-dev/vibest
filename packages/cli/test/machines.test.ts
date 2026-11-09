@@ -9,7 +9,6 @@ import { Db } from "@vibest/core/db"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nameProblem } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
-import * as VibestPlugin from "@vibest/plugin"
 import { peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/machine"
@@ -23,7 +22,16 @@ import * as Platform from "#platform"
 
 import { teardown } from "../src/cli.ts"
 import { pipeStdio } from "../src/connect.ts"
-import { FakeGit, makeRepository, runVibest, tempDirectory, until, untilVirtual, yieldToIo } from "./fakes.ts"
+import {
+  callerPlugin,
+  FakeGit,
+  makeRepository,
+  runVibest,
+  tempDirectory,
+  until,
+  untilVirtual,
+  yieldToIo,
+} from "./fakes.ts"
 import { COMMIT, Net, onB, REMOTE, REPOSITORY, repoStack, served, twoMachines } from "./machines-fakes.ts"
 
 type Stack = Context.Context<Layer.Success<ReturnType<typeof served>>>
@@ -625,11 +633,7 @@ describe("vibest run --machine and remote sessions", () => {
     "without --runtime A sends the caller's terminal runtime, else its main agent's; --runtime wins; B lacking it fails clearly",
     () =>
       Effect.gen(function* () {
-        const term = VibestPlugin.Plugin.define({
-          id: "runtime-term",
-          caller: { kind: "term", env: ["TERM_PANE"], terminal: () => Effect.succeed("p1") },
-          effect: () => Effect.void,
-        })
+        const term = callerPlugin("term", { env: ["TERM_PANE"], terminal: () => Effect.succeed("p1") })
         const { net, a, b, coordinator } = yield* twoMachines({ a: { plugins: [term] } })
         yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
         yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: { TERM_PANE: "p1" } }))

@@ -6,7 +6,7 @@ import { ChildProcessSpawner } from "effect/process"
 
 import type { Db, SessionRow } from "./db.ts"
 import type { Git } from "./git.ts"
-import { Harness, harnessOptions, Harnesses, preflight, type HarnessAdapter, isHarnessId } from "./harness.ts"
+import { Harness, harnessOptions, Harnesses, preflight } from "./harness.ts"
 import { errorMessage, type Plugins } from "./plugins.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { type Machine, type Runtime, type Terminal } from "./runtimes.ts"
@@ -61,7 +61,7 @@ export const sessionMove = (deps: {
   readonly plugins: Plugins["Service"]
   readonly subscriptions: Subscriptions["Service"]
   readonly harness: Harness["Service"]
-  readonly harnesses: { readonly get: (id: SessionRow["harnessId"]) => HarnessAdapter }
+  readonly harnesses: Harnesses["Service"]
   readonly track: (id: string) => Effect.Effect<{ readonly sawWorking: import("effect").Ref.Ref<boolean> }>
   readonly prompt: (
     h: Runtime,
@@ -223,7 +223,7 @@ export const sessionMove = (deps: {
       move: { harness: string | undefined; provider?: string | undefined } | undefined,
       rows: ReadonlyArray<Subscription>,
     ) => {
-      if (move === undefined || !isHarnessId(move.harness ?? "")) return true
+      if (move === undefined || harnesses.find(move.harness) === undefined) return true
       const provider = move.provider ?? ""
       if (thisRound.some((l) => l.harness === move.harness && l.provider === provider)) return true
       return attempts().some(
@@ -279,7 +279,7 @@ export const sessionMove = (deps: {
         })
         .pipe(Effect.exit)
       const next = Exit.isSuccess(decidedStart) ? decidedStart.value : undefined
-      if (next === undefined || next.harness === undefined || !isHarnessId(next.harness)) {
+      if (next === undefined || next.harness === undefined || harnesses.find(next.harness) === undefined) {
         skip(move.harness, "refused")
         continue
       }
@@ -319,7 +319,7 @@ export const sessionMove = (deps: {
         gone = true
         yield* endLeft
       } else yield* endLeft
-      const harnessSessionId = harnesses.get(next.harness).ownSessionId ? yield* deps.uuid : null
+      const harnessSessionId = (yield* harnesses.get(next.harness)).ownSessionId ? yield* deps.uuid : null
       const nextRow: SessionRow = {
         ...row,
         harnessId: next.harness,
@@ -368,7 +368,7 @@ export const sessionMove = (deps: {
         exitedAt: null,
       })
       row = (yield* db.getSession(row.id))!
-      const text = harnesses.get(row.harnessId).systemPromptInPrompt
+      const text = (yield* harnesses.get(row.harnessId)).systemPromptInPrompt
         ? `${yield* deps.systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
         : next.prompt
       const prompted = yield* deps

@@ -1,21 +1,32 @@
 import { assert, describe, it } from "@effect/vitest"
-import { MACHINE_TIMEOUT, makeHost, Plugins } from "@vibest/core/plugins"
+import type { RuntimeDefinition } from "@vibest/core/host"
+import { MACHINE_TIMEOUT, Plugins } from "@vibest/core/plugins"
+import { Runtimes } from "@vibest/core/runtimes"
 import { Plugin } from "@vibest/plugin"
 import { machineHooks } from "@vibest/plugin/testing"
 import { Duration, Effect, Fiber, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import { testLayer, type TestOptions, type TestServices, yieldToIo } from "./fakes.ts"
+import { PluginHost, testLayer, type TestOptions, type TestServices, yieldToIo } from "./fakes.ts"
 
 const event = { name: "mb", target: "b-host", vibestd: "b-id", runtimes: [] }
 
-const noting = (id: string, message: string) =>
+const noting = (id: string, message: string, runtime?: string) =>
   Plugin.define({
     id,
     effect: (ctx) =>
       Effect.gen(function* () {
-        yield* ctx.machine.hook("connect", (e) => Effect.sync(() => e.notes.push({ message, fix: `fix ${id}` })))
-        yield* ctx.machine.hook("remove", (e) => Effect.sync(() => e.notes.push({ message: `removed by ${id}` })))
+        const options = runtime === undefined ? undefined : { runtime }
+        yield* ctx.machine.hook(
+          "connect",
+          (e) => Effect.sync(() => e.notes.push({ message, fix: `fix ${id}` })),
+          options,
+        )
+        yield* ctx.machine.hook(
+          "remove",
+          (e) => Effect.sync(() => e.notes.push({ message: `removed by ${id}` })),
+          options,
+        )
       }),
   })
 
@@ -34,28 +45,26 @@ const unknown = Plugin.define({
   effect: (ctx) => ctx.machine.hook("nope" as "connect", () => Effect.void),
 })
 
-const runtimeOwner = (id: string, kind: string) =>
-  Plugin.define({
-    id,
-    effect: (ctx) =>
-      ctx.runtime.register({
-        kind,
-        status: () => Effect.succeed({ status: "online" as const }),
-        open: () => Effect.die(new Error("unused")),
-        send: () => Effect.die(new Error("unused")),
-        read: () => Effect.die(new Error("unused")),
-        process: () => Effect.die(new Error("unused")),
-        close: () => Effect.die(new Error("unused")),
-        events: Stream.never,
-      }),
-  })
+const runtimeOwner = (id: string, runtime: string) => {
+  const definition: RuntimeDefinition = {
+    id: runtime,
+    status: () => Effect.succeed({ status: "online" as const }),
+    open: () => Effect.die(new Error("unused")),
+    send: () => Effect.die(new Error("unused")),
+    read: () => Effect.die(new Error("unused")),
+    process: () => Effect.die(new Error("unused")),
+    close: () => Effect.die(new Error("unused")),
+    events: Stream.never,
+  }
+  return Plugin.define({ id, effect: (ctx) => ctx.runtime.transform((editor) => editor.add(definition)) })
+}
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices>, options: TestOptions) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer(options))))
 
 describe("plugins: machine hooks", () => {
   test(
-    "every subscriber runs after one crashes; notes are tagged in order; only reaches one plugin; unknown names fail the load",
+    "every subscriber runs after one crashes; notes are tagged in order; a runtime reaches its own hooks and unscoped ones; unknown names fail the load",
     Effect.gen(function* () {
       const plugins = yield* Plugins
       const fired = yield* plugins.machine("connect", event)
@@ -65,8 +74,8 @@ describe("plugins: machine hooks", () => {
         { plugin: "crashing", message: "plugin crashing crashed: boom" },
         { plugin: "two", message: "second", fix: "fix two" },
       ])
-      const only = yield* plugins.machine("connect", event, "two")
-      assert.deepStrictEqual(only.plugins, ["two"])
+      assert.deepStrictEqual((yield* plugins.machine("connect", event, "view")).plugins, ["one", "crashing", "two"])
+      assert.deepStrictEqual((yield* plugins.machine("connect", event, "other")).plugins, ["one", "crashing"])
       const removed = yield* plugins.machine("remove", event)
       assert.deepStrictEqual(
         removed.notes.map((n) => n.message),
@@ -76,7 +85,7 @@ describe("plugins: machine hooks", () => {
       assert.strictEqual(failed?.status, "failed")
       assert.include(failed?.error ?? "", 'unsupported hook "machine.nope"; supported: machine.connect, machine.remove')
     }),
-    { plugins: [noting("one", "first"), crashing, noting("two", "second"), unknown] },
+    { plugins: [noting("one", "first"), crashing, noting("two", "second", "view"), unknown] },
   )
 
   test(
@@ -97,26 +106,20 @@ describe("plugins: machine hooks", () => {
   )
 
   test(
-    "ownerOf follows ctx.runtime.register; an activation names only the plugins it started",
+    "the runtime registry names each runtime a commit adds or replaces, not the ones it keeps",
     Effect.gen(function* () {
-      const plugins = yield* Plugins
-      assert.strictEqual(yield* plugins.ownerOf("view"), "viewer")
-      assert.isUndefined(yield* plugins.ownerOf("nothing"))
-      const host = yield* makeHost()
+      const runtimes = yield* Runtimes
       const seen: Array<ReadonlyArray<string>> = []
-      const candidate = (plugin: Plugin.Plugin) => ({ source: `x:${plugin.id}`, revision: "-", options: {}, plugin })
-      const follow = yield* host.service.activated.pipe(
+      const follow = yield* runtimes.added.pipe(
         Stream.runForEach((ids) => Effect.sync(() => seen.push(ids))),
         Effect.forkScoped,
       )
       yield* yieldToIo
-      yield* host.activate([candidate(noting("a", "x"))])
-      yield* host.activate([candidate(noting("a", "x")), candidate(runtimeOwner("b", "other"))])
+      const host = yield* PluginHost
+      yield* host.load([noting("a", "x")])
+      yield* host.load([noting("a", "x"), runtimeOwner("b", "other")])
       yield* yieldToIo
-      assert.deepStrictEqual(seen, [["a"], ["b"]])
-      assert.strictEqual(yield* host.service.ownerOf("other"), "b")
-      yield* host.activate([candidate(noting("a", "x"))])
-      assert.isUndefined(yield* host.service.ownerOf("other"), "dropped when the plugin stops")
+      assert.deepStrictEqual(seen, [["other"]])
       yield* Fiber.interrupt(follow)
     }).pipe(Effect.scoped),
     { plugins: [runtimeOwner("viewer", "view")] },
@@ -124,8 +127,9 @@ describe("plugins: machine hooks", () => {
 
   it.effect("machineHooks fires a plugin's machine hooks in a plugin test", () =>
     Effect.gen(function* () {
-      const hooks = yield* machineHooks(noting("one", "first"))
+      const hooks = yield* machineHooks(noting("one", "first", "view"))
       assert.deepStrictEqual(yield* hooks.fire("connect", event), [{ message: "first", fix: "fix one" }])
+      assert.deepStrictEqual(yield* hooks.fire("connect", event, "other"), [])
       assert.deepStrictEqual(yield* hooks.fire("remove", event), [{ message: "removed by one" }])
     }).pipe(Effect.scoped),
   )

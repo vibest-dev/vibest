@@ -1,12 +1,26 @@
 import { assert, describe, it, layer } from "@effect/vitest"
-import { daemonEnv } from "@vibest/client/client"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
-import { coordinator, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
-import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
+import { Db } from "@vibest/core/db"
+import { coordinator, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
 import { Layout, VibestCommand } from "@vibest/core/paths"
+import { Project } from "@vibest/core/project"
 import { Forbidden } from "@vibest/protocol/rpc"
 import type { Host } from "@vibest/server/daemon"
-import { Cause, ConfigProvider, Crypto, Effect, Exit, FileSystem, Option, Path, Queue, Stdio, Terminal } from "effect"
+import * as Server from "@vibest/server/server"
+import {
+  Cause,
+  ConfigProvider,
+  Crypto,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Queue,
+  Stdio,
+  Terminal,
+} from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
 import { Command } from "effect/cli"
 import { ChildProcessSpawner } from "effect/process"
@@ -14,10 +28,12 @@ import { ChildProcessSpawner } from "effect/process"
 import * as Platform from "#platform"
 
 import * as Cli from "../src/cli.ts"
-import { FakeGit, makeRepository, tempDirectory } from "./fakes.ts"
+import { FakeGit, HARNESSES, harnessesLayer, makeRepository, runVibest, tempDirectory, testLayer } from "./fakes.ts"
+import { spawnWorking } from "./sessions-helpers.ts"
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
-const both = (command: string) => [shellBlock(command, source, true), shellBlock(command, source, false)]
+const CLIS = new Set(HARNESSES.map((definition) => definition.binary))
+const both = (command: string) => [shellBlock(command, source, true, CLIS), shellBlock(command, source, false, CLIS)]
 
 describe("Shell denials", () => {
   it("vibest connect and vibest machine are refused for every agent", () => {
@@ -158,15 +174,11 @@ describe("Shell denials", () => {
       "gh extension install a/b",
       "gh ext install a/b",
     ]) {
-      assert.isString(shellBlock(command, source, true), command)
-      assert.isUndefined(shellBlock(command, source, false), command)
+      assert.isString(shellBlock(command, source, true, CLIS), command)
+      assert.isUndefined(shellBlock(command, source, false, CLIS), command)
     }
-    assert.deepStrictEqual(
-      [...HARNESS_CLIS].sort(),
-      Object.values(ADAPTERS)
-        .map((a) => a.binary)
-        .sort(),
-    )
+    assert.isUndefined(shellBlock("cursor-agent -p x", source, true, new Set(["pi"])))
+    assert.isString(shellBlock("my-agent run", source, true, new Set(["my-agent"])))
   })
 
   it("splits at unquoted separators, leaves out redirections and here-documents, and adds substitutions", () => {
@@ -193,7 +205,7 @@ describe("Shell denials", () => {
   })
 })
 
-layer(Platform.services)("role rules", (it) => {
+layer(Layer.merge(Platform.services, harnessesLayer()))("role rules", (it) => {
   it.effect("Coordinator: file edits only in its project folder (VIBEST_PROJECT_DIR), symlinks and .. followed", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -572,7 +584,7 @@ describe("wizard entry", () => {
           readLine: Effect.die("readline"),
           display: () => Effect.void,
         })
-        const host = new Proxy({ builtinPlugins: [] } as unknown as Host, {
+        const host = new Proxy({} as Host, {
           get: (target, prop, receiver) => {
             if (prop in target) return Reflect.get(target, prop, receiver)
             touched.host = true
@@ -601,7 +613,6 @@ describe("wizard entry", () => {
             touched.socket = true
             return Effect.die("socket")
           }),
-          Effect.provide(builtinHarnesses),
           Effect.provideService(
             Crypto.Crypto,
             Crypto.make({
@@ -637,19 +648,6 @@ describe("wizard entry", () => {
   )
 })
 
-describe("where vibest starts the main agent", () => {
-  it("vibestd is started without the caller's terminal variables", () => {
-    const callerEnv = ["HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"]
-    assert.deepStrictEqual(daemonEnv(callerEnv, { KEPT: "1" }), {
-      HERDR_PANE_ID: undefined,
-      HERDR_SOCKET_PATH: undefined,
-      HC_TERMINAL_ID: undefined,
-      HC_TERMINAL_SOCKET: undefined,
-      KEPT: "1",
-    })
-  })
-})
-
 describe("vibest --session inside herdr", () => {
   it.effect(
     "the parent-workspace pane refuses --session before any exec or herdr call",
@@ -659,7 +657,7 @@ describe("vibest --session inside herdr", () => {
         const repo = yield* makeRepository.pipe(Effect.provide(FakeGit.layer), Effect.provide(Platform.services))
         const back = process.cwd()
         process.chdir(repo)
-        const host = new Proxy({ builtinPlugins: [] } as unknown as Host, {
+        const host = new Proxy({} as Host, {
           get: (target, prop, receiver) => {
             if (prop in target) return Reflect.get(target, prop, receiver)
             touched.host = true
@@ -680,7 +678,6 @@ describe("vibest --session inside herdr", () => {
             touched.socket = true
             return Effect.die("socket")
           }),
-          Effect.provide(builtinHarnesses),
           Effect.provide(Platform.services),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(Path.layer),
@@ -714,7 +711,7 @@ describe("vibest --session inside herdr", () => {
       process.chdir(sub)
       const secret = "probe-value-9f3c"
       const herdr: Array<string> = []
-      const host = new Proxy({ builtinPlugins: [], plugins: Platform.plugins } as unknown as Host, {
+      const host = new Proxy({ plugins: Platform.plugins } as unknown as Host, {
         get: (target, prop, receiver) =>
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })
@@ -727,7 +724,6 @@ describe("vibest --session inside herdr", () => {
           return Effect.die("herdr")
         }),
         Effect.provideService(VibestSocketConnector, () => Effect.die("socket")),
-        Effect.provide(builtinHarnesses),
         Effect.provide(Platform.services),
         Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
         Effect.provide(Path.layer),
@@ -741,5 +737,57 @@ describe("vibest --session inside herdr", () => {
       assert.notInclude(message, secret)
       assert.strictEqual(Exit.isFailure(exit), true)
     }).pipe(Effect.provide(Platform.services)),
+  )
+})
+
+describe("vibest integration guard through vibestd", () => {
+  const cursorAnswer = (reason: string | undefined) =>
+    reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" }
+  const served = Server.layer.pipe(
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+    Layer.provideMerge(Project.layer),
+    Layer.provideMerge(
+      testLayer({
+        harnesses: HARNESSES.map((definition) =>
+          definition.id === "cursor" ? { ...definition, guardAnswer: cursorAnswer } : definition,
+        ),
+      }),
+    ),
+  )
+  it.effect(
+    "--harness cursor prints Cursor's deny shape for a refused call and its allow shape otherwise",
+    () =>
+      Effect.gen(function* () {
+        const layout = yield* Layout
+        const repo = yield* makeRepository
+        const { id } = yield* spawnWorking(repo)
+        const identity = (yield* (yield* Db).sessionIdentity(id))!
+        const guard = (command: string) =>
+          runVibest(
+            repo,
+            {
+              HOME: layout.home,
+              VIBEST_HOME: layout.home,
+              VIBEST_AGENT: "general",
+              VIBEST_SESSION_ID: id,
+              VIBEST_PROJECT_ID: String(identity.projectId),
+            },
+            ["integration", "guard", "--harness", "cursor"],
+            JSON.stringify({ tool_name: "Shell", tool_input: { command }, cwd: repo }),
+          )
+        const refused = yield* guard("herdr pane list")
+        assert.strictEqual(refused.code, 0, refused.stderr)
+        const reason =
+          "Agents must not control herdr agents, panes, tabs, workspaces or worktrees; vibest manages them."
+        assert.deepStrictEqual(JSON.parse(refused.stdout), {
+          permission: "deny",
+          user_message: reason,
+          agent_message: reason,
+        })
+        const allowed = yield* guard("git status")
+        assert.strictEqual(allowed.code, 0, allowed.stderr)
+        assert.deepStrictEqual(JSON.parse(allowed.stdout), { permission: "allow" })
+      }).pipe(Effect.provide(served)),
+    30_000,
   )
 })

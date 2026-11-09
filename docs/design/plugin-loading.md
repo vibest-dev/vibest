@@ -2,6 +2,21 @@
 
 Implementation notes for the [plugin architecture](architecture.md#7-plugin-architecture-effect-only).
 
+## Order and boundary
+
+Builtin plugins load first, in the order of `pre` in `packages/builtins/src/index.ts` (`harness-pi`, `harness-claude`,
+`harness-cursor`, `runtime-herdr-core`, `runtime-herdr`, `runtime-choice`), then the plugins directory, then
+`vibest.json` in the order written. Registration order is detection order for runtime callers (herdr-core before
+herdr) and the order of `transform`s on a registry, so a user plugin sees and may change the builtin definitions.
+`vibest plugins` lists them in that order.
+
+Builtin plugins and harness integrations are written like a user plugin: `packages/plugin-harnesses`,
+`packages/runtime-herdr`, `packages/runtime-herdr-core` and `packages/integration/*/src` import only `@vibest/plugin`,
+`@vibest/schema`, `@vibest/protocol` and `@vibest/client`, and `packages/builtins` never imports core, server or the
+CLI. `.oxlintrc.json` enforces it with `no-restricted-imports` overrides (static, type-only and dynamic imports alike),
+and `vibest/no-restricted-disable` reports a disable comment for that rule. What a builtin needs from the platform
+(child processes, files, HTTP) it provides itself from `@effect/platform-node-shared`.
+
 ## Loading and watching
 
 In `plugin-sources.ts`: a half-saved `vibest.json` keeps its last parsed plugin list. An
@@ -19,14 +34,15 @@ running, so an old revision's finalizers can overlap the new setup.
 
 ## Machine hooks
 
-`ctx.machine.hook("connect" | "remove", callback)` subscribes to `machine.connect` and `machine.remove`
-(`Plugins.machine(hook, event, only?)`). Unlike `agent.*`, every subscriber runs, one after another, even after one
-crashed or timed out; each is bounded by 30 s (hc's own dial goes over ssh), not the 5 s host default. The event's
-`notes` come back tagged with the plugin, and a crash or a timeout becomes a note of its own (`plugin <id> crashed: …`,
-`plugin <id> timed out after 30s`). `only` reaches one plugin. `ctx.runtime.register` records which plugin owns each
-runtime kind (`Plugins.ownerOf`), dropped when that plugin stops, and every activation publishes the ids of the
-plugins it started (`Plugins.activated`), so a plugin loaded later catches up on the connected machines. When they
-fire: [multi-machine.md](multi-machine.md#terminals-on-other-machines). `@vibest/plugin/testing` `machineHooks(plugin)`
+`ctx.machine.hook("connect" | "remove", callback, { runtime? })` subscribes to `machine.connect` and `machine.remove`
+and returns a `Registration`; `{ runtime: id }` scopes the hook to one runtime (`Plugins.machine(hook, event,
+runtime?)`: with a runtime, the hooks scoped to it plus the unscoped ones run; without one, all of them). Unlike
+`agent.*`, every subscriber runs, one after another, even after one crashed or timed out; each is bounded by 30 s (hc's
+own dial goes over ssh), not the 5 s host default. The event's `notes` come back tagged with the plugin, and a crash or
+a timeout becomes a note of its own (`plugin <id> crashed: …`, `plugin <id> timed out after 30s`). Each commit of the
+runtime registry publishes the ids of the runtime definitions it added or replaced (`Runtimes.added`), and `connect`
+fires for each of them on every connected machine, so a runtime plugin loaded later catches up. When they fire:
+[multi-machine.md](multi-machine.md#terminals-on-other-machines). `@vibest/plugin/testing` `machineHooks(plugin)`
 fires a plugin's machine hooks in its own tests.
 
 ## Loading on Bun

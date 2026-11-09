@@ -1,39 +1,23 @@
 import { assert, describe, it } from "@effect/vitest"
-import { callerHits, callerKeys, callerTarget, mainPlace, type CallerHit } from "@vibest/core/caller"
-import { layer as builtinHarnesses } from "@vibest/core/harnesses"
+import { pre } from "@vibest/builtins"
+import { Bus } from "@vibest/core/bus"
+import { callerTarget, mainPlace, specHits, type CallerHit } from "@vibest/core/caller"
+import type { Caller, RuntimeDefinition } from "@vibest/core/host"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { makeSources } from "@vibest/core/plugin-sources"
-import { DEFAULT_TIMEOUT, PluginLoader, type Candidate } from "@vibest/core/plugins"
+import { HostEnv, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
 import { Plugin } from "@vibest/plugin"
 import { run as runDaemon, type Host } from "@vibest/server/daemon"
-import { ConfigProvider, Effect, FileSystem, Layer, Path } from "effect"
+import { ConfigProvider, Effect, FileSystem, Path, PubSub, Queue, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
 import { PATH_WITHOUT_HARNESS_CLIS } from "./fakes.ts"
 
-const callerPlugins = (builtins: ReadonlyArray<Candidate>) =>
-  Effect.gen(function* () {
-    const loader = yield* PluginLoader
-    yield* loader.prepare
-    const read = yield* (yield* makeSources(DEFAULT_TIMEOUT, { quiet: true })).read
-    return [...builtins, ...read.candidates]
-  })
-
-const runtime = (kind: string, env: ReadonlyArray<string>): Candidate => ({
-  source: kind,
-  revision: "-",
-  options: {},
-  plugin: Plugin.define({
-    id: `runtime-${kind}`,
-    caller: {
-      kind,
-      env,
-      terminal: (values) => Effect.succeed(env.map((key) => values[key]).join("/")),
-    },
-    effect: () => Effect.void,
-  }),
+const runtime = (id: string, env: ReadonlyArray<string>): Caller => ({
+  id,
+  env,
+  terminal: (values) => Effect.succeed(env.map((key) => values[key]).join("/")),
 })
 
 const plugins = [
@@ -42,22 +26,9 @@ const plugins = [
   runtime("rex", ["REX_PANE"]),
 ]
 
-const ternSource = `import { Plugin } from "@vibest/plugin"
-import { Effect } from "effect"
-export default Plugin.define({
-  id: "runtime-tern",
-  caller: {
-    kind: "tern",
-    env: ["TERN_ID", "TERN_SOCK"],
-    terminal: () => Effect.succeed(undefined),
-  },
-  effect: () => Effect.void,
-})
-`
-
 describe("where the main agent runs", () => {
-  const hc = { kind: "hc", terminal: "t4@/run/hc/default.sock" } satisfies CallerHit
-  const herdr = { kind: "herdr", terminal: "vibest/p1" } satisfies CallerHit
+  const hc = { id: "hc", terminal: "t4@/run/hc/default.sock" } satisfies CallerHit
+  const herdr = { id: "herdr", terminal: "vibest/p1" } satisfies CallerHit
   it("no detected runtime is refused, and --runtime launches one", () => {
     const refused = mainPlace({ runtime: undefined, hits: [] })
     assert.strictEqual(refused.in, "refused")
@@ -103,10 +74,68 @@ describe("where the main agent runs", () => {
   })
 })
 
-describe("caller plugins", () => {
-  it.effect("the first detected plugin in load order wins", () =>
+describe("the runtime registry", () => {
+  const definition = (id: string, env: ReadonlyArray<string>, events: Stream.Stream<RuntimeEvent> = Stream.never) =>
+    ({
+      id,
+      caller: {
+        env,
+        terminal: (values: Readonly<Record<string, string | undefined>>) => Effect.succeed(values[env[0]!]),
+      },
+      events,
+    }) as unknown as RuntimeDefinition
+
+  it.effect(
+    "the first registered definition wins detection, its caller variables leave vibestd's environment, and a removed definition's events stop",
+    () =>
+      Effect.gen(function* () {
+        const dropped: Array<string> = []
+        const bus = yield* Bus
+        const seen = yield* bus.subscribe
+        const runtimes = yield* makeRuntimes.pipe(
+          Effect.provideService(HostEnv, { drop: (names) => void dropped.push(...names) }),
+        )
+        const queue = yield* Queue.unbounded<RuntimeEvent>()
+        yield* runtimes.transform((editor) => editor.add(definition("hc", ["HC_ID"])))
+        const herdr = yield* runtimes.transform((editor) =>
+          editor.add(definition("herdr", ["HERDR_ID"], Stream.fromQueue(queue))),
+        )
+        const env = { HC_ID: "t1", HERDR_ID: "p1" }
+        assert.deepStrictEqual(mainPlace({ runtime: undefined, hits: yield* specHits(yield* runtimes.callers, env) }), {
+          in: "terminal",
+          runtime: "hc",
+          terminal: "t1",
+        })
+        assert.includeMembers(dropped, ["HC_ID", "HERDR_ID"])
+        const exited = (id: string): RuntimeEvent => ({ type: "exited", terminal: { machine: "local", id } })
+        const until = (type: "live.exited" | "live.drain") =>
+          Effect.gen(function* () {
+            const passed: Array<string> = []
+            for (;;) {
+              const event = yield* PubSub.take(seen)
+              if (event.type === "live.exited") passed.push(event.terminal.id)
+              if (event.type === type) return passed
+            }
+          })
+        yield* Queue.offer(queue, exited("first"))
+        assert.deepStrictEqual(yield* until("live.exited"), ["first"])
+        yield* herdr.dispose
+        yield* Queue.offer(queue, exited("after"))
+        for (let i = 0; i < 20; i++) yield* Effect.yieldNow
+        yield* bus.observe({ type: "live.drain" })
+        assert.deepStrictEqual(yield* until("live.drain"), [])
+        assert.deepStrictEqual(
+          (yield* runtimes.all).map((runtime) => runtime.id),
+          ["hc"],
+        )
+      }).pipe(Effect.scoped, Effect.provide(Bus.layer)),
+  )
+})
+
+describe("caller runtimes", () => {
+  it.effect("the first detected runtime in registration order wins", () =>
     Effect.gen(function* () {
-      const hits = yield* callerHits(plugins, {
+      const hits = yield* specHits(plugins, {
         REX_PANE: "rex-9",
         HC_TERMINAL_ID: "t1",
         HC_TERMINAL_SOCKET: "/hc.sock",
@@ -121,44 +150,9 @@ describe("caller plugins", () => {
     }),
   )
 
-  it.effect("builtin plugins choose hc when both environments are set, and --runtime herdr names herdr", () =>
+  it.effect("without an earlier runtime's environment the next one in load order wins", () =>
     Effect.gen(function* () {
-      const builtins = Platform.daemon.builtinPlugins.map((candidate) => {
-        const plugin = candidate.plugin
-        if (!("caller" in plugin) || plugin.caller?.kind !== "herdr") return candidate
-        return {
-          ...candidate,
-          plugin: Plugin.define({
-            id: plugin.id,
-            caller: { ...plugin.caller, terminal: () => Effect.succeed("herdr-term") },
-            effect: plugin.effect,
-          }),
-        }
-      })
-      const env = {
-        HC_TERMINAL_ID: "t1",
-        HC_TERMINAL_SOCKET: "/hc.sock",
-        HERDR_PANE_ID: "p1",
-        HERDR_SOCKET_PATH: "/herdr.sock",
-      }
-      const hits = yield* callerHits(builtins, env)
-      assert.deepStrictEqual(mainPlace({ runtime: undefined, hits }), {
-        in: "terminal",
-        runtime: "hc",
-        terminal: "t1@/hc.sock",
-      })
-      const named = yield* callerHits(builtins, env, "herdr")
-      assert.deepStrictEqual(mainPlace({ runtime: "herdr", hits: named }), {
-        in: "terminal",
-        runtime: "herdr",
-        terminal: "herdr-term",
-      })
-    }),
-  )
-
-  it.effect("without an earlier plugin's environment the next one in load order wins", () =>
-    Effect.gen(function* () {
-      const hits = yield* callerHits(plugins, {
+      const hits = yield* specHits(plugins, {
         REX_PANE: "rex-9",
         HERDR_PANE_ID: "p1",
         HERDR_SOCKET_PATH: "/herdr.sock",
@@ -173,59 +167,22 @@ describe("caller plugins", () => {
 
   it.effect("an empty declared variable is not that runtime", () =>
     Effect.gen(function* () {
-      const hits = yield* callerHits(plugins, { REX_PANE: "", HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: "/hc.sock" })
+      const hits = yield* specHits(plugins, { REX_PANE: "", HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: "/hc.sock" })
       const place = mainPlace({ runtime: undefined, hits })
       assert.strictEqual(place.in === "terminal" ? place.runtime : "", "hc")
-    }),
-  )
-
-  it.effect("a caller without a string kind, an env array, and a terminal function is skipped", () =>
-    Effect.gen(function* () {
-      const loose = (id: string, caller: object): Candidate => ({
-        source: id,
-        revision: "-",
-        options: {},
-        plugin: Plugin.define({
-          id,
-          caller: caller as Plugin.Caller,
-          effect: () => Effect.void,
-        }),
-      })
-      const hits = yield* callerHits(
-        [
-          loose("no-kind", { env: ["TERN_ID"], terminal: () => Effect.succeed("t") }),
-          loose("bad-env", { kind: "tern", env: "TERN_ID", terminal: () => Effect.succeed("t") }),
-          loose("no-terminal", { kind: "tern", env: ["TERN_ID"] }),
-          runtime("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"]),
-        ],
-        { TERN_ID: "t9", HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: "/hc.sock" },
-      )
-      assert.deepStrictEqual(
-        hits.map((hit) => hit.kind),
-        ["hc"],
-      )
     }),
   )
 
   it.effect("terminal() runs only for the first detected runtime, or the runtime --runtime names", () =>
     Effect.gen(function* () {
       const calls: Array<string> = []
-      const watch = (kind: string, env: ReadonlyArray<string>, terminal: string, fail = false): Candidate => ({
-        source: kind,
-        revision: "-",
-        options: {},
-        plugin: Plugin.define({
-          id: kind,
-          caller: {
-            kind,
-            env,
-            terminal: () => {
-              calls.push(kind)
-              return fail ? Effect.fail(`${kind} down`) : Effect.succeed(terminal)
-            },
-          },
-          effect: () => Effect.void,
-        }),
+      const watch = (id: string, env: ReadonlyArray<string>, terminal: string, fail = false): Caller => ({
+        id,
+        env,
+        terminal: () => {
+          calls.push(id)
+          return fail ? Effect.fail(`${id} down`) : Effect.succeed(terminal)
+        },
       })
       const env = {
         HC_TERMINAL_ID: "t1",
@@ -233,7 +190,7 @@ describe("caller plugins", () => {
         HERDR_PANE_ID: "p1",
         HERDR_SOCKET_PATH: "/herdr.sock",
       }
-      const hits = yield* callerHits(
+      const hits = yield* specHits(
         [
           watch("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"], "hc-term"),
           watch("herdr", ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"], "herdr-term", true),
@@ -247,7 +204,7 @@ describe("caller plugins", () => {
         terminal: "hc-term",
       })
       calls.length = 0
-      const named = yield* callerHits(
+      const named = yield* specHits(
         [
           watch("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"], "hc-term", true),
           watch("herdr", ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"], "herdr-term"),
@@ -262,27 +219,6 @@ describe("caller plugins", () => {
         terminal: "herdr-term",
       })
     }),
-  )
-
-  it.live("a runtime plugin from vibest.json is detected, and its environment keys join the caller keys", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const base = path.join(import.meta.dirname, ".tmp")
-      yield* fs.makeDirectory(base, { recursive: true })
-      const dir = yield* fs.makeTempDirectoryScoped({ directory: base })
-      yield* fs.writeFileString(path.join(dir, "tern.ts"), ternSource)
-      yield* fs.writeFileString(
-        path.join(dir, "vibest.json"),
-        '{ "runtime": "rex", "plugins": ["./tern.ts", "./not-a-plugin"] }\n',
-      )
-      const hc = runtime("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"])
-      const loaded = yield* callerPlugins([hc]).pipe(
-        Effect.provideService(PluginLoader, Platform.plugins),
-        Effect.provide(Layer.effect(Layout, Layout.make(dir))),
-      )
-      assert.deepStrictEqual(callerKeys(loaded), ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "TERN_ID", "TERN_SOCK"])
-    }).pipe(Effect.provide(Platform.services)),
   )
 
   it("callerTarget uses the socket path, a named session, or no target, and a plugin never sees keys it did not declare", () => {
@@ -304,7 +240,7 @@ describe("caller plugins", () => {
   })
 
   it("builtin plugins list herdr-core before herdr", () => {
-    const sources = Platform.daemon.builtinPlugins.map((plugin) => plugin.source)
+    const sources = pre.map((plugin) => plugin.source)
     const hc = sources.indexOf("builtin:runtime-herdr-core")
     const herdr = sources.indexOf("builtin:runtime-herdr")
     assert.ok(hc >= 0 && herdr > hc)
@@ -327,12 +263,28 @@ describe("caller plugins", () => {
       yield* fs.makeDirectory(base, { recursive: true })
       const dir = yield* fs.makeTempDirectoryScoped({ directory: base })
       yield* fs.makeDirectory(path.join(dir, "plugins"))
-      const host: Host = { ...Platform.daemon, builtinPlugins: [runtime("user", [key])] }
+      const user = Plugin.define({
+        id: "runtime-user",
+        effect: (context) =>
+          context.runtime
+            .transform((editor) =>
+              editor.add({
+                id: "user",
+                caller: { env: [key], terminal: () => Effect.succeed(undefined) },
+                status: () => Effect.succeed({ status: "offline", reason: "test" }),
+                events: Stream.never,
+              } as unknown as RuntimeDefinition),
+            )
+            .pipe(Effect.asVoid),
+      })
+      const host: Host = {
+        ...Platform.daemon,
+        builtins: [{ source: "builtin:runtime-user", revision: "-", options: {}, plugin: user }],
+      }
       const layout = yield* Layout.make(dir)
       yield* runDaemon(host).pipe(
         Effect.provideService(Layout, layout),
         Effect.provideService(VibestCommand, ["/bin/vibest"]),
-        Effect.provide(builtinHarnesses),
         Effect.provide(
           ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: dir, PATH: PATH_WITHOUT_HARNESS_CLIS })),
         ),

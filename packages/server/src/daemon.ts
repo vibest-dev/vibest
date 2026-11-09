@@ -1,13 +1,12 @@
 import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
-import { OnCallerPlugins } from "@vibest/core/caller"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Git } from "@vibest/core/git"
-import { Harness } from "@vibest/core/harness"
+import { Harness, Harnesses } from "@vibest/core/harness"
+import type { HostEnv as HostEnvShape } from "@vibest/core/host"
 import { type HostFacts, loadIdentity, VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
-import { Keychain, type KeychainPlatform } from "@vibest/core/keychain"
 import { Machines, MachineTransport } from "@vibest/core/machines"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Peers } from "@vibest/core/peer"
@@ -17,7 +16,7 @@ import { Project } from "@vibest/core/project"
 import { Remote } from "@vibest/core/remote"
 import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
-import { Runtimes } from "@vibest/core/runtimes"
+import { HostEnv, Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as UpdateCheck from "@vibest/core/update-check"
@@ -54,10 +53,9 @@ export interface Host {
   readonly socketServer: (path: string) => Layer.Layer<SocketServer, unknown>
   readonly httpServer: (path: string) => Layer.Layer<HttpServer, unknown>
   readonly plugins: PluginLoader["Service"]
-  readonly builtinPlugins: ReadonlyArray<Candidate>
-  readonly clearCallerEnv: (plugins: ReadonlyArray<Candidate>) => void
+  readonly builtins: ReadonlyArray<Candidate>
+  readonly env: HostEnvShape
   readonly processes: ProcessPlatform
-  readonly keychain: KeychainPlatform
   readonly lock: (
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, Error>) | undefined, Error, Scope.Scope>
@@ -96,20 +94,19 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provideMerge(SshHosts.layer),
     Layer.provideMerge(
       Plugins.layer.pipe(
-        Layer.provide(Layer.succeed(Builtins, host.builtinPlugins)),
+        Layer.provide(Layer.succeed(Builtins, host.builtins)),
         Layer.provide(Layer.succeed(PluginLoader, host.plugins)),
-        Layer.provide(Layer.succeed(OnCallerPlugins, host.clearCallerEnv)),
       ),
     ),
     Layer.provideMerge(Subscriptions.live),
     Layer.provideMerge(UpdateCheck.layer),
-    Layer.provideMerge(Keychain.layer(host.keychain)),
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provideMerge(Inbox.layer),
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(Harness.layer),
     Layer.provideMerge(Db.layer.pipe(Layer.provide(host.sqlite(layout.database)))),
-    Layer.provideMerge(Runtimes.layer),
+    Layer.provideMerge(Runtimes.layer.pipe(Layer.provide(Layer.succeed(HostEnv, host.env)))),
+    Layer.provideMerge(Harnesses.layer),
     Layer.provide(Drain.layer),
     Layer.provide(Restarting.layer),
     Layer.provide(Bus.layer),

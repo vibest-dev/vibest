@@ -1,9 +1,9 @@
-import { Context, Effect } from "effect"
+import { Effect } from "effect"
 
-import type { Candidate } from "./plugin-sources.ts"
+import type { Caller } from "./host.ts"
 
 export interface CallerHit {
-  readonly kind: string
+  readonly id: string
   readonly terminal: string | undefined
 }
 
@@ -16,7 +16,7 @@ export const mainPlace = (o: {
   readonly runtime: string | undefined
   readonly hits: ReadonlyArray<CallerHit>
 }): MainPlace => {
-  const named = (kind: string) => o.hits.find((hit) => hit.kind === kind)
+  const named = (id: string) => o.hits.find((hit) => hit.id === id)
   if (o.runtime !== undefined) {
     const hit = named(o.runtime)
     if (hit === undefined) return { in: "launch", runtime: o.runtime }
@@ -30,52 +30,10 @@ export const mainPlace = (o: {
   return chosen.terminal === undefined
     ? {
         in: "refused",
-        message: `${chosen.kind} is detected in this environment, but its terminal could not be named; pass --runtime`,
+        message: `${chosen.id} is detected in this environment, but its terminal could not be named; pass --runtime`,
       }
-    : { in: "terminal", runtime: chosen.kind, terminal: chosen.terminal }
+    : { in: "terminal", runtime: chosen.id, terminal: chosen.terminal }
 }
-
-export const OnCallerPlugins = Context.Reference<(plugins: ReadonlyArray<Candidate>) => void>(
-  "vibest/OnCallerPlugins",
-  {
-    defaultValue: () => () => {},
-  },
-)
-
-export const callerOf = (plugin: { readonly caller?: unknown; readonly effect?: unknown } | undefined) => {
-  if (plugin === undefined || !("effect" in plugin) || plugin.caller === undefined) return undefined
-  const spec = plugin.caller as {
-    readonly kind?: unknown
-    readonly env?: unknown
-    readonly terminal?: unknown
-    readonly ready?: (env: Readonly<Record<string, string | undefined>>) => Effect.Effect<boolean, unknown, never>
-    readonly missing?: string
-    readonly target?: (env: Readonly<Record<string, string | undefined>>, named?: string) => string | undefined
-  }
-  return typeof spec.kind === "string" &&
-    spec.kind !== "" &&
-    typeof spec.terminal === "function" &&
-    Array.isArray(spec.env)
-    ? {
-        kind: spec.kind,
-        env: spec.env,
-        terminal: spec.terminal as (
-          env: Readonly<Record<string, string | undefined>>,
-        ) => Effect.Effect<string | undefined, unknown, never>,
-        ...(typeof spec.ready === "function" ? { ready: spec.ready } : {}),
-        ...(typeof spec.missing === "string" ? { missing: spec.missing } : {}),
-        ...(typeof spec.target === "function" ? { target: spec.target } : {}),
-      }
-    : undefined
-}
-
-const caller = (plugin: Candidate["plugin"]) => ("effect" in plugin ? callerOf(plugin) : undefined)
-
-export type CallerSpec = NonNullable<ReturnType<typeof callerOf>>
-
-export const callerKeys = (plugins: ReadonlyArray<Candidate>): ReadonlyArray<string> => [
-  ...new Set(plugins.flatMap((candidate) => caller(candidate.plugin)?.env ?? [])),
-]
 
 const present = (keys: ReadonlyArray<string>, env: Readonly<Record<string, string | undefined>>) =>
   keys.every((key) => {
@@ -84,38 +42,24 @@ const present = (keys: ReadonlyArray<string>, env: Readonly<Record<string, strin
   })
 
 export const callerKind = (
-  specs: ReadonlyArray<Pick<CallerSpec, "kind" | "env">>,
+  specs: ReadonlyArray<Pick<Caller, "id" | "env">>,
   env: Readonly<Record<string, string | undefined>>,
-) => specs.find((spec) => present(spec.env, env))?.kind
+) => specs.find((spec) => present(spec.env, env))?.id
 
 export const specHits = (
-  specs: ReadonlyArray<Pick<CallerSpec, "kind" | "env" | "terminal">>,
+  specs: ReadonlyArray<Pick<Caller, "id" | "env" | "terminal">>,
   env: Readonly<Record<string, string | undefined>>,
   runtime?: string,
 ) =>
   Effect.gen(function* () {
     const matches = specs.filter((spec) => present(spec.env, env))
-    const chosen = runtime === undefined ? matches[0] : matches.find((hit) => hit.kind === runtime)
+    const chosen = runtime === undefined ? matches[0] : matches.find((hit) => hit.id === runtime)
     const terminal = chosen === undefined ? undefined : yield* chosen.terminal(env)
-    return matches.map((hit) => ({
-      kind: hit.kind,
+    return matches.map((hit): CallerHit => ({
+      id: hit.id,
       terminal: hit === chosen ? terminal : undefined,
     }))
   })
-
-export const callerHits = (
-  plugins: ReadonlyArray<Candidate>,
-  env: Readonly<Record<string, string | undefined>>,
-  runtime?: string,
-) =>
-  specHits(
-    plugins.flatMap((candidate) => {
-      const spec = caller(candidate.plugin)
-      return spec === undefined ? [] : [spec]
-    }),
-    env,
-    runtime,
-  )
 
 export const filterCallerEnv = (
   specs: ReadonlyArray<{ readonly env: ReadonlyArray<string> }>,
@@ -126,14 +70,6 @@ export const filterCallerEnv = (
   return out
 }
 
-export const callerByKind = (plugins: ReadonlyArray<Candidate>, kind: string) => {
-  for (const candidate of plugins) {
-    const spec = caller(candidate.plugin)
-    if (spec?.kind === kind) return spec
-  }
-  return undefined
-}
-
 const declared = (keys: ReadonlyArray<string>, env: Readonly<Record<string, string | undefined>>) => {
   const out: Record<string, string | undefined> = {}
   for (const key of keys) out[key] = env[key]
@@ -141,10 +77,7 @@ const declared = (keys: ReadonlyArray<string>, env: Readonly<Record<string, stri
 }
 
 export const callerTarget = (
-  specs: ReadonlyArray<{
-    readonly env: ReadonlyArray<string>
-    readonly target?: (env: Readonly<Record<string, string | undefined>>, named?: string) => string | undefined
-  }>,
+  specs: ReadonlyArray<Pick<Caller, "env" | "target">>,
   env: Readonly<Record<string, string | undefined>>,
   named?: string,
 ): string | undefined => {

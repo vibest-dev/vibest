@@ -4,7 +4,6 @@ import util from "node:util"
 
 import { assert, describe, it } from "@effect/vitest"
 import { connect, probe } from "@vibest/client/client"
-import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import { ID, randomId } from "@vibest/schema/id"
@@ -240,7 +239,6 @@ describe.concurrent("vibestd.pid lock", () => {
         const old = yield* run(slowClose).pipe(
           Effect.provideService(Layout, layout),
           Effect.provideService(VibestCommand, ["vibestd-under-test"]),
-          Effect.provide(builtinHarnesses),
           Effect.provide(
             ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: layout.home, PATH: PATH_WITHOUT_HARNESS_CLIS })),
           ),

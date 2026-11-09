@@ -155,12 +155,12 @@ const make = Effect.gen(function* () {
   const heard = (name: string, runtimes: ReadonlyArray<RuntimeThere> | undefined) =>
     Effect.map(Clock.currentTimeMillis, (at) => void there.set(name, { runtimes: runtimes ?? [], at }))
 
-  const fire = (row: MachineRow, hook: MachineHook, only?: string) =>
+  const fire = (row: MachineRow, hook: MachineHook, runtime?: string) =>
     Effect.gen(function* () {
       const fired = yield* plugins.machine(
         hook,
         { name: row.name, target: row.target, vibestd: row.vibestdId, runtimes: there.get(row.name)?.runtimes ?? [] },
-        only,
+        runtime,
       )
       if (hook === "connect") {
         const at = yield* Clock.currentTimeMillis
@@ -178,7 +178,7 @@ const make = Effect.gen(function* () {
   const coreNotes = (name: string) =>
     Effect.map(runtimes.all, (here) =>
       (there.get(name)?.runtimes ?? [])
-        .filter((r) => !here.some((h) => h.kind === r.kind && h.locate !== undefined))
+        .filter((r) => !here.some((h) => h.id === r.kind && h.locate !== undefined))
         .map((r): PluginNote => ({ message: cannotShow(name, r.kind) })),
     )
 
@@ -186,7 +186,7 @@ const make = Effect.gen(function* () {
     lock.withLock(name)(
       Effect.gen(function* () {
         const row = yield* db.machineNamed(name)
-        const locate = (yield* runtimes.all).find((r) => r.kind === kind)?.locate
+        const locate = (yield* runtimes.all).find((r) => r.id === kind)?.locate
         if (row === undefined || locate === undefined) return { terminals: NONE, note: cannotShow(name, kind) } as View
         const seen = there.get(name)
         const reported = seen?.runtimes.find((r) => r.kind === kind)
@@ -219,8 +219,7 @@ const make = Effect.gen(function* () {
           (yield* Clock.currentTimeMillis) - last.at < Duration.toMillis(REPAIR_PAUSE)
         )
           return { terminals: NONE, note: last.note } as View
-        const owner = yield* plugins.ownerOf(kind)
-        const notes = owner === undefined ? [] : yield* fire(row, "connect", owner)
+        const notes = yield* fire(row, "connect", kind)
         const again = yield* look
         if (!again.missing) {
           repairs.delete(key)
@@ -401,12 +400,12 @@ const make = Effect.gen(function* () {
       fibers.set(name, yield* Effect.forkIn(supervise(name, first), scope, { startImmediately: true }))
     })
 
-  yield* plugins.activated.pipe(
+  yield* runtimes.added.pipe(
     Stream.runForEach((started) =>
       Effect.flatMap(db.machines, (rows) =>
         Effect.forEach(
           rows.filter((row) => entries.get(row.name)?.state === "connected"),
-          (row) => Effect.forEach(started, (plugin) => lock.withLock(row.name)(fire(row, "connect", plugin))),
+          (row) => Effect.forEach(started, (runtime) => lock.withLock(row.name)(fire(row, "connect", runtime))),
           { concurrency: "unbounded", discard: true },
         ),
       ),

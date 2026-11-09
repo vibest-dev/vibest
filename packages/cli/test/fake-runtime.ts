@@ -1,7 +1,7 @@
 import { Runtime as R } from "@vibest/plugin"
 import { Context, Deferred, Effect, HashMap, Layer, Option, PubSub, Ref, Stream } from "effect"
 
-type Runtime = R.Runtime
+type Runtime = R.RuntimeDefinition
 type Terminal = R.Terminal
 type RuntimeError = R.RuntimeError
 type RuntimeEvent = R.RuntimeEvent
@@ -292,7 +292,7 @@ export class FakeRuntime extends Context.Service<
         )
 
       const runtime: Runtime = {
-        kind: KIND,
+        id: KIND,
         ...(options.noRun ? {} : { run }),
         status: () =>
           Effect.succeed(

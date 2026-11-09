@@ -192,8 +192,10 @@ const make = Effect.gen(function* () {
         const main = yield* db.coordinatorOf(from.project)
         const reportTo = from.coordinator ?? main?.id
         const runtime =
-          input.runtime ?? callerKind(yield* plugins.callers, input.callerEnv) ?? (main?.runtime || undefined)
-        const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.kind === runtime)
+          input.runtime ??
+          callerKind(yield* plugins.settled.pipe(Effect.andThen(runtimes.callers)), input.callerEnv) ??
+          (main?.runtime || undefined)
+        const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.id === runtime)
         const ready =
           viewer?.locate === undefined || runtime === undefined
             ? undefined

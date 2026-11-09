@@ -19,7 +19,6 @@ import {
   SESSION_HEADER,
 } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-import { isHarnessId } from "@vibest/schema/session"
 import { Clock, ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -113,10 +112,10 @@ export const make = Effect.gen(function* () {
         return ok()
       }
       const hook = parseHookRoute(request.path)
-      if (!hook || !isHarnessId(hook.harness)) return failure(404, `no route ${request.path}`)
+      const adapter = hook && harnesses.find(hook.harness)
+      if (!hook || adapter === undefined) return failure(404, `no route ${request.path}`)
       if (hook.harness !== who.harness)
         return failure(403, `session ${who.id} runs ${who.harness}, not ${hook.harness}`)
-      const adapter = harnesses.get(hook.harness)
       if (hook.hook === "turn-end")
         return yield* admitted(
           "hook turn-end",
@@ -127,10 +126,11 @@ export const make = Effect.gen(function* () {
         return yield* admitted(
           "hook prompt",
           true,
-          Hooks.prompt(sessions, adapter, who, request.body).pipe(Effect.as(ok())),
+          Hooks.prompt(sessions, db, adapter, who, request.body).pipe(Effect.as(ok())),
         )
       const own = { VIBEST_PROJECT_DIR: layout.project(who.projectId) }
       return yield* Guard.check(who.agent, request.body).pipe(
+        Effect.provideService(Harnesses, harnesses),
         Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: own }), { asPrimary: true })),
         Effect.map((reason) => ok(reason === undefined ? {} : { deny: reason })),
         Effect.catch((e) =>

@@ -4,7 +4,8 @@ import { Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope 
 
 import { awaitEvent, Bus } from "./bus.ts"
 import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
-import type { HarnessAdapter, HarnessId } from "./harness.ts"
+import type { HarnessId } from "./harness.ts"
+import type { HarnessDefinition, HarnessesShape } from "./host.ts"
 import type { Inbox } from "./inbox.ts"
 import { errorMessage } from "./plugins.ts"
 import type { Processes } from "./processes.ts"
@@ -61,20 +62,22 @@ export const current = (integration: { readonly version: string; readonly protoc
   integration !== undefined && integration.version === VERSION && integration.protocol === PROTOCOL
 
 export const blockedOf = (
-  adapter: HarnessAdapter,
+  adapter: HarnessDefinition | undefined,
   h: Runtime | undefined,
   pid: number | undefined,
   harnessSessionId: string | null,
 ) =>
-  adapter.ready !== "integration"
-    ? "its harness has no integration that reports its pid and when it is ready; quit it and start it again yourself"
-    : h?.run === undefined
-      ? "its runtime cannot start a program in its terminal again; quit it and start it again yourself"
-      : pid === undefined
-        ? "its harness never reported its pid; quit it and start it again yourself"
-        : harnessSessionId === null
-          ? "its conversation id is not known, so a restart would start a new conversation"
-          : undefined
+  adapter === undefined
+    ? "no loaded plugin provides its harness; load one, or quit it and start it again yourself"
+    : adapter.ready !== "integration"
+      ? "its harness has no integration that reports its pid and when it is ready; quit it and start it again yourself"
+      : h?.run === undefined
+        ? "its runtime cannot start a program in its terminal again; quit it and start it again yourself"
+        : pid === undefined
+          ? "its harness never reported its pid; quit it and start it again yourself"
+          : harnessSessionId === null
+            ? "its conversation id is not known, so a restart would start a new conversation"
+            : undefined
 
 const UPDATE_CLI_EXIT_POLL = Schedule.spaced("500 millis")
 
@@ -91,7 +94,7 @@ interface Target {
   readonly id: string
   readonly projectId: string
   readonly label: string
-  readonly adapter: HarnessAdapter
+  readonly adapter: HarnessDefinition | undefined
   readonly h: Runtime | undefined
   readonly terminal: Terminal
   readonly pid: number | undefined
@@ -109,7 +112,7 @@ export const sessionRestart = (deps: {
   readonly db: Db["Service"]
   readonly bus: Bus["Service"]
   readonly runtimes: Runtimes["Service"]
-  readonly harnesses: { readonly get: (id: HarnessId) => HarnessAdapter }
+  readonly harnesses: Pick<HarnessesShape, "get" | "find">
   readonly processes: Processes["Service"]
   readonly restarting: Restarting["Service"]
   readonly inbox: Inbox["Service"]
@@ -123,7 +126,7 @@ export const sessionRestart = (deps: {
   readonly awaitReady: (
     h: Runtime,
     terminal: Terminal,
-    adapter: HarnessAdapter,
+    adapter: HarnessDefinition,
     id: string,
   ) => Effect.Effect<unknown, unknown>
   readonly prompt: (
@@ -158,6 +161,7 @@ export const sessionRestart = (deps: {
       const blocked = blockedOf(t.adapter, t.h, t.pid, t.harnessSessionId)
       if (blocked !== undefined) return failed(`not restarted: ${blocked}`)
       const h = t.h!
+      const adapter = t.adapter!
       const pid = t.pid!
       const argv = yield* t.argv
       const signalled = yield* t.locked(
@@ -174,7 +178,7 @@ export const sessionRestart = (deps: {
       const back =
         Exit.isSuccess(ran) &&
         (yield* startedAgain(id, t.liveNow)) &&
-        Option.isSome(yield* deps.awaitReady(h, t.terminal, t.adapter, id).pipe(Effect.option))
+        Option.isSome(yield* deps.awaitReady(h, t.terminal, adapter, id).pipe(Effect.option))
       return yield* t.locked(
         Effect.gen(function* () {
           yield* deps.restarting.clear(id)
@@ -195,7 +199,7 @@ export const sessionRestart = (deps: {
 
   const againArgv = (session: SessionRow) =>
     Effect.gen(function* () {
-      const adapter = harnesses.get(session.harnessId)
+      const adapter = yield* harnesses.get(session.harnessId)
       const resume =
         session.harnessSessionId !== null &&
         (adapter.canResume === undefined ||
@@ -213,7 +217,7 @@ export const sessionRestart = (deps: {
         id,
         projectId: session.projectId,
         label: id,
-        adapter: harnesses.get(session.harnessId),
+        adapter: harnesses.find(session.harnessId),
         h: yield* routed(session.runtime),
         terminal: session.address,
         pid: session.metadata.pid,
@@ -257,7 +261,7 @@ export const sessionRestart = (deps: {
         id,
         projectId,
         label,
-        adapter: harnesses.get(main.harnessId),
+        adapter: harnesses.find(main.harnessId),
         h,
         terminal: main.address,
         pid: main.pid,
@@ -300,7 +304,7 @@ export const sessionRestart = (deps: {
       return Option.isNone(seen) || seen.value === "absent" ? undefined : seen.value
     })
 
-  const reports = (harness: HarnessId) => harnesses.get(harness).ready === "integration"
+  const reports = (harness: HarnessId) => harnesses.find(harness)?.ready === "integration"
 
   const outdated = Effect.gen(function* () {
     const agents = (yield* db.listSessions()).filter(
@@ -323,7 +327,7 @@ export const sessionRestart = (deps: {
         integration: main.integration?.version ?? null,
         working: stateOf(seen) === "working",
         blocked:
-          blockedOf(harnesses.get(main.harnessId), yield* routed(main.runtime), main.pid, main.harnessSessionId) ??
+          blockedOf(harnesses.find(main.harnessId), yield* routed(main.runtime), main.pid, main.harnessSessionId) ??
           null,
       })
     }
@@ -336,8 +340,12 @@ export const sessionRestart = (deps: {
         integration: row.metadata.integration?.version ?? null,
         working: row.turnState === "open",
         blocked:
-          blockedOf(harnesses.get(row.harnessId), yield* routed(row.runtime), row.metadata.pid, row.harnessSessionId) ??
-          null,
+          blockedOf(
+            harnesses.find(row.harnessId),
+            yield* routed(row.runtime),
+            row.metadata.pid,
+            row.harnessSessionId,
+          ) ?? null,
       })
     return [...subs, ...mains]
   })

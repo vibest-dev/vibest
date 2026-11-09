@@ -13,7 +13,7 @@ import type { HerdrPool } from "./pool.ts"
 export type AgentState = VibestPlugin.Runtime.AgentState
 export type Machine = VibestPlugin.Runtime.Machine
 export type Terminal = VibestPlugin.Runtime.Terminal
-export type Runtime = VibestPlugin.Runtime.Runtime
+export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 
@@ -628,7 +628,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       })
 
     return {
-      kind: KIND,
+      id: KIND,
       status,
       open,
       send,

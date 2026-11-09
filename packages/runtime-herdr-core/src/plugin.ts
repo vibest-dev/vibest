@@ -13,6 +13,11 @@ const platform = Layer.mergeAll(
   NodePath.layer,
 )
 
+const caller: VibestPlugin.Runtime.RuntimeCaller = {
+  env: CALLER_ENV,
+  terminal: (env) => Effect.succeed(terminalFrom(env)),
+}
+
 const set = (name: string) => Config.option(Config.String(name)).pipe(Config.map(Option.filter((v) => v !== "")))
 
 const hcSession = Effect.gen(function* () {
@@ -22,11 +27,6 @@ const hcSession = Effect.gen(function* () {
 
 export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   id: "runtime-herdr-core",
-  caller: {
-    kind: KIND,
-    env: CALLER_ENV,
-    terminal: (env) => Effect.succeed(terminalFrom(env)),
-  },
   effect: (context) =>
     Effect.gen(function* () {
       const socket = yield* defaultSocketPath().pipe(Effect.provide(platform), Effect.orDie)
@@ -34,15 +34,18 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
       const connect = (socketPath: string) => Effect.runSync(Hc.make(socketPath).pipe(Effect.provide(platform)))
       const home = connect(socket)
       const runtime = yield* make({ connect, socket, scope: yield* Effect.scope })
-      yield* context.runtime.register({
+      const definition: VibestPlugin.Runtime.RuntimeDefinition = {
         ...runtime,
+        id: KIND,
+        caller,
         link: () =>
           home.hello.pipe(
             Effect.map((hello) => ({ core: hello.core.id, session })),
             Effect.orElseSucceed(() => undefined),
           ),
         locate: (machine, sessions) => Machines.locate(home, socket, machine, sessions),
-      })
+      }
+      yield* context.runtime.transform((editor) => editor.add(definition))
       yield* Machines.mirror(
         context.machine,
         home,

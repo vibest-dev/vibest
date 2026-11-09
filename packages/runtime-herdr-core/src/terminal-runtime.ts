@@ -7,7 +7,7 @@ import { type api, type HcFailure, type HcShape, HcTransportError, type Notice }
 
 export type Machine = VibestPlugin.Runtime.Machine
 export type Terminal = VibestPlugin.Runtime.Terminal
-export type Runtime = VibestPlugin.Runtime.Runtime
+export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 export type AgentState = VibestPlugin.Runtime.AgentState
 
@@ -442,7 +442,7 @@ export const make = (deps: {
     }
 
     return {
-      kind: KIND,
+      id: KIND,
       status,
       open,
       send,
