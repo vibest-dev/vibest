@@ -1,6 +1,6 @@
 import path from "node:path"
 
-import { vibestTyped, type World } from "./world.ts"
+import type { World } from "./world.ts"
 import { claudeShadow, FAKE_ANTHROPIC_KEY, piShadow } from "./world/shadow.ts"
 
 export type Message = { role: string; content: unknown }
@@ -58,8 +58,8 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
       return reply("ok")
     }
     if (body.includes("<agent-")) {
-      if (body.includes("done-zero")) return bash(`${vibestTyped} run ${sub} -- '${ask("one")}'`)
-      if (body.includes("done-one")) return bash(`${vibestTyped} send ${sessionId} -- '${ask("two")}'`)
+      if (body.includes("done-zero")) return bash(`vibest run ${sub} -- '${ask("one")}'`)
+      if (body.includes("done-one")) return bash(`vibest send ${sessionId} -- '${ask("two")}'`)
       return reply("ok")
     }
     const task = /done-(\w+)/.exec(body)

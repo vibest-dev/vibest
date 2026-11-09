@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
-import { expect, row, SESSIONS, Skip, until, vibestd, vibestTyped, type World } from "../world.ts"
+import { binary, expect, row, SESSIONS, Skip, until, vibestd, type World } from "../world.ts"
 import { project } from "./inbox.ts"
 
 type Entry = { id: string; agent: string; status: string; turnState: string }
@@ -236,7 +236,7 @@ const checks: ReadonlyArray<Check> = [
         const typed = await core.hc(
           "send",
           "users-own",
-          `cd ${repo} && ${vibestTyped} --harness pi --runtime hc --env PI_CODING_AGENT_DIR=${piAgentDir}`,
+          `cd ${repo} && vibest --harness pi --runtime hc --env PI_CODING_AGENT_DIR=${piAgentDir}`,
         )
         expect(typed.code === 0, `hc send: ${typed.stderr}`)
         let main = ""
@@ -297,6 +297,18 @@ const checks: ReadonlyArray<Check> = [
         const opened = await core.hc("run", "--bg", "--keep", "--name", "caller", "--json")
         expect(opened.code === 0, `hc run: ${opened.stderr}${opened.stdout}`)
         const caller = await core.get("caller")
+        const which = path.join(w.root, "which-vibest")
+        const looked = await core.hc("send", "caller", `command -v vibest > '${which}'`)
+        expect(looked.code === 0, `hc send command -v: ${looked.stderr}`)
+        await until(
+          "command -v vibest is this build",
+          async () => (await fs.readFile(which, "utf8").catch(() => "")).trim() === binary,
+          30_000,
+        ).catch(async (e: Error) => {
+          throw new Error(
+            `${e.message}; command -v vibest wrote ${JSON.stringify(await fs.readFile(which, "utf8").catch(() => ""))}; screen:\n${await core.screens()}`,
+          )
+        })
         const typed = await core.hc("send", "caller", `cd ${repo} && vibest --harness pi --env ${env}`)
         expect(typed.code === 0, `hc send: ${typed.stderr}`)
         const runtimeOf = (id: string) =>

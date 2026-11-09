@@ -86,16 +86,18 @@ Several runtimes run at once, on any machine; core routes every call by the Agen
 product keeps one instance per machine (one herdr session `vibest`, one rex server, one tern daemon).
 
 - A runtime plugin declares `caller` on the plugin: its runtime `kind`, the environment variables its terminal sets,
-  and how to read the terminal from those values. Plugins declare no priority; load order decides. The CLI and core
-  only iterate the plugins they were given for detection. They name no runtime kind or variable there, so another
-  runtime plugin needs no change to be detected. The machine target is still herdr's: `vibest` and `vibest run` take
-  it from `callerMachine` in `@vibest/runtime-herdr/caller`, and `--session` names a herdr session. Every declared
-  variable set and non-empty means vibest is inside that runtime. One match: that runtime. Several: the first in load
-  order wins. Builtins are fixed, herdr-core before herdr, then the plugins directory, then vibest.json in the order
-  written. No process tree, tty match, ancestor walk, or detection RPC, and no fallback to herdr or to whichever
-  runtime is the only one online. After vibestd loads plugins it drops every loaded caller variable from its own
-  environment, so a process it starts does not inherit a user runtime's variables. The CLI still starts vibestd
-  without the builtin caller variables. A plugin cannot read its own caller variables inside vibestd, because
+  and how to read the terminal from those values. Plugins declare no priority; load order decides. Without
+  `--runtime`, vibest uses the runtime of the terminal it was started in. When a terminal carries both herdr-core and
+  herdr variables (they are inherited), hc wins because the builtin runtime-herdr-core loads before runtime-herdr.
+  The CLI and core only iterate the plugins they were given for detection. They name no runtime kind or variable
+  there, so another runtime plugin needs no change to be detected. The machine target is still herdr's: `vibest` and
+  `vibest run` take it from `callerMachine` in `@vibest/runtime-herdr/caller`, and `--session` names a herdr session.
+  Every declared variable set and non-empty means vibest is inside that runtime. One match: that runtime. Several: the
+  first in load order wins. Builtins are fixed, herdr-core before herdr, then the plugins directory, then vibest.json
+  in the order written. No process tree, tty match, ancestor walk, or detection RPC, and no fallback to herdr or to
+  whichever runtime is the only one online. After vibestd loads plugins it drops every loaded caller variable from
+  its own environment, so a process it starts does not inherit a user runtime's variables. The CLI still starts
+  vibestd without the builtin caller variables. A plugin cannot read its own caller variables inside vibestd, because
   those are removed; it connects through another variable, as hc uses `HC_SOCKET` rather than `HC_TERMINAL_SOCKET`.
 - The main agent (`vibest`) starts in that terminal. `vibest --runtime <kind>` overrides the detection and, when this
   terminal is not that runtime's, opens one there. None detected and no `--runtime`: refused, saying to pass

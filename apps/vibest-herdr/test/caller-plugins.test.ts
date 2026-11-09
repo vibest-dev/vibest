@@ -66,6 +66,41 @@ describe("caller plugins", () => {
     }),
   )
 
+  it.effect("builtin plugins choose hc when both environments are set, and --runtime herdr names herdr", () =>
+    Effect.gen(function* () {
+      const builtins = Platform.daemon.builtinPlugins.map((candidate) => {
+        const plugin = candidate.plugin
+        if (!("caller" in plugin) || plugin.caller?.kind !== "herdr") return candidate
+        return {
+          ...candidate,
+          plugin: Plugin.define({
+            id: plugin.id,
+            caller: { ...plugin.caller, terminal: () => Effect.succeed("herdr-term") },
+            effect: plugin.effect,
+          }),
+        }
+      })
+      const env = {
+        HC_TERMINAL_ID: "t1",
+        HC_TERMINAL_SOCKET: "/hc.sock",
+        HERDR_PANE_ID: "p1",
+        HERDR_SOCKET_PATH: "/herdr.sock",
+      }
+      const hits = yield* callerHits(builtins, env)
+      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+        in: "terminal",
+        runtime: "hc",
+        terminal: "t1@/hc.sock",
+      })
+      const named = yield* callerHits(builtins, env, "herdr")
+      assert.deepStrictEqual(mainPlace({ marked: false, runtime: "herdr", hits: named }), {
+        in: "terminal",
+        runtime: "herdr",
+        terminal: "herdr-term",
+      })
+    }),
+  )
+
   it.effect("without an earlier plugin's environment the next one in load order wins", () =>
     Effect.gen(function* () {
       const hits = yield* callerHits(plugins, {
