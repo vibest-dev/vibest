@@ -50,6 +50,27 @@ const coordinatorUpdate = (agent: string, args: ReadonlyArray<string>) =>
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 describe("vibest CLI", () => {
   test(
+    "vibest run without a harness starts on the main agent's harness; auto is an unknown harness",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const layout = yield* Layout
+      const repo = yield* makeRepository
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "claude", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "w1:p1" },
+      })
+      const run = (args: ReadonlyArray<string>) => vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args)
+      const inherited = yield* run(["run", "--runtime", "herdr", "--", "do it"])
+      assert.strictEqual(inherited.code, 0, inherited.stderr)
+      const { id } = decodeJson(inherited.stdout) as { id: string }
+      assert.strictEqual((yield* db.getSession(id))?.harnessId, "claude")
+      const auto = yield* run(["run", "--runtime", "herdr", "auto", "--", "do it"])
+      assert.notStrictEqual(auto.code, 0)
+      assert.include(auto.stderr, "no plugin provides harness auto")
+    }),
+  )
+
+  test(
     "plain CLI: run, status, send and ls print JSON; input is literal; empty input and unknown commands fail",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
