@@ -17,8 +17,8 @@ const hc = (...argv: Array<string>) =>
     catch: (e) => new Runtime.RuntimeError({ code: "failed", message: String(e) }),
   })
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
-const runtime: Runtime.Runtime = {
-  kind: "status-fixture",
+const runtime: Runtime.RuntimeDefinition = {
+  id: "status-fixture",
   status: () => Effect.succeed({ status: "online" }),
   open: (machine, input) =>
     hc(
@@ -54,10 +54,10 @@ export default Plugin.define({
   id: "status-fixture",
   effect: (ctx) =>
     Effect.gen(function* () {
-      yield* ctx.runtime.register(runtime)
+      yield* ctx.runtime.transform((editor) => editor.add(runtime))
       yield* ctx.agent.hook("start.before", (event) =>
         Effect.sync(() => {
-          event.runtime = runtime.kind
+          event.runtime = runtime.id
         }),
       )
     }),

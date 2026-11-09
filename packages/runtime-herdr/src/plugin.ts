@@ -21,27 +21,26 @@ const callerServices = Layer.provideMerge(NodeChildProcessSpawner.layer, platfor
 
 export const layer = HerdrPool.layer.pipe(Layer.provideMerge(callerServices))
 
+const caller: VibestPlugin.Runtime.RuntimeCaller = {
+  env: CALLER_ENV,
+  terminal: (env) => terminalFrom(env).pipe(Effect.provide(callerServices)),
+  ready: (env) => readyFrom(env).pipe(Effect.provide(platform)),
+  missing: "this pane's herdr session could not be named; run vibest outside herdr",
+  target: targetFrom,
+}
+
 export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   id: "runtime-herdr",
-  caller: {
-    kind: KIND,
-    env: CALLER_ENV,
-    terminal: (env) => terminalFrom(env).pipe(Effect.provide(callerServices)),
-    ready: (env) => readyFrom(env).pipe(Effect.provide(platform)),
-    missing: "this pane's herdr session could not be named; run vibest outside herdr",
-    target: targetFrom,
-  },
   effect: (context) =>
     Effect.gen(function* () {
       const scope = yield* Effect.scope
       const built = yield* Layer.build(layer)
-      yield* context.runtime.register(
-        yield* fromPool({
-          pool: Context.get(built, HerdrPool),
-          spawner: Context.get(built, ChildProcessSpawner.ChildProcessSpawner),
-          fs: Context.get(built, FileSystem.FileSystem),
-          scope,
-        }),
-      )
+      const runtime = yield* fromPool({
+        pool: Context.get(built, HerdrPool),
+        spawner: Context.get(built, ChildProcessSpawner.ChildProcessSpawner),
+        fs: Context.get(built, FileSystem.FileSystem),
+        scope,
+      })
+      yield* context.runtime.transform((editor) => editor.add({ ...runtime, id: KIND, caller }))
     }),
 })

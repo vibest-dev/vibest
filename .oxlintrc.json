@@ -13,6 +13,63 @@
     "eslint/no-unused-expressions": ["error", { "allowTernary": true }],
     "eslint/max-lines": ["error", { "max": 1000, "skipBlankLines": false, "skipComments": false }]
   },
+  "overrides": [
+    {
+      "files": [
+        "packages/plugin-harnesses/src/**",
+        "packages/runtime-herdr/src/**",
+        "packages/runtime-herdr-core/src/**",
+        "packages/integration/*/src/**"
+      ],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@vibest/*",
+                  "@vibest/*/**",
+                  "!@vibest/plugin",
+                  "!@vibest/plugin/**",
+                  "!@vibest/schema",
+                  "!@vibest/schema/**",
+                  "!@vibest/protocol",
+                  "!@vibest/protocol/**",
+                  "!@vibest/client",
+                  "!@vibest/client/**"
+                ],
+                "message": "Builtin plugins and harness integrations import only @vibest/plugin, schema, protocol and client."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["packages/builtins/src/**"],
+      "rules": {
+        "eslint/no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@vibest/core",
+                  "@vibest/core/**",
+                  "@vibest/server",
+                  "@vibest/server/**",
+                  "@vibest/cli",
+                  "@vibest/cli/**"
+                ],
+                "message": "The builtin list imports plugin packages, never vibest internals."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
   "ignorePatterns": [
     "dist",
     "node_modules",

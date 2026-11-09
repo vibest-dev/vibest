@@ -12,17 +12,18 @@ const platform = Layer.mergeAll(
   NodePath.layer,
 )
 
+const caller: VibestPlugin.Runtime.RuntimeCaller = {
+  env: CALLER_ENV,
+  terminal: (env) => Effect.succeed(terminalFrom(env)),
+}
+
 export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   id: "runtime-herdr-core",
-  caller: {
-    kind: KIND,
-    env: CALLER_ENV,
-    terminal: (env) => Effect.succeed(terminalFrom(env)),
-  },
   effect: (context) =>
     Effect.gen(function* () {
       const socket = yield* defaultSocketPath().pipe(Effect.provide(platform), Effect.orDie)
       const connect = (socketPath: string) => Effect.runSync(Hc.make(socketPath).pipe(Effect.provide(platform)))
-      yield* context.runtime.register(yield* make({ connect, socket, scope: yield* Effect.scope }))
+      const runtime = yield* make({ connect, socket, scope: yield* Effect.scope })
+      yield* context.runtime.transform((editor) => editor.add({ ...runtime, id: KIND, caller }))
     }),
 })

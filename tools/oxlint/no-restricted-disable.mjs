@@ -1,6 +1,12 @@
 const DISABLE_DIRECTIVE = /^\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?(?:\s+(?<body>[\s\S]*))?$/u
 
-const PROTECTED_RULES = new Set(["prefer-node-protocol", "node-import-style", "no-restricted-disable", "max-lines"])
+const PROTECTED_RULES = new Set([
+  "prefer-node-protocol",
+  "node-import-style",
+  "no-restricted-disable",
+  "max-lines",
+  "no-restricted-imports",
+])
 
 const parseDisableDirective = (commentValue) => {
   const match = DISABLE_DIRECTIVE.exec(commentValue.trim())

@@ -224,6 +224,15 @@ importers:
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
+      '@vibest/plugin-harnesses':
+        specifier: workspace:*
+        version: link:../plugin-harnesses
+      '@vibest/runtime-herdr':
+        specifier: workspace:*
+        version: link:../runtime-herdr
+      '@vibest/runtime-herdr-core':
+        specifier: workspace:*
+        version: link:../runtime-herdr-core
       effect:
         specifier: 4.0.2
         version: 4.0.2
@@ -248,9 +257,6 @@ importers:
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
-      '@vibest/plugin-harness-choice':
-        specifier: workspace:*
-        version: link:../plugin-harness-choice
       '@vibest/plugin-harnesses':
         specifier: workspace:*
         version: link:../plugin-harnesses
@@ -382,15 +388,6 @@ importers:
         specifier: 4.0.2
         version: 4.0.2
 
-  packages/plugin-harness-choice:
-    dependencies:
-      '@vibest/plugin':
-        specifier: workspace:*
-        version: link:../plugin
-      effect:
-        specifier: 4.0.2
-        version: 4.0.2
-
   packages/plugin-harnesses:
     dependencies:
       '@effect/platform-node-shared':
@@ -420,9 +417,6 @@ importers:
       '@effect/platform-node-shared':
         specifier: 4.0.2
         version: 4.0.2(effect@4.0.2)
-      '@vibest/core':
-        specifier: workspace:*
-        version: link:../core
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
