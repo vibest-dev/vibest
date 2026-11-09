@@ -42,8 +42,8 @@ describe("vibest.sock", () => {
         failureTag(yield* Effect.exit(raw.List({}, { headers: { ...protocolHeaders(), "vibest-caller": "session" } }))),
         "InvalidCaller",
       )
-      assert.deepStrictEqual(yield* raw.List({}, { headers: cliHeaders(repo) }), [])
-      assert.deepStrictEqual(yield* asCli(raw, repo).List({}), [])
+      assert.deepStrictEqual(yield* raw.List({}, { headers: cliHeaders(repo) }), { sessions: [], machines: [] })
+      assert.deepStrictEqual(yield* asCli(raw, repo).List({}), { sessions: [], machines: [] })
     }),
   )
 
@@ -62,7 +62,7 @@ describe("vibest.sock", () => {
         assert.include(refused.message, "cannot take over this vibestd (vibest.db is not this vibest's schema)")
         assert.include(refused.message, "it keeps running")
         assert.strictEqual((yield* raw.Ping()).instance, instance)
-        assert.deepStrictEqual(yield* c.List({}), [])
+        assert.deepStrictEqual(yield* c.List({}), { sessions: [], machines: [] })
       }).pipe(Effect.provide(served()), Effect.provideService(Server.Identity, { instance: "vibestd-before" })),
   )
 
@@ -146,7 +146,7 @@ describe("vibest.sock", () => {
       const { id } = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt })
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       yield* until(db.getSession(fit.id), (w) => w?.turnState === "open")
-      const listed = new Map((yield* c.List({})).map((w) => [w.id, w]))
+      const listed = new Map((yield* c.List({})).sessions.map((w) => [w.id, w]))
       const cut = `${"p".repeat(499)}…`
       const open = { status: "working", summary: "", endedAt: null } as const
       assert.strictEqual(listed.get(fit.id)!.task, exact)
@@ -157,12 +157,16 @@ describe("vibest.sock", () => {
       yield* writeResult(id, "pi", { text: "\nfixed it\nand more" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      const after = (yield* c.List({})).find((w) => w.id === id)!.latest
+      const after = (yield* c.List({})).sessions.find((w) => w.id === id)!.latest
       assert.strictEqual(after?.status, "completed")
       assert.strictEqual(after?.summary, "fixed it")
       assert.isNumber(after?.endedAt)
       yield* c.Send({ id, message: "follow up" })
-      assert.strictEqual((yield* c.List({})).find((w) => w.id === id)!.task, cut, "a follow-up is not the task")
+      assert.strictEqual(
+        (yield* c.List({})).sessions.find((w) => w.id === id)!.task,
+        cut,
+        "a follow-up is not the task",
+      )
       assert.strictEqual((yield* c.Get({ id })).task, prompt)
     }),
   )
@@ -326,13 +330,13 @@ describe("vibest.sock", () => {
         assert.match(String(Exit.isFailure(exit) && Cause.pretty(exit.cause)), /belongs to another coordinator/)
       }
       assert.deepInclude(yield* b.Get({ id }), { id, agent: "general" })
-      assert.strictEqual((yield* b.List({}))[0]?.agent, "main")
+      assert.strictEqual((yield* b.List({})).sessions[0]?.agent, "main")
       assert.deepStrictEqual(
-        (yield* b.List({ stopped: true })).filter((s) => s.agent !== "main"),
+        (yield* b.List({ stopped: true })).sessions.filter((s) => s.agent !== "main"),
         [],
       )
       assert.deepStrictEqual(
-        (yield* b.List({})).filter((s) => s.agent !== "main"),
+        (yield* b.List({})).sessions.filter((s) => s.agent !== "main"),
         [],
       )
       assert.strictEqual(
@@ -408,6 +412,16 @@ describe("vibest.sock", () => {
         ["Session.Ready", c["Session.Ready"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
         ["Agents.Outdated", c["Agents.Outdated"]()],
         ["Agents.Restart", c["Agents.Restart"]({ ids: [id] })],
+        ["Peer.Hello", c["Peer.Hello"]({ id, name: "x", callsMe: "y" })],
+        ["Machine.Add", c["Machine.Add"]({ name: "m", target: "h" })],
+        ["Machine.List", c["Machine.List"]()],
+        ["Machine.Remove", c["Machine.Remove"]({ name: "m" })],
+        [
+          "Peer.Spawn",
+          c["Peer.Spawn"]({ repository: "r", commit: "abc1234", prompt: "x", reportTo: id, request: "q" }),
+        ],
+        ["Peer.Outbox", Stream.runDrain(c["Peer.Outbox"](undefined))],
+        ["Peer.Ack", c["Peer.Ack"]({ ids: [] })],
       ]
       const bare = yield* client
       for (const [method, call] of protectedCalls(bare))
@@ -467,7 +481,7 @@ describe("vibest.sock", () => {
       const session = yield* asSession(raw, id)
       yield* session.Report({ message: "first" })
       assert.match((yield* db.latestInbox(id, "report"))!.message, /first/)
-      const listed = yield* cli.List({})
+      const listed = (yield* cli.List({})).sessions
       assert.deepStrictEqual(
         listed.map((w) => w.id),
         [id],
@@ -625,9 +639,9 @@ describe("vibest.sock", () => {
       yield* herdr.seedAgent(pane)
       yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: pane })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "working" }))
-      assert.deepInclude((yield* c.List({}))[0], { agent: "main", status: "working" })
+      assert.deepInclude((yield* c.List({})).sessions[0], { agent: "main", status: "working" })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "idle" }))
-      assert.deepInclude((yield* c.List({}))[0], { agent: "main", status: "idle" })
+      assert.deepInclude((yield* c.List({})).sessions[0], { agent: "main", status: "idle" })
     }),
   )
 
@@ -717,11 +731,11 @@ describe("vibest.sock", () => {
       const one = yield* asCli(yield* client, a).Spawn({ callerEnv: {}, harness: "pi", prompt: "one" })
       const two = yield* asCli(yield* client, b).Spawn({ callerEnv: {}, harness: "pi", prompt: "two" })
       const outside = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "vibest-outside-" }))
-      const listed = yield* asCli(yield* client, outside).List({})
+      const listed = (yield* asCli(yield* client, outside).List({})).sessions
       assert.deepStrictEqual(listed.map((row) => row.id).sort(), [one.id, two.id].sort())
       const bare = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "vibest-bare-" }))
       yield* (yield* FakeGit).repository(bare, { branch: "main" })
-      assert.deepStrictEqual(yield* asCli(yield* client, bare).List({}), [])
+      assert.deepStrictEqual(yield* asCli(yield* client, bare).List({}), { sessions: [], machines: [] })
     }),
   )
 

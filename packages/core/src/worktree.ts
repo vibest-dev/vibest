@@ -42,7 +42,8 @@ export const allocationParentBlocked = Effect.fn("allocationParentBlocked")(func
   return yield* fs.exists((yield* Path.Path).join(dir, ".git"))
 })
 
-export const addWorktree = (root: string, path: string) => Git.use((git) => git.addWorktree(root, path))
+export const addWorktree = (root: string, path: string, commit?: string) =>
+  Git.use((git) => git.addWorktree(root, path, commit))
 
 export const removeWorktree = (root: string, path: string) => Git.use((git) => git.removeWorktree(root, path))
 

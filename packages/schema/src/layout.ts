@@ -8,6 +8,7 @@ export class Layout extends Context.Service<
     readonly socket: string
     readonly httpSocket: string
     readonly daemonInfo: string
+    readonly identity: string
     readonly worktrees: string
     readonly projects: string
     readonly config: string
@@ -26,6 +27,7 @@ export class Layout extends Context.Service<
         socket: path.join(home, "vibest.sock"),
         httpSocket: path.join(home, "vibest-http.sock"),
         daemonInfo: path.join(home, "vibestd.pid"),
+        identity: path.join(home, "identity.json"),
         worktrees: path.join(home, "worktrees"),
         projects: path.join(home, "projects"),
         config: path.join(home, "vibest.json"),

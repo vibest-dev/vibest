@@ -38,16 +38,14 @@ import { Argument, CliError, Command, Flag } from "effect/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClientError as ClientError } from "effect/rpc"
 
-import { caller, userOnly } from "./caller.ts"
+import { caller, json, userOnly, vibest } from "./caller.ts"
 import { doctor } from "./doctor.ts"
 import { herdrCommands } from "./herdr-plugin.ts"
+import { connectCommand, machine, projectAdd } from "./machine-commands.ts"
 import { replaceDaemon } from "./replace.ts"
 import { LEFT, noticeFrom, restartAgents, update, updateNotice } from "./update.ts"
 
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
-
-const vibest = <A, E, R>(f: (client: VibestClient, agent: boolean) => Effect.Effect<A, E, R>) =>
-  Effect.flatMap(caller, (c) => withVibest(c.claim, (client) => f(client, c.agent), { start: !c.agent }))
 
 const requested = <A, E, R>(
   f: (
@@ -80,9 +78,6 @@ const requested = <A, E, R>(
       ),
     )
   })
-
-const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-const json = (value: unknown) => Console.log(encodeJson(value))
 
 const input = (value: string, what: string) =>
   Effect.gen(function* () {
@@ -197,6 +192,12 @@ const run = Command.make(
       Flag.withDescription("The terminal runtime for this session. Default: its parent's"),
       Flag.optional,
     ),
+    machine: Flag.String("machine").pipe(
+      Flag.withDescription(
+        "Run it on another machine (vibest machine ls), in that machine's checkout of this repository at this HEAD; its address is <machine>/<id>, and its results come to this project's main agent, or stay there for vibest result <machine>/<id> when there is none",
+      ),
+      Flag.optional,
+    ),
     session: sessionFlag,
   },
   (o) =>
@@ -219,6 +220,7 @@ const run = Command.make(
             peer: Option.getOrUndefined(o.peer),
             archive: o.archive || undefined,
             runtime: Option.getOrUndefined(o.runtime),
+            machine: Option.getOrUndefined(o.machine),
             callerEnv: callerEnvOf(),
             ...(Option.isNone(o.session) ? {} : { runtimeSession: o.session.value }),
           })
@@ -523,7 +525,7 @@ const ls = Command.make(
   (o) =>
     Effect.gen(function* () {
       yield* vibest((client) => client.List({ stopped: o.all })).pipe(
-        Effect.map((sessions) => sessions.map(titled)),
+        Effect.map((listed) => ({ ...listed, sessions: listed.sessions.map(titled) })),
         Effect.flatMap(json),
       )
     }),
@@ -653,6 +655,7 @@ const project = Command.make("project").pipe(
         "Only for working on several repositories together; a single git repository is already a project (cd into it and run vibest). Copies them into a new project directory, one folder each: `vibest project create ~/work/combo --from ~/code/shop --from ~/code/admin` makes ~/work/combo/shop and ~/work/combo/admin (your originals are untouched); ~/work/combo itself must not be inside a git repository. Then `cd ~/work/combo && vibest`: the main agent works there, and each subagent gets its own copy with the same folders. An agent may not run it",
       ),
     ),
+    projectAdd(openProject),
     Command.make("info", {}, () => vibest((client) => client["Project.Info"]()).pipe(Effect.flatMap(json))).pipe(
       Command.withDescription("The paths of the project folder, its preferences.md, docs, memories and artifacts"),
     ),
@@ -828,6 +831,8 @@ export const command = (host: Daemon.Host, exec: Exec) =>
       doctor,
       update,
       herdrCommands(userOnly),
+      connectCommand,
+      machine,
     ]),
   )
 

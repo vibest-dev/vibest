@@ -47,7 +47,7 @@ Then say what changed, the evidence, and the branch. `<id>` is the id the run pr
 
 ## Track
 
-`vibest ls` lists sessions that have not exited: task (cut to 500 characters), live status, and latest result. `vibest ls --all` includes exited sessions. `vibest result <id>` is the full latest result, with the task uncut. Use these after a restart, after compaction, or when you are unsure. Do not trust memory.
+`vibest ls` prints `{ sessions, machines }`: the sessions that have not exited (task cut to 500 characters, live status, latest result), and the other machines with their connection state. `vibest ls --all` includes exited sessions. `vibest result <id>` is the full latest result, with the task uncut. Use these after a restart, after compaction, or when you are unsure. Do not trust memory.
 
 ## Follow up
 

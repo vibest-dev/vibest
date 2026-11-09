@@ -7,6 +7,8 @@ import {
   CWD_HEADER,
   HARNESS_HEADER,
   HARNESS_SESSION_HEADER,
+  PEER_HEADER,
+  PEER_PROJECT_HEADER,
   PLUGIN_VERSION_HEADER,
   PROJECT_HEADER,
   PROTOCOL,
@@ -22,11 +24,13 @@ import {
   CallerGate,
   DaemonStopping,
   InvalidCaller,
+  PEER_CALLS,
   ProtocolGate,
   ProtocolRejected,
   VERSION,
   type CallerShape,
 } from "@vibest/protocol/rpc"
+import { ID } from "@vibest/schema/id"
 import { Effect, Layer, Option } from "effect"
 import * as Headers from "effect/http/Headers"
 
@@ -72,6 +76,21 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
     const bad = (message: string) => new InvalidCaller({ method, message })
     if (kind._tag === "None")
       return yield* bad(`${method} needs an ${CALLER_HEADER} header (cli or session); it does not default to cli`)
+    if (kind.value === "peer") {
+      const peer = Option.getOrUndefined(header(headers, PEER_HEADER))
+      if (peer === undefined || !ID.test(peer))
+        return yield* bad(`${method} claims peer without a valid ${PEER_HEADER}`)
+      if (sessionId._tag === "Some") return yield* bad(`${method} claims peer and a session id`)
+      if (!PEER_CALLS.has(method)) return yield* bad(`a peer vibestd may not call ${method}`)
+      if (method !== "Peer.Hello" && !(yield* db.peerKnown(peer)))
+        return yield* bad(`peer ${peer} has not said Peer.Hello; call it first`)
+      const project = Option.getOrUndefined(header(headers, PEER_PROJECT_HEADER))
+      return {
+        _tag: "Peer",
+        peerId: peer,
+        ...(project === undefined ? {} : { projectId: project }),
+      } satisfies CallerShape
+    }
     if (kind.value === "cli") {
       if (sessionId._tag === "Some") return yield* bad(`${method} claims cli and a session id`)
       if (repository._tag === "None" || repository.value.trim() === "")

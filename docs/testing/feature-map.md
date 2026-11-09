@@ -178,3 +178,16 @@ Held until the Agent runtime is decided. Steps are in [e2e-user-stories.md](e2e-
 | S36 | herdr-core runtime: an unwatched subagent turn end is `done` in Watch (session and project); `Session.Seen` writes `herdr.seen` and it is idle                                           | hc: `tools/e2e` S36                                                  |
 | S37 | `vibest ls` outside a project lists every project; a git repo that is no project is empty, and the CLI runs no git                                                                       | project: `tools/e2e` S37                                             |
 | S38 | herdr open-main focuses the main agent's pane through vibestd                                                                                                                            | project: `tools/e2e` S38                                             |
+
+## Machines
+
+Two vibest homes on one host: A's vibestd dials B through a fake `ssh` first on its `PATH`, which runs the line with
+B's environment; agents on both sides run in isolated hc cores on fake models. Design: [multi-machine.md](../design/multi-machine.md).
+
+| ID  | Capability                                                                                                                                                                                                                                          | Method                   |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| M1  | `machine add` records B's id, B records A as a peer, a second name for one B is refused; `run --machine` starts a B session and none on A, one notice reaches A's main agent, B's outbox empties; `send`, `result`, `peek`, `ls`, `archive` forward | machines: `tools/e2e` M1 |
+| M2  | a result written while A's vibestd is stopped, and one written while the ssh child is killed, arrive once each; `ls` lists the machine as not connected                                                                                             | machines: `tools/e2e` M2 |
+| M3  | two A's on one B: two peers, each gets only its own results and sessions                                                                                                                                                                            | machines: `tools/e2e` M3 |
+| M4  | `machine rm` with a task open, re-added under another name: delivered once                                                                                                                                                                          | machines: `tools/e2e` M4 |
+| M5  | unknown machine, vibest missing on the target, ssh failing, the target being this vibestd, a different vibestd, a missing commit, and agents running `connect`, `machine add`: each fails with its message                                          | machines: `tools/e2e` M5 |

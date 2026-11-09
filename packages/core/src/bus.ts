@@ -22,6 +22,7 @@ export type StoredType =
   | "turn.reported"
   | "inbox.queued"
   | "inbox.status"
+  | "peer.start"
 
 export type LiveEvent =
   | {
@@ -37,6 +38,7 @@ export type LiveEvent =
   | { readonly type: "live.drain" }
   | { readonly type: "live.session"; readonly sessionId: string }
   | { readonly type: "live.project"; readonly projectId: string }
+  | { readonly type: "live.outbox"; readonly peerId: string }
 
 export type EngineEvent = StoredEvent | LiveEvent
 

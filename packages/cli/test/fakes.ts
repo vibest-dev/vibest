@@ -6,11 +6,16 @@ import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harness, Harnesses, HARNESS_IDS, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
 import * as BuiltinHarnesses from "@vibest/core/harnesses"
+import { VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
+import { Machines, MachineTransport } from "@vibest/core/machines"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout } from "@vibest/core/paths"
+import { Peers } from "@vibest/core/peer"
 import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { type Liveness, Processes } from "@vibest/core/processes"
+import { Remote } from "@vibest/core/remote"
+import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
 import { turnEndFrom } from "@vibest/core/results"
 import { Runtimes, registry } from "@vibest/core/runtimes"
@@ -20,6 +25,7 @@ import { systemPromptRoot } from "@vibest/core/system-prompt"
 import type * as VibestPlugin from "@vibest/plugin"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
+import { randomId } from "@vibest/schema/id"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import {
   Clock,
@@ -320,9 +326,14 @@ export interface TestOptions extends FakeRuntimeOptions {
     | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
   >
   readonly pluginTimeout?: Duration.Input
+  readonly sshHosts?: Readonly<Record<string, string>>
   readonly db?: (db: Db["Service"]) => Db["Service"]
   readonly missingBinary?: ReadonlyArray<HarnessId>
+  readonly transport?: MachineTransport["Service"]
+  readonly sessions?: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]
 }
+
+const noTransport: MachineTransport["Service"] = () => Effect.fail(new Error("no machine transport in this test"))
 
 const harnessOf = (options: TestOptions) =>
   Layer.succeed(Harness, {
@@ -393,7 +404,18 @@ const over = (options: TestOptions) => {
     }),
   )
   return Layer.provideMerge(FakeRuntime.layer(options))(
-    Layer.effect(Sessions, Sessions.make({ maxSessions: options.maxSessions })).pipe(
+    Layer.merge(Peers.layer, Remote.layer).pipe(
+      Layer.provideMerge(
+        Layer.effect(
+          Sessions,
+          Effect.flatMap(Sessions.make({ maxSessions: options.maxSessions }), (s) =>
+            Effect.map(Db, (db) => (options.sessions ?? ((x) => x))(s, db)),
+          ),
+        ),
+      ),
+      Layer.provideMerge(
+        Machines.layer.pipe(Layer.provide(Layer.succeed(MachineTransport, options.transport ?? noTransport))),
+      ),
       Layer.provideMerge(fakeIntegrationReportsReadyOnStart),
       Layer.provideMerge(plugins),
       Layer.provideMerge(Inbox.layer),
@@ -418,8 +440,12 @@ const over = (options: TestOptions) => {
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
       Layer.provideMerge(FakeGit.layers),
+      Layer.provideMerge(
+        Layer.succeed(SshHosts, { hostName: (alias) => Effect.succeed(options.sshHosts?.[alias] ?? alias) }),
+      ),
       Layer.provideMerge(Platform.services),
       Layer.provideMerge(Bus.layer),
+      Layer.provideMerge(Layer.sync(VibestdIdentity, () => ({ id: randomId(), name: "test-host" }))),
     ),
   )
 }
@@ -436,7 +462,7 @@ export type TestServices = Layer.Success<ReturnType<typeof testLayer>> | FakeRun
 
 export class GaveUp extends Schema.TaggedError<GaveUp>()("GaveUp", { helper: Schema.String }) {}
 
-const yieldToIo = TestClock.withLive(Effect.sleep("10 millis"))
+export const yieldToIo = TestClock.withLive(Effect.sleep("10 millis"))
 
 const UNTIL_ATTEMPTS = 2000
 

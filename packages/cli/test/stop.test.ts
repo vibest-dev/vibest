@@ -145,7 +145,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
         "DaemonStopping",
       )
       assert.strictEqual(yield* stopFromCli(repo), "DaemonStopping")
-      assert.isAbove((yield* user.List({})).length, 0, "reads still answer")
+      assert.isAbove((yield* user.List({})).sessions.length, 0, "reads still answer")
     }),
   )
 

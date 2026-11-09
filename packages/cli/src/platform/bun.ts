@@ -1,14 +1,18 @@
 import { dlopen, FFIType } from "bun:ffi"
 import fs from "node:fs"
 import fsPromises from "node:fs/promises"
+import os from "node:os"
 
 import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { CallerEnv } from "@vibest/client/client"
+import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { callerKeys } from "@vibest/core/caller"
 import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
+import { MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { CLAUDE_CREDENTIALS, claudeCredentialsFile, type KeychainPlatform, securityArgs } from "@vibest/core/keychain"
+import type { MachineTransport } from "@vibest/core/machines"
 import { type Candidate, type PluginLoader } from "@vibest/core/plugins"
 import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibest/core/processes"
 import { UserPlatform } from "@vibest/core/system-prompt"
@@ -214,6 +218,47 @@ const lock: Host["lock"] = (file) =>
     ),
   )
 
+const ioreg = Effect.tryPromise((signal) =>
+  new Response(
+    Bun.spawn(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      signal,
+    }).stdout,
+  ).text(),
+)
+
+const hostId = readHostId(
+  process.platform === "darwin"
+    ? { ioreg, files: [] }
+    : { files: process.platform === "linux" ? MACHINE_ID_FILES : [] },
+).pipe(Effect.provide(BunServices.layer))
+
+const transport: MachineTransport["Service"] = (argv) =>
+  Effect.acquireRelease(
+    Effect.try({
+      try: () => Bun.spawn([...argv], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env } }),
+      catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+    }),
+    (proc) => Effect.sync(() => proc.kill()),
+  ).pipe(
+    Effect.flatMap((proc) => {
+      const stderr = new Response(proc.stderr).text().catch(() => "")
+      const exited = Effect.promise(async () => ({ code: (await proc.exited) ?? undefined, stderr: await stderr }))
+      const writable = new WritableStream<Uint8Array>({
+        write: async (chunk) => {
+          proc.stdin.write(chunk)
+          await proc.stdin.flush()
+        },
+        close: async () => {
+          await proc.stdin.end()
+        },
+      })
+      return Effect.map(stdioSocket({ readable: proc.stdout, writable }), (socket) => ({ socket, exited }))
+    }),
+  )
+
 const builtinPlugins: ReadonlyArray<Candidate> = [
   { source: "builtin:harness-choice", revision: "harness-choice", options: {}, plugin: harnessChoicePlugin },
   { source: "builtin:runtime-herdr-core", revision: "runtime-herdr-core", options: {}, plugin: runtimeHcPlugin },
@@ -238,6 +283,8 @@ export const daemon: Omit<Host, "runtime"> = {
   keychain,
   lock,
   checkDatabase,
+  host: { name: os.hostname(), id: hostId },
+  transport,
 }
 
 export const selfCommand: ReadonlyArray<string> =

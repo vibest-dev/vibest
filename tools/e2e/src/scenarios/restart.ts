@@ -234,9 +234,11 @@ const checks: ReadonlyArray<Check> = [
         const before = main()!
         const daemonBefore = await w.daemonPid()
         const address = async () =>
-          (await w.json<Array<{ id: string; address: unknown }>>(["ls"], { cwd: repo, env })).find(
-            (e) => e.id === before.id,
-          )?.address
+          (
+            await w
+              .json<{ sessions: Array<{ id: string; address: unknown }> }>(["ls"], { cwd: repo, env })
+              .then((l) => l.sessions)
+          ).find((e) => e.id === before.id)?.address
         const addressBefore = await address()
         await ok(["run", "pi", "--session", session, "--env", piEnv, ask("slow")])
         await until("the main agent's held turn", () => model.held() > 0, 120_000)
