@@ -347,9 +347,6 @@ importers:
       '@vibest/client':
         specifier: workspace:*
         version: link:../../client
-      '@vibest/core':
-        specifier: workspace:*
-        version: link:../../core
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../../protocol
@@ -369,6 +366,9 @@ importers:
       '@vibest/cli':
         specifier: workspace:*
         version: link:../../cli
+      '@vibest/core':
+        specifier: workspace:*
+        version: link:../../core
       '@vibest/server':
         specifier: workspace:*
         version: link:../../server

@@ -1,5 +1,4 @@
 import { connect, type VibestClient, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
-import { HARNESS_IDS } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
@@ -15,7 +14,7 @@ export const doctor = Command.make("doctor", {}, () =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const sections: Array<{ readonly title: string; readonly findings: ReadonlyArray<Finding> }> = []
-    const width = Math.max(...HARNESS_IDS.map((h) => h.length))
+    let width = 0
 
     const installs = yield* extraVibests
     if (installs.length > 0) sections.push({ title: "vibest on PATH", findings: installs })
@@ -59,9 +58,10 @@ export const doctor = Command.make("doctor", {}, () =>
       })
     } else {
       const listed = yield* RpcClient.withHeaders(
-        connect(layout.socket).pipe(Effect.flatMap((c) => c["Harnesses.List"]())),
+        connect(layout.socket).pipe(Effect.flatMap((c) => c["Harnesses.List"]({}))),
         protocolHeaders(),
       ).pipe(Effect.scoped, Effect.option)
+      if (Option.isSome(listed)) width = Math.max(0, ...listed.value.map((row) => row.harness.length))
       const harnesses: Array<Finding> = Option.isNone(listed)
         ? [harnessNote("did not answer")]
         : listed.value.map((row) =>

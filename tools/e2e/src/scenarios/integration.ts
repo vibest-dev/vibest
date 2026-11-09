@@ -312,18 +312,12 @@ const checks: ReadonlyArray<Check> = [
         const r = await w.run(repo, argv)
         expect(r.code === 0, `${argv.join(" ")}: ${r.stderr}`)
       }
-      const daemonLog = path.join(w.vibestHome, "vibestd.log")
-      const logFrom = (await fs.readFile(daemonLog, "utf8").catch(() => "")).length
       await withSession(
         w,
         "cursor",
         [],
         HERDR_TASK,
         async ({ id }) => {
-          const rerouted = /harness "cursor" → "(\w+)"/.exec(
-            (await fs.readFile(daemonLog, "utf8").catch(() => "")).slice(logFrom),
-          )
-          expect(rerouted === null, `harness-choice routed cursor to ${rerouted?.[1] ?? "another harness"}`)
           await until(
             "the session's result",
             async () => ["completed", "failed"].includes((await turnState(w, id, repo)) ?? ""),

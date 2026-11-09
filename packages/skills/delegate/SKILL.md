@@ -12,18 +12,18 @@ You direct subagents. You stay with the user. Each result arrives in your inbox 
 Split independent pieces. Research and review run in parallel. One writing subagent per set of files. A few shell reads (`git diff`, `rg`) you do yourself.
 
 ```
-vibest run <harness> --title '<Title>' -- '<self-contained task>'
+vibest run [<harness>] --title '<Title>' -- '<self-contained task>'
 ```
 
 Its id is <id>.
 
 ```
-vibest run <harness> --title '<Title>' --archive-on-completion -- '<task>'
+vibest run [<harness>] --title '<Title>' --archive-on-completion -- '<task>'
 ```
 
 `--archive-on-completion` is only for a session you will not message again after it completes. It archives once the session reports completed and that result has reached you. The branch is kept. Do not `vibest send` it after that. Any turn that ends normally archives it, a question included, so do not use it for a session that may need an answer. A `failed` result has not archived it: send the correction to the id it printed; the flag still archives the completed result that follows. A reviewer that gets later rounds is the pipeline skill and must stay open, without this flag.
 
-- `<harness>` is `pi`, `claude` or `cursor` (`auto` only when a spawn plugin chooses).
+- Leave `<harness>` out to use your own harness, provider and model; name one (`pi`, `claude`, `cursor`, or any harness a plugin adds; `vibest harness list`) to switch.
 - Always pass `--title`: three to six words, verb first, first letter capitalised, no kebab-case, saying what is done rather than how ("Fix login redirect loop"). The user's language is fine.
 - Each session gets its own new worktree.
 - Several `vibest run` commands in one message start in parallel.
