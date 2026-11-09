@@ -54,62 +54,38 @@ const breadcrumbView = (t: Theme, crumb: Breadcrumb): Element =>
     .child(div().min_w(0).truncate().text_color(t.foreground).child(crumb.thread))
     .when(crumb.branch !== null && crumb.branch !== "", (el) => el.child(branchChip(t, crumb.branch)))
 
-const SLIDE = { duration: 200, easing: "ease-out" } as const
-
-const sidebarToggle = (t: Theme, hidden: boolean, inset: number): Element =>
-  h_flex()
-    .id("toggle-sidebar-slot")
-    .flex_none()
-    .h(28)
-    .overflow_hidden()
-    .justify_end()
-    .w(hidden ? inset + 28 + 12 : inset)
-    .transition("width", SLIDE)
-    .child(
-      div()
-        .id("toggle-sidebar-fade")
-        .flex_none()
-        .mr(12)
-        .opacity(hidden ? 1 : 0)
-        .transition("opacity", SLIDE)
-        .child(
-          iconButton(t, "toggle-sidebar", "mods/vibest-topbar/panel-left-open.svg", () =>
-            run("layout.toggle", { id: "sidebar" }),
-          ),
-        ),
-    )
-
 export const topbarView = (t: Theme, state: TopbarState, win: TopbarWindow): Element =>
   h_flex()
     .size_full()
     .min_w(0)
+    .pl(win.inset)
     .pr(8)
     .pt(8)
+    .gap(12)
     .items_center()
     .bg(t.chrome)
     .text_size(14)
     .font_medium()
-    .child(sidebarToggle(t, state.sidebarHidden, win.inset))
+    .when(state.sidebarHidden, (el) =>
+      el.child(
+        iconButton(t, "toggle-sidebar", "mods/vibest-topbar/panel-left-open.svg", () =>
+          run("layout.toggle", { id: "sidebar" }),
+        ),
+      ),
+    )
+    .child(state.breadcrumb ? breadcrumbView(t, state.breadcrumb) : div().flex_1())
     .child(
       h_flex()
-        .flex_1()
-        .min_w(0)
-        .gap(12)
+        .flex_none()
+        .gap(4)
         .items_center()
-        .child(state.breadcrumb ? breadcrumbView(t, state.breadcrumb) : div().flex_1())
-        .child(
-          h_flex()
-            .flex_none()
-            .gap(4)
-            .items_center()
-            .child(panelButton(t, state.shownPanel, "files", "files"))
-            .child(panelButton(t, state.shownPanel, "changes", "git-compare"))
-            .child(panelButton(t, state.shownPanel, "agents", "monitor"))
-            .when(win.buttons, (el) =>
-              el
-                .child(iconButton(t, "minimize", "minus", () => run("window.minimize")))
-                .child(iconButton(t, "maximize", "square", () => run("window.maximize")))
-                .child(iconButton(t, "close-window", "x", () => run("window.close"))),
-            ),
+        .child(panelButton(t, state.shownPanel, "files", "files"))
+        .child(panelButton(t, state.shownPanel, "changes", "git-compare"))
+        .child(panelButton(t, state.shownPanel, "agents", "monitor"))
+        .when(win.buttons, (el) =>
+          el
+            .child(iconButton(t, "minimize", "minus", () => run("window.minimize")))
+            .child(iconButton(t, "maximize", "square", () => run("window.maximize")))
+            .child(iconButton(t, "close-window", "x", () => run("window.close"))),
         ),
     )
