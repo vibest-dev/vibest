@@ -7,12 +7,12 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vibest-dev/vibest.git",
-    "directory": "packages/vibest-herdr-app"
+    "directory": "apps/vibest-herdr-app"
   },
   "type": "module",
   "scripts": {
     "build": "bun scripts/build.ts",
     "typecheck": "tsrs --noEmit --fast",
-    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/vibest-herdr-app"
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run apps/vibest-herdr-app"
   }
 }
