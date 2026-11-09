@@ -558,6 +558,8 @@ describe("vibest.sock", () => {
           const dir = path.join(parent, name)
           yield* fs.makeDirectory(dir)
           yield* sh(dir, "init", "-q", "-b", "main")
+          yield* sh(dir, "config", "user.email", "t@example.com")
+          yield* sh(dir, "config", "user.name", "t")
           yield* fs.writeFileString(path.join(dir, "f"), "x\n")
           yield* sh(dir, "add", "f")
           yield* sh(dir, "commit", "-q", "-m", "f")
