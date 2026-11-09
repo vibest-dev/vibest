@@ -182,20 +182,22 @@ export default class Files extends View {
 
   header(t: Theme): Element {
     const tabs = this.tabs
-    return h_flex()
-      .h(32)
-      .flex_none()
-      .px(6)
+    const strip = h_flex()
+      .id("files-tabs")
+      .flex_1()
+      .min_w(0)
+      .h_full()
       .gap(2)
       .items_center()
-      .overflow_hidden()
+      .overflow_x_scroll()
       .when(tabs.files.length === 0, (el) => el.child(div().px(4).font_medium().child("Files")))
       .children(
         tabs.files.map((f, i) => {
           const active = f.path === tabs.active
           return h_flex()
             .id(`ft-${i}`)
-            .flex_none()
+            .flex_shrink(1)
+            .min_w(80)
             .h(24)
             .pl(8)
             .pr(4)
@@ -207,10 +209,11 @@ export default class Files extends View {
             .text_color(active ? t.foreground : t.muted)
             .hover((s) => s.bg(t.hover).text_color(t.foreground))
             .on_click((_e, cx) => this.setTabs(selectFile(this.tabs, f.path), cx))
-            .child(div().max_w(180).truncate().child(fileName(f.path)))
+            .child(div().flex_1().min_w(0).max_w(180).truncate().child(fileName(f.path)))
             .child(
               div()
                 .id(`ft-x-${i}`)
+                .flex_none()
                 .p(2)
                 .rounded(4)
                 .text_color(t.dim)
@@ -223,7 +226,13 @@ export default class Files extends View {
             )
         }),
       )
-      .child(div().flex_1())
+    return h_flex()
+      .h(32)
+      .flex_none()
+      .px(6)
+      .gap(4)
+      .items_center()
+      .child(strip)
       .child(
         iconButton(
           t,
