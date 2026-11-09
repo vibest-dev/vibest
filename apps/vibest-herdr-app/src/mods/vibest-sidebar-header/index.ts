@@ -1,7 +1,8 @@
 import { h_flex } from "gpui-base"
 import { div, type Element, View } from "gpui-kit"
-import { window } from "herdr"
+import { run, window } from "herdr"
 
+import { iconButton } from "../../shared/icon-button.ts"
 import { type Theme, themeColors } from "../../shared/theme-colors.ts"
 import { TRAFFIC_LIGHTS_INSET } from "../../shared/traffic-lights.ts"
 
@@ -17,6 +18,7 @@ const header = (t: Theme): Element => {
     .gap(4)
     .bg(t.chrome)
     .text_size(14)
+    .child(iconButton(t, "toggle-sidebar", "panel-left", () => run("layout.toggle", { id: "sidebar" })))
     .child(div().font_medium().text_color(t.foreground).child("Vibest"))
 }
 
