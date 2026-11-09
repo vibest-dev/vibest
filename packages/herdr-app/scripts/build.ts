@@ -3,7 +3,7 @@ import url from "node:url"
 
 const root = path.dirname(path.dirname(url.fileURLToPath(import.meta.url)))
 process.chdir(root)
-const mods = { "vibest-sessions": "src/sessions/main.ts" }
+const mods = { "vibest-sessions": "src/sessions/main.ts", t3: "src/t3/main.ts" }
 
 for (const [name, entry] of Object.entries(mods)) {
   const result = await Bun.build({

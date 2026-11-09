@@ -1,25 +1,20 @@
 import { h_flex, v_flex } from "gpui-base"
 import { div, View } from "gpui-kit"
-import { appHome, exec, theme } from "herdr"
+import { appHome, exec, type Theme, theme } from "herdr"
 
+import { sessionStatus } from "../shared/format.ts"
+import { cliArgv, commandNote, parseSessions, type SessionRow, settleList, statusVerdict } from "../shared/vibest.ts"
 import {
-  cliArgv,
   closePull,
-  commandNote,
   completePull,
   groupSessions,
   idlePull,
-  parseSessions,
   projectHeading,
   type Pull,
   requestPull,
   rowNote,
   rowTitle,
-  type SessionRow,
-  settleList,
   snapshotNote,
-  statusText,
-  statusVerdict,
 } from "./model.ts"
 
 export default class VibestSessions extends View {
@@ -99,7 +94,7 @@ export default class VibestSessions extends View {
     }
   }
 
-  sessionRow(colors: Record<string, string>, session: SessionRow): Chain {
+  sessionRow(colors: Theme, session: SessionRow): Chain {
     const row = h_flex()
       .id(`session-${session.id}`)
       .gap(6)
@@ -107,31 +102,15 @@ export default class VibestSessions extends View {
       .py(2)
       .items_center()
       .rounded(4)
-      .child(
-        div()
-          .flex_1()
-          .truncate()
-          .text_color(colors.foreground ?? "")
-          .child(rowTitle(session)),
-      )
+      .child(div().flex_1().truncate().text_color(colors.foreground).child(rowTitle(session)))
       .child(
         div()
           .flex_none()
-          .text_color(colors.dim ?? "")
-          .child(`${session.harness} ${statusText(session)}`),
+          .text_color(colors.dim)
+          .child(`${session.harness} ${sessionStatus(session)}`),
       )
-      .child(
-        div()
-          .flex_none()
-          .text_color(colors.dim ?? "")
-          .child(session.id.slice(0, 8)),
-      )
-    return row.child(
-      div()
-        .flex_none()
-        .text_color(colors.dim ?? "")
-        .child(rowNote(session)),
-    )
+      .child(div().flex_none().text_color(colors.dim).child(session.id.slice(0, 8)))
+    return row.child(div().flex_none().text_color(colors.dim).child(rowNote(session)))
   }
 
   render(_cx: Cx): Chain {
@@ -140,14 +119,14 @@ export default class VibestSessions extends View {
       div()
         .id(`project-${group.projectId}`)
         .truncate()
-        .text_color(colors.dim ?? "")
+        .text_color(colors.dim)
         .child(projectHeading(group.projectId, group.label)),
       ...group.sessions.map((session) => this.sessionRow(colors, session)),
     ])
     return v_flex()
       .id("vibest-sessions")
       .size_full()
-      .bg(colors.surface ?? "")
+      .bg(colors.surface)
       .p(10)
       .gap(6)
       .text_size(12)
@@ -156,12 +135,7 @@ export default class VibestSessions extends View {
         h_flex()
           .gap(8)
           .items_center()
-          .child(
-            div()
-              .font_semibold()
-              .text_color(colors.foreground ?? "")
-              .child("Vibest"),
-          )
+          .child(div().font_semibold().text_color(colors.foreground).child("Vibest"))
           .child(div().flex_1())
           .child(
             div()
@@ -170,28 +144,16 @@ export default class VibestSessions extends View {
               .py(2)
               .rounded(4)
               .cursor_pointer()
-              .text_color(colors.foreground ?? "")
-              .hover((el) => el.bg(colors.hover ?? ""))
+              .text_color(colors.foreground)
+              .hover((el) => el.bg(colors.hover))
               .on_click((_event, clicked) => {
                 this.request(clicked)
               })
               .child("Refresh"),
           ),
       )
-      .when(this.note !== "", (el) =>
-        el.child(
-          div()
-            .text_color(colors.muted ?? "")
-            .child(this.note),
-        ),
-      )
-      .when(this.asOf !== "", (el) =>
-        el.child(
-          div()
-            .text_color(colors.dim ?? "")
-            .child(snapshotNote(this.asOf)),
-        ),
-      )
+      .when(this.note !== "", (el) => el.child(div().text_color(colors.muted).child(this.note)))
+      .when(this.asOf !== "", (el) => el.child(div().text_color(colors.dim).child(snapshotNote(this.asOf))))
       .children(rows)
   }
 }

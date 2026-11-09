@@ -3,7 +3,10 @@ import { h_flex, v_flex } from "gpui-base";
 import { div, View } from "gpui-kit";
 import { appHome, exec, theme } from "herdr";
 
-// src/sessions/model.ts
+// src/shared/format.ts
+var sessionStatus = (row) => row.turnState === "" || row.turnState === "none" ? row.status : `${row.status}/${row.turnState}`;
+
+// src/shared/vibest.ts
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
 var cliArgv = (command) => [
   ...STRIPPED.flatMap((name) => ["-u", name]),
@@ -12,16 +15,6 @@ var cliArgv = (command) => [
   command,
   ...command === "ls" ? ["--no-start", "--all-projects"] : []
 ];
-var idlePull = () => ({ token: 0, closed: false, running: false, again: false });
-var rowNote = (session) => {
-  if (session.runtime !== "hc")
-    return `runtime ${session.runtime || "unknown"}`;
-  if (session.machine !== "local")
-    return "on another machine";
-  if (session.socket === "" || session.coreAddress.includes("/"))
-    return "no local terminal";
-  return "core not proven";
-};
 var commandNote = (result, fallback) => {
   if (result.code === 0)
     return "";
@@ -108,7 +101,18 @@ var parseSessions = (stdout) => {
   }
   return rows;
 };
-var statusText = (row) => row.turnState === "" || row.turnState === "none" ? row.status : `${row.status}/${row.turnState}`;
+
+// src/sessions/model.ts
+var idlePull = () => ({ token: 0, closed: false, running: false, again: false });
+var rowNote = (session) => {
+  if (session.runtime !== "hc")
+    return `runtime ${session.runtime || "unknown"}`;
+  if (session.machine !== "local")
+    return "on another machine";
+  if (session.socket === "" || session.coreAddress.includes("/"))
+    return "no local terminal";
+  return "core not proven";
+};
 var rowTitle = (row) => row.title || row.agent || row.id.slice(0, 8);
 var snapshotNote = (asOf) => `Snapshot ${asOf} UTC, not a watch.`;
 var folderName = (root) => root.split("/").filter((part) => part !== "").at(-1);
@@ -234,18 +238,18 @@ class VibestSessions extends View {
     }
   }
   sessionRow(colors, session) {
-    const row = h_flex().id(`session-${session.id}`).gap(6).px(2).py(2).items_center().rounded(4).child(div().flex_1().truncate().text_color(colors.foreground ?? "").child(rowTitle(session))).child(div().flex_none().text_color(colors.dim ?? "").child(`${session.harness} ${statusText(session)}`)).child(div().flex_none().text_color(colors.dim ?? "").child(session.id.slice(0, 8)));
-    return row.child(div().flex_none().text_color(colors.dim ?? "").child(rowNote(session)));
+    const row = h_flex().id(`session-${session.id}`).gap(6).px(2).py(2).items_center().rounded(4).child(div().flex_1().truncate().text_color(colors.foreground).child(rowTitle(session))).child(div().flex_none().text_color(colors.dim).child(`${session.harness} ${sessionStatus(session)}`)).child(div().flex_none().text_color(colors.dim).child(session.id.slice(0, 8)));
+    return row.child(div().flex_none().text_color(colors.dim).child(rowNote(session)));
   }
   render(_cx) {
     const colors = theme();
     const rows = groupSessions(this.sessions).flatMap((group) => [
-      div().id(`project-${group.projectId}`).truncate().text_color(colors.dim ?? "").child(projectHeading(group.projectId, group.label)),
+      div().id(`project-${group.projectId}`).truncate().text_color(colors.dim).child(projectHeading(group.projectId, group.label)),
       ...group.sessions.map((session) => this.sessionRow(colors, session))
     ]);
-    return v_flex().id("vibest-sessions").size_full().bg(colors.surface ?? "").p(10).gap(6).text_size(12).overflow_y_scrollbar().child(h_flex().gap(8).items_center().child(div().font_semibold().text_color(colors.foreground ?? "").child("Vibest")).child(div().flex_1()).child(div().id("vibest-refresh").px(6).py(2).rounded(4).cursor_pointer().text_color(colors.foreground ?? "").hover((el) => el.bg(colors.hover ?? "")).on_click((_event, clicked) => {
+    return v_flex().id("vibest-sessions").size_full().bg(colors.surface).p(10).gap(6).text_size(12).overflow_y_scrollbar().child(h_flex().gap(8).items_center().child(div().font_semibold().text_color(colors.foreground).child("Vibest")).child(div().flex_1()).child(div().id("vibest-refresh").px(6).py(2).rounded(4).cursor_pointer().text_color(colors.foreground).hover((el) => el.bg(colors.hover)).on_click((_event, clicked) => {
       this.request(clicked);
-    }).child("Refresh"))).when(this.note !== "", (el) => el.child(div().text_color(colors.muted ?? "").child(this.note))).when(this.asOf !== "", (el) => el.child(div().text_color(colors.dim ?? "").child(snapshotNote(this.asOf)))).children(rows);
+    }).child("Refresh"))).when(this.note !== "", (el) => el.child(div().text_color(colors.muted).child(this.note))).when(this.asOf !== "", (el) => el.child(div().text_color(colors.dim).child(snapshotNote(this.asOf)))).children(rows);
   }
 }
 export {

@@ -1,10 +1,12 @@
+import type { PaneInfo, SpaceInfo, TabInfo } from "herdr"
 import { describe, expect, it } from "vitest"
 
-import { elapsed, pill, projects, relativeTime, threadTitle } from "../home/mods/t3/model.js"
+import { elapsed, pill, relativeTime } from "../src/shared/format.ts"
+import { projects, threadTitle } from "../src/t3/model.ts"
 
 const shell = { key: "shell", name: "zsh", agent: false, shell: true }
 const claude = { key: "claude", name: "Claude Code", agent: true, shell: false }
-const tab = (over) => ({
+const tab = (over: Partial<TabInfo> = {}): TabInfo => ({
   id: "tb1",
   index: 1,
   name: "1",
@@ -12,10 +14,19 @@ const tab = (over) => ({
   active: false,
   status: null,
   settled: false,
+  zoomed: false,
   changed_at: null,
+  working_since: null,
   ...over,
 })
-const pane = (over) => ({ pane: "p1", terminal: "t1", tab: "tb1", title: "", program: shell, ...over })
+const pane = (over: Partial<PaneInfo> = {}): PaneInfo => ({
+  pane: "p1",
+  terminal: "t1",
+  tab: "tb1",
+  title: "",
+  program: shell,
+  ...over,
+})
 
 describe("relativeTime", () => {
   it("uses T3 Code's buckets: just now, then minutes, hours and days ago", () => {
@@ -69,11 +80,12 @@ describe("threadTitle", () => {
 
 describe("projects", () => {
   it("nests each space's tabs as threads, hiding settled ones unless shown", () => {
-    const spaces = [
+    const spaces: SpaceInfo[] = [
       {
         id: "sp1",
         name: "api",
         machine: null,
+        branch: null,
         active: true,
         status: "working",
         tabs: [

@@ -1,22 +1,24 @@
 import { assert, describe, it } from "@effect/vitest"
 
 import {
-  cliArgv,
   closePull,
-  commandNote,
   completePull,
   groupSessions,
   idlePull,
-  parseOwnedAddress,
-  parseSessions,
-  rowNote,
   projectHeading,
   requestPull,
+  rowNote,
+} from "../src/sessions/model.ts"
+import { sessionStatus } from "../src/shared/format.ts"
+import {
+  cliArgv,
+  commandNote,
+  parseOwnedAddress,
+  parseSessions,
   type SessionRow,
   settleList,
-  statusText,
   statusVerdict,
-} from "../src/sessions/model.ts"
+} from "../src/shared/vibest.ts"
 
 const socket = "/run/user/501/herdr-core/default.sock"
 
@@ -196,7 +198,7 @@ describe("herdr-app mod", () => {
       ["shop · aaaaaaaa", "cccccccc"],
     )
     assert.equal(groups[0]?.sessions.length, 2)
-    assert.equal(statusText(first), "working/open")
-    assert.equal(statusText(second), "idle")
+    assert.equal(sessionStatus(first), "working/open")
+    assert.equal(sessionStatus(second), "idle")
   })
 })
