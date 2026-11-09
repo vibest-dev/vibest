@@ -8,17 +8,9 @@ import {
   parseSessions,
   readLsResult,
   type SessionRow,
-} from "../src/panel/agents/ls.ts"
-import { closePull, completePull, idlePull, requestPull } from "../src/panel/agents/pull.ts"
-import {
-  groupSessions,
-  projectHeading,
-  rowNote,
-  rowTitle,
-  rowTooltip,
-  sessionStatus,
-  shortId,
-} from "../src/panel/agents/sessions.ts"
+} from "./ls.ts"
+import { closePull, completePull, idlePull, requestPull } from "./pull.ts"
+import { groupSessions, projectHeading, rowNote, rowTitle, rowTooltip, sessionStatus, shortId } from "./sessions.ts"
 
 const socket = "/run/user/501/herdr-core/default.sock"
 

@@ -13,7 +13,8 @@
     "eslint/no-unused-expressions": ["error", { "allowTernary": true }]
   },
   "ignorePatterns": [
-    "apps/vibest-herdr-app/home/mods/*/main.js",
+    "apps/vibest-herdr-app/mods/*/main.js",
+    "apps/vibest-herdr-app/mods/*/*.d.ts",
     "apps/vibest-herdr-app/types",
     "dist",
     "node_modules",

@@ -1,7 +1,7 @@
 import type { PaneInfo, SpaceInfo, TabInfo } from "herdr"
 import { describe, expect, it } from "vitest"
 
-import { topbarState } from "../src/workspace/topbar/topbar-state.ts"
+import { topbarState } from "./topbar-state.ts"
 
 const tab: TabInfo = {
   id: "tb1",

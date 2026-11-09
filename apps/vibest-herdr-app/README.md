@@ -9,13 +9,15 @@ Private: not published, not part of a release.
 
 ## Files
 
-`home/` is exactly what goes into a herdr-app home (`~/.config/herdr-app`, or `$HERDR_APP_HOME`):
+The package is laid out like the herdr-app home it installs into (`~/.config/herdr-app`, or `$HERDR_APP_HOME`):
 
-| Path in `home/`                                       | What it is                                             |
-| ----------------------------------------------------- | ------------------------------------------------------ |
-| `layouts/vibest.json`, `layouts/vibest.svg`           | the layout and its preview                             |
-| `themes/vibest-light.json`, `themes/vibest-dark.json` | optional light and dark themes (see Look)              |
-| `mods/vibest-*/main.js`, `mods/vibest-*/mod.json`     | the mods, built from `src/` (committed; `place: none`) |
+| Path                                                  | What it is                                                                                 |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `layouts/vibest.json`, `layouts/vibest.svg`           | the layout and its preview                                                                 |
+| `themes/vibest-light.json`, `themes/vibest-dark.json` | optional light and dark themes (see Look)                                                  |
+| `mods/<name>/`                                        | one mod: `mod.json`, `index.ts` and the built `main.js`, its other sources and their tests |
+| `shared/`                                             | code two or more mods use, with its tests                                                  |
+| `types/herdr-app-0.1.13/`                             | herdr-app's own `herdr.d.ts` and `gpui-kit.d.ts`, unchanged                                |
 
 The layout uses herdr-app's shipped pieces wherever they do the job: `workspace-chrome` for the sidebar footer
 (Settings, Add machine), `pane` for each terminal card's header (split, zoom, close), `changes` and `files` in the right
@@ -57,24 +59,21 @@ right panel has no frame of its own, because the shipped Diff and Files mods, li
 
 ## Mods
 
-Each of our layout blocks is its own mod, named after its block, with its own folder in `src/` that mirrors the
-layout tree, at `src/<area>/<mod>/`. Only a mod's entry file starts with `vibest-`: `src/<area>/<mod>/vibest-*.ts` is
-the mod of that name, and no other file in `src/` may start with `vibest-`. The entry reads herdr or vibest and keeps
-the copy's state; the data
-modules turn what was read into plain values and import nothing from gpui, so the tests cover them; `view.ts` draws.
+Each of our layout blocks is its own mod, named after its block, in one folder:
 
-- `sidebar/header/`: `vibest-sidebar-header.ts`, the wordmark;
-- `sidebar/threads/`: `vibest-sidebar-threads.ts`, `projects.ts` (spaces and panes to projects and threads, status
-  labels, times, the stored fold), `view.ts`;
-- `workspace/topbar/`: `vibest-topbar.ts`, `topbar-state.ts` (breadcrumb, shown panel, sidebar shown), `view.ts`;
-- `panel/agents/`: `vibest-agents.ts`, `ls.ts` (the `vibest ls` command line, parsing its JSON, the result a read shows),
-  `sessions.ts` (grouping and row text), `pull.ts` (which read's result to keep), `view.ts`;
-- `shared/`: only what two or more mods use: `theme-colors.ts`, `icon-button.ts`, `traffic-lights.ts`,
-  `thread-title.ts`.
+- `mods/<name>/index.ts` is the mod's entry and builds to `mods/<name>/main.js` beside it; nothing else is an entry.
+- A mod imports only from its own folder and `shared/`; `shared/` imports nothing from `mods/`; there are no cycles.
+  `mod-folders.test.ts` checks these rules, and that every mod folder has an `index.ts` and a `mod.json`.
+- In a mod, `index.ts` reads herdr or vibest and keeps the copy's state, the data modules turn what was read into
+  plain values and import nothing from gpui (their tests sit beside them), and `view.ts` draws.
 
-A mod cannot import from another mod's folder; `test/mod-folders.test.ts` fails when a file imports from another
-mod folder, when `shared/` imports from one, when an entry has no `home/mods/<name>/` folder, or when another
-file is named `vibest-*`.
+| Folder                         | Files                                                                                                                                                                                    |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mods/vibest-sidebar-header/`  | `index.ts`, the wordmark                                                                                                                                                                 |
+| `mods/vibest-sidebar-threads/` | `index.ts`, `projects.ts` (spaces and panes to projects and threads, status labels, times, the stored fold), `view.ts`                                                                   |
+| `mods/vibest-topbar/`          | `index.ts`, `topbar-state.ts` (breadcrumb, shown panel, sidebar shown), `view.ts`                                                                                                        |
+| `mods/vibest-agents/`          | `index.ts`, `ls.ts` (the `vibest ls` command line, parsing its JSON, the result a read shows), `sessions.ts` (grouping and row text), `pull.ts` (which read's result to keep), `view.ts` |
+| `shared/`                      | `theme-colors.ts`, `icon-button.ts`, `traffic-lights.ts`, `thread-title.ts`                                                                                                              |
 
 Types come from herdr-app 0.1.13's own `herdr.d.ts` and `gpui-kit.d.ts`, vendored unchanged in
 `types/herdr-app-0.1.13/`; `tsconfig.json` maps `herdr` to the first and uses the compiler options of the
@@ -92,19 +91,24 @@ The panel expects the herdr-app home to be outside a git repository: `vibest ls`
 outside one, and inside a checkout it would list that project's sessions only.
 
 The mods run in herdr-app's gpui-kit JavaScript: no Node, Effect or `setTimeout`, and a mod cannot import files from
-another mod's folder, so the `build` script (one `bun build src/*/*/vibest-*.ts`, without splitting) writes each
-entry to `home/mods/<name>/main.js`, inlining what it uses from `src/shared/`, with `gpui-kit`, `gpui-base` and
-`herdr` left external.
+another mod's folder, so the `build` script (one `bun build mods/*/index.ts`, without splitting) writes each
+entry to `mods/<name>/main.js`, inlining what it uses from `shared/`, with `gpui-kit`, `gpui-base` and `herdr` left
+external.
 
 ## Build, test, install
 
 ```sh
-pnpm --filter vibest-herdr-app build   # rewrites home/mods/vibest-*/main.js; commit them
-pnpm --filter vibest-herdr-app test    # vitest over the threads and agents models
-pnpm --filter vibest-herdr-app check   # herdr-app check on every mod in home/mods/
+pnpm --filter vibest-herdr-app build   # rewrites mods/*/main.js; commit them
+pnpm --filter vibest-herdr-app test    # the tests beside the code, and the mod folder rules
+pnpm --filter vibest-herdr-app check   # herdr-app check on every mods/*/ folder
+```
 
-H=${HERDR_APP_HOME:-~/.config/herdr-app}
-cp -R apps/vibest-herdr-app/home/* "$H/"
+Install copies the layout, the themes and, for each mod, only `mod.json` and `main.js`:
+
+```sh
+cd apps/vibest-herdr-app && H=${HERDR_APP_HOME:-~/.config/herdr-app}
+cp layouts/* "$H/layouts/" && cp themes/* "$H/themes/"
+for m in mods/*/; do mkdir -p "$H/$m" && cp "$m/mod.json" "$m/main.js" "$H/$m"; done
 herdr-app do layout.switch --name vibest
 ```
 

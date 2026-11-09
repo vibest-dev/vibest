@@ -1,12 +1,12 @@
-// src/sidebar/threads/vibest-sidebar-threads.ts
+// mods/vibest-sidebar-threads/index.ts
 import { View } from "gpui-kit";
 import { panes, spaces } from "herdr";
 
-// src/shared/theme-colors.ts
+// shared/theme-colors.ts
 import { theme } from "herdr";
 var themeColors = () => theme();
 
-// src/shared/thread-title.ts
+// shared/thread-title.ts
 var leading = (s) => s.replace(/^[^\p{L}\p{N}]+/u, "").trim();
 var looksLikePath = (s) => /^[~/]|^[A-Za-z]:\\/.test(s) || s.includes("@");
 var threadTitle = (tab, tabPanes) => {
@@ -20,7 +20,7 @@ var threadTitle = (tab, tabPanes) => {
   return lead?.program?.agent ? lead.program.name : `Terminal ${tab.index}`;
 };
 
-// src/sidebar/threads/projects.ts
+// mods/vibest-sidebar-threads/projects.ts
 var parseFolded = (stored) => {
   try {
     const value = JSON.parse(stored ?? "[]");
@@ -83,12 +83,12 @@ var PILLS = {
 };
 var pill = (status) => status === null ? null : PILLS[status] ?? null;
 
-// src/sidebar/threads/view.ts
+// mods/vibest-sidebar-threads/view.ts
 import { h_flex, v_flex } from "gpui-base";
 import { div as div2, svg as svg2 } from "gpui-kit";
 import { openOverlay, pickFolder, run } from "herdr";
 
-// src/shared/icon-button.ts
+// shared/icon-button.ts
 import { div, svg } from "gpui-kit";
 var icon = (name) => `mods/workspace-chrome/${name}.svg`;
 var iconButton = (t, id, name, action, { size = 28, on = false } = {}) => div().id(id).size(size).flex_none().flex().items_center().justify_center().rounded(8).when(on, (el) => el.bg(t.selected)).text_color(on ? t.foreground : t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).cursor_pointer().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => {
@@ -96,7 +96,7 @@ var iconButton = (t, id, name, action, { size = 28, on = false } = {}) => div().
   action(cx);
 }).child(svg(icon(name)).size(16));
 
-// src/sidebar/threads/view.ts
+// mods/vibest-sidebar-threads/view.ts
 class ThreadsView {
   t;
   ui;
@@ -176,7 +176,7 @@ var addProject = (cx) => {
   });
 };
 
-// src/sidebar/threads/vibest-sidebar-threads.ts
+// mods/vibest-sidebar-threads/index.ts
 var CLOCK_MS = 30000;
 
 class SidebarThreads extends View {

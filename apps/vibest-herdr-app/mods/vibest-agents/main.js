@@ -1,12 +1,12 @@
-// src/panel/agents/vibest-agents.ts
+// mods/vibest-agents/index.ts
 import { View } from "gpui-kit";
 import { appHome, exec } from "herdr";
 
-// src/shared/theme-colors.ts
+// shared/theme-colors.ts
 import { theme } from "herdr";
 var themeColors = () => theme();
 
-// src/panel/agents/ls.ts
+// mods/vibest-agents/ls.ts
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
 var LS_ARGV = [...STRIPPED.flatMap((name) => ["-u", name]), "vibest", "ls"];
 var commandNote = (result, fallback) => {
@@ -86,7 +86,7 @@ var lsFailure = (error) => ({
   asOf: ""
 });
 
-// src/panel/agents/pull.ts
+// mods/vibest-agents/pull.ts
 var idlePull = () => ({ token: 0, closed: false, running: false, again: false });
 var requestPull = (pull) => {
   if (pull.closed)
@@ -109,11 +109,11 @@ var closePull = (pull) => ({
   again: false
 });
 
-// src/panel/agents/view.ts
+// mods/vibest-agents/view.ts
 import { h_flex, v_flex } from "gpui-base";
 import { div } from "gpui-kit";
 
-// src/panel/agents/sessions.ts
+// mods/vibest-agents/sessions.ts
 var rowNote = (session) => {
   if (session.runtime !== "hc")
     return `runtime ${session.runtime || "unknown"}`;
@@ -154,7 +154,7 @@ var groupSessions = (rows) => {
 };
 var sessionStatus = (row) => row.turnState === "" || row.turnState === "none" ? row.status : `${row.status}/${row.turnState}`;
 
-// src/panel/agents/view.ts
+// mods/vibest-agents/view.ts
 var sessionRow2 = (t, session) => h_flex().id(`session-${session.id}`).gap(8).px(2).py(2).items_center().rounded(4).tooltip(rowTooltip(session)).child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(rowTitle(session))).child(div().flex_none().text_color(t.muted).child(sessionStatus(session))).child(div().flex_none().text_color(t.dim).child(shortId(session)));
 var agentsView = (t, shown, refresh) => {
   const rows = groupSessions(shown.sessions).flatMap((group) => [
@@ -164,7 +164,7 @@ var agentsView = (t, shown, refresh) => {
   return v_flex().id("agents").size_full().bg(t.background).border(1).border_color(t.border).rounded(10).p(10).gap(6).text_size(12).overflow_y_scrollbar().child(h_flex().gap(8).items_center().child(div().font_semibold().text_color(t.foreground).child("Agents")).child(div().flex_1()).child(div().id("agents-refresh").px(6).py(2).rounded(4).cursor_pointer().text_color(t.foreground).hover((el) => el.bg(t.hover)).on_click((_event, clicked) => refresh(clicked)).child("Refresh"))).when(shown.note !== "", (el) => el.child(div().text_color(t.muted).child(shown.note))).when(shown.asOf !== "", (el) => el.child(div().text_color(t.dim).child(snapshotNote(shown.asOf)))).children(rows);
 };
 
-// src/panel/agents/vibest-agents.ts
+// mods/vibest-agents/index.ts
 class Agents extends View {
   shown;
   pull;

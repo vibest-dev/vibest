@@ -1,16 +1,16 @@
-// src/sidebar/header/vibest-sidebar-header.ts
+// mods/vibest-sidebar-header/index.ts
 import { h_flex } from "gpui-base";
 import { div, View } from "gpui-kit";
 import { window } from "herdr";
 
-// src/shared/theme-colors.ts
+// shared/theme-colors.ts
 import { theme } from "herdr";
 var themeColors = () => theme();
 
-// src/shared/traffic-lights.ts
+// shared/traffic-lights.ts
 var TRAFFIC_LIGHTS_INSET = 90;
 
-// src/sidebar/header/vibest-sidebar-header.ts
+// mods/vibest-sidebar-header/index.ts
 var header = (t) => {
   const w = window();
   const inset = w?.platform === "macos" && !w.fullscreen ? TRAFFIC_LIGHTS_INSET : 16;

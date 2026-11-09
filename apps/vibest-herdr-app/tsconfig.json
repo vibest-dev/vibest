@@ -12,5 +12,6 @@
     "skipLibCheck": true,
     "paths": { "herdr": ["./types/herdr-app-0.1.13/herdr.d.ts"] }
   },
-  "include": ["src", "test", "types/herdr-app-0.1.13/gpui-kit.d.ts"]
+  "include": ["mods", "shared", "*.test.ts", "types/herdr-app-0.1.13/gpui-kit.d.ts"],
+  "exclude": ["mods/*/*.d.ts", "mods/*/main.js"]
 }

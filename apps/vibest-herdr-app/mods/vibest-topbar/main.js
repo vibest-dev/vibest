@@ -1,15 +1,15 @@
-// src/workspace/topbar/vibest-topbar.ts
+// mods/vibest-topbar/index.ts
 import { View } from "gpui-kit";
 import { layout, panes, spaces, window } from "herdr";
 
-// src/shared/theme-colors.ts
+// shared/theme-colors.ts
 import { theme } from "herdr";
 var themeColors = () => theme();
 
-// src/shared/traffic-lights.ts
+// shared/traffic-lights.ts
 var TRAFFIC_LIGHTS_INSET = 90;
 
-// src/shared/thread-title.ts
+// shared/thread-title.ts
 var leading = (s) => s.replace(/^[^\p{L}\p{N}]+/u, "").trim();
 var looksLikePath = (s) => /^[~/]|^[A-Za-z]:\\/.test(s) || s.includes("@");
 var threadTitle = (tab, tabPanes) => {
@@ -23,7 +23,7 @@ var threadTitle = (tab, tabPanes) => {
   return lead?.program?.agent ? lead.program.name : `Terminal ${tab.index}`;
 };
 
-// src/workspace/topbar/topbar-state.ts
+// mods/vibest-topbar/topbar-state.ts
 var RIGHT_PANEL = "right-panel";
 var find = (node, id) => {
   if (node?.id === id)
@@ -51,12 +51,12 @@ var topbarState = (layout, spaces, panes) => {
   };
 };
 
-// src/workspace/topbar/view.ts
+// mods/vibest-topbar/view.ts
 import { h_flex } from "gpui-base";
 import { div as div2, svg as svg2 } from "gpui-kit";
 import { run } from "herdr";
 
-// src/shared/icon-button.ts
+// shared/icon-button.ts
 import { div, svg } from "gpui-kit";
 var icon = (name) => `mods/workspace-chrome/${name}.svg`;
 var iconButton = (t, id, name, action, { size = 28, on = false } = {}) => div().id(id).size(size).flex_none().flex().items_center().justify_center().rounded(8).when(on, (el) => el.bg(t.selected)).text_color(on ? t.foreground : t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).cursor_pointer().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => {
@@ -64,7 +64,7 @@ var iconButton = (t, id, name, action, { size = 28, on = false } = {}) => div().
   action(cx);
 }).child(svg(icon(name)).size(16));
 
-// src/workspace/topbar/view.ts
+// mods/vibest-topbar/view.ts
 var panelButton = (t, shown, child, name) => {
   const on = shown === child;
   return iconButton(t, `panel-${child}`, name, () => {
@@ -78,7 +78,7 @@ var branchChip = (t, branch) => h_flex().flex_none().h(20).px(6).gap(4).items_ce
 var breadcrumbView = (t, crumb) => h_flex().flex_1().min_w(0).gap(8).items_center().child(svg2(icon("folder")).size(14).flex_none().text_color(t.muted)).child(div2().flex_none().max_w(160).truncate().text_color(t.muted).child(crumb.project)).child(div2().flex_none().text_color(t.dim).child("/")).child(div2().min_w(0).truncate().text_color(t.foreground).child(crumb.thread)).when(crumb.branch !== null && crumb.branch !== "", (el) => el.child(branchChip(t, crumb.branch)));
 var topbarView = (t, state, win) => h_flex().size_full().min_w(0).pl(win.inset).pr(12).gap(12).items_center().bg(t.background).text_size(14).font_medium().child(state.breadcrumb ? breadcrumbView(t, state.breadcrumb) : div2().flex_1()).child(h_flex().flex_none().gap(4).items_center().child(panelButton(t, state.shownPanel, "files", "files")).child(panelButton(t, state.shownPanel, "changes", "git-compare")).child(panelButton(t, state.shownPanel, "agents", "monitor")).when(win.buttons, (el) => el.child(iconButton(t, "minimize", "minus", () => run("window.minimize"))).child(iconButton(t, "maximize", "square", () => run("window.maximize"))).child(iconButton(t, "close-window", "x", () => run("window.close")))));
 
-// src/workspace/topbar/vibest-topbar.ts
+// mods/vibest-topbar/index.ts
 class Topbar extends View {
   render() {
     const state = topbarState(layout(), spaces(), panes());
