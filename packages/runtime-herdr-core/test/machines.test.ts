@@ -1,9 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { MachineEvent } from "@vibest/plugin"
-import { Effect } from "effect"
+import { type MachineEvent, Plugin } from "@vibest/plugin"
+import { machineHooks } from "@vibest/plugin/testing"
+import { Effect, Queue, Stream } from "effect"
 import { type api, HcError, type HcShape, HcTransportError } from "effect-herdr-core-sdk"
 
-import { connect, locate, remove } from "../src/machines.ts"
+import { connect, locate, mirror, remove } from "../src/machines.ts"
 
 type Row = api.MachineView
 
@@ -186,6 +187,7 @@ describe("hc mirrors vibest's machines", () => {
       assert.isTrue(none.missing)
       const found = yield* locate(fake([row("mb", "core-new")]).hc, "/a.sock", machine, ["s1", "s2", "s9"])
       assert.isFalse(found.missing)
+      assert.include(found.note ?? "", "no terminal of that session under mb/")
       assert.strictEqual(found.as, "mb")
       assert.deepStrictEqual(
         [...found.terminals.entries()],
@@ -206,5 +208,60 @@ describe("hc mirrors vibest's machines", () => {
       assert.isFalse(offline.missing)
       assert.include(offline.note ?? "", "fix: hc server start")
     }),
+  )
+
+  it.effect("remove leaves a same-target row alone when B reported runtimes but no hc", () =>
+    Effect.gen(function* () {
+      const f = fake([row("mine", "core-user")])
+      const e = event(undefined, { runtimes: [{ kind: "herdr", status: "online" }] })
+      yield* remove(f.hc, e)
+      assert.deepStrictEqual(
+        f.rows.map((r) => r.name),
+        ["mine"],
+      )
+      assert.deepStrictEqual(e.notes, [])
+      const linkless = fake([row("mb", "core-1")])
+      yield* remove(linkless.hc, event(undefined, { runtimes: [{ kind: "hc", status: "offline" }] }))
+      assert.lengthOf(linkless.rows, 0, "an hc entry without a link still falls back to the target")
+    }),
+  )
+
+  it.effect("a same-target, same-session row that is connected is not replaced", () =>
+    Effect.gen(function* () {
+      const f = fake([row("mb", "core-other")])
+      const e = event(linked)
+      yield* connect(f.hc, e)
+      assert.deepStrictEqual(
+        f.rows.map((r) => r.id),
+        ["core-other"],
+      )
+      assert.strictEqual(e.notes[0]!.message, "hc here has a machine mb that is another one")
+    }),
+  )
+
+  it.live("mirror: a core reset re-checks the held machines; remove drops one from what is held", () =>
+    Effect.gen(function* () {
+      const f = fake([])
+      const resets = yield* Queue.unbounded<void>()
+      const hooks = yield* machineHooks(
+        Plugin.define({ id: "hc-test", effect: (ctx) => mirror(ctx.machine, f.hc, Stream.fromQueue(resets)) }),
+      )
+      const { notes: _, ...b } = event(linked)
+      const { notes: __, ...c } = event({ core: "core-c", session: "main" }, { name: "mc", target: "c-host" })
+      yield* hooks.fire("connect", b)
+      yield* hooks.fire("connect", c)
+      assert.strictEqual(f.added(), 2)
+      f.rows.length = 0
+      yield* hooks.fire("remove", c)
+      yield* Queue.offer(resets, undefined)
+      yield* Effect.yieldNow
+      yield* Effect.sleep("10 millis").pipe(Effect.repeat({ until: () => f.added() >= 3, times: 100 }))
+      yield* Effect.sleep("50 millis")
+      assert.strictEqual(f.added(), 3, "only mb is added back")
+      assert.deepStrictEqual(
+        f.rows.map((r) => r.name),
+        ["mb"],
+      )
+    }).pipe(Effect.scoped),
   )
 })

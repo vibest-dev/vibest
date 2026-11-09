@@ -1,5 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin"
-import { Duration, Effect } from "effect"
+import { Duration, Effect, type Scope, Stream } from "effect"
 import type { api, HcFailure, HcShape } from "effect-herdr-core-sdk"
 
 import { KIND, LABEL, terminalId } from "./terminal-runtime.ts"
@@ -76,7 +76,7 @@ export const connect = (hc: Hc, event: Event) =>
       event.notes.push({ message: failed(outcome), fix: addCommand(event, session) })
       return
     }
-    if (holder.target !== event.target || (holder.session ?? "") !== session) {
+    if (holder.target !== event.target || (holder.session ?? "") !== session || holder.state === "connected") {
       event.notes.push({
         message: `hc here has a machine ${event.name} that is another one`,
         fix: `hc machine rm ${event.name} (or rename it), then ${addCommand(event, session)}`,
@@ -103,7 +103,9 @@ export const connect = (hc: Hc, event: Event) =>
 
 export const remove = (hc: Hc, event: Event) =>
   Effect.gen(function* () {
-    const core = hcThere(event)?.link?.core
+    const there = hcThere(event)
+    const core = there?.link?.core
+    if (core === undefined && event.runtimes.length > 0 && there === undefined) return
     const rows = (yield* hc.call("machine.list", {})).machines
     const doomed = rows.filter((row) => (core === undefined ? row.target === event.target : row.id === core))
     if (core === undefined && doomed.length > 1) {
@@ -164,7 +166,14 @@ export const locate = (
       if (t.address.startsWith(`${row.name}/`) && session !== undefined && wanted.has(session))
         terminals.set(session, { machine: "local", id: terminalId(socket, t.address) })
     }
-    return { missing: false, terminals, as: row.name }
+    return {
+      missing: false,
+      terminals,
+      as: row.name,
+      ...(terminals.size < wanted.size
+        ? { note: `hc here has no terminal of that session under ${row.name}/ (it may have exited there)` }
+        : {}),
+    }
   }).pipe(
     Effect.catch((e) =>
       Effect.succeed({
@@ -174,3 +183,28 @@ export const locate = (
       }),
     ),
   )
+
+export const mirror = (
+  machine: VibestPlugin.Domain<"machine">,
+  hc: Hc,
+  resets: Stream.Stream<unknown>,
+): Effect.Effect<void, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    const held = new Map<string, Event>()
+    yield* machine.hook("connect", (event) =>
+      Effect.sync(() => held.set(event.name, event)).pipe(Effect.andThen(connect(hc, event))),
+    )
+    yield* machine.hook("remove", (event) =>
+      Effect.sync(() => held.delete(event.name)).pipe(Effect.andThen(remove(hc, event))),
+    )
+    yield* resets.pipe(
+      Stream.runForEach(() =>
+        Effect.forEach(
+          [...held.values()],
+          (event) => (held.has(event.name) ? connect(hc, { ...event, notes: [] }) : Effect.void),
+          { discard: true },
+        ),
+      ),
+      Effect.forkScoped,
+    )
+  })

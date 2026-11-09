@@ -212,9 +212,12 @@ const make = Effect.gen(function* () {
         const first = yield* look
         if (!first.missing) return first as View
         const key = `${name}\0${kind}`
-        const now = yield* Clock.currentTimeMillis
         const last = repairs.get(key)
-        if (!always && last !== undefined && now - last.at < Duration.toMillis(REPAIR_PAUSE))
+        if (
+          !always &&
+          last !== undefined &&
+          (yield* Clock.currentTimeMillis) - last.at < Duration.toMillis(REPAIR_PAUSE)
+        )
           return { terminals: NONE, note: last.note } as View
         const owner = yield* plugins.ownerOf(kind)
         const notes = owner === undefined ? [] : yield* fire(row, "connect", owner)
@@ -225,7 +228,7 @@ const make = Effect.gen(function* () {
         }
         const note =
           again.note ?? (notes.map(noteText).join("; ") || `${name}'s ${kind} terminals are not in ${kind} here`)
-        repairs.set(key, { at: now, note })
+        repairs.set(key, { at: yield* Clock.currentTimeMillis, note })
         return { terminals: NONE, note } as View
       }),
     )

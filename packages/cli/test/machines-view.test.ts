@@ -1,15 +1,16 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders } from "@vibest/client/client"
 import { REPAIR_PAUSE } from "@vibest/core/machines"
+import { MACHINE_TIMEOUT } from "@vibest/core/plugins"
 import type { SpawnInput } from "@vibest/core/sessions"
 import { type MachineEvent, Plugin } from "@vibest/plugin"
-import { Effect, PubSub, Stream } from "effect"
+import { Duration, Effect, Fiber, PubSub, Stream } from "effect"
 import { RpcClient } from "effect/rpc"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { FakeRuntime, until, untilVirtual, yieldToIo } from "./fakes.ts"
+import { FakeRuntime, PluginHost, until, untilVirtual, yieldToIo } from "./fakes.ts"
 import { fakeSpawns, Net, onB, repoStack } from "./machines-fakes.ts"
 
 type Side = {
@@ -19,6 +20,7 @@ type Side = {
   readonly connects: Array<MachineEvent>
   readonly removes: Array<MachineEvent>
   refuse: boolean
+  hang: boolean
 }
 
 const side = (id: string): Side => ({
@@ -28,6 +30,7 @@ const side = (id: string): Side => ({
   connects: [],
   removes: [],
   refuse: false,
+  hang: false,
 })
 
 const unused = () => Effect.die(new Error("not used in this test"))
@@ -44,7 +47,7 @@ const viewPlugin = (s: Side) =>
           status: () => Effect.succeed({ status: "online" as const }),
           open: unused,
           send: unused,
-          read: unused,
+          read: () => Effect.succeed("screen of B"),
           process: unused,
           close: unused,
           events: Stream.never,
@@ -62,14 +65,16 @@ const viewPlugin = (s: Side) =>
             }),
         })
         yield* ctx.machine.hook("connect", (event) =>
-          Effect.sync(() => {
+          Effect.suspend(() => {
             s.connects.push(event)
+            if (s.hang) return Effect.never
             const core = coreOf(event)
             if (s.refuse) event.notes.push({ message: "cannot add", fix: "add by hand" })
             else if (core !== undefined && !s.mirror.has(core)) {
               s.mirror.set(core, event.name)
               event.notes.push({ message: `added ${event.name}` })
             }
+            return Effect.void
           }),
         )
         yield* ctx.machine.hook("remove", (event) =>
@@ -86,13 +91,19 @@ const crasher = Plugin.define({
   effect: (ctx) => ctx.machine.hook("remove", () => Effect.die(new Error("boom"))),
 })
 
-const pair = (extra: ReadonlyArray<Plugin.Plugin> = []) =>
+const counting = (seen: Array<string>) =>
+  Plugin.define({
+    id: "counting",
+    effect: (ctx) => ctx.machine.hook("connect", (event) => Effect.sync(() => seen.push(event.name))),
+  })
+
+const pair = (extra: ReadonlyArray<Plugin.Plugin> = [], options: { readonly late?: boolean } = {}) =>
   Effect.gen(function* () {
     const net = new Net()
     const A = side("a")
     const B = side("b")
     const spawned: Array<SpawnInput> = []
-    const a = yield* repoStack(net, { plugins: [viewPlugin(A), ...extra] })
+    const a = yield* repoStack(net, { plugins: [...(options.late ? [] : [viewPlugin(A)]), ...extra] })
     const b = yield* repoStack(net, {
       plugins: [viewPlugin(B)],
       sessions: fakeSpawns(spawned, (input, id) => (input.runtime === undefined ? "" : `t-${id}`)),
@@ -181,8 +192,67 @@ describe("another machine's terminals here", () => {
         const plain = yield* listed(other.id)
         assert.deepStrictEqual(plain.address, { machine: "mb", id: "" })
         assert.include(plain.view ?? "", "cannot be shown here")
+        const peeked = yield* here(a.raw.Peek({ id: spawned.id }))
+        assert.strictEqual(peeked.terminal, row.address.id)
+        A.refuse = true
+        A.mirror.clear()
+        const unseen = yield* here(a.raw.Peek({ id: spawned.id }))
+        assert.strictEqual(unseen.view, "cannot add; fix: add by hand")
       }),
     ),
+  )
+
+  it.effect(
+    "a hook that hangs: the pause starts when it gives up, so an ls 1 s later and one queued meanwhile wait",
+    () =>
+      runs(
+        Effect.gen(function* () {
+          const { A, spawn, listed } = yield* pair()
+          const spawned = yield* spawn()
+          A.hang = true
+          A.mirror.clear()
+          const first = yield* Effect.forkChild(listed(spawned.id))
+          yield* until(
+            Effect.sync(() => A.connects.length),
+            (n) => n === 2,
+          )
+          const queued = yield* Effect.forkChild(listed(spawned.id))
+          yield* yieldToIo
+          yield* TestClock.adjust(MACHINE_TIMEOUT)
+          const row = yield* Fiber.join(first)
+          assert.include(row.view ?? "", "timed out after 30")
+          yield* Fiber.join(queued)
+          yield* TestClock.adjust(Duration.seconds(1))
+          yield* listed(spawned.id)
+          assert.lengthOf(A.connects, 2, "no repair within the pause")
+        }),
+      ),
+  )
+
+  it.effect(
+    "a runtime plugin loaded after machine add: connect reaches only it, with no reconnect; ls then shows the address",
+    () =>
+      runs(
+        Effect.gen(function* () {
+          const seen: Array<string> = []
+          const { A, a, net, spawn, listed } = yield* pair([counting(seen)], { late: true })
+          assert.deepStrictEqual(seen, ["mb"])
+          const spawned = yield* spawn()
+          assert.include((yield* listed(spawned.id)).view ?? "", "cannot be shown here")
+          const dials = net.argv.length
+          yield* (yield* a.run(PluginHost)).load([counting(seen), viewPlugin(A)])
+          yield* until(
+            Effect.sync(() => A.connects.length),
+            (n) => n === 1,
+          )
+          assert.deepStrictEqual(seen, ["mb"], "the plugin loaded before is not called again")
+          assert.strictEqual(net.argv.length, dials, "no reconnect")
+          assert.deepStrictEqual((yield* listed(spawned.id)).address, {
+            machine: "local",
+            id: `mb/${onB(spawned.id)}`,
+          })
+        }),
+      ),
   )
 
   it.effect("a repair that fails: the note and no address; paused 30 s for ls; run --machine tries and starts", () =>

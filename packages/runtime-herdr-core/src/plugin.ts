@@ -43,21 +43,10 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
           ),
         locate: (machine, sessions) => Machines.locate(home, socket, machine, sessions),
       })
-      const held = new Map<string, VibestPlugin.MachineEvent>()
-      yield* context.machine.hook("connect", (event) =>
-        Effect.sync(() => held.set(event.name, event)).pipe(Effect.andThen(Machines.connect(home, event))),
-      )
-      yield* context.machine.hook("remove", (event) =>
-        Effect.sync(() => held.delete(event.name)).pipe(Effect.andThen(Machines.remove(home, event))),
-      )
-      yield* runtime.events.pipe(
-        Stream.filter((event) => event.type === "reset"),
-        Stream.runForEach(() =>
-          Effect.forEach([...held.values()], (event) => Machines.connect(home, { ...event, notes: [] }), {
-            discard: true,
-          }),
-        ),
-        Effect.forkScoped,
+      yield* Machines.mirror(
+        context.machine,
+        home,
+        runtime.events.pipe(Stream.filter((event) => event.type === "reset")),
       )
     }),
 })

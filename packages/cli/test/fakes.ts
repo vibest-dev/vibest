@@ -12,7 +12,7 @@ import { Machines, MachineTransport } from "@vibest/core/machines"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout } from "@vibest/core/paths"
 import { Peers } from "@vibest/core/peer"
-import { type Candidate, Plugins } from "@vibest/core/plugins"
+import { type Candidate, makeHost, Plugins } from "@vibest/core/plugins"
 import { type Liveness, Processes } from "@vibest/core/processes"
 import { Remote } from "@vibest/core/remote"
 import { SshHosts } from "@vibest/core/repository-url"
@@ -365,6 +365,19 @@ export const harnessChoice: Candidate = {
   plugin: harnessChoicePlugin,
 }
 
+type PluginEntry = NonNullable<TestOptions["plugins"]>[number]
+
+const candidateOf = (entry: PluginEntry): Candidate => {
+  const plugin = "effect" in entry ? entry : entry.plugin
+  const pluginOptions = "effect" in entry ? {} : (entry.options ?? {})
+  return { source: `test:${plugin.id}`, revision: "-", options: pluginOptions, plugin }
+}
+
+export class PluginHost extends Context.Service<
+  PluginHost,
+  { readonly load: (added: ReadonlyArray<PluginEntry>) => Effect.Effect<void> }
+>()("test/PluginHost") {}
+
 const over = (options: TestOptions) => {
   const runtime = Layer.effect(
     Runtimes,
@@ -378,20 +391,21 @@ const over = (options: TestOptions) => {
       ),
     ),
   )
-  const plugins = Layer.effect(
-    Plugins,
-    Plugins.make(
-      [
-        harnessChoice,
-        { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
-        ...(options.plugins ?? []).map((entry) => {
-          const plugin = "effect" in entry ? entry : entry.plugin
-          const pluginOptions = "effect" in entry ? {} : (entry.options ?? {})
-          return { source: `test:${plugin.id}`, revision: "-", options: pluginOptions, plugin }
+  const candidates: ReadonlyArray<Candidate> = [
+    harnessChoice,
+    { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
+    ...(options.plugins ?? []).map(candidateOf),
+  ]
+  const plugins = Layer.effectContext(
+    Effect.gen(function* () {
+      const host = yield* makeHost(options.pluginTimeout ? { timeout: options.pluginTimeout } : {})
+      yield* host.activate(candidates)
+      return Context.make(Plugins, host.service).pipe(
+        Context.add(PluginHost, {
+          load: (added) => host.activate([...candidates, ...added.map(candidateOf)]),
         }),
-      ],
-      options.pluginTimeout ? { timeout: options.pluginTimeout } : {},
-    ),
+      )
+    }),
   ).pipe(Layer.provideMerge(Subscriptions.layer))
   const fakeIntegrationReportsReadyOnStart = Layer.effectDiscard(
     Effect.gen(function* () {

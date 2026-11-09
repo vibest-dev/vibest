@@ -187,13 +187,20 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
   (below, only to the plugin that registered that runtime kind). `remove` fires in `Machine.Remove` after the row is
   deleted, with the last Hello's runtimes (none after a vibestd restart with B unreachable); its notes go into the
   answer. A hook never fails a command; its trouble is a note with a fix. Fires and uses for one machine run one at a
-  time.
+  time under a per-machine lock, and a hook may hold it up to its 30 s bound, so an `ls` can wait behind a reconnect's
+  or a plugin load's `connect` for that machine.
 - **`ensure`: check and repair at the moment of use.** Before `List` and `Get` rewrite a remote row of runtime kind
   `k`, before `Peek` names the terminal, before `machine ls` shows "here", and before `run --machine` sends
   `Peer.Spawn` with runtime `k`, A asks its runtime of kind `k` with `locate` where B's terminals are. `missing` (the
   runtime has no machine with the link's id) fires `connect` to the owner plugin and asks again. Still missing: the
   note is kept for 30 s, during which `ls`, `Get`, `Peek` and `machine ls` show it without trying again; `run
-  --machine` always tries, and still starts the agent, answering the note in `notes`.
+  --machine` always tries, and still starts the agent, answering the note in `notes`. The pause starts when the
+  repair gives up, so a hook that hangs to its 30 s bound is not run again by the next `ls`.
+- **Which runtime B uses.** The forwarding rule of `run --machine` is unchanged by the view (A: remote sessions):
+  `--runtime`, else the caller's terminal runtime, else A's main agent's, also when A's runtime of that kind has no
+  `locate`. So when A runs in the herdr TUI or Rex and B does not have that runtime, `run --machine` fails with B's
+  `NoRuntime`; pass `--runtime <kind B has>` to run it there (its rows then say they cannot be shown here). `ensure`
+  runs before `Peer.Spawn` only when A's runtime of the forwarded kind has `locate`.
 - **The address.** A remote row's `address` becomes A's view: found, `{machine: "local", id: <the terminal id A's
   runtime takes>}` (hc: `mb/t7@<A's socket>`); not found, `{machine: <name>, id: ""}` and `view` says why (the
   runtime's note, a failed repair, or `<name>'s <kind> terminals cannot be shown here; vibest peek <name>/<id> reads
@@ -207,11 +214,14 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
 
 The hc plugin (`runtime-herdr-core/src/machines.ts`) finds its mirror row by the link's core id under any name:
 `connect` adds `{target, name, session}` (never `install`) when there is none, counts `already_added` as done, and
-replaces a `name_taken` row only when it has the same target and session (B's core id changed); another row is the
-user's and gets a note. After an add it waits up to 10 s for the row to leave `connecting`. `remove` removes the rows
-with the link's core id, or without a link the one row with the event's target (several: a note). `locate` reads
+replaces a `name_taken` row only when it has the same target and session and is not `connected` (B's core id
+changed); another row is the user's and gets a note. After an add it waits up to 10 s for the row to leave `connecting`. `remove` removes the rows
+with the link's core id, or, when there is no link because the event has no runtimes (a vibestd restart with B
+unreachable) or B's hc gave none, the one row with the event's target (several: a note); when B reported runtimes
+without hc, nothing. `locate` reads
 `machine.list` and then `terminal.list` with `vibest.runtime=hc`, keeping the addresses under that row's name whose
-`vibest.session` is one of the sessions. Terminals of other machines in A's own event stream match no session and are
+`vibest.session` is one of the sessions, with a note when one of them has no terminal there. After its core's
+`Subscribed` it runs `connect` again for the machines it last heard of and still holds. Terminals of other machines in A's own event stream match no session and are
 ignored. Not covered yet: herdr (TUI) and Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote
 row (its own PR); replacing a mirror row when B's vibestd moved to another hc session on the same host.
 
