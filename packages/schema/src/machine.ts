@@ -35,6 +35,33 @@ export class AlreadyAdded extends Schema.TaggedError<AlreadyAdded>()("AlreadyAdd
 export const MachineState = Schema.Literals(["connecting", "connected", "unreachable", "different"])
 export type MachineState = typeof MachineState.Type
 
+export const MachineNote = Schema.Struct({
+  plugin: Schema.optional(Schema.String),
+  message: Schema.String,
+  fix: Schema.optional(Schema.String),
+})
+export type MachineNote = typeof MachineNote.Type
+
+export const RuntimeThere = Schema.Struct({
+  kind: Schema.String,
+  status: Schema.Literals(["online", "offline", "blocked"]),
+  reason: Schema.optional(Schema.String),
+  link: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+})
+export type RuntimeThere = typeof RuntimeThere.Type
+
+export const RuntimeView = Schema.Struct({
+  kind: Schema.String,
+  status: RuntimeThere.fields.status,
+  reason: Schema.optional(Schema.String),
+  here: Schema.Struct({
+    visible: Schema.Boolean,
+    as: Schema.optional(Schema.String),
+    note: Schema.optional(Schema.String),
+  }),
+})
+export type RuntimeView = typeof RuntimeView.Type
+
 export const MachineInfo = Schema.Struct({
   name: Schema.String,
   target: Schema.String,
@@ -45,6 +72,9 @@ export const MachineInfo = Schema.Struct({
   connectedAt: Schema.Number,
   vibestd: Schema.optional(Schema.String),
   version: Schema.optional(Schema.String),
+  runtimes: Schema.optional(Schema.Array(RuntimeView)),
+  runtimesAt: Schema.optional(Schema.Number),
+  notes: Schema.optional(Schema.Array(Schema.Struct({ ...MachineNote.fields, at: Schema.Number }))),
 })
 export type MachineInfo = typeof MachineInfo.Type
 

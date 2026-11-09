@@ -82,6 +82,23 @@ export interface MachineRuntime {
   readonly reason?: string | undefined
 }
 
+export interface MachineNote {
+  readonly message: string
+  readonly fix?: string
+}
+
+export interface MachineRuntimeThere extends MachineRuntime {
+  readonly link?: Readonly<Record<string, string>> | undefined
+}
+
+export interface MachineEvent {
+  readonly name: string
+  readonly target: string
+  readonly vibestd: string
+  readonly runtimes: ReadonlyArray<MachineRuntimeThere>
+  readonly notes: Array<MachineNote>
+}
+
 export interface MachineInfo {
   readonly machine: string
   readonly runtimes: ReadonlyArray<MachineRuntime>
@@ -134,6 +151,8 @@ export interface AgentFail extends AgentContext {
 export interface Hooks {
   readonly "agent.start.before": { readonly event: AgentStartBefore; readonly error: AgentRefused }
   readonly "agent.fail": { readonly event: AgentFail; readonly error: never }
+  readonly "machine.connect": { readonly event: MachineEvent; readonly error: never }
+  readonly "machine.remove": { readonly event: MachineEvent; readonly error: never }
 }
 
 export type HookOf<D extends string> = { [K in keyof Hooks]: K extends `${D}.${infer S}` ? S : never }[keyof Hooks]
@@ -150,6 +169,7 @@ export interface Domain<D extends string> {
 export interface Context {
   readonly options: Readonly<Record<string, unknown>>
   readonly agent: Domain<"agent">
+  readonly machine: Domain<"machine">
   readonly runtime: RuntimeRegistry
   readonly subscription: {
     readonly report: (input: SubscriptionReport) => Effect.Effect<void>

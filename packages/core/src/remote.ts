@@ -12,6 +12,7 @@ import { VibestdIdentity } from "./identity.ts"
 import { Machines } from "./machines.ts"
 import { Plugins } from "./plugins.ts"
 import { repositoryIdentity } from "./repository-url.ts"
+import { Runtimes } from "./runtimes.ts"
 
 export type Address =
   | { readonly _tag: "Local"; readonly id: string }
@@ -58,6 +59,38 @@ const make = Effect.gen(function* () {
   const self = yield* VibestdIdentity
   const git = yield* Git
   const plugins = yield* Plugins
+  const runtimes = yield* Runtimes
+
+  const view = <R extends SessionInfo>(name: string, rows: ReadonlyArray<R>) =>
+    Effect.gen(function* () {
+      const shown = rows.filter((row) => row.address.id !== "")
+      const kinds = [...new Set(shown.map((row) => row.runtime))]
+      const views = new Map(
+        yield* Effect.forEach(
+          kinds,
+          (kind) =>
+            machines
+              .ensure(
+                name,
+                kind,
+                shown.filter((row) => row.runtime === kind).map((row) => row.id),
+              )
+              .pipe(Effect.map((found) => [kind, found] as const)),
+          { concurrency: "unbounded" },
+        ),
+      )
+      return rows.map((row): R => {
+        const found = row.address.id === "" ? undefined : views.get(row.runtime)
+        const terminal = found?.terminals.get(row.id)
+        return {
+          ...row,
+          id: addressed(name, row.id),
+          machine: name,
+          address: terminal === undefined ? { machine: name, id: "" } : { machine: terminal.machine, id: terminal.id },
+          ...(terminal === undefined && found?.note !== undefined ? { view: found.note } : {}),
+        }
+      })
+    })
 
   const call = <A, E>(
     machine: string,
@@ -91,24 +124,39 @@ const make = Effect.gen(function* () {
                     }),
                   )
                   .pipe(
-                    Effect.match({
-                      onSuccess: (rows) => ({
-                        machine: info,
-                        sessions: rows.sessions.map((row) => ({
-                          ...row,
-                          id: addressed(info.name, row.id),
-                          machine: info.name,
-                        })),
-                      }),
-                      onFailure: (e) => ({
-                        machine: { ...info, state: "unreachable", reason: e.message },
-                        sessions: [],
-                      }),
+                    Effect.matchEffect({
+                      onSuccess: (rows) =>
+                        Effect.map(view(info.name, rows.sessions), (sessions) => ({ machine: info, sessions })),
+                      onFailure: (e) =>
+                        Effect.succeed({
+                          machine: { ...info, state: "unreachable" as const, reason: e.message },
+                          sessions: [],
+                        }),
                     }),
                   ),
           { concurrency: "unbounded" },
         )
         return { sessions: each.flatMap((e) => e.sessions), machines: each.map((e) => e.machine) }
+      }),
+
+    get: (at: At, project: string, p: PayloadOf<"Get">) =>
+      relay(at, project, (c, { id }, o) => c.Get({ ...p, id }, o)).pipe(
+        Effect.flatMap((row) => Effect.map(view(at.machine, [row]), (rows) => rows[0]!)),
+      ),
+
+    peek: (at: At, project: string, p: PayloadOf<"Peek">) =>
+      Effect.gen(function* () {
+        const { text } = yield* relay(at, project, (c, { id }, o) => c.Peek({ ...p, id }, o))
+        const row = yield* relay(at, project, (c, { id }, o) => c.Get({ id }, o)).pipe(
+          Effect.flatMap((row) => view(at.machine, [row])),
+          Effect.map((rows) => rows[0]),
+          Effect.orElseSucceed(() => undefined),
+        )
+        return {
+          text,
+          ...(row === undefined || row.address.id === "" ? {} : { terminal: row.address.id }),
+          ...(row?.view === undefined ? {} : { view: row.view }),
+        }
       }),
 
     spawn: (
@@ -145,6 +193,11 @@ const make = Effect.gen(function* () {
         const reportTo = from.coordinator ?? main?.id
         const runtime =
           input.runtime ?? callerKind(yield* plugins.callers, input.callerEnv) ?? (main?.runtime || undefined)
+        const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.kind === runtime)
+        const ready =
+          viewer?.locate === undefined || runtime === undefined
+            ? undefined
+            : yield* machines.ensure(machine, runtime, [], true)
         const spawned = yield* call(machine, from.project, (client, headers) =>
           client["Peer.Spawn"](
             {
@@ -171,6 +224,7 @@ const make = Effect.gen(function* () {
           ...(spawned.model === undefined ? {} : { model: spawned.model }),
           decidedBy: spawned.decidedBy,
           trace: spawned.trace,
+          ...(ready?.note === undefined ? {} : { notes: [{ message: ready.note }] }),
         }
       }),
   }

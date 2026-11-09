@@ -46,10 +46,14 @@ export type HcIncompatible = HcGenerationMismatch | HcCoreTooOld | HcMethodsMiss
 
 export const USED_METHODS: ReadonlyArray<Method> = [
   "events.subscribe",
+  "machine.add",
+  "machine.list",
+  "machine.rm",
   "terminal.get",
   "terminal.keys",
   "terminal.kill",
   "terminal.label",
+  "terminal.list",
   "terminal.read",
   "terminal.rm",
   "terminal.run",

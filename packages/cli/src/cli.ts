@@ -488,7 +488,13 @@ const peek = Command.make(
   },
   (o) =>
     vibest((client) => client.Peek({ id: o.id, lines: Option.getOrUndefined(o.lines) })).pipe(
-      Effect.flatMap((r) => Console.log(r.text)),
+      Effect.flatMap((r) =>
+        Effect.gen(function* () {
+          if (r.terminal !== undefined) yield* Console.error(`terminal here: ${r.terminal.split("@")[0]}`)
+          if (r.view !== undefined) yield* Console.error(`not shown here: ${r.view}`)
+          yield* Console.log(r.text)
+        }),
+      ),
     ),
 ).pipe(
   Command.withDescription(

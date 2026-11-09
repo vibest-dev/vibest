@@ -3,6 +3,14 @@ import { type Effect, Schema, type Stream } from "effect"
 export interface Machine {
   readonly id: string
   readonly target?: string
+  readonly link?: Readonly<Record<string, string>>
+}
+
+export interface Located {
+  readonly missing: boolean
+  readonly terminals: ReadonlyMap<string, Terminal>
+  readonly as?: string
+  readonly note?: string
 }
 
 export interface Terminal {
@@ -87,6 +95,8 @@ export interface Runtime {
   readonly prepare?: (machine: Machine) => Effect.Effect<void, RuntimeError>
   readonly doctor?: (machine: Machine, harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>
   readonly attach?: (machine: Machine) => ReadonlyArray<string>
+  readonly link?: () => Effect.Effect<Readonly<Record<string, string>> | undefined>
+  readonly locate?: (machine: Machine, sessions: ReadonlyArray<string>) => Effect.Effect<Located>
 }
 
 export interface RuntimeRegistry {

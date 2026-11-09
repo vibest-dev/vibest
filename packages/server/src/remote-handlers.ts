@@ -3,6 +3,7 @@ import { VibestdIdentity } from "@vibest/core/identity"
 import { Machines } from "@vibest/core/machines"
 import { Peers } from "@vibest/core/peer"
 import { address, type At, type ListScope, type PeerScope, Remote } from "@vibest/core/remote"
+import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import type { NotInRepository } from "@vibest/core/worktree"
 import { PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
 import { Caller, type CallerShape, Forbidden, type PayloadOf, type SessionInfo, VERSION } from "@vibest/protocol/rpc"
@@ -45,6 +46,7 @@ export const remoteHandlers = <R>(deps: {
     const machines = yield* Machines
     const peers = yield* Peers
     const remote = yield* Remote
+    const runtimes = yield* Runtimes
     const { cliOnly } = deps
 
     const reach = (method: Routed | "List") =>
@@ -101,15 +103,9 @@ export const remoteHandlers = <R>(deps: {
             remote.forward(at, project, (c, { id }, o) => c.Remove({ ...p, id }, o)),
           ),
         Get: <A, E, R2>(p: PayloadOf<"Get">, local: Local<A, E, R2>) =>
-          routed("Get", p.id, local, (at, project) =>
-            remote
-              .forward(at, project, (c, { id }, o) => c.Get({ ...p, id }, o))
-              .pipe(Effect.map((row) => ({ ...row, machine: at.machine }))),
-          ),
+          routed("Get", p.id, local, (at, project) => remote.get(at, project, p)),
         Peek: <A, E, R2>(p: PayloadOf<"Peek">, local: Local<A, E, R2>) =>
-          routed("Peek", p.id, local, (at, project) =>
-            remote.relay(at, project, (c, { id }, o) => c.Peek({ ...p, id }, o)),
-          ),
+          routed("Peek", p.id, local, (at, project) => remote.peek(at, project, p)),
       },
 
       spawnOn: (machine: string, input: PayloadOf<"Spawn">, caller: Agent, project: string) =>
@@ -135,7 +131,7 @@ export const remoteHandlers = <R>(deps: {
                 message: "Peer.Hello names the vibestd that calls it",
               })
             if (id !== self.id) yield* db.notePeer({ id, name, callsMe })
-            return { id: self.id, name: self.name, version: VERSION }
+            return { id: self.id, name: self.name, version: VERSION, runtimes: yield* runtimesHere(runtimes) }
           }),
 
         "Peer.Spawn": (input: PayloadOf<"Peer.Spawn">) =>
@@ -153,11 +149,7 @@ export const remoteHandlers = <R>(deps: {
         "Machine.Add": ({ name, target }: PayloadOf<"Machine.Add">) =>
           cliOnly("Machine.Add").pipe(Effect.andThen(machines.add(name, target))),
 
-        "Machine.List": () =>
-          cliOnly("Machine.List").pipe(
-            Effect.andThen(machines.states),
-            Effect.map((states) => states.map((s) => s.info)),
-          ),
+        "Machine.List": () => cliOnly("Machine.List").pipe(Effect.andThen(machines.listing)),
 
         "Machine.Remove": ({ name }: PayloadOf<"Machine.Remove">) =>
           cliOnly("Machine.Remove").pipe(Effect.andThen(machines.remove(name))),
