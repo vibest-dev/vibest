@@ -1,6 +1,7 @@
 import { h_flex, v_flex } from "gpui-base"
 import { type Context, div, type Element } from "gpui-kit"
 
+import { TEXT } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import type { LsResult, SessionRow } from "./ls.ts"
 import {
@@ -44,10 +45,10 @@ export const agentsView = (t: Theme, shown: LsResult, refresh: (cx: Context) => 
     .border_color(t.border)
     .rounded(10)
     .overflow_hidden()
-    .text_size(13)
+    .text_size(TEXT)
     .child(
       h_flex()
-        .h(28)
+        .h(30)
         .flex_none()
         .px(14)
         .gap(8)
@@ -63,7 +64,7 @@ export const agentsView = (t: Theme, shown: LsResult, refresh: (cx: Context) => 
             .py(2)
             .rounded(4)
             .cursor_pointer()
-            .text_size(12)
+            .text_size(TEXT)
             .text_color(t.foreground)
             .hover((el) => el.bg(t.hover))
             .on_click((_event, clicked) => refresh(clicked))
@@ -77,7 +78,7 @@ export const agentsView = (t: Theme, shown: LsResult, refresh: (cx: Context) => 
         .min_h(0)
         .p(10)
         .gap(6)
-        .text_size(12)
+        .text_size(TEXT)
         .overflow_y_scrollbar()
         .when(shown.note !== "", (el) => el.child(div().text_color(t.muted).child(shown.note)))
         .when(shown.asOf !== "", (el) => el.child(div().text_color(t.dim).child(snapshotNote(shown.asOf))))

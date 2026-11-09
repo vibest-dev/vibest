@@ -43,14 +43,14 @@
         {
           "id": "topbar",
           "type": "block",
-          "size": { "px": 32 },
+          "size": { "px": 37 },
           "window_drag": true,
           "content": { "mod": "vibest-topbar" }
         },
         {
           "id": "workspace-body",
           "type": "row",
-          "padding": [8, 0],
+          "padding": [3, 0],
           "gap": 8,
           "children": [
             {
@@ -65,7 +65,7 @@
                   "border": { "width": 1, "color": "border" },
                   "focus": { "width": 1, "color": "border" },
                   "lone": true,
-                  "header": { "content": { "mod": "vibest-pane" }, "height": 28, "position": "top", "reveal": "always" }
+                  "header": { "content": { "mod": "vibest-pane" }, "height": 30, "position": "top", "reveal": "always" }
                 }
               }
             },

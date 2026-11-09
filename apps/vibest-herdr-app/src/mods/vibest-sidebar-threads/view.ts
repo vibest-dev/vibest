@@ -3,6 +3,7 @@ import { type Context, div, type Element, svg } from "gpui-kit"
 import { openOverlay, pickFolder, run } from "herdr"
 
 import { icon, iconButton } from "../../shared/icon-button.ts"
+import { TEXT, SMALL } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import { elapsed, pill, type Project, relativeTime, type Thread } from "./projects.ts"
 
@@ -39,7 +40,7 @@ export class ThreadsView {
           .gap(8)
           .items_center()
           .rounded(6)
-          .text_size(14)
+          .text_size(TEXT)
           .font_medium()
           .text_color(t.muted)
           .hover((s) => s.bg(t.hover))
@@ -55,14 +56,14 @@ export class ThreadsView {
   status(thread: Thread): Element {
     const t = this.t
     const p = pill(thread.status)
-    if (!p) return div().text_size(12).text_color(t.dim).child(relativeTime(thread.changedAt, this.ui.now))
+    if (!p) return div().text_size(TEXT).text_color(t.dim).child(relativeTime(thread.changedAt, this.ui.now))
     const color = t[p.tone]
     const dot = div().size(6).flex_none().rounded_full().bg(color)
     const since = thread.status === "working" ? elapsed(thread.workingSince, this.ui.now) : ""
     return h_flex()
       .gap(6)
       .items_center()
-      .text_size(12)
+      .text_size(SMALL)
       .font_medium()
       .text_color(color)
       .child(p.pulse ? dot.loop("opacity", { from: 0.5, to: 1, period: 2000 }) : dot)
@@ -101,7 +102,7 @@ export class ThreadsView {
         })
       })
       .child(
-        div().flex_1().min_w(0).truncate().text_size(14).font_medium().text_color(t.foreground).child(thread.title),
+        div().flex_1().min_w(0).truncate().text_size(TEXT).font_medium().text_color(t.foreground).child(thread.title),
       )
       .child(h_flex().h(24).min_w(32).flex_none().justify_end().items_center().child(this.status(thread)))
   }
@@ -144,17 +145,17 @@ export class ThreadsView {
           .flex_1()
           .min_w(0)
           .truncate()
-          .text_size(14)
+          .text_size(TEXT)
           .font_medium()
           .text_color(project.active ? t.foreground : t.muted)
           .child(project.name),
       )
       .when(Boolean(project.machine), (el) =>
-        el.child(div().flex_none().text_size(12).text_color(t.dim).child(project.machine)),
+        el.child(div().flex_none().text_size(TEXT).text_color(t.dim).child(project.machine)),
       )
       .when(folded && tone !== null && !hovered, (el) => el.child(div().size(6).flex_none().rounded_full().bg(tone)))
       .when(folded && !hovered, (el) =>
-        el.child(div().flex_none().text_size(12).text_color(t.dim).child(String(project.threads.length))),
+        el.child(div().flex_none().text_size(TEXT).text_color(t.dim).child(String(project.threads.length))),
       )
       .when(hovered, (el) =>
         el.child(
@@ -177,7 +178,7 @@ export class ThreadsView {
         .px(18)
         .pt(16)
         .gap(4)
-        .text_size(12)
+        .text_size(TEXT)
         .text_color(t.muted)
         .child("No projects yet.")
         .child(

@@ -3,6 +3,7 @@ import { div, type Element, svg } from "gpui-kit"
 import { run } from "herdr"
 
 import { icon, iconButton } from "../../shared/icon-button.ts"
+import { TEXT, SMALL } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import { type Breadcrumb, RIGHT_PANEL, type TopbarState } from "./topbar-state.ts"
 
@@ -36,7 +37,7 @@ const branchChip = (t: Theme, branch: string): Element =>
     .rounded(6)
     .border(1)
     .border_color(t.border)
-    .text_size(12)
+    .text_size(SMALL)
     .font_weight(400)
     .text_color(t.muted)
     .child(svg(icon("git-branch")).size(12))
@@ -56,14 +57,15 @@ const breadcrumbView = (t: Theme, crumb: Breadcrumb): Element =>
 
 export const topbarView = (t: Theme, state: TopbarState, win: TopbarWindow): Element =>
   h_flex()
-    .size_full()
+    .w_full()
+    .h(32)
     .min_w(0)
     .pl(win.inset)
     .pt(8)
     .gap(12)
     .items_center()
     .bg(t.chrome)
-    .text_size(14)
+    .text_size(TEXT)
     .font_medium()
     .when(state.sidebarHidden, (el) =>
       el.child(

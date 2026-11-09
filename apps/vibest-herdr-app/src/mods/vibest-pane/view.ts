@@ -2,6 +2,7 @@ import { h_flex } from "gpui-base"
 import { type Color, div, type Element, image, svg } from "gpui-kit"
 import { type PaneInfo, run } from "herdr"
 
+import { TEXT, SMALL } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import { paneName, shortFolder } from "./header.ts"
 
@@ -36,7 +37,7 @@ export const paneHeader = (t: Theme, p: PaneInfo, home: string): Element => {
     .gap(8)
     .items_center()
     .bg(t.background)
-    .text_size(13)
+    .text_size(TEXT)
     .on_click(() => run("pane.focus", { pane }))
     .when(pic !== null, (el) => el.child(pic))
     .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(paneName(p)))
@@ -54,7 +55,7 @@ export const paneHeader = (t: Theme, p: PaneInfo, home: string): Element => {
           .items_center()
           .rounded(5)
           .bg(`${t.blocked}26` as Color)
-          .text_size(10.5)
+          .text_size(SMALL)
           .font_semibold()
           .text_color(t.blocked)
           .child("Needs you"),

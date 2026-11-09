@@ -3,6 +3,7 @@ import { type AsyncContext, type Context, div, type Element, svg, View } from "g
 import { exec, focused, panes, readTextFile, settings, spaces, theme, watchFolder } from "herdr"
 
 import { iconButton } from "../../shared/icon-button.ts"
+import { TEXT, SMALL } from "../../shared/text-size.ts"
 import { type Theme, themeColors } from "../../shared/theme-colors.ts"
 import {
   closeFile,
@@ -182,7 +183,7 @@ export default class Files extends View {
   header(t: Theme): Element {
     const tabs = this.tabs
     return h_flex()
-      .h(28)
+      .h(30)
       .flex_none()
       .px(6)
       .gap(2)
@@ -195,7 +196,7 @@ export default class Files extends View {
           return h_flex()
             .id(`ft-${i}`)
             .flex_none()
-            .h(22)
+            .h(24)
             .pl(8)
             .pr(4)
             .gap(4)
@@ -395,7 +396,7 @@ export default class Files extends View {
           .when(Boolean(mark), (el) =>
             el.child(
               div()
-                .text_size(11)
+                .text_size(SMALL)
                 .text_color(mark === "A" ? t.ansi2 : mark === "D" || mark === "U" ? t.ansi1 : t.blocked)
                 .child(mark),
             ),
@@ -417,13 +418,13 @@ export default class Files extends View {
       .p(6)
       .children(this.rows("", 0, [], t))
       .when(Boolean(this.error) || !this.entries.get("")?.length, (el) =>
-        el.child(div().p(8).text_size(12).text_color(t.dim).child(empty)),
+        el.child(div().p(8).text_size(TEXT).text_color(t.dim).child(empty)),
       )
       .when(this.limited, (el) =>
         el.child(
           div()
             .p(8)
-            .text_size(11)
+            .text_size(TEXT)
             .text_color(t.dim)
             .child("File list limited to 500 entries per folder and 5,000 total"),
         ),
@@ -438,7 +439,7 @@ export default class Files extends View {
       .border_1()
       .border_color(t.border)
       .text_color(t.foreground)
-      .text_size(13)
+      .text_size(TEXT)
       .child(this.header(t))
       .child(
         h_resizable("vibest-files-body")
