@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { closeFile, EMPTY_TABS, fileName, openFile, selectFile } from "./viewer-tabs.ts"
+import { closeFile, EMPTY_TABS, fileName, openFile, selectFile } from "./tabs.ts"
 
 const a = { path: "/r/a.ts", on: null as string | null }
 const b = { path: "/r/b.ts", on: null as string | null }
@@ -28,6 +28,5 @@ describe("viewer tabs", () => {
 
   it("names a file by its last path part", () => {
     expect(fileName("/r/src/a.ts")).toBe("a.ts")
-    expect(fileName("C:\\r\\b.ts")).toBe("b.ts")
   })
 })

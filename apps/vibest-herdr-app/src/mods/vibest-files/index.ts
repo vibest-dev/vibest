@@ -1,112 +1,19 @@
-import { Editor, EditorState, h_flex, h_resizable, resizable_panel, v_flex } from "gpui-base"
+import { Editor, h_flex, h_resizable, resizable_panel, v_flex } from "gpui-base"
 import { type AsyncContext, type Context, div, type Element, svg, View } from "gpui-kit"
-import { exec, focused, panes, readTextFile, settings, spaces, theme, watchFolder } from "herdr"
+import { focused, panes, readTextFile, spaces, watchFolder } from "herdr"
 
+import { currentFit } from "../../shared/current-fit.ts"
 import { iconButton } from "../../shared/icon-button.ts"
 import { TEXT, SMALL } from "../../shared/text-size.ts"
 import { type Theme, themeColors } from "../../shared/theme-colors.ts"
-import {
-  closeFile,
-  EMPTY_TABS,
-  fileName,
-  openFile,
-  selectFile,
-  type ViewerFile,
-  type ViewerTabs,
-} from "../../shared/viewer-tabs.ts"
-
-interface Entry {
-  readonly name: string
-  readonly dir: boolean
-}
+import { editorState, type Loaded } from "./editor.ts"
+import { closeFile, EMPTY_TABS, fileName, openFile, selectFile, type ViewerFile, type ViewerTabs } from "./tabs.ts"
+import { directory, type Entry, gitMarks, PER_FOLDER, TOTAL } from "./tree.ts"
 
 interface Where {
   readonly key: string
   readonly cwd: string | null
   readonly on: string | null
-}
-
-interface Loaded {
-  state: EditorState | null
-  message: string
-}
-
-const LANG: Record<string, string> = {
-  ts: "js",
-  tsx: "js",
-  mts: "js",
-  cts: "js",
-  jsx: "js",
-  mjs: "js",
-  toml: "yaml",
-  jsonc: "json",
-  svelte: "html",
-  vue: "html",
-}
-
-const MAX_CHARS = 400000
-
-const editorState = (path: string, text: string): EditorState => {
-  const t = theme()
-  const ext = path.includes(".") ? path.split(".").pop() : "txt"
-  return EditorState.new({
-    language: LANG[ext] ?? ext,
-    readonly: true,
-    value: text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}\n… (file truncated)` : text,
-    font_family: settings().font_family as string,
-    font_size: 12,
-    syntax: {
-      keyword: t.ansi5,
-      string: t.ansi2,
-      comment: t.dim,
-      function: t.ansi4,
-      type: t.ansi3,
-      number: t.ansi1,
-      constant: t.ansi6,
-    },
-  })
-}
-
-const PER_FOLDER = 500
-const TOTAL = 5000
-
-const LIST =
-  'n=0; for p in "$1"/* "$1"/.[!.]* "$1"/..?*; do [ -e "$p" ] || [ -L "$p" ] || continue; name=${p##*/}; [ "$name" = .git ] && continue; if [ -d "$p" ]; then kind=d; else kind=f; fi; printf "%s\\0%s\\0" "$kind" "$name"; n=$((n+1)); [ "$n" -gt 500 ] && break; done; test -d "$1"'
-
-const directory = async (path: string, on: string | null): Promise<Entry[]> => {
-  const r = await exec("sh", ["-c", LIST, "files", path], { on })
-  if (r.code !== 0) throw new Error(r.stderr || "Cannot list this folder")
-  const fields = r.stdout.split("\0")
-  const out: Entry[] = []
-  for (let i = 0; i + 1 < fields.length; i += 2) out.push({ name: fields[i + 1], dir: fields[i] === "d" })
-  return out
-}
-
-const gitMarks = async (cwd: string, on: string | null): Promise<Record<string, string>> => {
-  const marks: Record<string, string> = {}
-  const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on }).catch((): null => null)
-  if (top?.code !== 0) return marks
-  const status = await exec(
-    "git",
-    [
-      "--no-optional-locks",
-      "-c",
-      "core.fsmonitor=false",
-      "status",
-      "--porcelain=v1",
-      "-z",
-      "--no-renames",
-      "--untracked-files=all",
-    ],
-    { cwd, on },
-  ).catch((): null => null)
-  if (status?.code !== 0) return marks
-  for (const entry of status.stdout.split("\0").filter(Boolean).slice(0, TOTAL)) {
-    const xy = entry.slice(0, 2)
-    marks[`${top.stdout.trim()}/${entry.slice(3)}`] =
-      xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M"
-  }
-  return marks
 }
 
 export default class Files extends View {
@@ -176,6 +83,13 @@ export default class Files extends View {
   }
 
   setTabs(next: ViewerTabs, cx: Context): void {
+    const open = new Set(next.files.map((f) => f.path))
+    for (const [path, l] of this.loaded)
+      if (!open.has(path)) {
+        l.state?.release()
+        this.loaded.delete(path)
+      }
+    for (const f of next.files) if (!this.loaded.has(f.path)) this.load(f, cx)
     this.tabs = next
     cx.notify()
   }
@@ -226,7 +140,7 @@ export default class Files extends View {
         }),
       )
     return h_flex()
-      .h(40)
+      .h(currentFit().header)
       .flex_none()
       .px(6)
       .gap(4)
@@ -246,16 +160,8 @@ export default class Files extends View {
       )
   }
 
-  content(cx: Context, t: Theme): Element {
-    const tabs = this.tabs
-    const open = new Set(tabs.files.map((f) => f.path))
-    for (const [path, l] of this.loaded)
-      if (!open.has(path)) {
-        l.state?.release()
-        this.loaded.delete(path)
-      }
-    for (const f of tabs.files) if (!this.loaded.has(f.path)) this.load(f, cx)
-    const active = this.loaded.get(tabs.active)
+  content(t: Theme): Element {
+    const active = this.loaded.get(this.tabs.active)
     return active?.state
       ? Editor.new(active.state).size_full()
       : div()
@@ -434,7 +340,7 @@ export default class Files extends View {
             .p(8)
             .text_size(TEXT)
             .text_color(t.dim)
-            .child("File list limited to 500 entries per folder and 5,000 total"),
+            .child(`File list limited to ${PER_FOLDER} entries per folder and ${TOTAL.toLocaleString("en-US")} total`),
         ),
       )
     return v_flex()
@@ -453,7 +359,7 @@ export default class Files extends View {
         h_resizable("vibest-files-body")
           .flex_1()
           .min_h(0)
-          .child(resizable_panel().child(this.content(cx, t)))
+          .child(resizable_panel().child(this.content(t)))
           .when(this.treeOpen, (el) => el.child(resizable_panel().size(220).size_range(140, 520).child(tree))),
       )
   }

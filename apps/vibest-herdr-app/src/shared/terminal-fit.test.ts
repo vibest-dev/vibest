@@ -1,32 +1,57 @@
 import { describe, expect, it } from "vitest"
 
-import { barExtra, FIXED_HEIGHT, fitLayout } from "./terminal-fit.ts"
+import { fit, fitLayout } from "./terminal-fit.ts"
 
-describe("barExtra", () => {
-  it("gives the top bar what whole terminal rows leave over", () => {
-    expect(barExtra(FIXED_HEIGHT + 21 * 43, 14)).toBe(0)
-    expect(barExtra(FIXED_HEIGHT + 21 * 43 + 7, 14)).toBe(7)
-    expect(barExtra(FIXED_HEIGHT + 21 * 43 + 20.6, 14)).toBe(20)
-    expect(barExtra(FIXED_HEIGHT + 18 * 10 + 3, 12)).toBe(3)
+const tree = (bar: number, lights: number[], header = 40) => ({
+  id: "root",
+  traffic_lights: lights,
+  children: [
+    { id: "sidebar", children: [{ id: "sidebar-header", size: { px: bar } }] },
+    {
+      id: "workspace",
+      children: [
+        { id: "topbar", size: { px: bar } },
+        {
+          id: "workspace-body",
+          padding: [8, 0],
+          children: [{ id: "terminals", content: { pane: { border: { width: 1 }, header: { height: header } } } }],
+        },
+      ],
+    },
+  ],
+})
+
+describe("fit", () => {
+  const fixed = 32 + 16 + 2 + 36
+
+  it("splits what whole terminal rows leave over between the bars and the pane header", () => {
+    expect(fit(tree(32, [13, 12]), fixed + 21 * 43, 14)).toEqual({
+      bar: 32,
+      header: 36,
+      pad: 8,
+      searchTop: 11,
+      lights: [13, 12],
+    })
+    expect(fit(tree(32, [13, 12]), fixed + 21 * 43 + 11, 14)).toEqual({
+      bar: 37,
+      header: 42,
+      pad: 8,
+      searchTop: 14,
+      lights: [13, 15],
+    })
+    expect(fit(tree(32, [13, 12]), fixed + 21 * 43 + 20.6, 14)).toMatchObject({ bar: 42, header: 46 })
   })
 })
 
 describe("fitLayout", () => {
-  const tree = (bar: number, lights: number[]) => ({
-    id: "root",
-    traffic_lights: lights,
-    children: [
-      { id: "sidebar", children: [{ id: "sidebar-header", size: { px: bar } }, { id: "threads" }] },
-      { id: "workspace", children: [{ id: "topbar", size: { px: bar } }, { id: "body" }] },
-    ],
-  })
+  const f = { bar: 37, header: 42, pad: 8, searchTop: 14, lights: [13, 15] as const }
 
-  it("grows both bars and moves the traffic lights down by half the extra", () => {
-    expect(fitLayout(tree(32, [13, 12]), 7)).toEqual(tree(39, [13, 15]))
+  it("resizes both bars and the pane header, and moves the traffic lights", () => {
+    expect(fitLayout(tree(32, [13, 12]), f)).toEqual(tree(37, [13, 15], 42))
   })
 
   it("returns nothing when the layout already fits", () => {
-    expect(fitLayout(tree(39, [13, 15]), 7)).toBeNull()
-    expect(fitLayout(null, 7)).toBeNull()
+    expect(fitLayout(tree(37, [13, 15], 42), f)).toBeNull()
+    expect(fitLayout(null, f)).toBeNull()
   })
 })

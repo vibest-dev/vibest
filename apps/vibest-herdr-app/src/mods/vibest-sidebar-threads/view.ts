@@ -2,6 +2,7 @@ import { h_flex, v_flex } from "gpui-base"
 import { type Context, div, type Element, svg } from "gpui-kit"
 import { openOverlay, pickFolder, run } from "herdr"
 
+import { currentFit } from "../../shared/current-fit.ts"
 import { icon, iconButton } from "../../shared/icon-button.ts"
 import { TEXT, SMALL } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
@@ -26,7 +27,7 @@ export class ThreadsView {
     const active = projects.find((p) => p.active)
     return h_flex()
       .pr(12)
-      .pt(13)
+      .pt(currentFit().searchTop)
       .pb(8)
       .gap(4)
       .items_center()

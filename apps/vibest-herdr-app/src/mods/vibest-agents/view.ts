@@ -1,6 +1,7 @@
 import { h_flex, v_flex } from "gpui-base"
 import { type Context, div, type Element } from "gpui-kit"
 
+import { currentFit } from "../../shared/current-fit.ts"
 import { TEXT } from "../../shared/text-size.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import type { LsResult, SessionRow } from "./ls.ts"
@@ -48,7 +49,7 @@ export const agentsView = (t: Theme, shown: LsResult, refresh: (cx: Context) => 
     .text_size(TEXT)
     .child(
       h_flex()
-        .h(40)
+        .h(currentFit().header)
         .flex_none()
         .px(14)
         .gap(8)

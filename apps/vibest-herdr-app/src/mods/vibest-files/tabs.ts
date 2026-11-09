@@ -25,4 +25,4 @@ export const closeFile = (tabs: ViewerTabs, path: string): ViewerTabs => {
   return { files, active: files[Math.min(index, files.length - 1)]?.path ?? null }
 }
 
-export const fileName = (path: string): string => path.split(/[\\/]/).pop() || path
+export const fileName = (path: string): string => path.split("/").pop() || path
