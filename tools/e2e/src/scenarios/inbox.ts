@@ -25,6 +25,7 @@ import {
   row,
   SESSIONS,
   Skip,
+  binary,
   transcript,
   until,
   type World,
@@ -343,7 +344,7 @@ const checks: ReadonlyArray<Check> = [
             )
           },
         )
-        await c.typeIn(["vibest", ...c.flags].join(" "))
+        await c.typeIn([binary, "--harness", "claude"].join(" "))
         await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
         await round("cmresumed")
         expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
