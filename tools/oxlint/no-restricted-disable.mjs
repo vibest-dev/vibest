@@ -1,6 +1,6 @@
 const DISABLE_DIRECTIVE = /^\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?(?:\s+(?<body>[\s\S]*))?$/u
 
-const PROTECTED_RULES = new Set(["prefer-node-protocol", "node-import-style", "no-restricted-disable"])
+const PROTECTED_RULES = new Set(["prefer-node-protocol", "node-import-style", "no-restricted-disable", "max-lines"])
 
 const parseDisableDirective = (commentValue) => {
   const match = DISABLE_DIRECTIVE.exec(commentValue.trim())
@@ -25,7 +25,7 @@ export const noRestrictedDisable = {
             context.report({
               node: comment,
               message:
-                "A blanket eslint/oxlint-disable also turns off the Node builtin import rules. Name the rules to disable.",
+                "A blanket eslint/oxlint-disable also turns off the Node builtin import rules and max-lines. Name the rules to disable.",
             })
             continue
           }
@@ -33,7 +33,7 @@ export const noRestrictedDisable = {
             if (!PROTECTED_RULES.has(rule.split("/").pop())) continue
             context.report({
               node: comment,
-              message: `Do not disable ${rule} with a comment. Fix the import instead of silencing the diagnostic.`,
+              message: `Do not disable ${rule} with a comment. Fix the code instead of silencing the diagnostic.`,
             })
           }
         }
