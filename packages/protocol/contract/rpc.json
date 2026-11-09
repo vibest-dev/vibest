@@ -2271,6 +2271,16 @@
             ]
           },
           {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
           }
         ],
@@ -2317,6 +2327,29 @@
             "required": [
               "_tag",
               "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
               "message"
             ],
             "additionalProperties": true
@@ -7329,6 +7362,9 @@
               },
               {
                 "$ref": "#/$defs/NoRuntimeEncoded"
+              },
+              {
+                "$ref": "#/$defs/LaunchFailedEncoded"
               }
             ]
           },
@@ -7507,6 +7543,25 @@
                 "type": "string",
                 "enum": [
                   "NoRuntime"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "LaunchFailedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "LaunchFailed"
                 ]
               },
               "message": {

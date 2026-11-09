@@ -46,14 +46,14 @@ export type RuntimeEvent =
   | { readonly type: "state"; readonly terminal: Terminal; readonly state: AgentState }
   | { readonly type: "reset"; readonly machine: string }
 
-export type CallerEnv = Readonly<Record<string, string | undefined>>
+export type CallerValues = Readonly<Record<string, string | undefined>>
 
 export interface RuntimeCaller {
   readonly env: ReadonlyArray<string>
-  readonly terminal: (env: CallerEnv) => Effect.Effect<string | undefined, unknown>
-  readonly ready?: (env: CallerEnv) => Effect.Effect<boolean, unknown>
+  readonly terminal: (env: CallerValues) => Effect.Effect<string | undefined, unknown>
+  readonly ready?: (env: CallerValues) => Effect.Effect<boolean, unknown>
   readonly missing?: string
-  readonly target?: (env: CallerEnv, named?: string) => string | undefined
+  readonly target?: (env: CallerValues, named?: string) => string | undefined
 }
 
 export interface RuntimeLocation {

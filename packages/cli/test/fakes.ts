@@ -1,24 +1,23 @@
 import net from "node:net"
 
 import { readPing } from "@vibest/client/client"
-import { Bus, type EngineEvent, type LiveEvent } from "@vibest/core/bus"
+import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { Harness, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
+import { Harness, Harnesses, HarnessUnavailable, makeHarnesses } from "@vibest/core/harness"
 import type { HarnessDefinition, HarnessesShape, RuntimeDefinition, RuntimesShape } from "@vibest/core/host"
 import { Inbox } from "@vibest/core/inbox"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout } from "@vibest/core/paths"
 import { Plugins } from "@vibest/core/plugins"
 import { type Liveness, Processes } from "@vibest/core/processes"
-import * as Registry from "@vibest/core/registry"
 import { Restarting } from "@vibest/core/restarting"
 import { turnEndFrom } from "@vibest/core/results"
-import { NoRuntime, Runtimes } from "@vibest/core/runtimes"
+import { make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
-import type * as VibestPlugin from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import {
@@ -47,7 +46,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { FakeGit } from "./fake-git.ts"
-import { FakeRuntime, type FakeRuntimeOptions } from "./fake-runtime.ts"
+import { FakeRuntime, type FakeRuntimeOptions, KIND } from "./fake-runtime.ts"
 
 export { FakeGit, FakeRuntime }
 
@@ -406,7 +405,12 @@ export const CLAUDE: HarnessDefinition = {
             event.reason === "answer"
               ? event
               : event.reason === "aborted"
-                ? { ...event, aborted: true, error: "interrupted", error_details: "stopped" }
+                ? {
+                    ...event,
+                    aborted: true,
+                    error: "interrupted",
+                    error_details: "the turn was stopped in its terminal (Esc) before it ended",
+                  }
                 : { ...event, error: "error", error_details: "the turn ended on an API error" },
         },
   userPrompt: (event, coordinator) =>
@@ -448,97 +452,34 @@ export const CURSOR: HarnessDefinition = {
 export const HARNESSES: ReadonlyArray<HarnessDefinition> = [PI, CLAUDE, CURSOR]
 
 export const harnessesFrom = (
-  definitions: ReadonlyArray<HarnessDefinition>,
+  definitions: ReadonlyArray<HarnessDefinition> = HARNESSES,
 ): Effect.Effect<HarnessesShape, never, Scope.Scope> =>
-  Effect.gen(function* () {
-    const registry = Registry.definitions<HarnessDefinition>("harness")
-    yield* registry.transform((editor) => definitions.forEach((definition) => editor.add(definition)))
-    const find = (id: string | null | undefined) =>
-      id ? registry.get().find((definition) => definition.id === id) : undefined
-    return {
-      get all() {
-        return registry.get()
-      },
-      get: (id) => {
-        const found = find(id)
-        if (found === undefined)
-          throw new HarnessUnavailable({ harness: id, message: `no plugin provides harness ${id}` })
-        return found
-      },
-      find,
-      transform: registry.transform,
-      reload: registry.reload,
-    }
-  })
+  Effect.tap(makeHarnesses, (harnesses) =>
+    harnesses.transform((editor) => definitions.forEach((definition) => editor.add(definition))),
+  )
 
-const liveOf = (runtime: string, event: VibestPlugin.Runtime.RuntimeEvent): LiveEvent => {
-  switch (event.type) {
-    case "state":
-      return { type: "live.state", runtime, terminal: event.terminal, state: event.state }
-    case "exited":
-      return { type: "live.exited", runtime, terminal: event.terminal }
-    case "seen":
-      return { type: "live.seen", runtime, terminal: event.terminal }
-    case "reset":
-      return { type: "live.reset", runtime, machine: event.machine }
-  }
-}
+export const harnessesLayer = (definitions: ReadonlyArray<HarnessDefinition> = HARNESSES) =>
+  Layer.effect(Harnesses, harnessesFrom(definitions))
+
+export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCaller) =>
+  VibestPlugin.Plugin.define({
+    id: `runtime-${id}-caller`,
+    effect: (context) =>
+      context.runtime
+        .transform((editor) => {
+          const own = editor.get(id)
+          if (own === undefined) editor.add({ ...editor.get(KIND)!, id, caller })
+          else editor.update(id, (definition) => (definition.caller = caller))
+        })
+        .pipe(Effect.asVoid),
+  })
 
 export const runtimesFrom = (
   definitions: ReadonlyArray<RuntimeDefinition>,
 ): Effect.Effect<RuntimesShape, never, Bus | Scope.Scope> =>
-  Effect.gen(function* () {
-    const bus = yield* Bus
-    const scope = yield* Effect.scope
-    const merged = new Set<RuntimeDefinition>()
-    const registry = Registry.definitions<RuntimeDefinition>("runtime", (list) =>
-      Effect.forEach(
-        list.filter((runtime) => !merged.has(runtime)),
-        (runtime) =>
-          Effect.sync(() => merged.add(runtime)).pipe(
-            Effect.andThen(
-              runtime.events.pipe(
-                Stream.runForEach((event) => bus.observe(liveOf(runtime.id, event))),
-                Effect.catchCause(() => Effect.void),
-                Effect.forkIn(scope),
-              ),
-            ),
-          ),
-        { discard: true },
-      ),
-    )
-    yield* registry.transform((editor) => definitions.forEach((definition) => editor.add(definition)))
-    const route = (id: string) =>
-      Effect.suspend(() => {
-        const found = registry.get().find((runtime) => runtime.id === id)
-        return found === undefined
-          ? Effect.fail(new NoRuntime({ message: `the runtime "${id}" is not loaded` }))
-          : Effect.succeed(found)
-      })
-    return {
-      all: Effect.sync(() => registry.get()),
-      route,
-      statuses: (machine) =>
-        Effect.forEach(registry.get(), (runtime) =>
-          runtime.status(machine).pipe(Effect.map((status) => ({ runtime, status }))),
-        ),
-      online: (runtime, machine) =>
-        runtime
-          .status(machine)
-          .pipe(
-            Effect.flatMap((status) =>
-              status.status === "online"
-                ? Effect.void
-                : Effect.fail(new NoRuntime({ message: `the runtime ${runtime.id} is ${status.status}` })),
-            ),
-          ),
-      callers: Effect.sync(() =>
-        registry.get().flatMap((runtime) => (runtime.caller ? [{ ...runtime.caller, id: runtime.id }] : [])),
-      ),
-      transform: registry.transform,
-      reload: registry.reload,
-    }
-  })
+  Effect.tap(makeRuntimes, (runtimes) =>
+    runtimes.transform((editor) => definitions.forEach((definition) => editor.add(definition))),
+  )
 
 const harnessOf = (options: TestOptions) =>
   Layer.succeed(Harness, {
@@ -612,7 +553,7 @@ const over = (options: TestOptions) => {
       ),
       Layer.provideMerge(runtime),
       Layer.provideMerge(harnessOf(options)),
-      Layer.provideMerge(Layer.effect(Harnesses, harnessesFrom(options.harnesses ?? HARNESSES))),
+      Layer.provideMerge(harnessesLayer(options.harnesses)),
       Layer.provideMerge(
         Layer.effect(
           Processes,

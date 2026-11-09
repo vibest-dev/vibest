@@ -328,7 +328,7 @@ export class VibestRpcs extends RpcGroup.make(
       success: Schema.Array(HarnessChoice),
     }),
   ),
-  protocol(
+  scoped(
     Rpc.make("Integration.Guard", {
       payload: { harness: Schema.String, agent: Schema.String, input: Schema.String },
       success: Schema.Struct({ answer: Schema.optional(Schema.Unknown) }),
@@ -510,6 +510,7 @@ export class VibestRpcs extends RpcGroup.make(
         AgentRefused,
         HarnessUnavailable,
         NoRuntime,
+        LaunchFailed,
       ]),
     }),
   ),
