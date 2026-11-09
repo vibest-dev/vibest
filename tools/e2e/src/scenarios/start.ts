@@ -5,7 +5,7 @@ import path from "node:path"
 import type { Check } from "../check.ts"
 import { answerFolderTrust } from "../drivers/claude.ts"
 import { claudeConfigOf, claudeEnv, fakeAnthropic, heldModel, piDir } from "../fake-model.ts"
-import { expect, fail, row, SESSIONS, Skip, until, vibestTyped, type World } from "../world.ts"
+import { expect, fail, row, SESSIONS, Skip, until, type World } from "../world.ts"
 
 type Entry = {
   id: string
@@ -168,7 +168,7 @@ const move = (harness: "claude" | "pi"): Check => ({
         })) as { pane: { pane_id: string } }
       ).pane.pane_id
       await until("B's shell", async () => /\S/.test(await screen(socket, b)), 30_000)
-      await type(socket, b, [vibestTyped, ...options].join(" "))
+      await type(socket, b, ["vibest", ...options].join(" "))
       await until(
         "B asks to move the main agent",
         async () => (await screen(socket, b)).includes("Move it here and continue? [y/N]"),

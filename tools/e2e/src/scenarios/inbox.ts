@@ -25,7 +25,6 @@ import {
   Skip,
   transcript,
   until,
-  vibestTyped,
   type World,
   writeEvidence,
 } from "../world.ts"
@@ -342,7 +341,7 @@ const checks: ReadonlyArray<Check> = [
             )
           },
         )
-        await c.typeIn([vibestTyped, ...c.flags].join(" "))
+        await c.typeIn(["vibest", ...c.flags].join(" "))
         await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
         await round("cmresumed")
         expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)

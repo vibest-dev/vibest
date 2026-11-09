@@ -37,20 +37,21 @@ const target = () => {
 }
 export const { binary, compiled, harnesses } = target()
 
-export const vibestTyped = `'${binary.replaceAll("'", "'\\''")}'`
-
 export const buildVersion = (
   JSON.parse(fs.readFileSync(path.join(checkout, "apps/vibest-herdr/package.json"), "utf8")) as { version: string }
 ).version
 
+const shSingle = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
+
 const zshKeepingHistoryInTheWorld = async (dir: string) => {
   await fsPromises.mkdir(dir, { mode: 0o700 })
+  const first = `PATH=${shSingle(path.dirname(binary))}:$PATH\nexport PATH\n`
   const user = (file: string) =>
-    `ZDOTDIR=$__vbe_user\n[[ -r $ZDOTDIR/${file} ]] && source $ZDOTDIR/${file}\nZDOTDIR=$__vbe_zdot\n`
+    `ZDOTDIR=$__vbe_user\n[[ -r $ZDOTDIR/${file} ]] && source $ZDOTDIR/${file}\nZDOTDIR=$__vbe_zdot\n${first}`
   const history = "HISTFILE=$__vbe_zdot/.zsh_history\n"
   await fsPromises.writeFile(
     path.join(dir, ".zshenv"),
-    "__vbe_zdot=$ZDOTDIR\nZDOTDIR=$HOME\n[[ -r $HOME/.zshenv ]] && source $HOME/.zshenv\n__vbe_user=$ZDOTDIR\nZDOTDIR=$__vbe_zdot\n",
+    `__vbe_zdot=$ZDOTDIR\nZDOTDIR=$HOME\n[[ -r $HOME/.zshenv ]] && source $HOME/.zshenv\n__vbe_user=$ZDOTDIR\nZDOTDIR=$__vbe_zdot\n${first}`,
   )
   await fsPromises.writeFile(path.join(dir, ".zprofile"), user(".zprofile"))
   await fsPromises.writeFile(path.join(dir, ".zshrc"), user(".zshrc") + history)
