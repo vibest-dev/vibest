@@ -14,6 +14,13 @@ export const callerLocation = (named?: string) =>
 export const callerMachine = (named?: string) =>
   callerLocation(named).pipe(Effect.map((location) => ({ id: "local", target: encodeTarget(location) })))
 
+export const targetFrom = (env: Readonly<Record<string, string | undefined>>, named?: string): string | undefined => {
+  if (named !== undefined) return encodeTarget({ session: named })
+  const socketPath = env.HERDR_SOCKET_PATH
+  if (socketPath === undefined || socketPath === "") return undefined
+  return encodeTarget({ socketPath })
+}
+
 export const CALLER_ENV = ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"] as const
 
 const SessionList = Schema.decodeUnknownEffect(

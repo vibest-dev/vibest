@@ -77,6 +77,7 @@ export interface Runtime {
   readonly seen?: (terminal: Terminal) => Effect.Effect<Seen, RuntimeError>
   readonly see?: (terminal: Terminal, turn: number) => Effect.Effect<void, RuntimeError>
   readonly run?: (terminal: Terminal, argv: ReadonlyArray<string>) => Effect.Effect<void, RuntimeError>
+  readonly focus?: (terminal: Terminal) => Effect.Effect<void, RuntimeError>
   readonly exec?: (
     machine: Machine,
     argv: ReadonlyArray<string>,

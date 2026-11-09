@@ -16,7 +16,7 @@ import {
   startDaemon,
   withVibest,
 } from "@vibest/client/client"
-import { callerByKind, callerHits, callerKeys, type CallerHit } from "@vibest/core/caller"
+import { callerByKind, callerHits, callerKeys, mainPlace } from "@vibest/core/caller"
 import * as Guard from "@vibest/core/guard"
 import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
@@ -359,49 +359,6 @@ const mainFlags = {
     Flag.optional,
   ),
   inParent: Flag.String("in-parent").pipe(Flag.withHidden, Flag.optional),
-}
-
-export type MainPlace =
-  | { readonly in: "terminal"; readonly runtime: string; readonly terminal: string }
-  | { readonly in: "launch"; readonly runtime: string }
-  | { readonly in: "refused"; readonly message: string }
-
-export const mainPlace = (o: {
-  readonly marked: boolean
-  readonly runtime: string | undefined
-  readonly hits: ReadonlyArray<CallerHit>
-}): MainPlace => {
-  const named = (kind: string) => o.hits.find((hit) => hit.kind === kind)
-  const here = (kind: string): MainPlace => {
-    const hit = named(kind)
-    if (hit === undefined)
-      return {
-        in: "refused",
-        message: `vibestd opened this terminal in ${kind}, but that runtime's environment is not set`,
-      }
-    if (hit.terminal === undefined) return { in: "refused", message: `this ${kind} terminal could not be named` }
-    return { in: "terminal", runtime: kind, terminal: hit.terminal }
-  }
-  if (o.marked)
-    return o.runtime === undefined
-      ? { in: "refused", message: "vibestd opened this terminal without naming its runtime" }
-      : here(o.runtime)
-  if (o.runtime !== undefined) {
-    const hit = named(o.runtime)
-    if (hit === undefined) return { in: "launch", runtime: o.runtime }
-    return hit.terminal === undefined
-      ? { in: "refused", message: `this ${o.runtime} terminal could not be named` }
-      : { in: "terminal", runtime: o.runtime, terminal: hit.terminal }
-  }
-  const chosen = o.hits[0]
-  if (chosen === undefined)
-    return { in: "refused", message: "no runtime was detected in this environment; pass --runtime" }
-  return chosen.terminal === undefined
-    ? {
-        in: "refused",
-        message: `${chosen.kind} is detected in this environment, but its terminal could not be named; pass --runtime`,
-      }
-    : { in: "terminal", runtime: chosen.kind, terminal: chosen.terminal }
 }
 
 const readCallerEnv = (plugins: ReadonlyArray<Candidate>) =>

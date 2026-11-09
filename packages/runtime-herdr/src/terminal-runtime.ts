@@ -515,6 +515,13 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         }
       })
 
+    const focus: Runtime["focus"] = (terminal) =>
+      Effect.gen(function* () {
+        const place = yield* at(terminal, "focus")
+        const h = yield* client(place.session)
+        yield* failWith(h.call("pane.focus", { pane_id: place.paneId })).pipe(Effect.asVoid)
+      })
+
     const close: Runtime["close"] = (terminal) =>
       Effect.gen(function* () {
         const place = yield* at(terminal, "close")
@@ -628,6 +635,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       read,
       process,
       close,
+      focus,
       run,
       state,
       session,
