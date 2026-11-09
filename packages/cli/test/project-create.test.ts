@@ -23,7 +23,17 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { liveDaemon } from "../src/herdr-plugin.ts"
-import { authed, FakeRuntime, runVibest, testLayer, type TestServices, until, writeResult, projectOf } from "./fakes.ts"
+import {
+  authed,
+  FakeRuntime,
+  runVibest,
+  stopRecorded,
+  testLayer,
+  type TestServices,
+  until,
+  writeResult,
+  projectOf,
+} from "./fakes.ts"
 
 const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
 
@@ -388,21 +398,7 @@ describe("multi-repository project", () => {
       const sdk = yield* repositoryWithOneCommitOnMain(sources, "sdk")
       const directory = path.join(yield* scopedRealPathTempDirectory("vibest-project-"), "combo")
       const env = { HOME: home, VIBEST_HOME: home }
-      yield* Effect.addFinalizer(() =>
-        Effect.gen(function* () {
-          const raw = yield* fs.readFileString(path.join(home, "vibestd.pid")).pipe(Effect.option)
-          if (Option.isNone(raw)) return
-          const pid = (JSON.parse(raw.value) as { pid?: number }).pid
-          if (pid !== undefined)
-            yield* Effect.sync(() => {
-              try {
-                process.kill(pid, "SIGTERM")
-              } catch {
-                return
-              }
-            })
-        }).pipe(Effect.ignore),
-      )
+      yield* Effect.addFinalizer(() => TestClock.withLive(stopRecorded(path.join(home, "vibestd.pid"))))
       const created = yield* runVibest(sources, env, ["project", "create", directory, "--from", app, "--from", sdk])
       assert.strictEqual(created.code, 0, created.stderr)
       assert.match(created.stderr, new RegExp(`warning: ${app}: uncommitted changes were not copied`))
