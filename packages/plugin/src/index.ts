@@ -1,9 +1,13 @@
-import { type Effect, Schema, type Scope } from "effect"
+import { type Effect, Schema } from "effect"
 
-import type { RuntimeRegistry } from "./runtime.ts"
+import type { HarnessDomain } from "./harness.ts"
+import type { Hooks } from "./registration.ts"
+import type { RuntimeDomain } from "./runtime.ts"
 
+export * as Harness from "./harness.ts"
 export * as Plugin from "./plugin.ts"
 export * as Runtime from "./runtime.ts"
+export type { Hooks, Registration, Transform } from "./registration.ts"
 
 export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
 
@@ -14,15 +18,17 @@ export interface SubscriptionLimit {
   readonly resetTime: number | null
 }
 
+export interface SubscriptionAccount {
+  readonly kind: "subscription" | "api-key" | "none"
+  readonly plan?: string | undefined
+  readonly provider?: string | undefined
+}
+
 export interface SubscriptionSnapshot {
   readonly harness: string
   readonly provider: string
   readonly machine: "local"
-  readonly account: {
-    readonly kind: "subscription" | "api-key" | "none"
-    readonly plan?: string | undefined
-    readonly provider?: string | undefined
-  }
+  readonly account: SubscriptionAccount
   readonly limits: ReadonlyArray<SubscriptionLimit>
   readonly updatedAt: number
   readonly error?: string | undefined
@@ -131,27 +137,30 @@ export interface AgentFail extends AgentContext {
   move: { harness: string; provider?: string | undefined; model?: string | undefined } | undefined
 }
 
-export interface Hooks {
-  readonly "agent.start.before": { readonly event: AgentStartBefore; readonly error: AgentRefused }
-  readonly "agent.fail": { readonly event: AgentFail; readonly error: never }
+export interface AgentHooks {
+  readonly "start.before": AgentStartBefore
+  readonly fail: AgentFail
 }
 
-export type HookOf<D extends string> = { [K in keyof Hooks]: K extends `${D}.${infer S}` ? S : never }[keyof Hooks]
-
-export interface Domain<D extends string> {
-  readonly hook: <N extends HookOf<D>>(
-    name: N,
-    callback: (
-      event: Hooks[Extract<`${D}.${N}`, keyof Hooks>]["event"],
-    ) => Effect.Effect<void, Hooks[Extract<`${D}.${N}`, keyof Hooks>]["error"]>,
-  ) => Effect.Effect<void, never, Scope.Scope>
+export interface AgentFailures extends Record<keyof AgentHooks, unknown> {
+  readonly "start.before": AgentRefused
+  readonly fail: never
 }
+
+export interface AgentDomain {
+  readonly hook: Hooks<AgentHooks, AgentFailures>
+}
+
+export interface SubscriptionDomain {
+  readonly report: (input: SubscriptionReport) => Effect.Effect<void>
+}
+
+export type PluginOptions = Readonly<Record<string, unknown>>
 
 export interface Context {
-  readonly options: Readonly<Record<string, unknown>>
-  readonly agent: Domain<"agent">
-  readonly runtime: RuntimeRegistry
-  readonly subscription: {
-    readonly report: (input: SubscriptionReport) => Effect.Effect<void>
-  }
+  readonly options: PluginOptions
+  readonly agent: AgentDomain
+  readonly runtime: RuntimeDomain
+  readonly harness: HarnessDomain
+  readonly subscription: SubscriptionDomain
 }

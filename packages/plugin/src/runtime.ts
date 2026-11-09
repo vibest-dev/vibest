@@ -1,4 +1,6 @@
-import { type Effect, Schema, type Stream } from "effect"
+import { type Effect, Schema, type Stream, type Types } from "effect"
+
+import type { Transform } from "./registration.ts"
 
 export interface Machine {
   readonly id: string
@@ -44,8 +46,25 @@ export type RuntimeEvent =
   | { readonly type: "state"; readonly terminal: Terminal; readonly state: AgentState }
   | { readonly type: "reset"; readonly machine: string }
 
-export interface Runtime {
-  readonly kind: string
+export type CallerEnv = Readonly<Record<string, string | undefined>>
+
+export interface RuntimeCaller {
+  readonly env: ReadonlyArray<string>
+  readonly terminal: (env: CallerEnv) => Effect.Effect<string | undefined, unknown>
+  readonly ready?: (env: CallerEnv) => Effect.Effect<boolean, unknown>
+  readonly missing?: string
+  readonly target?: (env: CallerEnv, named?: string) => string | undefined
+}
+
+export interface RuntimeLocation {
+  readonly address?: string
+  readonly missing?: true
+  readonly reason?: string
+}
+
+export interface RuntimeDefinition {
+  readonly id: string
+  readonly caller?: RuntimeCaller
   readonly status: (machine: Machine) => Effect.Effect<MachineStatus>
 
   readonly open: (
@@ -87,8 +106,23 @@ export interface Runtime {
   readonly prepare?: (machine: Machine) => Effect.Effect<void, RuntimeError>
   readonly doctor?: (machine: Machine, harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>
   readonly attach?: (machine: Machine) => ReadonlyArray<string>
+  readonly link?: (machine: Machine) => Effect.Effect<Readonly<Record<string, string>> | undefined>
+  readonly locate?: (
+    machine: Machine,
+    link: Readonly<Record<string, string>>,
+    terminal: string,
+  ) => Effect.Effect<RuntimeLocation, RuntimeError>
 }
 
-export interface RuntimeRegistry {
-  readonly register: (runtime: Runtime) => Effect.Effect<void>
+export interface RuntimeEditor {
+  list(): ReadonlyArray<RuntimeDefinition>
+  get(id: string): RuntimeDefinition | undefined
+  add(definition: RuntimeDefinition): void
+  update(id: string, update: (definition: Types.Mutable<RuntimeDefinition>) => void): void
+  remove(id: string): void
+}
+
+export interface RuntimeDomain {
+  readonly transform: Transform<RuntimeEditor>
+  readonly reload: () => Effect.Effect<void>
 }

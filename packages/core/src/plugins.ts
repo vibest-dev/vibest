@@ -16,7 +16,8 @@ import {
   Stream,
 } from "effect"
 
-import { callerOf, type CallerSpec, OnCallerPlugins } from "./caller.ts"
+import { callerOf, OnCallerPlugins } from "./caller.ts"
+import type { PluginsShape } from "./host.ts"
 import { type Candidate, makeSources, makeWatcher, messageOf, PluginLoader } from "./plugin-sources.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
@@ -437,20 +438,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     return { service: Plugins.of({ start, fail, list, callers }), activate, ready }
   })
 
-export class Plugins extends Context.Service<
-  Plugins,
-  {
-    readonly start: (input: StartInput) => Effect.Effect<SpawnDecision, AgentRefused>
-    readonly fail: (
-      input: FailInput,
-    ) => Effect.Effect<
-      { readonly move: VibestPlugin.AgentFail["move"]; readonly trace: ReadonlyArray<TraceEntry> },
-      HookFailed
-    >
-    readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
-    readonly callers: Effect.Effect<ReadonlyArray<CallerSpec>>
-  }
->()("vibest/Plugins") {
+export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Plugins") {
   static readonly make = (candidates: ReadonlyArray<Candidate>, options: { readonly timeout?: Duration.Input } = {}) =>
     makeHost(options).pipe(
       Effect.tap((host) => host.activate(candidates)),

@@ -1,12 +1,11 @@
 {
-  "protocol": 6,
+  "protocol": 7,
   "capabilities": {
     "http": true,
     "handoff": true,
     "requests": true,
     "watch": true,
     "projects": true,
-    "harnesses": true,
     "spawnRuntime": true
   },
   "methods": {
@@ -30,12 +29,7 @@
               "type": "string"
             },
             "harness": {
-              "type": "string",
-              "enum": [
-                "pi",
-                "claude",
-                "cursor"
-              ]
+              "type": "string"
             },
             "integration": {
               "anyOf": [
@@ -448,12 +442,7 @@
             "type": "string"
           },
           "harness": {
-            "type": "string",
-            "enum": [
-              "pi",
-              "claude",
-              "cursor"
-            ]
+            "type": "string"
           },
           "harnessSessionId": {
             "type": "string"
@@ -1204,12 +1193,7 @@
             "type": "string"
           },
           "harness": {
-            "type": "string",
-            "enum": [
-              "pi",
-              "claude",
-              "cursor"
-            ]
+            "type": "string"
           },
           "provider": {
             "anyOf": [
@@ -1894,7 +1878,20 @@
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "null"
+        "type": "object",
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
       },
       "success": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1903,12 +1900,10 @@
           "type": "object",
           "properties": {
             "harness": {
-              "type": "string",
-              "enum": [
-                "pi",
-                "claude",
-                "cursor"
-              ]
+              "type": "string"
+            },
+            "binary": {
+              "type": "string"
             },
             "problem": {
               "anyOf": [
@@ -1957,6 +1952,7 @@
           },
           "required": [
             "harness",
+            "binary",
             "problem",
             "models"
           ],
@@ -2148,6 +2144,179 @@
             "required": [
               "_tag",
               "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "Integration.Guard": {
+      "access": "open",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "harness": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "input": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "harness",
+          "agent",
+          "input"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HarnessUnavailableEncoded"
+              },
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "HarnessUnavailableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "HarnessUnavailable"
+                ]
+              },
+              "harness": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "harness",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
               "message"
             ],
             "additionalProperties": true
@@ -2999,12 +3168,7 @@
               "type": "string"
             },
             "harness": {
-              "type": "string",
-              "enum": [
-                "pi",
-                "claude",
-                "cursor"
-              ]
+              "type": "string"
             },
             "provider": {
               "anyOf": [
@@ -4331,12 +4495,7 @@
         "type": "object",
         "properties": {
           "harness": {
-            "type": "string",
-            "enum": [
-              "pi",
-              "claude",
-              "cursor"
-            ]
+            "type": "string"
           },
           "fresh": {
             "type": "boolean"
@@ -6390,12 +6549,7 @@
             "type": "object",
             "properties": {
               "harness": {
-                "type": "string",
-                "enum": [
-                  "pi",
-                  "claude",
-                  "cursor"
-                ]
+                "type": "string"
               },
               "place": {
                 "type": "string"
@@ -6955,12 +7109,7 @@
           "harness": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "pi",
-                  "claude",
-                  "cursor"
-                ]
+                "type": "string"
               },
               {
                 "type": "null"
@@ -7005,12 +7154,7 @@
         "type": "object",
         "properties": {
           "harness": {
-            "type": "string",
-            "enum": [
-              "pi",
-              "claude",
-              "cursor"
-            ]
+            "type": "string"
           },
           "provider": {
             "anyOf": [
@@ -7817,12 +7961,7 @@
             "type": "string"
           },
           "harness": {
-            "type": "string",
-            "enum": [
-              "pi",
-              "claude",
-              "cursor"
-            ]
+            "type": "string"
           },
           "event": {
             "type": "string"
@@ -9569,12 +9708,7 @@
           "harness": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "pi",
-                  "claude",
-                  "cursor"
-                ]
+                "type": "string"
               },
               {
                 "type": "null"
@@ -9695,12 +9829,7 @@
             "type": "string"
           },
           "harness": {
-            "type": "string",
-            "enum": [
-              "pi",
-              "claude",
-              "cursor"
-            ]
+            "type": "string"
           },
           "provider": {
             "anyOf": [
@@ -10331,12 +10460,7 @@
           "type": "object",
           "properties": {
             "harness": {
-              "type": "string",
-              "enum": [
-                "pi",
-                "claude",
-                "cursor"
-              ]
+              "type": "string"
             },
             "provider": {
               "type": "string"
@@ -10575,12 +10699,7 @@
             "type": "string"
           },
           "harness": {
-            "type": "string",
-            "enum": [
-              "pi",
-              "claude",
-              "cursor"
-            ]
+            "type": "string"
           },
           "event": {
             "type": "string"
@@ -10781,12 +10900,7 @@
                       "type": "string"
                     },
                     "harness": {
-                      "type": "string",
-                      "enum": [
-                        "pi",
-                        "claude",
-                        "cursor"
-                      ]
+                      "type": "string"
                     },
                     "provider": {
                       "anyOf": [
@@ -11314,12 +11428,7 @@
                     "type": "string"
                   },
                   "harness": {
-                    "type": "string",
-                    "enum": [
-                      "pi",
-                      "claude",
-                      "cursor"
-                    ]
+                    "type": "string"
                   },
                   "provider": {
                     "anyOf": [

@@ -3,6 +3,7 @@ import { NoRuntime } from "@vibest/schema/session"
 import { Cause, Context, Effect, FileSystem, Layer, type Scope, Stream } from "effect"
 
 import { Bus, type LiveEvent } from "./bus.ts"
+import type { RuntimesShape } from "./host.ts"
 
 export { NoRuntime }
 
@@ -15,15 +16,7 @@ export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 export const RuntimeError = VibestPlugin.Runtime.RuntimeError
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 
-export interface RuntimesShape {
-  readonly register: (runtime: Runtime) => Effect.Effect<void, never, Scope.Scope>
-  readonly all: Effect.Effect<ReadonlyArray<Runtime>>
-  readonly route: (kind: string) => Effect.Effect<Runtime, NoRuntime>
-  readonly statuses: (
-    machine: Machine,
-  ) => Effect.Effect<ReadonlyArray<{ readonly runtime: Runtime; readonly status: MachineStatus }>>
-  readonly online: (runtime: Runtime, machine: Machine) => Effect.Effect<void, NoRuntime>
-}
+export type { RuntimesShape }
 
 const live = (kind: string, event: RuntimeEvent): LiveEvent => {
   switch (event.type) {

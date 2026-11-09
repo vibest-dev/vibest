@@ -32,7 +32,12 @@ drawn in the focused window, send `Session.Seen` (`cli`) `{id, turn}` with the `
 turn; vibestd writes only a mark that rises, so a stale or repeated call changes nothing, and the result comes back
 through Watch.
 
-`Harnesses.List` (`open`, capability `harnesses`): one entry per harness, `{harness, problem, models}`. `problem` is null when vibestd can
+`Harnesses.List` (`open`, payload `{provider?}`): one entry per harness the loaded plugins provide, `{harness, binary, problem, models}`. `problem` is null when vibestd can
 start that harness, else the reason to show; `models` (empty with a problem) are `{provider, model, name, default}`,
 provider null meaning the harness's default provider and `default` the model it runs when none is given. A start
-passes the chosen `harness`, `provider` and `model` to `vibest` unchanged.
+passes the chosen `harness`, `provider` and `model` to `vibest` unchanged. With `provider`, only that provider's
+models are listed, and a harness that refuses the provider or lists none for it gives that as its `problem`.
+
+`Integration.Guard` (`open`) `{harness, agent, input}`: a harness's pre-tool hook input, judged by the guard rules of
+`agent` in vibestd. `answer` is what the harness's hook prints (its own JSON shape), or for a harness without one the
+reason the call is refused; no `answer` means the call is allowed.

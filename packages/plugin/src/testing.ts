@@ -2,7 +2,7 @@ import { Cause, Duration, Effect, Exit, Option, Ref, Schema, type Scope, Stream 
 
 import type * as Runtime from "./runtime.ts"
 
-export { type Runtime } from "./runtime.ts"
+export type { RuntimeDefinition } from "./runtime.ts"
 
 export class ContractFailure extends Schema.TaggedError<ContractFailure>()("ContractFailure", {
   member: Schema.String,
@@ -37,7 +37,7 @@ export interface ContractOptions {
 }
 
 export const runtimeContract = (
-  runtime: Runtime.Runtime,
+  runtime: Runtime.RuntimeDefinition,
   options: ContractOptions,
 ): Effect.Effect<void, ContractError, Scope.Scope> =>
   Effect.gen(function* () {

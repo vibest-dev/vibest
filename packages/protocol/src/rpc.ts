@@ -6,7 +6,6 @@ import {
   AgentStatus,
   AllocationFailed,
   AmbiguousSession,
-  HARNESS_IDS,
   HarnessUnavailable,
   InboxRow,
   LaunchFailed,
@@ -201,7 +200,7 @@ export const SessionInfo = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   agent: Schema.String,
-  harness: Schema.Literals(HARNESS_IDS),
+  harness: Schema.String,
   provider: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
   status: AgentStatus,
@@ -241,7 +240,8 @@ export const HarnessModel = Schema.Struct({
 })
 
 export const HarnessChoice = Schema.Struct({
-  harness: Schema.Literals(HARNESS_IDS),
+  harness: Schema.String,
+  binary: Schema.String,
   problem: Schema.NullOr(Schema.String),
   models: Schema.Array(HarnessModel),
 })
@@ -283,7 +283,7 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           name: Schema.optional(Schema.String),
           prompt: Schema.String,
-          harness: Schema.optional(Schema.Literals(HARNESS_IDS)),
+          harness: Schema.optional(Schema.String),
           provider: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
           env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -297,7 +297,7 @@ export class VibestRpcs extends RpcGroup.make(
         },
         success: Schema.Struct({
           id: Schema.String,
-          harness: Schema.Literals(HARNESS_IDS),
+          harness: Schema.String,
           provider: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
           ...Routing.fields,
@@ -322,7 +322,19 @@ export class VibestRpcs extends RpcGroup.make(
     ),
   ),
   protocol(Rpc.make("Plugins", { success: Schema.Array(PluginInfo) })),
-  protocol(Rpc.make("Harnesses.List", { success: Schema.Array(HarnessChoice) })),
+  protocol(
+    Rpc.make("Harnesses.List", {
+      payload: { provider: Schema.optional(Schema.String) },
+      success: Schema.Array(HarnessChoice),
+    }),
+  ),
+  protocol(
+    Rpc.make("Integration.Guard", {
+      payload: { harness: Schema.String, agent: Schema.String, input: Schema.String },
+      success: Schema.Struct({ answer: Schema.optional(Schema.Unknown) }),
+      error: Schema.Union([HarnessUnavailable, InvalidCaller]),
+    }),
+  ),
   protocol(
     Rpc.make("Runtimes.Doctor", {
       payload: { harnesses: Schema.Array(Schema.String) },
@@ -426,14 +438,14 @@ export class VibestRpcs extends RpcGroup.make(
   protocol(
     admitted(
       Rpc.make("TurnEnd", {
-        payload: { sessionId: Schema.String, harness: Schema.Literals(HARNESS_IDS), event: Schema.String },
+        payload: { sessionId: Schema.String, harness: Schema.String, event: Schema.String },
       }),
     ),
   ),
   protocol(
     admitted(
       Rpc.make("Prompt", {
-        payload: { sessionId: Schema.String, harness: Schema.Literals(HARNESS_IDS), event: Schema.String },
+        payload: { sessionId: Schema.String, harness: Schema.String, event: Schema.String },
       }),
     ),
   ),
@@ -441,7 +453,7 @@ export class VibestRpcs extends RpcGroup.make(
     admitted(
       Rpc.make("Project.CoordinatorSession", {
         payload: {
-          harness: Schema.Literals(HARNESS_IDS),
+          harness: Schema.String,
           fresh: Schema.Boolean,
           terminal: Schema.String,
           runtime: Schema.optional(Schema.String),
@@ -477,13 +489,13 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     Rpc.make("Project.StartMain", {
       payload: {
-        harness: Schema.optional(Schema.Literals(HARNESS_IDS)),
+        harness: Schema.optional(Schema.String),
         provider: Schema.optional(Schema.String),
         model: Schema.optional(Schema.String),
         runtime: Schema.optional(Schema.String),
       },
       success: Schema.Struct({
-        harness: Schema.Literals(HARNESS_IDS),
+        harness: Schema.String,
         provider: Schema.optional(Schema.String),
         model: Schema.optional(Schema.String),
         runtime: Schema.String,
@@ -554,7 +566,7 @@ export class VibestRpcs extends RpcGroup.make(
       payload: { terminal: Schema.String },
       success: Schema.NullOr(
         Schema.Struct({
-          harness: Schema.Literals(HARNESS_IDS),
+          harness: Schema.String,
           place: Schema.String,
           runtime: Schema.String,
           address: Schema.String,
@@ -585,7 +597,7 @@ export class VibestRpcs extends RpcGroup.make(
   protocol(
     admitted(
       Rpc.make("CoordinatorSessionReady", {
-        payload: { sessionId: Schema.String, harness: Schema.Literals(HARNESS_IDS), harnessSessionId: Schema.String },
+        payload: { sessionId: Schema.String, harness: Schema.String, harnessSessionId: Schema.String },
       }),
     ),
   ),
@@ -649,7 +661,7 @@ export class VibestRpcs extends RpcGroup.make(
         Schema.Struct({
           id: Schema.String,
           agent: Schema.String,
-          harness: Schema.Literals(HARNESS_IDS),
+          harness: Schema.String,
           integration: Schema.NullOr(Schema.String),
           working: Schema.Boolean,
           blocked: Schema.NullOr(Schema.String),
@@ -670,6 +682,7 @@ export const ACCESS = {
   Ping: "open",
   Plugins: "open",
   "Harnesses.List": "open",
+  "Integration.Guard": "open",
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
   Republish: "open",
@@ -714,6 +727,5 @@ export const CAPABILITIES = {
   requests: true,
   watch: true,
   projects: true,
-  harnesses: true,
   spawnRuntime: true,
 } as const

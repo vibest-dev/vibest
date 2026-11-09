@@ -5,6 +5,7 @@ import { HARNESS_IDS, type HarnessId, HarnessUnavailable, isHarnessId } from "@v
 import { Clock, Config, Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
+import type { HarnessesShape } from "./host.ts"
 import type { Model, ModelLister } from "./models.ts"
 export { HARNESS_IDS, type HarnessId, HarnessUnavailable, isHarnessId } from "@vibest/schema/session"
 
@@ -78,14 +79,7 @@ export const noProvider = (harness: string) => (provider: string | null) =>
 
 export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 
-export class Harnesses extends Context.Service<
-  Harnesses,
-  {
-    readonly all: ReadonlyArray<HarnessAdapter>
-    readonly get: (id: HarnessId) => HarnessAdapter
-    readonly find: (id: string | null | undefined) => HarnessAdapter | undefined
-  }
->()("vibest/Harnesses") {
+export class Harnesses extends Context.Service<Harnesses, HarnessesShape>()("vibest/Harnesses") {
   static readonly layer = (adapters: Readonly<Record<HarnessId, HarnessAdapter>>) =>
     Layer.succeed(
       Harnesses,

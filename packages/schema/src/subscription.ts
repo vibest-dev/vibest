@@ -1,7 +1,5 @@
 import { Schema } from "effect"
 
-import { HARNESS_IDS } from "./session.ts"
-
 export const SubscriptionAccount = Schema.Struct({
   kind: Schema.Literals(["subscription", "api-key", "none"]),
   plan: Schema.optional(Schema.String),
@@ -18,7 +16,7 @@ export const SubscriptionLimit = Schema.Struct({
 export type SubscriptionLimit = typeof SubscriptionLimit.Type
 
 export const Subscription = Schema.Struct({
-  harness: Schema.Literals(HARNESS_IDS),
+  harness: Schema.String,
   provider: Schema.String,
   machine: Schema.Literal("local"),
   account: SubscriptionAccount,

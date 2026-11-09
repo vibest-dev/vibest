@@ -21,6 +21,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { Harness, type HarnessId, isHarnessId } from "../harness.ts"
 import { cursor } from "../harnesses/cursor.ts"
+import type { SubscriptionsShape } from "../host.ts"
 import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Keychain } from "../keychain.ts"
 import { claudeAccount, claudeUsage, cursorAccount, cursorUsage, num, piAccount, record } from "./index.ts"
 
@@ -169,14 +170,7 @@ const usageOf = (
     },
   })
 
-export class Subscriptions extends Context.Service<
-  Subscriptions,
-  {
-    readonly list: Effect.Effect<ReadonlyArray<Subscription>>
-    readonly report: (input: SubscriptionReport) => Effect.Effect<void>
-    readonly poll: Effect.Effect<void, never, PollServices>
-  }
->()("vibest/Subscriptions") {
+export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsShape>()("vibest/Subscriptions") {
   static readonly make = Effect.gen(function* () {
     const rows = yield* Ref.make(new Map<string, Row>())
     const modify = (harness: HarnessId, provider: string, f: (prev: Row | undefined, now: number) => Row) =>

@@ -44,6 +44,7 @@
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
+    "@vibest/builtins": "workspace:*",
     "@vibest/client": "workspace:*",
     "@vibest/core": "workspace:*",
     "@vibest/plugin": "workspace:*",

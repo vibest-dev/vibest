@@ -1,4 +1,4 @@
-export const PROTOCOL = 6
+export const PROTOCOL = 7
 
 export const MISMATCH_ACTION = "vibest update"
 
