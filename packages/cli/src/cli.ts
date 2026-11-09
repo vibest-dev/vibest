@@ -22,7 +22,7 @@ import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writ
 import { makeSources } from "@vibest/core/plugin-sources"
 import { DEFAULT_TIMEOUT, describeSpawn, PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
-import { createProject, projectRoot } from "@vibest/core/project-create"
+import { createProject } from "@vibest/core/project-create"
 import { jsonObject, promptOf } from "@vibest/core/results"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
@@ -569,9 +569,7 @@ const ls = Command.make(
   },
   (o) =>
     Effect.gen(function* () {
-      const cwd = (yield* Path.Path).resolve(".")
-      const outsideProject = Option.isNone(yield* projectRoot(cwd).pipe(Effect.option))
-      yield* vibest((client) => client.List({ stopped: o.all, ...(outsideProject ? { all: true } : {}) })).pipe(
+      yield* vibest((client) => client.List({ stopped: o.all })).pipe(
         Effect.map((sessions) => sessions.map(titled)),
         Effect.flatMap(json),
       )

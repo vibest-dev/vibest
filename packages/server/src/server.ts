@@ -785,17 +785,15 @@ export const handlers = VibestRpcs.toLayer(
       List: ({ stopped, all }) =>
         Effect.gen(function* () {
           const c = yield* agent("List")
-          const projectId =
-            c._tag === "Coordinator"
-              ? c.projectId
-              : all === true
-                ? undefined
-                : yield* findAt(c.repositoryRoot ?? "").pipe(
-                    Effect.map((found) => found?.id),
-                    Effect.catchTag("NotInRepository", () => Effect.succeed(undefined)),
-                  )
-          if (projectId === undefined && all !== true) return []
-          return yield* listed(projectId, stopped === true)
+          if (c._tag === "Coordinator") return yield* listed(c.projectId, stopped === true)
+          if (all === true) return yield* listed(undefined, stopped === true)
+          const found = yield* findAt(c.repositoryRoot ?? "").pipe(
+            Effect.map((row) => row?.id),
+            Effect.catchTag("NotInRepository", () => Effect.succeed("all" as const)),
+          )
+          if (found === "all") return yield* listed(undefined, stopped === true)
+          if (found === undefined) return []
+          return yield* listed(found, stopped === true)
         }),
 
       Get: ({ id: input }) =>

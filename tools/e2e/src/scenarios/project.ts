@@ -240,6 +240,38 @@ const checks: ReadonlyArray<Check> = [
       await sh(vibestOwnWorktree, "git", "status", "--short")
     },
   },
+
+  {
+    id: "S37",
+    title:
+      "vibest ls outside a project lists that project's main agent, and from a git repository that is no project lists nothing, without the CLI running git",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr", "git"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      await w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi } })
+      const outside = await fs.mkdtemp(path.join(w.root, "outside-"))
+      const log = path.join(w.root, "git-calls")
+      const shim = path.join(w.root, "git-shim")
+      await fs.mkdir(shim)
+      await fs.writeFile(
+        path.join(shim, "git"),
+        `#!/bin/sh\necho "$@" >> '${log}'\nexec '${Bun.which("git")}' "$@"\n`,
+        { mode: 0o755 },
+      )
+      const env = { PATH: `${shim}:${w.env().PATH}` }
+      const listed = JSON.parse(await w.ok(["ls"], { cwd: outside, env })) as Array<{ agent: string }>
+      expect(
+        listed.some((row) => row.agent === "main"),
+        `ls outside a project: ${JSON.stringify(listed)}`,
+      )
+      expect((await fs.readFile(log, "utf8").catch(() => "")) === "", "ls ran git")
+      const repo = path.join(w.root, "no-project")
+      await fs.mkdir(repo)
+      const init = await w.run(repo, ["git", "init", "-q"])
+      expect(init.code === 0, init.stderr)
+      const none = JSON.parse(await w.ok(["ls"], { cwd: repo, env })) as Array<unknown>
+      expect(none.length === 0, `ls in a repository that is no project: ${JSON.stringify(none)}`)
+    },
+  },
 ]
 
 export default checks
