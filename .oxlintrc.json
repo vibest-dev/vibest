@@ -10,7 +10,8 @@
     "vibest/no-restricted-disable": "error",
     "vibest/no-comments": "error",
     "eslint/no-unused-vars": "error",
-    "eslint/no-unused-expressions": ["error", { "allowTernary": true }]
+    "eslint/no-unused-expressions": ["error", { "allowTernary": true }],
+    "eslint/max-lines": ["error", { "max": 1000, "skipBlankLines": false, "skipComments": false }]
   },
   "ignorePatterns": [
     "dist",

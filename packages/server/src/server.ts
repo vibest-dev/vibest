@@ -1,15 +1,8 @@
 import { importCheck, spawnDaemon } from "@vibest/client/client"
-import { projectActivity, raisesSeen, unseenDone } from "@vibest/core/activity"
+import { raisesSeen } from "@vibest/core/activity"
 import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
 import { callerTarget, filterCallerEnv, mainPlace, specHits } from "@vibest/core/caller"
-import {
-  AddressJson,
-  type CoordinatorRow,
-  Db,
-  encodeAddress,
-  type RuntimeAddress,
-  type SessionBrief,
-} from "@vibest/core/db"
+import { AddressJson, Db, encodeAddress } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { harnessCatalog, harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
@@ -23,31 +16,15 @@ import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
 import { Restarting } from "@vibest/core/restarting"
 import { envelope } from "@vibest/core/results"
-import { agentState, machinesListing, NoRuntime, Runtimes, type Runtime, type Terminal } from "@vibest/core/runtimes"
-import { NoSuchSession, runtimeEnv, type SessionView, Sessions } from "@vibest/core/sessions"
+import { machinesListing, NoRuntime, Runtimes, type Terminal } from "@vibest/core/runtimes"
+import { NoSuchSession, runtimeEnv, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { UpdateCheck } from "@vibest/core/update-check"
 import { NotInRepository } from "@vibest/core/worktree"
-import {
-  AGENT_HEADER,
-  CALLER_HEADER,
-  CWD_HEADER,
-  HARNESS_HEADER,
-  HARNESS_SESSION_HEADER,
-  PLUGIN_VERSION_HEADER,
-  PROJECT_HEADER,
-  PROTOCOL,
-  PROTOCOL_HEADER,
-  protocolMismatch,
-  REPOSITORY_HEADER,
-  RUNTIME_HEADER,
-  SESSION_HEADER,
-} from "@vibest/protocol/protocol"
+import { PROTOCOL } from "@vibest/protocol/protocol"
 import {
   ACCESS,
-  Admission,
   Caller,
-  CallerGate,
   CAPABILITIES,
   DaemonBusy,
   type DaemonIdentity,
@@ -55,18 +32,13 @@ import {
   Forbidden,
   InvalidCaller,
   VibestRpcs,
-  ProtocolGate,
   WatchLagged,
   type WatchEvent,
-  type WatchSession,
-  type ProjectRow,
-  ProtocolRejected,
   VERSION,
   WrongInstance,
   type CallerShape,
-  type SessionInfo,
 } from "@vibest/protocol/rpc"
-import { HARNESS_IDS, LaunchFailed, NoHarnessChosen, type AgentStatus } from "@vibest/schema/session"
+import { HARNESS_IDS, LaunchFailed, NoHarnessChosen } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import {
   Clock,
@@ -86,87 +58,9 @@ import * as Headers from "effect/http/Headers"
 import { ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 
+import { AdmissionLive, CallerGateLive, noteOpen, ProtocolGateLive } from "./gates.ts"
 import * as Hooks from "./hooks.ts"
-
-const placeOf = (kind: string, address: RuntimeAddress) =>
-  address.id !== "" ? `${kind} terminal ${address.id}` : `${kind} (no terminal)`
-
-const sameCoordinator = (
-  current: { readonly runtime: string | null; readonly address: RuntimeAddress | null } | undefined,
-  runtime: string,
-  address: string,
-) => {
-  const place = current?.address
-  return (
-    current?.runtime === runtime &&
-    place !== null &&
-    place !== undefined &&
-    place.id !== "" &&
-    encodeAddress(place) === address
-  )
-}
-
-const LS_TASK = 500
-const taskForLs = (task: string | null) =>
-  task !== null && task.length > LS_TASK ? `${task.slice(0, LS_TASK - 1)}…` : task
-
-export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo => ({
-  id: session.id,
-  name: session.name,
-  agent: session.agent,
-  harness: session.harnessId,
-  provider: session.provider,
-  model: session.model,
-  status: session.status,
-  startedAt: session.startedAt,
-  exitedAt: session.exitedAt,
-  turnState: session.turnState,
-  projectId: session.projectId,
-  runtime: session.runtime,
-  address: session.address,
-  worktree: session.worktree,
-  repositoryRoot: session.repositoryRoot ?? null,
-  git: session.git ?? null,
-  ...(session.metadata.routing ? { routing: session.metadata.routing } : {}),
-  createdAt: session.createdAt,
-  lastActive: session.lastActive,
-  task: brief?.task ?? null,
-  latest: brief?.latest ?? null,
-})
-
-const mainInfo = (m: CoordinatorRow, status: AgentStatus): SessionInfo => ({
-  id: m.id,
-  name: "main",
-  agent: "main",
-  harness: m.harnessId,
-  provider: m.provider,
-  model: m.model,
-  status,
-  startedAt: null,
-  exitedAt: null,
-  turnState: "none",
-  projectId: m.projectId,
-  runtime: m.runtime ?? "",
-  address: m.address ?? { machine: "local", id: "" },
-  worktree: m.projectDirectory ?? "",
-  repositoryRoot: m.projectDirectory ?? null,
-  git: null,
-  ...(m.routing ? { routing: m.routing } : {}),
-  createdAt: m.createdAt,
-  lastActive: m.createdAt,
-  task: null,
-  latest: null,
-})
-
-const mainStatus = (h: Runtime, terminal: Terminal): Effect.Effect<AgentStatus> =>
-  Effect.gen(function* () {
-    const seen = yield* agentState(h, terminal).pipe(Effect.option)
-    if (Option.isSome(seen) && seen.value !== "absent") return seen.value
-    return yield* coordinatorIdle(h, terminal).pipe(
-      Effect.map((presence) => (presence === "busy" ? "working" : presence === "idle" ? "idle" : "unknown")),
-      Effect.catchTag("RuntimeError", () => Effect.succeed("unknown" as AgentStatus)),
-    )
-  })
+import { placeOf, sameCoordinator, sessionListing, toInfo } from "./listing.ts"
 
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyof Access]
@@ -185,137 +79,6 @@ export const DRAIN_TIMEOUT = Duration.seconds(5)
 export const PRESENT_TIMEOUT = Duration.seconds(5)
 
 export const WATCH_BACKLOG = 10_000
-
-const SETTLEMENTS: ReadonlySet<string> = new Set(["TurnEnd", "Prompt"])
-
-export const AdmissionLive = Layer.effect(
-  Admission,
-  Effect.gen(function* () {
-    const drain = yield* Drain
-    return Admission.of((effect, { rpc }) =>
-      Effect.acquireUseRelease(
-        drain.admit(rpc._tag, SETTLEMENTS.has(rpc._tag)),
-        (leave) => (leave ? effect : Effect.fail(new DaemonStopping({ method: rpc._tag }))),
-        (leave) => leave ?? Effect.void,
-      ),
-    )
-  }),
-)
-
-const header = (headers: Headers.Headers, name: string) => Headers.get(headers, name)
-
-const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id: string; harness: string }) =>
-  Effect.gen(function* () {
-    const conversation = Option.getOrUndefined(header(headers, HARNESS_SESSION_HEADER))
-    if (!conversation || Option.getOrUndefined(header(headers, HARNESS_HEADER)) !== row.harness) return
-    if (yield* db.noteHarnessSession(row.id, conversation))
-      yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
-  })
-
-const noteOpen = (db: Db["Service"], headers: Headers.Headers, sessionId: string) =>
-  Effect.gen(function* () {
-    if (Option.getOrUndefined(header(headers, SESSION_HEADER)) !== sessionId) return
-    const row = yield* db.sessionIdentity(sessionId)
-    if (row && Option.getOrUndefined(header(headers, PROJECT_HEADER)) === row.projectId)
-      yield* noteConversation(db, headers, row)
-  })
-
-const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: string) =>
-  Effect.gen(function* () {
-    const kind = header(headers, CALLER_HEADER)
-    const sessionId = header(headers, SESSION_HEADER)
-    const repository = header(headers, REPOSITORY_HEADER)
-    const bad = (message: string) => new InvalidCaller({ method, message })
-    if (kind._tag === "None")
-      return yield* bad(`${method} needs an ${CALLER_HEADER} header (cli or session); it does not default to cli`)
-    if (kind.value === "cli") {
-      if (sessionId._tag === "Some") return yield* bad(`${method} claims cli and a session id`)
-      if (repository._tag === "None" || repository.value.trim() === "")
-        return yield* bad(`${method} claims cli without a repository`)
-      return { _tag: "Cli", repositoryRoot: repository.value } satisfies CallerShape
-    }
-    if (kind.value === "session") {
-      if (sessionId._tag === "None" || sessionId.value.trim() === "")
-        return yield* bad(`${method} claims session without a session id`)
-      if (repository._tag === "Some" && repository.value.trim() === "")
-        return yield* bad(`${method} has an empty repository`)
-      const row = yield* db.sessionIdentity(sessionId.value)
-      if (!row) return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
-      const project = header(headers, PROJECT_HEADER)
-      if (project._tag === "None")
-        return yield* bad(`${method} claims session ${row.id} without ${PROJECT_HEADER} (VIBEST_PROJECT_ID)`)
-      if (project.value !== row.projectId)
-        return yield* bad(`${method} claims project ${project.value}; session ${row.id} is in project ${row.projectId}`)
-      yield* noteConversation(db, headers, row)
-      if (row.agent === "coordinator") {
-        return {
-          _tag: "Coordinator",
-          sessionId: row.id,
-          projectId: row.projectId,
-          ...(repository._tag === "Some" ? { repositoryRoot: repository.value } : {}),
-        } satisfies CallerShape
-      }
-      if (repository._tag === "Some") return yield* bad(`${method} is a session; a repository is not its identity`)
-      return { _tag: "Session", sessionId: row.id, projectId: row.projectId } satisfies CallerShape
-    }
-    return yield* bad(`${method} has caller ${kind.value}; expected cli or session`)
-  })
-
-export const noteIntegration = (db: Db["Service"], read: (name: string) => string | undefined): Effect.Effect<void> =>
-  Effect.gen(function* () {
-    const sessionId = read(SESSION_HEADER)
-    const version = read(PLUGIN_VERSION_HEADER)
-    if (!sessionId || !version) return
-    const protocol = Number(read(PROTOCOL_HEADER) ?? "0")
-    if (yield* db.noteIntegration(sessionId, { version, protocol: Number.isFinite(protocol) ? protocol : 0 }))
-      yield* Effect.logInfo(`session ${sessionId} runs integration ${version} (protocol ${protocol})`).pipe(
-        Effect.annotateLogs({
-          agent: read(AGENT_HEADER) ?? "",
-          harness: read(HARNESS_HEADER) ?? "",
-          cwd: decodeURIComponent(read(CWD_HEADER) ?? ""),
-          runtime: read(RUNTIME_HEADER) ?? "",
-        }),
-      )
-  })
-
-export const ProtocolGateLive = Layer.effect(
-  ProtocolGate,
-  Effect.gen(function* () {
-    const db = yield* Db
-    return ProtocolGate.of((effect, { headers, rpc }) =>
-      Effect.gen(function* () {
-        yield* noteIntegration(db, (name) => Option.getOrUndefined(header(headers, name)))
-        const protocol = header(headers, PROTOCOL_HEADER)
-        if (protocol._tag === "None" || protocol.value !== String(PROTOCOL)) {
-          const sent = protocol._tag === "None" ? null : protocol.value
-          return yield* new ProtocolRejected({
-            method: rpc._tag,
-            protocol: sent,
-            mismatch: protocolMismatch(
-              sent === null ? undefined : Number(sent),
-              PROTOCOL,
-              VERSION,
-              Option.getOrUndefined(header(headers, PLUGIN_VERSION_HEADER)),
-            ),
-          })
-        }
-        return yield* effect
-      }),
-    )
-  }),
-)
-
-export const CallerGateLive = Layer.effect(
-  CallerGate,
-  Effect.gen(function* () {
-    const db = yield* Db
-    return CallerGate.of((effect, { headers, rpc }) =>
-      resolveCaller(db, headers, rpc._tag).pipe(
-        Effect.flatMap((caller) => Effect.provideService(effect, Caller, caller)),
-      ),
-    )
-  }),
-)
 
 export const handlers = VibestRpcs.toLayer(
   Effect.gen(function* () {
@@ -447,154 +210,7 @@ export const handlers = VibestRpcs.toLayer(
           address: encodeAddress(coord.address),
         }
       })
-    const listedMain = (m: CoordinatorRow | undefined) =>
-      Effect.gen(function* () {
-        if (!m?.runtime || !m.address || m.address.id === "") return undefined
-        const h = yield* runtimes.route(m.runtime).pipe(Effect.option)
-        const status = Option.isNone(h) ? "unknown" : yield* mainStatus(h.value, m.address)
-        return mainInfo(m, status)
-      })
-
-    const listedRows = (rows: ReadonlyArray<SessionView>) =>
-      Effect.map(db.sessionBriefs(rows.map((row) => row.id)), (briefs) =>
-        rows.map((row) => {
-          const brief = briefs.get(row.id)
-          return { ...toInfo(row, brief), task: taskForLs(brief?.task ?? null) }
-        }),
-      )
-
-    const listed = (projectId: string | undefined, stopped: boolean) =>
-      Effect.gen(function* () {
-        const rows = yield* sessions.list({ ...(projectId === undefined ? {} : { projectId }), stopped })
-        const mains = projectId === undefined ? yield* db.coordinators : [yield* db.coordinatorOf(projectId)]
-        return [
-          ...(yield* Effect.forEach(mains, listedMain)).flatMap((m) => (m ? [m] : [])),
-          ...(yield* listedRows(rows)),
-        ]
-      })
-
-    const seenAt = (runtime: string, address: RuntimeAddress) =>
-      address.id === ""
-        ? Effect.succeed(undefined)
-        : runtimes.route(runtime).pipe(
-            Effect.flatMap((rt) => (rt.seen === undefined ? Effect.succeed(undefined) : rt.seen(address))),
-            Effect.orElseSucceed(() => undefined),
-          )
-
-    const watched = (infos: ReadonlyArray<SessionInfo>) =>
-      Effect.gen(function* () {
-        const parents = yield* db.sessionParents(infos.map((info) => info.id))
-        return yield* Effect.forEach(
-          infos,
-          (info) =>
-            Effect.map(seenAt(info.runtime, info.address), (seen): WatchSession => ({
-              ...info,
-              status: unseenDone(info.status, seen),
-              parentId: parents.get(info.id) ?? null,
-              turn: seen?.turn ?? null,
-            })),
-          { concurrency: "unbounded" },
-        )
-      })
-
-    const snapshotProjects = (sessions: ReadonlyArray<WatchSession>) =>
-      Effect.map(db.watchProjects(), (rows) =>
-        rows.map((row): ProjectRow => ({
-          ...row,
-          activity: projectActivity(sessions.filter((s) => s.projectId === row.id).map((s) => s.status)),
-        })),
-      )
-
-    const projectStatuses = (id: string) =>
-      Effect.gen(function* () {
-        const main = yield* listedMain(yield* db.coordinatorOf(id))
-        const live = [
-          ...(main === undefined ? [] : [main]),
-          ...(yield* db.listSessions({ projectId: id, stopped: false })),
-        ]
-        return yield* Effect.forEach(
-          live,
-          (s) => Effect.map(seenAt(s.runtime, s.address), (seen) => unseenDone(s.status, seen)),
-          { concurrency: "unbounded" },
-        )
-      })
-
-    const watchSession = (id: string) =>
-      Effect.gen(function* () {
-        const identity = yield* db.sessionIdentity(id)
-        if (identity === undefined) return []
-        const ended: WatchEvent = { _tag: "SessionEnded", id, projectId: identity.projectId }
-        const info =
-          identity.agent === "coordinator"
-            ? yield* listedMain(yield* db.coordinatorOf(identity.projectId))
-            : yield* Effect.gen(function* () {
-                const row = yield* db.getSession(id)
-                if (row === undefined || row.agent === "main" || row.exitedAt !== null) return undefined
-                const view = yield* sessions
-                  .get(id)
-                  .pipe(
-                    Effect.catchTag("NoSuchSession", () =>
-                      Effect.succeed({ ...row, worktree: "", repositoryRoot: undefined, git: undefined }),
-                    ),
-                  )
-                return (yield* listedRows([view]))[0]
-              })
-        if (info === undefined || info.id !== id) return [ended]
-        const [session] = yield* watched([info])
-        return [{ _tag: "Session", session: session! } satisfies WatchEvent]
-      })
-
-    const watchProject = (id: string) =>
-      Effect.gen(function* () {
-        const rows = yield* db.watchProjects(id)
-        if (rows.length === 0) return []
-        const activity = projectActivity(yield* projectStatuses(id))
-        return rows.map((row): WatchEvent => ({ _tag: "Project", project: { ...row, activity } }))
-      })
-
-    const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
-      Effect.gen(function* () {
-        const project = yield* db.coordinatorAt(runtime, terminal)
-        const main = project === undefined ? undefined : yield* db.coordinatorOf(project)
-        const rows = yield* db.listSessions()
-        return [
-          ...(main === undefined ? [] : [main.id]),
-          ...rows
-            .filter(
-              (row) =>
-                row.runtime === runtime && row.address.machine === terminal.machine && row.address.id === terminal.id,
-            )
-            .map((row) => row.id),
-        ]
-      })
-
-    const watchDeltas = (events: ReadonlyArray<EngineEvent>) =>
-      Effect.gen(function* () {
-        const projectIds = new Set<string>()
-        const sessionIds = new Set<string>()
-        for (const event of events) {
-          if ("id" in event || event.type === "live.session" || event.type === "live.turn_start")
-            sessionIds.add(event.sessionId)
-          else if (event.type === "live.project") projectIds.add(event.projectId)
-          else if (event.type === "live.state" || event.type === "live.exited") {
-            const project = yield* db.coordinatorAt(event.runtime, event.terminal)
-            const main = project === undefined ? undefined : yield* db.coordinatorOf(project)
-            if (main !== undefined) sessionIds.add(main.id)
-          } else if (event.type === "live.seen")
-            for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
-          else if (event.type === "live.reset")
-            for (const info of yield* listed(undefined, false))
-              if (info.runtime === event.runtime) sessionIds.add(info.id)
-        }
-        for (const id of sessionIds) {
-          const identity = yield* db.sessionIdentity(id)
-          if (identity !== undefined) projectIds.add(identity.projectId)
-        }
-        return [
-          ...(yield* Effect.forEach(sessionIds, watchSession)).flat(),
-          ...(yield* Effect.forEach(projectIds, watchProject)).flat(),
-        ]
-      })
+    const { listed, watched, snapshotProjects, watchDeltas } = sessionListing({ db, sessions, runtimes })
 
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
 

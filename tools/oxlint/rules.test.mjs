@@ -83,6 +83,14 @@ export const cpus = os.cpus()
     ).toContain("1 vibest(no-restricted-disable)")
   })
 
+  it.each(["eslint/max-lines", "max-lines", "oxc/max-lines"])(
+    "refuses disabling %s on a file over the limit",
+    (rule) => {
+      const body = Array.from({ length: 1001 }, (_, i) => `export const line${i} = ${i}`).join("\n")
+      expect(oxlintFindings(`/* oxlint-disable ${rule} */\n${body}\n`)).toContain("1 vibest(no-restricted-disable)")
+    },
+  )
+
   it("refuses a blanket disable", () => {
     expect(oxlintFindings(`// eslint-disable\nexport const one = 1\n`)).toEqual(["1 vibest(no-restricted-disable)"])
   })

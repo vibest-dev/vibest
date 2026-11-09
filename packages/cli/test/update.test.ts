@@ -14,7 +14,8 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { compareVersions, removeCommand, stageCommand, upgradeCommand } from "../src/cli.ts"
+import { compareVersions } from "../src/replace.ts"
+import { removeCommand, stageCommand, upgradeCommand } from "../src/update.ts"
 import { makeRepository, runVibest, tempDirectory, testLayer } from "./fakes.ts"
 
 describe("vibest update", () => {

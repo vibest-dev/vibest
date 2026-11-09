@@ -26,8 +26,8 @@ import * as HttpServer from "effect/http/HttpServer"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 
+import { noteIntegration } from "./gates.ts"
 import * as Hooks from "./hooks.ts"
-import { noteIntegration } from "./server.ts"
 
 export type Request = {
   readonly path: string
