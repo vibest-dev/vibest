@@ -26,6 +26,7 @@ import { envelope } from "@vibest/core/results"
 import { agentState, machinesListing, NoRuntime, Runtimes, type Runtime, type Terminal } from "@vibest/core/runtimes"
 import { NoSuchSession, runtimeEnv, type SessionView, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import { UpdateCheck } from "@vibest/core/update-check"
 import { NotInRepository } from "@vibest/core/worktree"
 import {
   AGENT_HEADER,
@@ -328,6 +329,7 @@ export const handlers = VibestRpcs.toLayer(
     const plugins = yield* Plugins
     const subscriptions = yield* Subscriptions
     const identity = yield* Identity
+    const updateStatus = yield* UpdateCheck
     const shutdown = yield* Shutdown
     const drain = yield* Drain
     const bus = yield* Bus
@@ -662,10 +664,12 @@ export const handlers = VibestRpcs.toLayer(
               })),
             ),
           ),
-          Effect.map((rows) => ({
+          Effect.zip(updateStatus),
+          Effect.map(([rows, update]) => ({
             protocol: PROTOCOL,
             version: VERSION,
             runtimes: rows,
+            update,
             ...identity,
             capabilities: CAPABILITIES,
           })),
