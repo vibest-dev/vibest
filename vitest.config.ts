@@ -15,6 +15,7 @@ export default defineConfig({
       "packages/core/src/**/*.test.ts",
       "packages/core/test/**/*.test.ts",
       "packages/plugin-harness-choice/test/**/*.test.ts",
+      "packages/herdr-app-t3/test/**/*.test.mjs",
       "tools/oxlint/**/*.test.mjs",
       "tools/check/**/*.test.ts",
     ],

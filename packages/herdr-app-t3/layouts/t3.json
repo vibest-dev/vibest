@@ -1,0 +1,98 @@
+{
+  "id": "root",
+  "type": "row",
+  "titlebar": "none",
+  "traffic_lights": [16, 19],
+  "preview": "layouts/t3.svg",
+  "theme": { "light": "t3-light", "dark": "t3-dark" },
+  "ui_font": ".SystemUIFont",
+  "font": "Menlo",
+  "font_size": 13,
+  "terminal_padding": [12, 12],
+  "background": "background",
+  "divider": { "width": 1, "color": "border" },
+  "children": [
+    {
+      "id": "sidebar",
+      "type": "column",
+      "size": { "px": 256 },
+      "min": 208,
+      "max": 480,
+      "background": "chrome",
+      "resizable": false,
+      "children": [
+        {
+          "id": "brand",
+          "type": "block",
+          "size": { "px": 52 },
+          "window_drag": true,
+          "content": { "mod": "t3", "props": { "part": "header" } }
+        },
+        { "id": "threads", "type": "block", "content": { "mod": "t3" } },
+        {
+          "id": "sidebar-footer",
+          "type": "block",
+          "size": { "px": 48 },
+          "content": { "mod": "t3", "props": { "part": "footer" } }
+        }
+      ]
+    },
+    {
+      "id": "work",
+      "type": "column",
+      "resizable": false,
+      "background": "background",
+      "children": [
+        {
+          "id": "topbar",
+          "type": "block",
+          "size": { "px": 52 },
+          "window_drag": true,
+          "content": { "mod": "t3", "props": { "part": "topbar" } }
+        },
+        {
+          "id": "work-body",
+          "type": "row",
+          "divider": { "width": 1, "color": "border" },
+          "children": [
+            {
+              "id": "main",
+              "type": "block",
+              "padding": 8,
+              "content": {
+                "tab": "active",
+                "pane": {
+                  "gap": 8,
+                  "radius": 8,
+                  "background": "background",
+                  "border": { "width": 1, "color": "border" },
+                  "focus": { "width": 1, "color": "input" },
+                  "lone": false
+                }
+              }
+            },
+            {
+              "id": "panel",
+              "type": "column",
+              "hidden": true,
+              "size": { "px": 540 },
+              "min": 360,
+              "max": 900,
+              "children": [
+                {
+                  "id": "panel-body",
+                  "type": "stack",
+                  "active": "changes",
+                  "children": [
+                    { "id": "changes", "type": "block", "content": { "mod": "changes" } },
+                    { "id": "files", "type": "block", "content": { "mod": "files" } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
