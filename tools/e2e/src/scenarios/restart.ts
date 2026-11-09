@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { answerFolderTrust } from "../drivers/claude.ts"
+import { answerFolderTrust, typeAndEnter } from "../drivers/claude.ts"
 import {
   ask,
   claudeEnv,
@@ -518,8 +518,14 @@ const checks: ReadonlyArray<Check> = [
         const before = main()!
 
         await install.point(binary)
-        await herdr(socket, "pane.send_text", { pane_id: pane(), text: UPDATE })
-        await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
+        await typeAndEnter(
+          screen,
+          {
+            text: (text) => herdr(socket, "pane.send_text", { pane_id: pane(), text }),
+            enter: () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] }),
+          },
+          UPDATE,
+        )
 
         await until(
           "the main agent restarted on this integration",

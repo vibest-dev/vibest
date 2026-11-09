@@ -15,3 +15,24 @@ export const answerFolderTrust = async (
     await Bun.sleep(1_000)
   }
 }
+
+const squeeze = (s: string) => s.replace(/\s+/g, "")
+
+export const typeAndEnter = async (
+  screen: () => Promise<string>,
+  send: { readonly text: (text: string) => Promise<unknown>; readonly enter: () => Promise<unknown> },
+  text: string,
+  timeoutMs = 30_000,
+) => {
+  await send.text(text)
+  const aBusyClaudeTakesTextAndAQuickEnterAsOnePasteAndSendsNothing = `"${text}" in the input line`
+  await until(
+    aBusyClaudeTakesTextAndAQuickEnterAsOnePasteAndSendsNothing,
+    async () => {
+      const s = await screen()
+      return squeeze(s.slice(s.lastIndexOf("❯"))).includes(squeeze(text))
+    },
+    timeoutMs,
+  )
+  await send.enter()
+}
