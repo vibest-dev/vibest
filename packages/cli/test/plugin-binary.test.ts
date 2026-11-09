@@ -63,7 +63,7 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
       rpc(
         connect(socket).pipe(
           Effect.flatMap((client) => client.Plugins(undefined, { headers: protocolHeaders() })),
-          Effect.map((listed) => listed.filter((p) => p.id !== builtinHarnessChoicePlugin)),
+          Effect.map((listed) => listed.filter((p) => !p.source.startsWith("builtin:"))),
           Effect.scoped,
         ),
       ),
@@ -73,8 +73,6 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
     await daemon.exited
   }
 }
-
-const builtinHarnessChoicePlugin = "harness-choice"
 
 let built = false
 const build = () => {

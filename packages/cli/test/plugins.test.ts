@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
-import { AgentRefused, Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
+import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -20,7 +20,7 @@ import {
   type TestOptions,
   type TestServices,
   until,
-  harnessChoice,
+  harnessesLayer,
   projectOf,
 } from "./fakes.ts"
 
@@ -146,29 +146,9 @@ describe("plugins: spawn hook", () => {
       assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
       const unset = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(repo, { prompt: "unset" })))
       assert.strictEqual(unset._tag, "NoHarnessChosen")
-      assert.include(unset.message, "routing plugin")
+      assert.include(unset.message, "no harness to inherit")
     }),
     { plugins: [write("editor", (e) => (e.harness = e.prompt === "unset" ? undefined : "vim"))] },
-  )
-
-  test(
-    "no usable harness at all is a refusal naming each harness",
-    Effect.gen(function* () {
-      const error = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository)).pipe(
-        Effect.flip,
-        Effect.filterOrElse(
-          (e): e is AgentRefused => e._tag === "AgentRefused",
-          (e) => Effect.die(new Error(`not refused: ${e._tag}`)),
-        ),
-      )
-      assert.deepInclude(error, {
-        plugin: "harness-choice",
-        reason:
-          "no harness available: pi: pi model discovery failed: Not logged in, claude: claude model discovery failed: Not logged in, cursor: cursor model discovery failed: Not logged in",
-      })
-      assert.deepStrictEqual(yield* sessionRowsAndRuntimeOpens, { rows: 0, starts: 0 })
-    }),
-    { unusable: ["pi", "claude", "cursor"] },
   )
 
   test(
@@ -177,7 +157,6 @@ describe("plugins: spawn hook", () => {
       const plugins = yield* Plugins
       const listed = yield* plugins.list
       const byId = (id: string) => listed.filter((q) => q.id === id)
-      assert.deepInclude(listed[0], { id: "harness-choice", status: "active" })
       assert.deepInclude(byId("runtime-choice")[0], { status: "active" })
       assert.deepInclude(byId("broken")[0], { id: "broken", status: "failed" })
       assert.include(byId("broken")[0]!.error, "setup boom")
@@ -218,7 +197,6 @@ describe("plugins: spawn hook", () => {
       assert.deepStrictEqual(
         s.trace.map((t) => [t.plugin, t.outcome]),
         [
-          ["harness-choice", "ok"],
           ["runtime-choice", "ok"],
           ["current", "ok"],
         ],
@@ -228,7 +206,6 @@ describe("plugins: spawn hook", () => {
       assert.deepStrictEqual(
         listed.map((p) => [p.id, p.status]),
         [
-          ["harness-choice", "active"],
           ["runtime-choice", "active"],
           ["session", "failed"],
           ["worker", "failed"],
@@ -238,10 +215,10 @@ describe("plugins: spawn hook", () => {
         ],
       )
       const supported = "agent.start.before, agent.fail"
-      assert.include(listed[2]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
-      assert.include(listed[3]!.error, `unsupported hook "agent.worker.spawn"`)
-      assert.include(listed[4]!.error, `unsupported hook "agent.session.start"`)
-      assert.include(listed[5]!.error, `unsupported hook "agent.toString"`)
+      assert.include(listed[1]!.error, `unsupported hook "agent.session.spawn"; supported: ${supported}`)
+      assert.include(listed[2]!.error, `unsupported hook "agent.worker.spawn"`)
+      assert.include(listed[3]!.error, `unsupported hook "agent.session.start"`)
+      assert.include(listed[4]!.error, `unsupported hook "agent.toString"`)
     }),
     {
       plugins: [
@@ -258,7 +235,6 @@ describe("plugins: spawn hook", () => {
     Effect.gen(function* () {
       const building = yield* Effect.forkChild(
         Plugins.make([
-          harnessChoice,
           {
             source: "hang",
             revision: "-",
@@ -273,7 +249,6 @@ describe("plugins: spawn hook", () => {
       assert.deepStrictEqual(
         (yield* plugins.list).map((p) => [p.id, p.status, p.error]),
         [
-          ["harness-choice", "active", undefined],
           ["hang", "failed", "setup timed out"],
           ["ok", "active", undefined],
         ],
@@ -281,6 +256,7 @@ describe("plugins: spawn hook", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(Subscriptions.layer),
+      Effect.provide(harnessesLayer()),
       Effect.provide(Runtimes.layer),
       Effect.provide(Bus.layer),
     ),
@@ -305,8 +281,9 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.a
 const loaded = (dir: string) =>
   Plugins.layer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, { ...Platform.plugins, prepare: Effect.void })),
-    Layer.provide(Layer.succeed(Builtins, [harnessChoice])),
+    Layer.provide(Layer.succeed(Builtins, [])),
     Layer.provide(Subscriptions.layer),
+    Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(Runtimes.layer),
     Layer.provide(Bus.layer),
@@ -367,7 +344,6 @@ describe("plugins: loading", () => {
         assert.deepStrictEqual(
           (yield* first.list).map((p) => [p.id, p.status]),
           [
-            ["harness-choice", "active"],
             ["a", "active"],
             [path.join(plugins, "broken.ts"), "failed"],
             ["x", "active"],
@@ -386,7 +362,7 @@ describe("plugins: loading", () => {
         const second = yield* loaded(dir)
         assert.deepStrictEqual(
           (yield* second.list).map((p) => p.id),
-          ["harness-choice", "y", "x"],
+          ["y", "x"],
         )
         assert.strictEqual((yield* second.start(event)).model, "from-x")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),

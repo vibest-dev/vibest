@@ -2,11 +2,12 @@ import module from "node:module"
 
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
+import { Harnesses } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, type Candidate, makeHost, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
-import { Plugin, type AgentStartBefore, type Runtime } from "@vibest/plugin"
+import { Plugin, type AgentStartBefore, type Harness, type Runtime } from "@vibest/plugin"
 import {
   Context,
   type Crypto,
@@ -26,7 +27,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { harnessChoice } from "./fakes.ts"
+import { harnessesLayer } from "./fakes.ts"
 
 const events: Array<string> = []
 const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.void) =>
@@ -80,9 +81,73 @@ const host = <A, E>(f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Ef
     Effect.flatMap(f),
     Effect.scoped,
     Effect.provide(Subscriptions.layer),
+    Effect.provide(harnessesLayer()),
     Effect.provide(Runtimes.layer),
     Effect.provide(Bus.layer),
   )
+
+describe("plugins: registrations", () => {
+  const edits = (id: string, edit: (editor: Harness.HarnessEditor) => void) =>
+    candidate(id, "1", Plugin.define({ id, effect: (ctx) => ctx.harness.transform(edit).pipe(Effect.asVoid) }))
+  const registered = <A, E>(f: (h: Effect.Success<ReturnType<typeof makeHost>>) => Effect.Effect<A, E, Harnesses>) =>
+    makeHost().pipe(
+      Effect.flatMap(f),
+      Effect.scoped,
+      Effect.provide(Subscriptions.layer),
+      Effect.provide(harnessesLayer()),
+      Effect.provide(Runtimes.layer),
+      Effect.provide(Bus.layer),
+    )
+
+  it.effect("a boot of several plugins commits their transforms once", () =>
+    registered((h) =>
+      Effect.gen(function* () {
+        let runs = 0
+        yield* h.activate([
+          edits("count", () => void runs++),
+          edits("glm", (e) => e.update("claude", (d) => void (d.binary = "glm"))),
+          edits("other", (e) => e.update("pi", (d) => void (d.binary = "pi2"))),
+        ])
+        assert.strictEqual(runs, 1)
+        assert.strictEqual((yield* Harnesses).get("claude").binary, "glm")
+      }),
+    ),
+  )
+
+  it.effect("a throwing transform fails its plugin and leaves the others' definitions in place", () =>
+    registered((h) =>
+      Effect.gen(function* () {
+        yield* h.activate([
+          edits("glm", (e) => e.update("claude", (d) => void (d.binary = "glm"))),
+          edits("bad", (e) => {
+            e.update("pi", (d) => void (d.binary = "broken"))
+            throw new Error("boom")
+          }),
+        ])
+        const listed = yield* h.service.list
+        assert.strictEqual(listed.find((p) => p.id === "bad")?.status, "failed")
+        assert.include(listed.find((p) => p.id === "bad")?.error ?? "", "boom")
+        assert.strictEqual(listed.find((p) => p.id === "glm")?.status, "active")
+        const harnesses = yield* Harnesses
+        assert.strictEqual(harnesses.get("claude").binary, "glm")
+        assert.strictEqual(harnesses.get("pi").binary, "pi")
+      }),
+    ),
+  )
+
+  it.effect("removing a plugin restores the definition it changed or removed", () =>
+    registered((h) =>
+      Effect.gen(function* () {
+        const harnesses = yield* Harnesses
+        const before = harnesses.get("claude")
+        yield* h.activate([edits("drop", (e) => e.remove("claude"))])
+        assert.isUndefined(harnesses.find("claude"))
+        yield* h.activate([])
+        assert.strictEqual(harnesses.find("claude"), before)
+      }),
+    ),
+  )
+})
 
 describe("plugins: activation", () => {
   it.effect(
@@ -305,7 +370,7 @@ describe("plugins: activation", () => {
     ),
   )
 
-  it.effect("a hook in flight finishes before its plugin is torn down", () =>
+  it.effect("a reload does not wait for a hook in flight, which finishes on the snapshot it started with", () =>
     host((h) =>
       Effect.gen(function* () {
         const entered = yield* Deferred.make<void>()
@@ -327,13 +392,10 @@ describe("plugins: activation", () => {
         yield* takeEvents
         const spawning = yield* Effect.forkChild(h.service.start(event))
         yield* Deferred.await(entered)
-        const reloading = yield* Effect.forkChild(h.activate([]))
-        for (let i = 0; i < 20; i++) yield* Effect.yieldNow
-        assert.deepStrictEqual(events, [], "not torn down while its hook runs")
+        yield* h.activate([])
+        assert.deepStrictEqual(yield* takeEvents, ["close slow"])
         yield* Deferred.succeed(gate, undefined)
         assert.strictEqual((yield* Fiber.join(spawning)).model, "slow")
-        yield* Fiber.join(reloading)
-        assert.deepStrictEqual(yield* takeEvents, ["close slow"])
       }),
     ),
   )
@@ -395,17 +457,14 @@ const packageHome = Effect.gen(function* () {
 const supervise = (dir: string) =>
   Plugins.layer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, loader)),
-    Layer.provide(Layer.succeed(Builtins, [harnessChoice])),
+    Layer.provide(Layer.succeed(Builtins, [])),
     Layer.provide(Subscriptions.layer),
+    Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
     Layer.provide(Runtimes.layer),
     Layer.provide(Bus.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),
-    Effect.map((plugins) => ({
-      ...plugins,
-      list: plugins.list.pipe(Effect.map((all) => all.filter((p) => p.source !== "builtin:harness-choice"))),
-    })),
   )
 
 const eventually = <A, E, R>(f: Effect.Effect<A, E, R>, done: (a: A) => boolean, what: string) =>
@@ -613,10 +672,7 @@ describe("plugins: supervisor", () => {
       const s = yield* (yield* supervise(dir)).start(event)
       assert.deepStrictEqual(
         s.trace.map((t) => [t.plugin, t.outcome]),
-        [
-          ["harness-choice", "ok"],
-          ["early", "ok"],
-        ],
+        [["early", "ok"]],
       )
       assert.strictEqual(s.model, "early")
     }),
@@ -631,20 +687,24 @@ describe("plugins: supervisor", () => {
         "1",
         Plugin.define({
           id: "runtime-fake",
-          effect: (ctx) => ctx.runtime.register({ kind: "fake", events: Stream.empty } as unknown as Runtime.Runtime),
+          effect: (ctx) =>
+            ctx.runtime.transform((editor) =>
+              editor.add({ id: "fake", events: Stream.empty } as unknown as Runtime.RuntimeDefinition),
+            ),
         }),
       )
       const built = yield* Plugins.layer.pipe(
         Layer.provide(Layer.succeed(PluginLoader, loader)),
         Layer.provide(Layer.succeed(Builtins, [runtimePlugin])),
         Layer.provide(Subscriptions.layer),
+        Layer.provide(harnessesLayer()),
         Layer.provide(Layer.effect(Layout, Layout.make(dir))),
         Layer.provideMerge(Runtimes.layer),
         Layer.provide(Bus.layer),
         Layer.build,
       )
       const routed = yield* Context.get(built, Runtimes).route("fake")
-      assert.strictEqual(routed.kind, "fake")
+      assert.strictEqual(routed.id, "fake")
     }),
   )
 
@@ -809,7 +869,7 @@ describe("plugins: supervisor", () => {
         assert.strictEqual(s.model, "z2")
         assert.deepStrictEqual(
           s.trace.map((t) => t.plugin),
-          ["harness-choice", "z"],
+          ["z"],
         )
         assert.deepStrictEqual(
           (yield* plugins.list).map((p) => [p.id, p.status, p.error]),
