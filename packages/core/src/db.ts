@@ -1332,6 +1332,8 @@ const make = Effect.gen(function* () {
 
     coordinators: findCoordinators().pipe(Effect.orDie),
 
+    allocateSessionId: () => unusedId,
+
     coordinatorOf: (projectIdValue: string) =>
       findCoordinators(projectIdValue).pipe(
         Effect.map((rows) => rows[0]),
@@ -1355,10 +1357,11 @@ const make = Effect.gen(function* () {
         readonly routing?: unknown
         readonly projectDirectory?: string | undefined
         readonly pid?: number | undefined
+        readonly sessionId?: string | undefined
       } = {},
     ) =>
       Effect.gen(function* () {
-        const id = yield* unusedId
+        const id = start.sessionId ?? (yield* unusedId)
         return yield* tx(
           Effect.gen(function* () {
             yield* clearMainAt(location.runtime, location.address, project)

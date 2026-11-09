@@ -1,4 +1,4 @@
-import { Config, Effect, FileSystem, Option } from "effect"
+import { Effect, FileSystem } from "effect"
 
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
@@ -21,7 +21,6 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   readonly root: string
   readonly provider: string | null
   readonly model: string | null
-  readonly passEnv: ReadonlyArray<string>
   readonly session: Effect.Effect<
     {
       readonly sessionId: string
@@ -50,10 +49,6 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     VIBEST_HARNESS: input.harness,
     VIBEST_HOME: layout.home,
     VIBEST_COMMAND: encodeCommand(vibest),
-  }
-  for (const name of input.passEnv) {
-    const value = yield* Config.option(Config.String(name))
-    if (Option.isSome(value)) env[name] = value.value
   }
   const saved = yield* input.session
   const systemPromptFile = yield* unsafeOnly(
@@ -94,36 +89,33 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   }
 })
 
-export const inParent = (argv: ReadonlyArray<string>, root: string, runtime: string) => {
-  const rest: Array<string> = []
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--runtime") i++
-    else if (!argv[i]!.startsWith("--runtime=")) rest.push(argv[i]!)
-  }
-  return [...rest, "--runtime", runtime, "--in-parent", root]
+export const IDENTITY_ENV = [
+  "VIBEST_SESSION_ID",
+  "VIBEST_PROJECT_ID",
+  "VIBEST_PROJECT_DIR",
+  "VIBEST_AGENT",
+  "VIBEST_HARNESS",
+  "VIBEST_RUNTIME",
+  "VIBEST_HOME",
+  "VIBEST_COMMAND",
+] as const
+
+export const identityPairs = (env: Readonly<Record<string, string>>) =>
+  IDENTITY_ENV.flatMap((key) => {
+    const value = env[key]
+    return value === undefined ? [] : [`${key}=${value}`]
+  })
+
+export const restartArgv = (command: {
+  readonly file: string
+  readonly args: ReadonlyArray<string>
+  readonly env: Readonly<Record<string, string>>
+}) => ["env", ...identityPairs(command.env), command.file, ...command.args]
+
+export const flagValue = (argv: ReadonlyArray<string>, name: string) => {
+  const value = argv[argv.indexOf(name) + 1]
+  return argv.includes(name) && value !== undefined && !value.startsWith("-") ? value : undefined
 }
-
-export const MAIN_ENV = "VIBEST_MAIN_ENV"
-
-export const mainEnvPairs = (raw: string | undefined): Record<string, string> => {
-  if (raw === undefined || raw === "") return {}
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return {}
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {}
-  const out: Record<string, string> = {}
-  for (const [key, value] of Object.entries(parsed)) if (key !== "" && typeof value === "string") out[key] = value
-  return out
-}
-
-export const commandEnv = (
-  flags: Readonly<Record<string, string>>,
-  marked: boolean,
-  carried: string | undefined,
-): Record<string, string> => (Object.keys(flags).length > 0 ? flags : marked ? mainEnvPairs(carried) : {})
 
 export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(function* (
   h: Runtime,

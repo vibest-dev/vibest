@@ -148,7 +148,9 @@ describe("contract", () => {
       const w = yield* wire
       const layout = yield* Layout
       const repo = yield* makeRepository
-      yield* w.send(request(1, "Launch", { argv: ["vibest"], focus: false, runtime: "herdr" }, cliHeaders(repo)))
+      yield* w.send(
+        request(1, "Launch", { argv: ["vibest"], focus: false, runtime: "herdr", callerEnv: {} }, cliHeaders(repo)),
+      )
       yield* w.recv
       yield* check("launch", w.lines, { [repo]: "/fixture/repo", [layout.home]: "/fixture/home" })
     }),
@@ -160,7 +162,7 @@ describe("contract", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const c = authed(yield* connect(layout.socket), cliHeaders(repo))
-      const { id } = yield* c.Spawn({ harness: "pi", prompt: "do it" })
+      const { id } = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until((yield* Db).getSession(id), (row) => row?.turnState === "open")
       const worktree = (yield* (yield* Db).sessionDirectory(id))!
       const w = yield* wire
@@ -198,7 +200,7 @@ describe("contract", () => {
         yield* connect(layout.socket),
         sessionHeaders({ sessionId: main.sessionId, projectId: project }),
       )
-      const { id } = yield* coordinator.Spawn({ harness: "pi", prompt: "do it" })
+      const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => row?.turnState === "open")
       yield* settled
       const worktree = (yield* db.sessionDirectory(id))!

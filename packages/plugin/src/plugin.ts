@@ -10,6 +10,7 @@ export interface Caller {
   ) => Effect.Effect<string | undefined, unknown, never>
   readonly ready?: (env: Readonly<Record<string, string | undefined>>) => Effect.Effect<boolean, unknown, never>
   readonly missing?: string
+  readonly target?: (env: Readonly<Record<string, string | undefined>>, named?: string) => string | undefined
 }
 
 export interface Plugin {

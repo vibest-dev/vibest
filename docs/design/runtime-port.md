@@ -90,8 +90,8 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   `--runtime`, vibest uses the runtime of the terminal it was started in. When a terminal carries both herdr-core and
   herdr variables (they are inherited), hc wins because the builtin runtime-herdr-core loads before runtime-herdr.
   The CLI and core only iterate the plugins they were given for detection. They name no runtime kind or variable
-  there, so another runtime plugin needs no change to be detected. The machine target is still herdr's: `vibest` and
-  `vibest run` take it from `callerMachine` in `@vibest/runtime-herdr/caller`, and `--session` names a herdr session.
+  there, so another runtime plugin needs no change to be detected. The CLI sends its environment to vibestd, which keeps only the keys the runtime plugin declared and asks that
+  plugin for the machine target. `--session` is an opaque runtime session name.
   Every declared variable set and non-empty means vibest is inside that runtime. One match: that runtime. Several: the
   first in load order wins. Builtins are fixed, herdr-core before herdr, then the plugins directory, then vibest.json
   in the order written. No process tree, tty match, ancestor walk, or detection RPC, and no fallback to herdr or to

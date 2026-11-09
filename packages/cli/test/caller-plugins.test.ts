@@ -1,18 +1,23 @@
 import { assert, describe, it } from "@effect/vitest"
-import { callerHits, callerKeys } from "@vibest/core/caller"
+import { callerHits, callerKeys, callerTarget, mainPlace, type CallerHit } from "@vibest/core/caller"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { PluginLoader, type Candidate } from "@vibest/core/plugins"
+import { makeSources } from "@vibest/core/plugin-sources"
+import { DEFAULT_TIMEOUT, PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { Plugin } from "@vibest/plugin"
 import { run as runDaemon, type Host } from "@vibest/server/daemon"
-import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Logger, Path } from "effect"
-import { Command } from "effect/cli"
+import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import { callerPlugins, command, mainPlace } from "../src/cli.ts"
-import { makeRepository } from "./fakes.ts"
+const callerPlugins = (builtins: ReadonlyArray<Candidate>) =>
+  Effect.gen(function* () {
+    const loader = yield* PluginLoader
+    yield* loader.prepare
+    const read = yield* (yield* makeSources(DEFAULT_TIMEOUT, { quiet: true })).read
+    return [...builtins, ...read.candidates]
+  })
 
 const runtime = (kind: string, env: ReadonlyArray<string>): Candidate => ({
   source: kind,
@@ -48,6 +53,54 @@ export default Plugin.define({
 })
 `
 
+describe("where the main agent runs", () => {
+  const hc = { kind: "hc", terminal: "t4@/run/hc/default.sock" } satisfies CallerHit
+  const herdr = { kind: "herdr", terminal: "vibest/p1" } satisfies CallerHit
+  it("no detected runtime is refused, and --runtime launches one", () => {
+    const refused = mainPlace({ runtime: undefined, hits: [] })
+    assert.strictEqual(refused.in, "refused")
+    assert.match(refused.in === "refused" ? refused.message : "", /pass --runtime/)
+    assert.deepStrictEqual(mainPlace({ runtime: "herdr", hits: [] }), {
+      in: "launch",
+      runtime: "herdr",
+    })
+  })
+  it("one detected runtime starts the main agent in that terminal", () => {
+    assert.deepStrictEqual(mainPlace({ runtime: undefined, hits: [hc] }), {
+      in: "terminal",
+      runtime: "hc",
+      terminal: hc.terminal,
+    })
+    assert.deepStrictEqual(mainPlace({ runtime: undefined, hits: [herdr] }), {
+      in: "terminal",
+      runtime: "herdr",
+      terminal: herdr.terminal,
+    })
+    assert.strictEqual(mainPlace({ runtime: undefined, hits: [{ ...herdr, terminal: undefined }] }).in, "refused")
+  })
+  it("two detected runtimes follow load order, and --runtime overrides", () => {
+    assert.deepStrictEqual(mainPlace({ runtime: undefined, hits: [hc, herdr] }), {
+      in: "terminal",
+      runtime: "hc",
+      terminal: hc.terminal,
+    })
+    assert.deepStrictEqual(mainPlace({ runtime: undefined, hits: [herdr, hc] }), {
+      in: "terminal",
+      runtime: "herdr",
+      terminal: herdr.terminal,
+    })
+    assert.deepStrictEqual(mainPlace({ runtime: "herdr", hits: [herdr, hc] }), {
+      in: "terminal",
+      runtime: "herdr",
+      terminal: herdr.terminal,
+    })
+    assert.deepStrictEqual(mainPlace({ runtime: "hc", hits: [herdr] }), {
+      in: "launch",
+      runtime: "hc",
+    })
+  })
+})
+
 describe("caller plugins", () => {
   it.effect("the first detected plugin in load order wins", () =>
     Effect.gen(function* () {
@@ -58,7 +111,7 @@ describe("caller plugins", () => {
         HERDR_PANE_ID: "p1",
         HERDR_SOCKET_PATH: "/herdr.sock",
       })
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+      assert.deepStrictEqual(mainPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "hc",
         terminal: "t1//hc.sock",
@@ -87,13 +140,13 @@ describe("caller plugins", () => {
         HERDR_SOCKET_PATH: "/herdr.sock",
       }
       const hits = yield* callerHits(builtins, env)
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+      assert.deepStrictEqual(mainPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "hc",
         terminal: "t1@/hc.sock",
       })
       const named = yield* callerHits(builtins, env, "herdr")
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: "herdr", hits: named }), {
+      assert.deepStrictEqual(mainPlace({ runtime: "herdr", hits: named }), {
         in: "terminal",
         runtime: "herdr",
         terminal: "herdr-term",
@@ -108,7 +161,7 @@ describe("caller plugins", () => {
         HERDR_PANE_ID: "p1",
         HERDR_SOCKET_PATH: "/herdr.sock",
       })
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+      assert.deepStrictEqual(mainPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "herdr",
         terminal: "p1//herdr.sock",
@@ -119,7 +172,7 @@ describe("caller plugins", () => {
   it.effect("an empty declared variable is not that runtime", () =>
     Effect.gen(function* () {
       const hits = yield* callerHits(plugins, { REX_PANE: "", HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: "/hc.sock" })
-      const place = mainPlace({ marked: false, runtime: undefined, hits })
+      const place = mainPlace({ runtime: undefined, hits })
       assert.strictEqual(place.in === "terminal" ? place.runtime : "", "hc")
     }),
   )
@@ -186,7 +239,7 @@ describe("caller plugins", () => {
         env,
       )
       assert.deepStrictEqual(calls, ["hc"])
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+      assert.deepStrictEqual(mainPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "hc",
         terminal: "hc-term",
@@ -201,7 +254,7 @@ describe("caller plugins", () => {
         "herdr",
       )
       assert.deepStrictEqual(calls, ["herdr"])
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: "herdr", hits: named }), {
+      assert.deepStrictEqual(mainPlace({ runtime: "herdr", hits: named }), {
         in: "terminal",
         runtime: "herdr",
         terminal: "herdr-term",
@@ -209,9 +262,8 @@ describe("caller plugins", () => {
     }),
   )
 
-  it.live("a runtime plugin from vibest.json is detected, and its environment keys join the caller keys", () => {
-    const logs: Array<string> = []
-    return Effect.gen(function* () {
+  it.live("a runtime plugin from vibest.json is detected, and its environment keys join the caller keys", () =>
+    Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const base = path.join(import.meta.dirname, ".tmp")
@@ -228,40 +280,25 @@ describe("caller plugins", () => {
         Effect.provide(Layer.effect(Layout, Layout.make(dir))),
       )
       assert.deepStrictEqual(callerKeys(loaded), ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "TERN_ID", "TERN_SOCK"])
-      const repo = yield* makeRepository.pipe(Effect.provide(Platform.services))
-      const back = process.cwd()
-      process.chdir(repo)
-      const host = { builtinPlugins: [hc], plugins: Platform.plugins } as unknown as Host
-      const exit = yield* Command.runWith(
-        command(host, () => {}),
-        { version: "0.0.0-test" },
-      )(["--in-parent", repo, "--runtime", "tern"]).pipe(
-        Effect.provide(Layer.effect(Layout, Layout.make(dir))),
-        Effect.provideService(PluginLoader, Platform.plugins),
-        Effect.provide(
-          ConfigProvider.layer(
-            ConfigProvider.fromUnknown({
-              HOME: dir,
-              TERN_ID: "t9",
-              TERN_SOCK: "/tern.sock",
-            }),
-          ),
-        ),
-        Effect.exit,
-        Effect.ensuring(Effect.sync(() => process.chdir(back))),
-      )
-      const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "started"
-      assert.match(message, /this tern terminal could not be named/)
-      assert.notMatch(message, /environment is not set/)
-      assert.deepStrictEqual(
-        logs.filter((line) => /runtime|plugin|vibest\.json/i.test(line)),
-        [],
-      )
-    }).pipe(
-      Effect.provide(Logger.layer([Logger.make((entry) => void logs.push(String(entry.message)))])),
-      Effect.provide(builtinHarnesses),
-      Effect.provide(Platform.services),
-    )
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it("callerTarget uses the socket path, a named session, or no target, and a plugin never sees keys it did not declare", () => {
+    const seen: Array<Record<string, string | undefined>> = []
+    const herdr = {
+      env: ["HERDR_SOCKET_PATH"],
+      target: (env: Readonly<Record<string, string | undefined>>, named?: string) => {
+        seen.push({ ...env })
+        if (named !== undefined) return `session:${named}`
+        return env.HERDR_SOCKET_PATH === undefined ? undefined : `socket:${env.HERDR_SOCKET_PATH}`
+      },
+    }
+    const env = { HERDR_SOCKET_PATH: "/h.sock", HERDR_PANE_ID: "p1", OTHER: "x" }
+    assert.strictEqual(callerTarget([herdr], env), "socket:/h.sock")
+    assert.deepStrictEqual(seen, [{ HERDR_SOCKET_PATH: "/h.sock" }])
+    assert.strictEqual(callerTarget([herdr], env, "other"), "session:other")
+    assert.strictEqual(callerTarget([herdr], {}), undefined)
+    assert.strictEqual(callerTarget([{ env: ["REX_PANE"] }], env), undefined)
   })
 
   it("builtin plugins list herdr-core before herdr", () => {

@@ -1,6 +1,9 @@
-import { Effect, Exit, FileSystem, Option, Path, Schema } from "effect"
+import { ProjectCreateFailed } from "@vibest/protocol/rpc"
+import { Effect, Exit, FileSystem, Option, Path } from "effect"
 
 import { safeRepositoryDirectory, sameWorktreeBucket } from "./paths.ts"
+
+export { ProjectCreateFailed }
 import {
   addWorktree,
   copyIncluded,
@@ -10,10 +13,6 @@ import {
   repositoryDirectoryName,
   type GitState,
 } from "./worktree.ts"
-
-export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()("ProjectCreateFailed", {
-  message: Schema.String,
-}) {}
 
 export interface ProjectFolder {
   readonly name: string
@@ -31,12 +30,15 @@ export interface CreatedProject {
 
 const optionalGit = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orElseSucceed(() => undefined))
 
-const inspect = (directory: string, given: string) =>
+const resolveAgainst = (path: Path.Path, base: string | undefined, given: string) =>
+  base === undefined ? path.resolve(given) : path.resolve(base, given)
+
+const inspect = (directory: string, given: string, base: string | undefined) =>
   Effect.gen(function* () {
     const path = yield* Path.Path
     const fs = yield* FileSystem.FileSystem
     const refuse = (why: string) => new ProjectCreateFailed({ message: `${given}: ${why}` })
-    const absolute = path.resolve(given)
+    const absolute = resolveAgainst(path, base, given)
     const info = yield* fs.stat(absolute).pipe(Effect.mapError(() => refuse("not found")))
     if (info.type !== "Directory") return yield* refuse("not a directory")
     const top = yield* git(absolute, "rev-parse", "--show-toplevel").pipe(
@@ -90,12 +92,16 @@ const copy = (folder: ProjectFolder) =>
     ),
   )
 
-export const createProject = Effect.fn("createProject")(function* (directory: string, sources: ReadonlyArray<string>) {
+export const createProject = Effect.fn("createProject")(function* (
+  directory: string,
+  sources: ReadonlyArray<string>,
+  base?: string,
+) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const refuse = (message: string) => new ProjectCreateFailed({ message })
   if (sources.length === 0) return yield* refuse("at least one --from repository is needed")
-  const target = path.resolve(directory)
+  const target = resolveAgainst(path, base, directory)
   const existing = yield* fs.stat(target).pipe(
     Effect.map((info) => info.type),
     Effect.catchIf(
@@ -118,7 +124,7 @@ export const createProject = Effect.fn("createProject")(function* (directory: st
 
   const folders: ProjectFolder[] = []
   for (const source of sources) {
-    const folder = yield* inspect(real, source)
+    const folder = yield* inspect(real, source, base)
     const clash = folders.find((f) => sameWorktreeBucket(f.name, folder.name))
     if (clash)
       return yield* refuse(`${source} and ${clash.source} would both be the folder ${JSON.stringify(folder.name)}`)

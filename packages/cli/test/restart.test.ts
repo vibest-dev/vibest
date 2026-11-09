@@ -196,11 +196,22 @@ describe("restart in place", () => {
       assert.lengthOf(notices, 1)
       assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
       assert.include(notices[0]!.message, `Restarted: ${sub}, ${main}.`)
-      assert.deepInclude(
-        (yield* herdr.callsTo("run")).map((c) => c.argv),
-        ["/own/bin/vibest", "integration", "start", main],
-        "the main agent restarts through the vibest vibestd runs, not the first vibest on PATH",
-      )
+      const mainArgv = (yield* herdr.callsTo("run")).map((c) => c.argv).find((argv) => argv[0] === "env")
+      assert.ok(mainArgv, "the main agent is restarted by typing env")
+      assert.ok(mainArgv!.includes(`VIBEST_SESSION_ID=${main}`))
+      assert.ok(mainArgv!.includes("pi"))
+      const identity = new Set([
+        "VIBEST_SESSION_ID",
+        "VIBEST_PROJECT_ID",
+        "VIBEST_PROJECT_DIR",
+        "VIBEST_AGENT",
+        "VIBEST_HARNESS",
+        "VIBEST_RUNTIME",
+        "VIBEST_HOME",
+        "VIBEST_COMMAND",
+      ])
+      for (const pair of mainArgv!.slice(1, mainArgv!.indexOf("pi")))
+        assert.ok(identity.has(pair.slice(0, pair.indexOf("="))), pair)
     }).pipe(Effect.provideService(VibestCommand, ["/own/bin/vibest"])),
   )
 

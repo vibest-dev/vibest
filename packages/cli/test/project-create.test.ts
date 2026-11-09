@@ -23,7 +23,17 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { liveDaemon } from "../src/herdr-plugin.ts"
-import { authed, FakeRuntime, runVibest, testLayer, type TestServices, until, writeResult, projectOf } from "./fakes.ts"
+import {
+  authed,
+  FakeRuntime,
+  runVibest,
+  stopRecorded,
+  testLayer,
+  type TestServices,
+  until,
+  writeResult,
+  projectOf,
+} from "./fakes.ts"
 
 const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
 
@@ -377,7 +387,7 @@ describe("multi-repository project", () => {
   )
 
   test(
-    "vibest project create prints the project as JSON, warns about uncommitted changes, and does not need vibestd",
+    "vibest project create prints the project as JSON and warns about uncommitted changes",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -388,6 +398,7 @@ describe("multi-repository project", () => {
       const sdk = yield* repositoryWithOneCommitOnMain(sources, "sdk")
       const directory = path.join(yield* scopedRealPathTempDirectory("vibest-project-"), "combo")
       const env = { HOME: home, VIBEST_HOME: home }
+      yield* Effect.addFinalizer(() => TestClock.withLive(stopRecorded(path.join(home, "vibestd.pid"))))
       const created = yield* runVibest(sources, env, ["project", "create", directory, "--from", app, "--from", sdk])
       assert.strictEqual(created.code, 0, created.stderr)
       assert.match(created.stderr, new RegExp(`warning: ${app}: uncommitted changes were not copied`))
@@ -403,7 +414,7 @@ describe("multi-repository project", () => {
         ["app", "sdk"],
       )
       assert.deepStrictEqual(project.folders[0]!.uncommitted, [" M README.md"])
-      assert.isFalse(yield* fs.exists(path.join(home, "vibest.sock")))
+      assert.isTrue(yield* fs.exists(path.join(home, "vibest.sock")))
 
       const again = path.join(directory, "nope")
       const agent = yield* runVibest(sources, { ...env, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }, [
@@ -534,7 +545,6 @@ describe("multi-repository isolated workspace", () => {
         root,
         provider: null,
         model: null,
-        passEnv: [],
         session: authed(raw, cliHeaders(root))["Project.CoordinatorSession"]({
           harness: "pi",
           fresh: false,
@@ -576,10 +586,7 @@ describe("multi-repository isolated workspace", () => {
       const { id } = yield* authed(
         raw,
         sessionHeaders({ sessionId, repositoryRoot: app, projectId: String(projectId) }),
-      ).Spawn({
-        harness: "pi",
-        prompt: "do it",
-      })
+      ).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
       const row = (yield* db.getSession(id))!
       assert.strictEqual(row.projectId, (yield* db.projectAt(root))?.id)
@@ -607,7 +614,7 @@ describe("multi-repository isolated workspace", () => {
       const raw = yield* connect((yield* Layout).socket)
       const cli = authed(raw, cliHeaders(root))
       yield* cli["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "coord" })
-      const { id } = yield* authed(raw, cliHeaders(workspace)).Spawn({ harness: "pi", prompt: "do it" })
+      const { id } = yield* authed(raw, cliHeaders(workspace)).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => row?.turnState === "open")
       assert.strictEqual((yield* db.getSession(id))!.projectId, (yield* db.projectAt(root))?.id)
       assert.isUndefined(yield* db.projectAt(workspace))

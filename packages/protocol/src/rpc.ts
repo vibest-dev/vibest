@@ -18,7 +18,6 @@ import {
   NoRuntime,
   RuntimeAddress,
   RuntimeIncompatible,
-  RuntimeMachine,
   RuntimeUnreachable,
   SessionBusy,
   TurnState,
@@ -95,6 +94,10 @@ export class InvalidCaller extends Schema.TaggedError<InvalidCaller>()("InvalidC
 
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   method: Schema.String,
+  message: Schema.String,
+}) {}
+
+export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()("ProjectCreateFailed", {
   message: Schema.String,
 }) {}
 
@@ -277,7 +280,8 @@ export class VibestRpcs extends RpcGroup.make(
           model: Schema.optional(Schema.String),
           env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
           agent: Schema.optional(Schema.String),
-          machine: Schema.optional(RuntimeMachine),
+          callerEnv: Schema.Record(Schema.String, Schema.String),
+          runtimeSession: Schema.optional(Schema.String),
           peer: Schema.optional(Schema.String),
           archive: Schema.optional(Schema.Boolean),
           runtime: Schema.optional(Schema.String),
@@ -325,7 +329,8 @@ export class VibestRpcs extends RpcGroup.make(
         payload: {
           argv: Schema.Array(Schema.String),
           focus: Schema.Boolean,
-          machine: Schema.optional(RuntimeMachine),
+          callerEnv: Schema.Record(Schema.String, Schema.String),
+          runtimeSession: Schema.optional(Schema.String),
           runtime: Schema.optional(Schema.String),
         },
         success: Schema.Struct({
@@ -333,6 +338,7 @@ export class VibestRpcs extends RpcGroup.make(
           terminal: Schema.String,
           place: Schema.String,
           attach: Schema.NullOr(Schema.Array(Schema.String)),
+          routing: Schema.optional(Schema.String),
         }),
         error: Schema.Union([
           InvalidCaller,
@@ -430,19 +436,22 @@ export class VibestRpcs extends RpcGroup.make(
           harness: Schema.Literals(HARNESS_IDS),
           fresh: Schema.Boolean,
           terminal: Schema.String,
-          machine: Schema.optional(RuntimeMachine),
           runtime: Schema.optional(Schema.String),
           provider: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
           routing: Schema.optional(Routing),
           pid: Schema.optional(Schema.Number),
-          env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
         },
         success: Schema.Struct({
           sessionId: Schema.String,
           harnessSessionId: Schema.NullOr(Schema.String),
           projectId: Schema.String,
           runtime: Schema.optional(Schema.String),
+          command: Schema.Struct({
+            file: Schema.String,
+            args: Schema.Array(Schema.String),
+            env: Schema.Record(Schema.String, Schema.String),
+          }),
         }),
         error: Schema.Union([
           InvalidCaller,
@@ -451,6 +460,8 @@ export class VibestRpcs extends RpcGroup.make(
           ProjectMoved,
           RuntimeUnreachable,
           RuntimeIncompatible,
+          HarnessUnavailable,
+          LaunchFailed,
         ]),
       }),
     ),
@@ -501,8 +512,38 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
+    Rpc.make("Project.MainPlace", {
+      payload: {
+        callerEnv: Schema.Record(Schema.String, Schema.String),
+        runtime: Schema.optional(Schema.String),
+      },
+      success: Schema.Struct({
+        directory: Schema.String,
+        place: Schema.Union([
+          Schema.Struct({
+            in: Schema.Literals(["terminal"]),
+            runtime: Schema.String,
+            terminal: Schema.String,
+          }),
+          Schema.Struct({
+            in: Schema.Literals(["launch"]),
+            runtime: Schema.String,
+          }),
+        ]),
+      }),
+      error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, ProjectMoved, LaunchFailed]),
+    }),
+  ),
+  scoped(
+    Rpc.make("Project.FocusCoordinator", {
+      payload: {},
+      success: Schema.NullOr(Schema.Struct({ place: Schema.String, focused: Schema.Boolean })),
+      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
+    }),
+  ),
+  scoped(
     Rpc.make("Project.RunningCoordinator", {
-      payload: { terminal: Schema.String, machine: Schema.optional(RuntimeMachine) },
+      payload: { terminal: Schema.String },
       success: Schema.NullOr(
         Schema.Struct({
           harness: Schema.Literals(HARNESS_IDS),
@@ -554,6 +595,27 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
+    admitted(
+      Rpc.make("Project.Create", {
+        payload: { directory: Schema.String, from: Schema.Array(Schema.String) },
+        success: Schema.Struct({
+          directory: Schema.String,
+          folders: Schema.Array(
+            Schema.Struct({
+              name: Schema.String,
+              source: Schema.String,
+              path: Schema.String,
+              branch: Schema.String,
+              origin: Schema.optional(Schema.String),
+              uncommitted: Schema.Array(Schema.String),
+            }),
+          ),
+        }),
+        error: Schema.Union([Forbidden, ProjectCreateFailed]),
+      }),
+    ),
+  ),
+  scoped(
     Rpc.make("Daemon.Stop", {
       payload: { instance: Schema.String },
       success: Schema.Struct({ instance: Schema.String }),
@@ -565,21 +627,6 @@ export class VibestRpcs extends RpcGroup.make(
       payload: { instance: Schema.String, command: Schema.Array(Schema.String) },
       success: Schema.Struct({ instance: Schema.String }),
       error: Schema.Union([Forbidden, WrongInstance, DaemonBusy, DaemonStopping, LaunchFailed]),
-    }),
-  ),
-  scoped(
-    Rpc.make("Session.Start", {
-      payload: { id: Schema.String },
-      success: Schema.Struct({
-        harness: Schema.Literals(HARNESS_IDS),
-        harnessSessionId: Schema.NullOr(Schema.String),
-        provider: Schema.NullOr(Schema.String),
-        model: Schema.NullOr(Schema.String),
-        projectId: Schema.String,
-        runtime: Schema.optional(Schema.String),
-        env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-      }),
-      error: Schema.Union([Forbidden, NoSuchSession]),
     }),
   ),
   scoped(
@@ -630,10 +677,13 @@ export const ACCESS = {
   Watch: "cli",
   "Session.Seen": "cli",
   "Project.Open": "cli",
+  "Project.MainPlace": "cli",
   "Project.CoordinatorSession": "agent",
   "Project.StartMain": "agent",
+  "Project.FocusCoordinator": "cli",
   "Project.RunningCoordinator": "agent",
   "Project.StopCoordinator": "agent",
+  "Project.Create": "cli",
   "Project.Info": "agent",
   "Project.Search": "agent",
   Send: "owner",
@@ -642,7 +692,6 @@ export const ACCESS = {
   Remove: "owner",
   "Daemon.Stop": "cli",
   "Daemon.Handoff": "cli",
-  "Session.Start": "self",
   "Session.Ready": "self",
   "Agents.Outdated": "cli",
   "Agents.Restart": "cli",

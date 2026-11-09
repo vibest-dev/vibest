@@ -4,12 +4,9 @@ import { type Claim, type VibestClient, withVibest } from "@vibest/client/client
 import { VibestCommand } from "@vibest/core/paths"
 import { isLimited } from "@vibest/plugin"
 import type { SessionInfo } from "@vibest/protocol/rpc"
-import { callerMachine } from "@vibest/runtime-herdr/caller"
 import { agentName, KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { shortId } from "@vibest/schema/id"
-import { RuntimeAddress } from "@vibest/schema/session"
 import { Config, Console, Effect, Option, Schema } from "effect"
-import { Herdr } from "effect-herdr-sdk"
 import { Command } from "effect/cli"
 
 export class BadPluginContext extends Schema.TaggedError<BadPluginContext>()("BadPluginContext", {
@@ -53,7 +50,7 @@ export interface HerdrDaemon<E = never, R = never> {
   readonly republish: (directory: string | undefined) => Step<number, E, R>
   readonly openMain: (
     directory: string,
-  ) => Step<{ readonly action: "focused" | "opened"; readonly place: string }, E, R>
+  ) => Step<{ readonly action: "focused" | "runs in" | "opened"; readonly place: string }, E, R>
   readonly spawn: (directory: string, prompt: string) => Step<string, E, R>
   readonly interrupt: (id: string) => Step<void, E, R>
   readonly list: (directory: string | undefined) => Step<ReadonlyArray<LiveSession>, E, R>
@@ -193,20 +190,10 @@ export const perform = <E, R>(
   return go(verb)
 }
 
-const NOT_A_PANE = "vibest-open-main"
-
 const claim = (directory: string): Claim => ({ _tag: "cli", repositoryRoot: directory })
 
-const decodeAddress = Schema.decodeUnknownEffect(Schema.fromJsonString(RuntimeAddress))
-
-const herdrClient = Effect.gen(function* () {
-  const socket = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_SOCKET_PATH")))
-  if (socket === undefined)
-    return yield* new BadPluginContext({ message: "HERDR_SOCKET_PATH is not set; vibest herdr runs inside herdr" })
-  const client = yield* Herdr.make(socket)
-  yield* Herdr.verifyProtocol(client)
-  return client
-})
+const callerEnvOf = (): Record<string, string> =>
+  Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
 
 const ask = <A, E, R>(directory: string, f: (client: VibestClient) => Effect.Effect<A, E, R>) =>
   withVibest(claim(directory), f)
@@ -223,25 +210,18 @@ const theDaemon = {
   republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
   openMain: (directory: string) =>
     Effect.gen(function* () {
-      const machine = yield* callerMachine()
-      const running = yield* ask(directory, (client) => client["Project.RunningCoordinator"]({ terminal: NOT_A_PANE }))
-      if (running) {
-        const address = yield* decodeAddress(running.address)
-        const pane = parseTerminal(address)?.paneId
-        if (pane === undefined) return yield* new BadPluginContext({ message: "the main agent has no pane" })
-        yield* (yield* herdrClient).call("pane.focus", { pane_id: pane })
-        return { action: "focused" as const, place: pane }
-      }
+      const focused = yield* ask(directory, (client) => client["Project.FocusCoordinator"]({}))
+      if (focused)
+        return { action: focused.focused ? ("focused" as const) : ("runs in" as const), place: focused.place }
       const self = yield* VibestCommand
       const opened = yield* ask(directory, (client) =>
-        client.Launch({ argv: [...self], focus: true, machine, runtime: KIND }),
+        client.Launch({ argv: [...self], focus: true, runtime: KIND, callerEnv: callerEnvOf() }),
       )
       return { action: "opened" as const, place: opened.place }
     }),
   spawn: (directory: string, prompt: string) =>
     Effect.gen(function* () {
-      const machine = yield* callerMachine()
-      return (yield* ask(directory, (client) => client.Spawn({ prompt, machine }))).id
+      return (yield* ask(directory, (client) => client.Spawn({ prompt, callerEnv: callerEnvOf() }))).id
     }),
   interrupt: (id: string) => ask("/", (client) => client.Interrupt({ id })).pipe(Effect.asVoid),
   list: (directory: string | undefined) =>

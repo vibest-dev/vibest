@@ -16,7 +16,7 @@ import {
   Stream,
 } from "effect"
 
-import { OnCallerPlugins } from "./caller.ts"
+import { callerOf, type CallerSpec, OnCallerPlugins } from "./caller.ts"
 import { type Candidate, makeSources, makeWatcher, messageOf, PluginLoader } from "./plugin-sources.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
@@ -424,7 +424,17 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     })
 
     const list = settled.pipe(Effect.andThen(Effect.sync(() => slots.map(info))))
-    return { service: Plugins.of({ start, fail, list }), activate, ready }
+    const callers = settled.pipe(
+      Effect.andThen(
+        Effect.sync(() =>
+          slots.flatMap((slot) => {
+            const spec = callerOf(slot.running?.candidate.plugin)
+            return spec === undefined ? [] : [spec]
+          }),
+        ),
+      ),
+    )
+    return { service: Plugins.of({ start, fail, list, callers }), activate, ready }
   })
 
 export class Plugins extends Context.Service<
@@ -438,6 +448,7 @@ export class Plugins extends Context.Service<
       HookFailed
     >
     readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
+    readonly callers: Effect.Effect<ReadonlyArray<CallerSpec>>
   }
 >()("vibest/Plugins") {
   static readonly make = (candidates: ReadonlyArray<Candidate>, options: { readonly timeout?: Duration.Input } = {}) =>

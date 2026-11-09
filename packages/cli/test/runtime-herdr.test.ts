@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import { targetFrom } from "@vibest/runtime-herdr/caller"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
@@ -153,6 +154,27 @@ describe("pane events", () => {
       assert.deepStrictEqual(yield* Fiber.join(first), [
         { type: "state", terminal: TerminalRuntime.terminalOf("s", "w1:p2"), state: "idle" },
       ])
+    }).pipe(Effect.provide(Platform.services)),
+  )
+})
+
+describe("focus and the caller target", () => {
+  it("targetFrom encodes the socket path or the named session, and nothing when neither is set", () => {
+    assert.deepStrictEqual(TerminalRuntime.decodeTarget(targetFrom({ HERDR_SOCKET_PATH: "/h/s.sock" })), {
+      socketPath: "/h/s.sock",
+    })
+    assert.deepStrictEqual(TerminalRuntime.decodeTarget(targetFrom({ HERDR_SOCKET_PATH: "/h/s.sock" }, "other")), {
+      session: "other",
+    })
+    assert.isUndefined(targetFrom({}))
+    assert.isUndefined(targetFrom({ HERDR_SOCKET_PATH: "" }))
+  })
+
+  it.effect("focus asks herdr to focus that pane on the pane's own session", () =>
+    Effect.gen(function* () {
+      const { runtime, calls } = yield* scriptedRuntime(() => Effect.succeed({}))
+      yield* runtime.focus!(TerminalRuntime.terminalOf("s", "w1:p2"))
+      assert.deepStrictEqual(calls, [{ method: "pane.focus", params: { pane_id: "w1:p2" } }])
     }).pipe(Effect.provide(Platform.services)),
   )
 })

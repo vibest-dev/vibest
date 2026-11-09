@@ -5,6 +5,7 @@ import type { Check } from "../check.ts"
 import {
   ask,
   claudeEnv,
+  envArgs,
   fakeAnthropic,
   fakeOpenAI,
   heldModel,
@@ -12,7 +13,7 @@ import {
   subagentFolder,
   type Step,
 } from "../fake-model.ts"
-import { expect, row, Skip, until } from "../world.ts"
+import { expect, herdr, row, Skip, until } from "../world.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 type Info = { directory: string; preferences: string; docs: string; memories: string; artifacts: string }
@@ -99,8 +100,11 @@ const checks: ReadonlyArray<Check> = [
         const repo = await newRepository(w, "files")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-files", pi.url)}`
         await w.daemon()
-        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+        await w.startMain({
+          harness: "pi",
+          session,
           cwd: repo,
+          env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
         const run = async (args: ReadonlyArray<string>) =>
@@ -114,7 +118,7 @@ const checks: ReadonlyArray<Check> = [
           ).id
         const subs = {
           pi: await run(["pi", "--env", env]),
-          claude: await run(["claude", ...(await claudeEnv(w, "files", claude.url))]),
+          claude: await run(["claude", ...envArgs(await claudeEnv(w, "files", claude.url))]),
         }
         const answered = (who: string) => (results[who]?.length ?? 0) >= 3
         for (const who of ["pi", "claude", "main"])
@@ -234,6 +238,130 @@ const checks: ReadonlyArray<Check> = [
       const kept = await fs.readFile(path.join(now.memories, "a.md"), "utf8")
       expect(kept.includes("kept across the move"), `memories after the move: ${kept}`)
       await sh(vibestOwnWorktree, "git", "status", "--short")
+    },
+  },
+
+  {
+    id: "S37",
+    title:
+      "vibest ls outside a project lists that project's main agent, and from a git repository that is no project lists nothing, without the CLI running git",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr", "git"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      await w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi } })
+      const outside = await fs.mkdtemp(path.join(w.root, "outside-"))
+      const log = path.join(w.root, "git-calls")
+      const shim = path.join(w.root, "git-shim")
+      await fs.mkdir(shim)
+      await fs.writeFile(
+        path.join(shim, "git"),
+        `#!/bin/sh\necho "$@" >> '${log}'\nexec '${Bun.which("git")}' "$@"\n`,
+        { mode: 0o755 },
+      )
+      const env = { PATH: `${shim}:${w.env().PATH}` }
+      const listed = JSON.parse(await w.ok(["ls"], { cwd: outside, env })) as Array<{ agent: string }>
+      expect(
+        listed.some((row) => row.agent === "main"),
+        `ls outside a project: ${JSON.stringify(listed)}`,
+      )
+      expect((await fs.readFile(log, "utf8").catch(() => "")) === "", "ls ran git")
+      const repo = path.join(w.root, "no-project")
+      await fs.mkdir(repo)
+      const init = await w.run(repo, ["git", "init", "-q"])
+      expect(init.code === 0, init.stderr)
+      const none = JSON.parse(await w.ok(["ls"], { cwd: repo, env })) as Array<unknown>
+      expect(none.length === 0, `ls in a repository that is no project: ${JSON.stringify(none)}`)
+    },
+  },
+
+  {
+    id: "S38",
+    title: "herdr open-main focuses the main agent's pane through vibestd",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      await w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi } })
+      const context = JSON.stringify({ workspace_cwd: w.repository })
+      const focused = await w.ok(["herdr", "open-main"], { env: { HERDR_PLUGIN_CONTEXT_JSON: context } })
+      expect(focused.startsWith("focused "), `open-main: ${focused}`)
+      const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
+      const panes = async () =>
+        ((await herdr(socket, "pane.list", {})) as { panes: Array<{ pane_id: string }> }).panes.map((p) => p.pane_id)
+      let mainPane = ""
+      await until(
+        "the main agent's pane",
+        async () => {
+          for (const id of await panes()) {
+            const info = (await herdr(socket, "pane.process_info", { pane_id: id })) as {
+              process_info?: { foreground_processes?: Array<{ name?: string; argv0?: string | null }> }
+            }
+            const fg = info.process_info?.foreground_processes ?? []
+            if (fg.some((proc) => (proc.argv0 ?? proc.name ?? "").includes("pi"))) {
+              mainPane = id
+              return true
+            }
+          }
+          return false
+        },
+        30_000,
+      )
+      const before = new Set(await panes())
+      await herdr(socket, "pane.close", { pane_id: mainPane })
+      await until("the main pane closed", async () => !(await panes()).includes(mainPane), 15_000)
+      const opened = await w.ok(["herdr", "open-main"], {
+        env: { HERDR_PLUGIN_CONTEXT_JSON: context, HERDR_SOCKET_PATH: socket },
+      })
+      expect(opened.startsWith("opened "), `open-main after quit: ${opened}`)
+      const after = await panes()
+      expect(
+        after.some((id) => !before.has(id)),
+        `no new pane in ${after.join(",")}`,
+      )
+    },
+  },
+  {
+    id: "P9",
+    title:
+      "vibest project create through vibestd: relative --from against the CLI directory; an agent is refused; a non-empty target is left untouched",
+    run: async (w) => {
+      const root = path.join(w.root, "p9")
+      const cwd = path.join(root, "work")
+      await fs.mkdir(cwd, { recursive: true })
+      for (const name of ["a", "b"]) {
+        const dir = path.join(root, name)
+        await fs.mkdir(dir)
+        for (const argv of [
+          ["git", "init", "-q", "-b", "main"],
+          ["git", "add", "f"],
+          ["git", "commit", "-q", "-m", "f"],
+        ]) {
+          if (argv[1] === "add") await fs.writeFile(path.join(dir, "f"), "x\n")
+          const ran = await w.run(dir, argv)
+          expect(ran.code === 0, `${name} ${argv.join(" ")}: ${ran.stderr}`)
+        }
+      }
+      const created = await w.json<{ directory: string; folders: Array<{ name: string }> }>(
+        ["project", "create", "combo", "--from", "../a", "--from", "../b"],
+        { cwd },
+      )
+      expect((await fs.realpath(created.directory)) === (await fs.realpath(path.join(cwd, "combo"))), created.directory)
+      expect(created.folders.map((folder) => folder.name).join(",") === "a,b", JSON.stringify(created.folders))
+      const agent = await w.vibest(["project", "create", "agent", "--from", "../a"], {
+        cwd,
+        env: { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
+      })
+      expect(agent.code !== 0 && agent.stderr.includes("Forbidden"), agent.stderr)
+      expect(
+        !(await fs.stat(path.join(cwd, "agent")).then(
+          () => true,
+          () => false,
+        )),
+        "an agent created a project",
+      )
+      const full = path.join(cwd, "full")
+      await fs.mkdir(full)
+      await fs.writeFile(path.join(full, "keep"), "keep\n")
+      const refused = await w.vibest(["project", "create", "full", "--from", "../a"], { cwd })
+      expect(refused.code !== 0 && refused.stderr.includes("not empty"), refused.stderr)
+      expect(await fs.readFile(path.join(full, "keep"), "utf8"), "the non-empty target was touched")
     },
   },
 ]

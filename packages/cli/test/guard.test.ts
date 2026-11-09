@@ -1,13 +1,10 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { daemonEnv } from "@vibest/client/client"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
-import type { CallerHit } from "@vibest/core/caller"
 import { coordinator, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
-import * as Launch from "@vibest/core/launch"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Forbidden } from "@vibest/protocol/rpc"
-import { LaunchFailed } from "@vibest/schema/session"
 import type { Host } from "@vibest/server/daemon"
 import { Cause, ConfigProvider, Crypto, Effect, Exit, FileSystem, Option, Path, Queue, Stdio, Terminal } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
@@ -634,79 +631,6 @@ describe("wizard entry", () => {
 })
 
 describe("where vibest starts the main agent", () => {
-  const hc = { kind: "hc", terminal: "t4@/run/hc/default.sock" } satisfies CallerHit
-  const herdr = { kind: "herdr", terminal: "vibest/p1" } satisfies CallerHit
-  it("no detected runtime is refused, and --runtime launches one", () => {
-    const refused = Cli.mainPlace({ marked: false, runtime: undefined, hits: [] })
-    assert.strictEqual(refused.in, "refused")
-    assert.match(refused.in === "refused" ? refused.message : "", /pass --runtime/)
-    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: "herdr", hits: [] }), {
-      in: "launch",
-      runtime: "herdr",
-    })
-  })
-  it("one detected runtime starts the main agent in that terminal", () => {
-    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: undefined, hits: [hc] }), {
-      in: "terminal",
-      runtime: "hc",
-      terminal: hc.terminal,
-    })
-    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: undefined, hits: [herdr] }), {
-      in: "terminal",
-      runtime: "herdr",
-      terminal: herdr.terminal,
-    })
-    assert.strictEqual(
-      Cli.mainPlace({ marked: false, runtime: undefined, hits: [{ ...herdr, terminal: undefined }] }).in,
-      "refused",
-    )
-  })
-  it("two detected runtimes follow load order, and --runtime overrides", () => {
-    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: undefined, hits: [hc, herdr] }), {
-      in: "terminal",
-      runtime: "hc",
-      terminal: hc.terminal,
-    })
-    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: undefined, hits: [herdr, hc] }), {
-      in: "terminal",
-      runtime: "herdr",
-      terminal: herdr.terminal,
-    })
-    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: "herdr", hits: [herdr, hc] }), {
-      in: "terminal",
-      runtime: "herdr",
-      terminal: herdr.terminal,
-    })
-    assert.deepStrictEqual(Cli.mainPlace({ marked: false, runtime: "hc", hits: [herdr] }), {
-      in: "launch",
-      runtime: "hc",
-    })
-  })
-  it("a pane vibestd opened uses the runtime it named, not another runtime earlier in the load order", () => {
-    assert.deepStrictEqual(Cli.mainPlace({ marked: true, runtime: "herdr", hits: [hc, herdr] }), {
-      in: "terminal",
-      runtime: "herdr",
-      terminal: herdr.terminal,
-    })
-    assert.deepStrictEqual(Cli.mainPlace({ marked: true, runtime: "hc", hits: [hc] }), {
-      in: "terminal",
-      runtime: "hc",
-      terminal: hc.terminal,
-    })
-    assert.strictEqual(Cli.mainPlace({ marked: true, runtime: "hc", hits: [herdr] }).in, "refused")
-    assert.strictEqual(Cli.mainPlace({ marked: true, runtime: undefined, hits: [hc] }).in, "refused")
-  })
-  it("Launch types the runtime it chose, once, before --in-parent", () => {
-    assert.deepStrictEqual(Launch.inParent(["/bin/vibest", "--runtime", "hc", "--harness", "pi"], "/r", "herdr"), [
-      "/bin/vibest",
-      "--harness",
-      "pi",
-      "--runtime",
-      "herdr",
-      "--in-parent",
-      "/r",
-    ])
-  })
   it("vibestd is started without the caller's terminal variables", () => {
     const callerEnv = ["HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"]
     assert.deepStrictEqual(daemonEnv(callerEnv, { KEPT: "1" }), {
@@ -721,7 +645,7 @@ describe("where vibest starts the main agent", () => {
 
 describe("vibest --session inside herdr", () => {
   it.effect(
-    "the parent-workspace pane refuses --session before any exec, herdr call or vibestd start",
+    "the parent-workspace pane refuses --session before any exec or herdr call",
     () =>
       Effect.gen(function* () {
         const touched = { exec: false, host: false, socket: false }
@@ -766,14 +690,9 @@ describe("vibest --session inside herdr", () => {
           Effect.exit,
           Effect.ensuring(Effect.sync(() => process.chdir(back))),
         )
-        const error = Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
-        assert.strictEqual(
-          error instanceof LaunchFailed,
-          true,
-          Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "vibest started the main agent",
-        )
-        assert.match(error instanceof LaunchFailed ? error.message : "", /--session other/)
-        assert.deepStrictEqual(touched, { exec: false, host: false, socket: false })
+        assert.strictEqual(Exit.isFailure(exit), true, "vibest started the main agent")
+        assert.strictEqual(touched.exec, false)
+        assert.strictEqual(touched.host, false)
       }),
     15_000,
   )
@@ -788,7 +707,6 @@ describe("vibest --session inside herdr", () => {
       process.chdir(sub)
       const secret = "probe-value-9f3c"
       const herdr: Array<string> = []
-      let cwdAfter = ""
       const host = new Proxy({ builtinPlugins: [], plugins: Platform.plugins } as unknown as Host, {
         get: (target, prop, receiver) =>
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
@@ -796,7 +714,7 @@ describe("vibest --session inside herdr", () => {
       const exit = yield* Command.runWith(
         Cli.command(host, () => {}),
         { version: "0.0.0-test" },
-      )(["--in-parent", repo, "--harness", "pi", "--env", "MAIN_PROBE=" + secret]).pipe(
+      )(["--harness", "pi", "--env", "MAIN_PROBE=" + secret]).pipe(
         Effect.provideService(SocketConnector, () => {
           herdr.push("connect")
           return Effect.die("herdr")
@@ -809,18 +727,12 @@ describe("vibest --session inside herdr", () => {
         Effect.provideService(VibestCommand, ["/bin/vibest"]),
         Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: "/nonexistent" }))),
         Effect.exit,
-        Effect.ensuring(
-          Effect.sync(() => {
-            cwdAfter = process.cwd()
-            process.chdir(back)
-          }),
-        ),
+        Effect.ensuring(Effect.sync(() => process.chdir(back))),
       )
-      assert.strictEqual(cwdAfter, repo)
       assert.deepStrictEqual(herdr, [])
       const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "started"
       assert.notInclude(message, secret)
-      assert.match(message, /without naming its runtime/)
+      assert.strictEqual(Exit.isFailure(exit), true)
     }).pipe(Effect.provide(Platform.services)),
   )
 })

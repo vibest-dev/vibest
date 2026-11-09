@@ -25,6 +25,7 @@ export interface FakeRuntimeOptions {
   readonly statusEvents?: boolean
   readonly noRun?: boolean
   readonly offline?: string
+  readonly noFocus?: boolean
 }
 
 export interface RuntimeCalls {
@@ -37,6 +38,7 @@ export interface RuntimeCalls {
     readonly near: string | undefined
     readonly split: boolean | undefined
     readonly focus: boolean | undefined
+    readonly target?: string
   }
   readonly send: { readonly terminal: string; readonly text?: string; readonly keys?: ReadonlyArray<string> }
   readonly read: { readonly terminal: string; readonly lines: number }
@@ -47,6 +49,7 @@ export interface RuntimeCalls {
   readonly run: { readonly terminal: string; readonly argv: ReadonlyArray<string> }
   readonly present: { readonly terminal: string; readonly info: Readonly<Record<string, string>> }
   readonly see: { readonly terminal: string; readonly turn: number }
+  readonly focus: { readonly terminal: string }
 }
 
 type Entry = { [M in keyof RuntimeCalls]: { readonly method: M; readonly params: RuntimeCalls[M] } }[keyof RuntimeCalls]
@@ -309,6 +312,7 @@ export class FakeRuntime extends Context.Service<
               near: input.near?.id,
               split: input.split,
               focus: input.focus,
+              ...(machine.target !== undefined ? { target: machine.target } : {}),
             },
             input.env.VIBEST_SESSION_ID,
             Effect.gen(function* () {
@@ -472,6 +476,12 @@ export class FakeRuntime extends Context.Service<
             mark(terminal.id, (now) => ({ ...now, seen: turn })),
           ),
         attach: () => ["fake", "attach"],
+        ...(options.noFocus
+          ? {}
+          : {
+              focus: (terminal: { readonly id: string }) =>
+                call("focus", { terminal: terminal.id }, terminal.id, Effect.void),
+            }),
       }
 
       return FakeRuntime.of({

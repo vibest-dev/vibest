@@ -313,6 +313,105 @@ export class World {
     await until("vibestd gone", () => !alive(pid!), 10_000)
   }
 
+  private async ensureHerdr(session: string) {
+    const socket = path.join(this.home, ".config", "herdr", "sessions", session, "herdr.sock")
+    if (fs.existsSync(socket)) return socket
+    const server = Bun.spawn(["herdr", "server", "--session", session], {
+      env: this.env(),
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    })
+    server.unref()
+    this.started.push(server)
+    await until(`herdr session ${session}`, () => fs.existsSync(socket), 20_000)
+    return socket
+  }
+
+  async startMain(input: {
+    readonly harness: string
+    readonly env?: Record<string, string>
+    readonly cwd?: string
+    readonly session?: string
+    readonly runtime?: string
+    readonly extra?: ReadonlyArray<string>
+    readonly bin?: string
+    readonly name?: string
+    readonly timeoutMs?: number
+    readonly processEnv?: Record<string, string | undefined>
+    readonly hc?: {
+      readonly run: (...args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>
+      readonly terminal?: string
+    }
+  }) {
+    const cwd = input.cwd ?? this.repository
+    const timeoutMs = input.timeoutMs ?? 60_000
+    const vars = input.env ?? {}
+    if (input.runtime === "hc") {
+      if (input.hc === undefined) throw new Error("startMain on hc needs the check's hc runner")
+      const name = input.hc.terminal ?? input.name ?? `main-${Date.now()}`
+      if (input.hc.terminal === undefined) {
+        const opened = await input.hc.run("run", "--bg", "--keep", "--name", name)
+        expect(opened.code === 0, `hc run: ${opened.stderr}${opened.stdout}`)
+      }
+      const prefix = Object.entries(vars)
+        .map(([key, value]) => `${key}=${shSingle(value)}`)
+        .join(" ")
+      const program = input.bin ?? "vibest"
+      const args = [program, "--harness", input.harness, ...(input.extra ?? [])].map(shSingle).join(" ")
+      const typed = await input.hc.run(
+        "send",
+        name,
+        `cd ${shSingle(cwd)} && ${prefix} ${args}`.replace(/ +/g, " ").trim(),
+      )
+      expect(typed.code === 0, `hc send: ${typed.stderr}${typed.stdout}`)
+    } else {
+      const session = input.session ?? this.herdrSession
+      const socket = await this.ensureHerdr(session)
+      const workspace = await herdr(socket, "workspace.create", { cwd, focus: false, label: "project" })
+      const workspaceId = (workspace.workspace as { workspace_id: string }).workspace_id
+      const created = await herdr(socket, "tab.create", {
+        cwd,
+        env: { ...this.env(input.processEnv), ...vars },
+        focus: true,
+        workspace_id: workspaceId,
+      })
+      const pane = (created.root_pane as { pane_id: string }).pane_id
+      const shells = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "nu"])
+      await until(
+        "the pane shell",
+        async () => {
+          const info = await herdr(socket, "pane.process_info", { pane_id: pane })
+          const fg =
+            (info.process_info as { foreground_processes?: Array<{ name: string }> } | undefined)
+              ?.foreground_processes ?? []
+          return fg.length > 0 && fg.every((proc) => shells.has(proc.name.replace(/^-/, "").replace(/^.*\//, "")))
+        },
+        30_000,
+      )
+      const program = input.bin ?? binary
+      const args = [program, "--harness", input.harness, ...(input.extra ?? [])].map(shSingle).join(" ")
+      await herdr(socket, "pane.send_text", { pane_id: pane, text: args })
+      await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
+    }
+    await until(
+      "the main agent",
+      () => {
+        const file = path.join(this.vibestHome, "vibest.db")
+        if (!fs.existsSync(file)) return false
+        const db = readDb(file)
+        try {
+          return db.query("SELECT id FROM session WHERE role = 'main' AND ended_at IS NULL").get() !== null
+        } catch {
+          return false
+        } finally {
+          db.close()
+        }
+      },
+      timeoutMs,
+    )
+  }
+
   async close() {
     await this.stopDaemon()
     const startedHerdrSession = await fsPromises
@@ -334,10 +433,13 @@ export class World {
 export const alive = (pid: number) => {
   try {
     process.kill(pid, 0)
-    return true
   } catch {
     return false
   }
+  const state = Bun.spawnSync(["ps", "-p", String(pid), "-o", "state="])
+    .stdout.toString()
+    .trim()
+  return state !== "" && state !== "Z"
 }
 
 export const SESSIONS = `(SELECT s.id, s.project_id, s.role AS agent_type, s.directory, s.created_at, s.ended_at,

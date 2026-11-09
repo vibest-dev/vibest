@@ -3,16 +3,22 @@ import net from "node:net"
 import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
+import { PluginLoader } from "@vibest/core/plugin-sources"
 import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
+import { Plugin } from "@vibest/plugin"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
+import { HANDOFF_ENV } from "@vibest/server/daemon"
 import * as Server from "@vibest/server/server"
-import { Effect, FileSystem, Layer, Option, Path, type Scope, Schema } from "effect"
+import { ConfigProvider, Effect, Exit, FileSystem, Fiber, Layer, Option, Path, type Scope, Schema } from "effect"
+import { Command } from "effect/cli"
 import { SqlClient } from "effect/sql"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
+import * as Cli from "../src/cli.ts"
 import {
   FakeRuntime,
   makeRepository,
@@ -334,38 +340,6 @@ describe("vibest CLI", () => {
       assert.isTrue(history.some((row) => row.kind === "result" && row.message.includes("kept finding")))
     }),
   )
-
-  test(
-    "vibest --env outside herdr is the new pane's environment and is not on the typed command",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const layout = yield* Layout
-      const repo = yield* makeRepository
-      const secret = "probe-value-9f3c"
-      const run = (args: ReadonlyArray<string>) =>
-        vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home, VIBEST_NO_UPDATE_CHECK: "1" }, args)
-      const started = yield* run([
-        "--runtime",
-        "herdr",
-        "--harness",
-        "pi",
-        "--headless",
-        "--env",
-        "MAIN_PROBE=" + secret,
-      ])
-      assert.strictEqual(started.code, 0, started.stderr)
-      assert.notInclude(started.stdout, secret)
-      assert.notInclude(started.stderr, secret)
-      const open = (yield* herdr.callsTo("open"))[0]!
-      const typed = ((yield* herdr.callsTo("run"))[0]!.argv as ReadonlyArray<string>).join(" ")
-      assert.notInclude(open.argv.join(" "), secret)
-      assert.notInclude(typed, secret)
-      assert.notInclude(typed, "--env")
-      assert.strictEqual(open.env.MAIN_PROBE, undefined)
-      assert.deepStrictEqual(JSON.parse(open.env.VIBEST_MAIN_ENV!), { MAIN_PROBE: secret })
-      assert.strictEqual(open.env.VIBEST_HOME, layout.home)
-    }),
-  )
 })
 
 describe("vibest CLI without vibestd", () => {
@@ -682,3 +656,144 @@ describe("vibest CLI without vibestd", () => {
     TIMEOUT,
   )
 })
+
+it.effect("vibest execs the daemon command over the process environment and never loads plugins", () =>
+  Effect.gen(function* () {
+    const repo = yield* makeRepository
+    const back = process.cwd()
+    process.chdir(repo)
+    const prev = {
+      HERDR_PANE_ID: process.env.HERDR_PANE_ID,
+      HERDR_SOCKET_PATH: process.env.HERDR_SOCKET_PATH,
+      VIBEST_SESSION_ID: process.env.VIBEST_SESSION_ID,
+      VIBEST_AGENT: process.env.VIBEST_AGENT,
+    }
+    process.env.HERDR_PANE_ID = "w1:p1"
+    process.env.HERDR_SOCKET_PATH = "/h.sock"
+    delete process.env.VIBEST_SESSION_ID
+    delete process.env.VIBEST_AGENT
+    const seen: Array<{ file: string; args: ReadonlyArray<string>; env: Record<string, string> }> = []
+    const exit = yield* Command.runWith(
+      Cli.command(Platform.daemon, (file, args, env) => {
+        seen.push({
+          file,
+          args,
+          env: {
+            ...Object.fromEntries(
+              Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+            ),
+            ...env,
+          },
+        })
+      }),
+      { version: "0.0.0-test" },
+    )(["--harness", "pi"]).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromUnknown({
+            HERDR_PANE_ID: "w1:p1",
+            HERDR_SOCKET_PATH: "/h.sock",
+            HOME: process.env.HOME,
+            PATH: process.env.PATH,
+          }),
+        ),
+      ),
+      Effect.provideService(PluginLoader, {
+        prepare: Effect.die("PluginLoader"),
+        parseJsonc: () => {
+          throw new Error("PluginLoader")
+        },
+        graph: () => {
+          throw new Error("PluginLoader")
+        },
+        load: () => Promise.reject(new Error("PluginLoader")),
+        watch: () => () => undefined,
+      }),
+      Effect.exit,
+      Effect.ensuring(
+        Effect.sync(() => {
+          process.chdir(back)
+          if (prev.HERDR_PANE_ID === undefined) delete process.env.HERDR_PANE_ID
+          else process.env.HERDR_PANE_ID = prev.HERDR_PANE_ID
+          if (prev.HERDR_SOCKET_PATH === undefined) delete process.env.HERDR_SOCKET_PATH
+          else process.env.HERDR_SOCKET_PATH = prev.HERDR_SOCKET_PATH
+          if (prev.VIBEST_SESSION_ID === undefined) delete process.env.VIBEST_SESSION_ID
+          else process.env.VIBEST_SESSION_ID = prev.VIBEST_SESSION_ID
+          if (prev.VIBEST_AGENT === undefined) delete process.env.VIBEST_AGENT
+          else process.env.VIBEST_AGENT = prev.VIBEST_AGENT
+        }),
+      ),
+    )
+    assert.strictEqual(Exit.isSuccess(exit), true, Exit.isFailure(exit) ? String(exit.cause) : "")
+    assert.strictEqual(seen.length, 1)
+    assert.strictEqual(seen[0]!.file, "pi")
+    assert.ok(seen[0]!.env.VIBEST_SESSION_ID)
+    assert.strictEqual(seen[0]!.env.PATH, process.env.PATH)
+  }).pipe(
+    Effect.provide(
+      Server.layer.pipe(
+        Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+        Layer.provideMerge(Project.layer),
+        Layer.provideMerge(
+          testLayer({
+            plugins: [
+              Plugin.define({
+                id: "runtime-herdr",
+                caller: {
+                  kind: "herdr",
+                  env: ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"],
+                  terminal: (env) => Effect.succeed(env.HERDR_PANE_ID),
+                },
+                effect: () => Effect.void,
+              }),
+            ],
+          }),
+        ),
+      ),
+    ),
+  ),
+)
+
+test(
+  "doctor reads harnesses from vibestd, and --env is not a flag",
+  Effect.gen(function* () {
+    const layout = yield* Layout
+    const repo = yield* makeRepository
+    const run = (args: ReadonlyArray<string>) => vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args)
+    const doctor = yield* run(["doctor"])
+    assert.strictEqual(doctor.code, 0, doctor.stderr)
+    assert.match(doctor.stdout, /Coding agents/)
+    assert.match(doctor.stdout, /\bpi\b/)
+    const flagged = yield* run(["--env", "A=b"])
+    assert.strictEqual(flagged.code, 2)
+    assert.match(flagged.stderr, /--env/)
+  }),
+)
+
+test(
+  "daemon --foreground --import drops VIBEST_HANDOFF_ENV before it runs",
+  Effect.gen(function* () {
+    const agent = process.env.VIBEST_SESSION_ID
+    const who = process.env.VIBEST_AGENT
+    delete process.env.VIBEST_SESSION_ID
+    delete process.env.VIBEST_AGENT
+    process.env[HANDOFF_ENV] = "from-the-old-daemon"
+    const fiber = yield* Effect.forkChild(
+      Command.runWith(
+        Cli.command(Platform.daemon, () => {}),
+        { version: "0.0.0-test" },
+      )(["daemon", "--foreground", "--import"]).pipe(
+        Effect.provide(
+          ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: process.env.HOME, PATH: process.env.PATH })),
+        ),
+      ),
+    )
+    for (let i = 0; i < 10 && process.env[HANDOFF_ENV] !== undefined; i++) yield* TestClock.adjust("20 millis")
+    assert.strictEqual(process.env[HANDOFF_ENV], undefined)
+    yield* Fiber.interrupt(fiber)
+    if (agent === undefined) delete process.env.VIBEST_SESSION_ID
+    else process.env.VIBEST_SESSION_ID = agent
+    if (who === undefined) delete process.env.VIBEST_AGENT
+    else process.env.VIBEST_AGENT = who
+  }),
+)
