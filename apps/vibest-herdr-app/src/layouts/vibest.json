@@ -3,7 +3,7 @@
   "type": "row",
   "titlebar": "none",
   "theme": { "light": "vibest-light", "dark": "vibest-dark" },
-  "traffic_lights": [16, 13],
+  "traffic_lights": [16, 17],
   "preview": "layouts/vibest.svg",
   "terminal_padding": [12, 12],
   "background": "chrome",

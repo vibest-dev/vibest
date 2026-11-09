@@ -12,6 +12,7 @@ const header = (t: Theme): Element => {
     .size_full()
     .pl(inset)
     .pr(12)
+    .pt(8)
     .items_center()
     .gap(4)
     .bg(t.chrome)
