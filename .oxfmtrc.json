@@ -8,6 +8,7 @@
   "trailingComma": "all",
   "experimentalSortImports": {},
   "ignorePatterns": [
+    "apps/vibest-herdr-app/types/**",
     "**/dist/**",
     "**/node_modules/**",
     "packages/effect-herdr-sdk/src/generated/**",
