@@ -24,7 +24,7 @@ export class ThreadsView {
     const t = this.t
     const active = projects.find((p) => p.active)
     return h_flex()
-      .px(8)
+      .pr(8)
       .pb(8)
       .gap(4)
       .items_center()
@@ -191,7 +191,7 @@ export class ThreadsView {
       .id("projects")
       .flex_1()
       .min_h(0)
-      .px(8)
+      .pr(8)
       .pb(8)
       .overflow_y_scrollbar()
       .children(
