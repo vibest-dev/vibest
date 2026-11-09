@@ -1202,4 +1202,25 @@ describe("vibest.sock", () => {
       assert.strictEqual("session" in failed ? failed.session : failed._tag, id)
     }),
   )
+
+  test(
+    "archive refuses a main agent and names its project",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const path = yield* Path.Path
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      yield* db.coordinatorLaunch(projectId, "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "test/main" },
+      })
+      const main = (yield* db.coordinatorOf(projectId))!
+      const failed = yield* Effect.flip(asCli(yield* client, repo).Remove({ id: main.id }))
+      assert.strictEqual(failed._tag, "NoSuchSession")
+      assert.strictEqual(
+        "message" in failed ? failed.message : "",
+        `${main.id} is the main agent of project ${path.basename(repo)}. Stop it in its terminal.`,
+      )
+    }),
+  )
 })

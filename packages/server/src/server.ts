@@ -344,7 +344,21 @@ export const handlers = VibestRpcs.toLayer(
         const c = yield* agent(method)
         const id = yield* db.resolveSession(input)
         const session = yield* db.getSession(id)
-        if (!session) return yield* new NoSuchSession({ id, message: `no session ${id}` })
+        if (!session) {
+          const identity = yield* db.sessionIdentity(id)
+          if (identity?.agent === "coordinator") {
+            const directory = yield* db.projectDirectory(identity.projectId)
+            const name =
+              directory !== undefined && directory !== ""
+                ? directory.slice(directory.lastIndexOf("/") + 1)
+                : identity.projectId
+            return yield* new NoSuchSession({
+              id,
+              message: `${id} is the main agent of project ${name}. Stop it in its terminal.`,
+            })
+          }
+          return yield* new NoSuchSession({ id, message: `no session ${id}` })
+        }
         if (c._tag === "Coordinator" && session.projectId !== c.projectId)
           return yield* new Forbidden({
             method,
