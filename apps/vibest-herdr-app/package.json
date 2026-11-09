@@ -13,7 +13,7 @@
   "scripts": {
     "build": "bun build.ts",
     "check": "for mod in dist/mods/*/; do herdr-app check \"$mod\" || exit 1; rm -f \"$mod\"gpui-kit.d.ts \"$mod\"herdr.d.ts \"$mod\"jsconfig.json; done",
-    "typecheck": "tsrs --noEmit --fast",
+    "typecheck": "tsrs --noEmit --fast && tsrs --noEmit --fast -p tsconfig.build.json",
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run apps/vibest-herdr-app"
   }
 }
