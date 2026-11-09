@@ -2,7 +2,7 @@
   "id": "root",
   "type": "row",
   "titlebar": "none",
-  "traffic_lights": [16, 19],
+  "traffic_lights": [16, 13],
   "preview": "layouts/vibest.svg",
   "terminal_padding": [12, 12],
   "background": "background",
@@ -20,7 +20,7 @@
         {
           "id": "sidebar-header",
           "type": "block",
-          "size": { "px": 52 },
+          "size": { "px": 40 },
           "window_drag": true,
           "content": { "mod": "vibest-sidebar-header" }
         },
@@ -37,12 +37,12 @@
       "id": "workspace",
       "type": "column",
       "resizable": false,
-      "background": "background",
+      "background": "chrome",
       "children": [
         {
           "id": "topbar",
           "type": "block",
-          "size": { "px": 52 },
+          "size": { "px": 40 },
           "window_drag": true,
           "content": { "mod": "vibest-topbar" }
         },
@@ -61,8 +61,6 @@
                   "gap": 8,
                   "radius": 10,
                   "background": "background",
-                  "border": { "width": 1, "color": "border" },
-                  "focus": { "width": 1, "color": "input" },
                   "lone": true,
                   "header": { "content": { "mod": "pane" }, "height": 30, "position": "top", "reveal": "always" }
                 }

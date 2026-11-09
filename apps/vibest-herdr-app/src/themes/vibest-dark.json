@@ -23,7 +23,7 @@
   ],
   "colors": {
     "canvas": "#000000",
-    "chrome": "#000000",
+    "chrome": "#0e0e0e",
     "surface": "#111111",
     "popover": "#111111",
     "raised": "#1b1b1c",

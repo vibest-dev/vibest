@@ -62,7 +62,7 @@ export const topbarView = (t: Theme, state: TopbarState, win: TopbarWindow): Ele
     .pr(12)
     .gap(12)
     .items_center()
-    .bg(t.background)
+    .bg(t.chrome)
     .text_size(14)
     .font_medium()
     .child(state.breadcrumb ? breadcrumbView(t, state.breadcrumb) : div().flex_1())
