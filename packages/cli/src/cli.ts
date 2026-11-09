@@ -22,7 +22,6 @@ import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writ
 import { makeSources } from "@vibest/core/plugin-sources"
 import { DEFAULT_TIMEOUT, describeSpawn, PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
-import { createProject } from "@vibest/core/project-create"
 import { jsonObject, promptOf } from "@vibest/core/results"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
@@ -684,7 +683,9 @@ const project = Command.make("project").pipe(
       (o) =>
         Effect.gen(function* () {
           yield* userOnly("project create")
-          const created = yield* createProject(o.directory, o.from)
+          const created = yield* vibest((client) =>
+            client["Project.Create"]({ directory: o.directory, from: [...o.from] }),
+          )
           for (const folder of created.folders) {
             if (folder.uncommitted.length === 0) continue
             yield* Console.error(
@@ -695,7 +696,7 @@ const project = Command.make("project").pipe(
         }),
     ).pipe(
       Command.withDescription(
-        "Only for working on several repositories together; a single git repository is already a project (cd into it and run vibest). Copies them into a new project directory, one folder each: `vibest project create ~/work/combo --from ~/code/shop --from ~/code/admin` makes ~/work/combo/shop and ~/work/combo/admin (your originals are untouched); ~/work/combo itself must not be inside a git repository. Then `cd ~/work/combo && vibest`: the main agent works there, and each subagent gets its own copy with the same folders. Local, does not need vibestd; an agent may not run it",
+        "Only for working on several repositories together; a single git repository is already a project (cd into it and run vibest). Copies them into a new project directory, one folder each: `vibest project create ~/work/combo --from ~/code/shop --from ~/code/admin` makes ~/work/combo/shop and ~/work/combo/admin (your originals are untouched); ~/work/combo itself must not be inside a git repository. Then `cd ~/work/combo && vibest`: the main agent works there, and each subagent gets its own copy with the same folders. An agent may not run it",
       ),
     ),
     Command.make("info", {}, () => vibest((client) => client["Project.Info"]()).pipe(Effect.flatMap(json))).pipe(

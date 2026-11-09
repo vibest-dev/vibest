@@ -433,6 +433,7 @@ describe("vibest.sock", () => {
           "Project.CoordinatorSession",
           c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" }),
         ],
+        ["Project.Create", c["Project.Create"]({ directory: "x", from: ["y"] })],
         ["Project.FocusCoordinator", c["Project.FocusCoordinator"]({})],
         ["Project.RunningCoordinator", c["Project.RunningCoordinator"]({ terminal: "test/p1" })],
         ["Project.StopCoordinator", c["Project.StopCoordinator"]({ runtime: "herdr", address: "{}" })],
@@ -542,6 +543,36 @@ describe("vibest.sock", () => {
       assert.includeMembers([...ran!.argv], ["--model", "it's"])
       assert.notInclude(ran!.argv, "--in-parent")
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
+    }),
+  )
+
+  test(
+    "Project.Create resolves a relative directory and --from against the cli directory",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const parent = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "vibest-create-" }))
+      const init = (name: string) =>
+        Effect.gen(function* () {
+          const dir = path.join(parent, name)
+          yield* fs.makeDirectory(dir)
+          yield* sh(dir, "init", "-q", "-b", "main")
+          yield* fs.writeFileString(path.join(dir, "f"), "x\n")
+          yield* sh(dir, "add", "f")
+          yield* sh(dir, "commit", "-q", "-m", "f")
+        })
+      yield* init("a")
+      yield* init("b")
+      const created = yield* asCli(yield* client, parent)["Project.Create"]({
+        directory: "combo",
+        from: ["a", "b"],
+      })
+      assert.strictEqual(created.directory, path.join(parent, "combo"))
+      assert.deepStrictEqual(
+        created.folders.map((folder) => folder.name),
+        ["a", "b"],
+      )
+      assert.isTrue(yield* fs.exists(path.join(parent, "combo", "a", "f")))
     }),
   )
 

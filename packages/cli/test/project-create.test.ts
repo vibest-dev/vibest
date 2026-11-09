@@ -377,7 +377,7 @@ describe("multi-repository project", () => {
   )
 
   test(
-    "vibest project create prints the project as JSON, warns about uncommitted changes, and does not need vibestd",
+    "vibest project create prints the project as JSON and warns about uncommitted changes",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -388,6 +388,21 @@ describe("multi-repository project", () => {
       const sdk = yield* repositoryWithOneCommitOnMain(sources, "sdk")
       const directory = path.join(yield* scopedRealPathTempDirectory("vibest-project-"), "combo")
       const env = { HOME: home, VIBEST_HOME: home }
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          const raw = yield* fs.readFileString(path.join(home, "vibestd.pid")).pipe(Effect.option)
+          if (Option.isNone(raw)) return
+          const pid = (JSON.parse(raw.value) as { pid?: number }).pid
+          if (pid !== undefined)
+            yield* Effect.sync(() => {
+              try {
+                process.kill(pid, "SIGTERM")
+              } catch {
+                return
+              }
+            })
+        }).pipe(Effect.ignore),
+      )
       const created = yield* runVibest(sources, env, ["project", "create", directory, "--from", app, "--from", sdk])
       assert.strictEqual(created.code, 0, created.stderr)
       assert.match(created.stderr, new RegExp(`warning: ${app}: uncommitted changes were not copied`))
@@ -403,7 +418,7 @@ describe("multi-repository project", () => {
         ["app", "sdk"],
       )
       assert.deepStrictEqual(project.folders[0]!.uncommitted, [" M README.md"])
-      assert.isFalse(yield* fs.exists(path.join(home, "vibest.sock")))
+      assert.isTrue(yield* fs.exists(path.join(home, "vibest.sock")))
 
       const again = path.join(directory, "nope")
       const agent = yield* runVibest(sources, { ...env, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }, [

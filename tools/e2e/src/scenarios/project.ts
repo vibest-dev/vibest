@@ -284,6 +284,53 @@ const checks: ReadonlyArray<Check> = [
       expect(focused.startsWith("focused "), `open-main: ${focused}`)
     },
   },
+  {
+    id: "P9",
+    title:
+      "vibest project create through vibestd: relative --from against the CLI directory; an agent is refused; a non-empty target is left untouched",
+    run: async (w) => {
+      const root = path.join(w.root, "p9")
+      const cwd = path.join(root, "work")
+      await fs.mkdir(cwd, { recursive: true })
+      for (const name of ["a", "b"]) {
+        const dir = path.join(root, name)
+        await fs.mkdir(dir)
+        for (const argv of [
+          ["git", "init", "-q", "-b", "main"],
+          ["git", "add", "f"],
+          ["git", "commit", "-q", "-m", "f"],
+        ]) {
+          if (argv[1] === "add") await fs.writeFile(path.join(dir, "f"), "x\n")
+          const ran = await w.run(dir, argv)
+          expect(ran.code === 0, `${name} ${argv.join(" ")}: ${ran.stderr}`)
+        }
+      }
+      const created = await w.json<{ directory: string; folders: Array<{ name: string }> }>(
+        ["project", "create", "combo", "--from", "../a", "--from", "../b"],
+        { cwd },
+      )
+      expect((await fs.realpath(created.directory)) === (await fs.realpath(path.join(cwd, "combo"))), created.directory)
+      expect(created.folders.map((folder) => folder.name).join(",") === "a,b", JSON.stringify(created.folders))
+      const agent = await w.vibest(["project", "create", "agent", "--from", "../a"], {
+        cwd,
+        env: { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
+      })
+      expect(agent.code !== 0 && agent.stderr.includes("Forbidden"), agent.stderr)
+      expect(
+        !(await fs.stat(path.join(cwd, "agent")).then(
+          () => true,
+          () => false,
+        )),
+        "an agent created a project",
+      )
+      const full = path.join(cwd, "full")
+      await fs.mkdir(full)
+      await fs.writeFile(path.join(full, "keep"), "keep\n")
+      const refused = await w.vibest(["project", "create", "full", "--from", "../a"], { cwd })
+      expect(refused.code !== 0 && refused.stderr.includes("not empty"), refused.stderr)
+      expect(await fs.readFile(path.join(full, "keep"), "utf8"), "the non-empty target was touched")
+    },
+  },
 ]
 
 export default checks

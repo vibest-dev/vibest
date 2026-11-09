@@ -98,6 +98,10 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   message: Schema.String,
 }) {}
 
+export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>()("ProjectCreateFailed", {
+  message: Schema.String,
+}) {}
+
 export type CallerShape =
   | { readonly _tag: "Cli"; readonly repositoryRoot: string }
   | {
@@ -596,6 +600,27 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
+    admitted(
+      Rpc.make("Project.Create", {
+        payload: { directory: Schema.String, from: Schema.Array(Schema.String) },
+        success: Schema.Struct({
+          directory: Schema.String,
+          folders: Schema.Array(
+            Schema.Struct({
+              name: Schema.String,
+              source: Schema.String,
+              path: Schema.String,
+              branch: Schema.String,
+              origin: Schema.optional(Schema.String),
+              uncommitted: Schema.Array(Schema.String),
+            }),
+          ),
+        }),
+        error: Schema.Union([Forbidden, ProjectCreateFailed]),
+      }),
+    ),
+  ),
+  scoped(
     Rpc.make("Daemon.Stop", {
       payload: { instance: Schema.String },
       success: Schema.Struct({ instance: Schema.String }),
@@ -663,6 +688,7 @@ export const ACCESS = {
   "Project.FocusCoordinator": "cli",
   "Project.RunningCoordinator": "agent",
   "Project.StopCoordinator": "agent",
+  "Project.Create": "cli",
   "Project.Info": "agent",
   "Project.Search": "agent",
   Send: "owner",

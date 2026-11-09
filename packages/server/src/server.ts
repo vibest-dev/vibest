@@ -11,6 +11,7 @@ import * as Launch from "@vibest/core/launch"
 import { Layout, shellQuote } from "@vibest/core/paths"
 import { describeSpawn, Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
+import { createProject } from "@vibest/core/project-create"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
 import { Restarting } from "@vibest/core/restarting"
@@ -1191,6 +1192,29 @@ export const handlers = VibestRpcs.toLayer(
 
       CoordinatorSessionReady: ({ sessionId, harness, harnessSessionId }) =>
         db.reportCoordinatorSession(sessionId, harness, harnessSessionId),
+      "Project.Create": ({ directory, from }) =>
+        Effect.gen(function* () {
+          yield* cliOnly("Project.Create")
+          const c = yield* Caller
+          if (c._tag !== "Cli" || c.repositoryRoot === undefined)
+            return yield* new Forbidden({
+              method: "Project.Create",
+              message: "only the user runs Project.Create",
+            })
+          const created = yield* createProject(directory, from, c.repositoryRoot)
+          return {
+            directory: created.directory,
+            folders: created.folders.map((folder) => ({
+              name: folder.name,
+              source: folder.source,
+              path: folder.path,
+              branch: folder.branch,
+              uncommitted: [...folder.uncommitted],
+              ...(folder.origin === undefined ? {} : { origin: folder.origin }),
+            })),
+          }
+        }),
+
       "Project.Info": () => scope("Project.Info").pipe(Effect.flatMap(project.info)),
       "Project.Search": (input) => scope("Project.Search").pipe(Effect.flatMap((s) => project.search(s, input))),
 
