@@ -4,7 +4,6 @@
   "titlebar": "none",
   "traffic_lights": [16, 19],
   "preview": "layouts/vibest.svg",
-  "theme": { "light": "vibest-light", "dark": "vibest-dark" },
   "terminal_padding": [12, 12],
   "background": "background",
   "divider": { "width": 1, "color": "border" },

@@ -14,11 +14,21 @@ Private: not published, not part of a release.
 | Path in `home/`                                       | What it is                                            |
 | ----------------------------------------------------- | ----------------------------------------------------- |
 | `layouts/vibest.json`, `layouts/vibest.svg`           | the layout and its preview                            |
-| `themes/vibest-light.json`, `themes/vibest-dark.json` | the light and dark themes the layout follows          |
+| `themes/vibest-light.json`, `themes/vibest-dark.json` | optional light and dark themes (see Look)             |
 | `mods/vibest/main.js`, `mods/vibest/mod.json`         | the mod, built from `src/` (committed; `place: none`) |
 
 The layout also uses the shipped `changes`, `files`, `menu`, `picker` and `machine-add` mods and the icons in
 `mods/workspace-chrome/`.
+
+## Look
+
+Like the shipped `main` layout, `vibest` has no look of its own: the person's `settings.json` (and Settings) decides
+fonts, sizes, theme, colors and appearance. The vibest themes are optional; pick them in Settings, or set them in
+`settings.json`:
+
+```json
+"theme": {"light": "vibest-light", "dark": "vibest-dark"}
+```
 
 ## Layout
 
