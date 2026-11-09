@@ -153,7 +153,6 @@ declare module "herdr" {
   export function layout(): unknown
   export function window(): { platform: "linux" | "macos" | "windows"; buttons: boolean; fullscreen: boolean } | null
   export function updates(): { app?: { ready: string | null } } | null
-  export function props(): { part?: string } | null
   export function run(name: string, args?: Record<string, unknown>): null
   export function openOverlay(spec: {
     mod: string

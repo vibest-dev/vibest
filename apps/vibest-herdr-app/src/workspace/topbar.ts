@@ -1,9 +1,9 @@
 import { h_flex } from "gpui-base"
-import { div, svg } from "gpui-kit"
-import { focused, layout, type LayoutNode, panes, run, spaces, type Theme, window } from "herdr"
+import { div, svg, View } from "gpui-kit"
+import { focused, layout, type LayoutNode, panes, run, spaces, type Theme, theme, window } from "herdr"
 
-import { threadTitle } from "./threads/model.ts"
-import { icon, iconButton, TRAFFIC_LIGHTS_INSET } from "./ui.ts"
+import { threadTitle } from "../shared/thread-title.ts"
+import { icon, iconButton, TRAFFIC_LIGHTS_INSET } from "../shared/ui.ts"
 
 const find = (node: LayoutNode | undefined, id: string): LayoutNode | undefined => {
   if (node?.id === id) return node
@@ -32,7 +32,7 @@ const panelButton = (t: Theme, root: LayoutNode | undefined, child: string, name
   )
 }
 
-export const topbar = (t: Theme): Chain => {
+const topbar = (t: Theme): Chain => {
   const w = window()
   const root = layout() as LayoutNode | undefined
   const space = spaces().find((s) => s.active)
@@ -114,4 +114,10 @@ export const topbar = (t: Theme): Chain => {
             .child(iconButton(t, "close-window", "x", () => run("window.close"))),
         ),
     )
+}
+
+export default class Topbar extends View {
+  render(): unknown {
+    return topbar(theme())
+  }
 }

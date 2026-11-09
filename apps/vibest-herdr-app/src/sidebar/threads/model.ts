@@ -1,4 +1,6 @@
-import type { PaneInfo, SpaceInfo, Status, TabInfo } from "herdr"
+import type { PaneInfo, SpaceInfo, Status } from "herdr"
+
+import { threadTitle } from "../../shared/thread-title.ts"
 
 export interface Thread {
   readonly id: string
@@ -18,9 +20,6 @@ export interface Project {
   readonly threads: readonly Thread[]
 }
 
-const leading = (s: string): string => s.replace(/^[^\p{L}\p{N}]+/u, "").trim()
-const looksLikePath = (s: string): boolean => /^[~/]|^[A-Za-z]:\\/.test(s) || s.includes("@")
-
 export const parseFolded = (stored: string | null): string[] => {
   try {
     const value: unknown = JSON.parse(stored ?? "[]")
@@ -28,15 +27,6 @@ export const parseFolded = (stored: string | null): string[] => {
   } catch {
     return []
   }
-}
-
-export const threadTitle = (tab: TabInfo, tabPanes: readonly PaneInfo[]): string => {
-  if (tab.named) return tab.name
-  const lead = tabPanes.find((p) => p.program?.agent) ?? tabPanes.find((p) => p.terminal) ?? tabPanes[0]
-  const raw = (lead?.title ?? "").trim()
-  const live = leading(raw)
-  if (live && live !== lead?.terminal && !looksLikePath(raw) && live.toLowerCase() !== lead?.program?.key) return live
-  return lead?.program?.agent ? lead.program.name : `Terminal ${tab.index}`
 }
 
 export const projects = (spaces: readonly SpaceInfo[], panes: readonly PaneInfo[]): Project[] => {

@@ -1,7 +1,8 @@
 import type { PaneInfo, SpaceInfo, TabInfo } from "herdr"
 import { describe, expect, it } from "vitest"
 
-import { elapsed, parseFolded, pill, projects, relativeTime, threadTitle } from "../src/threads/model.ts"
+import { threadTitle } from "../src/shared/thread-title.ts"
+import { elapsed, parseFolded, pill, projects, relativeTime } from "../src/sidebar/threads/model.ts"
 
 const shell = { key: "shell", name: "zsh", agent: false, shell: true }
 const claude = { key: "claude", name: "Claude Code", agent: true, shell: false }

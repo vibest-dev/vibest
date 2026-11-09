@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 
-import { commandNote, LS_ARGV, parseOwnedAddress, parseSessions, type SessionRow } from "../src/agents/cli.ts"
+import { commandNote, LS_ARGV, parseOwnedAddress, parseSessions, type SessionRow } from "../src/panel/agents/cli.ts"
 import {
   closePull,
   completePull,
@@ -13,7 +13,7 @@ import {
   rowTooltip,
   sessionStatus,
   shortId,
-} from "../src/agents/model.ts"
+} from "../src/panel/agents/model.ts"
 
 const socket = "/run/user/501/herdr-core/default.sock"
 

@@ -1,10 +1,10 @@
 import { h_flex } from "gpui-base"
-import { div } from "gpui-kit"
-import { run, type Theme, updates } from "herdr"
+import { div, View } from "gpui-kit"
+import { run, type Theme, theme, updates } from "herdr"
 
-import { iconButton } from "./ui.ts"
+import { iconButton } from "../shared/ui.ts"
 
-export const footer = (t: Theme): Chain => {
+const footer = (t: Theme): Chain => {
   const ready = Boolean(updates()?.app?.ready)
   return h_flex()
     .size_full()
@@ -23,4 +23,10 @@ export const footer = (t: Theme): Chain => {
     .child(iconButton(t, "add-machine", "server", () => run("mod.open", { name: "machine-add" }), { size: 32 }))
     .child(div().flex_1())
     .child(iconButton(t, "palette", "layers", () => run("app.palette"), { size: 32 }))
+}
+
+export default class SidebarFooter extends View {
+  render(): unknown {
+    return footer(theme())
+  }
 }

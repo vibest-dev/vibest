@@ -22,14 +22,14 @@
           "type": "block",
           "size": { "px": 52 },
           "window_drag": true,
-          "content": { "mod": "vibest", "props": { "part": "header" } }
+          "content": { "mod": "vibest-sidebar-header" }
         },
-        { "id": "sidebar-threads", "type": "block", "content": { "mod": "vibest", "props": { "part": "threads" } } },
+        { "id": "sidebar-threads", "type": "block", "content": { "mod": "vibest-sidebar-threads" } },
         {
           "id": "sidebar-footer",
           "type": "block",
           "size": { "px": 48 },
-          "content": { "mod": "vibest", "props": { "part": "footer" } }
+          "content": { "mod": "vibest-sidebar-footer" }
         }
       ]
     },
@@ -44,7 +44,7 @@
           "type": "block",
           "size": { "px": 52 },
           "window_drag": true,
-          "content": { "mod": "vibest", "props": { "part": "topbar" } }
+          "content": { "mod": "vibest-topbar" }
         },
         {
           "id": "workspace-body",
@@ -78,7 +78,7 @@
               "children": [
                 { "id": "changes", "type": "block", "content": { "mod": "changes" } },
                 { "id": "files", "type": "block", "content": { "mod": "files" } },
-                { "id": "agents", "type": "block", "content": { "mod": "vibest", "props": { "part": "agents" } } }
+                { "id": "agents", "type": "block", "content": { "mod": "vibest-agents" } }
               ]
             }
           ]
