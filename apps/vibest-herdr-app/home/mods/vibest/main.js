@@ -9,12 +9,11 @@ import { appHome, exec } from "herdr";
 
 // src/agents/cli.ts
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
-var cliArgv = (command) => [
+var LS_ARGV = [
   ...STRIPPED.flatMap((name) => ["-u", name]),
-  ...command === "status" ? ["VIBEST_NO_UPDATE_CHECK=1"] : [],
   "vibest",
-  command,
-  ...command === "ls" ? ["--no-start", "--all-projects"] : []
+  "ls",
+  "--all-projects"
 ];
 var commandNote = (result, fallback) => {
   if (result.code === 0)
@@ -29,32 +28,6 @@ var parseOwnedAddress = (id) => {
   if (at <= 0 || at === id.length - 1)
     return;
   return { address: id.slice(0, at), socket: id.slice(at + 1) };
-};
-var statusVerdict = (stdout) => {
-  let value;
-  try {
-    value = JSON.parse(stdout);
-  } catch {
-    return;
-  }
-  if (!isRecord(value) || !isRecord(value.daemon))
-    return;
-  const status = text(value.daemon.status);
-  if (status === undefined)
-    return;
-  if (status !== "running")
-    return { list: false, message: "vibestd is not running" };
-  const client = isRecord(value.client) ? value.client : undefined;
-  const clientVersion = client ? text(client.version) : undefined;
-  const daemonVersion = text(value.daemon.version);
-  if (value.daemon.sameVersion !== true)
-    return {
-      list: false,
-      message: `vibestd ${daemonVersion ?? "unknown"} is not this vibest ${clientVersion ?? "unknown"}`
-    };
-  if (typeof value.daemon.protocol !== "number")
-    return { list: false, message: "vibest status has no protocol" };
-  return { list: true };
 };
 var sessionRow = (item) => {
   const id = text(item.id);
@@ -192,30 +165,17 @@ class AgentList {
     let asOf = "";
     let sessions = [];
     try {
-      const cwd = appHome();
-      const status = await exec("env", cliArgv("status"), { cwd });
-      if (status.code !== 0)
-        note = commandNote(status, "vibest status failed");
+      const listed = await exec("env", [...LS_ARGV], { cwd: appHome() });
+      if (listed.code !== 0)
+        note = commandNote(listed, "vibest ls failed");
       else {
-        const verdict = statusVerdict(status.stdout);
-        if (verdict === undefined)
-          note = "vibest status was not understood";
-        else if (!verdict.list)
-          note = verdict.message;
+        const parsed = parseSessions(listed.stdout);
+        if (parsed === undefined)
+          note = "vibest ls was not understood";
         else {
-          const listed = await exec("env", cliArgv("ls"), { cwd });
-          if (listed.code !== 0)
-            note = commandNote(listed, "vibest ls failed");
-          else {
-            const parsed = parseSessions(listed.stdout);
-            if (parsed === undefined)
-              note = "vibest ls was not understood";
-            else {
-              sessions = parsed;
-              asOf = new Date().toISOString().slice(11, 19);
-              note = parsed.length === 0 ? "No live sessions." : "";
-            }
-          }
+          sessions = parsed;
+          asOf = new Date().toISOString().slice(11, 19);
+          note = parsed.length === 0 ? "No live sessions." : "";
         }
       }
     } catch (error) {

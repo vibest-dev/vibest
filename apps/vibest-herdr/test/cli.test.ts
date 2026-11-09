@@ -170,9 +170,7 @@ describe("vibest CLI", () => {
       )
       for (const args of [
         ["ls"],
-        ["ls", "--no-start"],
         ["ls", "--all-projects"],
-        ["ls", "--no-start", "--all-projects"],
         ["interrupt", id],
         ["send", id, "x"],
         ["run", "pi", "x"],
@@ -367,13 +365,13 @@ describe("vibest CLI", () => {
             return (decodeJson(r.stdout) as { id: string }[]).map((row) => row.id).sort()
           }),
         )
-      assert.deepStrictEqual(yield* ids(["ls", "--no-start"]), [here])
-      assert.deepStrictEqual(yield* ids(["ls", "--no-start", "--all-projects"]), [here, there].sort())
+      assert.deepStrictEqual(yield* ids(["ls"]), [here])
+      assert.deepStrictEqual(yield* ids(["ls", "--all-projects"]), [here, there].sort())
       yield* db.updateSession(here, { status: "unknown", exitedAt: 1 })
-      assert.deepStrictEqual(yield* ids(["ls", "--no-start"]), [])
-      assert.deepStrictEqual(yield* ids(["ls", "--no-start", "--all"]), [here])
-      assert.deepStrictEqual(yield* ids(["ls", "--no-start", "--all-projects"]), [there])
-      assert.deepStrictEqual(yield* ids(["ls", "--all", "--all-projects", "--no-start"]), [here, there].sort())
+      assert.deepStrictEqual(yield* ids(["ls"]), [])
+      assert.deepStrictEqual(yield* ids(["ls", "--all"]), [here])
+      assert.deepStrictEqual(yield* ids(["ls", "--all-projects"]), [there])
+      assert.deepStrictEqual(yield* ids(["ls", "--all", "--all-projects"]), [here, there].sort())
     }),
   )
 
@@ -481,122 +479,6 @@ describe("vibest CLI without vibestd", () => {
         })
         assert.isFalse(yield* fs.exists(vibestHome))
         for (const dir of [".claude", ".cursor", ".pi"]) assert.isFalse(yield* fs.exists(path.join(home, dir)), dir)
-      }).pipe(Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
-
-  it.effect(
-    "status then ls --no-start does not start vibestd, and an unknown flag does not either",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const home = yield* tempDirectory("vibest-ls-nostart-")
-        const vibestHome = path.join(home, "vibest")
-        const env = { HOME: home, VIBEST_HOME: vibestHome }
-        const run = (args: ReadonlyArray<string>) => vibest(home, env, args)
-        const status = yield* run(["status"])
-        assert.strictEqual(status.code, 0, status.stderr)
-        assert.deepInclude(decodeJson(status.stdout), {
-          daemon: { status: "not running", socket: path.join(vibestHome, "vibest.sock") },
-        })
-        assert.isFalse(yield* fs.exists(vibestHome))
-        const listed = yield* run(["ls", "--no-start"])
-        assert.deepStrictEqual([listed.code, listed.stdout], [1, ""])
-        assert.match(listed.stderr, /^DaemonUnavailable: vibestd is unreachable on /)
-        assert.isFalse(yield* fs.exists(vibestHome))
-        const unknown = yield* run(["ls", "--no-start-typo"])
-        assert.strictEqual(unknown.code, 2, `${unknown.stderr}${unknown.stdout}`)
-        assert.match(`${unknown.stderr}\n${unknown.stdout}`, /no-start-typo/)
-        assert.isFalse(yield* fs.exists(vibestHome))
-        const again = decodeJson((yield* run(["status"])).stdout) as { daemon: { status: string } }
-        assert.strictEqual(again.daemon.status, "not running")
-        assert.isFalse(yield* fs.exists(vibestHome))
-      }).pipe(Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
-
-  it.effect(
-    "ls --no-start does not start vibestd after it disappears",
-    () =>
-      Effect.gen(function* () {
-        const home = yield* tempDirectory("vibest-ls-gone-")
-        const path = yield* Path.Path
-        const vibestHome = path.join(home, "vibest")
-        const env = { HOME: home, VIBEST_HOME: vibestHome, VIBEST_NO_UPDATE_CHECK: "1" }
-        const run = (args: ReadonlyArray<string>) => vibest(home, env, args)
-        let pid: number | undefined
-        yield* Effect.gen(function* () {
-          const started = yield* run(["daemon"])
-          assert.strictEqual(started.code, 0, `${started.stderr}${started.stdout}`)
-          const up = decodeJson((yield* run(["status"])).stdout) as {
-            daemon: { status: string; pid?: number }
-          }
-          assert.strictEqual(up.daemon.status, "running", JSON.stringify(up))
-          pid = up.daemon.pid
-          assert.isNumber(pid)
-          yield* Effect.sync(() => process.kill(pid!, "SIGTERM"))
-          let down = ""
-          for (let i = 0; i < 50; i++) {
-            const status = decodeJson((yield* run(["status"])).stdout) as { daemon: { status: string } }
-            down = status.daemon.status
-            if (down === "not running") break
-            yield* Effect.sleep("100 millis")
-          }
-          assert.strictEqual(down, "not running")
-          const listed = yield* run(["ls", "--no-start"])
-          assert.deepStrictEqual([listed.code, listed.stdout], [1, ""])
-          assert.match(listed.stderr, /^DaemonUnavailable: vibestd is unreachable on /)
-          const after = decodeJson((yield* run(["status"])).stdout) as { daemon: { status: string; pid?: number } }
-          assert.strictEqual(after.daemon.status, "not running")
-          if (after.daemon.pid !== undefined) pid = after.daemon.pid
-        }).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              if (pid === undefined) return
-              try {
-                process.kill(pid, "SIGTERM")
-              } catch (error) {
-                if (!(error instanceof Error) || !error.message.includes("ESRCH")) throw error
-              }
-            }),
-          ),
-        )
-      }).pipe(Effect.provide(Platform.services)),
-    TIMEOUT,
-  )
-
-  it.effect(
-    "VIBEST_NO_UPDATE_CHECK=1 does not write update-check.json when the install would check",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const bare = yield* tempDirectory("vibest-update-bare-")
-        const bareHome = path.join(bare, "vibest")
-        const wrote = yield* vibest(
-          bare,
-          { HOME: bare, VIBEST_HOME: bareHome, VIBEST_HARNESSES: path.join(bare, "harnesses") },
-          ["status"],
-        )
-        assert.strictEqual(wrote.code, 0, wrote.stderr)
-        assert.isTrue(yield* fs.exists(path.join(bareHome, "update-check.json")))
-        const quiet = yield* tempDirectory("vibest-update-quiet-")
-        const quietHome = path.join(quiet, "vibest")
-        const status = yield* vibest(
-          quiet,
-          {
-            HOME: quiet,
-            VIBEST_HOME: quietHome,
-            VIBEST_HARNESSES: path.join(quiet, "harnesses"),
-            VIBEST_NO_UPDATE_CHECK: "1",
-          },
-          ["status"],
-        )
-        assert.strictEqual(status.code, 0, status.stderr)
-        const body = decodeJson(status.stdout) as { daemon: { status: string } }
-        assert.strictEqual(body.daemon.status, "not running")
-        assert.isFalse(yield* fs.exists(quietHome))
       }).pipe(Effect.provide(Platform.services)),
     TIMEOUT,
   )

@@ -44,15 +44,15 @@ One mod, `vibest`, draws each part named by its `props.part`. `src/` is split by
 
 - `header.ts`, `footer.ts`, `topbar.ts`, `ui.ts` (the icon button they share);
 - `threads/`: `model.ts` (projects, thread titles, status pills, relative times) and `view.ts`;
-- `agents/`: `cli.ts` (running `vibest status` and `vibest ls --no-start --all-projects`, parsing their JSON),
+- `agents/`: `cli.ts` (the `vibest ls --all-projects` command line and parsing its JSON),
   `model.ts` (grouping, row text, stale-result handling) and `view.ts`;
 - `host.d.ts`: a hand-copied subset of herdr-app's type files (`herdr.d.ts`, `gpui-kit.d.ts`) for the `herdr`, `gpui-kit`
   and `gpui-base` modules the mod uses.
 
 The Agents panel reads once when it starts and again on **Refresh**; there is no timer. Each read runs, with
 `VIBEST_SESSION_ID`, `VIBEST_AGENT` and `VIBEST_PROJECT_ID` removed so the CLI acts as the owner,
-`VIBEST_NO_UPDATE_CHECK=1 vibest status`, then, only when that daemon is this vibest, `vibest ls --no-start
---all-projects`. Neither starts vibestd. A newer Refresh or the copy closing drops an older result. `exec` is capped at
+`vibest ls --all-projects`, which starts vibestd for the user when it is not running, as every vibest client does; a
+non-zero exit shows its error text. A newer Refresh or the copy closing drops an older result. `exec` is capped at
 30 s and 8 MiB and cannot be cancelled. Rows are grouped by project: the title takes the width, then the status and
 turn state, then the short id; the tooltip has the full id, the harness and, for a session that is not a local herdr-core
 terminal, why. The panel does not focus terminals: herdr-app does not name the core of this window.

@@ -1,13 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 
-import {
-  cliArgv,
-  commandNote,
-  parseOwnedAddress,
-  parseSessions,
-  type SessionRow,
-  statusVerdict,
-} from "../src/agents/cli.ts"
+import { commandNote, LS_ARGV, parseOwnedAddress, parseSessions, type SessionRow } from "../src/agents/cli.ts"
 import {
   closePull,
   completePull,
@@ -54,32 +47,9 @@ const listed = (row: SessionRow) => ({
   repositoryRoot: row.repositoryRoot,
 })
 
-const runningStatus = {
-  client: { version: "0.0.1-beta.17", command: ["vibest"] },
-  daemon: {
-    status: "running",
-    version: "0.0.1-beta.17",
-    sameVersion: true,
-    protocol: 5,
-    socket: "/Users/dinq/.vibest/vibest.sock",
-  },
-  runtimes: [{ kind: "hc", status: "online" }],
-}
-
 describe("agents panel", () => {
-  it("parses status the way vibest status prints it", () => {
-    assert.deepEqual(cliArgv("status"), [
-      "-u",
-      "VIBEST_SESSION_ID",
-      "-u",
-      "VIBEST_AGENT",
-      "-u",
-      "VIBEST_PROJECT_ID",
-      "VIBEST_NO_UPDATE_CHECK=1",
-      "vibest",
-      "status",
-    ])
-    assert.deepEqual(cliArgv("ls"), [
+  it("runs vibest ls --all-projects as the owner and shows its error text when it fails", () => {
+    assert.deepEqual(LS_ARGV, [
       "-u",
       "VIBEST_SESSION_ID",
       "-u",
@@ -88,53 +58,14 @@ describe("agents panel", () => {
       "VIBEST_PROJECT_ID",
       "vibest",
       "ls",
-      "--no-start",
       "--all-projects",
     ])
-    assert.equal(cliArgv("ls").includes("VIBEST_NO_UPDATE_CHECK=1"), false)
     assert.equal(
-      commandNote(
-        {
-          code: 1,
-          stdout: "",
-          stderr:
-            "DaemonUnavailable: vibestd is unreachable on /tmp/vibest.sock (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon",
-        },
-        "vibest ls failed",
-      ),
-      "DaemonUnavailable: vibestd is unreachable on /tmp/vibest.sock (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon",
+      commandNote({ code: 1, stdout: "", stderr: "Forbidden: an agent may not run vibest ls\n" }, "vibest ls failed"),
+      "Forbidden: an agent may not run vibest ls",
     )
-    assert.equal(commandNote({ code: 1, stdout: "", stderr: "" }, "vibest could not be run"), "vibest could not be run")
-    assert.equal(
-      commandNote({ code: 2, stdout: "", stderr: "Unknown option: --no-start" }, "vibest ls failed"),
-      "Unknown option: --no-start",
-    )
-    assert.deepEqual(statusVerdict(JSON.stringify(runningStatus)), { list: true })
-    assert.deepEqual(
-      statusVerdict(
-        JSON.stringify({
-          client: { version: "0.0.1-beta.17" },
-          daemon: { status: "not running", socket: "/tmp/vibest.sock" },
-          runtimes: null,
-        }),
-      ),
-      { list: false, message: "vibestd is not running" },
-    )
-    assert.deepEqual(
-      statusVerdict(
-        JSON.stringify({
-          client: { version: "0.0.1-beta.17" },
-          daemon: { status: "running", version: "0.0.1-beta.9", sameVersion: false, protocol: 4 },
-        }),
-      ),
-      { list: false, message: "vibestd 0.0.1-beta.9 is not this vibest 0.0.1-beta.17" },
-    )
-    assert.equal(statusVerdict("{"), undefined)
-    assert.deepEqual(statusVerdict(JSON.stringify({ daemon: { status: "running", sameVersion: true } })), {
-      list: false,
-      message: "vibest status has no protocol",
-    })
-    assert.equal(statusVerdict("null"), undefined)
+    assert.equal(commandNote({ code: 1, stdout: "", stderr: "" }, "vibest ls failed"), "vibest ls failed")
+    assert.equal(commandNote({ code: 0, stdout: "[]", stderr: "" }, "vibest ls failed"), "")
   })
 
   it("reads the CLI list and rejects a malformed one", () => {

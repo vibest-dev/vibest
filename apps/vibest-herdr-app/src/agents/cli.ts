@@ -1,11 +1,10 @@
 const STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"] as const
 
-export const cliArgv = (command: "status" | "ls"): string[] => [
+export const LS_ARGV: readonly string[] = [
   ...STRIPPED.flatMap((name) => ["-u", name]),
-  ...(command === "status" ? ["VIBEST_NO_UPDATE_CHECK=1"] : []),
   "vibest",
-  command,
-  ...(command === "ls" ? ["--no-start", "--all-projects"] : []),
+  "ls",
+  "--all-projects",
 ]
 
 export interface SessionRow {
@@ -23,8 +22,6 @@ export interface SessionRow {
   readonly coreAddress: string
   readonly repositoryRoot: string | null
 }
-
-export type StatusVerdict = { readonly list: false; readonly message: string } | { readonly list: true }
 
 export const commandNote = (
   result: { readonly code: number; readonly stdout: string; readonly stderr: string },
@@ -44,29 +41,6 @@ export const parseOwnedAddress = (id: string): { readonly address: string; reado
   const at = id.indexOf("@")
   if (at <= 0 || at === id.length - 1) return undefined
   return { address: id.slice(0, at), socket: id.slice(at + 1) }
-}
-
-export const statusVerdict = (stdout: string): StatusVerdict | undefined => {
-  let value: unknown
-  try {
-    value = JSON.parse(stdout)
-  } catch {
-    return undefined
-  }
-  if (!isRecord(value) || !isRecord(value.daemon)) return undefined
-  const status = text(value.daemon.status)
-  if (status === undefined) return undefined
-  if (status !== "running") return { list: false, message: "vibestd is not running" }
-  const client = isRecord(value.client) ? value.client : undefined
-  const clientVersion = client ? text(client.version) : undefined
-  const daemonVersion = text(value.daemon.version)
-  if (value.daemon.sameVersion !== true)
-    return {
-      list: false,
-      message: `vibestd ${daemonVersion ?? "unknown"} is not this vibest ${clientVersion ?? "unknown"}`,
-    }
-  if (typeof value.daemon.protocol !== "number") return { list: false, message: "vibest status has no protocol" }
-  return { list: true }
 }
 
 const sessionRow = (item: Record<string, unknown>): SessionRow | undefined => {

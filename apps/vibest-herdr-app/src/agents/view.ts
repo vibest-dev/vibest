@@ -2,7 +2,7 @@ import { h_flex, v_flex } from "gpui-base"
 import { div } from "gpui-kit"
 import { appHome, exec, type Theme } from "herdr"
 
-import { cliArgv, commandNote, parseSessions, type SessionRow, statusVerdict } from "./cli.ts"
+import { commandNote, LS_ARGV, parseSessions, type SessionRow } from "./cli.ts"
 import {
   closePull,
   completePull,
@@ -48,25 +48,15 @@ export class AgentList {
     let asOf = ""
     let sessions: readonly SessionRow[] = []
     try {
-      const cwd = appHome()
-      const status = await exec("env", cliArgv("status"), { cwd })
-      if (status.code !== 0) note = commandNote(status, "vibest status failed")
+      const listed = await exec("env", [...LS_ARGV], { cwd: appHome() })
+      if (listed.code !== 0) note = commandNote(listed, "vibest ls failed")
       else {
-        const verdict = statusVerdict(status.stdout)
-        if (verdict === undefined) note = "vibest status was not understood"
-        else if (!verdict.list) note = verdict.message
+        const parsed = parseSessions(listed.stdout)
+        if (parsed === undefined) note = "vibest ls was not understood"
         else {
-          const listed = await exec("env", cliArgv("ls"), { cwd })
-          if (listed.code !== 0) note = commandNote(listed, "vibest ls failed")
-          else {
-            const parsed = parseSessions(listed.stdout)
-            if (parsed === undefined) note = "vibest ls was not understood"
-            else {
-              sessions = parsed
-              asOf = new Date().toISOString().slice(11, 19)
-              note = parsed.length === 0 ? "No live sessions." : ""
-            }
-          }
+          sessions = parsed
+          asOf = new Date().toISOString().slice(11, 19)
+          note = parsed.length === 0 ? "No live sessions." : ""
         }
       }
     } catch (error) {
