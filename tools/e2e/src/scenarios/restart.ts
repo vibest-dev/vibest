@@ -206,7 +206,15 @@ const checks: ReadonlyArray<Check> = [
           m.at(-1)!.includes("<agent-") && m.at(-1)!.includes(marker)
 
         await w.stopDaemon()
-        await ok(["--harness", "pi", "--session", session, "--headless", "--env", piEnv])
+        await w.startMain({
+          harness: "pi",
+          session,
+          cwd: repo,
+          env: { PI_CODING_AGENT_DIR: agentDir },
+          processEnv: env,
+          bin: wrapper,
+          timeoutMs: 60_000,
+        })
         const zero = (
           JSON.parse(await ok(["run", "pi", "--session", session, "--env", piEnv, ask("zero")])) as { id: string }
         ).id
@@ -491,7 +499,15 @@ const checks: ReadonlyArray<Check> = [
 
         await w.stopDaemon()
         await vibest(["daemon"])
-        await vibest(["--harness", "claude", ...flags, "--session", session, "--headless"])
+        await w.startMain({
+          harness: "claude",
+          session,
+          cwd: repo,
+          env: flags,
+          processEnv: install.env,
+          bin: install.wrapper,
+          timeoutMs: 120_000,
+        })
         await until("the main agent's row", () => pane() !== "", 60_000)
         await answerFolderTrust(screen, (key) => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [key] }))
         await until(

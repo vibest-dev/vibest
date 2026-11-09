@@ -5,6 +5,7 @@ import type { Check } from "../check.ts"
 import {
   ask,
   claudeEnv,
+  envArgs,
   fakeAnthropic,
   fakeOpenAI,
   heldModel,
@@ -99,8 +100,11 @@ const checks: ReadonlyArray<Check> = [
         const repo = await newRepository(w, "files")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-files", pi.url)}`
         await w.daemon()
-        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+        await w.startMain({
+          harness: "pi",
+          session,
           cwd: repo,
+          env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
         const run = async (args: ReadonlyArray<string>) =>
@@ -114,7 +118,7 @@ const checks: ReadonlyArray<Check> = [
           ).id
         const subs = {
           pi: await run(["pi", "--env", env]),
-          claude: await run(["claude", ...(await claudeEnv(w, "files", claude.url))]),
+          claude: await run(["claude", ...envArgs(await claudeEnv(w, "files", claude.url))]),
         }
         const answered = (who: string) => (results[who]?.length ?? 0) >= 3
         for (const who of ["pi", "claude", "main"])

@@ -5,6 +5,7 @@ import type { Check } from "../check.ts"
 import {
   claudeConfigOf,
   claudeEnv,
+  envArgs,
   fakeAnthropic,
   fakeOpenAI,
   lastUser,
@@ -145,7 +146,13 @@ const checks: ReadonlyArray<Check> = [
       try {
         const piEnv = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-other", pi.url)}`
         await w.daemon({ env })
-        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", piEnv], { env, timeoutMs: 90_000 })
+        await w.startMain({
+          harness: "pi",
+          session,
+          env: { PI_CODING_AGENT_DIR: piEnv.slice("PI_CODING_AGENT_DIR=".length) },
+          processEnv: env,
+          timeoutMs: 90_000,
+        })
         const run = async (flags: ReadonlyArray<string>) =>
           (
             JSON.parse(
@@ -154,7 +161,7 @@ const checks: ReadonlyArray<Check> = [
           ).id
         const subs = [
           await run(["pi", "--env", piEnv]),
-          await run(["claude", ...(await claudeEnv(w, "other", claude.url))]),
+          await run(["claude", ...envArgs(await claudeEnv(w, "other", claude.url))]),
         ]
         for (const id of subs) {
           await until(`${id}'s result`, async () => (await turnState(w, id)) === "completed", 120_000)
@@ -354,7 +361,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const flags = await claudeEnv(w, "turns", model.url)
         const besideRan = await installBesidePlugin(w, claudeConfigOf(flags))
-        await withSession(w, "claude", flags, "Answer once.", async ({ id, socket }) => {
+        await withSession(w, "claude", envArgs(flags), "Answer once.", async ({ id, socket }) => {
           const settled = (want: string) => async () => (await turnState(w, id)) === want
           await until("the answer's result", settled("completed"), 120_000)
           const first = await latest(w, id)
@@ -431,52 +438,58 @@ const checks: ReadonlyArray<Check> = [
         return calls(r.tools)[r.results.length]?.step ?? "status: completed\nsummary: guard test"
       })
       try {
-        await withSession(w, "claude", await claudeEnv(w, "guard", model.url), "guard test", async ({ id, socket }) => {
-          await until("the session's result", async () => (await turnState(w, id)) === "completed", 180_000).catch(
-            (e: Error) => {
-              throw new Error(`${e.message}; the model got ${model.requests.length} requests`)
-            },
-          )
-          const last = model.requests.findLast((r) => subagentFolder(r.system) !== undefined)
-          expect(last !== undefined, "the session never asked the model with its system prompt")
-          const made = calls(last!.tools)
-          const answers = new Map(last!.results.map((x) => [x.tool_use_id, x]))
-          made.forEach((c, i) => {
-            const answer = answers.get(`toolu_${i}`)
-            expect(answer !== undefined, `no answer to ${c.step.tool} ${JSON.stringify(c.step.input)}`)
-            if (c.reason === undefined)
-              expect(
-                answer!.is_error !== true && resultText(answer!).includes("ok-own"),
-                `reading its own project folder: ${resultText(answer!)}`,
-              )
-            else
-              expect(
-                answer!.is_error === true && resultText(answer!).includes(c.reason),
-                `${c.step.tool} ${JSON.stringify(c.step.input)} answered ${resultText(answer!)}`,
-              )
-          })
-          const leaked = model.requests.flatMap((r) => r.results).filter((x) => resultText(x).includes("lighthouse"))
-          expect(leaked.length === 0, `a refused file's text reached the model: ${JSON.stringify(leaked)}`)
-          expect(!(await Bun.file(ran).exists()), "herdr ran: herdr-ran.txt exists")
-          const message = (await latest(w, id))?.message ?? ""
-          expect(/summary: guard test/.test(message), `the session's result: ${message}`)
-          const pane = (await w.json<Array<{ id: string; address?: { id: string } }>>(["ls"]))
-            .find((e) => e.id === id)
-            ?.address?.id.split("/")[1]
-          const info = (await herdr(socket, "pane.process_info", { pane_id: pane ?? "" })).process_info as {
-            foreground_processes?: Array<{ name: string; argv?: Array<string> | null }>
-          }
-          const argv = (info.foreground_processes ?? []).find((p) =>
-            /claude/.test(`${p.name} ${p.argv?.[0] ?? ""}`),
-          )?.argv
-          expect(argv !== undefined && argv !== null, `no claude in the session's pane: ${JSON.stringify(info)}`)
-          expect(!argv!.includes("--settings"), `claude started with --settings: ${argv!.join(" ")}`)
-          const pluginDir = argv![argv!.indexOf("--plugin-dir") + 1] ?? ""
-          expect(
-            argv!.includes("--plugin-dir") && path.basename(pluginDir) === "claude",
-            `claude started without vibest's plugin: ${argv!.join(" ")}`,
-          )
-        })
+        await withSession(
+          w,
+          "claude",
+          envArgs(await claudeEnv(w, "guard", model.url)),
+          "guard test",
+          async ({ id, socket }) => {
+            await until("the session's result", async () => (await turnState(w, id)) === "completed", 180_000).catch(
+              (e: Error) => {
+                throw new Error(`${e.message}; the model got ${model.requests.length} requests`)
+              },
+            )
+            const last = model.requests.findLast((r) => subagentFolder(r.system) !== undefined)
+            expect(last !== undefined, "the session never asked the model with its system prompt")
+            const made = calls(last!.tools)
+            const answers = new Map(last!.results.map((x) => [x.tool_use_id, x]))
+            made.forEach((c, i) => {
+              const answer = answers.get(`toolu_${i}`)
+              expect(answer !== undefined, `no answer to ${c.step.tool} ${JSON.stringify(c.step.input)}`)
+              if (c.reason === undefined)
+                expect(
+                  answer!.is_error !== true && resultText(answer!).includes("ok-own"),
+                  `reading its own project folder: ${resultText(answer!)}`,
+                )
+              else
+                expect(
+                  answer!.is_error === true && resultText(answer!).includes(c.reason),
+                  `${c.step.tool} ${JSON.stringify(c.step.input)} answered ${resultText(answer!)}`,
+                )
+            })
+            const leaked = model.requests.flatMap((r) => r.results).filter((x) => resultText(x).includes("lighthouse"))
+            expect(leaked.length === 0, `a refused file's text reached the model: ${JSON.stringify(leaked)}`)
+            expect(!(await Bun.file(ran).exists()), "herdr ran: herdr-ran.txt exists")
+            const message = (await latest(w, id))?.message ?? ""
+            expect(/summary: guard test/.test(message), `the session's result: ${message}`)
+            const pane = (await w.json<Array<{ id: string; address?: { id: string } }>>(["ls"]))
+              .find((e) => e.id === id)
+              ?.address?.id.split("/")[1]
+            const info = (await herdr(socket, "pane.process_info", { pane_id: pane ?? "" })).process_info as {
+              foreground_processes?: Array<{ name: string; argv?: Array<string> | null }>
+            }
+            const argv = (info.foreground_processes ?? []).find((p) =>
+              /claude/.test(`${p.name} ${p.argv?.[0] ?? ""}`),
+            )?.argv
+            expect(argv !== undefined && argv !== null, `no claude in the session's pane: ${JSON.stringify(info)}`)
+            expect(!argv!.includes("--settings"), `claude started with --settings: ${argv!.join(" ")}`)
+            const pluginDir = argv![argv!.indexOf("--plugin-dir") + 1] ?? ""
+            expect(
+              argv!.includes("--plugin-dir") && path.basename(pluginDir) === "claude",
+              `claude started without vibest's plugin: ${argv!.join(" ")}`,
+            )
+          },
+        )
       } finally {
         model.stop()
       }

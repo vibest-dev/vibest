@@ -16,10 +16,7 @@ type Entry = {
 }
 
 const mains = async (w: World) => (await w.json<Array<Entry>>(["ls"])).filter((e) => e.agent === "main")
-const start = (w: World) =>
-  w.ok(["--harness", "pi", "--session", w.herdrSession, "--headless", "--env", `PI_CODING_AGENT_DIR=${w.config.pi}`], {
-    timeoutMs: 60_000,
-  })
+const start = (w: World) => w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi }, timeoutMs: 60_000 })
 
 const herdr = (socket: string, method: string, params: Record<string, unknown>) =>
   new Promise<any>((resolve, reject) => {
@@ -84,18 +81,20 @@ const move = (harness: "claude" | "pi"): Check => ({
     pi.release()
     const claude = fakeAnthropic(() => "ok")
     const configTheResumeCheckReads = w.config.claude
-    const claudeFlags = await claudeEnv(w, "move", claude.url, configTheResumeCheckReads)
+    const claudeVars = await claudeEnv(w, "move", claude.url, configTheResumeCheckReads)
     const piAgentDir = await piDir(w, "pi-move", pi.url)
-    const options =
-      harness === "claude"
-        ? ["--harness", "claude", ...claudeFlags]
-        : ["--harness", "pi", "--env", `PI_CODING_AGENT_DIR=${piAgentDir}`]
     const session = `${w.herdrSession}-move`
     const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
     const env = {}
     await w.daemon({ env })
     try {
-      await w.ok([...options, "--session", session, "--headless"], { env, timeoutMs: 60_000 })
+      await w.startMain({
+        harness,
+        session,
+        env: harness === "claude" ? claudeVars : { PI_CODING_AGENT_DIR: piAgentDir },
+        processEnv: env,
+        timeoutMs: 60_000,
+      })
       let a = ""
       await until(
         `${harness} in terminal A`,
@@ -136,7 +135,7 @@ const move = (harness: "claude" | "pi"): Check => ({
       const prompt = "Do not use any tools. Reply with exactly: ok"
       await herdr(socket, "agent.prompt", { target: a, text: prompt })
       let conversation: string | undefined
-      const projects = path.join(claudeConfigOf(claudeFlags), "projects")
+      const projects = path.join(claudeConfigOf(claudeVars), "projects")
       const realRepository = await fs.realpath(w.repository)
       await until(
         "A's conversation written",
@@ -163,12 +162,15 @@ const move = (harness: "claude" | "pi"): Check => ({
           target_pane_id: a,
           direction: "right",
           cwd: w.repository,
-          env: { PATH: w.env().PATH! },
+          env: {
+            PATH: w.env().PATH!,
+            ...(harness === "claude" ? claudeVars : { PI_CODING_AGENT_DIR: piAgentDir }),
+          },
           focus: false,
         })) as { pane: { pane_id: string } }
       ).pane.pane_id
       await until("B's shell", async () => /\S/.test(await screen(socket, b)), 30_000)
-      await type(socket, b, ["vibest", ...options].join(" "))
+      await type(socket, b, `vibest --harness ${harness}`)
       await until(
         "B asks to move the main agent",
         async () => (await screen(socket, b)).includes("Move it here and continue? [y/N]"),
@@ -232,8 +234,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       if (!Bun.which("pi")) throw new Skip("pi not on PATH")
       if (!Bun.which("herdr")) throw new Skip("herdr not on PATH")
-      const out = await start(w)
-      expect(out.includes("the main agent is starting in"), `vibest said: ${out}`)
+      await start(w)
       await until("the main agent in vibest ls", async () => (await mains(w)).length === 1, 30_000)
       const [main] = await mains(w)
       expect(main!.harness === "pi", `main agent: ${JSON.stringify(main)}`)

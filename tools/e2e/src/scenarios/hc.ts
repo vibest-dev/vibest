@@ -85,10 +85,16 @@ const checks: ReadonlyArray<Check> = [
       const core = await isolatedCore(w, piAgentDir, "hc")
       try {
         const repo = await project(w, "hc")
-        await w.ok(["--harness", "pi", "--runtime", "hc", "--headless", "--env", env], {
+        await w.startMain({
+          harness: "pi",
+          runtime: "hc",
           cwd: repo,
+          env: { PI_CODING_AGENT_DIR: piAgentDir },
+          processEnv: { CLAUDE_CONFIG_DIR: undefined },
+          extra: ["--runtime", "hc"],
+          name: "hc-main",
+          hc: { run: core.hc },
           timeoutMs: 60_000,
-          env: { CLAUDE_CONFIG_DIR: undefined },
         })
         let main = ""
         await until(
@@ -233,12 +239,15 @@ const checks: ReadonlyArray<Check> = [
         const opened = await core.hc("run", "--bg", "--keep", "--name", "users-own", "--json")
         expect(opened.code === 0, `hc run: ${opened.stderr}${opened.stdout}`)
         const users = await core.get("users-own")
-        const typed = await core.hc(
-          "send",
-          "users-own",
-          `cd ${repo} && vibest --harness pi --runtime hc --env PI_CODING_AGENT_DIR=${piAgentDir}`,
-        )
-        expect(typed.code === 0, `hc send: ${typed.stderr}`)
+        await w.startMain({
+          harness: "pi",
+          runtime: "hc",
+          cwd: repo,
+          env: { PI_CODING_AGENT_DIR: piAgentDir },
+          extra: ["--runtime", "hc"],
+          hc: { run: core.hc, terminal: "users-own" },
+          timeoutMs: 90_000,
+        })
         let main = ""
         await until(
           "the main agent in vibest ls",
@@ -309,8 +318,14 @@ const checks: ReadonlyArray<Check> = [
             `${e.message}; command -v vibest wrote ${JSON.stringify(await fs.readFile(which, "utf8").catch(() => ""))}; screen:\n${await core.screens()}`,
           )
         })
-        const typed = await core.hc("send", "caller", `cd ${repo} && vibest --harness pi --env ${env}`)
-        expect(typed.code === 0, `hc send: ${typed.stderr}`)
+        await w.startMain({
+          harness: "pi",
+          runtime: "hc",
+          cwd: repo,
+          env: { PI_CODING_AGENT_DIR: piAgentDir },
+          hc: { run: core.hc, terminal: "caller" },
+          timeoutMs: 90_000,
+        })
         const runtimeOf = (id: string) =>
           JSON.parse(
             row<{ runtime: string }>(w, `SELECT runtime FROM ${SESSIONS} s WHERE id = ?`, id)?.runtime ?? "{}",
@@ -401,10 +416,15 @@ const checks: ReadonlyArray<Check> = [
       const restore = await configureRuntime(w, "hc")
       try {
         const repo = await project(w, "hc-seen")
-        await w.ok(["--harness", "pi", "--runtime", "hc", "--headless", "--env", env], {
+        await w.startMain({
+          harness: "pi",
+          runtime: "hc",
           cwd: repo,
+          env: { PI_CODING_AGENT_DIR: piAgentDir },
+          processEnv: { CLAUDE_CONFIG_DIR: undefined },
+          extra: ["--runtime", "hc"],
+          hc: { run: core.hc },
           timeoutMs: 60_000,
-          env: { CLAUDE_CONFIG_DIR: undefined },
         })
         await until(
           "the main agent in vibest ls",

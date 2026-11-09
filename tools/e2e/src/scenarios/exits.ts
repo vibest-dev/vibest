@@ -19,9 +19,12 @@ const piProject = async (w: World, name: string) => {
   const startDaemon = () => w.ok(["daemon"], { env })
   await w.stopDaemon()
   await startDaemon()
-  await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", pi], {
+  await w.startMain({
+    harness: "pi",
+    session,
     cwd: repo,
-    env,
+    env: { PI_CODING_AGENT_DIR: pi.slice("PI_CODING_AGENT_DIR=".length) },
+    processEnv: env,
     timeoutMs: 90_000,
   })
   const q = <A>(sql: string, ...args: Array<string | number>) => row<A>(w, sql, ...args)

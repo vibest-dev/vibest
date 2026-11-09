@@ -7,6 +7,7 @@ import {
   ask,
   claudeConfigOf,
   claudeEnv,
+  envArgs,
   delegatingModel,
   fakeAnthropic,
   heldModel,
@@ -73,10 +74,7 @@ const claudeMain = async (
   const repo = await project(w, name)
   const env = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
   await w.daemon()
-  await w.ok(["--harness", "claude", ...flags, "--session", session, "--headless"], {
-    cwd: repo,
-    timeoutMs: 120_000,
-  })
+  await w.startMain({ harness: "claude", session, cwd: repo, env: flags, timeoutMs: 120_000 })
   let main = ""
   await until(
     "the main agent in vibest ls",
@@ -220,8 +218,11 @@ const heldSubagent = async (w: World, pastWindow: boolean) => {
     const repo = await project(w, "held")
     const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-held", model.url)}`
     await w.daemon()
-    await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+    await w.startMain({
+      harness: "pi",
+      session,
       cwd: repo,
+      env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
       timeoutMs: 60_000,
     })
     const sub = (
@@ -457,14 +458,17 @@ const checks: ReadonlyArray<Check> = [
         const task = r.tools.length > 0 ? /done-(\w+)/.exec(text(lastUser(r))) : null
         return task ? `done-${task[1]}\nstatus: completed` : "ok"
       })
-      const model = delegatingModel(`claude ${(await claudeEnv(w, "inbox", claude.url)).join(" ")}`)
+      const model = delegatingModel(`claude ${envArgs(await claudeEnv(w, "inbox", claude.url)).join(" ")}`)
       const session = `${w.herdrSession}-inbox`
       try {
         const repo = await project(w, "inbox")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-inbox", model.url)}`
         await w.stopDaemon()
-        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+        await w.startMain({
+          harness: "pi",
+          session,
           cwd: repo,
+          env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
         const mains = async () => (await w.json<Array<Entry>>(["ls"], { cwd: repo })).filter((e) => e.agent === "main")
@@ -510,8 +514,11 @@ const checks: ReadonlyArray<Check> = [
         const repo = await project(w, "ids")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-ids", model.url)}`
         await w.daemon()
-        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+        await w.startMain({
+          harness: "pi",
+          session,
           cwd: repo,
+          env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
         const sub = (
@@ -576,8 +583,11 @@ const checks: ReadonlyArray<Check> = [
         expect(hook.code === 0, `herdr integration install pi exited ${hook.code}: ${hook.stderr}${hook.stdout}`)
         const env = `PI_CODING_AGENT_DIR=${dir}`
         await w.daemon()
-        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", env], {
+        await w.startMain({
+          harness: "pi",
+          session,
           cwd: repo,
+          env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
         const sub = (
@@ -639,9 +649,12 @@ const checks: ReadonlyArray<Check> = [
         const repo = await project(w, "s26")
         const pi = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-s26", model.url)}`
         await w.daemon({ env })
-        await w.ok(["--harness", "pi", "--session", session, "--headless", "--env", pi], {
+        await w.startMain({
+          harness: "pi",
+          session,
           cwd: repo,
-          env,
+          env: { PI_CODING_AGENT_DIR: pi.slice("PI_CODING_AGENT_DIR=".length) },
+          processEnv: env,
           timeoutMs: 90_000,
         })
         const runSub = async (task: string) =>

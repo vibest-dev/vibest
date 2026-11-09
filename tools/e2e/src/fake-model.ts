@@ -318,12 +318,12 @@ export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<S
   return { requests, url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) }
 }
 
-export const claudeConfigOf = (flags: ReadonlyArray<string>) =>
-  flags.find((f) => f.startsWith("CLAUDE_CONFIG_DIR="))!.slice("CLAUDE_CONFIG_DIR=".length)
+export const claudeConfigOf = (env: Record<string, string>) => env.CLAUDE_CONFIG_DIR!
+
+export const envArgs = (env: Record<string, string>) =>
+  Object.entries(env).flatMap(([key, value]) => ["--env", `${key}=${value}`])
 
 export const claudeEnv = async (w: World, name: string, url: string, dir = path.join(w.root, `claude-${name}`)) => {
   await claudeShadow(dir, w.profile)
-  return [`CLAUDE_CONFIG_DIR=${dir}`, `ANTHROPIC_BASE_URL=${url}`, `ANTHROPIC_API_KEY=${FAKE_ANTHROPIC_KEY}`].flatMap(
-    (pair) => ["--env", pair],
-  )
+  return { CLAUDE_CONFIG_DIR: dir, ANTHROPIC_BASE_URL: url, ANTHROPIC_API_KEY: FAKE_ANTHROPIC_KEY }
 }
