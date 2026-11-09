@@ -43,7 +43,7 @@ describe("runtime boundary", () => {
       "projectRoot",
       "createProject",
       "coordinatorCommand",
-      "callerHits",
+      "specHits",
       "callerMachine",
       "makeSources",
       "preflight",

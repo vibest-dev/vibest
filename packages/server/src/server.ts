@@ -4,7 +4,8 @@ import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
 import { callerTarget, filterCallerEnv, mainPlace, specHits } from "@vibest/core/caller"
 import { AddressJson, Db, encodeAddress } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { harnessCatalog, harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
+import { harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
+import type { HarnessDefinition } from "@vibest/core/host"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import * as Launch from "@vibest/core/launch"
@@ -38,7 +39,7 @@ import {
   WrongInstance,
   type CallerShape,
 } from "@vibest/protocol/rpc"
-import { HARNESS_IDS, LaunchFailed, NoHarnessChosen } from "@vibest/schema/session"
+import { LaunchFailed } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import {
   Clock,
@@ -60,6 +61,7 @@ import { RpcSerialization, RpcServer } from "effect/rpc"
 
 import { AdmissionLive, CallerGateLive, noteOpen, ProtocolGateLive } from "./gates.ts"
 import * as Hooks from "./hooks.ts"
+import { integrationHandlers } from "./integration.ts"
 import { placeOf, sameCoordinator, sessionListing, toInfo } from "./listing.ts"
 
 type Access = typeof ACCESS
@@ -104,13 +106,17 @@ export const handlers = VibestRpcs.toLayer(
       sessionId: string,
       harness: string,
       headers: Headers.Headers,
-      run: (who: Hooks.HookCaller) => Effect.Effect<void, E, FileSystem.FileSystem | Path.Path | Layout>,
+      run: (
+        who: Hooks.HookCaller,
+        definition: HarnessDefinition,
+      ) => Effect.Effect<void, E, FileSystem.FileSystem | Path.Path | Layout>,
     ) =>
       Effect.gen(function* () {
         yield* noteOpen(db, headers, sessionId)
         const row = yield* db.sessionIdentity(sessionId)
-        if (!row || row.harness !== harness) return
-        yield* run(row)
+        const definition = harnesses.find(harness)
+        if (!row || row.harness !== harness || definition === undefined) return
+        yield* run(row, definition)
       }).pipe(Effect.provideContext(files), Effect.orDie)
 
     const agent = (method: MethodOf<"agent" | "owner">) =>
@@ -185,7 +191,7 @@ export const handlers = VibestRpcs.toLayer(
       readonly runtimeSession?: string | undefined
     }) =>
       Effect.gen(function* () {
-        const specs = yield* plugins.callers
+        const specs = yield* runtimes.callers
         const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv), input.runtimeSession)
         return { id: "local", ...(target !== undefined ? { target } : {}) }
       })
@@ -211,6 +217,12 @@ export const handlers = VibestRpcs.toLayer(
         }
       })
     const { listed, watched, snapshotProjects, watchDeltas } = sessionListing({ db, sessions, runtimes })
+
+    const integration = yield* integrationHandlers
+    const harnessIds = () => harnesses.all.map((definition) => definition.id)
+    const firstStart = new LaunchFailed({
+      message: "no harness to inherit: pass --harness, for example `vibest --harness claude`",
+    })
 
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
 
@@ -321,17 +333,17 @@ export const handlers = VibestRpcs.toLayer(
 
       Plugins: () => plugins.list,
 
-      "Harnesses.List": () => harnessCatalog,
+      ...integration,
 
       "Runtimes.Doctor": ({ harnesses }) =>
         Effect.flatMap(runtimes.statuses({ id: "local" }), (rows) =>
           Effect.forEach(rows, ({ runtime, status }) =>
             (runtime.doctor
               ? runtime.doctor({ id: "local" }, harnesses)
-              : Effect.succeed({ name: runtime.kind, checks: [] })
+              : Effect.succeed({ name: runtime.id, checks: [] })
             ).pipe(
               Effect.map((report) => ({
-                kind: runtime.kind,
+                kind: runtime.id,
                 status: status.status,
                 ...("reason" in status ? { reason: status.reason } : {}),
                 name: report.name,
@@ -364,20 +376,18 @@ export const handlers = VibestRpcs.toLayer(
             machine: { id: at.id },
             runtime,
             parentRuntime: current?.runtime ?? undefined,
-            machines: yield* machinesListing(runtimes, [...HARNESS_IDS]).pipe(Effect.orElseSucceed(() => [])),
+            machines: yield* machinesListing(runtimes, harnessIds()).pipe(Effect.orElseSucceed(() => [])),
           })
           if (decision.runtime === undefined) {
-            const loaded = (yield* runtimes.all).map((h) => h.kind)
+            const loaded = (yield* runtimes.all).map((h) => h.id)
             return yield* new NoRuntime({
               message: `no terminal runtime was chosen for the main agent${loaded.length === 0 ? "" : `; loaded: ${loaded.join(", ")}`}`,
             })
           }
-          if (decision.harness === undefined || !isHarnessId(decision.harness))
+          if (decision.harness === undefined) return yield* firstStart
+          if (harnesses.find(decision.harness) === undefined)
             return yield* new LaunchFailed({
-              message:
-                decision.harness === undefined
-                  ? "no harness was chosen for the main agent"
-                  : `unknown harness ${decision.harness}`,
+              message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")}`,
             })
           const harness = decision.harness
           const rt = yield* runtimes.route(decision.runtime)
@@ -416,7 +426,7 @@ export const handlers = VibestRpcs.toLayer(
                     id,
                     harness,
                     fresh,
-                    { runtime: rt.kind, address: pane },
+                    { runtime: rt.id, address: pane },
                     {
                       provider: decision.provider,
                       model: decision.model,
@@ -427,7 +437,7 @@ export const handlers = VibestRpcs.toLayer(
                   )
                   .pipe(Effect.tapError(() => rt.close(pane).pipe(Effect.ignore)))
                 claimedId = claimed.sessionId
-                return { ...claimed, runtime: runtimeEnv(rt.kind, pane) }
+                return { ...claimed, runtime: runtimeEnv(rt.id, pane) }
               }),
             ),
           }).pipe(
@@ -469,9 +479,9 @@ export const handlers = VibestRpcs.toLayer(
                   decidedBy: decision.decidedBy,
                 })
           return {
-            runtime: rt.kind,
+            runtime: rt.id,
             terminal: pane.id,
-            place: placeOf(rt.kind, pane),
+            place: placeOf(rt.id, pane),
             attach: rt.attach?.(at) ?? null,
             ...(routing === undefined ? {} : { routing }),
           }
@@ -625,10 +635,10 @@ export const handlers = VibestRpcs.toLayer(
         ),
 
       TurnEnd: ({ sessionId, harness, event }, { headers }) =>
-        hook(sessionId, harness, headers, (who) => Hooks.turnEnd(db, harnesses.get(harness), who, event)),
+        hook(sessionId, harness, headers, (who, definition) => Hooks.turnEnd(db, definition, who, event)),
 
       Prompt: ({ sessionId, harness, event }, { headers }) =>
-        hook(sessionId, harness, headers, (who) => Hooks.prompt(sessions, harnesses.get(harness), who, event)),
+        hook(sessionId, harness, headers, (who, definition) => Hooks.prompt(sessions, db, definition, who, event)),
 
       "Project.StartMain": ({ harness, provider, model, runtime }) =>
         Effect.gen(function* () {
@@ -647,19 +657,19 @@ export const handlers = VibestRpcs.toLayer(
             machine: { id: "local" },
             runtime,
             parentRuntime: current?.runtime ?? undefined,
-            machines: yield* machinesListing(runtimes, [...HARNESS_IDS]).pipe(Effect.orElseSucceed(() => [])),
+            machines: yield* machinesListing(runtimes, harnessIds()).pipe(Effect.orElseSucceed(() => [])),
           })
-          if (decision.harness === undefined) return yield* new NoHarnessChosen()
-          if (!isHarnessId(decision.harness))
+          if (decision.harness === undefined) return yield* firstStart
+          if (harnesses.find(decision.harness) === undefined)
             return yield* new HarnessUnavailable({
               harness: decision.harness,
-              message: `unknown harness ${decision.harness} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})`,
+              message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})`,
             })
           if (decision.runtime === undefined)
             return yield* new NoRuntime({ message: "no terminal runtime was chosen for the main agent" })
           const rt = yield* runtimes.route(decision.runtime)
           yield* runtimes.online(rt, { id: decision.machine.id })
-          return { ...decision, harness: decision.harness, runtime: rt.kind }
+          return { ...decision, harness: decision.harness, runtime: rt.id }
         }),
 
       "Project.Open": ({ move }) =>
@@ -687,13 +697,13 @@ export const handlers = VibestRpcs.toLayer(
               message: "only the user runs Project.MainPlace",
             })
           const project = yield* resolveAt(c.repositoryRoot)
-          const specs = yield* plugins.callers
+          const specs = yield* runtimes.callers
           const env = filterCallerEnv(specs, callerEnv)
           const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
           const place = mainPlace({ runtime, hits })
           if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
           if (place.in === "terminal") {
-            const spec = specs.find((item) => item.kind === place.runtime)
+            const spec = specs.find((item) => item.id === place.runtime)
             if (spec?.ready !== undefined && !(yield* spec.ready(env).pipe(Effect.orDie)))
               return yield* new LaunchFailed({
                 message: spec.missing ?? `this ${place.runtime} terminal could not be named`,
@@ -705,7 +715,7 @@ export const handlers = VibestRpcs.toLayer(
       "Project.CoordinatorSession": ({ harness, fresh, terminal, runtime, provider, model, routing, pid }) =>
         Effect.gen(function* () {
           const { id: projectId, directory } = yield* scope("Project.CoordinatorSession")
-          const kind = runtime ?? (yield* onlyRuntime)?.kind
+          const kind = runtime ?? (yield* onlyRuntime)?.id
           if (kind === undefined)
             return yield* new InvalidCaller({
               method: "Project.CoordinatorSession",

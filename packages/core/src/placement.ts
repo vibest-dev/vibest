@@ -145,7 +145,7 @@ export const sessionPlacement = (deps: {
       readonly endedByCaller?: boolean
     },
   ) {
-    const near = input.near !== undefined ? input.near : yield* nearMain(session, h.kind)
+    const near = input.near !== undefined ? input.near : yield* nearMain(session, h.id)
     const choice = {
       harnessId: session.harnessId,
       provider: session.provider,

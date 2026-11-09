@@ -1,10 +1,18 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
-import { Plugin } from "@vibest/plugin"
 import { Effect, FileSystem, Path } from "effect"
 
-import { FakeGit, FakeRuntime, makeRepository, tempDirectory, until, projectOf, systemPromptFile } from "./fakes.ts"
+import {
+  callerPlugin,
+  FakeGit,
+  FakeRuntime,
+  makeRepository,
+  tempDirectory,
+  until,
+  projectOf,
+  systemPromptFile,
+} from "./fakes.ts"
 import { test, client, asCli } from "./rpc-helpers.ts"
 
 describe("vibest.sock", () => {
@@ -92,7 +100,7 @@ describe("vibest.sock", () => {
       const opened = yield* c["Project.Open"]({})
       const here = yield* c["Project.MainPlace"]({ callerEnv: { HC_ID: "t1", HERDR_ID: "p1" } })
       assert.strictEqual(here.directory, opened.directory)
-      assert.deepStrictEqual(here.place, { in: "terminal", runtime: "hc", terminal: "t1" })
+      assert.deepStrictEqual(here.place, { in: "terminal", runtime: "herdr", terminal: "p1" })
       assert.deepStrictEqual((yield* c["Project.MainPlace"]({ callerEnv: { HC_ID: "t1" }, runtime: "herdr" })).place, {
         in: "launch",
         runtime: "herdr",
@@ -100,23 +108,13 @@ describe("vibest.sock", () => {
     }),
     {
       plugins: [
-        Plugin.define({
-          id: "runtime-hc",
-          caller: {
-            kind: "hc",
-            env: ["HC_ID"],
-            terminal: (env) => Effect.succeed(env.HC_ID),
-          },
-          effect: () => Effect.void,
+        callerPlugin("hc", {
+          env: ["HC_ID"],
+          terminal: (env) => Effect.succeed(env.HC_ID),
         }),
-        Plugin.define({
-          id: "runtime-herdr-caller",
-          caller: {
-            kind: "herdr",
-            env: ["HERDR_ID"],
-            terminal: (env) => Effect.succeed(env.HERDR_ID),
-          },
-          effect: () => Effect.void,
+        callerPlugin("herdr", {
+          env: ["HERDR_ID"],
+          terminal: (env) => Effect.succeed(env.HERDR_ID),
         }),
       ],
     },
@@ -132,16 +130,11 @@ describe("vibest.sock", () => {
     }),
     {
       plugins: [
-        Plugin.define({
-          id: "runtime-hc",
-          caller: {
-            kind: "hc",
-            env: ["HC_ID"],
-            terminal: (env) => Effect.succeed(env.HC_ID),
-            ready: () => Effect.succeed(false),
-            missing: "hc socket is down",
-          },
-          effect: () => Effect.void,
+        callerPlugin("hc", {
+          env: ["HC_ID"],
+          terminal: (env) => Effect.succeed(env.HC_ID),
+          ready: () => Effect.succeed(false),
+          missing: "hc socket is down",
         }),
       ],
     },
@@ -199,7 +192,7 @@ describe("vibest.sock", () => {
       yield* until(herdr.callsTo("open"), (calls) => calls.length > 0)
       assert.strictEqual((yield* herdr.callsTo("open"))[0]?.target, socket)
       yield* c.Launch({
-        argv: ["/bin/vibest"],
+        argv: ["/bin/vibest", "--harness", "pi"],
         focus: false,
         runtime: "herdr",
         callerEnv: { HERDR_SOCKET_PATH: "/h.sock" },
@@ -209,20 +202,15 @@ describe("vibest.sock", () => {
     }),
     {
       plugins: [
-        Plugin.define({
-          id: "runtime-herdr-caller",
-          caller: {
-            kind: "herdr",
-            env: ["HERDR_SOCKET_PATH"],
-            terminal: () => Effect.succeed("pane"),
-            target: (env, named) =>
-              named !== undefined
-                ? JSON.stringify({ session: named })
-                : env.HERDR_SOCKET_PATH === undefined
-                  ? undefined
-                  : JSON.stringify({ socketPath: env.HERDR_SOCKET_PATH }),
-          },
-          effect: () => Effect.void,
+        callerPlugin("herdr", {
+          env: ["HERDR_SOCKET_PATH"],
+          terminal: () => Effect.succeed("pane"),
+          target: (env, named) =>
+            named !== undefined
+              ? JSON.stringify({ session: named })
+              : env.HERDR_SOCKET_PATH === undefined
+                ? undefined
+                : JSON.stringify({ socketPath: env.HERDR_SOCKET_PATH }),
         }),
       ],
     },

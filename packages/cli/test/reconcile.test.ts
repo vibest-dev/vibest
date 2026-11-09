@@ -295,13 +295,13 @@ describe("reconcile: one look at every live session at start, when a runtime reg
       const read = yield* Ref.make<ReadonlyArray<string>>([])
       yield* idleSubagentsBetweenTurns(3, "late")
       const late = {
-        kind: "late",
+        id: "late",
         events: Stream.never,
         state: (terminal: Runtime.Terminal) =>
           Ref.update(read, (all) => [...all, terminal.id]).pipe(Effect.as("idle" as const)),
         present: () => Effect.void,
-      } as unknown as Runtime.Runtime
-      yield* (yield* Runtimes).register(late)
+      } as unknown as Runtime.RuntimeDefinition
+      yield* (yield* Runtimes).transform((editor) => editor.add(late))
       yield* until(Ref.get(read), (all) => all.length >= 3)
       yield* settled
       assert.deepStrictEqual([...(yield* Ref.get(read))].toSorted(), ["w9:p0", "w9:p1", "w9:p2"])
