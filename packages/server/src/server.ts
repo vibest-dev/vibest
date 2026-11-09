@@ -2,7 +2,14 @@ import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { projectActivity, raisesSeen, unseenDone } from "@vibest/core/activity"
 import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
 import { callerTarget, filterCallerEnv, mainPlace, specHits } from "@vibest/core/caller"
-import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
+import {
+  AddressJson,
+  type CoordinatorRow,
+  Db,
+  encodeAddress,
+  type RuntimeAddress,
+  type SessionBrief,
+} from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { harnessCatalog, harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
@@ -60,7 +67,20 @@ import {
 } from "@vibest/protocol/rpc"
 import { HARNESS_IDS, LaunchFailed, NoHarnessChosen, type AgentStatus } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
-import { Clock, Context, Deferred, Duration, Effect, FileSystem, Layer, Option, Path, Queue, Stream } from "effect"
+import {
+  Clock,
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Queue,
+  Schema,
+  Stream,
+} from "effect"
 import * as Headers from "effect/http/Headers"
 import { ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
@@ -746,92 +766,94 @@ export const handlers = VibestRpcs.toLayer(
           if (run === undefined)
             return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
           const fresh = argv.includes("--new")
-          const terminal = yield* projectLocked.withLock(id)(
-            Effect.gen(function* () {
-              const running = yield* runningCoordinator(id, "")
-              if (running)
-                return yield* new Forbidden({
-                  method: "Launch",
-                  message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
+          let opened: Terminal | undefined
+          let claimedId: string | undefined
+          const command = yield* Launch.coordinatorCommand({
+            harness,
+            root,
+            provider: decision.provider ?? null,
+            model: decision.model ?? null,
+            session: projectLocked.withLock(id)(
+              Effect.gen(function* () {
+                const running = yield* runningCoordinator(id, "")
+                if (running)
+                  return yield* new Forbidden({
+                    method: "Launch",
+                    message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there first`,
+                  })
+                const existing = yield* db.coordinatorOf(id)
+                const sessionId =
+                  existing === undefined || fresh ? yield* db.allocateSessionId().pipe(Effect.orDie) : existing.id
+                const pane = yield* Launch.openInParentWorkspace(rt, at, {
+                  root,
+                  label: "vibest",
+                  home: layout.home,
+                  focus,
                 })
-              const existing = yield* db.coordinatorOf(id)
-              const sessionId =
-                existing === undefined || fresh ? yield* db.allocateSessionId().pipe(Effect.orDie) : existing.id
-              const opened = yield* Launch.openInParentWorkspace(rt, at, {
-                root,
-                label: "vibest",
-                home: layout.home,
-                env: yield* Launch.identityEnv({
-                  sessionId,
-                  projectId: id,
-                  harness,
-                  runtime: runtimeEnv(rt.kind, { machine: at.id, id: "" }),
-                }),
-                focus,
-              })
-              const claimed = yield* db
-                .coordinatorLaunch(
-                  id,
-                  harness,
-                  fresh,
-                  { runtime: rt.kind, address: opened },
-                  {
-                    provider: decision.provider,
-                    model: decision.model,
-                    routing: { decidedBy: decision.decidedBy, trace: decision.trace },
-                    projectDirectory: root,
-                    ...(existing === undefined || fresh ? { sessionId } : {}),
-                    identityInShell: true,
-                  },
-                )
-                .pipe(Effect.catch((error) => rt.close(opened).pipe(Effect.ignore, Effect.andThen(Effect.fail(error)))))
-              const command = yield* Launch.coordinatorCommand({
-                harness,
-                root,
-                provider: decision.provider ?? null,
-                model: decision.model ?? null,
-                passEnv: [],
-                session: Effect.succeed({
-                  ...claimed,
-                  runtime: runtimeEnv(rt.kind, opened),
-                }),
-              }).pipe(
-                Effect.catchTag("HarnessUnavailable", (error) =>
-                  Effect.fail(new LaunchFailed({ message: error.message })),
-                ),
-                Effect.catchTag("SystemPromptDirUnsafe", (error) =>
-                  Effect.fail(new LaunchFailed({ message: error.message })),
-                ),
-                Effect.catchTag("ConfigError", (error) => Effect.die(error)),
-                Effect.catch((error) =>
-                  rt
+                opened = pane
+                const claimed = yield* db
+                  .coordinatorLaunch(
+                    id,
+                    harness,
+                    fresh,
+                    { runtime: rt.kind, address: pane },
+                    {
+                      provider: decision.provider,
+                      model: decision.model,
+                      routing: { decidedBy: decision.decidedBy, trace: decision.trace },
+                      projectDirectory: root,
+                      ...(existing === undefined || fresh ? { sessionId } : {}),
+                    },
+                  )
+                  .pipe(Effect.tapError(() => rt.close(pane).pipe(Effect.ignore)))
+                claimedId = claimed.sessionId
+                return { ...claimed, runtime: runtimeEnv(rt.kind, pane) }
+              }),
+            ),
+          }).pipe(
+            Effect.catchTag("HarnessUnavailable", (error) => Effect.fail(new LaunchFailed({ message: error.message }))),
+            Effect.catchTag("SystemPromptDirUnsafe", (error) =>
+              Effect.fail(new LaunchFailed({ message: error.message })),
+            ),
+            Effect.tapError(() =>
+              opened === undefined
+                ? Effect.void
+                : rt
                     .close(opened)
                     .pipe(
                       Effect.ignore,
-                      Effect.andThen(db.endProcess(claimed.sessionId, "launch_failed")),
-                      Effect.andThen(Effect.fail(error)),
+                      Effect.andThen(claimedId === undefined ? Effect.void : db.endProcess(claimedId, "launch_failed")),
                     ),
-                ),
-              )
-              yield* run(opened, [command.file, ...command.args]).pipe(
-                Effect.catch((error) =>
-                  rt
-                    .close(opened)
-                    .pipe(
-                      Effect.ignore,
-                      Effect.andThen(db.endProcess(claimed.sessionId, "launch_failed")),
-                      Effect.andThen(Effect.fail(new LaunchFailed({ message: error.message }))),
-                    ),
-                ),
-              )
-              return opened
-            }),
+            ),
           )
+          if (opened === undefined) return yield* Effect.die("launch opened no terminal")
+          const pane = opened
+          yield* run(pane, Launch.restartArgv(false, command)).pipe(
+            Effect.catch((error) =>
+              rt
+                .close(pane)
+                .pipe(
+                  Effect.ignore,
+                  Effect.andThen(claimedId === undefined ? Effect.void : db.endProcess(claimedId, "launch_failed")),
+                  Effect.andThen(Effect.fail(new LaunchFailed({ message: error.message }))),
+                ),
+            ),
+          )
+          const routing =
+            Object.keys(decision.decidedBy).length === 0
+              ? undefined
+              : describeSpawn({
+                  harness,
+                  provider: decision.provider,
+                  model: decision.model,
+                  decidedBy: decision.decidedBy,
+                })
           return {
             runtime: rt.kind,
-            terminal: terminal.id,
-            place: placeOf(rt.kind, terminal),
+            terminal: pane.id,
+            place: placeOf(rt.kind, pane),
             attach: rt.attach?.(at) ?? null,
+            ...(routing === undefined ? {} : { routing }),
           }
         }),
 
@@ -1035,7 +1057,7 @@ export const handlers = VibestRpcs.toLayer(
           }
         }),
 
-      "Project.MainPlace": ({ callerEnv, runtime, inParent }) =>
+      "Project.MainPlace": ({ callerEnv, runtime }) =>
         Effect.gen(function* () {
           yield* cliOnly("Project.MainPlace")
           const c = yield* Caller
@@ -1047,11 +1069,10 @@ export const handlers = VibestRpcs.toLayer(
           const project = yield* resolveAt(c.repositoryRoot)
           const specs = yield* plugins.callers
           const env = filterCallerEnv(specs, callerEnv)
-          const marked = inParent !== undefined && inParent === project.directory
           const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
-          const place = mainPlace({ marked, runtime, hits })
+          const place = mainPlace({ runtime, hits })
           if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
-          if (place.in === "terminal" && !marked) {
+          if (place.in === "terminal") {
             const spec = specs.find((item) => item.kind === place.runtime)
             if (spec?.ready !== undefined && !(yield* spec.ready(env).pipe(Effect.orDie)))
               return yield* new LaunchFailed({
@@ -1092,7 +1113,6 @@ export const handlers = VibestRpcs.toLayer(
                 root: directory,
                 provider: provider ?? null,
                 model: model ?? null,
-                passEnv: [],
                 session: Effect.gen(function* () {
                   const saved = yield* db.coordinatorLaunch(
                     projectId,
@@ -1108,7 +1128,6 @@ export const handlers = VibestRpcs.toLayer(
                 Effect.catchTag("SystemPromptDirUnsafe", (error) =>
                   Effect.fail(new LaunchFailed({ message: error.message })),
                 ),
-                Effect.catchTag("ConfigError", (error) => Effect.die(error)),
               )
               if (claimed === undefined) return yield* Effect.die("coordinator command returned without a session")
               const rt = Option.getOrUndefined(yield* runtimes.route(kind).pipe(Effect.option))
@@ -1137,14 +1156,13 @@ export const handlers = VibestRpcs.toLayer(
               message: "only the user runs Project.FocusCoordinator",
             })
           const project = yield* resolveAt(c.repositoryRoot)
-          const coord = yield* db.coordinatorOf(project.id)
-          const address = coord?.address
-          if (!coord?.runtime || !address || address.id === "") return null
-          const runtime = Option.getOrUndefined(yield* runtimes.route(coord.runtime).pipe(Effect.option))
-          const place = placeOf(coord.runtime, address)
-          if (runtime?.focus === undefined) return { place, focused: false }
-          yield* runtime.focus(address).pipe(Effect.orDie)
-          return { place, focused: true }
+          const running = yield* runningCoordinator(project.id, "")
+          if (running === null) return null
+          const runtime = Option.getOrUndefined(yield* runtimes.route(running.runtime).pipe(Effect.option))
+          if (runtime?.focus === undefined) return { place: running.place, focused: false }
+          const address = yield* Schema.decodeUnknownEffect(AddressJson)(running.address).pipe(Effect.orDie)
+          const focused = yield* runtime.focus(address).pipe(Effect.exit)
+          return { place: running.place, focused: focused._tag === "Success" }
         }),
 
       "Project.RunningCoordinator": ({ terminal }) =>

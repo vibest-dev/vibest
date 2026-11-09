@@ -344,14 +344,13 @@ const mainFlags = {
     ),
     Flag.optional,
   ),
-  inParent: Flag.String("in-parent").pipe(Flag.withHidden, Flag.optional),
 }
 
 const callerEnvOf = (): Record<string, string> =>
   Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
 
 const startMain =
-  (exec: Exec, _host: Daemon.Host) =>
+  (exec: Exec) =>
   (o: {
     readonly fresh: boolean
     readonly harness: Option.Option<HarnessId>
@@ -360,11 +359,10 @@ const startMain =
     readonly session: Option.Option<string>
     readonly headless: boolean
     readonly runtime: Option.Option<string>
-    readonly inParent: Option.Option<string>
   }) =>
     Effect.gen(function* () {
       yield* userOnly("")
-      if (Option.isNone(o.inParent)) yield* updateNotice
+      yield* updateNotice
       const harness = Option.getOrUndefined(o.harness)
       const provider = Option.getOrUndefined(o.provider)
       const model = Option.getOrUndefined(o.model)
@@ -380,12 +378,11 @@ const startMain =
       const claim = (yield* caller).claim
       const path = yield* Path.Path
       const fs = yield* FileSystem.FileSystem
-      if (Option.isNone(o.inParent)) yield* withVibest(claim, openProject)
+      yield* withVibest(claim, openProject)
       const placed = yield* withVibest(claim, (client) =>
         client["Project.MainPlace"]({
           callerEnv: callerEnvOf(),
           ...(runtimeKind === undefined ? {} : { runtime: runtimeKind }),
-          ...(Option.isNone(o.inParent) ? {} : { inParent: o.inParent.value }),
         }),
       )
       const foreignSession = Option.match(o.session, {
@@ -405,6 +402,7 @@ const startMain =
             ...(Option.isNone(o.session) ? {} : { runtimeSession: o.session.value }),
           }),
         )
+        if (opened.routing !== undefined) yield* Console.error(`main agent: ${opened.routing}`)
         yield* Console.log(`the main agent is starting in ${opened.place}`)
         if (o.headless || !opened.attach) return
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -1369,7 +1367,7 @@ const update = Command.make(
 )
 
 export const command = (host: Daemon.Host, exec: Exec) =>
-  Command.make("vibest", mainFlags, startMain(exec, host)).pipe(
+  Command.make("vibest", mainFlags, startMain(exec)).pipe(
     Command.withDescription(
       "vibest: in a project directory, open its main agent here (--new: a new conversation); the main agent runs subagents in herdr panes",
     ),

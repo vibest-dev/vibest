@@ -57,64 +57,47 @@ describe("where the main agent runs", () => {
   const hc = { kind: "hc", terminal: "t4@/run/hc/default.sock" } satisfies CallerHit
   const herdr = { kind: "herdr", terminal: "vibest/p1" } satisfies CallerHit
   it("no detected runtime is refused, and --runtime launches one", () => {
-    const refused = mainPlace({ marked: false, runtime: undefined, hits: [] })
+    const refused = mainPlace({ runtime: undefined, hits: [] })
     assert.strictEqual(refused.in, "refused")
     assert.match(refused.in === "refused" ? refused.message : "", /pass --runtime/)
-    assert.deepStrictEqual(mainPlace({ marked: false, runtime: "herdr", hits: [] }), {
+    assert.deepStrictEqual(mainPlace({ runtime: "herdr", hits: [] }), {
       in: "launch",
       runtime: "herdr",
     })
   })
   it("one detected runtime starts the main agent in that terminal", () => {
-    assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits: [hc] }), {
+    assert.deepStrictEqual(mainPlace({ runtime: undefined, hits: [hc] }), {
       in: "terminal",
       runtime: "hc",
       terminal: hc.terminal,
     })
-    assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits: [herdr] }), {
+    assert.deepStrictEqual(mainPlace({ runtime: undefined, hits: [herdr] }), {
       in: "terminal",
       runtime: "herdr",
       terminal: herdr.terminal,
     })
-    assert.strictEqual(
-      mainPlace({ marked: false, runtime: undefined, hits: [{ ...herdr, terminal: undefined }] }).in,
-      "refused",
-    )
+    assert.strictEqual(mainPlace({ runtime: undefined, hits: [{ ...herdr, terminal: undefined }] }).in, "refused")
   })
   it("two detected runtimes follow load order, and --runtime overrides", () => {
-    assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits: [hc, herdr] }), {
+    assert.deepStrictEqual(mainPlace({ runtime: undefined, hits: [hc, herdr] }), {
       in: "terminal",
       runtime: "hc",
       terminal: hc.terminal,
     })
-    assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits: [herdr, hc] }), {
+    assert.deepStrictEqual(mainPlace({ runtime: undefined, hits: [herdr, hc] }), {
       in: "terminal",
       runtime: "herdr",
       terminal: herdr.terminal,
     })
-    assert.deepStrictEqual(mainPlace({ marked: false, runtime: "herdr", hits: [herdr, hc] }), {
+    assert.deepStrictEqual(mainPlace({ runtime: "herdr", hits: [herdr, hc] }), {
       in: "terminal",
       runtime: "herdr",
       terminal: herdr.terminal,
     })
-    assert.deepStrictEqual(mainPlace({ marked: false, runtime: "hc", hits: [herdr] }), {
+    assert.deepStrictEqual(mainPlace({ runtime: "hc", hits: [herdr] }), {
       in: "launch",
       runtime: "hc",
     })
-  })
-  it("a pane vibestd opened uses the runtime it named, not another runtime earlier in the load order", () => {
-    assert.deepStrictEqual(mainPlace({ marked: true, runtime: "herdr", hits: [hc, herdr] }), {
-      in: "terminal",
-      runtime: "herdr",
-      terminal: herdr.terminal,
-    })
-    assert.deepStrictEqual(mainPlace({ marked: true, runtime: "hc", hits: [hc] }), {
-      in: "terminal",
-      runtime: "hc",
-      terminal: hc.terminal,
-    })
-    assert.strictEqual(mainPlace({ marked: true, runtime: "hc", hits: [herdr] }).in, "refused")
-    assert.strictEqual(mainPlace({ marked: true, runtime: undefined, hits: [hc] }).in, "refused")
   })
 })
 
@@ -128,7 +111,7 @@ describe("caller plugins", () => {
         HERDR_PANE_ID: "p1",
         HERDR_SOCKET_PATH: "/herdr.sock",
       })
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+      assert.deepStrictEqual(mainPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "hc",
         terminal: "t1//hc.sock",
@@ -157,13 +140,13 @@ describe("caller plugins", () => {
         HERDR_SOCKET_PATH: "/herdr.sock",
       }
       const hits = yield* callerHits(builtins, env)
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+      assert.deepStrictEqual(mainPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "hc",
         terminal: "t1@/hc.sock",
       })
       const named = yield* callerHits(builtins, env, "herdr")
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: "herdr", hits: named }), {
+      assert.deepStrictEqual(mainPlace({ runtime: "herdr", hits: named }), {
         in: "terminal",
         runtime: "herdr",
         terminal: "herdr-term",
@@ -178,7 +161,7 @@ describe("caller plugins", () => {
         HERDR_PANE_ID: "p1",
         HERDR_SOCKET_PATH: "/herdr.sock",
       })
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+      assert.deepStrictEqual(mainPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "herdr",
         terminal: "p1//herdr.sock",
@@ -189,7 +172,7 @@ describe("caller plugins", () => {
   it.effect("an empty declared variable is not that runtime", () =>
     Effect.gen(function* () {
       const hits = yield* callerHits(plugins, { REX_PANE: "", HC_TERMINAL_ID: "t1", HC_TERMINAL_SOCKET: "/hc.sock" })
-      const place = mainPlace({ marked: false, runtime: undefined, hits })
+      const place = mainPlace({ runtime: undefined, hits })
       assert.strictEqual(place.in === "terminal" ? place.runtime : "", "hc")
     }),
   )
@@ -256,7 +239,7 @@ describe("caller plugins", () => {
         env,
       )
       assert.deepStrictEqual(calls, ["hc"])
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+      assert.deepStrictEqual(mainPlace({ runtime: undefined, hits }), {
         in: "terminal",
         runtime: "hc",
         terminal: "hc-term",
@@ -271,7 +254,7 @@ describe("caller plugins", () => {
         "herdr",
       )
       assert.deepStrictEqual(calls, ["herdr"])
-      assert.deepStrictEqual(mainPlace({ marked: false, runtime: "herdr", hits: named }), {
+      assert.deepStrictEqual(mainPlace({ runtime: "herdr", hits: named }), {
         in: "terminal",
         runtime: "herdr",
         terminal: "herdr-term",

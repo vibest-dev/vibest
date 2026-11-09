@@ -3,7 +3,6 @@ import { daemonEnv } from "@vibest/client/client"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
 import { coordinator, HARNESS_CLIS, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
 import { BUILTIN as ADAPTERS, layer as builtinHarnesses } from "@vibest/core/harnesses"
-import * as Launch from "@vibest/core/launch"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Forbidden } from "@vibest/protocol/rpc"
 import type { Host } from "@vibest/server/daemon"
@@ -632,17 +631,6 @@ describe("wizard entry", () => {
 })
 
 describe("where vibest starts the main agent", () => {
-  it("Launch types the runtime it chose, once, before --in-parent", () => {
-    assert.deepStrictEqual(Launch.inParent(["/bin/vibest", "--runtime", "hc", "--harness", "pi"], "/r", "herdr"), [
-      "/bin/vibest",
-      "--harness",
-      "pi",
-      "--runtime",
-      "herdr",
-      "--in-parent",
-      "/r",
-    ])
-  })
   it("vibestd is started without the caller's terminal variables", () => {
     const callerEnv = ["HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"]
     assert.deepStrictEqual(daemonEnv(callerEnv, { KEPT: "1" }), {
@@ -726,7 +714,7 @@ describe("vibest --session inside herdr", () => {
       const exit = yield* Command.runWith(
         Cli.command(host, () => {}),
         { version: "0.0.0-test" },
-      )(["--in-parent", repo, "--harness", "pi", "--env", "MAIN_PROBE=" + secret]).pipe(
+      )(["--harness", "pi", "--env", "MAIN_PROBE=" + secret]).pipe(
         Effect.provideService(SocketConnector, () => {
           herdr.push("connect")
           return Effect.die("herdr")

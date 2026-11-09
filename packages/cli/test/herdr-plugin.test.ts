@@ -4,7 +4,11 @@ import os from "node:os"
 import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, FileSystem } from "effect"
+import { Db } from "@vibest/core/db"
+import { Layout } from "@vibest/core/paths"
+import { Project } from "@vibest/core/project"
+import * as Server from "@vibest/server/server"
+import { Effect, FileSystem, Layer } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -24,7 +28,7 @@ import {
   projectDirectory,
   type Verb,
 } from "../src/herdr-plugin.ts"
-import { runVibest, stopRecorded, tempDirectory } from "./fakes.ts"
+import { FakeRuntime, makeRepository, projectOf, runVibest, stopRecorded, tempDirectory, testLayer } from "./fakes.ts"
 
 const ctx = (patch: Partial<PluginContext> = {}): PluginContext => ({
   workspaceId: undefined,
@@ -372,5 +376,41 @@ describe("herdr plugin package", () => {
         for (const name of VERBS) assert.match(help.stdout, new RegExp(`\\b${name}\\b`))
       }).pipe(Effect.provide(Platform.services)),
     30_000,
+  )
+})
+
+const served = Server.layer.pipe(
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+  Layer.provideMerge(Project.layer),
+  Layer.provideMerge(testLayer()),
+)
+
+describe("herdr open-main", () => {
+  it.effect("focuses a running main agent, and launches one when there is none", () =>
+    Effect.gen(function* () {
+      const layout = yield* Layout
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const env = {
+        HOME: layout.home,
+        VIBEST_HOME: layout.home,
+        HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_cwd: repo }),
+      }
+      const none = yield* runVibest(repo, env, ["herdr", "open-main"])
+      assert.strictEqual(none.code, 0, none.stderr)
+      assert.match(none.stdout, /^opened /)
+      assert.ok((yield* herdr.callsTo("open")).length > 0)
+      const projectId = yield* projectOf(repo)
+      yield* db.coordinatorLaunch(projectId, "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "test/main" },
+      })
+      yield* herdr.seedAgent("test/main")
+      const again = yield* runVibest(repo, env, ["herdr", "open-main"])
+      assert.strictEqual(again.code, 0, again.stderr)
+      assert.match(again.stdout, /^focused /)
+      assert.strictEqual((yield* herdr.callsTo("focus")).at(-1)?.terminal, "test/main")
+    }).pipe(Effect.provide(served)),
   )
 })

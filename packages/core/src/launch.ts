@@ -1,4 +1,4 @@
-import { Config, Effect, FileSystem, Option } from "effect"
+import { Effect, FileSystem } from "effect"
 
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
@@ -21,7 +21,6 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   readonly root: string
   readonly provider: string | null
   readonly model: string | null
-  readonly passEnv: ReadonlyArray<string>
   readonly session: Effect.Effect<
     {
       readonly sessionId: string
@@ -50,10 +49,6 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     VIBEST_HARNESS: input.harness,
     VIBEST_HOME: layout.home,
     VIBEST_COMMAND: encodeCommand(vibest),
-  }
-  for (const name of input.passEnv) {
-    const value = yield* Config.option(Config.String(name))
-    if (Option.isSome(value)) env[name] = value.value
   }
   const saved = yield* input.session
   const systemPromptFile = yield* unsafeOnly(
@@ -126,35 +121,6 @@ export const restartArgv = (
 export const flagValue = (argv: ReadonlyArray<string>, name: string) => {
   const value = argv[argv.indexOf(name) + 1]
   return argv.includes(name) && value !== undefined && !value.startsWith("-") ? value : undefined
-}
-
-export const identityEnv = Effect.fn("Launch.identityEnv")(function* (input: {
-  readonly sessionId: string
-  readonly projectId: string
-  readonly harness: string
-  readonly runtime: string
-}) {
-  const layout = yield* Layout
-  const vibest = yield* VibestCommand
-  return {
-    VIBEST_SESSION_ID: input.sessionId,
-    VIBEST_PROJECT_ID: input.projectId,
-    VIBEST_PROJECT_DIR: layout.project(input.projectId),
-    VIBEST_AGENT: COORDINATOR,
-    VIBEST_HARNESS: input.harness,
-    VIBEST_RUNTIME: input.runtime,
-    VIBEST_HOME: layout.home,
-    VIBEST_COMMAND: encodeCommand(vibest),
-  }
-})
-
-export const inParent = (argv: ReadonlyArray<string>, root: string, runtime: string) => {
-  const rest: Array<string> = []
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--runtime") i++
-    else if (!argv[i]!.startsWith("--runtime=")) rest.push(argv[i]!)
-  }
-  return [...rest, "--runtime", runtime, "--in-parent", root]
 }
 
 export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(function* (

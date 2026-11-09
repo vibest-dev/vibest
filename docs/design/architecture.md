@@ -1011,7 +1011,7 @@ id a harness made for a coordinator; the last report wins). Of the rest:
   root, whose shell runs argv. `Project.Open` finds or makes the project of the directory (`move` answers a
   `ProjectMoved`). `Project.StartMain` picks the main agent's harness, provider, model and runtime and writes
   nothing. `Project.CoordinatorSession` then upserts the coordinator row at its terminal and returns the harness
-  command the CLI execs, with the caller's PID. A pane vibestd opened already has the identity variables in its shell.
+  command the CLI execs, with the caller's PID. A main agent's pane does not keep those variables in its shell.
   `Project.RunningCoordinator` finds a coordinator in another pane; `Project.StopCoordinator` sends SIGTERM to its
   recorded PID only, keeps its terminal, and answers `stopped`, `running` (nothing changed), `moved` (the row is no
   longer there) or `unsupported` (with the reason).
@@ -1024,7 +1024,7 @@ id a harness made for a coordinator; the last report wins). Of the rest:
   watches Ping. `Daemon.Handoff` (`handoff` capability) checks that `command` opens the database, drains as
   `Daemon.Stop` does, starts `command daemon --foreground --import`, then hands over its sockets and lock; a
   failure before that leaves it serving. `spawnDaemon`'s `env` reaches only the new vibestd's environment.
-- A restart in place types the main agent's harness command into its shell. A pane vibestd opened already has the identity variables; a main agent started in the user's own pane gets them as an env prefix.
+- A restart in place types the main agent's harness command into its shell with the identity variables as an env prefix, so the shell does not keep them.
   `Session.Ready` is the integration saying the harness takes input, with the harness's own `pid`; vibestd hands over a
   first or restarted turn only after it.
 - `Agents.Outdated` lists live agents whose integration is not this vibestd's (`blocked`: why one cannot restart in

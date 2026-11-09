@@ -500,7 +500,7 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "Launch opens a terminal whose shell has the main agent's identity, and types the harness command",
+    "Launch types the harness with an env prefix and does not put identity in the pane",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const layout = yield* Layout
@@ -516,7 +516,7 @@ describe("vibest.sock", () => {
       const root = yield* sh(repo, "rev-parse", "--show-toplevel")
       const main = yield* db.coordinatorOf(yield* projectOf(repo))
       assert.ok(main)
-      assert.strictEqual(main!.identityInShell, true)
+      assert.notStrictEqual(main!.identityInShell, true)
       assert.deepStrictEqual(opened, {
         runtime: "herdr",
         terminal: opened.terminal,
@@ -537,15 +537,13 @@ describe("vibest.sock", () => {
           focus: true,
         },
       )
-      assert.strictEqual(open!.env["VIBEST_SESSION_ID"], main!.id)
-      assert.strictEqual(open!.env["VIBEST_HARNESS"], "pi")
-      assert.strictEqual(open!.env["VIBEST_AGENT"], "coordinator")
+      assert.strictEqual(open!.env["VIBEST_SESSION_ID"], undefined)
       assert.strictEqual(open!.env["VIBEST_HOME"], layout.home)
       const [ran] = yield* herdr.callsTo("run")
       assert.strictEqual(ran!.terminal, opened.terminal)
-      assert.strictEqual(ran!.argv[0], "pi")
-      assert.includeMembers([...ran!.argv], ["--model", "it's"])
-      assert.notInclude(ran!.argv, "--in-parent")
+      assert.strictEqual(ran!.argv[0], "env")
+      assert.ok(ran!.argv.includes(`VIBEST_SESSION_ID=${main!.id}`))
+      assert.includeMembers([...ran!.argv], ["pi", "--model", "it's"])
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
     }),
   )
@@ -581,7 +579,7 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "Project.MainPlace names the detected terminal, launches a named runtime that is not here, and a marked root only when it matches",
+    "Project.MainPlace names the detected terminal, and launches a named runtime that is not here",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
@@ -593,22 +591,6 @@ describe("vibest.sock", () => {
         in: "launch",
         runtime: "herdr",
       })
-      assert.deepStrictEqual(
-        (yield* c["Project.MainPlace"]({
-          callerEnv: { HC_ID: "t1", HERDR_ID: "p1" },
-          runtime: "herdr",
-          inParent: opened.directory,
-        })).place,
-        { in: "terminal", runtime: "herdr", terminal: "p1" },
-      )
-      assert.deepStrictEqual(
-        (yield* c["Project.MainPlace"]({
-          callerEnv: { HC_ID: "t1" },
-          runtime: "herdr",
-          inParent: "/not-the-root",
-        })).place,
-        { in: "launch", runtime: "herdr" },
-      )
     }),
     {
       plugins: [
@@ -1222,5 +1204,87 @@ describe("vibest.sock", () => {
         `${main.id} is the main agent of project ${path.basename(repo)}. Stop it in its terminal.`,
       )
     }),
+  )
+
+  test(
+    "FocusCoordinator is null without a running main, and focuses one that is running",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      assert.strictEqual(yield* c["Project.FocusCoordinator"]({}), null)
+      const projectId = yield* projectOf(repo)
+      yield* db.coordinatorLaunch(projectId, "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "test/main" },
+      })
+      assert.strictEqual(yield* c["Project.FocusCoordinator"]({}), null)
+      yield* herdr.seedAgent("test/main")
+      const focused = yield* c["Project.FocusCoordinator"]({})
+      assert.strictEqual(focused?.focused, true)
+      assert.strictEqual((yield* herdr.callsTo("focus"))[0]?.terminal, "test/main")
+    }),
+  )
+
+  test(
+    "FocusCoordinator reports a runtime that cannot focus",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      yield* db.coordinatorLaunch(projectId, "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "test/main" },
+      })
+      yield* herdr.seedAgent("test/main")
+      const focused = yield* asCli(yield* client, repo)["Project.FocusCoordinator"]({})
+      assert.strictEqual(focused?.focused, false)
+      assert.strictEqual((yield* herdr.callsTo("focus")).length, 0)
+    }),
+    { noFocus: true },
+  )
+
+  test(
+    "List outside any repository shows every project, and a repository with no project is empty",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const a = yield* makeRepository
+      const b = yield* makeRepository
+      const one = yield* asCli(yield* client, a).Spawn({ callerEnv: {}, harness: "pi", prompt: "one" })
+      const two = yield* asCli(yield* client, b).Spawn({ callerEnv: {}, harness: "pi", prompt: "two" })
+      const outside = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "vibest-outside-" }))
+      const listed = yield* asCli(yield* client, outside).List({})
+      assert.deepStrictEqual(listed.map((row) => row.id).sort(), [one.id, two.id].sort())
+      const bare = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "vibest-bare-" }))
+      yield* sh(bare, "init", "-q")
+      assert.deepStrictEqual(yield* asCli(yield* client, bare).List({}), [])
+    }),
+  )
+
+  test(
+    "--new with a missing harness does not archive the current main agent",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const repo = yield* makeRepository
+      const projectId = yield* projectOf(repo)
+      yield* db.coordinatorLaunch(projectId, "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "test/main" },
+      })
+      const before = (yield* db.coordinatorOf(projectId))!.id
+      const failed = yield* Effect.flip(
+        asCli(yield* client, repo).Launch({
+          callerEnv: {},
+          argv: ["/bin/vibest", "--harness", "cursor", "--new"],
+          focus: false,
+          runtime: "herdr",
+        }),
+      )
+      assert.ok(failed._tag === "LaunchFailed" || failed._tag === "AgentRefused", failed._tag)
+      assert.strictEqual((yield* db.coordinatorOf(projectId))!.id, before)
+    }),
+    { missingBinary: ["cursor"] },
   )
 })

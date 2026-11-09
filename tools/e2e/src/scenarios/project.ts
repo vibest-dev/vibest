@@ -13,7 +13,7 @@ import {
   subagentFolder,
   type Step,
 } from "../fake-model.ts"
-import { expect, row, Skip, until } from "../world.ts"
+import { expect, herdr, row, Skip, until } from "../world.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 type Info = { directory: string; preferences: string; docs: string; memories: string; artifacts: string }
@@ -282,6 +282,39 @@ const checks: ReadonlyArray<Check> = [
       const context = JSON.stringify({ workspace_cwd: w.repository })
       const focused = await w.ok(["herdr", "open-main"], { env: { HERDR_PLUGIN_CONTEXT_JSON: context } })
       expect(focused.startsWith("focused "), `open-main: ${focused}`)
+      const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
+      const panes = async () =>
+        ((await herdr(socket, "pane.list", {})) as { panes: Array<{ pane_id: string }> }).panes.map((p) => p.pane_id)
+      let mainPane = ""
+      await until(
+        "the main agent's pane",
+        async () => {
+          for (const id of await panes()) {
+            const info = (await herdr(socket, "pane.process_info", { pane_id: id })) as {
+              process_info?: { foreground_processes?: Array<{ name?: string; argv0?: string | null }> }
+            }
+            const fg = info.process_info?.foreground_processes ?? []
+            if (fg.some((proc) => (proc.argv0 ?? proc.name ?? "").includes("pi"))) {
+              mainPane = id
+              return true
+            }
+          }
+          return false
+        },
+        30_000,
+      )
+      const before = new Set(await panes())
+      await herdr(socket, "pane.close", { pane_id: mainPane })
+      await until("the main pane closed", async () => !(await panes()).includes(mainPane), 15_000)
+      const opened = await w.ok(["herdr", "open-main"], {
+        env: { HERDR_PLUGIN_CONTEXT_JSON: context, HERDR_SOCKET_PATH: socket },
+      })
+      expect(opened.startsWith("opened "), `open-main after quit: ${opened}`)
+      const after = await panes()
+      expect(
+        after.some((id) => !before.has(id)),
+        `no new pane in ${after.join(",")}`,
+      )
     },
   },
   {

@@ -2622,6 +2622,16 @@
                 "type": "null"
               }
             ]
+          },
+          "routing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -5681,16 +5691,6 @@
             }
           },
           "runtime": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "inParent": {
             "anyOf": [
               {
                 "type": "string"

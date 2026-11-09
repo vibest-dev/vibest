@@ -549,7 +549,6 @@ describe("multi-repository isolated workspace", () => {
         root,
         provider: null,
         model: null,
-        passEnv: [],
         session: authed(raw, cliHeaders(root))["Project.CoordinatorSession"]({
           harness: "pi",
           fresh: false,

@@ -1425,7 +1425,6 @@ export class Sessions extends Context.Service<
               root,
               provider: main.provider,
               model: main.model,
-              passEnv: [],
               session: Effect.succeed({
                 sessionId: main.id,
                 harnessSessionId: main.harnessSessionId,

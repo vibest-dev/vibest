@@ -25,6 +25,7 @@ export interface FakeRuntimeOptions {
   readonly statusEvents?: boolean
   readonly noRun?: boolean
   readonly offline?: string
+  readonly noFocus?: boolean
 }
 
 export interface RuntimeCalls {
@@ -48,6 +49,7 @@ export interface RuntimeCalls {
   readonly run: { readonly terminal: string; readonly argv: ReadonlyArray<string> }
   readonly present: { readonly terminal: string; readonly info: Readonly<Record<string, string>> }
   readonly see: { readonly terminal: string; readonly turn: number }
+  readonly focus: { readonly terminal: string }
 }
 
 type Entry = { [M in keyof RuntimeCalls]: { readonly method: M; readonly params: RuntimeCalls[M] } }[keyof RuntimeCalls]
@@ -474,6 +476,12 @@ export class FakeRuntime extends Context.Service<
             mark(terminal.id, (now) => ({ ...now, seen: turn })),
           ),
         attach: () => ["fake", "attach"],
+        ...(options.noFocus
+          ? {}
+          : {
+              focus: (terminal: { readonly id: string }) =>
+                call("focus", { terminal: terminal.id }, terminal.id, Effect.void),
+            }),
       }
 
       return FakeRuntime.of({

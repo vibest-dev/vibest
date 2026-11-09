@@ -338,6 +338,7 @@ export class VibestRpcs extends RpcGroup.make(
           terminal: Schema.String,
           place: Schema.String,
           attach: Schema.NullOr(Schema.Array(Schema.String)),
+          routing: Schema.optional(Schema.String),
         }),
         error: Schema.Union([
           InvalidCaller,
@@ -515,7 +516,6 @@ export class VibestRpcs extends RpcGroup.make(
       payload: {
         callerEnv: Schema.Record(Schema.String, Schema.String),
         runtime: Schema.optional(Schema.String),
-        inParent: Schema.optional(Schema.String),
       },
       success: Schema.Struct({
         directory: Schema.String,

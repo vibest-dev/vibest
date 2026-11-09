@@ -31,7 +31,6 @@ import { envelope, isUsageLimitError, outcome, parseReport, turnEndFrom, turnEnd
 import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { copyIncluded, git, gitState, mainCheckout, repositoryDirectoryName } from "@vibest/core/worktree"
 import type { HarnessChoice } from "@vibest/protocol/rpc"
-import { CALLER_ENV } from "@vibest/runtime-herdr/caller"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID, newId, shortId } from "@vibest/schema/id"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, PlatformError } from "effect"
@@ -1571,7 +1570,6 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
             root: repo,
             provider,
             model: null,
-            passEnv: CALLER_ENV,
             session,
           }).pipe(
             Effect.provide(harness),

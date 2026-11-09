@@ -13,25 +13,10 @@ export type MainPlace =
   | { readonly in: "refused"; readonly message: string }
 
 export const mainPlace = (o: {
-  readonly marked: boolean
   readonly runtime: string | undefined
   readonly hits: ReadonlyArray<CallerHit>
 }): MainPlace => {
   const named = (kind: string) => o.hits.find((hit) => hit.kind === kind)
-  const here = (kind: string): MainPlace => {
-    const hit = named(kind)
-    if (hit === undefined)
-      return {
-        in: "refused",
-        message: `vibestd opened this terminal in ${kind}, but that runtime's environment is not set`,
-      }
-    if (hit.terminal === undefined) return { in: "refused", message: `this ${kind} terminal could not be named` }
-    return { in: "terminal", runtime: kind, terminal: hit.terminal }
-  }
-  if (o.marked)
-    return o.runtime === undefined
-      ? { in: "refused", message: "vibestd opened this terminal without naming its runtime" }
-      : here(o.runtime)
   if (o.runtime !== undefined) {
     const hit = named(o.runtime)
     if (hit === undefined) return { in: "launch", runtime: o.runtime }
