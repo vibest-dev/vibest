@@ -17,7 +17,6 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   caller: {
     kind: KIND,
     env: CALLER_ENV,
-    overOtherCallers: true,
     terminal: (env) => Effect.succeed(terminalFrom(env)),
   },
   effect: (context) =>
