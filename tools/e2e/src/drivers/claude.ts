@@ -33,6 +33,8 @@ export const typeAndEnter = async (
       return squeeze(s.slice(s.lastIndexOf("❯"))).includes(squeeze(text))
     },
     timeoutMs,
-  )
+  ).catch(async (e: Error) => {
+    throw new Error(`${e.message}; its screen:\n${await screen()}`)
+  })
   await send.enter()
 }
