@@ -65,7 +65,7 @@
                   "border": { "width": 1, "color": "border" },
                   "focus": { "width": 1, "color": "border" },
                   "lone": true,
-                  "header": { "content": { "mod": "pane" }, "height": 42, "position": "top", "reveal": "always" }
+                  "header": { "content": { "mod": "vibest-pane" }, "height": 34, "position": "top", "reveal": "always" }
                 }
               }
             },
