@@ -7,7 +7,7 @@ import { Db, SQL_NAMES } from "@vibest/core/db"
 import { Effect, Layer } from "effect"
 
 const checkout = path.resolve(import.meta.dirname, "../../..")
-const binary = path.join(checkout, "apps/vibest-herdr/dist/vibest")
+const binary = path.join(checkout, "packages/cli/dist/vibest")
 const sizes = [200, 1000]
 const runs = 20
 const idleMs = 15_000

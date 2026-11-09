@@ -51,7 +51,7 @@ describe("vibest update", () => {
       share: "/home/u/.local/share/vibest",
     })
     for (const argv of [
-      ["/repository/apps/vibest-herdr/dist/vibest"],
+      ["/repository/packages/cli/dist/vibest"],
       ["/usr/bin/bun", "/repository/src/main.ts"],
       ["/s/versions/1/bin/vibest", "x"],
     ])

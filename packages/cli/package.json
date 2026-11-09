@@ -6,7 +6,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/vibest-dev/vibest.git",
-    "directory": "apps/vibest-herdr"
+    "directory": "packages/cli"
   },
   "bin": {
     "vibest": "./bin/vibest.cjs"
@@ -39,7 +39,7 @@
     "build:linux-x64": "bun scripts/build.ts ../../packages/cli-linux-x64/bin/vibest bun-linux-x64",
     "prepack": "bun scripts/build-harnesses.ts",
     "typecheck": "tsrs --noEmit --fast",
-    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run apps/vibest-herdr"
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/cli"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",

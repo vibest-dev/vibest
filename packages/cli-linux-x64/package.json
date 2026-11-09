@@ -25,7 +25,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "cd ../../apps/vibest-herdr && bun run build:linux-x64",
-    "prepack": "cd ../../apps/vibest-herdr && bun run build:linux-x64"
+    "build": "cd ../../packages/cli && bun run build:linux-x64",
+    "prepack": "cd ../../packages/cli && bun run build:linux-x64"
   }
 }

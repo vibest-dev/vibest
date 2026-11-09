@@ -59,7 +59,7 @@ How the required members map: herdr `tab.create` (env) + `agent.start`, `pane.se
 Core helpers over the interface, so no plugin writes them: `readFile(machine, path)` (local: the file system; remote:
 `exec` `cat`), and the hidden-terminal `exec`.
 
-herdr behaviour the in-memory fake (`apps/vibest-herdr/test/fake-runtime.ts`) models: an agent's record outlives its
+herdr behaviour the in-memory fake (`packages/cli/test/fake-runtime.ts`) models: an agent's record outlives its
 process, so `session` still answers after the harness exited while `state` answers `not_found`; a pane id handed out
 again is a new pane, not the agent that died in it; a resume moves the named agent to the new terminal; closing the
 last pane closes its workspace, and a main checkout's workspace takes its linked worktrees' workspaces with it.

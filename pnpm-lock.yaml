@@ -219,7 +219,7 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.0))
 
-  apps/vibest-herdr:
+  packages/cli:
     devDependencies:
       '@effect/platform-bun':
         specifier: 'catalog:'
@@ -229,44 +229,44 @@ importers:
         version: 4.0.2(effect@4.0.2)
       '@vibest/client':
         specifier: workspace:*
-        version: link:../../packages/client
+        version: link:../client
       '@vibest/core':
         specifier: workspace:*
-        version: link:../../packages/core
+        version: link:../core
       '@vibest/plugin':
         specifier: workspace:*
-        version: link:../../packages/plugin
+        version: link:../plugin
       '@vibest/plugin-harness-choice':
         specifier: workspace:*
-        version: link:../../packages/plugin-harness-choice
+        version: link:../plugin-harness-choice
       '@vibest/protocol':
         specifier: workspace:*
-        version: link:../../packages/protocol
+        version: link:../protocol
       '@vibest/runtime-herdr':
         specifier: workspace:*
-        version: link:../../packages/runtime-herdr
+        version: link:../runtime-herdr
       '@vibest/runtime-herdr-core':
         specifier: workspace:*
-        version: link:../../packages/runtime-herdr-core
+        version: link:../runtime-herdr-core
       '@vibest/schema':
         specifier: workspace:*
-        version: link:../../packages/schema
+        version: link:../schema
       '@vibest/server':
         specifier: workspace:*
-        version: link:../../packages/server
+        version: link:../server
       effect:
         specifier: 4.0.2
         version: 4.0.2
       effect-herdr-sdk:
         specifier: workspace:*
-        version: link:../../packages/effect-herdr-sdk
+        version: link:../effect-herdr-sdk
     optionalDependencies:
       '@vibest/cli-darwin-arm64':
         specifier: workspace:*
-        version: link:../../packages/cli-darwin-arm64
+        version: link:../cli-darwin-arm64
       '@vibest/cli-linux-x64':
         specifier: workspace:*
-        version: link:../../packages/cli-linux-x64
+        version: link:../cli-linux-x64
 
   packages/cli-darwin-arm64: {}
 
@@ -356,7 +356,7 @@ importers:
         version: 1.2.0
       '@vibest/cli':
         specifier: workspace:*
-        version: link:../../../apps/vibest-herdr
+        version: link:../../cli
       '@vibest/server':
         specifier: workspace:*
         version: link:../../server

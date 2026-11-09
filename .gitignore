@@ -1,7 +1,6 @@
 node_modules/
 dist/
 packages/cli/test/.tmp/
-apps/vibest-herdr/test/.tmp/
 packages/cli-darwin-arm64/bin/
 packages/cli-linux-x64/bin/
 .turbo/
@@ -12,5 +11,5 @@ packages/integration/claude/.claude-plugin/
 tools/e2e/evidence/
 packages/integration/cursor/.cursor-plugin/
 packages/integration/cursor/hooks/
-apps/vibest-herdr/harnesses/
+packages/cli/harnesses/
 packages/integration/pi/dist/

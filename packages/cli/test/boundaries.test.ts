@@ -7,7 +7,7 @@ const root = path.resolve(import.meta.dirname, "../../..")
 const PACKAGES = ["schema", "core", "server", "protocol", "client"]
 const HERDR = /["'](effect-herdr-sdk|@vibest\/runtime-herdr)(\/[^"']*)?["']/
 
-const HERDR_TESTS = new Set(["apps/vibest-herdr/test/guard.test.ts", "apps/vibest-herdr/test/runtime-herdr.test.ts"])
+const HERDR_TESTS = new Set(["packages/cli/test/guard.test.ts", "packages/cli/test/runtime-herdr.test.ts"])
 
 describe("runtime boundary", () => {
   it("no runtime-neutral package depends on or imports herdr", () => {
@@ -25,11 +25,11 @@ describe("runtime boundary", () => {
   })
 
   it("unit tests outside the herdr allowlist do not import effect-herdr-sdk", () => {
-    const dir = path.join(root, "apps/vibest-herdr/test")
+    const dir = path.join(root, "packages/cli/test")
     const offenders: Array<string> = []
     for (const file of fs.readdirSync(dir, { encoding: "utf8" })) {
       if (!file.endsWith(".ts")) continue
-      const rel = path.join("apps/vibest-herdr/test", file)
+      const rel = path.join("packages/cli/test", file)
       if (HERDR_TESTS.has(rel)) continue
       const text = fs.readFileSync(path.join(dir, file), "utf8")
       const blocks = text.match(/(?:import|export)[\s\S]*?from\s+["'][^"']+["']/g) ?? []

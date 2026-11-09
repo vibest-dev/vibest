@@ -79,7 +79,7 @@ const checks: ReadonlyArray<Check> = [
       const archive = `vibest-${process.platform}-${process.arch}.tar.gz`
       const packed = await w.run(root, ["tar", "-czf", path.join(root, archive), "-C", release, "bin", "harnesses"])
       expect(packed.code === 0, `tar: ${out(packed)}`)
-      const installSh = path.join(checkout, "apps", "vibest-herdr", "install.sh")
+      const installSh = path.join(checkout, "packages", "cli", "install.sh")
       let downloads = 0
       const server = Bun.serve({
         port: 0,

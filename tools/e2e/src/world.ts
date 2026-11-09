@@ -32,13 +32,13 @@ const target = () => {
       harnesses: path.join(version, "harnesses"),
     }
   }
-  const compiled = path.join(checkout, "apps/vibest-herdr/dist/vibest")
-  return { binary: compiled, compiled, harnesses: path.join(checkout, "apps/vibest-herdr/harnesses") }
+  const compiled = path.join(checkout, "packages/cli/dist/vibest")
+  return { binary: compiled, compiled, harnesses: path.join(checkout, "packages/cli/harnesses") }
 }
 export const { binary, compiled, harnesses } = target()
 
 export const buildVersion = (
-  JSON.parse(fs.readFileSync(path.join(checkout, "apps/vibest-herdr/package.json"), "utf8")) as { version: string }
+  JSON.parse(fs.readFileSync(path.join(checkout, "packages/cli/package.json"), "utf8")) as { version: string }
 ).version
 
 const shSingle = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
