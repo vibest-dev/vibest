@@ -2,8 +2,7 @@ import { h_flex } from "gpui-base"
 import { type Color, div, type Element, image, svg } from "gpui-kit"
 import { type PaneInfo, run } from "herdr"
 
-import { currentFit } from "../../shared/current-fit.ts"
-import { TEXT, SMALL } from "../../shared/text-size.ts"
+import { INSET, SMALL, TEXT } from "../../shared/metrics.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import { paneName, shortFolder } from "./header.ts"
 
@@ -35,7 +34,7 @@ export const paneHeader = (t: Theme, p: PaneInfo, home: string): Element => {
     .size_full()
     .pl(5)
     .pr(8)
-    .pt(currentFit().inset)
+    .pt(INSET)
     .gap(8)
     .items_center()
     .bg(t.background)

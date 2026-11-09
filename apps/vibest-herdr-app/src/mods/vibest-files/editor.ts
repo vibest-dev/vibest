@@ -1,7 +1,7 @@
 import { EditorState } from "gpui-base"
 import { settings, theme } from "herdr"
 
-import { TEXT } from "../../shared/text-size.ts"
+import { TEXT } from "../../shared/metrics.ts"
 
 export interface Loaded {
   state: EditorState | null

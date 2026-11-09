@@ -1,20 +1,18 @@
 import { h_flex } from "gpui-base"
 import { type Element, View } from "gpui-kit"
-import { run, window } from "herdr"
+import { run } from "herdr"
 
-import { currentFit } from "../../shared/current-fit.ts"
 import { iconButton } from "../../shared/icon-button.ts"
+import { lightsShown, liveMetrics } from "../../shared/live-metrics.ts"
+import { INSET, LIGHTS_INSET } from "../../shared/metrics.ts"
 import { type Theme, themeColors } from "../../shared/theme-colors.ts"
-import { TRAFFIC_LIGHTS_INSET } from "../../shared/traffic-lights.ts"
 
 const header = (t: Theme): Element => {
-  const w = window()
-  const inset = w?.platform === "macos" && !w.fullscreen ? TRAFFIC_LIGHTS_INSET : 8
   return h_flex()
     .size_full()
-    .pl(inset)
+    .pl(lightsShown() ? LIGHTS_INSET : INSET)
     .pr(12)
-    .pt(currentFit().pad)
+    .pt(liveMetrics().pad)
     .items_center()
     .bg(t.chrome)
     .child(

@@ -1,63 +1,29 @@
 import { Editor, h_flex, h_resizable, resizable_panel, v_flex } from "gpui-base"
 import { type AsyncContext, type Context, div, type Element, svg, View } from "gpui-kit"
-import { focused, panes, readTextFile, spaces, watchFolder } from "herdr"
+import { readTextFile } from "herdr"
 
-import { currentFit } from "../../shared/current-fit.ts"
 import { iconButton } from "../../shared/icon-button.ts"
-import { TEXT, SMALL } from "../../shared/text-size.ts"
+import { liveMetrics } from "../../shared/live-metrics.ts"
+import { SMALL, TEXT } from "../../shared/metrics.ts"
 import { type Theme, themeColors } from "../../shared/theme-colors.ts"
 import { editorState, type Loaded } from "./editor.ts"
+import { Folder } from "./folder.ts"
 import { closeFile, EMPTY_TABS, fileName, openFile, selectFile, type ViewerFile, type ViewerTabs } from "./tabs.ts"
-import { directory, type Entry, gitMarks, PER_FOLDER, TOTAL } from "./tree.ts"
-
-interface Where {
-  readonly key: string
-  readonly cwd: string | null
-  readonly on: string | null
-}
+import { PER_FOLDER, TOTAL } from "./tree.ts"
 
 export default class Files extends View {
-  where: Where
-  saved: Map<string, Set<string>>
-  entries: Map<string, Entry[]>
-  folders: Set<string>
-  pending: Set<string>
-  marks: Record<string, string>
-  watched: string | null
-  loading: boolean
-  limited: boolean
-  error: string | null
-
+  folder: Folder
   tabs: ViewerTabs
   treeOpen: boolean
   loaded: Map<string, Loaded>
 
   init(_props: unknown, cx: AsyncContext): void {
-    this.where = { key: "", cwd: null, on: null }
+    this.folder = new Folder()
     this.tabs = EMPTY_TABS
     this.treeOpen = true
     this.loaded = new Map()
-    this.saved = new Map()
-    this.entries = new Map()
-    this.folders = new Set()
-    this.pending = new Set()
-    this.marks = {}
-    this.watched = null
-    this.loading = false
-    this.limited = false
-    this.error = null
-    this.refresh(cx)
-    cx.timer.every(10000, (ticked) => this.refresh(ticked))
-  }
-
-  locate(): Where {
-    const f = focused()
-    const pane = f?.pane ? panes().find((p) => p.pane === f.pane) : null
-    if (pane?.mod) return this.where
-    const space = spaces().find((s) => s.active)
-    const on = space?.machine ?? null
-    const cwd = pane?.cwd || f?.cwd || space?.folder || null
-    return { key: JSON.stringify([cwd, on, space?.id]), cwd, on }
+    this.folder.refresh(cx)
+    cx.timer.every(10000, (ticked) => this.folder.refresh(ticked))
   }
 
   close(): void {
@@ -140,7 +106,7 @@ export default class Files extends View {
         }),
       )
     return h_flex()
-      .h(currentFit().header + currentFit().inset)
+      .h(liveMetrics().head)
       .flex_none()
       .px(6)
       .gap(4)
@@ -171,110 +137,14 @@ export default class Files extends View {
           .child(active?.message ?? "Open a file from the tree")
   }
 
-  current(where: Where): boolean {
-    return this.where === where && this.locate().key === where.key
-  }
-
-  async loadFolder(path: string, where: Where): Promise<void> {
-    const entries = await directory(path ? `${where.cwd}/${path}` : where.cwd, where.on)
-    if (!this.current(where) || (path && !this.folders.has(path))) return
-    const used = [...this.entries].filter(([p]) => p !== path).reduce((n, [, e]) => n + e.length, 0)
-    this.entries.set(
-      path,
-      entries
-        .slice(0, Math.max(0, Math.min(PER_FOLDER, TOTAL - used)))
-        .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name)),
-    )
-    if (entries.length > PER_FOLDER || used + entries.length > TOTAL) this.limited = true
-  }
-
-  watch(where: Where, cx: AsyncContext): void {
-    if (where.on || this.watched === where.cwd) return
-    this.watched = where.cwd
-    cx.spawn(async (spawned) => {
-      try {
-        while (this.where === where) {
-          await watchFolder(where.cwd)
-          if (this.current(where)) this.refresh(spawned)
-        }
-      } catch {
-        if (this.where === where) this.watched = null
-      }
-    })
-  }
-
-  refresh(cx: Context): void {
-    const next = this.locate()
-    if (next.key !== this.where.key) {
-      if (this.where.key) this.saved.set(this.where.key, this.folders)
-      this.where = next
-      this.entries = new Map()
-      this.folders = new Set(this.saved.get(next.key))
-      this.pending = new Set()
-      this.marks = {}
-      this.watched = null
-      this.error = null
-      this.limited = false
-      this.loading = false
-    }
-    const where = this.where
-    if (!where.cwd || this.loading) return
-    this.loading = true
-    this.limited = false
-    cx.spawn(async (spawned) => {
-      try {
-        for (const path of ["", ...this.folders]) {
-          if (!this.current(where)) return
-          await this.loadFolder(path, where)
-        }
-        const marks = await gitMarks(where.cwd, where.on)
-        if (!this.current(where)) return
-        this.marks = marks
-        this.error = null
-        this.watch(where, spawned)
-      } catch (e) {
-        if (this.current(where)) this.error = String(e)
-      } finally {
-        if (this.where === where) this.loading = false
-        spawned.notify()
-      }
-    })
-  }
-
-  toggle(path: string, cx: Context): void {
-    if (this.folders.has(path)) {
-      for (const folder of this.folders)
-        if (folder === path || folder.startsWith(`${path}/`)) {
-          this.folders.delete(folder)
-          this.entries.delete(folder)
-        }
-    } else {
-      this.folders.add(path)
-      if (!this.entries.has(path) && !this.pending.has(path)) {
-        const where = this.where
-        this.pending.add(path)
-        cx.spawn(async (spawned) => {
-          try {
-            await this.loadFolder(path, where)
-          } catch (e) {
-            if (this.current(where)) this.error = String(e)
-          } finally {
-            if (this.where === where) this.pending.delete(path)
-            spawned.notify()
-          }
-        })
-      }
-    }
-    cx.notify()
-  }
-
   rows(prefix: string, depth: number, out: Element[], t: Theme): Element[] {
     if (out.length >= TOTAL || depth > 40) return out
-    for (const entry of this.entries.get(prefix) ?? []) {
+    const folder = this.folder
+    for (const entry of folder.entries.get(prefix) ?? []) {
       if (out.length >= TOTAL) break
       const path = prefix ? `${prefix}/${entry.name}` : entry.name
-      const open = this.folders.has(path)
-      const mark = this.marks[`${this.where.cwd}/${path}`]
+      const open = folder.open.has(path)
+      const mark = folder.marks[`${folder.where.cwd}/${path}`]
       out.push(
         h_flex()
           .id(`file-${path}`)
@@ -289,8 +159,8 @@ export default class Files extends View {
           .hover((s) => s.bg(t.hover))
           .on_click((_e, cx) =>
             entry.dir
-              ? this.toggle(path, cx)
-              : this.setTabs(openFile(this.tabs, { path: `${this.where.cwd}/${path}`, on: this.where.on }), cx),
+              ? folder.toggle(path, cx)
+              : this.setTabs(openFile(this.tabs, { path: `${folder.where.cwd}/${path}`, on: folder.where.on }), cx),
           )
           .child(
             entry.dir
@@ -322,19 +192,20 @@ export default class Files extends View {
   }
 
   render(cx: Context): Element {
-    if (this.locate().key !== this.where.key) this.refresh(cx)
+    const folder = this.folder
+    if (folder.moved()) folder.refresh(cx)
     const t = themeColors()
-    const empty = this.error || (this.loading ? "Loading files…" : this.where.cwd ? "No files" : "No folder")
+    const empty = folder.error || (folder.loading ? "Loading files…" : folder.where.cwd ? "No files" : "No folder")
     const tree = v_flex()
       .id("files-tree")
       .size_full()
       .overflow_y_scrollbar()
       .p(6)
       .children(this.rows("", 0, [], t))
-      .when(Boolean(this.error) || !this.entries.get("")?.length, (el) =>
+      .when(Boolean(folder.error) || !folder.entries.get("")?.length, (el) =>
         el.child(div().p(8).text_size(TEXT).text_color(t.dim).child(empty)),
       )
-      .when(this.limited, (el) =>
+      .when(folder.limited, (el) =>
         el.child(
           div()
             .p(8)

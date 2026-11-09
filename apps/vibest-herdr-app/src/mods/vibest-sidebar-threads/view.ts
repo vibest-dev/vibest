@@ -2,9 +2,9 @@ import { h_flex, v_flex } from "gpui-base"
 import { type Context, div, type Element, svg } from "gpui-kit"
 import { openOverlay, pickFolder, run } from "herdr"
 
-import { currentFit } from "../../shared/current-fit.ts"
 import { icon, iconButton } from "../../shared/icon-button.ts"
-import { TEXT, SMALL } from "../../shared/text-size.ts"
+import { liveMetrics } from "../../shared/live-metrics.ts"
+import { CONTROL, SMALL, TEXT } from "../../shared/metrics.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import { elapsed, pill, type Project, relativeTime, type Thread } from "./projects.ts"
 
@@ -27,7 +27,7 @@ export class ThreadsView {
     const active = projects.find((p) => p.active)
     return h_flex()
       .pr(12)
-      .pt(currentFit().searchTop)
+      .pt(liveMetrics().searchTop)
       .pb(8)
       .gap(4)
       .items_center()
@@ -36,7 +36,7 @@ export class ThreadsView {
         h_flex()
           .id("search")
           .flex_1()
-          .h(32)
+          .h(CONTROL)
           .px(10)
           .gap(8)
           .items_center()

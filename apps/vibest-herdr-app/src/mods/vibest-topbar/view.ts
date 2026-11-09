@@ -3,7 +3,7 @@ import { div, type Element, svg } from "gpui-kit"
 import { run } from "herdr"
 
 import { icon, iconButton } from "../../shared/icon-button.ts"
-import { TEXT, SMALL } from "../../shared/text-size.ts"
+import { SMALL, TEXT } from "../../shared/metrics.ts"
 import type { Theme } from "../../shared/theme-colors.ts"
 import { type Breadcrumb, RIGHT_PANEL, type TopbarState } from "./topbar-state.ts"
 
