@@ -45,9 +45,11 @@ const isolatedHome = (home: string) =>
         VIBEST_SESSION_ID: process.env.VIBEST_SESSION_ID,
         VIBEST_AGENT: process.env.VIBEST_AGENT,
         PATH: process.env.PATH,
+        VIBEST_NO_UPDATE_CHECK: process.env.VIBEST_NO_UPDATE_CHECK,
       }
       process.env.VIBEST_HOME = home
       process.env.PATH = PATH_WITHOUT_HARNESS_CLIS
+      process.env.VIBEST_NO_UPDATE_CHECK = "1"
       delete process.env.VIBEST_SESSION_ID
       delete process.env.VIBEST_AGENT
       return saved
