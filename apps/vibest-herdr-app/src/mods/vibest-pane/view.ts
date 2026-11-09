@@ -31,7 +31,7 @@ export const paneHeader = (t: Theme, p: PaneInfo, home: string): Element => {
   return h_flex()
     .id(`pane-head-${pane}`)
     .size_full()
-    .px(10)
+    .px(8)
     .gap(8)
     .items_center()
     .bg(t.background)

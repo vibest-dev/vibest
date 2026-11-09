@@ -5,7 +5,7 @@
   "theme": { "light": "vibest-light", "dark": "vibest-dark" },
   "traffic_lights": [13, 12],
   "preview": "layouts/vibest.svg",
-  "terminal_padding": [12, 12],
+  "terminal_padding": [8, 8],
   "background": "chrome",
   "padding": [0, 8],
   "children": [
