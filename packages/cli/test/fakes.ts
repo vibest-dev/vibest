@@ -1,11 +1,9 @@
-import fs from "node:fs/promises"
 import net from "node:net"
 
 import { readPing } from "@vibest/client/client"
 import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { Git } from "@vibest/core/git"
 import { Harness, Harnesses, HARNESS_IDS, HarnessUnavailable, type HarnessId } from "@vibest/core/harness"
 import * as BuiltinHarnesses from "@vibest/core/harnesses"
 import { Inbox } from "@vibest/core/inbox"
@@ -48,9 +46,10 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
+import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime, type FakeRuntimeOptions } from "./fake-runtime.ts"
 
-export { FakeRuntime }
+export { FakeGit, FakeRuntime }
 
 export const TEST_HERDR = "herdr"
 
@@ -111,24 +110,6 @@ export const nextTurnStart = (subscription: PubSub.Subscription<EngineEvent>, id
         : nextTurnStart(subscription, id),
     ),
   )
-
-export const gitCli = (cwd: string, ...args: string[]) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const handle = yield* spawner.spawn(ChildProcess.make("git", args, { cwd }))
-    const [stdout, stderr, exitCode] = yield* Effect.all(
-      [
-        Stream.mkString(Stream.decodeText(handle.stdout)),
-        Stream.mkString(Stream.decodeText(handle.stderr)),
-        handle.exitCode,
-      ],
-      { concurrency: "unbounded" },
-    )
-    if (exitCode !== 0) return yield* Effect.fail(new Error(stderr.trim() || `exit ${exitCode}`))
-    return stdout.trim()
-  }).pipe(Effect.scoped)
-
-export const sh = (cwd: string, ...args: string[]) => gitCli(cwd, ...args).pipe(Effect.orDie)
 
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
@@ -202,33 +183,13 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
     return { stdout, stderr, code }
   }).pipe(Effect.scoped, Effect.orDie)
 
-let repositoryTemplate: Promise<string> | undefined
-const templateRepository = Effect.promise(() => {
-  repositoryTemplate ??= Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const root = yield* fs.makeTempDirectory({ prefix: "vibest-repo-template-" }).pipe(Effect.orDie)
-      yield* sh(root, "init", "-q", "-b", "main")
-      yield* sh(root, "config", "user.email", "t@example.com")
-      yield* sh(root, "config", "user.name", "t")
-      yield* fs.writeFileString(path.join(root, "README.md"), "hi\n")
-      yield* sh(root, "add", ".")
-      yield* sh(root, "commit", "-q", "-m", "init")
-      yield* fs.writeFileString(path.join(root, "CLAUDE.md"), "local rules\n")
-      return root
-    }).pipe(Effect.provide(Platform.services)),
-  ).catch((error: unknown) => {
-    repositoryTemplate = undefined
-    throw error
-  })
-  return repositoryTemplate
-})
-
 export const makeRepository = Effect.gen(function* () {
-  const source = yield* templateRepository
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
   const root = yield* tempDirectory("vibest-repo-")
-  yield* Effect.promise(() => fs.cp(source, root, { recursive: true }))
+  yield* fs.writeFileString(path.join(root, "README.md"), "hi\n")
+  yield* fs.writeFileString(path.join(root, "CLAUDE.md"), "local rules\n")
+  yield* (yield* FakeGit).repository(root, { files: { "README.md": "hi\n" } })
   return root
 }).pipe(Effect.orDie)
 
@@ -455,7 +416,7 @@ const over = (options: TestOptions) => {
       Layer.provideMerge(ownTmpdir),
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
-      Layer.provideMerge(Git.layer),
+      Layer.provideMerge(FakeGit.layers),
       Layer.provideMerge(Platform.services),
       Layer.provideMerge(Bus.layer),
     ),
