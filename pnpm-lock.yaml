@@ -319,6 +319,8 @@ importers:
         specifier: 'catalog:'
         version: 4.0.2(effect@4.0.2)
 
+  packages/herdr-app-mod: {}
+
   packages/integration/claude:
     devDependencies:
       '@vibest/protocol':
