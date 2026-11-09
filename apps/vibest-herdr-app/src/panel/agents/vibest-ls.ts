@@ -80,3 +80,32 @@ export const parseSessions = (stdout: string): readonly SessionRow[] | undefined
   }
   return rows
 }
+
+export interface LsResult {
+  readonly sessions: readonly SessionRow[]
+  readonly note: string
+  readonly asOf: string
+}
+
+export const readLsResult = (
+  result: { readonly code: number; readonly stdout: string; readonly stderr: string },
+  now: Date,
+): LsResult => {
+  if (result.code !== 0) return { sessions: [], note: commandNote(result, "vibest ls failed"), asOf: "" }
+  const sessions = parseSessions(result.stdout)
+  if (sessions === undefined) return { sessions: [], note: "vibest ls was not understood", asOf: "" }
+  return {
+    sessions,
+    note: sessions.length === 0 ? "No live sessions." : "",
+    asOf: now.toISOString().slice(11, 19),
+  }
+}
+
+export const lsFailure = (error: unknown): LsResult => ({
+  sessions: [],
+  note: commandNote(
+    { code: 1, stdout: "", stderr: error instanceof Error ? error.message : "vibest could not be run" },
+    "vibest could not be run",
+  ),
+  asOf: "",
+})

@@ -1,19 +1,24 @@
 import { assert, describe, it } from "@effect/vitest"
 
-import { commandNote, LS_ARGV, parseOwnedAddress, parseSessions, type SessionRow } from "../src/panel/agents/cli.ts"
+import { closePull, completePull, idlePull, requestPull } from "../src/panel/agents/pull.ts"
 import {
-  closePull,
-  completePull,
   groupSessions,
-  idlePull,
   projectHeading,
-  requestPull,
   rowNote,
   rowTitle,
   rowTooltip,
   sessionStatus,
   shortId,
-} from "../src/panel/agents/model.ts"
+} from "../src/panel/agents/sessions.ts"
+import {
+  commandNote,
+  LS_ARGV,
+  lsFailure,
+  parseOwnedAddress,
+  parseSessions,
+  readLsResult,
+  type SessionRow,
+} from "../src/panel/agents/vibest-ls.ts"
 
 const socket = "/run/user/501/herdr-core/default.sock"
 
@@ -145,5 +150,24 @@ describe("agents panel", () => {
     assert.equal(groups[0]?.sessions.length, 2)
     assert.equal(sessionStatus(first), "working/open")
     assert.equal(sessionStatus(second), "idle")
+  })
+})
+
+describe("readLsResult", () => {
+  const ok = (stdout: string) => ({ code: 0, stdout, stderr: "" })
+  const at = new Date("2026-11-09T07:08:09Z")
+
+  it("keeps the sessions and stamps the snapshot time", () => {
+    const result = readLsResult(ok(JSON.stringify([listed(session())])), at)
+    assert.strictEqual(result.sessions.length, 1)
+    assert.strictEqual(result.note, "")
+    assert.strictEqual(result.asOf, "07:08:09")
+  })
+
+  it("says so when nothing is live, when the output is not understood, and when the command fails", () => {
+    assert.strictEqual(readLsResult(ok("[]"), at).note, "No live sessions.")
+    assert.strictEqual(readLsResult(ok("{"), at).note, "vibest ls was not understood")
+    assert.strictEqual(readLsResult({ code: 2, stdout: "", stderr: "vibestd refused\n" }, at).note, "vibestd refused")
+    assert.strictEqual(lsFailure(new Error("no such file")).note, "no such file")
   })
 })

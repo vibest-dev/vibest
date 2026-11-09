@@ -28,8 +28,8 @@
         {
           "id": "sidebar-footer",
           "type": "block",
-          "size": { "px": 48 },
-          "content": { "mod": "vibest-sidebar-footer" }
+          "size": { "px": 69 },
+          "content": { "mod": "workspace-chrome", "props": { "footer": true } }
         }
       ]
     },
@@ -63,7 +63,8 @@
                   "background": "background",
                   "border": { "width": 1, "color": "border" },
                   "focus": { "width": 1, "color": "input" },
-                  "lone": true
+                  "lone": true,
+                  "header": { "content": { "mod": "pane" }, "height": 30, "position": "top", "reveal": "always" }
                 }
               }
             },

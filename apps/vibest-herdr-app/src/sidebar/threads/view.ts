@@ -1,41 +1,28 @@
 import { h_flex, v_flex } from "gpui-base"
 import { type Context, div, type Element, svg } from "gpui-kit"
-import { openOverlay, panes, pickFolder, run, spaces } from "herdr"
+import { openOverlay, pickFolder, run } from "herdr"
 
-import type { Theme } from "../../shared/theme.ts"
-import { icon, iconButton } from "../../shared/ui.ts"
-import { elapsed, parseFolded, pill, type Project, projects, relativeTime, type Thread } from "./model.ts"
+import { icon, iconButton } from "../../shared/icon-button.ts"
+import type { Theme } from "../../shared/theme-colors.ts"
+import { elapsed, pill, type Project, relativeTime, type Thread } from "./projects.ts"
 
-const CLOCK_MS = 30000
+export interface ThreadsUi {
+  readonly hovered: string | null
+  readonly folded: ReadonlySet<string>
+  readonly now: number
+  hover(id: string): (on: boolean, cx: Context) => void
+  fold(id: string): void
+}
 
-export class ThreadList {
-  hovered: string | null = null
-  folded = new Set(parseFolded(localStorage.getItem("folded")))
-  now = Date.now()
+export class ThreadsView {
+  constructor(
+    readonly t: Theme,
+    readonly ui: ThreadsUi,
+  ) {}
 
-  constructor(cx: Context) {
-    cx.timer.every(CLOCK_MS, (ticked) => {
-      this.now = Date.now()
-      ticked.notify()
-    })
-  }
-
-  hover(id: string) {
-    return (on: boolean, cx: Context) => {
-      if (on) this.hovered = id
-      else if (this.hovered === id) this.hovered = null
-      cx.notify()
-    }
-  }
-
-  fold(id: string): void {
-    if (this.folded.has(id)) this.folded.delete(id)
-    else this.folded.add(id)
-    localStorage.setItem("folded", JSON.stringify([...this.folded]))
-  }
-
-  toolbar(t: Theme): Element {
-    const active = spaces().find((s) => s.active)
+  toolbar(projects: readonly Project[]): Element {
+    const t = this.t
+    const active = projects.find((p) => p.active)
     return h_flex()
       .px(8)
       .pb(8)
@@ -60,25 +47,17 @@ export class ThreadList {
           .child(svg(icon("search")).size(16))
           .child("Search"),
       )
-      .when(spaces().length > 0, (el) =>
-        el.child(iconButton(t, "add-project", "folder-plus", (cx) => this.addProject(cx))),
-      )
+      .when(projects.length > 0, (el) => el.child(iconButton(t, "add-project", "folder-plus", (cx) => addProject(cx))))
       .child(iconButton(t, "new-thread", "square-pen", () => run("tab.new", active ? { space: active.id } : {})))
   }
 
-  addProject(cx: Context): void {
-    cx.spawn(async () => {
-      const folder = await pickFolder({ prompt: "Add project" })
-      if (folder) run("space.new", { folder })
-    })
-  }
-
-  status(t: Theme, thread: Thread): Element {
+  status(thread: Thread): Element {
+    const t = this.t
     const p = pill(thread.status)
-    if (!p) return div().text_size(12).text_color(t.dim).child(relativeTime(thread.changedAt, this.now))
+    if (!p) return div().text_size(12).text_color(t.dim).child(relativeTime(thread.changedAt, this.ui.now))
     const color = t[p.tone]
     const dot = div().size(6).flex_none().rounded_full().bg(color)
-    const since = thread.status === "working" ? elapsed(thread.workingSince, this.now) : ""
+    const since = thread.status === "working" ? elapsed(thread.workingSince, this.ui.now) : ""
     return h_flex()
       .gap(6)
       .items_center()
@@ -89,7 +68,8 @@ export class ThreadList {
       .child(since ? `${p.label} ${since}` : p.label)
   }
 
-  threadRow(t: Theme, project: Project, thread: Thread): Element {
+  threadRow(project: Project, thread: Thread): Element {
+    const t = this.t
     const id = `thread-${thread.id}`
     return h_flex()
       .id(id)
@@ -105,7 +85,7 @@ export class ThreadList {
       .bg(thread.active ? t.selected : t.chrome)
       .hover((s) => s.bg(thread.active ? t.selected : t.hover))
       .cursor_pointer()
-      .on_hover(this.hover(id))
+      .on_hover(this.ui.hover(id))
       .on_click(() => {
         run("space.select", { id: project.id })
         run("tab.select", { id: thread.id })
@@ -122,13 +102,14 @@ export class ThreadList {
       .child(
         div().flex_1().min_w(0).truncate().text_size(14).font_medium().text_color(t.foreground).child(thread.title),
       )
-      .child(h_flex().h(24).min_w(32).flex_none().justify_end().items_center().child(this.status(t, thread)))
+      .child(h_flex().h(24).min_w(32).flex_none().justify_end().items_center().child(this.status(thread)))
   }
 
-  projectRow(t: Theme, project: Project): Element {
+  projectRow(project: Project): Element {
+    const t = this.t
     const id = `project-${project.id}`
-    const folded = this.folded.has(project.id)
-    const hovered = this.hovered === id
+    const folded = this.ui.folded.has(project.id)
+    const hovered = this.ui.hovered === id
     const tone = project.status && project.status !== "idle" ? t[project.status] : null
     return h_flex()
       .id(id)
@@ -141,9 +122,9 @@ export class ThreadList {
       .flex_none()
       .hover((s) => s.bg(t.hover))
       .cursor_pointer()
-      .on_hover(this.hover(id))
+      .on_hover(this.ui.hover(id))
       .on_click((_e, cx) => {
-        this.fold(project.id)
+        this.ui.fold(project.id)
         cx.notify()
       })
       .on_mouse_down("right", (_e, cx) => {
@@ -187,8 +168,8 @@ export class ThreadList {
       )
   }
 
-  list(t: Theme): Element {
-    const all = projects(spaces(), panes())
+  list(all: readonly Project[]): Element {
+    const t = this.t
     if (!all.length)
       return v_flex()
         .flex_1()
@@ -215,13 +196,20 @@ export class ThreadList {
       .overflow_y_scrollbar()
       .children(
         all.flatMap((project) => [
-          this.projectRow(t, project),
-          ...(this.folded.has(project.id) ? [] : project.threads.map((thread) => this.threadRow(t, project, thread))),
+          this.projectRow(project),
+          ...(this.ui.folded.has(project.id) ? [] : project.threads.map((thread) => this.threadRow(project, thread))),
         ]),
       )
   }
 
-  render(t: Theme): Element {
-    return v_flex().size_full().bg(t.chrome).child(this.toolbar(t)).child(this.list(t))
+  render(projects: readonly Project[]): Element {
+    return v_flex().size_full().bg(this.t.chrome).child(this.toolbar(projects)).child(this.list(projects))
   }
+}
+
+const addProject = (cx: Context): void => {
+  cx.spawn(async () => {
+    const folder = await pickFolder({ prompt: "Add project" })
+    if (folder) run("space.new", { folder })
+  })
 }

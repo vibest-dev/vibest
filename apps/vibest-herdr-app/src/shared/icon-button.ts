@@ -1,8 +1,6 @@
 import { type Context, div, type Element, svg } from "gpui-kit"
 
-import type { Theme } from "./theme.ts"
-
-export const TRAFFIC_LIGHTS_INSET = 90
+import type { Theme } from "./theme-colors.ts"
 
 export const icon = (name: string): string => `mods/workspace-chrome/${name}.svg`
 

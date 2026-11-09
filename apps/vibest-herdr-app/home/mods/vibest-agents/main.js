@@ -1,16 +1,35 @@
 // src/panel/agents/vibest-agents.ts
 import { View } from "gpui-kit";
+import { appHome, exec } from "herdr";
 
-// src/shared/theme.ts
+// src/shared/theme-colors.ts
 import { theme } from "herdr";
 var themeColors = () => theme();
 
-// src/panel/agents/view.ts
-import { h_flex, v_flex } from "gpui-base";
-import { div } from "gpui-kit";
-import { appHome, exec } from "herdr";
+// src/panel/agents/pull.ts
+var idlePull = () => ({ token: 0, closed: false, running: false, again: false });
+var requestPull = (pull) => {
+  if (pull.closed)
+    return pull;
+  if (pull.running)
+    return { ...pull, again: true };
+  return { token: pull.token + 1, closed: false, running: true, again: false };
+};
+var completePull = (pull, token) => {
+  if (pull.closed || token !== pull.token)
+    return { pull, apply: false };
+  if (pull.again)
+    return { apply: false, pull: { token: pull.token + 1, closed: false, running: true, again: false } };
+  return { apply: true, pull: { ...pull, running: false } };
+};
+var closePull = (pull) => ({
+  token: pull.token + 1,
+  closed: true,
+  running: false,
+  again: false
+});
 
-// src/panel/agents/cli.ts
+// src/panel/agents/vibest-ls.ts
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
 var LS_ARGV = [...STRIPPED.flatMap((name) => ["-u", name]), "vibest", "ls"];
 var commandNote = (result, fallback) => {
@@ -72,9 +91,29 @@ var parseSessions = (stdout) => {
   }
   return rows;
 };
+var readLsResult = (result, now) => {
+  if (result.code !== 0)
+    return { sessions: [], note: commandNote(result, "vibest ls failed"), asOf: "" };
+  const sessions = parseSessions(result.stdout);
+  if (sessions === undefined)
+    return { sessions: [], note: "vibest ls was not understood", asOf: "" };
+  return {
+    sessions,
+    note: sessions.length === 0 ? "No live sessions." : "",
+    asOf: now.toISOString().slice(11, 19)
+  };
+};
+var lsFailure = (error) => ({
+  sessions: [],
+  note: commandNote({ code: 1, stdout: "", stderr: error instanceof Error ? error.message : "vibest could not be run" }, "vibest could not be run"),
+  asOf: ""
+});
 
-// src/panel/agents/model.ts
-var idlePull = () => ({ token: 0, closed: false, running: false, again: false });
+// src/panel/agents/view.ts
+import { h_flex, v_flex } from "gpui-base";
+import { div } from "gpui-kit";
+
+// src/panel/agents/sessions.ts
 var rowNote = (session) => {
   if (session.runtime !== "hc")
     return `runtime ${session.runtime || "unknown"}`;
@@ -113,35 +152,25 @@ var groupSessions = (rows) => {
     return [{ projectId, label, sessions }];
   });
 };
-var requestPull = (pull) => {
-  if (pull.closed)
-    return pull;
-  if (pull.running)
-    return { ...pull, again: true };
-  return { token: pull.token + 1, closed: false, running: true, again: false };
-};
-var completePull = (pull, token) => {
-  if (pull.closed || token !== pull.token)
-    return { pull, apply: false };
-  if (pull.again)
-    return { apply: false, pull: { token: pull.token + 1, closed: false, running: true, again: false } };
-  return { apply: true, pull: { ...pull, running: false } };
-};
-var closePull = (pull) => ({
-  token: pull.token + 1,
-  closed: true,
-  running: false,
-  again: false
-});
 var sessionStatus = (row) => row.turnState === "" || row.turnState === "none" ? row.status : `${row.status}/${row.turnState}`;
 
 // src/panel/agents/view.ts
-class AgentList {
-  sessions = [];
-  note = "Reading vibestd…";
-  asOf = "";
-  pull = idlePull();
-  constructor(cx) {
+var sessionRow2 = (t, session) => h_flex().id(`session-${session.id}`).gap(8).px(2).py(2).items_center().rounded(4).tooltip(rowTooltip(session)).child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(rowTitle(session))).child(div().flex_none().text_color(t.muted).child(sessionStatus(session))).child(div().flex_none().text_color(t.dim).child(shortId(session)));
+var agentsView = (t, shown, refresh) => {
+  const rows = groupSessions(shown.sessions).flatMap((group) => [
+    div().id(`project-${group.projectId}`).truncate().text_color(t.dim).child(projectHeading(group.projectId, group.label)),
+    ...group.sessions.map((session) => sessionRow2(t, session))
+  ]);
+  return v_flex().id("agents").size_full().bg(t.background).border(1).border_color(t.border).rounded(10).p(10).gap(6).text_size(12).overflow_y_scrollbar().child(h_flex().gap(8).items_center().child(div().font_semibold().text_color(t.foreground).child("Agents")).child(div().flex_1()).child(div().id("agents-refresh").px(6).py(2).rounded(4).cursor_pointer().text_color(t.foreground).hover((el) => el.bg(t.hover)).on_click((_event, clicked) => refresh(clicked)).child("Refresh"))).when(shown.note !== "", (el) => el.child(div().text_color(t.muted).child(shown.note))).when(shown.asOf !== "", (el) => el.child(div().text_color(t.dim).child(snapshotNote(shown.asOf)))).children(rows);
+};
+
+// src/panel/agents/vibest-agents.ts
+class Agents extends View {
+  shown;
+  pull;
+  init(_props, cx) {
+    this.shown = { sessions: [], note: "Reading vibestd…", asOf: "" };
+    this.pull = idlePull();
     this.request(cx);
   }
   close() {
@@ -151,74 +180,24 @@ class AgentList {
     const next = requestPull(this.pull);
     const started = !this.pull.running && next.running;
     this.pull = next;
-    if (!started)
-      return;
-    const token = next.token;
+    if (started)
+      this.spawnRead(cx, next.token);
+  }
+  spawnRead(cx, token) {
     cx.spawn(async (spawned) => {
-      await this.read(spawned, token);
+      const result = await exec("env", [...LS_ARGV], { cwd: appHome() }).then((listed) => readLsResult(listed, new Date), lsFailure);
+      const done = completePull(this.pull, token);
+      this.pull = done.pull;
+      if (done.apply) {
+        this.shown = result;
+        spawned.notify();
+      }
+      if (this.pull.running)
+        this.spawnRead(spawned, this.pull.token);
     });
   }
-  async read(cx, token) {
-    let note = "";
-    let asOf = "";
-    let sessions = [];
-    try {
-      const listed = await exec("env", [...LS_ARGV], { cwd: appHome() });
-      if (listed.code !== 0)
-        note = commandNote(listed, "vibest ls failed");
-      else {
-        const parsed = parseSessions(listed.stdout);
-        if (parsed === undefined)
-          note = "vibest ls was not understood";
-        else {
-          sessions = parsed;
-          asOf = new Date().toISOString().slice(11, 19);
-          note = parsed.length === 0 ? "No live sessions." : "";
-        }
-      }
-    } catch (error) {
-      note = commandNote({ code: 1, stdout: "", stderr: error instanceof Error ? error.message : "vibest could not be run" }, "vibest could not be run");
-    }
-    const done = completePull(this.pull, token);
-    this.pull = done.pull;
-    if (done.apply) {
-      this.sessions = sessions;
-      this.note = note;
-      this.asOf = asOf;
-      cx.notify();
-    }
-    if (this.pull.running) {
-      const follow = this.pull.token;
-      cx.spawn(async (spawned) => {
-        await this.read(spawned, follow);
-      });
-    }
-  }
-  sessionRow(colors, session) {
-    return h_flex().id(`session-${session.id}`).gap(8).px(2).py(2).items_center().rounded(4).tooltip(rowTooltip(session)).child(div().flex_1().min_w(0).truncate().text_color(colors.foreground).child(rowTitle(session))).child(div().flex_none().text_color(colors.muted).child(sessionStatus(session))).child(div().flex_none().text_color(colors.dim).child(shortId(session)));
-  }
-  render(colors) {
-    const rows = groupSessions(this.sessions).flatMap((group) => [
-      div().id(`project-${group.projectId}`).truncate().text_color(colors.dim).child(projectHeading(group.projectId, group.label)),
-      ...group.sessions.map((session) => this.sessionRow(colors, session))
-    ]);
-    return v_flex().id("agents").size_full().bg(colors.background).border(1).border_color(colors.border).rounded(10).p(10).gap(6).text_size(12).overflow_y_scrollbar().child(h_flex().gap(8).items_center().child(div().font_semibold().text_color(colors.foreground).child("Agents")).child(div().flex_1()).child(div().id("agents-refresh").px(6).py(2).rounded(4).cursor_pointer().text_color(colors.foreground).hover((el) => el.bg(colors.hover)).on_click((_event, clicked) => {
-      this.request(clicked);
-    }).child("Refresh"))).when(this.note !== "", (el) => el.child(div().text_color(colors.muted).child(this.note))).when(this.asOf !== "", (el) => el.child(div().text_color(colors.dim).child(snapshotNote(this.asOf)))).children(rows);
-  }
-}
-
-// src/panel/agents/vibest-agents.ts
-class Agents extends View {
-  list;
-  init(_props, cx) {
-    this.list = new AgentList(cx);
-  }
-  close() {
-    this.list.close();
-  }
   render() {
-    return this.list.render(themeColors());
+    return agentsView(themeColors(), this.shown, (cx) => this.request(cx));
   }
 }
 export {

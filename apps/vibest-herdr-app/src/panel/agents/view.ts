@@ -1,144 +1,71 @@
 import { h_flex, v_flex } from "gpui-base"
 import { type Context, div, type Element } from "gpui-kit"
-import { appHome, exec } from "herdr"
 
-import type { Theme } from "../../shared/theme.ts"
-import { commandNote, LS_ARGV, parseSessions, type SessionRow } from "./cli.ts"
+import type { Theme } from "../../shared/theme-colors.ts"
 import {
-  closePull,
-  completePull,
   groupSessions,
-  idlePull,
   projectHeading,
-  type Pull,
-  requestPull,
   rowTitle,
   rowTooltip,
   sessionStatus,
   shortId,
   snapshotNote,
-} from "./model.ts"
+} from "./sessions.ts"
+import type { LsResult, SessionRow } from "./vibest-ls.ts"
 
-export class AgentList {
-  sessions: readonly SessionRow[] = []
-  note = "Reading vibestd…"
-  asOf = ""
-  pull: Pull = idlePull()
+const sessionRow = (t: Theme, session: SessionRow): Element =>
+  h_flex()
+    .id(`session-${session.id}`)
+    .gap(8)
+    .px(2)
+    .py(2)
+    .items_center()
+    .rounded(4)
+    .tooltip(rowTooltip(session))
+    .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(rowTitle(session)))
+    .child(div().flex_none().text_color(t.muted).child(sessionStatus(session)))
+    .child(div().flex_none().text_color(t.dim).child(shortId(session)))
 
-  constructor(cx: Context) {
-    this.request(cx)
-  }
-
-  close(): void {
-    this.pull = closePull(this.pull)
-  }
-
-  request(cx: Context): void {
-    const next = requestPull(this.pull)
-    const started = !this.pull.running && next.running
-    this.pull = next
-    if (!started) return
-    const token = next.token
-    cx.spawn(async (spawned) => {
-      await this.read(spawned, token)
-    })
-  }
-
-  async read(cx: Context, token: number): Promise<void> {
-    let note = ""
-    let asOf = ""
-    let sessions: readonly SessionRow[] = []
-    try {
-      const listed = await exec("env", [...LS_ARGV], { cwd: appHome() })
-      if (listed.code !== 0) note = commandNote(listed, "vibest ls failed")
-      else {
-        const parsed = parseSessions(listed.stdout)
-        if (parsed === undefined) note = "vibest ls was not understood"
-        else {
-          sessions = parsed
-          asOf = new Date().toISOString().slice(11, 19)
-          note = parsed.length === 0 ? "No live sessions." : ""
-        }
-      }
-    } catch (error) {
-      note = commandNote(
-        { code: 1, stdout: "", stderr: error instanceof Error ? error.message : "vibest could not be run" },
-        "vibest could not be run",
-      )
-    }
-    const done = completePull(this.pull, token)
-    this.pull = done.pull
-    if (done.apply) {
-      this.sessions = sessions
-      this.note = note
-      this.asOf = asOf
-      cx.notify()
-    }
-    if (this.pull.running) {
-      const follow = this.pull.token
-      cx.spawn(async (spawned) => {
-        await this.read(spawned, follow)
-      })
-    }
-  }
-
-  sessionRow(colors: Theme, session: SessionRow): Element {
-    return h_flex()
-      .id(`session-${session.id}`)
-      .gap(8)
-      .px(2)
-      .py(2)
-      .items_center()
-      .rounded(4)
-      .tooltip(rowTooltip(session))
-      .child(div().flex_1().min_w(0).truncate().text_color(colors.foreground).child(rowTitle(session)))
-      .child(div().flex_none().text_color(colors.muted).child(sessionStatus(session)))
-      .child(div().flex_none().text_color(colors.dim).child(shortId(session)))
-  }
-
-  render(colors: Theme): Element {
-    const rows = groupSessions(this.sessions).flatMap((group) => [
-      div()
-        .id(`project-${group.projectId}`)
-        .truncate()
-        .text_color(colors.dim)
-        .child(projectHeading(group.projectId, group.label)),
-      ...group.sessions.map((session) => this.sessionRow(colors, session)),
-    ])
-    return v_flex()
-      .id("agents")
-      .size_full()
-      .bg(colors.background)
-      .border(1)
-      .border_color(colors.border)
-      .rounded(10)
-      .p(10)
-      .gap(6)
-      .text_size(12)
-      .overflow_y_scrollbar()
-      .child(
-        h_flex()
-          .gap(8)
-          .items_center()
-          .child(div().font_semibold().text_color(colors.foreground).child("Agents"))
-          .child(div().flex_1())
-          .child(
-            div()
-              .id("agents-refresh")
-              .px(6)
-              .py(2)
-              .rounded(4)
-              .cursor_pointer()
-              .text_color(colors.foreground)
-              .hover((el) => el.bg(colors.hover))
-              .on_click((_event, clicked) => {
-                this.request(clicked)
-              })
-              .child("Refresh"),
-          ),
-      )
-      .when(this.note !== "", (el) => el.child(div().text_color(colors.muted).child(this.note)))
-      .when(this.asOf !== "", (el) => el.child(div().text_color(colors.dim).child(snapshotNote(this.asOf))))
-      .children(rows)
-  }
+export const agentsView = (t: Theme, shown: LsResult, refresh: (cx: Context) => void): Element => {
+  const rows = groupSessions(shown.sessions).flatMap((group) => [
+    div()
+      .id(`project-${group.projectId}`)
+      .truncate()
+      .text_color(t.dim)
+      .child(projectHeading(group.projectId, group.label)),
+    ...group.sessions.map((session) => sessionRow(t, session)),
+  ])
+  return v_flex()
+    .id("agents")
+    .size_full()
+    .bg(t.background)
+    .border(1)
+    .border_color(t.border)
+    .rounded(10)
+    .p(10)
+    .gap(6)
+    .text_size(12)
+    .overflow_y_scrollbar()
+    .child(
+      h_flex()
+        .gap(8)
+        .items_center()
+        .child(div().font_semibold().text_color(t.foreground).child("Agents"))
+        .child(div().flex_1())
+        .child(
+          div()
+            .id("agents-refresh")
+            .px(6)
+            .py(2)
+            .rounded(4)
+            .cursor_pointer()
+            .text_color(t.foreground)
+            .hover((el) => el.bg(t.hover))
+            .on_click((_event, clicked) => refresh(clicked))
+            .child("Refresh"),
+        ),
+    )
+    .when(shown.note !== "", (el) => el.child(div().text_color(t.muted).child(shown.note)))
+    .when(shown.asOf !== "", (el) => el.child(div().text_color(t.dim).child(snapshotNote(shown.asOf))))
+    .children(rows)
 }

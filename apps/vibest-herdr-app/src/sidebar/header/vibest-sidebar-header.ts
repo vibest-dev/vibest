@@ -2,8 +2,8 @@ import { h_flex } from "gpui-base"
 import { div, type Element, View } from "gpui-kit"
 import { window } from "herdr"
 
-import { type Theme, themeColors } from "../shared/theme.ts"
-import { TRAFFIC_LIGHTS_INSET } from "../shared/ui.ts"
+import { type Theme, themeColors } from "../../shared/theme-colors.ts"
+import { TRAFFIC_LIGHTS_INSET } from "../../shared/traffic-lights.ts"
 
 const header = (t: Theme): Element => {
   const w = window()

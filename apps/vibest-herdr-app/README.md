@@ -1,6 +1,6 @@
 # vibest-herdr-app
 
-Vibest's own interface for [herdr-app](https://herdr.dev) **0.1.13**: a layout, two themes and one mod per layout block that shows vibest content. The layout
+Vibest's own interface for [herdr-app](https://herdr.dev) **0.1.13**: a layout, two themes and one mod per layout block that herdr-app's shipped mods do not cover. The layout
 started from T3 Code's look: herdr spaces are projects and their tabs are threads in a 256 px sidebar; a 52 px top
 bar carries the `project / thread` breadcrumb and branch; the middle is the shown tab's terminals; a right panel holds
 Diff (shipped `changes`), Files (shipped `files`) and **Agents**, the vibest sessions of every project.
@@ -17,8 +17,11 @@ Private: not published, not part of a release.
 | `themes/vibest-light.json`, `themes/vibest-dark.json` | optional light and dark themes (see Look)              |
 | `mods/vibest-*/main.js`, `mods/vibest-*/mod.json`     | the mods, built from `src/` (committed; `place: none`) |
 
-The layout also uses the shipped `changes`, `files`, `menu`, `picker` and `machine-add` mods and the icons in
-`mods/workspace-chrome/`.
+The layout uses herdr-app's shipped pieces wherever they do the job: `workspace-chrome` for the sidebar footer
+(Settings, Add machine), `pane` for each terminal card's header (split, zoom, close), `changes` and `files` in the right
+panel, `menu`, `picker` and `machine-add`, the commands, and the icons in `mods/workspace-chrome/`. Our mods cover only
+what nothing shipped does: the Vibest wordmark, threads nested under their projects, the `project / thread` breadcrumb with
+the Agents toggle, and the vibest sessions.
 
 ## Look
 
@@ -37,11 +40,11 @@ root (row)
 ├─ sidebar (column, 256 px)
 │  ├─ sidebar-header   mod vibest-sidebar-header: the Vibest wordmark
 │  ├─ sidebar-threads  mod vibest-sidebar-threads: projects and their threads
-│  └─ sidebar-footer   mod vibest-sidebar-footer: settings, add machine, palette
+│  └─ sidebar-footer   shipped workspace-chrome (footer): settings, add machine
 └─ workspace (column)
-   ├─ topbar           mod vibest-topbar: breadcrumb, branch, split, panel toggles, zoom
+   ├─ topbar           mod vibest-topbar: breadcrumb, branch, panel toggles, window buttons
    └─ workspace-body (row)
-      ├─ terminals     the shown tab's terminals
+      ├─ terminals     the shown tab's terminals, each card headed by the shipped pane mod
       └─ right-panel (stack, hidden, 540 px): changes | files | agents (mod vibest-agents)
 ```
 
@@ -54,16 +57,21 @@ right panel has no frame of its own, because the shipped Diff and Files mods, li
 
 ## Mods
 
-Each layout block that shows vibest content is its own mod, named after its block. `src/` mirrors the layout tree,
-and each mod's entry file carries the mod's name:
+Each of our layout blocks is its own mod, named after its block, with its own folder in `src/` that mirrors the
+layout tree. In a mod folder, the entry `vibest-<block>.ts` reads herdr or vibest and keeps the copy's state; the data
+modules turn what was read into plain values and import nothing from gpui, so the tests cover them; `view.ts` draws.
 
-- `sidebar/vibest-sidebar-header.ts` and `sidebar/vibest-sidebar-footer.ts`;
-- `sidebar/threads/vibest-sidebar-threads.ts`, with `model.ts` (projects, status pills, relative times) and `view.ts`;
-- `workspace/vibest-topbar.ts`;
-- `panel/agents/vibest-agents.ts`, with `cli.ts` (the `vibest ls` command line and parsing its JSON), `model.ts`
-  (grouping, row text, stale-result handling) and `view.ts`;
-- `shared/`: what more than one mod uses: `theme.ts` (the theme colors, typed), `ui.ts` (the icon button) and
-  `thread-title.ts` (threads and top bar).
+- `sidebar/header/`: `vibest-sidebar-header.ts`, the wordmark;
+- `sidebar/threads/`: `vibest-sidebar-threads.ts`, `projects.ts` (spaces and panes to projects and threads, status
+  labels, times, the stored fold), `view.ts`;
+- `workspace/topbar/`: `vibest-topbar.ts`, `topbar-state.ts` (breadcrumb, shown panel, sidebar shown), `view.ts`;
+- `panel/agents/`: `vibest-agents.ts`, `vibest-ls.ts` (the command line, parsing its JSON, the result a read shows),
+  `sessions.ts` (grouping and row text), `pull.ts` (which read's result to keep), `view.ts`;
+- `shared/`: only what two or more mods use: `theme-colors.ts`, `icon-button.ts`, `traffic-lights.ts`,
+  `thread-title.ts`.
+
+A mod cannot import from another mod's folder; `test/mod-folders.test.ts` fails when a file imports from another
+mod folder, or when `shared/` imports from one.
 
 Types come from herdr-app 0.1.13's own `herdr.d.ts` and `gpui-kit.d.ts`, vendored unchanged in
 `types/herdr-app-0.1.13/`; `tsconfig.json` maps `herdr` to the first and uses the compiler options of the

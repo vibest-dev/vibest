@@ -1,23 +1,10 @@
 // src/sidebar/threads/vibest-sidebar-threads.ts
 import { View } from "gpui-kit";
+import { panes, spaces } from "herdr";
 
-// src/shared/theme.ts
+// src/shared/theme-colors.ts
 import { theme } from "herdr";
 var themeColors = () => theme();
-
-// src/sidebar/threads/view.ts
-import { h_flex, v_flex } from "gpui-base";
-import { div as div2, svg as svg2 } from "gpui-kit";
-import { openOverlay, panes, pickFolder, run, spaces } from "herdr";
-
-// src/shared/ui.ts
-import { div, svg } from "gpui-kit";
-var TRAFFIC_LIGHTS_INSET = 90;
-var icon = (name) => `mods/workspace-chrome/${name}.svg`;
-var iconButton = (t, id, name, action, { size = 28, on = false } = {}) => div().id(id).size(size).flex_none().flex().items_center().justify_center().rounded(8).when(on, (el) => el.bg(t.selected)).text_color(on ? t.foreground : t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).cursor_pointer().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => {
-  cx.stop_propagation();
-  action(cx);
-}).child(svg(icon(name)).size(16));
 
 // src/shared/thread-title.ts
 var leading = (s) => s.replace(/^[^\p{L}\p{N}]+/u, "").trim();
@@ -33,7 +20,7 @@ var threadTitle = (tab, tabPanes) => {
   return lead?.program?.agent ? lead.program.name : `Terminal ${tab.index}`;
 };
 
-// src/sidebar/threads/model.ts
+// src/sidebar/threads/projects.ts
 var parseFolded = (stored) => {
   try {
     const value = JSON.parse(stored ?? "[]");
@@ -97,13 +84,109 @@ var PILLS = {
 var pill = (status) => status === null ? null : PILLS[status] ?? null;
 
 // src/sidebar/threads/view.ts
+import { h_flex, v_flex } from "gpui-base";
+import { div as div2, svg as svg2 } from "gpui-kit";
+import { openOverlay, pickFolder, run } from "herdr";
+
+// src/shared/icon-button.ts
+import { div, svg } from "gpui-kit";
+var icon = (name) => `mods/workspace-chrome/${name}.svg`;
+var iconButton = (t, id, name, action, { size = 28, on = false } = {}) => div().id(id).size(size).flex_none().flex().items_center().justify_center().rounded(8).when(on, (el) => el.bg(t.selected)).text_color(on ? t.foreground : t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).cursor_pointer().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => {
+  cx.stop_propagation();
+  action(cx);
+}).child(svg(icon(name)).size(16));
+
+// src/sidebar/threads/view.ts
+class ThreadsView {
+  t;
+  ui;
+  constructor(t, ui) {
+    this.t = t;
+    this.ui = ui;
+  }
+  toolbar(projects) {
+    const t = this.t;
+    const active = projects.find((p) => p.active);
+    return h_flex().px(8).pb(8).gap(4).items_center().flex_none().child(h_flex().id("search").flex_1().h(32).px(8).gap(8).items_center().rounded(6).text_size(14).font_medium().text_color(t.muted).hover((s) => s.bg(t.hover)).cursor_pointer().on_click(() => run("mod.open", { name: "picker" })).child(svg2(icon("search")).size(16)).child("Search")).when(projects.length > 0, (el) => el.child(iconButton(t, "add-project", "folder-plus", (cx) => addProject(cx)))).child(iconButton(t, "new-thread", "square-pen", () => run("tab.new", active ? { space: active.id } : {})));
+  }
+  status(thread) {
+    const t = this.t;
+    const p = pill(thread.status);
+    if (!p)
+      return div2().text_size(12).text_color(t.dim).child(relativeTime(thread.changedAt, this.ui.now));
+    const color = t[p.tone];
+    const dot = div2().size(6).flex_none().rounded_full().bg(color);
+    const since = thread.status === "working" ? elapsed(thread.workingSince, this.ui.now) : "";
+    return h_flex().gap(6).items_center().text_size(12).font_medium().text_color(color).child(p.pulse ? dot.loop("opacity", { from: 0.5, to: 1, period: 2000 }) : dot).child(since ? `${p.label} ${since}` : p.label);
+  }
+  threadRow(project, thread) {
+    const t = this.t;
+    const id = `thread-${thread.id}`;
+    return h_flex().id(id).h(36).pl(36).pr(10).gap(10).items_center().rounded(6).flex_none().border(1).border_color(thread.active ? t.border : t.chrome).bg(thread.active ? t.selected : t.chrome).hover((s) => s.bg(thread.active ? t.selected : t.hover)).cursor_pointer().on_hover(this.ui.hover(id)).on_click(() => {
+      run("space.select", { id: project.id });
+      run("tab.select", { id: thread.id });
+    }).on_mouse_down("right", (_e, cx) => {
+      cx.stop_propagation();
+      openOverlay({
+        mod: "menu",
+        kind: "popup",
+        width: 200,
+        props: { tab: "tab", target: { id: thread.id, space: project.id } }
+      });
+    }).child(div2().flex_1().min_w(0).truncate().text_size(14).font_medium().text_color(t.foreground).child(thread.title)).child(h_flex().h(24).min_w(32).flex_none().justify_end().items_center().child(this.status(thread)));
+  }
+  projectRow(project) {
+    const t = this.t;
+    const id = `project-${project.id}`;
+    const folded = this.ui.folded.has(project.id);
+    const hovered = this.ui.hovered === id;
+    const tone = project.status && project.status !== "idle" ? t[project.status] : null;
+    return h_flex().id(id).h(32).mt(8).px(10).gap(10).items_center().rounded(8).flex_none().hover((s) => s.bg(t.hover)).cursor_pointer().on_hover(this.ui.hover(id)).on_click((_e, cx) => {
+      this.ui.fold(project.id);
+      cx.notify();
+    }).on_mouse_down("right", (_e, cx) => {
+      cx.stop_propagation();
+      openOverlay({
+        mod: "menu",
+        kind: "popup",
+        width: 200,
+        height: 260,
+        props: { tab: "space", target: { id: project.id } }
+      });
+    }).child(svg2(icon("folder")).size(16).flex_none().text_color(t.muted)).child(div2().flex_1().min_w(0).truncate().text_size(14).font_medium().text_color(project.active ? t.foreground : t.muted).child(project.name)).when(Boolean(project.machine), (el) => el.child(div2().flex_none().text_size(12).text_color(t.dim).child(project.machine))).when(folded && tone !== null && !hovered, (el) => el.child(div2().size(6).flex_none().rounded_full().bg(tone))).when(folded && !hovered, (el) => el.child(div2().flex_none().text_size(12).text_color(t.dim).child(String(project.threads.length)))).when(hovered, (el) => el.child(iconButton(t, `new-${project.id}`, "square-pen", () => run("tab.new", { space: project.id }), { size: 24 }))).child(svg2(icon(folded ? "chevron-right" : "chevron-down")).size(12).flex_none().text_color(t.muted));
+  }
+  list(all) {
+    const t = this.t;
+    if (!all.length)
+      return v_flex().flex_1().px(18).pt(16).gap(4).text_size(12).text_color(t.muted).child("No projects yet.").child(div2().id("empty-add").text_color(t.foreground).cursor_pointer().on_click(() => run("space.new")).child("New project"));
+    return v_flex().id("projects").flex_1().min_h(0).px(8).pb(8).overflow_y_scrollbar().children(all.flatMap((project) => [
+      this.projectRow(project),
+      ...this.ui.folded.has(project.id) ? [] : project.threads.map((thread) => this.threadRow(project, thread))
+    ]));
+  }
+  render(projects) {
+    return v_flex().size_full().bg(this.t.chrome).child(this.toolbar(projects)).child(this.list(projects));
+  }
+}
+var addProject = (cx) => {
+  cx.spawn(async () => {
+    const folder = await pickFolder({ prompt: "Add project" });
+    if (folder)
+      run("space.new", { folder });
+  });
+};
+
+// src/sidebar/threads/vibest-sidebar-threads.ts
 var CLOCK_MS = 30000;
 
-class ThreadList {
-  hovered = null;
-  folded = new Set(parseFolded(localStorage.getItem("folded")));
-  now = Date.now();
-  constructor(cx) {
+class SidebarThreads extends View {
+  hovered;
+  folded;
+  now;
+  init(_props, cx) {
+    this.hovered = null;
+    this.folded = new Set(parseFolded(localStorage.getItem("folded")));
+    this.now = Date.now();
     cx.timer.every(CLOCK_MS, (ticked) => {
       this.now = Date.now();
       ticked.notify();
@@ -125,82 +208,8 @@ class ThreadList {
       this.folded.add(id);
     localStorage.setItem("folded", JSON.stringify([...this.folded]));
   }
-  toolbar(t) {
-    const active = spaces().find((s) => s.active);
-    return h_flex().px(8).pb(8).gap(4).items_center().flex_none().child(h_flex().id("search").flex_1().h(32).px(8).gap(8).items_center().rounded(6).text_size(14).font_medium().text_color(t.muted).hover((s) => s.bg(t.hover)).cursor_pointer().on_click(() => run("mod.open", { name: "picker" })).child(svg2(icon("search")).size(16)).child("Search")).when(spaces().length > 0, (el) => el.child(iconButton(t, "add-project", "folder-plus", (cx) => this.addProject(cx)))).child(iconButton(t, "new-thread", "square-pen", () => run("tab.new", active ? { space: active.id } : {})));
-  }
-  addProject(cx) {
-    cx.spawn(async () => {
-      const folder = await pickFolder({ prompt: "Add project" });
-      if (folder)
-        run("space.new", { folder });
-    });
-  }
-  status(t, thread) {
-    const p = pill(thread.status);
-    if (!p)
-      return div2().text_size(12).text_color(t.dim).child(relativeTime(thread.changedAt, this.now));
-    const color = t[p.tone];
-    const dot = div2().size(6).flex_none().rounded_full().bg(color);
-    const since = thread.status === "working" ? elapsed(thread.workingSince, this.now) : "";
-    return h_flex().gap(6).items_center().text_size(12).font_medium().text_color(color).child(p.pulse ? dot.loop("opacity", { from: 0.5, to: 1, period: 2000 }) : dot).child(since ? `${p.label} ${since}` : p.label);
-  }
-  threadRow(t, project, thread) {
-    const id = `thread-${thread.id}`;
-    return h_flex().id(id).h(36).pl(36).pr(10).gap(10).items_center().rounded(6).flex_none().border(1).border_color(thread.active ? t.border : t.chrome).bg(thread.active ? t.selected : t.chrome).hover((s) => s.bg(thread.active ? t.selected : t.hover)).cursor_pointer().on_hover(this.hover(id)).on_click(() => {
-      run("space.select", { id: project.id });
-      run("tab.select", { id: thread.id });
-    }).on_mouse_down("right", (_e, cx) => {
-      cx.stop_propagation();
-      openOverlay({
-        mod: "menu",
-        kind: "popup",
-        width: 200,
-        props: { tab: "tab", target: { id: thread.id, space: project.id } }
-      });
-    }).child(div2().flex_1().min_w(0).truncate().text_size(14).font_medium().text_color(t.foreground).child(thread.title)).child(h_flex().h(24).min_w(32).flex_none().justify_end().items_center().child(this.status(t, thread)));
-  }
-  projectRow(t, project) {
-    const id = `project-${project.id}`;
-    const folded = this.folded.has(project.id);
-    const hovered = this.hovered === id;
-    const tone = project.status && project.status !== "idle" ? t[project.status] : null;
-    return h_flex().id(id).h(32).mt(8).px(10).gap(10).items_center().rounded(8).flex_none().hover((s) => s.bg(t.hover)).cursor_pointer().on_hover(this.hover(id)).on_click((_e, cx) => {
-      this.fold(project.id);
-      cx.notify();
-    }).on_mouse_down("right", (_e, cx) => {
-      cx.stop_propagation();
-      openOverlay({
-        mod: "menu",
-        kind: "popup",
-        width: 200,
-        height: 260,
-        props: { tab: "space", target: { id: project.id } }
-      });
-    }).child(svg2(icon("folder")).size(16).flex_none().text_color(t.muted)).child(div2().flex_1().min_w(0).truncate().text_size(14).font_medium().text_color(project.active ? t.foreground : t.muted).child(project.name)).when(Boolean(project.machine), (el) => el.child(div2().flex_none().text_size(12).text_color(t.dim).child(project.machine))).when(folded && tone !== null && !hovered, (el) => el.child(div2().size(6).flex_none().rounded_full().bg(tone))).when(folded && !hovered, (el) => el.child(div2().flex_none().text_size(12).text_color(t.dim).child(String(project.threads.length)))).when(hovered, (el) => el.child(iconButton(t, `new-${project.id}`, "square-pen", () => run("tab.new", { space: project.id }), { size: 24 }))).child(svg2(icon(folded ? "chevron-right" : "chevron-down")).size(12).flex_none().text_color(t.muted));
-  }
-  list(t) {
-    const all = projects(spaces(), panes());
-    if (!all.length)
-      return v_flex().flex_1().px(18).pt(16).gap(4).text_size(12).text_color(t.muted).child("No projects yet.").child(div2().id("empty-add").text_color(t.foreground).cursor_pointer().on_click(() => run("space.new")).child("New project"));
-    return v_flex().id("projects").flex_1().min_h(0).px(8).pb(8).overflow_y_scrollbar().children(all.flatMap((project) => [
-      this.projectRow(t, project),
-      ...this.folded.has(project.id) ? [] : project.threads.map((thread) => this.threadRow(t, project, thread))
-    ]));
-  }
-  render(t) {
-    return v_flex().size_full().bg(t.chrome).child(this.toolbar(t)).child(this.list(t));
-  }
-}
-
-// src/sidebar/threads/vibest-sidebar-threads.ts
-class SidebarThreads extends View {
-  list;
-  init(_props, cx) {
-    this.list = new ThreadList(cx);
-  }
   render() {
-    return this.list.render(themeColors());
+    return new ThreadsView(themeColors(), this).render(projects(spaces(), panes()));
   }
 }
 export {

@@ -2,7 +2,7 @@ import type { PaneInfo, SpaceInfo, TabInfo } from "herdr"
 import { describe, expect, it } from "vitest"
 
 import { threadTitle } from "../src/shared/thread-title.ts"
-import { elapsed, parseFolded, pill, projects, relativeTime } from "../src/sidebar/threads/model.ts"
+import { elapsed, parseFolded, pill, projects, relativeTime } from "../src/sidebar/threads/projects.ts"
 
 const program = { icon: null as string | null, tint: false, tile: null as string | null, color: null as string | null }
 const shell = { ...program, key: "shell", name: "zsh", agent: false, shell: true }

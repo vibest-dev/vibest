@@ -2,7 +2,7 @@
   "name": "vibest-herdr-app",
   "version": "0.0.1-beta.17",
   "private": true,
-  "description": "Vibest's herdr-app interface: a layout, light and dark themes, and one mod per layout block: a T3 Code style sidebar and top bar, and a panel of vibest sessions.",
+  "description": "Vibest's herdr-app interface: a layout, light and dark themes, and one mod per layout block that herdr-app's shipped mods do not cover: a T3 Code style sidebar and top bar, and a panel of vibest sessions.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,7 +11,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "bun build src/sidebar/vibest-sidebar-header.ts src/sidebar/threads/vibest-sidebar-threads.ts src/sidebar/vibest-sidebar-footer.ts src/workspace/vibest-topbar.ts src/panel/agents/vibest-agents.ts --entry-naming \"[name]/main.[ext]\" --outdir home/mods --format esm --target browser --external gpui-kit --external gpui-base --external herdr",
+    "build": "bun build src/sidebar/header/vibest-sidebar-header.ts src/sidebar/threads/vibest-sidebar-threads.ts src/workspace/topbar/vibest-topbar.ts src/panel/agents/vibest-agents.ts --entry-naming \"[name]/main.[ext]\" --outdir home/mods --format esm --target browser --external gpui-kit --external gpui-base --external herdr",
     "check": "for mod in home/mods/*/; do herdr-app check \"$mod\" || exit 1; done",
     "typecheck": "tsrs --noEmit --fast",
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run apps/vibest-herdr-app"
