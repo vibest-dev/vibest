@@ -1,11 +1,6 @@
 const STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"] as const
 
-export const LS_ARGV: readonly string[] = [
-  ...STRIPPED.flatMap((name) => ["-u", name]),
-  "vibest",
-  "ls",
-  "--all-projects",
-]
+export const LS_ARGV: readonly string[] = [...STRIPPED.flatMap((name) => ["-u", name]), "vibest", "ls"]
 
 export interface SessionRow {
   readonly id: string

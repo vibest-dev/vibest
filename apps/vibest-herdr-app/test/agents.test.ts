@@ -48,7 +48,7 @@ const listed = (row: SessionRow) => ({
 })
 
 describe("agents panel", () => {
-  it("runs vibest ls --all-projects as the owner and shows its error text when it fails", () => {
+  it("runs vibest ls as the owner and shows its error text when it fails", () => {
     assert.deepEqual(LS_ARGV, [
       "-u",
       "VIBEST_SESSION_ID",
@@ -58,7 +58,6 @@ describe("agents panel", () => {
       "VIBEST_PROJECT_ID",
       "vibest",
       "ls",
-      "--all-projects",
     ])
     assert.equal(
       commandNote({ code: 1, stdout: "", stderr: "Forbidden: an agent may not run vibest ls\n" }, "vibest ls failed"),

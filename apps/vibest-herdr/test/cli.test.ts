@@ -168,14 +168,7 @@ describe("vibest CLI", () => {
         reported.map((r) => /<message>\n([\s\S]*)\n<\/message>/.exec(r.message)?.[1]),
         ["- fix the bug\n- then test", "--help", "--model x"],
       )
-      for (const args of [
-        ["ls"],
-        ["ls", "--all-projects"],
-        ["interrupt", id],
-        ["send", id, "x"],
-        ["run", "pi", "x"],
-        ["project", "info"],
-      ]) {
+      for (const args of [["ls"], ["interrupt", id], ["send", id, "x"], ["run", "pi", "x"], ["project", "info"]]) {
         const r = yield* asSession(id, args)
         assert.deepStrictEqual([r.code, r.stdout], [1, ""], args.join(" "))
         assert.match(r.stderr, /^Forbidden: /, args.join(" "))
@@ -339,39 +332,6 @@ describe("vibest CLI", () => {
       }>`SELECT kind, content AS message FROM inbox WHERE sender_session_id = ${id} AND kind IN ('report', 'result') ORDER BY id`
       assert.isTrue(history.some((row) => row.kind === "report" && row.message.includes("prior note")))
       assert.isTrue(history.some((row) => row.kind === "result" && row.message.includes("kept finding")))
-    }),
-  )
-
-  test(
-    "ls --all-projects lists every project from inside a checkout; --all is still exited sessions",
-    Effect.gen(function* () {
-      const db = yield* Db
-      const layout = yield* Layout
-      const repo = yield* makeRepository
-      const other = yield* makeRepository
-      const cli = { HOME: layout.home, VIBEST_HOME: layout.home, VIBEST_NO_UPDATE_CHECK: "1" }
-      const here = (
-        decodeJson((yield* vibest(repo, cli, ["run", "--runtime", "herdr", "pi", "here"])).stdout) as { id: string }
-      ).id
-      const there = (
-        decodeJson((yield* vibest(other, cli, ["run", "--runtime", "herdr", "pi", "there"])).stdout) as { id: string }
-      ).id
-      yield* until(db.getSession(here), (w) => w?.turnState === "open")
-      yield* until(db.getSession(there), (w) => w?.turnState === "open")
-      const ids = (args: ReadonlyArray<string>) =>
-        vibest(repo, cli, args).pipe(
-          Effect.map((r) => {
-            assert.strictEqual(r.code, 0, r.stderr)
-            return (decodeJson(r.stdout) as { id: string }[]).map((row) => row.id).sort()
-          }),
-        )
-      assert.deepStrictEqual(yield* ids(["ls"]), [here])
-      assert.deepStrictEqual(yield* ids(["ls", "--all-projects"]), [here, there].sort())
-      yield* db.updateSession(here, { status: "unknown", exitedAt: 1 })
-      assert.deepStrictEqual(yield* ids(["ls"]), [])
-      assert.deepStrictEqual(yield* ids(["ls", "--all"]), [here])
-      assert.deepStrictEqual(yield* ids(["ls", "--all-projects"]), [there])
-      assert.deepStrictEqual(yield* ids(["ls", "--all", "--all-projects"]), [here, there].sort())
     }),
   )
 

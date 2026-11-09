@@ -9,12 +9,7 @@ import { appHome, exec } from "herdr";
 
 // src/agents/cli.ts
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
-var LS_ARGV = [
-  ...STRIPPED.flatMap((name) => ["-u", name]),
-  "vibest",
-  "ls",
-  "--all-projects"
-];
+var LS_ARGV = [...STRIPPED.flatMap((name) => ["-u", name]), "vibest", "ls"];
 var commandNote = (result, fallback) => {
   if (result.code === 0)
     return "";

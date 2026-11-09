@@ -44,18 +44,21 @@ One mod, `vibest`, draws each part named by its `props.part`. `src/` is split by
 
 - `header.ts`, `footer.ts`, `topbar.ts`, `ui.ts` (the icon button they share);
 - `threads/`: `model.ts` (projects, thread titles, status pills, relative times) and `view.ts`;
-- `agents/`: `cli.ts` (the `vibest ls --all-projects` command line and parsing its JSON),
+- `agents/`: `cli.ts` (the `vibest ls` command line and parsing its JSON),
   `model.ts` (grouping, row text, stale-result handling) and `view.ts`;
 - `host.d.ts`: a hand-copied subset of herdr-app's type files (`herdr.d.ts`, `gpui-kit.d.ts`) for the `herdr`, `gpui-kit`
   and `gpui-base` modules the mod uses.
 
 The Agents panel reads once when it starts and again on **Refresh**; there is no timer. Each read runs, with
 `VIBEST_SESSION_ID`, `VIBEST_AGENT` and `VIBEST_PROJECT_ID` removed so the CLI acts as the owner,
-`vibest ls --all-projects`, which starts vibestd for the user when it is not running, as every vibest client does; a
+`vibest ls` in the herdr-app home, which starts vibestd for the user when it is not running, as every vibest client does; a
 non-zero exit shows its error text. A newer Refresh or the copy closing drops an older result. `exec` is capped at
 30 s and 8 MiB and cannot be cancelled. Rows are grouped by project: the title takes the width, then the status and
 turn state, then the short id; the tooltip has the full id, the harness and, for a session that is not a local herdr-core
 terminal, why. The panel does not focus terminals: herdr-app does not name the core of this window.
+
+The panel expects the herdr-app home to be outside a git repository: `vibest ls` lists every project only when it runs
+outside one, and inside a checkout it would list that project's sessions only.
 
 The mod runs in herdr-app's gpui-kit JavaScript: no Node, Effect or `setTimeout`, and it cannot import files from
 another mod's folder, so `scripts/build.ts` bundles `src/main.ts` into `home/mods/vibest/main.js` with `gpui-kit`,
