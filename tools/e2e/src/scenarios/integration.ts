@@ -229,10 +229,20 @@ const checks: ReadonlyArray<Check> = [
       await fs.mkdir(solo, { recursive: true })
       await fs.copyFile(compiled, path.join(solo, "vibest"))
       await fs.chmod(path.join(solo, "vibest"), 0o755)
+      const home = path.join(w.root, "solo-home")
+      await fs.mkdir(home)
       const r = await w.run(w.repository, [path.join(solo, "vibest"), "doctor"], {
-        env: { VIBEST_HARNESSES: undefined },
+        env: { VIBEST_HARNESSES: undefined, VIBEST_HOME: home },
         timeoutMs: 120_000,
       })
+      const pid = JSON.parse(await fs.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "{}")) as {
+        pid?: number
+      }
+      if (pid.pid) {
+        try {
+          process.kill(pid.pid, "SIGTERM")
+        } catch {}
+      }
       const resolvedSolo = await fs.realpath(path.join(w.root, "solo"))
       for (const h of ["pi", "claude", "cursor"])
         expect(

@@ -16,7 +16,7 @@ import {
   withVibest,
 } from "@vibest/client/client"
 import * as Guard from "@vibest/core/guard"
-import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
+import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId } from "@vibest/core/harness"
 import { catalogModels } from "@vibest/core/models"
 import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { makeSources } from "@vibest/core/plugin-sources"
@@ -857,24 +857,8 @@ const doctor = Command.make("doctor", {}, () =>
     const sections: Array<{ readonly title: string; readonly findings: ReadonlyArray<Finding> }> = []
     const width = Math.max(...HARNESS_IDS.map((h) => h.length))
 
-    const harnesses = yield* Effect.forEach(
-      HARNESS_IDS,
-      (h) =>
-        preflight(h, null, null).pipe(
-          Effect.map((models): Finding => ({
-            mark: "ok",
-            text: `${h.padEnd(width)}  ${models.length} models, default ${models.find((m) => m.default)?.model ?? "chosen by the harness"}`,
-          })),
-          Effect.catchTag("HarnessUnavailable", (e) =>
-            Effect.succeed<Finding>({ mark: "problem", text: `${h.padEnd(width)}  ${e.message}` }),
-          ),
-        ),
-      { concurrency: "unbounded" },
-    ).pipe(Effect.provide(Harness.layer))
-    sections.push({ title: "Coding agents (the harnesses vibest starts)", findings: harnesses })
     const installs = yield* extraVibests
     if (installs.length > 0) sections.push({ title: "vibest on PATH", findings: installs })
-    const usable = HARNESS_IDS.filter((_, i) => harnesses[i]!.mark === "ok")
 
     const daemon: Array<Finding> = []
     let ping = Option.getOrUndefined(yield* readPing(layout.socket))
@@ -905,6 +889,32 @@ const doctor = Command.make("doctor", {}, () =>
         daemon.push({ mark: "note", text: `this vibest is ${VERSION}; to run it instead: vibest daemon restart` })
     }
     sections.push({ title: "vibestd (the background service)", findings: daemon })
+
+    const harnessNote = (why: string): Finding => ({ mark: "note", text: `not checked: vibestd ${why}` })
+    let usable: Array<string> = []
+    if (!talks) {
+      sections.push({
+        title: "Coding agents (the harnesses vibest starts)",
+        findings: [harnessNote(ping === undefined ? "is not running" : `speaks protocol ${ping.protocol}`)],
+      })
+    } else {
+      const listed = yield* RpcClient.withHeaders(
+        connect(layout.socket).pipe(Effect.flatMap((c) => c["Harnesses.List"]())),
+        protocolHeaders(),
+      ).pipe(Effect.scoped, Effect.option)
+      const harnesses: Array<Finding> = Option.isNone(listed)
+        ? [harnessNote("did not answer")]
+        : listed.value.map((row) =>
+            row.problem
+              ? { mark: "problem" as const, text: `${row.harness.padEnd(width)}  ${row.problem}` }
+              : {
+                  mark: "ok" as const,
+                  text: `${row.harness.padEnd(width)}  ${row.models.length} models, default ${row.models.find((m) => m.default)?.model ?? "chosen by the harness"}`,
+                },
+          )
+      if (Option.isSome(listed)) usable = listed.value.filter((row) => row.problem === null).map((row) => row.harness)
+      sections.push({ title: "Coding agents (the harnesses vibest starts)", findings: harnesses })
+    }
 
     if (talks) {
       const ask = <A, E>(f: (c: VibestClient) => Effect.Effect<A, E>) =>
