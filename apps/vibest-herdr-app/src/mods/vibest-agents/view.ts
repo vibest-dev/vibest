@@ -39,8 +39,6 @@ export const agentsView = (t: Theme, shown: LsResult, refresh: (cx: Context) => 
     .id("agents")
     .size_full()
     .bg(t.background)
-    .border(1)
-    .border_color(t.border)
     .rounded(10)
     .p(10)
     .gap(6)
