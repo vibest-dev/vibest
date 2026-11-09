@@ -1,16 +1,24 @@
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
 import * as VibestPlugin from "@vibest/plugin"
-import { Effect, Layer } from "effect"
-import { defaultSocketPath, Hc, SocketConnector } from "effect-herdr-core-sdk"
+import { Config, Effect, Layer, Option, Stream } from "effect"
+import { DEFAULT_SESSION, defaultSocketPath, Hc, SocketConnector } from "effect-herdr-core-sdk"
 
 import { CALLER_ENV, terminalFrom } from "./caller.ts"
+import * as Machines from "./machines.ts"
 import { KIND, make } from "./terminal-runtime.ts"
 
 const platform = Layer.mergeAll(
   Layer.succeed(SocketConnector, (endpoint: string) => NodeSocket.makeNet({ path: endpoint })),
   NodePath.layer,
 )
+
+const set = (name: string) => Config.option(Config.String(name)).pipe(Config.map(Option.filter((v) => v !== "")))
+
+const hcSession = Effect.gen(function* () {
+  if (Option.isSome(yield* set("HC_SOCKET"))) return ""
+  return Option.getOrElse(yield* set("HC_SESSION"), () => DEFAULT_SESSION)
+})
 
 export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   id: "runtime-herdr-core",
@@ -22,7 +30,34 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
   effect: (context) =>
     Effect.gen(function* () {
       const socket = yield* defaultSocketPath().pipe(Effect.provide(platform), Effect.orDie)
+      const session = yield* hcSession.pipe(Effect.orDie)
       const connect = (socketPath: string) => Effect.runSync(Hc.make(socketPath).pipe(Effect.provide(platform)))
-      yield* context.runtime.register(yield* make({ connect, socket, scope: yield* Effect.scope }))
+      const home = connect(socket)
+      const runtime = yield* make({ connect, socket, scope: yield* Effect.scope })
+      yield* context.runtime.register({
+        ...runtime,
+        link: () =>
+          home.hello.pipe(
+            Effect.map((hello) => ({ core: hello.core.id, session })),
+            Effect.orElseSucceed(() => undefined),
+          ),
+        locate: (machine, sessions) => Machines.locate(home, socket, machine, sessions),
+      })
+      const held = new Map<string, VibestPlugin.MachineEvent>()
+      yield* context.machine.hook("connect", (event) =>
+        Effect.sync(() => held.set(event.name, event)).pipe(Effect.andThen(Machines.connect(home, event))),
+      )
+      yield* context.machine.hook("remove", (event) =>
+        Effect.sync(() => held.delete(event.name)).pipe(Effect.andThen(Machines.remove(home, event))),
+      )
+      yield* runtime.events.pipe(
+        Stream.filter((event) => event.type === "reset"),
+        Stream.runForEach(() =>
+          Effect.forEach([...held.values()], (event) => Machines.connect(home, { ...event, notes: [] }), {
+            discard: true,
+          }),
+        ),
+        Effect.forkScoped,
+      )
     }),
 })

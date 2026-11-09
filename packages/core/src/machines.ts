@@ -10,6 +10,8 @@ import {
   type MachineState,
   MachineUnavailable,
   type OutboxItem,
+  type RuntimeThere,
+  type RuntimeView,
   UnknownMachine,
 } from "@vibest/schema/machine"
 import { Clock, Context, Duration, Effect, Exit, Fiber, Layer, Option, Predicate, Schema, Scope, Stream } from "effect"
@@ -18,6 +20,9 @@ import type * as Socket from "effect/socket/Socket"
 
 import { Db, type MachineRow } from "./db.ts"
 import { VibestdIdentity } from "./identity.ts"
+import { keyedLock } from "./keyed-lock.ts"
+import { errorMessage, type MachineHook, type PluginNote, Plugins } from "./plugins.ts"
+import { Runtimes, type Terminal } from "./runtimes.ts"
 
 export type PipeExit = { readonly code: number | undefined; readonly stderr: string }
 
@@ -36,6 +41,20 @@ export const RETRY_FIRST = Duration.millis(500)
 export const RETRY_MAX = Duration.seconds(120)
 export const RETRY_RESET = Duration.seconds(60)
 const EXIT_WAIT = Duration.seconds(1)
+export const REPAIR_PAUSE = Duration.seconds(30)
+
+export const cannotShow = (name: string, kind: string) =>
+  `${name}'s ${kind} terminals cannot be shown here; vibest peek ${name}/<id> reads them`
+
+export const noteText = (note: PluginNote) => `${note.message}${note.fix === undefined ? "" : `; fix: ${note.fix}`}`
+
+export interface View {
+  readonly terminals: ReadonlyMap<string, Terminal>
+  readonly as?: string | undefined
+  readonly note?: string | undefined
+}
+
+const NONE: ReadonlyMap<string, Terminal> = new Map()
 
 export const REMOTE_LINE = `sh -c 'p=$(command -v vibest) || p=$HOME/.local/bin/vibest; [ -x "$p" ] || { echo "vibest is not installed here" >&2; exit 127; }; exec "$p" connect'`
 
@@ -124,8 +143,92 @@ const make = Effect.gen(function* () {
   const self = yield* VibestdIdentity
   const transport = yield* MachineTransport
   const scope = yield* Effect.scope
+  const plugins = yield* Plugins
+  const runtimes = yield* Runtimes
   const entries = new Map<string, Entry>()
   const fibers = new Map<string, Fiber.Fiber<void>>()
+  const there = new Map<string, { readonly runtimes: ReadonlyArray<RuntimeThere>; readonly at: number }>()
+  const noted = new Map<string, Map<string, { readonly notes: ReadonlyArray<PluginNote>; readonly at: number }>>()
+  const repairs = new Map<string, { readonly at: number; readonly note: string }>()
+  const lock = keyedLock<string>()
+
+  const heard = (name: string, runtimes: ReadonlyArray<RuntimeThere> | undefined) =>
+    Effect.map(Clock.currentTimeMillis, (at) => void there.set(name, { runtimes: runtimes ?? [], at }))
+
+  const fire = (row: MachineRow, hook: MachineHook, only?: string) =>
+    Effect.gen(function* () {
+      const fired = yield* plugins.machine(
+        hook,
+        { name: row.name, target: row.target, vibestd: row.vibestdId, runtimes: there.get(row.name)?.runtimes ?? [] },
+        only,
+      )
+      if (hook === "connect") {
+        const at = yield* Clock.currentTimeMillis
+        const kept = noted.get(row.name) ?? new Map()
+        for (const plugin of fired.plugins) {
+          const notes = fired.notes.filter((note) => note.plugin === plugin)
+          if (notes.length === 0) kept.delete(plugin)
+          else kept.set(plugin, { notes, at })
+        }
+        noted.set(row.name, kept)
+      }
+      return fired.notes
+    })
+
+  const coreNotes = (name: string) =>
+    Effect.map(runtimes.all, (here) =>
+      (there.get(name)?.runtimes ?? [])
+        .filter((r) => !here.some((h) => h.kind === r.kind && h.locate !== undefined))
+        .map((r): PluginNote => ({ message: cannotShow(name, r.kind) })),
+    )
+
+  const ensure = (name: string, kind: string, sessions: ReadonlyArray<string>, always = false) =>
+    lock.withLock(name)(
+      Effect.gen(function* () {
+        const row = yield* db.machineNamed(name)
+        const locate = (yield* runtimes.all).find((r) => r.kind === kind)?.locate
+        if (row === undefined || locate === undefined) return { terminals: NONE, note: cannotShow(name, kind) } as View
+        const seen = there.get(name)
+        const reported = seen?.runtimes.find((r) => r.kind === kind)
+        if (reported?.link === undefined)
+          return {
+            terminals: NONE,
+            note:
+              seen === undefined
+                ? `${name} has not answered since vibestd started`
+                : reported === undefined
+                  ? `${name} has no ${kind} runtime`
+                  : `${kind} on ${name} is ${reported.status}${reported.reason ? ` (${reported.reason})` : ""}`,
+          } as View
+        const look = locate({ id: name, target: row.target, link: reported.link }, sessions).pipe(
+          Effect.catchCause((cause) =>
+            Effect.succeed({
+              missing: false,
+              terminals: NONE,
+              note: `${kind} here could not look for ${name}: ${errorMessage(cause)}`,
+            }),
+          ),
+        )
+        const first = yield* look
+        if (!first.missing) return first as View
+        const key = `${name}\0${kind}`
+        const now = yield* Clock.currentTimeMillis
+        const last = repairs.get(key)
+        if (!always && last !== undefined && now - last.at < Duration.toMillis(REPAIR_PAUSE))
+          return { terminals: NONE, note: last.note } as View
+        const owner = yield* plugins.ownerOf(kind)
+        const notes = owner === undefined ? [] : yield* fire(row, "connect", owner)
+        const again = yield* look
+        if (!again.missing) {
+          repairs.delete(key)
+          return again as View
+        }
+        const note =
+          again.note ?? (notes.map(noteText).join("; ") || `${name}'s ${kind} terminals are not in ${kind} here`)
+        repairs.set(key, { at: now, note })
+        return { terminals: NONE, note } as View
+      }),
+    )
 
   const set = (name: string, entry: Omit<Entry, "since">) =>
     Effect.gen(function* () {
@@ -229,12 +332,14 @@ const make = Effect.gen(function* () {
           answered: opened.hello.id,
         })
       yield* db.machineConnected(row.name)
+      yield* heard(row.name, opened.hello.runtimes)
       yield* set(row.name, {
         state: "connected",
         vibestd: opened.hello.name,
         version: opened.version,
         link: opened.link,
       })
+      if (first === undefined) yield* Effect.forkScoped(lock.withLock(row.name)(fire(row, "connect")))
       const link = opened.link
       const outbox = link.client["Peer.Outbox"](undefined, { headers: peerHeaders(self.id) }).pipe(
         Stream.runForEach((item) => receive(row.name, link, item)),
@@ -293,6 +398,19 @@ const make = Effect.gen(function* () {
       fibers.set(name, yield* Effect.forkIn(supervise(name, first), scope, { startImmediately: true }))
     })
 
+  yield* plugins.activated.pipe(
+    Stream.runForEach((started) =>
+      Effect.flatMap(db.machines, (rows) =>
+        Effect.forEach(
+          rows.filter((row) => entries.get(row.name)?.state === "connected"),
+          (row) => Effect.forEach(started, (plugin) => lock.withLock(row.name)(fire(row, "connect", plugin))),
+          { concurrency: "unbounded", discard: true },
+        ),
+      ),
+    ),
+    Effect.forkIn(scope, { startImmediately: true }),
+  )
+
   for (const row of yield* db.machines) yield* start(row.name)
 
   const failed = (message: string) => new MachineFailed({ message })
@@ -307,6 +425,25 @@ const make = Effect.gen(function* () {
               ? `still connecting to ${name}`
               : `${name} is ${entry.state}${entry.reason ? `: ${entry.reason}` : ""}`,
         })
+
+  const states = Effect.map(db.machines, (rows) =>
+    rows.map((row) => {
+      const entry = entries.get(row.name) ?? { state: "connecting" as const, since: row.connectedAt }
+      const connected = entry.state === "connected"
+      const info: MachineInfo = {
+        name: row.name,
+        target: row.target,
+        id: row.vibestdId,
+        state: entry.state,
+        since: entry.since,
+        ...(entry.reason === undefined || connected ? {} : { reason: entry.reason }),
+        connectedAt: row.connectedAt,
+        ...(connected && entry.vibestd !== undefined ? { vibestd: entry.vibestd } : {}),
+        ...(connected && entry.version !== undefined ? { version: entry.version } : {}),
+      }
+      return { info, link: connected ? entry.link : undefined }
+    }),
+  )
 
   return {
     add: (name: string, target: string) =>
@@ -336,36 +473,75 @@ const make = Effect.gen(function* () {
           return yield* failed(alreadyNamed(name))
         }
         yield* start(name, { row: added, opened, scope: pipe })
-        return { name, id, vibestd: opened.hello.name, version: opened.version }
+        yield* heard(name, opened.hello.runtimes)
+        const notes = yield* lock.withLock(name)(fire(added, "connect"))
+        return {
+          name,
+          id,
+          vibestd: opened.hello.name,
+          version: opened.version,
+          notes: [...(yield* coreNotes(name)), ...notes],
+        }
       }),
 
-    states: Effect.map(db.machines, (rows) =>
-      rows.map((row) => {
-        const entry = entries.get(row.name) ?? { state: "connecting" as const, since: row.connectedAt }
-        const connected = entry.state === "connected"
-        const info: MachineInfo = {
-          name: row.name,
-          target: row.target,
-          id: row.vibestdId,
-          state: entry.state,
-          since: entry.since,
-          ...(entry.reason === undefined || connected ? {} : { reason: entry.reason }),
-          connectedAt: row.connectedAt,
-          ...(connected && entry.vibestd !== undefined ? { vibestd: entry.vibestd } : {}),
-          ...(connected && entry.version !== undefined ? { version: entry.version } : {}),
-        }
-        return { info, link: connected ? entry.link : undefined }
-      }),
+    ensure,
+
+    listing: Effect.flatMap(states, (rows) =>
+      Effect.forEach(
+        rows,
+        ({ info }) =>
+          Effect.gen(function* () {
+            const seen = there.get(info.name)
+            const views = yield* Effect.forEach(
+              seen?.runtimes ?? [],
+              (r) =>
+                (info.state === "connected"
+                  ? ensure(info.name, r.kind, [])
+                  : Effect.succeed<View>({ terminals: NONE, note: `${info.name} is ${info.state}` })
+                ).pipe(
+                  Effect.map((view): RuntimeView => ({
+                    kind: r.kind,
+                    status: r.status,
+                    ...(r.reason === undefined ? {} : { reason: r.reason }),
+                    here: {
+                      visible: view.note === undefined,
+                      ...(view.as === undefined ? {} : { as: view.as }),
+                      ...(view.note === undefined ? {} : { note: view.note }),
+                    },
+                  })),
+                ),
+              { concurrency: "unbounded" },
+            )
+            const notes = [...(noted.get(info.name)?.values() ?? [])].flatMap((kept) =>
+              kept.notes.map((note) => ({ ...note, at: kept.at })),
+            )
+            return {
+              ...info,
+              runtimes: views,
+              ...(seen === undefined ? {} : { runtimesAt: seen.at }),
+              notes,
+            } satisfies MachineInfo
+          }),
+        { concurrency: "unbounded" },
+      ),
     ),
+
+    states,
 
     remove: (name: string) =>
       Effect.gen(function* () {
+        const row = yield* db.machineNamed(name)
         const fiber = fibers.get(name)
         fibers.delete(name)
         if (fiber !== undefined) yield* Fiber.interrupt(fiber)
         entries.delete(name)
-        if (!(yield* db.removeMachine(name)))
+        if (row === undefined || !(yield* db.removeMachine(name)))
           return yield* new UnknownMachine({ machine: name, machines: (yield* db.machines).map((row) => row.name) })
+        const notes = yield* lock.withLock(name)(fire(row, "remove"))
+        there.delete(name)
+        noted.delete(name)
+        for (const key of repairs.keys()) if (key.startsWith(`${name}\0`)) repairs.delete(key)
+        return { notes }
       }),
 
     link: (name: string) =>

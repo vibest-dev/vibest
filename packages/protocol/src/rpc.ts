@@ -4,11 +4,13 @@ import {
   MachineFailed,
   MachineIncompatible,
   MachineInfo,
+  MachineNote,
   MachineUnavailable,
   NoCommit,
   NoProject,
   OutboxItem,
   PromptTooLarge,
+  RuntimeThere,
   UnknownMachine,
 } from "@vibest/schema/machine"
 import { MessageStatus } from "@vibest/schema/model"
@@ -240,6 +242,7 @@ export const SessionInfo = Schema.Struct({
     }),
   ),
   machine: Schema.optional(Schema.String),
+  view: Schema.optional(Schema.String),
 })
 export type SessionInfo = typeof SessionInfo.Type
 
@@ -319,6 +322,7 @@ export class VibestRpcs extends RpcGroup.make(
           provider: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
           ...Routing.fields,
+          notes: Schema.optional(Schema.Array(MachineNote)),
         }),
         error: Schema.Union([
           InvalidCaller,
@@ -445,7 +449,11 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     Rpc.make("Peek", {
       payload: { id: Schema.String, lines: Schema.optional(Schema.Number) },
-      success: Schema.Struct({ text: Schema.String }),
+      success: Schema.Struct({
+        text: Schema.String,
+        terminal: Schema.optional(Schema.String),
+        view: Schema.optional(Schema.String),
+      }),
       error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, NoRuntime, RuntimeUnreachable, ...LINE_ERRORS]),
     }),
   ),
@@ -708,7 +716,12 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     Rpc.make("Peer.Hello", {
       payload: { id: Schema.String, name: Schema.String, callsMe: Schema.String },
-      success: Schema.Struct({ id: Schema.String, name: Schema.String, version: Schema.String }),
+      success: Schema.Struct({
+        id: Schema.String,
+        name: Schema.String,
+        version: Schema.String,
+        runtimes: Schema.optional(Schema.Array(RuntimeThere)),
+      }),
       error: Forbidden,
     }),
   ),
@@ -766,6 +779,7 @@ export class VibestRpcs extends RpcGroup.make(
         id: Schema.String,
         vibestd: Schema.String,
         version: Schema.String,
+        notes: Schema.Array(MachineNote),
       }),
       error: Schema.Union([Forbidden, MachineFailed, MachineIncompatible, AlreadyAdded]),
     }),
@@ -774,6 +788,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     Rpc.make("Machine.Remove", {
       payload: { name: Schema.String },
+      success: Schema.Struct({ notes: Schema.Array(MachineNote) }),
       error: Schema.Union([Forbidden, UnknownMachine]),
     }),
   ),

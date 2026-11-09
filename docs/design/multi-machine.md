@@ -170,6 +170,51 @@ delivery and the redelivery, the key sits on the old entry, which is neither of 
 is written. The outbox stream failing (the 10 s ping timeout of a held pipe, for one) counts as the connection going
 down.
 
+## Terminals on other machines
+
+vibest's machine list is the source of truth, and a runtime that can show other machines' terminals mirrors it: it
+gets B when vibest adds or reaches B, gets it back whenever vibest needs it and finds it gone, and loses it at
+`vibest machine rm`. The transport stays vibest's own ssh pipe; the view is an extra on top of it.
+
+- **What B tells A.** `Peer.Hello` answers `runtimes`: every runtime loaded on B with its `status`, `reason` and
+  `link`, an opaque record from the runtime's optional `link()` member (hc: `{core: <B's hc core id>, session: <B's hc
+  session, or "" when B's vibestd reached its core through HC_SOCKET>}`). A keeps the last list per machine in memory
+  with its time.
+- **The hooks.** `machine.connect` ("make sure your runtime has this machine") and `machine.remove` ("make sure it
+  does not") carry `{name, target, vibestd, runtimes, notes}`. `connect` fires inside `Machine.Add` after the row is
+  stored (its notes go into the answer), at every reconnect and every connect after vibestd starts, after each plugin
+  activation for every connected machine (only to the plugins that activation started), and at the moment of use
+  (below, only to the plugin that registered that runtime kind). `remove` fires in `Machine.Remove` after the row is
+  deleted, with the last Hello's runtimes (none after a vibestd restart with B unreachable); its notes go into the
+  answer. A hook never fails a command; its trouble is a note with a fix. Fires and uses for one machine run one at a
+  time.
+- **`ensure`: check and repair at the moment of use.** Before `List` and `Get` rewrite a remote row of runtime kind
+  `k`, before `Peek` names the terminal, before `machine ls` shows "here", and before `run --machine` sends
+  `Peer.Spawn` with runtime `k`, A asks its runtime of kind `k` with `locate` where B's terminals are. `missing` (the
+  runtime has no machine with the link's id) fires `connect` to the owner plugin and asks again. Still missing: the
+  note is kept for 30 s, during which `ls`, `Get`, `Peek` and `machine ls` show it without trying again; `run
+  --machine` always tries, and still starts the agent, answering the note in `notes`.
+- **The address.** A remote row's `address` becomes A's view: found, `{machine: "local", id: <the terminal id A's
+  runtime takes>}` (hc: `mb/t7@<A's socket>`); not found, `{machine: <name>, id: ""}` and `view` says why (the
+  runtime's note, a failed repair, or `<name>'s <kind> terminals cannot be shown here; vibest peek <name>/<id> reads
+  them` when A has no runtime of that kind with `locate`). `vibest peek` prints `terminal here: <address>` or `not
+  shown here: <view>` on stderr. `Machine.Add` also answers that core note for each kind of B's that A cannot show.
+- **`machine ls`** gives per machine the runtimes of its last Hello (`runtimes`, `runtimesAt`), each with `here:
+  {visible, as?, note?}` from `ensure`, and the last hook notes per plugin with their time (`notes`).
+- **Stepping in.** Keys typed into the terminal on A go through the runtime's own link (A's hc core, B's hc core) to
+  the harness on B. B records the typed turn as any local one, and its result reaches A's main agent once as the
+  `<name>/<id8>: …` notice through B's outbox.
+
+The hc plugin (`runtime-herdr-core/src/machines.ts`) finds its mirror row by the link's core id under any name:
+`connect` adds `{target, name, session}` (never `install`) when there is none, counts `already_added` as done, and
+replaces a `name_taken` row only when it has the same target and session (B's core id changed); another row is the
+user's and gets a note. After an add it waits up to 10 s for the row to leave `connecting`. `remove` removes the rows
+with the link's core id, or without a link the one row with the event's target (several: a note). `locate` reads
+`machine.list` and then `terminal.list` with `vibest.runtime=hc`, keeping the addresses under that row's name whose
+`vibest.session` is one of the sessions. Terminals of other machines in A's own event stream match no session and are
+ignored. Not covered yet: herdr (TUI) and Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote
+row (its own PR); replacing a mirror row when B's vibestd moved to another hc session on the same host.
+
 ## Optional tables
 
 Created when missing at open (schema.md, Optional objects).

@@ -11,6 +11,7 @@ import {
   Latch,
   Layer,
   Option,
+  PubSub,
   Queue,
   Scope,
   Stream,
@@ -25,11 +26,18 @@ export { AgentRefused, Change, HookFailed, PluginInfo, Routing, TraceEntry } fro
 export { type Candidate, pluginEntries, PluginLoader } from "./plugin-sources.ts"
 
 export const DEFAULT_TIMEOUT = Duration.seconds(5)
+export const MACHINE_TIMEOUT = Duration.seconds(30)
 const ACTIVATION_WAIT = Duration.seconds(10)
 const DEBOUNCE = Duration.millis(100)
 const RECHECK = Duration.seconds(1)
 
 type HookName = keyof VibestPlugin.Hooks
+
+export type MachineHook = "connect" | "remove"
+export type MachineEventInput = Omit<VibestPlugin.MachineEvent, "notes">
+export interface PluginNote extends VibestPlugin.MachineNote {
+  readonly plugin?: string
+}
 
 export const describeSpawn = (s: {
   harness: string
@@ -73,7 +81,12 @@ type Registered<N extends HookName> = {
   readonly callback: HookFn<N>
 }
 type HookBuckets = { [N in HookName]: Array<Registered<N>> }
-const emptyBuckets = (): HookBuckets => ({ "agent.start.before": [], "agent.fail": [] })
+const emptyBuckets = (): HookBuckets => ({
+  "agent.start.before": [],
+  "agent.fail": [],
+  "machine.connect": [],
+  "machine.remove": [],
+})
 type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
 export const Builtins = Context.Reference<ReadonlyArray<Candidate>>("vibest/Plugins/Builtins", {
   defaultValue: () => [],
@@ -148,6 +161,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const timeout = options.timeout ?? DEFAULT_TIMEOUT
     const root = yield* Effect.scope
     const ready = yield* Latch.make(true)
+    const activations = yield* PubSub.unbounded<ReadonlyArray<string>>()
+    const owners = new Map<string, string>()
     let slots: ReadonlyArray<Slot> = []
     let dispatching = 0
     const idle = yield* Latch.make(true)
@@ -180,15 +195,15 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             }),
           )
         })
-      const bind = (
-        prefix: "agent",
+      const bind = <D extends "agent" | "machine">(
+        prefix: D,
         register: {
-          [S in VibestPlugin.HookOf<"agent">]: (
-            callback: HookFn<Extract<`agent.${S}`, HookName>>,
+          [S in VibestPlugin.HookOf<D>]: (
+            callback: HookFn<Extract<`${D}.${S}`, HookName>>,
           ) => Effect.Effect<void, never, Scope.Scope>
         },
-      ): VibestPlugin.Domain<"agent"> => ({
-        hook: <S extends VibestPlugin.HookOf<"agent">>(short: S, callback: HookFn<Extract<`agent.${S}`, HookName>>) => {
+      ): VibestPlugin.Domain<D> => ({
+        hook: <S extends VibestPlugin.HookOf<D>>(short: S, callback: HookFn<Extract<`${D}.${S}`, HookName>>) => {
           if (typeof short !== "string" || !Object.hasOwn(register, short)) {
             return Effect.die(
               new Error(
@@ -198,7 +213,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
               ),
             )
           }
-          const call: (callback: HookFn<Extract<`agent.${S}`, HookName>>) => Effect.Effect<void, never, Scope.Scope> =
+          const call: (callback: HookFn<Extract<`${D}.${S}`, HookName>>) => Effect.Effect<void, never, Scope.Scope> =
             register[short]
           return call(callback)
         },
@@ -209,7 +224,23 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           "start.before": (callback) => remember("agent.start.before", callback),
           fail: (callback) => remember("agent.fail", callback),
         }),
-        runtime: { register: (runtime) => runtimes.register(runtime).pipe(Scope.provide(scope)) },
+        machine: bind("machine", {
+          connect: (callback) => remember("machine.connect", callback),
+          remove: (callback) => remember("machine.remove", callback),
+        }),
+        runtime: {
+          register: (runtime) =>
+            runtimes.register(runtime).pipe(
+              Effect.andThen(
+                Effect.acquireRelease(
+                  Effect.sync(() => owners.set(runtime.kind, plugin.id)),
+                  () => Effect.sync(() => owners.get(runtime.kind) === plugin.id && owners.delete(runtime.kind)),
+                ),
+              ),
+              Effect.asVoid,
+              Scope.provide(scope),
+            ),
+        },
         subscription: { report: (input) => subscriptions.report(input) },
       }
       const exit = yield* runBounded(plugin.effect(ctx).pipe(Scope.provide(scope)), scope, timeout)
@@ -284,15 +315,20 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       for (const slot of retired.toReversed())
         if (slot.running) yield* close(slot.running.scope, slot.running.candidate.plugin.id)
       const ids = new Set(slots.flatMap((s) => (s.running ? [s.running.candidate.plugin.id] : [])))
+      const started: Array<string> = []
       for (const candidate of candidates.slice(prefix)) {
         const slot = yield* build(
           candidate,
           retired.find((s) => s.candidate.source === candidate.source),
           ids,
         )
-        if (slot.running) ids.add(slot.running.candidate.plugin.id)
+        if (slot.running) {
+          ids.add(slot.running.candidate.plugin.id)
+          started.push(slot.running.candidate.plugin.id)
+        }
         slots = [...slots, slot]
       }
+      if (started.length > 0) yield* PubSub.publish(activations, started)
     })
 
     const settled = ready.await.pipe(Effect.timeoutOption(ACTIVATION_WAIT), Effect.map(Option.isSome))
@@ -423,6 +459,45 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       )
     })
 
+    const machine = Effect.fn("Plugins.machine")(function* (
+      short: MachineHook,
+      input: MachineEventInput,
+      only?: string,
+    ) {
+      const name = `machine.${short}` as const
+      return yield* withHooks(name, (hooks) =>
+        Effect.gen(function* () {
+          const notes: Array<PluginNote> = []
+          const ran: Array<string> = []
+          const subscribers: ReadonlyArray<
+            Omit<Registered<"machine.connect">, "callback"> & {
+              readonly callback: (event: VibestPlugin.MachineEvent) => Effect.Effect<void>
+            }
+          > = short === "connect" ? bucket(hooks, "machine.connect") : bucket(hooks, "machine.remove")
+          for (const hook of subscribers) {
+            if (only !== undefined && hook.plugin !== only) continue
+            const own: Array<VibestPlugin.MachineNote> = []
+            const exit = yield* runBounded(hook.callback({ ...input, notes: own }), hook.scope, MACHINE_TIMEOUT)
+            hook.stats.calls++
+            ran.push(hook.plugin)
+            notes.push(...own.map((note) => ({ plugin: hook.plugin, ...note })))
+            const problem = Option.isNone(exit)
+              ? `plugin ${hook.plugin} timed out after ${Duration.format(MACHINE_TIMEOUT)}`
+              : Exit.isFailure(exit.value)
+                ? `plugin ${hook.plugin} crashed: ${errorMessage(exit.value.cause)}`
+                : undefined
+            if (problem === undefined) continue
+            if (Option.isNone(exit)) hook.stats.timedOut++
+            else hook.stats.crashed++
+            hook.stats.lastError = problem
+            notes.push({ plugin: hook.plugin, message: problem })
+            yield* Effect.logWarning(`${name} ${input.name}: ${problem}`)
+          }
+          return { plugins: ran, notes }
+        }),
+      )
+    })
+
     const list = settled.pipe(Effect.andThen(Effect.sync(() => slots.map(info))))
     const callers = settled.pipe(
       Effect.andThen(
@@ -434,7 +509,19 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         ),
       ),
     )
-    return { service: Plugins.of({ start, fail, list, callers }), activate, ready }
+    return {
+      service: Plugins.of({
+        start,
+        fail,
+        list,
+        callers,
+        machine,
+        ownerOf: (kind) => Effect.sync(() => owners.get(kind)),
+        activated: Stream.fromPubSub(activations),
+      }),
+      activate,
+      ready,
+    }
   })
 
 export class Plugins extends Context.Service<
@@ -449,6 +536,13 @@ export class Plugins extends Context.Service<
     >
     readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
     readonly callers: Effect.Effect<ReadonlyArray<CallerSpec>>
+    readonly machine: (
+      hook: MachineHook,
+      event: MachineEventInput,
+      only?: string,
+    ) => Effect.Effect<{ readonly plugins: ReadonlyArray<string>; readonly notes: ReadonlyArray<PluginNote> }>
+    readonly ownerOf: (kind: string) => Effect.Effect<string | undefined>
+    readonly activated: Stream.Stream<ReadonlyArray<string>>
   }
 >()("vibest/Plugins") {
   static readonly make = (candidates: ReadonlyArray<Candidate>, options: { readonly timeout?: Duration.Input } = {}) =>

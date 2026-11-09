@@ -1,5 +1,7 @@
 import { Cause, Duration, Effect, Exit, Option, Ref, Schema, type Scope, Stream } from "effect"
 
+import type { MachineEvent, MachineNote } from "./index.ts"
+import type * as Plugin from "./plugin.ts"
 import type * as Runtime from "./runtime.ts"
 
 export { type Runtime } from "./runtime.ts"
@@ -186,3 +188,43 @@ export const runtimeContract = (
       Duration.fromInputUnsafe("5 seconds"),
     )
   }).pipe(Effect.asVoid)
+
+export const machineHooks = (
+  plugin: Plugin.Plugin,
+  options: Readonly<Record<string, unknown>> = {},
+): Effect.Effect<
+  {
+    readonly runtimes: ReadonlyArray<Runtime.Runtime>
+    readonly fire: (
+      hook: "connect" | "remove",
+      event: Omit<MachineEvent, "notes">,
+    ) => Effect.Effect<ReadonlyArray<MachineNote>>
+  },
+  never,
+  Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const runtimes: Array<Runtime.Runtime> = []
+    const hooks: Record<string, Array<(event: MachineEvent) => Effect.Effect<void>>> = { connect: [], remove: [] }
+    yield* plugin.effect({
+      options,
+      agent: { hook: () => Effect.void },
+      machine: {
+        hook: (name, callback) =>
+          Object.hasOwn(hooks, name)
+            ? Effect.sync(() => void hooks[name]!.push(callback))
+            : Effect.die(new Error(`unsupported hook machine.${String(name)}`)),
+      },
+      runtime: { register: (runtime) => Effect.sync(() => void runtimes.push(runtime)) },
+      subscription: { report: () => Effect.void },
+    })
+    return {
+      runtimes,
+      fire: (hook, input) =>
+        Effect.gen(function* () {
+          const event: MachineEvent = { ...input, notes: [] }
+          for (const callback of hooks[hook]!) yield* callback(event)
+          return event.notes
+        }),
+    }
+  })

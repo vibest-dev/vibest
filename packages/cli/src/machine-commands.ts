@@ -1,6 +1,7 @@
 import { probe, startDaemon, type VibestClient, withVibest } from "@vibest/client/client"
 import { Layout } from "@vibest/core/paths"
 import { shortId } from "@vibest/schema/id"
+import type { MachineNote } from "@vibest/schema/machine"
 import { Console, Effect, Path } from "effect"
 import { Argument, Command } from "effect/cli"
 
@@ -23,6 +24,16 @@ export const connectCommand = Command.make("connect", {}, () =>
   ),
 )
 
+const printNotes = (notes: ReadonlyArray<MachineNote>) =>
+  Effect.forEach(
+    notes,
+    (note) =>
+      Console.log(
+        `note${note.plugin === undefined ? "" : ` (${note.plugin})`}: ${note.message}${note.fix === undefined ? "" : `; fix: ${note.fix}`}`,
+      ),
+    { discard: true },
+  )
+
 export const machine = Command.make("machine").pipe(
   Command.withDescription("Other machines this vibestd dials over ssh, to run agents there (vibest run --machine)"),
   Command.withSubcommands([
@@ -40,17 +51,21 @@ export const machine = Command.make("machine").pipe(
           Effect.flatMap((added) =>
             Console.log(
               `added ${added.name}: vibestd ${added.vibestd} (${shortId(added.id)}), vibest ${added.version}; connected`,
-            ),
+            ).pipe(Effect.andThen(printNotes(added.notes))),
           ),
         ),
     ).pipe(Command.withDescription("Connect once to a machine's vibestd over ssh and keep it as a machine")),
     Command.make("ls", {}, () =>
       userOnly("machine ls").pipe(Effect.andThen(vibest((client) => client["Machine.List"]())), Effect.flatMap(json)),
-    ).pipe(Command.withDescription("The machines this vibestd dials, with their connection state (JSON)")),
+    ).pipe(
+      Command.withDescription(
+        "The machines this vibestd dials, with their connection state, their runtimes and whether this machine shows their terminals (JSON)",
+      ),
+    ),
     Command.make("rm", { name: Argument.String("name") }, (o) =>
       userOnly("machine rm").pipe(
         Effect.andThen(vibest((client) => client["Machine.Remove"]({ name: o.name }))),
-        Effect.andThen(json({ removed: o.name })),
+        Effect.flatMap((removed) => json({ removed: o.name, notes: removed.notes })),
       ),
     ).pipe(
       Command.withDescription(

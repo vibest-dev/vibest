@@ -6,7 +6,11 @@ import { ask, delegatingModel, piDir } from "../fake-model.ts"
 import { alive, binary, expect, readDb, row, Skip, until, type World } from "../world.ts"
 
 type Machine = { name: string; id: string; state: string; reason?: string }
-type Listed = { id: string; machine?: string; runtime?: string }
+type Listed = { id: string; machine?: string; runtime?: string; address?: { machine: string; id: string } }
+type HcMachine = { id: string; name: string; session?: string | null }
+type MachineView = {
+  runtimes?: Array<{ kind: string; status: string; here: { visible: boolean; as?: string; note?: string } }>
+}
 
 const sh = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 
@@ -51,14 +55,14 @@ const stopVibestd = async (home: string) => {
   await until(`vibestd ${pid} gone`, () => !alive(pid), 15_000)
 }
 
-const hcCore = async (w: World, tag: string, env: Record<string, string>) => {
+const hcCore = async (w: World, tag: string, env: Record<string, string | undefined>) => {
   const hc = (...args: Array<string>) => w.run(w.root, ["hc", ...args], { env })
   const started = await hc("server", "start")
   expect(started.code === 0, `hc server start (${tag}): ${started.stderr}${started.stdout}`)
   return hc
 }
 
-const setup = async (w: World) => {
+const setup = async (w: World, options: { readonly bSession?: boolean } = {}) => {
   for (const bin of ["pi", "hc", "git"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   w.ownRuntimes.add("hc")
   const bin = path.join(w.root, "bin")
@@ -74,18 +78,19 @@ const setup = async (w: World) => {
   const bEnv = {
     VIBEST_HOME: path.join(b, "home"),
     PATH: loginPath,
-    HC_SESSION: `${w.herdrSession}-b`,
+    HC_SESSION: `${w.herdrSession.toLowerCase()}-b`,
     XDG_RUNTIME_DIR: path.join(b, "r"),
     XDG_STATE_HOME: path.join(b, "s"),
     XDG_CONFIG_HOME: path.join(b, "c"),
     PI_CODING_AGENT_DIR: piB,
     TMPDIR: path.join(b, "tmp"),
     ZDOTDIR: empty,
-    HC_SOCKET: path.join(b, "hc.sock"),
+    HC_SOCKET: options.bSession ? undefined : path.join(b, "hc.sock"),
   }
-  const exports = Object.entries(bEnv)
-    .map(([k, v]) => `${k}=${sh(v)}`)
-    .join(" ")
+  const exports = [
+    ...(options.bSession ? ["-u HC_SOCKET"] : []),
+    ...Object.entries(bEnv).flatMap(([k, v]) => (v === undefined ? [] : [`${k}=${sh(v)}`])),
+  ].join(" ")
   const log = path.join(w.root, "ssh.log")
   await fs.writeFile(
     path.join(bin, "ssh"),
@@ -183,7 +188,8 @@ const setup = async (w: World) => {
     await hcB("server", "stop")
     await hcA("server", "stop")
   }
-  return { b, bEnv, aEnv, onA, okA, onB, okB, bDb, identity, notices, run, subs, main, log, stop, hcB }
+  const aSocket = w.hcSocket
+  return { b, bEnv, aEnv, aSocket, onA, okA, onB, okB, bDb, identity, notices, run, subs, main, log, stop, hcA, hcB }
 }
 
 type Setup = Awaited<ReturnType<typeof setup>>
@@ -399,6 +405,122 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         await failed(["run", "--machine", "mb", "pi", "--", "x"], "now answers as a different vibestd")
+      } finally {
+        await s?.stop()
+      }
+    },
+  },
+  {
+    id: "M6",
+    title:
+      "terminals on another machine: machine add mirrors B's hc core into A's hc; a run --machine row's address is A's hc terminal; typing into it on A starts a typed turn on B whose result arrives once; a rename in hc is followed; a mirror removed in hc is added back by the next ls and result; machine rm removes it from hc whatever its name",
+    run: async (w) => {
+      let s: Setup | undefined
+      try {
+        s = await setup(w, { bSession: true })
+        const hcRows = async () => {
+          const r = await s!.hcA("machine", "ls", "--json")
+          expect(r.code === 0, `hc machine ls on A: ${r.stderr}`)
+          const parsed = JSON.parse(r.stdout) as Array<HcMachine> | { machines: Array<HcMachine> }
+          return Array.isArray(parsed) ? parsed : parsed.machines
+        }
+        const status = JSON.parse((await s.hcB("server", "status", "--json")).stdout) as {
+          core?: { id?: string }
+          id?: string
+        }
+        const core = status.core?.id ?? status.id ?? ""
+        expect(core !== "", `B's hc core id: ${JSON.stringify(status)}`)
+        const added = await s.okA(["machine", "add", "mb", "b-host"])
+        expect(added.includes("hc: added mb to herdr-core here"), `machine add: ${added}`)
+        const mirrored = (await hcRows()).filter((m) => m.id === core)
+        expect(
+          mirrored.length === 1 && mirrored[0]!.name === "mb" && mirrored[0]!.session === s.bEnv.HC_SESSION,
+          `A's hc machines: ${JSON.stringify(await hcRows())}`,
+        )
+        const ssh = await fs.readFile(s.log, "utf8")
+        expect(ssh.includes(`HC_SESSION=${s.bEnv.HC_SESSION} exec`), `hc's own dial is not in the ssh log: ${ssh}`)
+        const machines = JSON.parse(await s.okA(["machine", "ls"])) as Array<MachineView>
+        const hc = machines[0]?.runtimes?.find((r) => r.kind === "hc")
+        expect(
+          hc?.status === "online" && hc.here.visible && hc.here.as === "mb",
+          `machine ls: ${JSON.stringify(machines)}`,
+        )
+
+        const address = await s.run("msix")
+        const id8 = address.slice(3)
+        const bRow = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
+          r.id?.startsWith(id8),
+        )
+        expect(bRow?.runtime === "hc", `B's row: ${JSON.stringify(bRow)}`)
+        const shown = async () =>
+          (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
+            r.id?.startsWith(address),
+          )
+        let first: Listed | undefined
+        await until(
+          "A's row has its terminal",
+          async () => {
+            first = await shown()
+            return (first?.address?.id ?? "") !== ""
+          },
+          60_000,
+        )
+        expect(
+          /^mb\/t\d+@/.test(first?.address?.id ?? "") && (first?.address?.id.endsWith(`@${s.aSocket}`) ?? false),
+          `A's row: ${JSON.stringify(first)}`,
+        )
+        const terminal = first!.address!.id.split("@")[0]!
+        const byLabel = await s.hcA("ls", "--json", "--label", `vibest.session=${bRow!.id}`)
+        expect(byLabel.stdout.includes(`"${terminal}"`), `hc ls on A: ${byLabel.stdout}${byLabel.stderr}`)
+        await until("the first notice", () => s!.notices(address, "msix") === 1, 120_000)
+
+        const typed = await s.hcA("send", terminal, ask("mstep"))
+        expect(typed.code === 0, `hc send on A: ${typed.stderr}`)
+        await until("B saw the typed turn", () => s!.subs.asked("mstep"), 120_000)
+        await until(
+          "B recorded a typed turn",
+          () =>
+            (s!.bDb<{ n: number }>(
+              "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'turn.start' AND json_extract(data, '$.typed') IS NOT NULL",
+              bRow!.id!,
+            )?.n ?? 0) === 1,
+          60_000,
+        )
+        await until("the typed turn's notice", () => s!.notices(address, "mstep") === 1, 120_000)
+
+        const renamed = await s.hcA("machine", "rename", "mb", "mbx")
+        expect(renamed.code === 0, `hc machine rename: ${renamed.stderr}`)
+        const followed = await shown()
+        expect(followed?.address?.id.startsWith("mbx/t") === true, `after the rename: ${JSON.stringify(followed)}`)
+        expect((await hcRows()).length === 1, `a second mirror after the rename: ${JSON.stringify(await hcRows())}`)
+
+        const dials = (await fs.readFile(s.log, "utf8")).split("\n").filter((l) => l.includes("vibest connect")).length
+        expect((await s.hcA("machine", "rm", "mbx")).code === 0, "hc machine rm mbx")
+        const repaired = await shown()
+        expect(repaired?.address?.id.startsWith("mb/t") === true, `ls after hc machine rm: ${JSON.stringify(repaired)}`)
+        expect(
+          (await hcRows()).some((m) => m.id === core && m.name === "mb"),
+          `A's hc after the repair: ${JSON.stringify(await hcRows())}`,
+        )
+        expect((await s.hcA("machine", "rm", "mb")).code === 0, "hc machine rm mb")
+        const got = JSON.parse(await s.okA(["result", address])) as Listed
+        expect(got.address?.id.startsWith("mb/t") === true, `result after hc machine rm: ${JSON.stringify(got)}`)
+        const dialsAfter = (await fs.readFile(s.log, "utf8")).split("\n").filter((l) => l.includes("vibest connect"))
+        expect(dialsAfter.length === dials, "vibest reconnected to repair")
+
+        expect((await s.hcA("machine", "rename", "mb", "vps")).code === 0, "hc machine rename mb vps")
+        const removed = JSON.parse(await s.okA(["machine", "rm", "mb"])) as { notes: Array<unknown> }
+        expect(removed.notes.length === 0, `machine rm notes: ${JSON.stringify(removed)}`)
+        expect(
+          !(await hcRows()).some((m) => m.id === core),
+          `A's hc after machine rm: ${JSON.stringify(await hcRows())}`,
+        )
+        const again = await s.okA(["machine", "add", "mb", "b-host"])
+        expect(again.includes("hc: added mb"), `machine add again: ${again}`)
+        expect(
+          (await hcRows()).some((m) => m.id === core && m.name === "mb"),
+          "added again",
+        )
       } finally {
         await s?.stop()
       }

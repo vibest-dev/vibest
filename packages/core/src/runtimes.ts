@@ -160,6 +160,24 @@ export const paneTail = (h: Runtime, terminal: Terminal | undefined, lines = 30)
       )
     : Effect.succeed("")
 
+export const runtimesHere = (runtimes: RuntimesShape) =>
+  Effect.flatMap(runtimes.statuses({ id: "local" }), (rows) =>
+    Effect.forEach(
+      rows,
+      ({ runtime, status }) =>
+        (runtime.link?.() ?? Effect.succeed(undefined)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+          Effect.map((link) => ({
+            kind: runtime.kind,
+            status: status.status,
+            ...("reason" in status ? { reason: status.reason } : {}),
+            ...(link === undefined ? {} : { link }),
+          })),
+        ),
+      { concurrency: "unbounded" },
+    ),
+  )
+
 export const machinesListing = (
   runtimes: RuntimesShape,
   harnesses: ReadonlyArray<string>,
