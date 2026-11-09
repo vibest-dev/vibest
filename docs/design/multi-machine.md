@@ -92,6 +92,8 @@ and fetch it there"), and runs `Sessions.spawn` with the worktree detached at th
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
 started it is one `peer.start` event (peer, project, parent?, reportTo?), written in the transaction that creates
 the session row; it has no `report_to` when A's project had no main agent. The forwarded `request` finds the session on a retry.
+A `peer.start` row that fails to decode is logged as a warning and the session is treated as local: its results go to
+B's own inbox delivery and no outbox row is written for it.
 
 Every result and notice of a peer session with a `report_to` goes to B's `outbox` in the transaction that writes it. B still writes the
 inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
@@ -112,6 +114,11 @@ main agent as `reportTo`; `Spawn` answers the address `<name>/<id>`, as every fo
 with no parent: nothing is sent back, the result stays on B and `vibest result <name>/<id>` reads it there.
 `--env`, `--peer`, `--archive-on-completion`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
+The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
+path), which means nothing on B. A sends a runtime kind instead. With `--runtime` it is that one; without it, the
+runtime of the caller's terminal when the caller runs in one, else the runtime of A's main agent. B starts the session
+in that runtime and fails with `NoRuntime` (`<B>: the runtime "x" is not
+loaded; loaded: …`) when it does not have it. With none of the three, B's own hooks choose, as for a local run.
 An address `<name>/<id>` is resolved once, at the entry of each method, into a local id or a machine and an id; a
 bare id is always local and nothing is searched across machines. `vibest result|send|interrupt|archive|peek
 <name>/<id>` forward `Get`, `Send`, `Interrupt`, `Remove` and `Peek` with `vibest-peer-project` set to the caller's
@@ -132,11 +139,13 @@ and passes `PromptTooLarge` through.
 
 After `Peer.Hello`, A opens `Peer.Outbox`. For each item it runs one transaction (`Db.receivePeerItem`): the
 recipient's project (none: logged and acknowledged); the dedupe key `inbox.queued` with `request = 'peer:<outbox
-id>'` anywhere in that project (found: only acknowledged); otherwise a `notice` row with no sender, routed to the
+id>'` on the item's recipient or on where it is routed now (found: only acknowledged); otherwise a `notice` row with no sender, routed to the
 recipient while it has not ended, else to the project's entry session, `pending` when that one is present, else
 `dropped`, with content `<name>/<id8>: <text>` (and a pointer to `vibest result` when the item was cut). Then
 `Peer.Ack`. A pipe that drops between the commit and the ack sends the item again at the next connect, and the key
-finds it. The outbox stream failing (the 10 s ping timeout of a held pipe, for one) counts as the connection going
+finds it. One edge case is left: if the recipient ended and the project's entry session changed between the first
+delivery and the redelivery, the key sits on the old entry, which is neither of the two looked at, so one more notice
+is written. The outbox stream failing (the 10 s ping timeout of a held pipe, for one) counts as the connection going
 down.
 
 ## Optional tables

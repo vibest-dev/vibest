@@ -83,6 +83,11 @@ const present = (keys: ReadonlyArray<string>, env: Readonly<Record<string, strin
     return value !== undefined && value !== ""
   })
 
+export const callerKind = (
+  specs: ReadonlyArray<Pick<CallerSpec, "kind" | "env">>,
+  env: Readonly<Record<string, string | undefined>>,
+) => specs.find((spec) => present(spec.env, env))?.kind
+
 export const specHits = (
   specs: ReadonlyArray<Pick<CallerSpec, "kind" | "env" | "terminal">>,
   env: Readonly<Record<string, string | undefined>>,

@@ -88,14 +88,15 @@ const exitReason = (name: string, exit: PipeExit) => {
 
 type LineError = RpcClientError.RpcClientError | ProtocolRejected | DaemonStopping | InvalidCaller | MachineDown
 
-const LINE_TAGS: ReadonlySet<unknown> = new Set([
-  "RpcClientError",
-  "ProtocolRejected",
-  "DaemonStopping",
-  "InvalidCaller",
-  "MachineDown",
-])
-const isLineError = (e: unknown): e is LineError => Predicate.hasProperty(e, "_tag") && LINE_TAGS.has(e._tag)
+const LINE_TAGS: Record<LineError["_tag"], true> = {
+  RpcClientError: true,
+  ProtocolRejected: true,
+  DaemonStopping: true,
+  InvalidCaller: true,
+  MachineDown: true,
+}
+const isLineError = (e: unknown): e is LineError =>
+  Predicate.hasProperty(e, "_tag") && typeof e._tag === "string" && Object.hasOwn(LINE_TAGS, e._tag)
 
 const alreadyNamed = (name: string) =>
   `a machine named ${name} is already added; remove it first (vibest machine rm ${name})`

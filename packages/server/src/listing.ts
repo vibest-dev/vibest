@@ -114,18 +114,10 @@ export const sessionListing = (deps: {
   const listed = (scope: ListScope, stopped: boolean) =>
     Effect.gen(function* () {
       if (scope._tag === "Nothing") return []
+      if (scope._tag === "Peer") return yield* listedRows(yield* sessions.list({ peer: scope, stopped }))
       const projectId = scope._tag === "Project" ? scope.id : undefined
-      const rows = yield* sessions.list({
-        ...(projectId === undefined ? {} : { projectId }),
-        ...(scope._tag === "Peer" ? { peer: scope } : {}),
-        stopped,
-      })
-      const mains =
-        scope._tag === "Peer"
-          ? []
-          : projectId === undefined
-            ? yield* db.coordinators
-            : [yield* db.coordinatorOf(projectId)]
+      const rows = yield* sessions.list({ ...(projectId === undefined ? {} : { projectId }), stopped })
+      const mains = projectId === undefined ? yield* db.coordinators : [yield* db.coordinatorOf(projectId)]
       return [
         ...(yield* Effect.forEach(mains, listedMain)).flatMap((m) => (m ? [m] : [])),
         ...(yield* listedRows(rows)),

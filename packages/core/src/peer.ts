@@ -9,6 +9,7 @@ import {
   PROMPT_MAX,
   PromptTooLarge,
 } from "@vibest/schema/machine"
+import { NoRuntime } from "@vibest/schema/session"
 import { Context, Deferred, Effect, Layer, Stream } from "effect"
 
 import { Bus } from "./bus.ts"
@@ -65,20 +66,22 @@ const make = Effect.gen(function* () {
           return yield* new NoCommit({
             message: `${self.name}'s checkout ${target.directory} does not have ${input.commit}: push it and fetch it there`,
           })
-        const spawned = yield* sessions.spawn({
-          machine: { id: "local" },
-          root: target.directory,
-          projectId: target.id,
-          name: input.title ?? defaultSessionName(input.prompt),
-          prompt: input.prompt,
-          harness: input.harness,
-          provider: input.provider,
-          model: input.model,
-          runtime: input.runtime,
-          request: input.request,
-          commit: input.commit,
-          origin: { peer, project, parent: input.parent, reportTo: input.reportTo },
-        })
+        const spawned = yield* sessions
+          .spawn({
+            machine: { id: "local" },
+            root: target.directory,
+            projectId: target.id,
+            name: input.title ?? defaultSessionName(input.prompt),
+            prompt: input.prompt,
+            harness: input.harness,
+            provider: input.provider,
+            model: input.model,
+            runtime: input.runtime,
+            request: input.request,
+            commit: input.commit,
+            origin: { peer, project, parent: input.parent, reportTo: input.reportTo },
+          })
+          .pipe(Effect.catchTag("NoRuntime", (e) => new NoRuntime({ message: `${self.name}: ${e.message}` })))
         return {
           session: spawned.id,
           harness: spawned.harness,

@@ -7,7 +7,7 @@ import { alive, binary, expect, readDb, row, Skip, until, type World } from "../
 
 type Machine = { name: string; id: string; state: string; reason?: string }
 type Peer = { id: string; name: string; callsMe: string; outbox: number }
-type Listed = { id: string; machine?: string }
+type Listed = { id: string; machine?: string; runtime?: string }
 
 const sh = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 
@@ -165,9 +165,7 @@ const setup = async (w: World) => {
       `%done-${marker}%`,
     )?.n ?? 0
   const run = async (marker: string, machine = "mb") => {
-    const printed = (
-      JSON.parse(await okA(["run", "--machine", machine, "--runtime", "hc", "pi", "--", ask(marker)])) as { id: string }
-    ).id
+    const printed = (JSON.parse(await okA(["run", "--machine", machine, "pi", "--", ask(marker)])) as { id: string }).id
     expect(printed.startsWith(`${machine}/`) && /^[0-9a-f-]{36}$/.test(printed.slice(machine.length + 1)), printed)
     return printed.slice(0, machine.length + 9)
   }
@@ -187,7 +185,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M1",
     title:
-      "machine add over a fake ssh records B's id, B lists A as a peer, a second name for the same B is refused; vibest run --machine starts a session on B and none on A, A's main agent gets one notice with B's text, B's outbox empties; send, result, peek and archive forward to B",
+      "machine add over a fake ssh records B's id, B lists A as a peer, a second name for the same B is refused; vibest run --machine without --runtime starts a session on B in the runtime of A's main agent and none on A, A's main agent gets one notice with B's text, B's outbox empties; send, result, peek and archive forward to B",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -221,8 +219,8 @@ const checks: ReadonlyArray<Check> = [
         const id8 = address.slice(3)
         const bRows = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions
         expect(
-          bRows.some((r) => r.id?.startsWith(id8)),
-          `B's ls: ${JSON.stringify(bRows)}`,
+          bRows.some((r) => r.id?.startsWith(id8) && r.runtime === "hc"),
+          `B's ls (no --runtime: A sends its main agent's hc): ${JSON.stringify(bRows)}`,
         )
         expect(row(w, "SELECT id FROM session WHERE id LIKE ?", `${id8}%`) === undefined, "A has a session row")
         await until("the notice on A", () => s!.notices(address, "mone") === 1, 120_000)

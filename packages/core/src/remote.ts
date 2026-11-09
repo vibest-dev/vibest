@@ -5,10 +5,12 @@ import { randomId } from "@vibest/schema/id"
 import { type ListedMachine, MachineFailed } from "@vibest/schema/machine"
 import { Context, Effect, Layer } from "effect"
 
+import { callerKind } from "./caller.ts"
 import { Db } from "./db.ts"
 import { Git } from "./git.ts"
 import { VibestdIdentity } from "./identity.ts"
 import { Machines } from "./machines.ts"
+import { Plugins } from "./plugins.ts"
 
 export type Address =
   | { readonly _tag: "Local"; readonly id: string }
@@ -33,18 +35,11 @@ export type ListScope =
 
 export type Forwarded<A, E> = (
   client: PipeClient,
-  id: string,
+  at: At,
   options: { readonly headers: Record<string, string> },
 ) => Effect.Effect<A, E>
 
 const addressed = (machine: string, id: string) => `${machine}/${id}`
-
-type Named<A> = A extends { readonly id: string } ? A & { readonly machine: string } : A
-
-const named = <A>(machine: string, row: A): Named<A> =>
-  (row !== null && typeof row === "object" && "id" in row && typeof row.id === "string"
-    ? { ...row, id: addressed(machine, row.id), machine }
-    : row) as Named<A>
 
 const REFUSED = [
   ["env", "--env"],
@@ -61,6 +56,7 @@ const make = Effect.gen(function* () {
   const machines = yield* Machines
   const self = yield* VibestdIdentity
   const git = yield* Git
+  const plugins = yield* Plugins
 
   const call = <A, E>(
     machine: string,
@@ -68,10 +64,15 @@ const make = Effect.gen(function* () {
     f: (client: PipeClient, headers: Record<string, string>) => Effect.Effect<A, E>,
   ) => Effect.flatMap(machines.link(machine), (link) => link.call(f(link.client, peerHeaders(self.id, project))))
 
+  const relay = <A, E>(at: At, project: string, f: Forwarded<A, E>) =>
+    call(at.machine, project, (client, headers) => f(client, at, { headers }))
+
   return {
-    forward: <A, E>(at: At, project: string, f: Forwarded<A, E>) =>
-      call(at.machine, project, (client, headers) => f(client, at.id, { headers })).pipe(
-        Effect.map((out) => named(at.machine, out)),
+    relay,
+
+    forward: <A extends { readonly id: string } | null, E>(at: At, project: string, f: Forwarded<A, E>) =>
+      Effect.map(relay(at, project, f), (row): A =>
+        row === null ? row : { ...row, id: addressed(at.machine, row.id) },
       ),
 
     list: (scope: ListScope, stopped: boolean | undefined) =>
@@ -92,7 +93,11 @@ const make = Effect.gen(function* () {
                     Effect.match({
                       onSuccess: (rows) => ({
                         machine: info,
-                        sessions: rows.sessions.map((row) => named(info.name, row)),
+                        sessions: rows.sessions.map((row) => ({
+                          ...row,
+                          id: addressed(info.name, row.id),
+                          machine: info.name,
+                        })),
                       }),
                       onFailure: (e) => ({
                         machine: { ...info, state: "unreachable", reason: e.message },
@@ -134,7 +139,10 @@ const make = Effect.gen(function* () {
               (e) => new MachineFailed({ message: `cannot read HEAD of ${repository.path}: ${e.message}` }),
             ),
           )
-        const reportTo = from.coordinator ?? (yield* db.coordinatorOf(from.project))?.id
+        const main = yield* db.coordinatorOf(from.project)
+        const reportTo = from.coordinator ?? main?.id
+        const runtime =
+          input.runtime ?? callerKind(yield* plugins.callers, input.callerEnv) ?? (main?.runtime || undefined)
         const spawned = yield* call(machine, from.project, (client, headers) =>
           client["Peer.Spawn"](
             {
@@ -145,7 +153,7 @@ const make = Effect.gen(function* () {
               ...(input.provider === undefined ? {} : { provider: input.provider }),
               ...(input.model === undefined ? {} : { model: input.model }),
               ...(input.name === undefined ? {} : { title: input.name }),
-              ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
+              ...(runtime === undefined ? {} : { runtime }),
               ...(from.coordinator === undefined ? {} : { parent: from.coordinator }),
               ...(reportTo === undefined ? {} : { reportTo }),
               request: input.request ?? randomId(),

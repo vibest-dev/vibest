@@ -11,6 +11,7 @@ import { MachineTransport, REMOTE_LINE, RETRY_FIRST, sshArgv, targetProblem, nam
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import type { SpawnInput, Sessions } from "@vibest/core/sessions"
+import * as VibestPlugin from "@vibest/plugin"
 import { peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import { OUTBOX_ITEM_MAX, type OutboxItem, PROMPT_MAX } from "@vibest/schema/machine"
@@ -441,7 +442,9 @@ const repoStack = (net?: Net, options: TestOptions = {}) =>
   Effect.gen(function* () {
     const spawns: Array<SpawnInput> = []
     const transport = net === undefined ? {} : { transport: net.transport(yield* SocketConnector) }
-    const context = yield* Layer.build(served({ ...options, ...transport, sessions: fakeSpawns(spawns) }))
+    const context = yield* Layer.build(
+      served({ ...transport, ...options, sessions: options.sessions ?? fakeSpawns(spawns) }),
+    )
     const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideContext(effect, context)
     const layout = yield* run(Layout)
     const db = yield* run(Db)
@@ -804,6 +807,36 @@ describe("vibest run --machine and remote sessions", () => {
           [spawned.id, "mb"],
         )
         assert.lengthOf(yield* a.run(inboxOf(main)), 1, "one notice")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "without --runtime A sends the caller's terminal runtime, else its main agent's; --runtime wins; B lacking it fails clearly",
+    () =>
+      Effect.gen(function* () {
+        const term = VibestPlugin.Plugin.define({
+          id: "runtime-term",
+          caller: { kind: "term", env: ["TERM_PANE"], terminal: () => Effect.succeed("p1") },
+          effect: () => Effect.void,
+        })
+        const { net, a, b, coordinator } = yield* twoMachines({ a: { plugins: [term] } })
+        yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
+        yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: { TERM_PANE: "p1" } }))
+        yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: { TERM_PANE: "p1" }, runtime: "rex" }))
+        assert.deepStrictEqual(
+          b.spawns.map((spawn) => spawn.runtime),
+          ["fake", "term", "rex"],
+        )
+        const c = yield* repoStack(net, { sessions: (s) => s })
+        net.route("c-host", c.layout.socket)
+        yield* a.cli(a.raw["Machine.Add"]({ name: "mc", target: "c-host" }))
+        yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[1]?.state === "connected")
+        const failed = yield* Effect.flip(
+          coordinator(a.raw.Spawn({ machine: "mc", prompt: "x", harness: "pi", callerEnv: { TERM_PANE: "p1" } })),
+        )
+        assert.strictEqual(failed._tag, "NoRuntime")
+        assert.include(failed.message, 'the runtime "term" is not loaded')
+        assert.include(failed.message, (yield* c.run(VibestdIdentity)).name)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 

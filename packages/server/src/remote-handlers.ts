@@ -2,7 +2,7 @@ import { Db } from "@vibest/core/db"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { Machines } from "@vibest/core/machines"
 import { Peers } from "@vibest/core/peer"
-import { address, type Forwarded, type ListScope, type PeerScope, Remote } from "@vibest/core/remote"
+import { address, type At, type ListScope, type PeerScope, Remote } from "@vibest/core/remote"
 import type { NotInRepository } from "@vibest/core/worktree"
 import { PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
 import { Caller, type CallerShape, Forbidden, type PayloadOf, type SessionInfo, VERSION } from "@vibest/protocol/rpc"
@@ -73,7 +73,7 @@ export const remoteHandlers = <R>(deps: {
       method: Routed,
       input: string,
       local: Local<A, E, R2>,
-      forwarded: Forwarded<B, F>,
+      forwarded: (at: At, project: string) => Effect.Effect<B, F>,
     ) => {
       const at = address(input)
       return at._tag === "Local"
@@ -81,7 +81,7 @@ export const remoteHandlers = <R>(deps: {
         : deps.agent(method).pipe(
             Effect.flatMap((c) => deps.projectOf(c, method)),
             Effect.catchTags({ NotInRepository: refused(method), ProjectMoved: refused(method) }),
-            Effect.flatMap((project) => remote.forward(at, project.id, forwarded)),
+            Effect.flatMap((project) => forwarded(at, project.id)),
           )
     }
 
@@ -89,15 +89,27 @@ export const remoteHandlers = <R>(deps: {
       reach,
       routed: {
         Send: <A, E, R2>(p: PayloadOf<"Send">, local: Local<A, E, R2>) =>
-          routed("Send", p.id, local, (c, id, o) => c.Send({ ...p, id }, o)),
+          routed("Send", p.id, local, (at, project) =>
+            remote.forward(at, project, (c, { id }, o) => c.Send({ ...p, id }, o)),
+          ),
         Interrupt: <A, E, R2>(p: PayloadOf<"Interrupt">, local: Local<A, E, R2>) =>
-          routed("Interrupt", p.id, local, (c, id, o) => c.Interrupt({ ...p, id }, o)),
+          routed("Interrupt", p.id, local, (at, project) =>
+            remote.forward(at, project, (c, { id }, o) => c.Interrupt({ ...p, id }, o)),
+          ),
         Remove: <A, E, R2>(p: PayloadOf<"Remove">, local: Local<A, E, R2>) =>
-          routed("Remove", p.id, local, (c, id, o) => c.Remove({ ...p, id }, o)),
+          routed("Remove", p.id, local, (at, project) =>
+            remote.forward(at, project, (c, { id }, o) => c.Remove({ ...p, id }, o)),
+          ),
         Get: <A, E, R2>(p: PayloadOf<"Get">, local: Local<A, E, R2>) =>
-          routed("Get", p.id, local, (c, id, o) => c.Get({ ...p, id }, o)),
+          routed("Get", p.id, local, (at, project) =>
+            remote
+              .forward(at, project, (c, { id }, o) => c.Get({ ...p, id }, o))
+              .pipe(Effect.map((row) => ({ ...row, machine: at.machine }))),
+          ),
         Peek: <A, E, R2>(p: PayloadOf<"Peek">, local: Local<A, E, R2>) =>
-          routed("Peek", p.id, local, (c, id, o) => c.Peek({ ...p, id }, o)),
+          routed("Peek", p.id, local, (at, project) =>
+            remote.relay(at, project, (c, { id }, o) => c.Peek({ ...p, id }, o)),
+          ),
       },
 
       spawnOn: (machine: string, input: PayloadOf<"Spawn">, caller: Agent, project: string) =>
