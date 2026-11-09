@@ -1,7 +1,9 @@
-import { Schema } from "effect"
+import type { Harness } from "@vibest/plugin"
+import { Effect, Schema } from "effect"
 
-import { type HarnessAdapter, opt } from "../harness.ts"
-import { findMessage, jsonLines, type RawModel, withConfigured } from "../models.ts"
+import { findMessage, jsonLines, opt, withConfigured } from "./models.ts"
+import { platform } from "./platform.ts"
+import { piSubscription } from "./subscriptions/pi.ts"
 
 const extension = (pluginDir: string) => `${pluginDir}/extension.mjs`
 
@@ -34,7 +36,7 @@ const piList = findMessage(
   }),
 )
 
-export const piModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawModel> | undefined => {
+export const piModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
   const state = piState(lines)
   const list = piList(lines)
   if (!state || !list) return undefined
@@ -56,7 +58,7 @@ const providerModel = (provider: string | null, model: string | null) =>
 
 const VIBEST_DELIVERY_SOURCE = "extension"
 
-export const pi: HarnessAdapter = {
+export const pi: Harness.HarnessDefinition = {
   id: "pi",
   binary: "pi",
   ownSessionId: true,
@@ -94,6 +96,7 @@ export const pi: HarnessAdapter = {
     ),
     answer: piModels,
   },
+  subscription: (home) => piSubscription(home).pipe(Effect.provide(platform)),
   userPrompt: (event, coordinator) => {
     if (coordinator || event.source === VIBEST_DELIVERY_SOURCE || event.type !== "input") return undefined
     if (typeof event.text !== "string" || event.text.trim() === "") return undefined

@@ -251,6 +251,9 @@ importers:
       '@vibest/plugin-harness-choice':
         specifier: workspace:*
         version: link:../plugin-harness-choice
+      '@vibest/plugin-harnesses':
+        specifier: workspace:*
+        version: link:../plugin-harnesses
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -384,6 +387,21 @@ importers:
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
+      effect:
+        specifier: 4.0.2
+        version: 4.0.2
+
+  packages/plugin-harnesses:
+    dependencies:
+      '@effect/platform-node-shared':
+        specifier: 4.0.2
+        version: 4.0.2(effect@4.0.2)
+      '@vibest/plugin':
+        specifier: workspace:*
+        version: link:../plugin
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../schema
       effect:
         specifier: 4.0.2
         version: 4.0.2

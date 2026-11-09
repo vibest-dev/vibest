@@ -1,10 +1,11 @@
+import type { Harness } from "@vibest/plugin"
 import { Effect, FileSystem, Path } from "effect"
 
-import { noProvider, type HarnessAdapter, opt } from "../harness.ts"
-import type { RawModel } from "../models.ts"
-import { hostPlatform } from "../paths.ts"
+import { noProvider, opt } from "./models.ts"
+import { platform } from "./platform.ts"
+import { cursorSubscription } from "./subscriptions/cursor.ts"
 
-export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawModel> | undefined => {
+export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<Harness.RawModel> | undefined => {
   if (!lines.some((l) => l.startsWith("Available models"))) return undefined
   return lines.flatMap((l) => {
     const m = /^(\S+) - (.+?)(?: \(([^)]*)\))?$/.exec(l.trim())
@@ -12,9 +13,9 @@ export const cursorModels = (lines: ReadonlyArray<string>): ReadonlyArray<RawMod
   })
 }
 
-const cursorEnvironment = (home: string) =>
+export const keychainProblem = (home: string) =>
   Effect.gen(function* () {
-    if (hostPlatform !== "darwin") return undefined
+    if (process.platform !== "darwin") return undefined
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const keychain = path.join(home, "Library", "Keychains", "login.keychain-db")
@@ -29,7 +30,9 @@ const cursorEnvironment = (home: string) =>
       : `Cursor is disabled: HOME has no login keychain file (${keychain}); use the macOS login home to avoid Cursor's keychain probe dialog`
   })
 
-export const cursor: HarnessAdapter = {
+const cursorEnvironment = (home: string) => keychainProblem(home).pipe(Effect.provide(platform))
+
+export const cursor: Harness.HarnessDefinition = {
   id: "cursor",
   binary: "cursor-agent",
   checkEnvironment: cursorEnvironment,
@@ -49,6 +52,10 @@ export const cursor: HarnessAdapter = {
     ...opt("--model", i.model),
   ],
   models: { args: () => ["models"], answer: cursorModels },
+  subscription: (home) =>
+    Effect.flatMap(cursorEnvironment(home), (problem) => cursorSubscription(home, problem)).pipe(
+      Effect.provide(platform),
+    ),
   guardAnswer: (reason) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
   conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),

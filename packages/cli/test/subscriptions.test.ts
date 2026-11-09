@@ -1,13 +1,18 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Harness, HarnessUnavailable } from "@vibest/core/harness"
-import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Keychain } from "@vibest/core/keychain"
 import { Layout } from "@vibest/core/paths"
 import { Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin"
+import { claude, cursor, pi } from "@vibest/plugin-harnesses"
+import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
+import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Secrets } from "@vibest/plugin-harnesses/keychain"
+import { claudeSubscription } from "@vibest/plugin-harnesses/subscriptions/claude"
+import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
+import { piSubscription } from "@vibest/plugin-harnesses/subscriptions/pi"
 import * as Server from "@vibest/server/server"
 import {
   ByteSize,
@@ -29,7 +34,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { harnessChoice, makeRepository, runVibest, testLayer } from "./fakes.ts"
+import { harnessesLayer, makeRepository, runVibest, testLayer } from "./fakes.ts"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const CURSOR_SECRET = "cursor-token-do-not-log"
@@ -87,6 +92,7 @@ const fakeMachine = (options: {
   readonly http?: Readonly<Record<string, { readonly status: number; readonly body: unknown }>>
   readonly httpHang?: ReadonlyArray<string>
   readonly home: string
+  readonly fileSystem?: FileSystem.FileSystem
 }) => {
   const spawned: Array<Spawned> = []
   const requests: Array<{ readonly url: string; readonly authorization: string | undefined }> = []
@@ -111,12 +117,26 @@ const fakeMachine = (options: {
       HttpClientResponse.fromWeb(request, new Response(JSON.stringify(hit.body), { status: hit.status })),
     )
   })
-  const fakes = Layer.mergeAll(
-    Subscriptions.layer,
-    harnessLayer(options.installed),
-    Layer.succeed(Keychain, { password: (service) => Effect.succeed(options.passwords?.[service]) }),
+  const machine = Layer.mergeAll(
+    Layer.succeed(Secrets, { password: (service) => Effect.succeed(options.passwords?.[service]) }),
     Layer.succeed(HttpClient.HttpClient, http),
     Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    options.fileSystem === undefined ? Layer.empty : Layer.succeed(FileSystem.FileSystem, options.fileSystem),
+  )
+  const onMachine = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.provide(machine), Effect.provide(Platform.services), Effect.orDie)
+  const definitions = [
+    { ...claude, subscription: (dir: string) => onMachine(claudeSubscription(dir)) },
+    {
+      ...cursor,
+      subscription: (dir: string) =>
+        onMachine(Effect.flatMap(keychainProblem(dir), (problem) => cursorSubscription(dir, problem))),
+    },
+    { ...pi, subscription: (dir: string) => onMachine(piSubscription(dir)) },
+  ]
+  const fakes = Layer.mergeAll(
+    Subscriptions.layer.pipe(Layer.provideMerge(harnessesLayer(definitions))),
+    harnessLayer(options.installed),
   )
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -446,6 +466,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           "https://api2.cursor.sh/aiserver.v1.DashboardService/GetHardLimit": { status: 500, body: {} },
         },
         httpHang: [usageUrl],
+        fileSystem: clockSafeKeychain,
       })
       const row = yield* fake.provide(
         Effect.gen(function* () {
@@ -454,7 +475,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           yield* TestClock.adjust("10 seconds")
           yield* Fiber.join(pending)
           return (yield* subs.list).find((entry) => entry.harness === "cursor")!
-        }).pipe(Effect.provideService(FileSystem.FileSystem, clockSafeKeychain)),
+        }),
       )
       assert.include(row.error ?? "", "GetHardLimit answered 500")
       assert.include(row.error ?? "", "usage endpoint failed")
@@ -523,13 +544,13 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       })
       const listed = yield* Effect.gen(function* () {
         const subs = yield* Subscriptions
-        const plugins = yield* Plugins.make([harnessChoice, { source: "see", revision: "-", options: {}, plugin }])
+        const plugins = yield* Plugins.make([{ source: "see", revision: "-", options: {}, plugin }])
         yield* plugins.start({
           project: "/r",
           agentType: "general",
           parentSessionId: undefined,
           prompt: "go",
-          harness: undefined,
+          harness: "pi",
           provider: undefined,
           model: undefined,
           machine: { id: "local" },
@@ -542,6 +563,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         return { seen, list: yield* subs.list }
       }).pipe(
         Effect.provide(Subscriptions.layer),
+        Effect.provide(harnessesLayer()),
         Effect.provide(Runtimes.layer),
         Effect.provide(Bus.layer),
         Effect.scoped,

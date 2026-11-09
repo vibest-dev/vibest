@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 
-import { claudeAccount, claudeUsage, cursorAccount, cursorUsage, piAccount } from "./index.ts"
+import { claudeAccount, claudeUsage, cursorAccount, cursorUsage, piAccount } from "../src/subscriptions/index.ts"
 
 describe("claude", () => {
   it("reads a claude.ai login from `claude auth status --json`", () => {
