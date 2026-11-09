@@ -18,10 +18,11 @@ import {
 import * as Guard from "@vibest/core/guard"
 import { type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId } from "@vibest/core/harness"
 import { catalogModels } from "@vibest/core/models"
-import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
+import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand } from "@vibest/core/paths"
 import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
 import { jsonObject, promptOf } from "@vibest/core/results"
+import { installMethod, latestOf, releasesUrl, UpdateError } from "@vibest/core/update-check"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
@@ -42,7 +43,6 @@ import {
   Stream,
 } from "effect"
 import { Argument, CliError, Command, Flag } from "effect/cli"
-import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, RpcClientError as ClientError } from "effect/rpc"
 
@@ -482,6 +482,7 @@ const status = Command.make("status", {}, () =>
           version: p.version,
           sameVersion: p.version === VERSION,
           protocol: p.protocol ?? null,
+          update: p.update ?? null,
           socket: layout.socket,
           recordedPid: Option.getOrNull(Option.map(info, (i) => i.pid)),
         }),
@@ -989,19 +990,6 @@ const doctor = Command.make("doctor", {}, () =>
   ),
 )
 
-export class UpdateError extends Schema.TaggedError<UpdateError>()("UpdateError", { message: Schema.String }) {}
-
-export const isSemver = (v: string) =>
-  /^\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/.test(v)
-
-const RELEASES = "https://github.com/vibest-dev/vibest/releases/latest/download"
-
-export const installMethod = (self: ReadonlyArray<string>, harnesses: string | undefined) => {
-  if (harnesses) return { kind: "npm" } as const
-  const m = self.length === 1 ? /^(.+)\/versions\/[^/]+\/bin\/vibest$/.exec(self[0]!) : null
-  return m ? ({ kind: "curl", share: m[1]! } as const) : undefined
-}
-
 export const ownerOf = (real: string) => {
   if (real.includes("/.bun/install/global/node_modules/")) return { kind: "bun" } as const
   const npm = /^(.+)\/lib\/node_modules\/@vibest\//.exec(real)
@@ -1064,64 +1052,11 @@ const extraVibests = Effect.gen(function* () {
   )
 })
 
-const latestVersion = (
-  url: string,
-  read: (body: HttpClientResponse.HttpClientResponse) => Effect.Effect<string, unknown>,
-) =>
-  HttpClient.get(url).pipe(
-    Effect.filterOrFail(
-      (r) => r.status !== 404,
-      () => new Error(`no vibest release is published there yet; this vibest ${VERSION} stays as it is`),
-    ),
-    Effect.flatMap(HttpClientResponse.filterStatusOk),
-    Effect.flatMap(read),
-    Effect.map((v) => v.trim()),
-    Effect.filterOrFail(isSemver, (v) => new Error(`not a semver version: ${JSON.stringify(v)}`)),
-    Effect.timeoutOrElse({ duration: "15 seconds", orElse: () => Effect.fail(new Error("no answer")) }),
-    Effect.mapError(
-      (e) => new UpdateError({ message: `could not read ${url}: ${e instanceof Error ? e.message : String(e)}` }),
-    ),
-    Effect.provide(FetchHttpClient.layer),
-  )
-
-const npmLatest = Effect.gen(function* () {
-  const registry = yield* Config.String("npm_config_registry").pipe(Config.withDefault("https://registry.npmjs.org"))
-  return yield* latestVersion(`${registry.replace(/\/+$/, "")}/@vibest/cli/beta`, (r) =>
-    Effect.map(HttpClientResponse.schemaBodyJson(Schema.Struct({ version: Schema.String }))(r), (b) => b.version),
-  )
-})
-
-const UPDATE_CHECK_EVERY = Duration.hours(24)
-
 const updateNotice = Effect.gen(function* () {
   if (Option.isSome(yield* Config.option(Config.String("VIBEST_AGENT")))) return
   if (Option.isSome(yield* Config.option(Config.String("VIBEST_NO_UPDATE_CHECK")))) return
-  const method = installMethod(
-    yield* VibestCommand,
-    Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))),
-  )
-  if (!method) return
-  const fs = yield* FileSystem.FileSystem
-  const file = `${(yield* Layout).home}/update-check.json`
-  const Cached = Schema.Struct({ checkedAt: Schema.Number, latest: Schema.NullOr(Schema.String) })
-  const cached = yield* fs
-    .readFileString(file)
-    .pipe(Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Cached))), Effect.option)
-  const now = Date.now()
-  let latest = Option.match(cached, { onNone: () => null, onSome: (c) => c.latest })
-  if (Option.isNone(cached) || now - cached.value.checkedAt > Duration.toMillis(UPDATE_CHECK_EVERY)) {
-    const releases = (yield* Config.String("VIBEST_DOWNLOAD_URL").pipe(Config.withDefault(RELEASES))).replace(
-      /\/+$/,
-      "",
-    )
-    const read = method.kind === "npm" ? npmLatest : latestVersion(`${releases}/version`, (r) => r.text)
-    latest = yield* read.pipe(
-      Effect.timeout("2 seconds"),
-      Effect.orElseSucceed(() => latest),
-    )
-    yield* writeAtomic(file, JSON.stringify({ checkedAt: now, latest }))
-  }
-  if (latest !== null && compareVersions(VERSION, latest) < 0)
+  const latest = Option.getOrUndefined(yield* readPing((yield* Layout).socket))?.update?.latest
+  if (latest && compareVersions(VERSION, latest) < 0)
     yield* Console.error(`vibest ${latest} is available (this is ${VERSION}); update with: vibest update`)
 }).pipe(Effect.ignore)
 
@@ -1283,11 +1218,8 @@ const update = Command.make(
           `this vibest (${self.join(" ")}) was not installed by npm or install.sh; nothing to install.`,
         )
       else {
-        const releases = (yield* Config.String("VIBEST_DOWNLOAD_URL").pipe(Config.withDefault(RELEASES))).replace(
-          /\/+$/,
-          "",
-        )
-        const latest = yield* method.kind === "npm" ? npmLatest : latestVersion(`${releases}/version`, (r) => r.text)
+        const releases = yield* releasesUrl
+        const latest = yield* latestOf(method)
         if (compareVersions(VERSION, latest) >= 0) yield* Console.log(`vibest is already up to date (v${VERSION}).`)
         else {
           yield* Console.log(`vibest ${latest} is available (this is ${VERSION}).`)

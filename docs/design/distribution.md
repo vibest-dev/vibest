@@ -35,7 +35,8 @@ already current goes on to the vibestd and agent steps, which also covers an upg
 `update` and `doctor` report more than one `vibest` on PATH (one per real file, in PATH order): the first as the
 one that runs, the others with the command that removes them. The user's own `vibest`, `vibest status` and
 `vibest doctor`, never an agent's, print one line when a newer version is out (the registry's `beta` tag, or the
-release's `version` file), read at most once a day (a failed read waits as long), cached in
-`$VIBEST_HOME/update-check.json`, waited on for at most 2 s; any failure prints nothing, and
-`VIBEST_NO_UPDATE_CHECK=1` turns it off. A registry that answers 404 (a local build installed from a tarball) is
+release's `version` file). vibestd looks it up at start and then every hour and keeps the answer in memory only
+(`{checked, latest, checking}`; a failed look-up clears `checked` and is retried at the next hour); the CLI reads it
+from Ping, and `vibest status` shows it as `daemon.update`. Without a running vibestd nothing is printed.
+`VIBEST_NO_UPDATE_CHECK=1` turns it off: in vibestd's environment it stops the look-up, in the CLI's the line. A registry that answers 404 (a local build installed from a tarball) is
 reported as having no release yet.

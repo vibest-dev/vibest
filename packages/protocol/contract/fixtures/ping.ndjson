@@ -1,2 +1,2 @@
 {"jsonrpc":"2.0","id":1,"method":"Ping","params":null,"headers":[]}
-{"jsonrpc":"2.0","id":1,"result":{"protocol":6,"version":"0.0.0-fixture","runtimes":[{"kind":"herdr","status":"online"}],"capabilities":{"http":true,"handoff":true,"requests":true,"watch":true,"projects":true,"harnesses":true,"spawnRuntime":true}}}
+{"jsonrpc":"2.0","id":1,"result":{"protocol":6,"version":"0.0.0-fixture","runtimes":[{"kind":"herdr","status":"online"}],"update":{"checked":null,"latest":null,"checking":false},"capabilities":{"http":true,"handoff":true,"requests":true,"watch":true,"projects":true,"harnesses":true,"spawnRuntime":true}}}

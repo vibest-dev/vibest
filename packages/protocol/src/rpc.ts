@@ -59,10 +59,18 @@ export const RuntimeDoctor = Schema.Struct({
   ),
 })
 
+export const UpdateStatus = Schema.Struct({
+  checked: Schema.NullOr(Schema.Number),
+  latest: Schema.NullOr(Schema.String),
+  checking: Schema.Boolean,
+})
+export type UpdateStatus = typeof UpdateStatus.Type
+
 export const PingResult = Schema.Struct({
   protocol: Schema.optional(Schema.Number),
   version: Schema.String,
   runtimes: Schema.optional(Schema.Array(RuntimeStatus)),
+  update: Schema.optional(UpdateStatus),
   ...DaemonIdentity.fields,
   capabilities: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
 })
