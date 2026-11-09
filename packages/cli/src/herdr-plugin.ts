@@ -4,7 +4,6 @@ import { type Claim, type VibestClient, withVibest } from "@vibest/client/client
 import { VibestCommand } from "@vibest/core/paths"
 import { isLimited } from "@vibest/plugin"
 import type { SessionInfo } from "@vibest/protocol/rpc"
-import { callerMachine } from "@vibest/runtime-herdr/caller"
 import { agentName, KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { shortId } from "@vibest/schema/id"
 import { RuntimeAddress } from "@vibest/schema/session"
@@ -197,6 +196,9 @@ const NOT_A_PANE = "vibest-open-main"
 
 const claim = (directory: string): Claim => ({ _tag: "cli", repositoryRoot: directory })
 
+const callerEnvOf = (): Record<string, string> =>
+  Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
+
 const decodeAddress = Schema.decodeUnknownEffect(Schema.fromJsonString(RuntimeAddress))
 
 const herdrClient = Effect.gen(function* () {
@@ -223,7 +225,6 @@ const theDaemon = {
   republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
   openMain: (directory: string) =>
     Effect.gen(function* () {
-      const machine = yield* callerMachine()
       const running = yield* ask(directory, (client) => client["Project.RunningCoordinator"]({ terminal: NOT_A_PANE }))
       if (running) {
         const address = yield* decodeAddress(running.address)
@@ -234,14 +235,13 @@ const theDaemon = {
       }
       const self = yield* VibestCommand
       const opened = yield* ask(directory, (client) =>
-        client.Launch({ argv: [...self], focus: true, machine, runtime: KIND }),
+        client.Launch({ argv: [...self], focus: true, runtime: KIND, callerEnv: callerEnvOf() }),
       )
       return { action: "opened" as const, place: opened.place }
     }),
   spawn: (directory: string, prompt: string) =>
     Effect.gen(function* () {
-      const machine = yield* callerMachine()
-      return (yield* ask(directory, (client) => client.Spawn({ prompt, machine }))).id
+      return (yield* ask(directory, (client) => client.Spawn({ prompt, callerEnv: callerEnvOf() }))).id
     }),
   interrupt: (id: string) => ask("/", (client) => client.Interrupt({ id })).pipe(Effect.asVoid),
   list: (directory: string | undefined) =>

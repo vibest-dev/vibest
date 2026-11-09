@@ -1,6 +1,5 @@
 import {
   awaitDaemon,
-  CallerEnv,
   type Claim,
   claimHeaders,
   cliHeaders,
@@ -16,7 +15,7 @@ import {
   startDaemon,
   withVibest,
 } from "@vibest/client/client"
-import { callerByKind, callerHits, callerKeys, mainPlace } from "@vibest/core/caller"
+import { callerKeys } from "@vibest/core/caller"
 import * as Guard from "@vibest/core/guard"
 import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
@@ -27,7 +26,6 @@ import { DEFAULT_TIMEOUT, describeSpawn, PluginLoader, type Candidate } from "@v
 import { ProjectKind } from "@vibest/core/project"
 import { createProject, projectRoot } from "@vibest/core/project-create"
 import { jsonObject, promptOf } from "@vibest/core/results"
-import { callerMachine } from "@vibest/runtime-herdr/caller"
 import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
@@ -241,7 +239,6 @@ const run = Command.make(
   (o) =>
     Effect.gen(function* () {
       const prompt = yield* input(o.prompt, "prompt")
-      const machine = yield* callerMachine(Option.getOrUndefined(o.session))
       const spawned = yield* requested((client, request, ping) =>
         Effect.gen(function* () {
           if (Option.isSome(o.runtime) && ping.capabilities?.spawnRuntime !== true)
@@ -259,7 +256,8 @@ const run = Command.make(
             peer: Option.getOrUndefined(o.peer),
             archive: o.archive || undefined,
             runtime: Option.getOrUndefined(o.runtime),
-            machine,
+            callerEnv: callerEnvOf(),
+            ...(Option.isNone(o.session) ? {} : { runtimeSession: o.session.value }),
           })
         }),
       )
@@ -361,13 +359,6 @@ const mainFlags = {
   inParent: Flag.String("in-parent").pipe(Flag.withHidden, Flag.optional),
 }
 
-const readCallerEnv = (plugins: ReadonlyArray<Candidate>) =>
-  Effect.gen(function* () {
-    const env: Record<string, string | undefined> = {}
-    for (const key of callerKeys(plugins)) env[key] = Option.getOrUndefined(yield* Config.option(Config.String(key)))
-    return env
-  })
-
 export const callerPlugins = (builtins: ReadonlyArray<Candidate>) =>
   Effect.gen(function* () {
     const loader = yield* PluginLoader
@@ -376,8 +367,11 @@ export const callerPlugins = (builtins: ReadonlyArray<Candidate>) =>
     return [...builtins, ...read.candidates]
   })
 
+const callerEnvOf = (): Record<string, string> =>
+  Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
+
 const startMain =
-  (exec: Exec, host: Daemon.Host) =>
+  (exec: Exec, _host: Daemon.Host) =>
   (o: {
     readonly fresh: boolean
     readonly harness: Option.Option<HarnessId>
@@ -390,14 +384,9 @@ const startMain =
     readonly inParent: Option.Option<string>
   }) =>
     Effect.gen(function* () {
-      const carried = process.env[Launch.MAIN_ENV]
       delete process.env[Launch.MAIN_ENV]
       yield* userOnly("")
       if (Option.isNone(o.inParent)) yield* updateNotice
-      const path = yield* Path.Path
-      const fs = yield* FileSystem.FileSystem
-      const cwd = path.resolve(".")
-      const { root } = yield* projectRoot(cwd)
       const harness = Option.getOrUndefined(o.harness)
       const provider = Option.getOrUndefined(o.provider)
       const model = Option.getOrUndefined(o.model)
@@ -412,7 +401,17 @@ const startMain =
         ...Object.entries(env).flatMap(([k, v]) => ["--env", `${k}=${v}`]),
         ...(o.fresh ? ["--new"] : []),
       ]
-      const marked = Option.contains(o.inParent, root)
+      const claim = (yield* caller).claim
+      const path = yield* Path.Path
+      const fs = yield* FileSystem.FileSystem
+      if (Option.isNone(o.inParent)) yield* withVibest(claim, openProject)
+      const placed = yield* withVibest(claim, (client) =>
+        client["Project.MainPlace"]({
+          callerEnv: callerEnvOf(),
+          ...(runtimeKind === undefined ? {} : { runtime: runtimeKind }),
+          ...(Option.isNone(o.inParent) ? {} : { inParent: o.inParent.value }),
+        }),
+      )
       const foreignSession = Option.match(o.session, {
         onNone: () => undefined,
         onSome: (name) =>
@@ -420,93 +419,57 @@ const startMain =
             message: `--session ${name} names a herdr session; inside herdr this pane's own session is used. Run vibest outside herdr, or drop --session`,
           }),
       })
-      if (marked && foreignSession !== undefined) return yield* foreignSession
-      if (marked && (yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
-      const plugins = yield* callerPlugins(host.builtinPlugins).pipe(Effect.provideService(PluginLoader, host.plugins))
-      const stripCaller = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-        effect.pipe(Effect.provideService(CallerEnv, callerKeys(plugins)))
-      if (Option.isNone(o.inParent)) yield* stripCaller(withVibest((yield* caller).claim, openProject))
-      const detected = yield* readCallerEnv(plugins)
-      const place = mainPlace({
-        marked,
-        runtime: runtimeKind,
-        hits: yield* callerHits(plugins, detected, runtimeKind),
-      })
-      if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
-      const machine = yield* callerMachine(Option.getOrUndefined(o.session))
-      if (place.in === "terminal") {
-        if (foreignSession !== undefined) return yield* foreignSession
-        if (!marked) {
-          const spec = callerByKind(plugins, place.runtime)
-          if (spec?.ready !== undefined && !(yield* spec.ready(detected)))
-            return yield* new LaunchFailed({
-              message: spec.missing ?? `this ${place.runtime} terminal could not be named`,
-            })
-        }
-        if ((yield* fs.realPath(cwd)) !== root) yield* Effect.sync(() => process.chdir(root))
-        const terminal = place.terminal
-        if (!(yield* probe((yield* Layout).socket))) yield* stripCaller(startDaemon)
-        const claim = (yield* caller).claim
-        const chosen = yield* stripCaller(
-          withVibest(claim, (client) =>
-            client["Project.StartMain"]({
-              harness,
-              provider,
-              model,
-              runtime: place.runtime,
-            }),
-          ),
-        )
-        if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`main agent: ${describeSpawn(chosen)}`)
-        const passed = Launch.commandEnv(env, marked, carried)
-        const session = stripCaller(
-          withVibest(claim, (client) =>
-            Effect.gen(function* () {
-              return yield* soleMainAgent(
-                client,
-                terminal,
-                client["Project.CoordinatorSession"]({
-                  harness: chosen.harness,
-                  fresh: o.fresh,
-                  terminal,
-                  machine,
-                  runtime: chosen.runtime,
-                  provider: chosen.provider,
-                  model: chosen.model,
-                  routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
-                  pid: process.pid,
-                  ...(Object.keys(passed).length > 0 ? { env: passed } : {}),
-                }),
-              )
-            }),
-          ),
-        )
-        const main = yield* Launch.coordinatorCommand({
-          harness: chosen.harness,
-          root,
-          provider: chosen.provider ?? null,
-          model: chosen.model ?? null,
-          passEnv: callerKeys(plugins),
-          session,
-        }).pipe(Effect.provide(Harness.layer))
-        return yield* Effect.sync(() => exec(main.file, main.args, { ...passed, ...main.env }))
-      }
-      const opened = yield* stripCaller(
-        withVibest((yield* caller).claim, (client) =>
+      if (placed.place.in === "launch") {
+        const opened = yield* withVibest(claim, (client) =>
           client.Launch({
             argv: again,
             focus: !o.headless,
-            machine,
-            runtime: place.runtime,
+            runtime: placed.place.runtime,
+            callerEnv: callerEnvOf(),
+            ...(Option.isNone(o.session) ? {} : { runtimeSession: o.session.value }),
+          }),
+        )
+        yield* Console.log(`the main agent is starting in ${opened.place}`)
+        if (o.headless || !opened.attach) return
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const [file, ...args] = opened.attach
+        yield* spawner.exitCode(
+          ChildProcess.make(file!, args, { stdin: "inherit", stdout: "inherit", stderr: "inherit" }),
+        )
+        return
+      }
+      if (foreignSession !== undefined) return yield* foreignSession
+      if ((yield* fs.realPath(path.resolve("."))) !== placed.directory)
+        yield* Effect.sync(() => process.chdir(placed.directory))
+      const terminal = placed.place.terminal
+      const chosen = yield* withVibest(claim, (client) =>
+        client["Project.StartMain"]({
+          harness,
+          provider,
+          model,
+          runtime: placed.place.runtime,
+        }),
+      )
+      if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`main agent: ${describeSpawn(chosen)}`)
+      const started = yield* withVibest(claim, (client) =>
+        soleMainAgent(
+          client,
+          terminal,
+          client["Project.CoordinatorSession"]({
+            harness: chosen.harness,
+            fresh: o.fresh,
+            terminal,
+            runtime: chosen.runtime,
+            provider: chosen.provider,
+            model: chosen.model,
+            routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
+            pid: process.pid,
+            ...(Object.keys(env).length > 0 ? { env } : {}),
           }),
         ),
       )
-      yield* Console.log(`the main agent is starting in ${opened.place}`)
-      if (o.headless || !opened.attach) return
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-      const [file, ...args] = opened.attach
-      yield* spawner.exitCode(
-        ChildProcess.make(file!, args, { stdin: "inherit", stdout: "inherit", stderr: "inherit" }),
+      return yield* Effect.sync(() =>
+        exec(started.command.file, started.command.args, { ...env, ...started.command.env }),
       )
     })
 

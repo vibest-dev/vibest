@@ -5,14 +5,12 @@ import { Layout, VibestCommand } from "@vibest/core/paths"
 import { PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { Plugin } from "@vibest/plugin"
 import { run as runDaemon, type Host } from "@vibest/server/daemon"
-import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Logger, Path } from "effect"
-import { Command } from "effect/cli"
+import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
-import { callerPlugins, command } from "../src/cli.ts"
-import { makeRepository } from "./fakes.ts"
+import { callerPlugins } from "../src/cli.ts"
 
 const runtime = (kind: string, env: ReadonlyArray<string>): Candidate => ({
   source: kind,
@@ -274,9 +272,8 @@ describe("caller plugins", () => {
     }),
   )
 
-  it.live("a runtime plugin from vibest.json is detected, and its environment keys join the caller keys", () => {
-    const logs: Array<string> = []
-    return Effect.gen(function* () {
+  it.live("a runtime plugin from vibest.json is detected, and its environment keys join the caller keys", () =>
+    Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const base = path.join(import.meta.dirname, ".tmp")
@@ -293,41 +290,8 @@ describe("caller plugins", () => {
         Effect.provide(Layer.effect(Layout, Layout.make(dir))),
       )
       assert.deepStrictEqual(callerKeys(loaded), ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "TERN_ID", "TERN_SOCK"])
-      const repo = yield* makeRepository.pipe(Effect.provide(Platform.services))
-      const back = process.cwd()
-      process.chdir(repo)
-      const host = { builtinPlugins: [hc], plugins: Platform.plugins } as unknown as Host
-      const exit = yield* Command.runWith(
-        command(host, () => {}),
-        { version: "0.0.0-test" },
-      )(["--in-parent", repo, "--runtime", "tern"]).pipe(
-        Effect.provide(Layer.effect(Layout, Layout.make(dir))),
-        Effect.provideService(PluginLoader, Platform.plugins),
-        Effect.provide(
-          ConfigProvider.layer(
-            ConfigProvider.fromUnknown({
-              HOME: dir,
-              TERN_ID: "t9",
-              TERN_SOCK: "/tern.sock",
-            }),
-          ),
-        ),
-        Effect.exit,
-        Effect.ensuring(Effect.sync(() => process.chdir(back))),
-      )
-      const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "started"
-      assert.match(message, /this tern terminal could not be named/)
-      assert.notMatch(message, /environment is not set/)
-      assert.deepStrictEqual(
-        logs.filter((line) => /runtime|plugin|vibest\.json/i.test(line)),
-        [],
-      )
-    }).pipe(
-      Effect.provide(Logger.layer([Logger.make((entry) => void logs.push(String(entry.message)))])),
-      Effect.provide(builtinHarnesses),
-      Effect.provide(Platform.services),
-    )
-  })
+    }).pipe(Effect.provide(Platform.services)),
+  )
 
   it("callerTarget uses the socket path, a named session, or no target, and a plugin never sees keys it did not declare", () => {
     const seen: Array<Record<string, string | undefined>> = []
