@@ -1,6 +1,6 @@
 import { findNode, type LayoutNode } from "./layout-tree.ts"
 
-const BAR_MIN = 32
+const BAR_MIN = 30
 const HEADER_MIN = 36
 const SEARCH_ROW = 32
 const LIGHTS_X = 13
@@ -24,8 +24,8 @@ export const fit = (layout: unknown, viewportHeight: number, fontSize: number): 
   const border = findNode(root, "terminals")?.content?.pane?.border?.width ?? 0
   const row = Math.round(fontSize * 1.5)
   const leftover = (((Math.floor(viewportHeight) - BAR_MIN - 2 * pad - 2 * border - HEADER_MIN) % row) + row) % row
-  const bar = BAR_MIN + Math.floor(leftover / 2)
-  const header = HEADER_MIN + Math.ceil(leftover / 2)
+  const bar = BAR_MIN + Math.floor(leftover / 3)
+  const header = HEADER_MIN + leftover - Math.floor(leftover / 3)
   return {
     bar,
     header,

@@ -22,24 +22,24 @@ const tree = (bar: number, lights: number[], header = 40) => ({
 })
 
 describe("fit", () => {
-  const fixed = 32 + 16 + 2 + 36
+  const fixed = 30 + 16 + 2 + 36
 
-  it("splits what whole terminal rows leave over between the bars and the pane header", () => {
-    expect(fit(tree(32, [13, 12]), fixed + 21 * 43, 14)).toEqual({
-      bar: 32,
+  it("gives a third of what whole terminal rows leave over to the bars and the rest to the pane header", () => {
+    expect(fit(tree(30, [13, 11]), fixed + 21 * 43, 14)).toEqual({
+      bar: 30,
       header: 36,
       pad: 8,
       searchTop: 11,
-      lights: [13, 12],
+      lights: [13, 11],
     })
-    expect(fit(tree(32, [13, 12]), fixed + 21 * 43 + 11, 14)).toEqual({
-      bar: 37,
-      header: 42,
+    expect(fit(tree(30, [13, 11]), fixed + 21 * 43 + 14, 14)).toEqual({
+      bar: 34,
+      header: 46,
       pad: 8,
-      searchTop: 14,
-      lights: [13, 15],
+      searchTop: 16,
+      lights: [13, 13],
     })
-    expect(fit(tree(32, [13, 12]), fixed + 21 * 43 + 20.6, 14)).toMatchObject({ bar: 42, header: 46 })
+    expect(fit(tree(30, [13, 11]), fixed + 21 * 43 + 20.6, 14)).toMatchObject({ bar: 36, header: 50 })
   })
 })
 
