@@ -2,7 +2,7 @@ import { type Context, div, type Element, svg } from "gpui-kit"
 
 import type { Theme } from "./theme-colors.ts"
 
-export const icon = (name: string): string => `mods/workspace-chrome/${name}.svg`
+export const icon = (name: string): string => (name.endsWith(".svg") ? name : `mods/workspace-chrome/${name}.svg`)
 
 export const iconButton = (
   t: Theme,

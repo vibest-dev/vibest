@@ -67,7 +67,11 @@ export const topbarView = (t: Theme, state: TopbarState, win: TopbarWindow): Ele
     .text_size(14)
     .font_medium()
     .when(state.sidebarHidden, (el) =>
-      el.child(iconButton(t, "toggle-sidebar", "panel-left", () => run("layout.toggle", { id: "sidebar" }))),
+      el.child(
+        iconButton(t, "toggle-sidebar", "mods/vibest-topbar/panel-left-open.svg", () =>
+          run("layout.toggle", { id: "sidebar" }),
+        ),
+      ),
     )
     .child(state.breadcrumb ? breadcrumbView(t, state.breadcrumb) : div().flex_1())
     .child(

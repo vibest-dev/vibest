@@ -16,7 +16,11 @@ const header = (t: Theme): Element => {
     .pt(8)
     .items_center()
     .bg(t.chrome)
-    .child(iconButton(t, "toggle-sidebar", "panel-left", () => run("layout.toggle", { id: "sidebar" })))
+    .child(
+      iconButton(t, "toggle-sidebar", "mods/vibest-sidebar-header/panel-left-close.svg", () =>
+        run("layout.toggle", { id: "sidebar" }),
+      ),
+    )
 }
 
 export default class SidebarHeader extends View {

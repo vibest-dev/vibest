@@ -23,5 +23,7 @@ for await (const entry of new Bun.Glob("mods/*/index.ts").scan(src)) {
     for (const log of result.logs) console.error(log)
     process.exit(1)
   }
-  await fs.copyFile(path.join(src, mod, "mod.json"), path.join(dist, mod, "mod.json"))
+  for (const file of ["mod.json", ...new Bun.Glob("*.svg").scanSync(path.join(src, mod))]) {
+    await fs.copyFile(path.join(src, mod, file), path.join(dist, mod, file))
+  }
 }
