@@ -6,29 +6,6 @@ import { appHome, exec } from "herdr";
 import { theme } from "herdr";
 var themeColors = () => theme();
 
-// src/panel/agents/pull.ts
-var idlePull = () => ({ token: 0, closed: false, running: false, again: false });
-var requestPull = (pull) => {
-  if (pull.closed)
-    return pull;
-  if (pull.running)
-    return { ...pull, again: true };
-  return { token: pull.token + 1, closed: false, running: true, again: false };
-};
-var completePull = (pull, token) => {
-  if (pull.closed || token !== pull.token)
-    return { pull, apply: false };
-  if (pull.again)
-    return { apply: false, pull: { token: pull.token + 1, closed: false, running: true, again: false } };
-  return { apply: true, pull: { ...pull, running: false } };
-};
-var closePull = (pull) => ({
-  token: pull.token + 1,
-  closed: true,
-  running: false,
-  again: false
-});
-
 // src/panel/agents/ls.ts
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
 var LS_ARGV = [...STRIPPED.flatMap((name) => ["-u", name]), "vibest", "ls"];
@@ -107,6 +84,29 @@ var lsFailure = (error) => ({
   sessions: [],
   note: commandNote({ code: 1, stdout: "", stderr: error instanceof Error ? error.message : "vibest could not be run" }, "vibest could not be run"),
   asOf: ""
+});
+
+// src/panel/agents/pull.ts
+var idlePull = () => ({ token: 0, closed: false, running: false, again: false });
+var requestPull = (pull) => {
+  if (pull.closed)
+    return pull;
+  if (pull.running)
+    return { ...pull, again: true };
+  return { token: pull.token + 1, closed: false, running: true, again: false };
+};
+var completePull = (pull, token) => {
+  if (pull.closed || token !== pull.token)
+    return { pull, apply: false };
+  if (pull.again)
+    return { apply: false, pull: { token: pull.token + 1, closed: false, running: true, again: false } };
+  return { apply: true, pull: { ...pull, running: false } };
+};
+var closePull = (pull) => ({
+  token: pull.token + 1,
+  closed: true,
+  running: false,
+  again: false
 });
 
 // src/panel/agents/view.ts
