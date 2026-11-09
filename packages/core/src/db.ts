@@ -82,6 +82,7 @@ export const CoordinatorRow = Schema.Struct({
   runtime: Schema.NullOr(Schema.String),
   address: Schema.NullOr(AddressJson),
   projectDirectory: Schema.optional(Schema.String),
+  identityInShell: Schema.optional(Schema.Boolean),
   createdAt: Schema.Number,
   provider: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
@@ -251,6 +252,7 @@ type ProcessStart = {
   readonly terminal: string
   readonly resume?: string
   readonly pid?: number
+  readonly identityInShell?: boolean
 }
 
 type Integration = { readonly version: string; readonly protocol: number }
@@ -620,6 +622,7 @@ const make = Effect.gen(function* () {
               provider: start?.provider ?? null,
               model: start?.model ?? null,
               ...(start?.routing === undefined ? {} : { routing: start.routing }),
+              ...(start?.identityInShell === true ? { identityInShell: true } : {}),
               ...(integration === undefined ? {} : { integration }),
               ...(pid === null || pid === undefined ? {} : { pid }),
               ...(row.readyAt === null ? {} : { ready: row.readyAt }),
@@ -792,6 +795,7 @@ const make = Effect.gen(function* () {
         ...(start.routing === undefined ? {} : { routing: start.routing }),
         ...(start.resume ? { resume: start.resume } : {}),
         ...(start.pid === undefined ? {} : { pid: start.pid }),
+        ...(start.identityInShell === true ? { identityInShell: true } : {}),
       }
       const processId = yield* append({
         sessionId: id,
@@ -1332,6 +1336,8 @@ const make = Effect.gen(function* () {
 
     coordinators: findCoordinators().pipe(Effect.orDie),
 
+    allocateSessionId: () => unusedId,
+
     coordinatorOf: (projectIdValue: string) =>
       findCoordinators(projectIdValue).pipe(
         Effect.map((rows) => rows[0]),
@@ -1355,10 +1361,12 @@ const make = Effect.gen(function* () {
         readonly routing?: unknown
         readonly projectDirectory?: string | undefined
         readonly pid?: number | undefined
+        readonly sessionId?: string | undefined
+        readonly identityInShell?: boolean | undefined
       } = {},
     ) =>
       Effect.gen(function* () {
-        const id = yield* unusedId
+        const id = start.sessionId ?? (yield* unusedId)
         return yield* tx(
           Effect.gen(function* () {
             yield* clearMainAt(location.runtime, location.address, project)
@@ -1403,6 +1411,7 @@ const make = Effect.gen(function* () {
                 terminal: location.address.id,
                 ...(resume === undefined ? {} : { resume }),
                 ...(start.pid === undefined ? {} : { pid: start.pid }),
+                ...(start.identityInShell === true ? { identityInShell: true } : {}),
               },
               at,
             )

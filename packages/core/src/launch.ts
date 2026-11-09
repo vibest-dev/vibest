@@ -111,6 +111,43 @@ export const identityPairs = (env: Readonly<Record<string, string>>) =>
     return value === undefined ? [] : [`${key}=${value}`]
   })
 
+export const restartArgv = (
+  identityInShell: boolean,
+  command: {
+    readonly file: string
+    readonly args: ReadonlyArray<string>
+    readonly env: Readonly<Record<string, string>>
+  },
+) =>
+  identityInShell
+    ? [command.file, ...command.args]
+    : ["env", ...identityPairs(command.env), command.file, ...command.args]
+
+export const flagValue = (argv: ReadonlyArray<string>, name: string) => {
+  const value = argv[argv.indexOf(name) + 1]
+  return argv.includes(name) && value !== undefined && !value.startsWith("-") ? value : undefined
+}
+
+export const identityEnv = Effect.fn("Launch.identityEnv")(function* (input: {
+  readonly sessionId: string
+  readonly projectId: string
+  readonly harness: string
+  readonly runtime: string
+}) {
+  const layout = yield* Layout
+  const vibest = yield* VibestCommand
+  return {
+    VIBEST_SESSION_ID: input.sessionId,
+    VIBEST_PROJECT_ID: input.projectId,
+    VIBEST_PROJECT_DIR: layout.project(input.projectId),
+    VIBEST_AGENT: COORDINATOR,
+    VIBEST_HARNESS: input.harness,
+    VIBEST_RUNTIME: input.runtime,
+    VIBEST_HOME: layout.home,
+    VIBEST_COMMAND: encodeCommand(vibest),
+  }
+})
+
 export const inParent = (argv: ReadonlyArray<string>, root: string, runtime: string) => {
   const rest: Array<string> = []
   for (let i = 0; i < argv.length; i++) {

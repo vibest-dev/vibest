@@ -53,7 +53,7 @@ import {
 } from "./harness.ts"
 import { Inbox } from "./inbox.ts"
 import { keyedLock } from "./keyed-lock.ts"
-import { coordinatorCommand, identityPairs } from "./launch.ts"
+import { coordinatorCommand, restartArgv } from "./launch.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, VibestCommand, safeRepositoryDirectory } from "./paths.ts"
 import { sessionPlacement } from "./placement.ts"
@@ -1433,7 +1433,7 @@ export class Sessions extends Context.Service<
                 ...(main.runtime && main.address ? { runtime: runtimeEnv(main.runtime, main.address) } : {}),
               }),
             })
-            return ["env", ...identityPairs(command.env), command.file, ...command.args]
+            return restartArgv(main.identityInShell === true, command)
           }).pipe(
             Effect.provideService(Harness, harness),
             Effect.provideService(Harnesses, harnesses),

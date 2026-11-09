@@ -433,6 +433,7 @@ describe("vibest.sock", () => {
           "Project.CoordinatorSession",
           c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" }),
         ],
+        ["Project.FocusCoordinator", c["Project.FocusCoordinator"]({})],
         ["Project.RunningCoordinator", c["Project.RunningCoordinator"]({ terminal: "test/p1" })],
         ["Project.StopCoordinator", c["Project.StopCoordinator"]({ runtime: "herdr", address: "{}" })],
         ["Project.Info", c["Project.Info"]()],
@@ -495,10 +496,11 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "Launch opens a terminal at the repository root running the command in its shell; no session, no worktree",
+    "Launch opens a terminal whose shell has the main agent's identity, and types the harness command",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const layout = yield* Layout
+      const db = yield* Db
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const opened = yield* c.Launch({
@@ -507,32 +509,39 @@ describe("vibest.sock", () => {
         runtime: "herdr",
       })
       const root = yield* sh(repo, "rev-parse", "--show-toplevel")
+      const main = yield* db.coordinatorOf(yield* projectOf(repo))
+      assert.ok(main)
+      assert.strictEqual(main!.identityInShell, true)
       assert.deepStrictEqual(opened, {
         runtime: "herdr",
         terminal: opened.terminal,
         place: `herdr terminal ${opened.terminal}`,
         attach: ["fake", "attach"],
       })
-      assert.deepStrictEqual(yield* herdr.callsTo("open"), [
+      const [open] = yield* herdr.callsTo("open")
+      assert.deepStrictEqual(
+        { ...open, env: undefined },
         {
           project: root,
           cwd: root,
           argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh"],
-          env: { VIBEST_HOME: layout.home },
+          env: undefined,
           label: "vibest",
           near: undefined,
           split: undefined,
           focus: true,
         },
-      ])
-      assert.deepStrictEqual(yield* herdr.callsTo("run"), [
-        {
-          terminal: opened.terminal,
-          argv: ["/bin/vibest", "--harness", "pi", "--model", "it's", "--runtime", "herdr", "--in-parent", root],
-        },
-      ])
+      )
+      assert.strictEqual(open!.env["VIBEST_SESSION_ID"], main!.id)
+      assert.strictEqual(open!.env["VIBEST_HARNESS"], "pi")
+      assert.strictEqual(open!.env["VIBEST_AGENT"], "coordinator")
+      assert.strictEqual(open!.env["VIBEST_HOME"], layout.home)
+      const [ran] = yield* herdr.callsTo("run")
+      assert.strictEqual(ran!.terminal, opened.terminal)
+      assert.strictEqual(ran!.argv[0], "pi")
+      assert.includeMembers([...ran!.argv], ["--model", "it's"])
+      assert.notInclude(ran!.argv, "--in-parent")
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
-      assert.deepStrictEqual(yield* c.List({}), [])
     }),
   )
 

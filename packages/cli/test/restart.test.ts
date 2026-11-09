@@ -127,15 +127,18 @@ describe("restart in place", () => {
     assert.strictEqual(shown, `Notice: ${CONTINUE}`)
   })
 
-  const workingMain = (harness: "cursor" | "pi") =>
+  const workingMain = (harness: "cursor" | "pi", identityInShell = false) =>
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const projectId = yield* projectOf(yield* makeRepository)
-      yield* db.coordinatorLaunch(projectId, harness, false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.coordinatorLaunch(
+        projectId,
+        harness,
+        false,
+        { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
+        identityInShell ? { identityInShell: true } : {},
+      )
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
       const main = (yield* db.coordinatorOf(projectId))!
@@ -213,6 +216,32 @@ describe("restart in place", () => {
       for (const pair of mainArgv!.slice(1, mainArgv!.indexOf("pi")))
         assert.ok(identity.has(pair.slice(0, pair.indexOf("="))), pair)
     }).pipe(Effect.provideService(VibestCommand, ["/own/bin/vibest"])),
+  )
+
+  test(
+    "a main agent whose pane shell was given its identity is restarted by typing the harness command alone",
+    Effect.gen(function* () {
+      const { db, herdr, id } = yield* workingMain("pi", true)
+      const sessions = yield* Sessions
+      const processes = yield* FakeProcesses
+      yield* db.noteIntegration(id, { version: "0", protocol: PROTOCOL })
+      const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
+      yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
+      yield* until(processes.signaled, (t) => t.includes(100))
+      yield* db.patchLive(id, { pid: 500, ready: null })
+      yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "idle" }))
+      yield* TestClock.adjust("5 seconds")
+      yield* db.patchLive(id, { ready: 2 })
+      const done = (yield* untilVirtual(Ref.get(outcomes), (o) => o !== undefined))!
+      assert.deepStrictEqual(
+        done.map((o) => [o.id, o.ok]),
+        [[id, true]],
+      )
+      const [ran] = (yield* herdr.callsTo("run")).map((c) => c.argv)
+      assert.strictEqual(ran![0], "pi")
+      assert.notInclude(ran!, `VIBEST_SESSION_ID=${id}`)
+    }),
   )
 
   test(

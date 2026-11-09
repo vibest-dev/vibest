@@ -709,14 +709,15 @@ export const handlers = VibestRpcs.toLayer(
           const { id, directory: root } = yield* scope("Launch")
           const at = yield* machineFromCaller({ machine, callerEnv, runtimeSession })
           const current = yield* db.coordinatorOf(id)
+          const asked = Launch.flagValue(argv, "--harness")
           const decision = yield* plugins.start({
             project: root,
             agentType: "main",
             parentSessionId: undefined,
             prompt: "",
-            harness: undefined,
-            provider: undefined,
-            model: undefined,
+            harness: asked ?? current?.harnessId,
+            provider: Launch.flagValue(argv, "--provider"),
+            model: Launch.flagValue(argv, "--model"),
             harnesses: yield* harnessOptions,
             attempts: [],
             machine: { id: at.id },
@@ -730,25 +731,100 @@ export const handlers = VibestRpcs.toLayer(
               message: `no terminal runtime was chosen for the main agent${loaded.length === 0 ? "" : `; loaded: ${loaded.join(", ")}`}`,
             })
           }
+          if (decision.harness === undefined || !isHarnessId(decision.harness))
+            return yield* new LaunchFailed({
+              message:
+                decision.harness === undefined
+                  ? "no harness was chosen for the main agent"
+                  : `unknown harness ${decision.harness}`,
+            })
+          const harness = decision.harness
           const rt = yield* runtimes.route(decision.runtime)
           yield* runtimes.online(rt, { id: decision.machine.id })
-          const terminal = yield* Launch.openInParentWorkspace(rt, at, {
-            root,
-            label: "vibest",
-            home: layout.home,
-            focus,
-          })
           const run = rt.run
-          if (run === undefined) {
-            yield* rt.close(terminal).pipe(Effect.ignore)
+          if (run === undefined)
             return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
-          }
-          yield* run(terminal, Launch.inParent(argv, root, rt.kind)).pipe(
-            Effect.catch((error) =>
-              rt
-                .close(terminal)
-                .pipe(Effect.ignore, Effect.andThen(Effect.fail(new LaunchFailed({ message: error.message })))),
-            ),
+          const fresh = argv.includes("--new")
+          const terminal = yield* projectLocked.withLock(id)(
+            Effect.gen(function* () {
+              const running = yield* runningCoordinator(id, "")
+              if (running)
+                return yield* new Forbidden({
+                  method: "Launch",
+                  message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
+                })
+              const existing = yield* db.coordinatorOf(id)
+              const sessionId =
+                existing === undefined || fresh ? yield* db.allocateSessionId().pipe(Effect.orDie) : existing.id
+              const opened = yield* Launch.openInParentWorkspace(rt, at, {
+                root,
+                label: "vibest",
+                home: layout.home,
+                env: yield* Launch.identityEnv({
+                  sessionId,
+                  projectId: id,
+                  harness,
+                  runtime: runtimeEnv(rt.kind, { machine: at.id, id: "" }),
+                }),
+                focus,
+              })
+              const claimed = yield* db
+                .coordinatorLaunch(
+                  id,
+                  harness,
+                  fresh,
+                  { runtime: rt.kind, address: opened },
+                  {
+                    provider: decision.provider,
+                    model: decision.model,
+                    routing: { decidedBy: decision.decidedBy, trace: decision.trace },
+                    projectDirectory: root,
+                    ...(existing === undefined || fresh ? { sessionId } : {}),
+                    identityInShell: true,
+                  },
+                )
+                .pipe(Effect.catch((error) => rt.close(opened).pipe(Effect.ignore, Effect.andThen(Effect.fail(error)))))
+              const command = yield* Launch.coordinatorCommand({
+                harness,
+                root,
+                provider: decision.provider ?? null,
+                model: decision.model ?? null,
+                passEnv: [],
+                session: Effect.succeed({
+                  ...claimed,
+                  runtime: runtimeEnv(rt.kind, opened),
+                }),
+              }).pipe(
+                Effect.catchTag("HarnessUnavailable", (error) =>
+                  Effect.fail(new LaunchFailed({ message: error.message })),
+                ),
+                Effect.catchTag("SystemPromptDirUnsafe", (error) =>
+                  Effect.fail(new LaunchFailed({ message: error.message })),
+                ),
+                Effect.catchTag("ConfigError", (error) => Effect.die(error)),
+                Effect.catch((error) =>
+                  rt
+                    .close(opened)
+                    .pipe(
+                      Effect.ignore,
+                      Effect.andThen(db.endProcess(claimed.sessionId, "launch_failed")),
+                      Effect.andThen(Effect.fail(error)),
+                    ),
+                ),
+              )
+              yield* run(opened, [command.file, ...command.args]).pipe(
+                Effect.catch((error) =>
+                  rt
+                    .close(opened)
+                    .pipe(
+                      Effect.ignore,
+                      Effect.andThen(db.endProcess(claimed.sessionId, "launch_failed")),
+                      Effect.andThen(Effect.fail(new LaunchFailed({ message: error.message }))),
+                    ),
+                ),
+              )
+              return opened
+            }),
           )
           return {
             runtime: rt.kind,
