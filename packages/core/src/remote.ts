@@ -11,6 +11,7 @@ import { Git } from "./git.ts"
 import { VibestdIdentity } from "./identity.ts"
 import { Machines } from "./machines.ts"
 import { Plugins } from "./plugins.ts"
+import { repositoryIdentity } from "./repository-url.ts"
 
 export type Address =
   | { readonly _tag: "Local"; readonly id: string }
@@ -139,6 +140,7 @@ const make = Effect.gen(function* () {
               (e) => new MachineFailed({ message: `cannot read HEAD of ${repository.path}: ${e.message}` }),
             ),
           )
+        const identity = yield* repositoryIdentity(remote)
         const main = yield* db.coordinatorOf(from.project)
         const reportTo = from.coordinator ?? main?.id
         const runtime =
@@ -147,6 +149,7 @@ const make = Effect.gen(function* () {
           client["Peer.Spawn"](
             {
               repository: remote,
+              ...(identity === undefined ? {} : { identity }),
               commit,
               prompt: input.prompt,
               ...(input.harness === undefined ? {} : { harness: input.harness }),

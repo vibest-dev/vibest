@@ -182,11 +182,11 @@ export const remoteQueries = ({ sql, now, tx, notify, present, queuedBy, insertI
           }),
         ).pipe(Effect.orDie),
 
-      projectsWithRemote: (remote: string) =>
-        sql<{ id: string; directory: string | null; repositories: number }>`SELECT p.id, p.directory,
-            (SELECT count(*) FROM project_repository r WHERE r.project_id = p.id) AS repositories
-          FROM project p WHERE p.id IN (SELECT project_id FROM project_repository WHERE remote_url = ${remote})
-          ORDER BY p.rowid`.pipe(Effect.orDie),
+      remoteProjects: sql<{ id: string; directory: string | null; repositories: number; remote: string }>`SELECT
+            p.id, p.directory, r.remote_url AS remote,
+            (SELECT count(*) FROM project_repository c WHERE c.project_id = p.id) AS repositories
+          FROM project p JOIN project_repository r ON r.project_id = p.id
+          WHERE r.remote_url IS NOT NULL ORDER BY p.rowid, r.rowid`.pipe(Effect.orDie),
 
       outboxOf: (peer: string) =>
         sql<Omit<OutboxRow, "reportTo"> & { readonly start: string | null }>`SELECT o.id, o.session_id, o.kind,

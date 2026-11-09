@@ -5573,6 +5573,16 @@
           "repository": {
             "type": "string"
           },
+          "identity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "commit": {
             "type": "string"
           },

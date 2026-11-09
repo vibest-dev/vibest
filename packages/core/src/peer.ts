@@ -14,6 +14,7 @@ import { Bus } from "./bus.ts"
 import { Db, type OutboxRow } from "./db.ts"
 import { Git } from "./git.ts"
 import { VibestdIdentity } from "./identity.ts"
+import { repositoryIdentity } from "./repository-url.ts"
 import { defaultSessionName, Sessions } from "./sessions.ts"
 
 export const outboxItem = (row: OutboxRow): OutboxItem => {
@@ -36,7 +37,14 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const bytes = new TextEncoder().encode(input.prompt).length
         if (bytes > PROMPT_MAX) return yield* new PromptTooLarge({ bytes })
-        const found = yield* db.projectsWithRemote(input.repository)
+        const found: Array<{ readonly id: string; readonly directory: string | null; readonly repositories: number }> =
+          []
+        for (const row of yield* db.remoteProjects) {
+          const same =
+            row.remote === input.repository ||
+            (input.identity !== undefined && (yield* repositoryIdentity(row.remote)) === input.identity)
+          if (same && !found.some((p) => p.id === row.id)) found.push(row)
+        }
         const here = `${self.name} has no checkout of ${input.repository}: clone it there and run vibest project add in it`
         if (found.length === 0) return yield* new NoProject({ message: here })
         if (found.length > 1)

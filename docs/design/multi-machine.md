@@ -87,7 +87,8 @@ notifies nobody.
 ## B: agents for another machine
 
 `Peer.Spawn` (peer caller, with `vibest-peer-project` naming A's project) finds the one project whose repository
-`remote_url` equals `repository` (a multi-repository project is refused), checks that the checkout has `commit`
+`remote_url` equals `repository` or has the same repository identity as `identity` (a multi-repository project is
+refused), checks that the checkout has `commit`
 (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
 and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
@@ -105,10 +106,24 @@ the peer's rows in `created_at` order (insertion order on a tie), then each new 
 `List`, `Get`, `Send`, `Interrupt`, `Remove` and `Peek` from a peer resolve a session id only among sessions whose
 `peer.start` has that peer and that project; any other session is `NoSuchSession`.
 
+## Repository identity
+
+The same repository is often cloned with different URLs on two machines (`git@github-me:o/r.git` on A,
+`https://github.com/o/r` on B), so B does not match `remote_url` as a string alone. The repository identity
+(`packages/core/src/repository-url.ts`) is the host in lower case and the `owner/repo` path, without scheme, user,
+port, a leading `~/` or `/`, a trailing `/` and a trailing `.git`: `github.com/o/r` for all of `git@github.com:o/r.git`,
+`ssh://git@github.com:22/o/r`, `https://github.com/o/r.git` and `https://GitHub.com/o/r`. The host of an ssh form
+(scp-like `host:path`, `ssh://`, `git+ssh://`) may be an alias from the ssh config; it is resolved to its real
+`HostName` with `ssh -G <alias>` (the `SshHosts` service, cached per alias, 5 s limit, the alias itself on any failure)
+on the machine that reads it: A resolves its own remote, B the remotes of its own checkouts. An https host is never
+looked up. A local path or `file://` URL has no identity and matches only the same string. A sends both the raw URL
+and the identity; B matches a checkout when the raw URLs are equal or the identities are, and every `NoProject`
+message names A's raw URL. `remote_url` is stored unchanged.
+
 ## A: remote sessions
 
 `vibest run --machine <name>` (the user or the main agent) sends `Peer.Spawn` over the machine's connection with
-the project's one repository's `remote_url`, its `HEAD` (`Git.head`), the caller as `parent` and the
+the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`), the caller as `parent` and the
 main agent as `reportTo`; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. With no main agent there is no `report_to`, as in `hc run --on`
 with no parent: nothing is sent back, the result stays on B and `vibest result <name>/<id>` reads it there.
 `--env`, `--peer`, `--archive-on-completion`, `--agent` and `--session` are refused with it, by vibestd, after the

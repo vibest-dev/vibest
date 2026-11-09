@@ -717,6 +717,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Peer.Spawn", {
         payload: {
           repository: Schema.String,
+          identity: Schema.optional(Schema.String),
           commit: Schema.String,
           prompt: Schema.String,
           harness: Schema.optional(Schema.Literals(HARNESS_IDS)),

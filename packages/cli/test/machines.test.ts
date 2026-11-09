@@ -438,7 +438,7 @@ const REMOTE = "git@example.com:o/r.git"
 const COMMIT = "0123456789abcdef0123456789abcdef01234567"
 const REPOSITORY = { origin: REMOTE, head: COMMIT, commits: [COMMIT] }
 
-const repoStack = (net?: Net, options: TestOptions = {}) =>
+const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE) =>
   Effect.gen(function* () {
     const spawns: Array<SpawnInput> = []
     const transport = net === undefined ? {} : { transport: net.transport(yield* SocketConnector) }
@@ -449,8 +449,8 @@ const repoStack = (net?: Net, options: TestOptions = {}) =>
     const layout = yield* run(Layout)
     const db = yield* run(Db)
     const directory = yield* tempDirectory("vibest-b-checkout-")
-    yield* (yield* run(FakeGit)).repository(directory, REPOSITORY)
-    const project = yield* db.createProject(directory, [{ path: directory, remote: REMOTE }])
+    yield* (yield* run(FakeGit)).repository(directory, { ...REPOSITORY, origin: remote })
+    const project = yield* db.createProject(directory, [{ path: directory, remote }])
     const raw = yield* connect(layout.socket)
     const cli = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(layout.home))
     const as = (peer: string, aProject: string) =>
@@ -739,6 +739,29 @@ describe("vibest run --machine and remote sessions", () => {
       assert.strictEqual(got.id, spawned.id)
       assert.strictEqual(got.result?.message, "kept on B")
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "B finds a checkout cloned with another URL form; A resolves its own ssh alias; NoProject names the URL",
+    () =>
+      Effect.gen(function* () {
+        const net = new Net()
+        const a = yield* repoStack(net, { sshHosts: { "gh-me": "GitHub.com" } }, "git@gh-me:o/r.git")
+        const b = yield* repoStack(net, {}, "https://github.com/o/r")
+        const other = yield* repoStack(net, {}, "https://github.com/o/other.git")
+        net.route("b-host", b.layout.socket)
+        net.route("o-host", other.layout.socket)
+        yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
+        yield* a.cli(a.raw["Machine.Add"]({ name: "mo", target: "o-host" }))
+        yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows.every((row) => row.state === "connected"))
+        const here = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(a.directory))
+        yield* here(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
+        assert.lengthOf(b.spawns, 1)
+        assert.strictEqual(b.spawns[0]!.root, b.directory)
+        const missing = yield* Effect.flip(here(a.raw.Spawn({ machine: "mo", prompt: "x", callerEnv: {} })))
+        assert.strictEqual(missing._tag, "NoProject")
+        assert.include(missing.message, "has no checkout of git@gh-me:o/r.git")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
   it.effect("a session another machine started may not start agents", () =>

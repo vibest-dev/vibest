@@ -15,6 +15,7 @@ import { Builtins, Plugins, PluginLoader, type Candidate } from "@vibest/core/pl
 import { type ProcessPlatform, Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
 import { Remote } from "@vibest/core/remote"
+import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
@@ -92,6 +93,7 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provideMerge(Sessions.layer),
     Layer.provideMerge(Processes.layer(host.processes)),
     Layer.provideMerge(Git.layer),
+    Layer.provideMerge(SshHosts.layer),
     Layer.provideMerge(
       Plugins.layer.pipe(
         Layer.provide(Layer.succeed(Builtins, host.builtinPlugins)),

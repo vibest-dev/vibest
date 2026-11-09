@@ -15,6 +15,7 @@ import { Peers } from "@vibest/core/peer"
 import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { type Liveness, Processes } from "@vibest/core/processes"
 import { Remote } from "@vibest/core/remote"
+import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
 import { turnEndFrom } from "@vibest/core/results"
 import { Runtimes, registry } from "@vibest/core/runtimes"
@@ -325,6 +326,7 @@ export interface TestOptions extends FakeRuntimeOptions {
     | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
   >
   readonly pluginTimeout?: Duration.Input
+  readonly sshHosts?: Readonly<Record<string, string>>
   readonly db?: (db: Db["Service"]) => Db["Service"]
   readonly missingBinary?: ReadonlyArray<HarnessId>
   readonly transport?: MachineTransport["Service"]
@@ -438,6 +440,9 @@ const over = (options: TestOptions) => {
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
       Layer.provideMerge(FakeGit.layers),
+      Layer.provideMerge(
+        Layer.succeed(SshHosts, { hostName: (alias) => Effect.succeed(options.sshHosts?.[alias] ?? alias) }),
+      ),
       Layer.provideMerge(Platform.services),
       Layer.provideMerge(Bus.layer),
       Layer.provideMerge(Layer.sync(VibestdIdentity, () => ({ id: randomId(), name: "test-host" }))),

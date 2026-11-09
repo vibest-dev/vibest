@@ -91,6 +91,7 @@ const setup = async (w: World) => {
     path.join(bin, "ssh"),
     [
       "#!/bin/sh",
+      `[ "$1" = -G ] && { [ "$3" = gh-shop ] && echo "hostname Example.com" || echo "hostname $3"; exit 0; }`,
       `printf '%s\\n' "$*" >> ${sh(log)}`,
       `echo $$ >> ${sh(path.join(w.root, "ssh.pids"))}`,
       "for last; do :; done",
@@ -108,6 +109,13 @@ const setup = async (w: World) => {
   const bRepo = path.join(b, "shop")
   const cloned = await w.run(w.root, ["git", "clone", "-q", w.origin, bRepo])
   expect(cloned.code === 0, `git clone: ${cloned.stderr}`)
+  for (const [cwd, url] of [
+    [bRepo, "https://example.com/o/shop"],
+    [w.repository, "git@gh-shop:o/shop.git"],
+  ] as const) {
+    const set = await w.run(cwd, ["git", "remote", "set-url", "origin", url])
+    expect(set.code === 0, `git remote set-url: ${set.stderr}`)
+  }
   const hcB = await hcCore(w, "b", bEnv)
   const onB = (args: ReadonlyArray<string>, cwd = bRepo) => w.run(cwd, [binary, ...args], { env: bEnv })
   const okB = async (args: ReadonlyArray<string>) => {
@@ -184,7 +192,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M1",
     title:
-      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime starts a session on B in the runtime of A's main agent and none on A, A's main agent gets one notice with B's text, B's outbox empties; send, result, peek and archive forward to B",
+      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's main agent and none on A, A's main agent gets one notice with B's text, B's outbox empties; send, result, peek and archive forward to B",
     run: async (w) => {
       let s: Setup | undefined
       try {
