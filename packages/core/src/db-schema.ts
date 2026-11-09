@@ -130,14 +130,11 @@ export const objectCount = SqlClient.SqlClient.pipe(
 export const migrate = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   if ((yield* inspectSchema) === "empty") {
-    const installed = yield* sql.withTransaction(
+    yield* sql.withTransaction(
       Effect.gen(function* () {
-        if ((yield* objectCount) !== 0) return false
-        for (const statement of [...SCHEMA, ...REMOTE_TABLES]) yield* sql.unsafe(statement)
-        return true
+        if ((yield* objectCount) === 0) for (const statement of SCHEMA) yield* sql.unsafe(statement)
       }),
     )
-    if (installed) return
   }
   if ((yield* inspectSchema) !== "ready") return yield* mismatch(0, 0, "empty after install")
   yield* sql.withTransaction(Effect.forEach(REMOTE_TABLES, (statement) => sql.unsafe(statement), { discard: true }))

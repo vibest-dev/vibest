@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Schema, Struct } from "effect"
 
 export class MachineFailed extends Schema.TaggedError<MachineFailed>()("MachineFailed", { message: Schema.String }) {}
 
@@ -48,12 +48,7 @@ export const MachineInfo = Schema.Struct({
 })
 export type MachineInfo = typeof MachineInfo.Type
 
-export const ListedMachine = Schema.Struct({
-  name: Schema.String,
-  state: MachineState,
-  since: Schema.Number,
-  reason: Schema.optional(Schema.String),
-})
+export const ListedMachine = MachineInfo.mapFields(Struct.pick(["name", "state", "since", "reason"]))
 export type ListedMachine = typeof ListedMachine.Type
 
 export class NoProject extends Schema.TaggedError<NoProject>()("NoProject", { message: Schema.String }) {}

@@ -2,20 +2,42 @@ import { Db } from "@vibest/core/db"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { Machines } from "@vibest/core/machines"
 import { Peers } from "@vibest/core/peer"
-import { type Address, address, Remote } from "@vibest/core/remote"
+import { address, type Forwarded, type ListScope, type PeerScope, Remote } from "@vibest/core/remote"
+import type { NotInRepository } from "@vibest/core/worktree"
 import { PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
-import { type ACCESS, Caller, Forbidden, VERSION } from "@vibest/protocol/rpc"
+import { Caller, type CallerShape, Forbidden, type PayloadOf, type SessionInfo, VERSION } from "@vibest/protocol/rpc"
+import type { ProjectMoved } from "@vibest/schema/session"
 import { Effect, Stream } from "effect"
 
-type Access = typeof ACCESS
-type Levels<X> = Exclude<X extends ReadonlyArray<infer L> ? L : X, "peer">
-export type MethodOf<A> = {
-  [K in keyof Access]: [Levels<Access[K]>] extends [never] ? never : Levels<Access[K]> extends A ? K : never
-}[keyof Access]
+type Routed = "Send" | "Interrupt" | "Remove" | "Get" | "Peek"
+type CliOnly = "Peers.List" | "Peers.Remove" | "Machine.Add" | "Machine.List" | "Machine.Remove"
+type Agent = Extract<CallerShape, { _tag: "Cli" | "Coordinator" }>
+type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
-export const remoteHandlers = <E, R>(deps: {
-  readonly project: (method: MethodOf<"agent" | "owner">) => Effect.Effect<string, E, R>
-  readonly cliOnly: (method: MethodOf<"cli">) => Effect.Effect<void, Forbidden, Caller>
+const notPeer = (method: string) => new Forbidden({ method, message: `${method} is for another vibestd` })
+
+const peerOf = (method: string) =>
+  Effect.flatMap(Caller, (c) => (c._tag === "Peer" ? Effect.succeed(c.peerId) : Effect.fail(notPeer(method))))
+
+const peerScope = (method: string) =>
+  Effect.flatMap(Caller, (c): Effect.Effect<PeerScope | undefined, Forbidden> => {
+    if (c._tag !== "Peer") return Effect.succeed(undefined)
+    if (c.projectId === undefined)
+      return Effect.fail(
+        new Forbidden({ method, message: `${method} needs the calling project (${PEER_PROJECT_HEADER})` }),
+      )
+    return Effect.succeed({ peer: c.peerId, project: c.projectId })
+  })
+
+export const remoteHandlers = <R>(deps: {
+  readonly agent: (method: Routed | "List") => Effect.Effect<Agent, Forbidden, Caller>
+  readonly projectOf: (
+    c: Agent,
+    method: Routed,
+  ) => Effect.Effect<{ readonly id: string }, Forbidden | NotInRepository | ProjectMoved, R>
+  readonly findAt: (directory: string) => Effect.Effect<{ readonly id: string } | undefined, NotInRepository, R>
+  readonly listed: (scope: ListScope, stopped: boolean) => Effect.Effect<ReadonlyArray<SessionInfo>, never, R>
+  readonly cliOnly: (method: CliOnly) => Effect.Effect<void, Forbidden, Caller>
 }) =>
   Effect.gen(function* () {
     const db = yield* Db
@@ -25,68 +47,77 @@ export const remoteHandlers = <E, R>(deps: {
     const remote = yield* Remote
     const { cliOnly } = deps
 
-    const peerCaller = (method: string) =>
-      Effect.flatMap(Caller, (c) =>
-        c._tag === "Peer"
-          ? Effect.succeed({ peer: c.peerId, project: c.projectId })
-          : Effect.fail(new Forbidden({ method, message: `${method} is for another vibestd` })),
-      )
+    const reach = (method: Routed | "List") =>
+      Effect.gen(function* () {
+        const scope = yield* peerScope(method)
+        if (scope !== undefined) return { c: undefined, scope }
+        return { c: yield* deps.agent(method), scope }
+      })
 
-    const peerScope = (method: string) =>
-      Effect.flatMap(peerCaller(method), ({ peer, project }) =>
-        project === undefined
-          ? Effect.fail(
-              new Forbidden({ method, message: `${method} needs the calling project (${PEER_PROJECT_HEADER})` }),
-            )
-          : Effect.succeed({ peer, project }),
-      )
+    const listScope = (all: boolean | undefined) =>
+      Effect.gen(function* () {
+        const { c, scope } = yield* reach("List")
+        if (c === undefined) return { _tag: "Peer", ...scope } satisfies ListScope
+        if (c._tag === "Coordinator") return { _tag: "Project", id: c.projectId } satisfies ListScope
+        if (all === true) return { _tag: "All" } satisfies ListScope
+        return yield* deps.findAt(c.repositoryRoot).pipe(
+          Effect.map((row): ListScope => (row === undefined ? { _tag: "Nothing" } : { _tag: "Project", id: row.id })),
+          Effect.catchTag("NotInRepository", () => Effect.succeed<ListScope>({ _tag: "All" })),
+        )
+      })
 
-    const peerSession = (method: string, input: string) =>
-      peerScope(method).pipe(Effect.flatMap((scope) => db.resolveSession(input, scope)))
+    const refused = (method: string) => (e: NotInRepository | ProjectMoved) =>
+      Effect.fail(new Forbidden({ method, message: `${method} on another machine: ${e.message}` }))
 
-    const remoteProject = (method: MethodOf<"agent" | "owner">) =>
-      deps.project(method).pipe(
-        Effect.catchIf(
-          (e): e is Exclude<E, Forbidden> => !(e instanceof Forbidden),
-          (e) =>
-            Effect.fail(
-              new Forbidden({
-                method,
-                message: `${method} on another machine: ${(e as { message?: string }).message}`,
-              }),
-            ),
-        ),
-      )
-
-    const routed = <A, E1, R, B, F>(
-      method: MethodOf<"agent" | "owner">,
+    const routed = <A, E, R2, B, F>(
+      method: Routed,
       input: string,
-      local: (id: string) => Effect.Effect<A, E1, R>,
-      forwarded: (at: Extract<Address, { _tag: "Remote" }>, project: string) => Effect.Effect<B, F>,
+      local: Local<A, E, R2>,
+      forwarded: Forwarded<B, F>,
     ) => {
       const at = address(input)
       return at._tag === "Local"
         ? local(at.id)
-        : Effect.flatMap(remoteProject(method), (project) => forwarded(at, project))
+        : deps.agent(method).pipe(
+            Effect.flatMap((c) => deps.projectOf(c, method)),
+            Effect.catchTags({ NotInRepository: refused(method), ProjectMoved: refused(method) }),
+            Effect.flatMap((project) => remote.forward(at, project.id, forwarded)),
+          )
     }
 
     return {
-      remote,
-      routed,
-      peerScope,
-      peerSession,
+      reach,
+      routed: {
+        Send: <A, E, R2>(p: PayloadOf<"Send">, local: Local<A, E, R2>) =>
+          routed("Send", p.id, local, (c, id, o) => c.Send({ ...p, id }, o)),
+        Interrupt: <A, E, R2>(p: PayloadOf<"Interrupt">, local: Local<A, E, R2>) =>
+          routed("Interrupt", p.id, local, (c, id, o) => c.Interrupt({ ...p, id }, o)),
+        Remove: <A, E, R2>(p: PayloadOf<"Remove">, local: Local<A, E, R2>) =>
+          routed("Remove", p.id, local, (c, id, o) => c.Remove({ ...p, id }, o)),
+        Get: <A, E, R2>(p: PayloadOf<"Get">, local: Local<A, E, R2>) =>
+          routed("Get", p.id, local, (c, id, o) => c.Get({ ...p, id }, o)),
+        Peek: <A, E, R2>(p: PayloadOf<"Peek">, local: Local<A, E, R2>) =>
+          routed("Peek", p.id, local, (c, id, o) => c.Peek({ ...p, id }, o)),
+      },
+
+      spawnOn: (machine: string, input: PayloadOf<"Spawn">, caller: Agent, project: string) =>
+        remote.spawn(machine, input, {
+          project,
+          ...(caller._tag === "Coordinator" ? { coordinator: caller.sessionId } : {}),
+        }),
+
       methods: {
-        "Peer.Hello": ({
-          id,
-          name,
-          callsMe,
-        }: {
-          readonly id: string
-          readonly name: string
-          readonly callsMe: string
-        }) =>
+        List: ({ stopped, all }: PayloadOf<"List">) =>
           Effect.gen(function* () {
-            if ((yield* peerCaller("Peer.Hello")).peer !== id)
+            const scope = yield* listScope(all)
+            const local = yield* deps.listed(scope, stopped === true)
+            const away = yield* remote.list(scope, stopped)
+            return { sessions: [...local, ...away.sessions], machines: away.machines }
+          }),
+
+        "Peer.Hello": ({ id, name, callsMe }: PayloadOf<"Peer.Hello">) =>
+          Effect.gen(function* () {
+            if ((yield* peerOf("Peer.Hello")) !== id)
               return yield* new Forbidden({
                 method: "Peer.Hello",
                 message: "Peer.Hello names the vibestd that calls it",
@@ -95,20 +126,24 @@ export const remoteHandlers = <E, R>(deps: {
             return { id: self.id, name: self.name, version: VERSION }
           }),
 
-        "Peer.Spawn": (input: Parameters<Peers["Service"]["spawn"]>[2]) =>
-          peerScope("Peer.Spawn").pipe(Effect.flatMap(({ peer, project }) => peers.spawn(peer, project, input))),
+        "Peer.Spawn": (input: PayloadOf<"Peer.Spawn">) =>
+          Effect.gen(function* () {
+            const scope = yield* peerScope("Peer.Spawn")
+            if (scope === undefined) return yield* notPeer("Peer.Spawn")
+            return yield* peers.spawn(scope.peer, scope.project, input)
+          }),
 
-        "Peer.Outbox": () => Stream.unwrap(Effect.map(peerCaller("Peer.Outbox"), ({ peer }) => peers.outbox(peer))),
+        "Peer.Outbox": () => Stream.unwrap(Effect.map(peerOf("Peer.Outbox"), (peer) => peers.outbox(peer))),
 
-        "Peer.Ack": ({ ids }: { readonly ids: ReadonlyArray<string> }) =>
-          Effect.flatMap(peerCaller("Peer.Ack"), ({ peer }) => peers.ack(peer, ids)),
+        "Peer.Ack": ({ ids }: PayloadOf<"Peer.Ack">) =>
+          Effect.flatMap(peerOf("Peer.Ack"), (peer) => peers.ack(peer, ids)),
 
         "Peers.List": () => cliOnly("Peers.List").pipe(Effect.andThen(peers.list)),
 
-        "Peers.Remove": ({ peer }: { readonly peer: string }) =>
+        "Peers.Remove": ({ peer }: PayloadOf<"Peers.Remove">) =>
           cliOnly("Peers.Remove").pipe(Effect.andThen(peers.remove(peer))),
 
-        "Machine.Add": ({ name, target }: { readonly name: string; readonly target: string }) =>
+        "Machine.Add": ({ name, target }: PayloadOf<"Machine.Add">) =>
           cliOnly("Machine.Add").pipe(Effect.andThen(machines.add(name, target))),
 
         "Machine.List": () =>
@@ -117,7 +152,7 @@ export const remoteHandlers = <E, R>(deps: {
             Effect.map((states) => states.map((s) => s.info)),
           ),
 
-        "Machine.Remove": ({ name }: { readonly name: string }) =>
+        "Machine.Remove": ({ name }: PayloadOf<"Machine.Remove">) =>
           cliOnly("Machine.Remove").pipe(Effect.andThen(machines.remove(name))),
       },
     }

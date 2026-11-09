@@ -1,17 +1,11 @@
 import { probe, startDaemon, type VibestClient, withVibest } from "@vibest/client/client"
 import { Layout } from "@vibest/core/paths"
 import { shortId } from "@vibest/schema/id"
-import { Console, Effect, Path, Schema } from "effect"
+import { Console, Effect, Path } from "effect"
 import { Argument, Command } from "effect/cli"
 
-import { caller, userOnly } from "./caller.ts"
+import { json, userOnly, vibest } from "./caller.ts"
 import { pipeStdio } from "./connect.ts"
-
-const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-const json = (value: unknown) => Console.log(encodeJson(value))
-
-const vibest = <A, E, R>(f: (client: VibestClient) => Effect.Effect<A, E, R>) =>
-  Effect.flatMap(caller, (c) => withVibest(c.claim, f, { start: !c.agent }))
 
 export const connectCommand = Command.make("connect", {}, () =>
   userOnly("connect").pipe(

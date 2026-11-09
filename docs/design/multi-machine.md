@@ -87,10 +87,10 @@ notifies nobody.
 
 `Peer.Spawn` (peer caller, with `vibest-peer-project` naming A's project) finds the one project whose repository
 `remote_url` equals `repository` (a multi-repository project is refused), checks that the checkout has `commit`
-(`RepositoryFacts.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
+(`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
 and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
-started it is one `peer.start` event (peer, project, parent?, report_to?), written in the transaction that creates
+started it is one `peer.start` event (peer, project, parent?, reportTo?), written in the transaction that creates
 the session row; it has no `report_to` when A's project had no main agent. The forwarded `request` finds the session on a retry.
 
 Every result and notice of a peer session with a `report_to` goes to B's `outbox` in the transaction that writes it. B still writes the
@@ -107,16 +107,18 @@ with whether a stream is open now, its undelivered rows and its open sessions.
 ## A: remote sessions
 
 `vibest run --machine <name>` (the user or the main agent) sends `Peer.Spawn` over the machine's connection with
-the project's one repository's `remote_url`, its `HEAD` (`RepositoryFacts.head`), the caller as `parent` and the
-main agent as `report_to`; it prints `<name>/<id8>`. With no main agent there is no `report_to`, as in `hc run --on`
+the project's one repository's `remote_url`, its `HEAD` (`Git.head`), the caller as `parent` and the
+main agent as `reportTo`; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. With no main agent there is no `report_to`, as in `hc run --on`
 with no parent: nothing is sent back, the result stays on B and `vibest result <name>/<id>` reads it there.
-`--env`, `--peer` and `--archive-on-completion` are refused with it, by vibestd. A stores nothing for the session.
+`--env`, `--peer`, `--archive-on-completion`, `--agent` and `--session` are refused with it, by vibestd, after the
+reserved-name check every run gets. A stores nothing for the session.
 An address `<name>/<id>` is resolved once, at the entry of each method, into a local id or a machine and an id; a
 bare id is always local and nothing is searched across machines. `vibest result|send|interrupt|archive|peek
 <name>/<id>` forward `Get`, `Send`, `Interrupt`, `Remove` and `Peek` with `vibest-peer-project` set to the caller's
 project. `List` (and `vibest ls`) answers `{ sessions, machines }`, as `hc ls` does: `sessions` has the local rows and
 each connected machine's rows (ids `<name>/<id>`, `machine` set), asked of all machines at once; `machines` lists every
-added machine, connected or not, with `state`, `since` and, when it is not connected, `reason`. The code is
+added machine, connected or not, with `state`, `since` and, when it is not connected, `reason`; a connected
+machine whose `List` fails is shown `unreachable` with that failure as its `reason`. The code is
 `core/src/remote.ts` (forwarding, the merged List, the remote Spawn) and `core/src/machines.ts` (add, dial, the
 connection and outbox receiving).
 

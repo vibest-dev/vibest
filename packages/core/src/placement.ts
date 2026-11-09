@@ -39,6 +39,12 @@ import {
 
 class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message: string }> {}
 
+export type LaunchOptions = {
+  readonly splitFrom?: string | undefined
+  readonly env?: Readonly<Record<string, string>> | undefined
+  readonly commit?: string | undefined
+}
+
 export const sessionPlacement = (deps: {
   readonly db: {
     readonly coordinatorOf: (projectId: string) => Effect.Effect<CoordinatorRow | undefined>
@@ -188,9 +194,7 @@ export const sessionPlacement = (deps: {
     session: SessionRow,
     root: string,
     firstPrompt: string,
-    splitFrom?: string,
-    env?: Readonly<Record<string, string>>,
-    commit?: string,
+    { splitFrom, env, commit }: LaunchOptions = {},
   ) {
     const folders = yield* listProjectRepositories(root)
     const peer = splitFrom !== undefined ? yield* peerRow(session, splitFrom) : undefined
@@ -257,11 +261,9 @@ export const sessionPlacement = (deps: {
     session: SessionRow,
     root: string,
     firstPrompt: string,
-    splitFrom?: string,
-    env?: Readonly<Record<string, string>>,
-    commit?: string,
+    options: LaunchOptions = {},
   ) =>
-    launchRaw(h, machine, session, root, firstPrompt, splitFrom, env, commit).pipe(
+    launchRaw(h, machine, session, root, firstPrompt, options).pipe(
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           const e = Cause.squash(cause)

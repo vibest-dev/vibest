@@ -170,7 +170,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const none = "a7b8c9d0-a7b8-4a7b-8a7b-a7b8c9d0a7b8"
       const elsewhere = path.join(layout.home, "x", outside)
       yield* marker(elsewhere)
-      yield* db.insertSession(storedRow(outside, {}), key, undefined, elsewhere)
+      yield* db.insertSession(storedRow(outside, {}), key, { cwd: elsewhere })
       yield* db.insertSession(storedRow(none, {}), key)
       const left = (yield* sessions.remove(outside))!
       assert.strictEqual(left.worktree, "kept")

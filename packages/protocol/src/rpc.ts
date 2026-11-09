@@ -321,7 +321,6 @@ export class VibestRpcs extends RpcGroup.make(
           harness: Schema.Literals(HARNESS_IDS),
           provider: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
-          machine: Schema.optional(Schema.String),
           ...Routing.fields,
         }),
         error: Schema.Union([
@@ -840,6 +839,10 @@ export const ACCESS = {
   "Machine.Remove": "cli",
 } as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly [Access, "peer"]>
 
+export type PayloadOf<Tag extends RpcGroup.Rpcs<typeof VibestRpcs>["_tag"]> = Rpc.Payload<
+  Rpc.ExtractTag<RpcGroup.Rpcs<typeof VibestRpcs>, Tag>
+>
+
 export const PEER_CALLS: ReadonlySet<string> = new Set(
   Object.entries(ACCESS)
     .filter(([, access]) => ([] as ReadonlyArray<string>).concat(access).includes("peer"))
@@ -854,5 +857,4 @@ export const CAPABILITIES = {
   projects: true,
   harnesses: true,
   spawnRuntime: true,
-  machines: true,
 } as const

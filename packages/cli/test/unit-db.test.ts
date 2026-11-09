@@ -80,14 +80,11 @@ describe("Db", () => {
           const db = yield* Db
           const sql = yield* SqlClient.SqlClient
           const parent = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
-          yield* db.insertSession(
-            session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            yield* projectOf("r"),
-            undefined,
-            "/w",
-            "do it",
-            parent.sessionId,
-          )
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
+            cwd: "/w",
+            task: "do it",
+            parentSessionId: parent.sessionId,
+          })
           yield* db.beginUserTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "typed", { turnPromptedAt: 1 })
           const inbox = (kind: string, senderId: string | null, content: string, status: string) =>
             sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, status)
@@ -116,14 +113,11 @@ describe("Db", () => {
             parentSessionId: undefined,
           })
 
-          yield* db.insertSession(
-            session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
-            yield* projectOf("r"),
-            undefined,
-            "/w",
-            "do it",
-            parent.sessionId,
-          )
+          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), {
+            cwd: "/w",
+            task: "do it",
+            parentSessionId: parent.sessionId,
+          })
           yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "open", turnPromptedAt: 1 })
           yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "completed" })
           yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "open", turnPromptedAt: 3 })
@@ -165,13 +159,10 @@ describe("Db", () => {
               inboxId: number | null
               input: string
             }>`SELECT inbox_id, input FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`
-          yield* db.insertSession(
-            session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            yield* projectOf("r"),
-            undefined,
-            "/w",
-            "do it",
-          )
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
+            cwd: "/w",
+            task: "do it",
+          })
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 5 })
           assert.strictEqual(
             (yield* round("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))[0]!.inboxId,
@@ -243,10 +234,10 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         assert.isTrue(
-          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), 1),
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), { max: 1 }),
         )
         assert.isFalse(
-          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), 1),
+          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), { max: 1 }),
         )
         yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
           status: "unknown",
@@ -254,7 +245,7 @@ describe("Db", () => {
           exitedAt: 1,
         })
         assert.isTrue(
-          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), 1),
+          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), { max: 1 }),
         )
         assert.deepStrictEqual(
           (yield* db.listSessions()).map((w) => w.id),
@@ -270,13 +261,10 @@ describe("Db", () => {
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
-        yield* db.insertSession(
-          session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-          yield* projectOf("r"),
-          undefined,
-          "/w",
-          "do it",
-        )
+        yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
+          cwd: "/w",
+          task: "do it",
+        })
         assert.deepStrictEqual(
           yield* sql`SELECT kind, content, status FROM inbox WHERE recipient_session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
           [{ kind: "task", content: "do it", status: "delivered" }],
@@ -388,14 +376,11 @@ describe("Db", () => {
               VALUES (${id}, 'result', ${id}, ${end.result}, ${last!.id}, 'dropped')`
         })
       yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
-      yield* db.insertSession(
-        session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-        yield* projectOf("r"),
-        undefined,
-        "/w",
-        "from parent",
-        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-      )
+      yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
+        cwd: "/w",
+        task: "from parent",
+        parentSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      })
       yield* db.insertSend("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "later send")
       yield* turn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 1, {
         at: 10,
@@ -403,13 +388,10 @@ describe("Db", () => {
         result: "<summary>old summary</summary>",
       })
       yield* turn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 2, { at: 20, status: "failed", output: "new line\nmore" })
-      yield* db.insertSession(
-        session("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
-        yield* projectOf("r"),
-        undefined,
-        "/w",
-        "do it",
-      )
+      yield* db.insertSession(session("dddddddd-dddd-4ddd-8ddd-dddddddddddd"), yield* projectOf("r"), {
+        cwd: "/w",
+        task: "do it",
+      })
       yield* db.insertSession(session("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"), yield* projectOf("r"))
       yield* db.updateSession("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", { turnState: "open", turnPromptedAt: 5 })
       yield* db.insertSession(session("ffffffff-ffff-4fff-8fff-ffffffffffff"), yield* projectOf("r"))

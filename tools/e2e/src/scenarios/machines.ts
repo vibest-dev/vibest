@@ -164,9 +164,13 @@ const setup = async (w: World) => {
       `${address}:%`,
       `%done-${marker}%`,
     )?.n ?? 0
-  const run = async (marker: string, machine = "mb") =>
-    (JSON.parse(await okA(["run", "--machine", machine, "--runtime", "hc", "pi", "--", ask(marker)])) as { id: string })
-      .id
+  const run = async (marker: string, machine = "mb") => {
+    const printed = (
+      JSON.parse(await okA(["run", "--machine", machine, "--runtime", "hc", "pi", "--", ask(marker)])) as { id: string }
+    ).id
+    expect(printed.startsWith(`${machine}/`) && /^[0-9a-f-]{36}$/.test(printed.slice(machine.length + 1)), printed)
+    return printed.slice(0, machine.length + 9)
+  }
   const stop = async () => {
     subs.stop()
     main.stop()

@@ -2,6 +2,7 @@ import { projectActivity, unseenDone } from "@vibest/core/activity"
 import { type EngineEvent } from "@vibest/core/bus"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { coordinatorIdle } from "@vibest/core/inbox"
+import type { ListScope } from "@vibest/core/remote"
 import { agentState, Runtimes, type Runtime, type Terminal } from "@vibest/core/runtimes"
 import { type SessionView, Sessions } from "@vibest/core/sessions"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
@@ -110,10 +111,21 @@ export const sessionListing = (deps: {
       }),
     )
 
-  const listed = (projectId: string | undefined, stopped: boolean) =>
+  const listed = (scope: ListScope, stopped: boolean) =>
     Effect.gen(function* () {
-      const rows = yield* sessions.list({ ...(projectId === undefined ? {} : { projectId }), stopped })
-      const mains = projectId === undefined ? yield* db.coordinators : [yield* db.coordinatorOf(projectId)]
+      if (scope._tag === "Nothing") return []
+      const projectId = scope._tag === "Project" ? scope.id : undefined
+      const rows = yield* sessions.list({
+        ...(projectId === undefined ? {} : { projectId }),
+        ...(scope._tag === "Peer" ? { peer: scope } : {}),
+        stopped,
+      })
+      const mains =
+        scope._tag === "Peer"
+          ? []
+          : projectId === undefined
+            ? yield* db.coordinators
+            : [yield* db.coordinatorOf(projectId)]
       return [
         ...(yield* Effect.forEach(mains, listedMain)).flatMap((m) => (m ? [m] : [])),
         ...(yield* listedRows(rows)),
@@ -230,7 +242,7 @@ export const sessionListing = (deps: {
         } else if (event.type === "live.seen")
           for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
         else if (event.type === "live.reset")
-          for (const info of yield* listed(undefined, false))
+          for (const info of yield* listed({ _tag: "All" }, false))
             if (info.runtime === event.runtime) sessionIds.add(info.id)
       }
       for (const id of sessionIds) {
@@ -243,5 +255,5 @@ export const sessionListing = (deps: {
       ]
     })
 
-  return { listed, listedRows, watched, snapshotProjects, watchDeltas }
+  return { listed, watched, snapshotProjects, watchDeltas }
 }

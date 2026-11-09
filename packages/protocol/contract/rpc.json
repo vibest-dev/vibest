@@ -7,8 +7,7 @@
     "watch": true,
     "projects": true,
     "harnesses": true,
-    "spawnRuntime": true,
-    "machines": true
+    "spawnRuntime": true
   },
   "methods": {
     "Agents.Outdated": {
@@ -12824,16 +12823,6 @@
             ]
           },
           "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "machine": {
             "anyOf": [
               {
                 "type": "string"

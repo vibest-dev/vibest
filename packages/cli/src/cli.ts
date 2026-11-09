@@ -18,7 +18,6 @@ import { jsonObject, promptOf } from "@vibest/core/results"
 import { LaunchFailed } from "@vibest/core/sessions"
 import { UpdateError } from "@vibest/core/update-check"
 import { type Ping, VERSION } from "@vibest/protocol/rpc"
-import { shortId } from "@vibest/schema/id"
 import * as Daemon from "@vibest/server/daemon"
 import {
   Cause,
@@ -39,7 +38,7 @@ import { Argument, CliError, Command, Flag } from "effect/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClientError as ClientError } from "effect/rpc"
 
-import { caller, userOnly } from "./caller.ts"
+import { caller, json, userOnly, vibest } from "./caller.ts"
 import { doctor } from "./doctor.ts"
 import { herdrCommands } from "./herdr-plugin.ts"
 import { connectCommand, machine, peer, projectAdd } from "./machine-commands.ts"
@@ -47,9 +46,6 @@ import { replaceDaemon } from "./replace.ts"
 import { LEFT, noticeFrom, restartAgents, update, updateNotice } from "./update.ts"
 
 export class EmptyInput extends Schema.TaggedError<EmptyInput>()("EmptyInput", { message: Schema.String }) {}
-
-const vibest = <A, E, R>(f: (client: VibestClient, agent: boolean) => Effect.Effect<A, E, R>) =>
-  Effect.flatMap(caller, (c) => withVibest(c.claim, (client) => f(client, c.agent), { start: !c.agent }))
 
 const requested = <A, E, R>(
   f: (
@@ -82,9 +78,6 @@ const requested = <A, E, R>(
       ),
     )
   })
-
-const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
-const json = (value: unknown) => Console.log(encodeJson(value))
 
 const input = (value: string, what: string) =>
   Effect.gen(function* () {
@@ -212,10 +205,6 @@ const run = Command.make(
       const prompt = yield* input(o.prompt, "prompt")
       const spawned = yield* requested((client, request, ping) =>
         Effect.gen(function* () {
-          if (Option.isSome(o.machine) && ping.capabilities?.machines !== true)
-            return yield* new LaunchFailed({
-              message: "this vibestd does not take --machine on vibest run; run vibest update",
-            })
           if (Option.isSome(o.runtime) && ping.capabilities?.spawnRuntime !== true)
             return yield* new LaunchFailed({
               message: "this vibestd does not take --runtime on vibest run; run vibest update",
@@ -237,9 +226,7 @@ const run = Command.make(
           })
         }),
       )
-      yield* json(
-        spawned.machine === undefined ? spawned : { ...spawned, id: `${spawned.machine}/${shortId(spawned.id)}` },
-      )
+      yield* json(spawned)
     }),
 ).pipe(
   Command.withDescription(

@@ -1,5 +1,6 @@
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
 import { peerHeaders, PROTOCOL } from "@vibest/protocol/protocol"
+import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import {
   AlreadyAdded,
@@ -12,7 +13,7 @@ import {
   UnknownMachine,
 } from "@vibest/schema/machine"
 import { Clock, Context, Duration, Effect, Exit, Fiber, Layer, Option, Predicate, Schema, Scope, Stream } from "effect"
-import { RpcClient } from "effect/rpc"
+import { RpcClient, type RpcClientError } from "effect/rpc"
 import type * as Socket from "effect/socket/Socket"
 
 import { Db, type MachineRow } from "./db.ts"
@@ -85,15 +86,24 @@ const exitReason = (name: string, exit: PipeExit) => {
   return last || `ssh exited ${exit.code ?? "on a signal"}`
 }
 
-type Lost = { readonly _tag: "RpcClientError" }
-type LineError = { readonly _tag: "RpcClientError" | "ProtocolRejected" | "DaemonStopping" | "InvalidCaller" }
+type LineError = RpcClientError.RpcClientError | ProtocolRejected | DaemonStopping | InvalidCaller | MachineDown
 
-const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
+const LINE_TAGS: ReadonlySet<unknown> = new Set([
+  "RpcClientError",
+  "ProtocolRejected",
+  "DaemonStopping",
+  "InvalidCaller",
+  "MachineDown",
+])
+const isLineError = (e: unknown): e is LineError => Predicate.hasProperty(e, "_tag") && LINE_TAGS.has(e._tag)
+
+const alreadyNamed = (name: string) =>
+  `a machine named ${name} is already added; remove it first (vibest machine rm ${name})`
 
 export interface Link {
   readonly client: PipeClient
   readonly call: <A, E>(
-    effect: Effect.Effect<A, E>,
+    effect: Effect.Effect<A, E | LineError>,
   ) => Effect.Effect<A, Exclude<E, LineError> | MachineUnavailable | MachineIncompatible>
   readonly exited: Effect.Effect<PipeExit>
 }
@@ -139,39 +149,44 @@ const make = Effect.gen(function* () {
             ),
           ),
         )
-      const attempt = <A, E>(effect: Effect.Effect<A, E>) =>
-        effect.pipe(
-          Effect.raceFirst(Effect.flatMap(ended, (message) => Effect.fail(new MachineDown({ message })))),
-          Effect.catch((e) =>
-            Predicate.isTagged(e, "RpcClientError")
-              ? Effect.flatMap(down(e), (message) => Effect.fail(new MachineDown({ message })))
-              : Effect.fail(e),
-          ),
-        ) as Effect.Effect<A, Exclude<E, Lost> | MachineDown>
-      const call = <A, E>(effect: Effect.Effect<A, E>) =>
-        attempt(effect).pipe(
-          Effect.mapError((e): Exclude<E, LineError> | MachineUnavailable | MachineIncompatible => {
-            if (e instanceof MachineDown)
-              return new MachineUnavailable({
-                machine: name,
-                message: `lost the line to ${name} during the call (${e.message}); it may have happened there; check, then retry`,
-              })
-            if (Predicate.isTagged(e, "ProtocolRejected"))
-              return new MachineIncompatible({ machine: name, message: `${name}: ${messageOf(e)}` })
-            if (Predicate.isTagged(e, "DaemonStopping") || Predicate.isTagged(e, "InvalidCaller"))
-              return new MachineUnavailable({ machine: name, message: `${name}: ${messageOf(e)}` })
-            return e as Exclude<E, LineError>
-          }),
-        )
+      const unavailable = (message: string) => Effect.fail(new MachineUnavailable({ machine: name, message }))
+      const line =
+        (lost: (reason: string) => string) =>
+        <A, E>(effect: Effect.Effect<A, E | LineError>) =>
+          Effect.catchIf(
+            Effect.raceFirst(
+              effect,
+              Effect.flatMap(ended, (reason) => Effect.fail(new MachineDown({ message: reason }))),
+            ),
+            isLineError,
+            (e): Effect.Effect<never, MachineUnavailable | MachineIncompatible> => {
+              switch (e._tag) {
+                case "RpcClientError":
+                  return Effect.flatMap(down(e), (reason) => unavailable(lost(reason)))
+                case "MachineDown":
+                  return unavailable(lost(e.message))
+                case "ProtocolRejected":
+                  return Effect.fail(new MachineIncompatible({ machine: name, message: `${name}: ${e.message}` }))
+                case "DaemonStopping":
+                case "InvalidCaller":
+                  return unavailable(`${name}: ${e.message}`)
+              }
+            },
+          )
+      const call = line(
+        (reason) =>
+          `lost the line to ${name} during the call (${reason}); it may have happened there; check, then retry`,
+      )
+      const opening = line((reason) => reason)
       const client = yield* connectPipe(pipe.socket)
       const failed = (e: { readonly message: string }) => new MachineDown({ message: e.message })
-      const ping = yield* attempt(client.Ping(undefined)).pipe(Effect.mapError(failed))
+      const ping = yield* opening(client.Ping(undefined)).pipe(Effect.mapError(failed))
       if (ping.protocol !== PROTOCOL)
         return yield* new MachineDown({
           message: `${name} runs vibest ${ping.version} (protocol ${ping.protocol ?? "none"}); run vibest update there`,
           stop: "mismatch",
         })
-      const hello = yield* attempt(
+      const hello = yield* opening(
         RpcClient.withHeaders(
           client["Peer.Hello"]({ id: self.id, name: self.name, callsMe: name }),
           peerHeaders(self.id),
@@ -195,11 +210,16 @@ const make = Effect.gen(function* () {
       yield* link.client["Peer.Ack"]({ ids: [item.id] }, { headers: peerHeaders(self.id) })
     })
 
-  type First = { readonly opened: Effect.Success<ReturnType<typeof open>>; readonly scope: Scope.Closeable }
+  type First = {
+    readonly row: MachineRow
+    readonly opened: Effect.Success<ReturnType<typeof open>>
+    readonly scope: Scope.Closeable
+  }
 
   const connection = (row: MachineRow, first: First | undefined) =>
     Effect.gen(function* () {
       if (first !== undefined) yield* Effect.addFinalizer(() => Scope.close(first.scope, Exit.void))
+      yield* set(row.name, { state: "connecting", reason: entries.get(row.name)?.reason })
       const opened = first?.opened ?? (yield* open(row.name, row.target))
       if (opened.hello.id !== row.vibestdId)
         return yield* new MachineDown({
@@ -245,9 +265,8 @@ const make = Effect.gen(function* () {
       let delay = RETRY_FIRST
       let given = first
       while (true) {
-        const row = yield* db.machineNamed(name)
+        const row = given?.row ?? (yield* db.machineNamed(name))
         if (row === undefined) return
-        yield* set(name, { state: "connecting", reason: entries.get(name)?.reason })
         const down = yield* connection(row, given).pipe(Effect.flip)
         given = undefined
         if (down.stop !== undefined) {
@@ -270,10 +289,7 @@ const make = Effect.gen(function* () {
 
   const start = (name: string, first?: First) =>
     Effect.gen(function* () {
-      const supervised = supervise(name, first).pipe(
-        Effect.ensuring(first === undefined ? Effect.void : Scope.close(first.scope, Exit.void)),
-      )
-      fibers.set(name, yield* Effect.forkIn(supervised, scope))
+      fibers.set(name, yield* Effect.forkIn(supervise(name, first), scope, { startImmediately: true }))
     })
 
   for (const row of yield* db.machines) yield* start(row.name)
@@ -296,8 +312,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const problem = nameProblem(name) ?? targetProblem(target)
         if (problem !== undefined) return yield* failed(problem)
-        if ((yield* db.machineNamed(name)) !== undefined)
-          return yield* failed(`a machine named ${name} is already added; remove it first (vibest machine rm ${name})`)
+        if ((yield* db.machineNamed(name)) !== undefined) return yield* failed(alreadyNamed(name))
         const pipe = yield* Scope.make()
         const opened = yield* open(name, target).pipe(
           Scope.provide(pipe),
@@ -311,15 +326,15 @@ const make = Effect.gen(function* () {
           Effect.onError(() => Scope.close(pipe, Exit.void)),
         )
         const id = opened.hello.id
-        const added = id !== self.id && (yield* db.addMachine({ name, target, vibestdId: id }))
-        if (!added) {
+        const added = id === self.id ? undefined : yield* db.addMachine({ name, target, vibestdId: id })
+        if (added === undefined) {
           yield* Scope.close(pipe, Exit.void)
           if (id === self.id) return yield* failed(`${name} is this vibestd`)
           const same = yield* db.machineWithVibestd(id)
           if (same !== undefined) return yield* new AlreadyAdded({ machine: same.name, id })
-          return yield* failed(`a machine named ${name} is already added; remove it first (vibest machine rm ${name})`)
+          return yield* failed(alreadyNamed(name))
         }
-        yield* start(name, { opened, scope: pipe })
+        yield* start(name, { row: added, opened, scope: pipe })
         return { name, id, vibestd: opened.hello.name, version: opened.version }
       }),
 

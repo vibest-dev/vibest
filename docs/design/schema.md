@@ -148,9 +148,9 @@ BEGIN SELECT RAISE(ABORT, 'event is append-only'); END;
 
 ### Optional objects
 
-Tables and indexes added after the baseline without a numbered step are kept out of `SCHEMA` in `OPTIONAL`
-(`packages/core/src/db.ts`), written `CREATE … IF NOT EXISTS`. An empty file gets them in the install transaction;
-an existing file gets them in one write transaction after `inspectSchema` accepted it. `inspectSchema` requires only
+Tables and indexes added after the baseline without a numbered step are kept out of `SCHEMA` in `REMOTE_TABLES`
+(`packages/core/src/db-remote.ts`), written `CREATE … IF NOT EXISTS`. Every open runs them in one write transaction
+after `inspectSchema` accepted the file, a new one included. `inspectSchema` requires only
 the baseline objects and ignores extra ones, so an older vibest still opens the file (a downgrade, or an old CLI's
 `daemon import-check`) and never reads the new tables. `user_version` stays 1. A later change to the shape of one of
 these tables is the first case that needs numbered upgrade steps. The optional objects are listed in
@@ -184,18 +184,18 @@ An inbox row is text for one recipient: a session, or the user (`recipient_sessi
 
 ## Event types (data fields)
 
-| type                 | link columns        | data                                                                                                                                                                                                                                     |
-| -------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| process.start        | -                   | harness (an open string), provider?, model?, routing? (the plugins' decision record), runtime, machine, terminal, resume? (the conversation id it resumes), pid? (a main agent's launch)                                                 |
-| process.ready        | process_id          | pid, conversation?, integration {version, protocol}; may repeat after a plugin reload; pidOnly: a pid report that is not a ready report                                                                                                  |
-| process.conversation | process_id          | conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                                                                                         |
-| process.end          | process_id          | reason: exited, limited, restart, move, archived (also for vibest --new), launch_failed                                                                                                                                                  |
-| turn.start           | process_id          | typed? (the text typed into the pane; none for a turn a delivery opened)                                                                                                                                                                 |
-| turn.reported        | process_id          | harness, text; error?, conversation?, interrupted? (only when present). The turn end as the hook reported it, before a check consumes it                                                                                                 |
-| turn.end             | process_id, turn_id | status: completed, failed, interrupted, lost, not_started; report? (the turn.reported it consumed), failure? {message}; output? only on rows written before report                                                                       |
-| inbox.queued         | inbox_id            | request? (the request id of the `vibest send` or `vibest run` that queued the row, when its caller sent one; a repeat with it finds the row); the queue time is `at`                                                                     |
-| inbox.status         | inbox_id, turn_id?  | to; on to = delivered, turn_id is the turn that consumed it                                                                                                                                                                              |
-| peer.start           | -                   | peer (the identity id of the vibestd that started it), project (that vibestd's project id), parent? (its caller session), report_to? (its session that gets the results; none when that project had no main agent); see multi-machine.md |
+| type                 | link columns        | data                                                                                                                                                                                                                                    |
+| -------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| process.start        | -                   | harness (an open string), provider?, model?, routing? (the plugins' decision record), runtime, machine, terminal, resume? (the conversation id it resumes), pid? (a main agent's launch)                                                |
+| process.ready        | process_id          | pid, conversation?, integration {version, protocol}; may repeat after a plugin reload; pidOnly: a pid report that is not a ready report                                                                                                 |
+| process.conversation | process_id          | conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                                                                                                                        |
+| process.end          | process_id          | reason: exited, limited, restart, move, archived (also for vibest --new), launch_failed                                                                                                                                                 |
+| turn.start           | process_id          | typed? (the text typed into the pane; none for a turn a delivery opened)                                                                                                                                                                |
+| turn.reported        | process_id          | harness, text; error?, conversation?, interrupted? (only when present). The turn end as the hook reported it, before a check consumes it                                                                                                |
+| turn.end             | process_id, turn_id | status: completed, failed, interrupted, lost, not_started; report? (the turn.reported it consumed), failure? {message}; output? only on rows written before report                                                                      |
+| inbox.queued         | inbox_id            | request? (the request id of the `vibest send` or `vibest run` that queued the row, when its caller sent one; a repeat with it finds the row); the queue time is `at`                                                                    |
+| inbox.status         | inbox_id, turn_id?  | to; on to = delivered, turn_id is the turn that consumed it                                                                                                                                                                             |
+| peer.start           | -                   | peer (the identity id of the vibestd that started it), project (that vibestd's project id), parent? (its caller session), reportTo? (its session that gets the results; none when that project had no main agent); see multi-machine.md |
 
 A turn's input is its typed text, or the inbox rows with an `inbox.status` event `to = delivered` and `turn_id` =
 that turn. A delivery opens the turn before the rows move to delivered, so they get its id. A `task` is handed over

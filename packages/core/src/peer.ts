@@ -1,3 +1,4 @@
+import type { PayloadOf } from "@vibest/protocol/rpc"
 import {
   AmbiguousPeer,
   NoCommit,
@@ -14,21 +15,7 @@ import { Bus } from "./bus.ts"
 import { Db, type OutboxRow } from "./db.ts"
 import { Git } from "./git.ts"
 import { VibestdIdentity } from "./identity.ts"
-import { defaultSessionName, type SpawnInput, Sessions } from "./sessions.ts"
-
-export type PeerSpawn = {
-  readonly repository: string
-  readonly commit: string
-  readonly prompt: string
-  readonly harness?: SpawnInput["harness"]
-  readonly provider?: string | undefined
-  readonly model?: string | undefined
-  readonly title?: string | undefined
-  readonly runtime?: string | undefined
-  readonly parent?: string | undefined
-  readonly reportTo?: string | undefined
-  readonly request: string
-}
+import { defaultSessionName, Sessions } from "./sessions.ts"
 
 export const outboxItem = (row: OutboxRow): OutboxItem => {
   const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: row.kind }
@@ -58,7 +45,7 @@ const make = Effect.gen(function* () {
     })
 
   return {
-    spawn: (peer: string, project: string, input: PeerSpawn) =>
+    spawn: (peer: string, project: string, input: PayloadOf<"Peer.Spawn">) =>
       Effect.gen(function* () {
         const bytes = new TextEncoder().encode(input.prompt).length
         if (bytes > PROMPT_MAX) return yield* new PromptTooLarge({ bytes })

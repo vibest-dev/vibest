@@ -1,6 +1,6 @@
 import type { PipeClient } from "@vibest/client/pipe"
 import { peerHeaders } from "@vibest/protocol/protocol"
-import type { SessionInfo } from "@vibest/protocol/rpc"
+import type { PayloadOf, SessionInfo } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { type ListedMachine, MachineFailed } from "@vibest/schema/machine"
 import { Context, Effect, Layer } from "effect"
@@ -9,7 +9,6 @@ import { Db } from "./db.ts"
 import { Git } from "./git.ts"
 import { VibestdIdentity } from "./identity.ts"
 import { Machines } from "./machines.ts"
-import type { SpawnInput } from "./sessions.ts"
 
 export type Address =
   | { readonly _tag: "Local"; readonly id: string }
@@ -22,20 +21,40 @@ export const address = (input: string): Address => {
     : { _tag: "Remote", machine: input.slice(0, at), id: input.slice(at + 1) }
 }
 
-type At = Extract<Address, { readonly _tag: "Remote" }>
+export type At = Extract<Address, { readonly _tag: "Remote" }>
 
-export type RemoteSpawn = {
-  readonly prompt: string
-  readonly env?: unknown
-  readonly peer?: string | undefined
-  readonly archive?: boolean | undefined
-  readonly harness?: SpawnInput["harness"]
-  readonly provider?: string | undefined
-  readonly model?: string | undefined
-  readonly name?: string | undefined
-  readonly runtime?: string | undefined
-  readonly request?: string | undefined
-}
+export type PeerScope = { readonly peer: string; readonly project: string }
+
+export type ListScope =
+  | { readonly _tag: "All" }
+  | { readonly _tag: "Project"; readonly id: string }
+  | { readonly _tag: "Nothing" }
+  | ({ readonly _tag: "Peer" } & PeerScope)
+
+export type Forwarded<A, E> = (
+  client: PipeClient,
+  id: string,
+  options: { readonly headers: Record<string, string> },
+) => Effect.Effect<A, E>
+
+const addressed = (machine: string, id: string) => `${machine}/${id}`
+
+type Named<A> = A extends { readonly id: string } ? A & { readonly machine: string } : A
+
+const named = <A>(machine: string, row: A): Named<A> =>
+  (row !== null && typeof row === "object" && "id" in row && typeof row.id === "string"
+    ? { ...row, id: addressed(machine, row.id), machine }
+    : row) as Named<A>
+
+const REFUSED = [
+  ["env", "--env"],
+  ["peer", "--peer"],
+  ["archive", "--archive-on-completion"],
+  ["agent", "--agent"],
+  ["runtimeSession", "--session"],
+] as const
+
+type Away = { readonly machine: ListedMachine; readonly sessions: ReadonlyArray<SessionInfo> }
 
 const make = Effect.gen(function* () {
   const db = yield* Db
@@ -49,62 +68,36 @@ const make = Effect.gen(function* () {
     f: (client: PipeClient, headers: Record<string, string>) => Effect.Effect<A, E>,
   ) => Effect.flatMap(machines.link(machine), (link) => link.call(f(link.client, peerHeaders(self.id, project))))
 
-  const named = <S extends { readonly id: string }>(machine: string, row: S) => ({
-    ...row,
-    id: `${machine}/${row.id}`,
-    machine,
-  })
-
-  const listed = (info: ListedMachine & { readonly reason?: string | undefined }): ListedMachine => ({
-    name: info.name,
-    state: info.state,
-    since: info.since,
-    ...(info.reason === undefined ? {} : { reason: info.reason }),
-  })
-
   return {
-    send: (at: At, project: string, input: { readonly message: string; readonly request?: string }) =>
-      call(at.machine, project, (client, headers) => client.Send({ ...input, id: at.id }, { headers })).pipe(
-        Effect.map((sent) => ({ id: `${at.machine}/${sent.id}` })),
+    forward: <A, E>(at: At, project: string, f: Forwarded<A, E>) =>
+      call(at.machine, project, (client, headers) => f(client, at.id, { headers })).pipe(
+        Effect.map((out) => named(at.machine, out)),
       ),
 
-    interrupt: (at: At, project: string) =>
-      call(at.machine, project, (client, headers) => client.Interrupt({ id: at.id }, { headers })).pipe(
-        Effect.map((out) => ({ ...out, id: `${at.machine}/${out.id}` })),
-      ),
-
-    remove: (at: At, project: string, input: { readonly keepWorktree?: boolean }) =>
-      call(at.machine, project, (client, headers) => client.Remove({ ...input, id: at.id }, { headers })),
-
-    get: (at: At, project: string) =>
-      call(at.machine, project, (client, headers) => client.Get({ id: at.id }, { headers })).pipe(
-        Effect.map((row) => named(at.machine, row)),
-      ),
-
-    peek: (at: At, project: string, input: { readonly lines?: number }) =>
-      call(at.machine, project, (client, headers) => client.Peek({ ...input, id: at.id }, { headers })),
-
-    list: (project: string | undefined, stopped: boolean | undefined) =>
+    list: (scope: ListScope, stopped: boolean | undefined) =>
       Effect.gen(function* () {
-        const states = yield* machines.states
+        if (scope._tag === "Peer") return { sessions: [], machines: [] }
         const each = yield* Effect.forEach(
-          states,
-          ({ info, link }) =>
-            link === undefined || project === undefined
-              ? Effect.succeed({ machine: listed(info), sessions: [] as Array<SessionInfo> })
+          yield* machines.states,
+          ({ info, link }): Effect.Effect<Away> =>
+            link === undefined || scope._tag !== "Project"
+              ? Effect.succeed({ machine: info, sessions: [] })
               : link
                   .call(
                     link.client.List(stopped === undefined ? {} : { stopped }, {
-                      headers: peerHeaders(self.id, project),
+                      headers: peerHeaders(self.id, scope.id),
                     }),
                   )
                   .pipe(
                     Effect.match({
                       onSuccess: (rows) => ({
-                        machine: listed(info),
+                        machine: info,
                         sessions: rows.sessions.map((row) => named(info.name, row)),
                       }),
-                      onFailure: (e) => ({ machine: listed({ ...info, reason: e.message }), sessions: [] }),
+                      onFailure: (e) => ({
+                        machine: { ...info, state: "unreachable", reason: e.message },
+                        sessions: [],
+                      }),
                     }),
                   ),
           { concurrency: "unbounded" },
@@ -112,13 +105,15 @@ const make = Effect.gen(function* () {
         return { sessions: each.flatMap((e) => e.sessions), machines: each.map((e) => e.machine) }
       }),
 
-    spawn: (machine: string, input: RemoteSpawn, from: { readonly project: string; readonly coordinator?: string }) =>
+    spawn: (
+      machine: string,
+      input: PayloadOf<"Spawn">,
+      from: { readonly project: string; readonly coordinator?: string },
+    ) =>
       Effect.gen(function* () {
-        const refused = [
-          input.env === undefined ? undefined : "--env",
-          input.peer === undefined ? undefined : "--peer",
-          input.archive ? "--archive-on-completion" : undefined,
-        ].filter((flag) => flag !== undefined)
+        const refused = REFUSED.filter(([key]) => input[key] !== undefined && input[key] !== false).map(
+          ([, flag]) => flag,
+        )
         if (refused.length > 0)
           return yield* new MachineFailed({ message: `${refused.join(", ")} is not sent to another machine` })
         const repositories = yield* db.projectRemote(from.project)
@@ -159,11 +154,10 @@ const make = Effect.gen(function* () {
           ),
         )
         return {
-          id: spawned.session,
+          id: addressed(machine, spawned.session),
           harness: spawned.harness,
           ...(spawned.provider === undefined ? {} : { provider: spawned.provider }),
           ...(spawned.model === undefined ? {} : { model: spawned.model }),
-          machine,
           decidedBy: spawned.decidedBy,
           trace: spawned.trace,
         }

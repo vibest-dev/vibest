@@ -268,16 +268,14 @@ export const sessionSpawn = (deps: {
           createdAt: now,
           lastActive: now,
         }
-        const inserted = yield* db.insertSession(
-          draft,
-          input.projectId,
-          options.maxSessions,
+        const inserted = yield* db.insertSession(draft, input.projectId, {
+          max: options.maxSessions,
           cwd,
-          decision.prompt,
-          input.parentSessionId,
-          input.request,
-          input.origin,
-        )
+          task: decision.prompt,
+          parentSessionId: input.parentSessionId,
+          request: input.request,
+          origin: input.origin,
+        })
         const unreserve = shared === undefined ? fs.remove(cwd, { recursive: true }).pipe(Effect.ignore) : Effect.void
         if (inserted === false) {
           yield* unreserve
@@ -320,7 +318,13 @@ export const sessionSpawn = (deps: {
           locks
             .withLock(id)(
               Deferred.succeed(held, undefined).pipe(
-                Effect.andThen(launch(rt, machine, row, root, decision.prompt, input.peer, input.env, input.commit)),
+                Effect.andThen(
+                  launch(rt, machine, row, root, decision.prompt, {
+                    splitFrom: input.peer,
+                    env: input.env,
+                    commit: input.commit,
+                  }),
+                ),
               ),
             )
             .pipe(Effect.ensuring(leave), logged(`spawn ${id}`), Effect.provideContext(platform)),
