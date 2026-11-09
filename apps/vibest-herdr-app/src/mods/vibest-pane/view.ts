@@ -1,5 +1,5 @@
 import { h_flex } from "gpui-base"
-import { type Color, type Context, div, type Element, image, svg } from "gpui-kit"
+import { type Color, div, type Element, image, svg } from "gpui-kit"
 import { type PaneInfo, run } from "herdr"
 
 import type { Theme } from "../../shared/theme-colors.ts"
@@ -25,13 +25,7 @@ const button = (t: Theme, id: string, name: string, command: string, args: Recor
     })
     .child(svg(`mods/pane/${name}.svg`).size(14))
 
-export const paneHeader = (
-  t: Theme,
-  p: PaneInfo,
-  home: string,
-  hovered: boolean,
-  onHover: (hovered: boolean, cx: Context) => void,
-): Element => {
+export const paneHeader = (t: Theme, p: PaneInfo, home: string): Element => {
   const pane = p.pane
   const pic = programIcon(p, t.dim)
   return h_flex()
@@ -42,7 +36,6 @@ export const paneHeader = (
     .items_center()
     .bg(t.background)
     .text_size(13)
-    .on_hover(onHover)
     .on_click(() => run("pane.focus", { pane }))
     .when(pic !== null, (el) => el.child(pic))
     .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(paneName(p)))
@@ -67,7 +60,7 @@ export const paneHeader = (
       ),
     )
     .when(p.status === "done", (el) => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
-    .when(hovered, (el) =>
+    .when(p.focused, (el) =>
       el
         .child(button(t, `ph-r-${pane}`, "split-right", "pane.split", { direction: "right", pane }))
         .child(button(t, `ph-d-${pane}`, "split-down", "pane.split", { direction: "down", pane }))
