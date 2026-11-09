@@ -37,14 +37,18 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const bytes = new TextEncoder().encode(input.prompt).length
         if (bytes > PROMPT_MAX) return yield* new PromptTooLarge({ bytes })
-        const found: Array<{ readonly id: string; readonly directory: string | null; readonly repositories: number }> =
-          []
-        for (const row of yield* db.remoteProjects) {
-          const same =
-            row.remote === input.repository ||
-            (input.identity !== undefined && (yield* repositoryIdentity(row.remote)) === input.identity)
-          if (same && !found.some((p) => p.id === row.id)) found.push(row)
-        }
+        const rows = yield* db.remoteProjects
+        const exact = rows.filter((row) => row.remote === input.repository)
+        const { identity } = input
+        const matched =
+          exact.length > 0 || identity === undefined
+            ? exact
+            : (yield* Effect.forEach(
+                rows,
+                (row) => Effect.map(repositoryIdentity(row.remote), (id) => (id === identity ? [row] : [])),
+                { concurrency: 8 },
+              )).flat()
+        const found = matched.filter((row, i) => matched.findIndex((other) => other.id === row.id) === i)
         const here = `${self.name} has no checkout of ${input.repository}: clone it there and run vibest project add in it`
         if (found.length === 0) return yield* new NoProject({ message: here })
         if (found.length > 1)

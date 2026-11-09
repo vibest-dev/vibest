@@ -114,11 +114,19 @@ The same repository is often cloned with different URLs on two machines (`git@gi
 port, a leading `~/` or `/`, a trailing `/` and a trailing `.git`: `github.com/o/r` for all of `git@github.com:o/r.git`,
 `ssh://git@github.com:22/o/r`, `https://github.com/o/r.git` and `https://GitHub.com/o/r`. The host of an ssh form
 (scp-like `host:path`, `ssh://`, `git+ssh://`) may be an alias from the ssh config; it is resolved to its real
-`HostName` with `ssh -G <alias>` (the `SshHosts` service, cached per alias, 5 s limit, the alias itself on any failure)
+`HostName` with `ssh -G <alias>` (the `SshHosts` service: a successful lookup is cached per alias; a failure, a non-zero exit or the 5 s limit gives
+the alias itself and is asked again next time)
 on the machine that reads it: A resolves its own remote, B the remotes of its own checkouts. An https host is never
-looked up. A local path or `file://` URL has no identity and matches only the same string. A sends both the raw URL
-and the identity; B matches a checkout when the raw URLs are equal or the identities are, and every `NoProject`
+looked up, nor a bracketed IPv6 host or a one-letter host (a Windows path such as `C:/src/r`): those have no identity. A local path or `file://` URL has no identity and matches only the same string. A sends both the raw URL
+and the identity; B takes the checkouts whose raw URL equals A's, and only when there is none compares identities
+(so `ssh -G` runs on B only then, for its checkouts at once), and every `NoProject`
 message names A's raw URL. `remote_url` is stored unchanged.
+
+Known limits of the identity: the user and a leading `/` or `~/` are dropped from ssh paths, so on a self-hosted plain
+ssh server two different repositories (`alice@h:r` and `bob@h:r`, or `h:/srv/r` and `h:~/r`) get one identity; the
+`HEAD` commit check then refuses most of them, but not a fork that has the commit. A `HostName` such as
+`ssh.github.com` or `altssh.gitlab.com` is not mapped to `github.com` or `gitlab.com`, and paths are compared with
+their case; either gives `NoProject`.
 
 ## A: remote sessions
 

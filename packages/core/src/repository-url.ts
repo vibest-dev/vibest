@@ -17,7 +17,7 @@ export const parseRemote = (url: string): ParsedRemote | undefined => {
     const m = /^([a-z][a-z0-9+.-]*):\/\/(?:[^@/]*@)?([^/:@]+)(?::\d*)?\/(.+)$/i.exec(u)
     return m === null || /^file$/i.test(m[1]!) ? undefined : parsed(m[2]!, m[3]!, /ssh/i.test(m[1]!))
   }
-  const m = /^(?:[^@/:]+@)?([^/:@]+):(.+)$/.exec(u)
+  const m = /^(?:[^@/:]+@)?([^/:@[\]]{2,}):(.+)$/.exec(u)
   return m === null ? undefined : parsed(m[1]!, m[2]!, true)
 }
 
@@ -36,20 +36,23 @@ export class SshHosts extends Context.Service<
           const [out, code] = yield* Effect.all([Stream.mkString(Stream.decodeText(handle.stdout)), handle.exitCode], {
             concurrency: "unbounded",
           })
-          const line = code === 0 ? out.split("\n").find((l) => l.startsWith("hostname ")) : undefined
-          return line?.slice("hostname ".length).trim() || alias
+          const name = out
+            .split("\n")
+            .find((line) => line.startsWith("hostname "))
+            ?.slice("hostname ".length)
+            .trim()
+          if (code !== 0 || !name) return alias
+          known.set(alias, name)
+          return name
         }).pipe(
           Effect.scoped,
-          Effect.timeoutOption(Duration.seconds(5)),
-          Effect.map((found) => (found._tag === "Some" ? found.value : alias)),
+          Effect.timeout(Duration.seconds(5)),
           Effect.orElseSucceed(() => alias),
         )
       return {
         hostName: (alias) => {
           const hit = known.get(alias)
-          return hit !== undefined
-            ? Effect.succeed(hit)
-            : Effect.tap(ask(alias), (name) => Effect.sync(() => known.set(alias, name)))
+          return hit === undefined ? ask(alias) : Effect.succeed(hit)
         },
       }
     }),

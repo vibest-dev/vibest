@@ -764,6 +764,26 @@ describe("vibest run --machine and remote sessions", () => {
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
+  it.effect("B with two checkouts of one repository takes the exact URL; identity is only the fallback", () =>
+    Effect.gen(function* () {
+      const net = new Net()
+      const a = yield* repoStack(net, {}, "git@github.com:o/r.git")
+      const b = yield* repoStack(net, {}, "git@github.com:o/r.git")
+      const second = yield* tempDirectory("vibest-b-second-")
+      yield* (yield* b.run(FakeGit)).repository(second, { ...REPOSITORY, origin: "https://github.com/o/r" })
+      yield* b.db.createProject(second, [{ path: second, remote: "https://github.com/o/r" }])
+      net.route("b-host", b.layout.socket)
+      yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
+      yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
+      const here = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(a.directory))
+      yield* here(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
+      assert.deepStrictEqual(
+        b.spawns.map((spawn) => spawn.root),
+        [b.directory],
+      )
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
   it.effect("a session another machine started may not start agents", () =>
     Effect.gen(function* () {
       const b = yield* peerB
