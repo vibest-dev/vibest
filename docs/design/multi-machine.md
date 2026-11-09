@@ -189,7 +189,8 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
   deleted, with the last Hello's runtimes (none after a vibestd restart with B unreachable); its notes go into the
   answer. A hook never fails a command; its trouble is a note with a fix. Fires and uses for one machine run one at a
   time under a per-machine lock, and a hook may hold it up to its 30 s bound, so an `ls` can wait behind a reconnect's
-  or a plugin load's `connect` for that machine.
+  or a plugin load's `connect` for that machine. A plugin that registers only machine hooks (no runtime definition) and loads after the machines are connected
+  gets no `connect` for them until the next reconnect, because only a runtime registry commit triggers the catch-up.
 - **`ensure`: check and repair at the moment of use.** Before `List` and `Get` rewrite a remote row of runtime kind
   `k`, before `Peek` names the terminal, before `machine ls` shows "here", and before `run --machine` sends
   `Peer.Spawn` with runtime `k`, A asks its runtime of kind `k` with `locate` where B's terminals are. `missing` (the

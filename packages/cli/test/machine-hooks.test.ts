@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import type { RuntimeDefinition } from "@vibest/core/host"
 import { MACHINE_TIMEOUT, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
-import { Plugin } from "@vibest/plugin"
+import { Plugin, type Registration } from "@vibest/plugin"
 import { machineHooks } from "@vibest/plugin/testing"
 import { Duration, Effect, Fiber, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -123,6 +123,34 @@ describe("plugins: machine hooks", () => {
       yield* Fiber.interrupt(follow)
     }).pipe(Effect.scoped),
     { plugins: [runtimeOwner("viewer", "view")] },
+  )
+
+  const registrations: Array<Registration> = []
+  const calls: Array<string> = []
+  test(
+    "a machine hook's dispose stops its callback before the plugin unloads, and a second dispose does nothing",
+    Effect.gen(function* () {
+      const plugins = yield* Plugins
+      yield* plugins.machine("connect", event)
+      assert.deepStrictEqual(calls, ["mb"])
+      yield* registrations[0]!.dispose
+      yield* registrations[0]!.dispose
+      const fired = yield* plugins.machine("connect", event)
+      assert.deepStrictEqual(calls, ["mb"])
+      assert.deepStrictEqual(fired.plugins, [])
+      assert.strictEqual((yield* plugins.list).find((p) => p.id === "disposing")?.status, "active")
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "disposing",
+          effect: (ctx) =>
+            ctx.machine
+              .hook("connect", (e) => Effect.sync(() => calls.push(e.name)))
+              .pipe(Effect.map((registration) => void registrations.push(registration))),
+        }),
+      ],
+    },
   )
 
   it.effect("machineHooks fires a plugin's machine hooks in a plugin test", () =>
