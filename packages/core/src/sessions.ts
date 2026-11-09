@@ -293,7 +293,7 @@ export class Sessions extends Context.Service<
           Effect.flatMap((text) => writeSystemPrompt(session.id, text)),
           Effect.provideContext(platform),
         )
-        const adapter = harnesses.get(session.harnessId)
+        const adapter = yield* harnesses.get(session.harnessId)
         const pluginDir = yield* harness.plugin(adapter.id)
         return [
           adapter.binary,
@@ -338,7 +338,7 @@ export class Sessions extends Context.Service<
 
       const handTask = (h: Runtime, session: SessionRow, terminal: Terminal, task: string) =>
         Effect.gen(function* () {
-          const first = harnesses.get(session.harnessId).systemPromptInPrompt
+          const first = (yield* harnesses.get(session.harnessId)).systemPromptInPrompt
             ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${task}`
             : task
           const notStarted = yield* prompt(h, session, terminal, first, db.linkTask(session.id))
@@ -357,7 +357,6 @@ export class Sessions extends Context.Service<
         layout,
         fs,
         path,
-        harnesses,
         worktreeOf,
         vibestEnv,
         launchArgv,
@@ -452,7 +451,7 @@ export class Sessions extends Context.Service<
           if (!(yield* Ref.getAndSet(r.launchRechecked, true)))
             yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkLocked(id))
         } else yield* Ref.set(r.launchRechecked, false)
-        if (!harnesses.get(session.harnessId).ownSessionId && h.session !== undefined) {
+        if (!(yield* harnesses.get(session.harnessId)).ownSessionId && h.session !== undefined) {
           const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
           if (sessionId !== null && sessionId !== session.harnessSessionId)
             yield* db.updateSession(id, { harnessSessionId: sessionId })
@@ -561,7 +560,7 @@ export class Sessions extends Context.Service<
         if (state !== undefined && busy(state)) return
         if (state === undefined && !(yield* alive(h, terminal))) {
           if (session.exitedAt !== null && (yield* db.pendingInbox(id)).length === 0) return
-          if (!harnesses.get(session.harnessId).ownSessionId && !session.harnessSessionId)
+          if (!(yield* harnesses.get(session.harnessId)).ownSessionId && !session.harnessSessionId)
             return yield* new NoSuchSession({
               id,
               message: `${id} exited before the runtime reported its session id; spawn a new session`,

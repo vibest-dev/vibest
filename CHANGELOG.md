@@ -43,3 +43,5 @@ release. Each release lists what broke, who is affected and how to migrate under
   installing, so a running vibestd is replaced. Harness ids in every RPC are plain strings.
 - **`Harnesses.List`** (RPC clients, scripts reading it): takes an optional `{ provider }` and each row gains `binary`.
   The Ping capability `harnesses` is removed; protocol 7 implies the method. New RPC `Integration.Guard`.
+- **`Project.StartMain`** (RPC clients): `harness` is optional and the error union gains `LaunchFailed`. A first start
+  without a harness (no main agent to inherit from) now fails with `LaunchFailed` instead of `NoHarnessChosen`.

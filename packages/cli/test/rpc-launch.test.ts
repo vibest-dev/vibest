@@ -1,8 +1,11 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
-import { Effect, FileSystem, Path } from "effect"
+import { Plugin } from "@vibest/plugin"
+import { Effect, Fiber, FileSystem, Path } from "effect"
+import { TestClock } from "effect/testing"
 
+import { KIND } from "./fake-runtime.ts"
 import {
   callerPlugin,
   FakeGit,
@@ -115,6 +118,38 @@ describe("vibest.sock", () => {
         callerPlugin("herdr", {
           env: ["HERDR_ID"],
           terminal: (env) => Effect.succeed(env.HERDR_ID),
+        }),
+      ],
+    },
+  )
+
+  test(
+    "Project.MainPlace issued while a runtime plugin is still activating waits for it and detects its caller",
+    Effect.gen(function* () {
+      const c = asCli(yield* client, yield* makeRepository)
+      const place = yield* c["Project.MainPlace"]({ callerEnv: { SLOW_ID: "s1" } }).pipe(Effect.forkChild)
+      yield* TestClock.withLive(Effect.sleep("200 millis"))
+      yield* TestClock.adjust("1 second")
+      assert.deepStrictEqual((yield* Fiber.join(place)).place, { in: "terminal", runtime: "slow", terminal: "s1" })
+    }),
+    {
+      activateLate: true,
+      plugins: [
+        Plugin.define({
+          id: "runtime-slow-caller",
+          effect: (context) =>
+            Effect.sleep("1 second").pipe(
+              Effect.andThen(
+                context.runtime.transform((editor) =>
+                  editor.add({
+                    ...editor.get(KIND)!,
+                    id: "slow",
+                    caller: { env: ["SLOW_ID"], terminal: (env) => Effect.succeed(env.SLOW_ID) },
+                  }),
+                ),
+              ),
+              Effect.asVoid,
+            ),
         }),
       ],
     },

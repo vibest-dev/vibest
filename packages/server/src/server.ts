@@ -191,7 +191,7 @@ export const handlers = VibestRpcs.toLayer(
       readonly runtimeSession?: string | undefined
     }) =>
       Effect.gen(function* () {
-        const specs = yield* runtimes.callers
+        const specs = yield* plugins.settled.pipe(Effect.andThen(runtimes.callers))
         const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv), input.runtimeSession)
         return { id: "local", ...(target !== undefined ? { target } : {}) }
       })
@@ -697,7 +697,7 @@ export const handlers = VibestRpcs.toLayer(
               message: "only the user runs Project.MainPlace",
             })
           const project = yield* resolveAt(c.repositoryRoot)
-          const specs = yield* runtimes.callers
+          const specs = yield* plugins.settled.pipe(Effect.andThen(runtimes.callers))
           const env = filterCallerEnv(specs, callerEnv)
           const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
           const place = mainPlace({ runtime, hits })

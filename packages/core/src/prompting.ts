@@ -42,7 +42,7 @@ export type Collected = "none" | "delivered"
 
 export const sessionPrompting = (deps: {
   readonly db: Pick<Db["Service"], "readyAt" | "updateSession">
-  readonly harnesses: Pick<Harnesses["Service"], "get">
+  readonly harnesses: Pick<Harnesses["Service"], "get" | "find">
   readonly bus: Bus["Service"]
   readonly track: (id: string) => Effect.Effect<Tracked>
   readonly platform: Context.Context<Platform>
@@ -165,7 +165,8 @@ export const sessionPrompting = (deps: {
   }
   const interruptAgent = (h: Runtime, session: SessionRow, terminal: Terminal) =>
     Effect.gen(function* () {
-      yield* h.send(terminal, { keys: [harnesses.get(session.harnessId).interruptKey] }).pipe(Effect.ignore)
+      const key = harnesses.find(session.harnessId)?.interruptKey
+      if (key !== undefined) yield* h.send(terminal, { keys: [key] }).pipe(Effect.ignore)
       return yield* settleAfterInterrupt(h, session, terminal)
     })
 
@@ -182,7 +183,7 @@ export const sessionPrompting = (deps: {
       const at = yield* Clock.currentTimeMillis
       yield* db.updateSession(session.id, { turnState: "open", turnPromptedAt: at, lastActive: at })
     }
-    const adapter = harnesses.get(session.harnessId)
+    const adapter = yield* harnesses.get(session.harnessId)
     const state = yield* awaitReady(h, terminal, adapter, session.id).pipe(
       Effect.onExit((exit) =>
         openedHere && !Exit.isSuccess(exit)

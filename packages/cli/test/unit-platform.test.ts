@@ -46,7 +46,9 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
           const harness = yield* Harness.make()
           yield* Effect.flip(harness.models("pi", null))
           const adapters = yield* Harnesses
-          yield* Effect.forEach(["claude", "cursor"] as const, (h) => Effect.flip(listModels(adapters.get(h), null)))
+          yield* Effect.forEach(["claude", "cursor"] as const, (h) =>
+            adapters.get(h).pipe(Effect.flatMap((adapter) => Effect.flip(listModels(adapter, null)))),
+          )
         }).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromUnknown({ HOME: home }), { asPrimary: true })),
@@ -216,21 +218,24 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
     it.effect("turn ends: text field per harness; error marks failure; a junk hook input is no turn end", () =>
       Effect.gen(function* () {
         const harnesses = yield* Harnesses
-        assert.deepInclude(turnEndFrom(harnesses.get("claude"), { last_assistant_message: "hi" }, 5), {
+        assert.deepInclude(turnEndFrom(yield* harnesses.get("claude"), { last_assistant_message: "hi" }, 5), {
           harness: "claude",
           at: 5,
           text: "hi",
           error: undefined,
           interrupted: false,
         })
-        assert.deepInclude(turnEndFrom(harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1), {
-          error: "boom: why",
-        })
+        assert.deepInclude(
+          turnEndFrom(yield* harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1),
+          {
+            error: "boom: why",
+          },
+        )
         for (const bad of ["--flag", "-f", "--yolo", "--force", "a b", ""])
-          assert.deepInclude(turnEndFrom(harnesses.get("cursor"), { text: "x", conversation_id: bad }, 1), {
+          assert.deepInclude(turnEndFrom(yield* harnesses.get("cursor"), { text: "x", conversation_id: bad }, 1), {
             conversationId: undefined,
           })
-        assert.isUndefined(turnEndOf(harnesses.get("claude"), "general", "{", 1))
+        assert.isUndefined(turnEndOf(yield* harnesses.get("claude"), "general", "{", 1))
       }),
     )
 

@@ -27,11 +27,11 @@ export const makeHarnesses: Effect.Effect<HarnessesShape> = Effect.sync(() => {
     get all() {
       return registry.get()
     },
-    get: (id) => {
-      const found = find(id)
-      if (found === undefined) throw unprovided(id, registry.get())
-      return found
-    },
+    get: (id) =>
+      Effect.suspend(() => {
+        const found = find(id)
+        return found === undefined ? Effect.fail(unprovided(id, registry.get())) : Effect.succeed(found)
+      }),
     find,
     transform: registry.transform,
     reload: registry.reload,

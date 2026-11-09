@@ -197,7 +197,7 @@ export const sessionSpawn = (deps: {
       Effect.provideService(Harnesses, harnesses),
       Effect.mapError(routed),
     )
-    const adapter = harnesses.get(harnessId)
+    const adapter = yield* harnesses.get(harnessId)
     const routing: Routing = { decidedBy: decision.decidedBy, trace: decision.trace }
     const id = yield* db.newSessionId
     const now = yield* Clock.currentTimeMillis

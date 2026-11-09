@@ -9,7 +9,7 @@ import type { HarnessDefinition, HarnessesShape, RuntimeDefinition, RuntimesShap
 import { Inbox } from "@vibest/core/inbox"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout } from "@vibest/core/paths"
-import { Plugins } from "@vibest/core/plugins"
+import { makeHost, Plugins } from "@vibest/core/plugins"
 import { type Liveness, Processes } from "@vibest/core/processes"
 import { Restarting } from "@vibest/core/restarting"
 import { turnEndFrom } from "@vibest/core/results"
@@ -80,7 +80,7 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
 
 export const writeResult = (id: string, harness: string, payload: object, offsetMs = 1000) =>
   Effect.gen(function* () {
-    const adapter = (yield* Harnesses).get(harness)
+    const adapter = yield* (yield* Harnesses).get(harness)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
     yield* (yield* Db).reportTurn(id, turnEndFrom(adapter, payload as Record<string, unknown>, at))
   })
@@ -320,6 +320,7 @@ export interface TestOptions extends FakeRuntimeOptions {
     | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
   >
   readonly pluginTimeout?: Duration.Input
+  readonly activateLate?: boolean
   readonly db?: (db: Db["Service"]) => Db["Service"]
   readonly missingBinary?: ReadonlyArray<string>
   readonly harnesses?: ReadonlyArray<HarnessDefinition>
@@ -517,19 +518,25 @@ const over = (options: TestOptions) => {
       ),
     ),
   )
+  const candidates = [
+    { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
+    ...(options.plugins ?? []).map((entry) => {
+      const plugin = "effect" in entry ? entry : entry.plugin
+      const pluginOptions = "effect" in entry ? {} : (entry.options ?? {})
+      return { source: `test:${plugin.id}`, revision: "-", options: pluginOptions, plugin }
+    }),
+  ]
+  const hostOptions = options.pluginTimeout ? { timeout: options.pluginTimeout } : {}
   const plugins = Layer.effect(
     Plugins,
-    Plugins.make(
-      [
-        { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
-        ...(options.plugins ?? []).map((entry) => {
-          const plugin = "effect" in entry ? entry : entry.plugin
-          const pluginOptions = "effect" in entry ? {} : (entry.options ?? {})
-          return { source: `test:${plugin.id}`, revision: "-", options: pluginOptions, plugin }
-        }),
-      ],
-      options.pluginTimeout ? { timeout: options.pluginTimeout } : {},
-    ),
+    options.activateLate
+      ? Effect.gen(function* () {
+          const host = yield* makeHost(hostOptions)
+          host.ready.closeUnsafe()
+          yield* host.activate(candidates).pipe(Effect.andThen(host.ready.open), Effect.forkScoped)
+          return host.service
+        })
+      : Plugins.make(candidates, hostOptions),
   ).pipe(Layer.provideMerge(Subscriptions.layer))
   const fakeIntegrationReportsReadyOnStart = Layer.effectDiscard(
     Effect.gen(function* () {

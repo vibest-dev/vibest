@@ -1,12 +1,13 @@
 import type { SubscriptionReport } from "@vibest/plugin"
 import { type Subscription, type SubscriptionLimit } from "@vibest/schema/subscription"
-import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Ref, Semaphore } from "effect"
+import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Ref, Semaphore } from "effect"
 
 import { Harness, type HarnessId, Harnesses } from "../harness.ts"
 import type { HarnessDefinition, SubscriptionsShape } from "../host.ts"
 
 const MINUTE = "1 minute"
 const CLI_TIMEOUT = "10 seconds"
+const SUBSCRIPTION_TIMEOUT = "30 seconds"
 const MACHINE = "local" as const
 
 type Row = Subscription
@@ -82,7 +83,10 @@ export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsS
     const read = (definition: HarnessDefinition, home: string) =>
       Effect.gen(function* () {
         const id = definition.id
-        for (const row of yield* definition.subscription!(home))
+        const read = yield* definition.subscription!(home).pipe(Effect.timeoutOption(SUBSCRIPTION_TIMEOUT))
+        if (Option.isNone(read))
+          return yield* Effect.logWarning(`subscriptions: ${id} poll timed out after ${SUBSCRIPTION_TIMEOUT}`)
+        for (const row of read.value)
           yield* modify(id, row.provider, (prev, now) =>
             row.account === undefined
               ? keep(prev, now, row.error ?? "subscription read failed", id, row.provider)

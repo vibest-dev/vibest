@@ -489,6 +489,31 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       commands: { "claude auth status --json": JSON.stringify({ loggedIn: false }) },
     })
 
+  it.effect("a harness subscription that never answers is cut off after 30 s and the next harness is still read", () =>
+    Effect.gen(function* () {
+      const subs = yield* Subscriptions
+      const polling = yield* Effect.forkChild(subs.poll)
+      yield* TestClock.adjust("30 seconds")
+      yield* Fiber.join(polling)
+      assert.deepStrictEqual(
+        (yield* subs.list).map((row) => [row.harness, row.account.kind]),
+        [["pi", "none"]],
+      )
+    }).pipe(
+      Effect.provide(
+        Subscriptions.layer.pipe(
+          Layer.provideMerge(
+            harnessesLayer([
+              { ...claude, subscription: () => Effect.never },
+              { ...pi, subscription: () => Effect.succeed([{ provider: "", account: { kind: "none" } }]) },
+            ]),
+          ),
+          Layer.provideMerge(harnessLayer(["claude", "pi"])),
+        ),
+      ),
+    ),
+  )
+
   it.effect("while vibestd runs: one poll at start, then none over an idle hour", () =>
     Effect.gen(function* () {
       const fake = loggedOut(yield* home)

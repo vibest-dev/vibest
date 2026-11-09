@@ -319,7 +319,7 @@ export const sessionMove = (deps: {
         gone = true
         yield* endLeft
       } else yield* endLeft
-      const harnessSessionId = harnesses.get(next.harness).ownSessionId ? yield* deps.uuid : null
+      const harnessSessionId = (yield* harnesses.get(next.harness)).ownSessionId ? yield* deps.uuid : null
       const nextRow: SessionRow = {
         ...row,
         harnessId: next.harness,
@@ -368,7 +368,7 @@ export const sessionMove = (deps: {
         exitedAt: null,
       })
       row = (yield* db.getSession(row.id))!
-      const text = harnesses.get(row.harnessId).systemPromptInPrompt
+      const text = (yield* harnesses.get(row.harnessId)).systemPromptInPrompt
         ? `${yield* deps.systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
         : next.prompt
       const prompted = yield* deps

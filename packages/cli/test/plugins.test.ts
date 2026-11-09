@@ -7,7 +7,7 @@ import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { mainCheckout } from "@vibest/core/worktree"
-import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore } from "@vibest/plugin"
+import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore, type Registration } from "@vibest/plugin"
 import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -260,6 +260,49 @@ describe("plugins: spawn hook", () => {
       Effect.provide(Runtimes.layer),
       Effect.provide(Bus.layer),
     ),
+  )
+
+  it.effect(
+    "an agent hook's dispose stops its callback before the scope closes, a second dispose does nothing, and a running dispatch keeps its snapshot",
+    () =>
+      Effect.gen(function* () {
+        const calls: Array<string> = []
+        const registrations: Record<string, Registration> = {}
+        const recorder = (id: string, after: () => Effect.Effect<void> = () => Effect.void) =>
+          Plugin.define({
+            id,
+            effect: (ctx) =>
+              ctx.agent
+                .hook("start.before", () => Effect.sync(() => calls.push(id)).pipe(Effect.andThen(after())))
+                .pipe(Effect.map((registration) => void (registrations[id] = registration))),
+          })
+        const plugins = yield* Plugins.make([
+          { source: "a", revision: "-", options: {}, plugin: recorder("a", () => registrations.b!.dispose) },
+          { source: "b", revision: "-", options: {}, plugin: recorder("b") },
+        ])
+        yield* plugins.start(event)
+        assert.deepStrictEqual(calls, ["a", "b"])
+        yield* plugins.start(event)
+        assert.deepStrictEqual(calls, ["a", "b", "a"])
+        yield* registrations.a!.dispose
+        yield* registrations.a!.dispose
+        yield* registrations.b!.dispose
+        yield* plugins.start(event)
+        assert.deepStrictEqual(calls, ["a", "b", "a"])
+        assert.deepStrictEqual(
+          (yield* plugins.list).map((p) => [p.id, p.status, p.calls]),
+          [
+            ["a", "active", 2],
+            ["b", "active", 1],
+          ],
+        )
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(Subscriptions.layer),
+        Effect.provide(harnessesLayer()),
+        Effect.provide(Runtimes.layer),
+        Effect.provide(Bus.layer),
+      ),
   )
 })
 

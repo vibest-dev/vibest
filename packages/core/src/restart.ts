@@ -199,7 +199,7 @@ export const sessionRestart = (deps: {
 
   const againArgv = (session: SessionRow) =>
     Effect.gen(function* () {
-      const adapter = harnesses.get(session.harnessId)
+      const adapter = yield* harnesses.get(session.harnessId)
       const resume =
         session.harnessSessionId !== null &&
         (adapter.canResume === undefined ||
@@ -327,7 +327,7 @@ export const sessionRestart = (deps: {
         integration: main.integration?.version ?? null,
         working: stateOf(seen) === "working",
         blocked:
-          blockedOf(harnesses.get(main.harnessId), yield* routed(main.runtime), main.pid, main.harnessSessionId) ??
+          blockedOf(harnesses.find(main.harnessId), yield* routed(main.runtime), main.pid, main.harnessSessionId) ??
           null,
       })
     }
@@ -340,8 +340,12 @@ export const sessionRestart = (deps: {
         integration: row.metadata.integration?.version ?? null,
         working: row.turnState === "open",
         blocked:
-          blockedOf(harnesses.get(row.harnessId), yield* routed(row.runtime), row.metadata.pid, row.harnessSessionId) ??
-          null,
+          blockedOf(
+            harnesses.find(row.harnessId),
+            yield* routed(row.runtime),
+            row.metadata.pid,
+            row.harnessSessionId,
+          ) ?? null,
       })
     return [...subs, ...mains]
   })

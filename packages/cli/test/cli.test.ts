@@ -50,7 +50,7 @@ const coordinatorUpdate = (agent: string, args: ReadonlyArray<string>) =>
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 describe("vibest CLI", () => {
   test(
-    "vibest run without a harness starts on the main agent's harness; auto is an unknown harness",
+    "vibest run without a harness starts on the main agent's harness; auto is an unknown harness; a harness name alone is a missing prompt",
     Effect.gen(function* () {
       const db = yield* Db
       const layout = yield* Layout
@@ -67,6 +67,11 @@ describe("vibest CLI", () => {
       const auto = yield* run(["run", "--runtime", "herdr", "auto", "--", "do it"])
       assert.notStrictEqual(auto.code, 0)
       assert.include(auto.stderr, "no plugin provides harness auto")
+      const before = (yield* db.listSessions()).length
+      const forgotten = yield* run(["run", "--runtime", "herdr", "claude"])
+      assert.notStrictEqual(forgotten.code, 0)
+      assert.include(forgotten.stderr, "the prompt is missing: claude is a harness")
+      assert.strictEqual((yield* db.listSessions()).length, before)
     }),
   )
 

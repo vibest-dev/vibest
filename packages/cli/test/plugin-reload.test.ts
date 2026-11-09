@@ -109,7 +109,7 @@ describe("plugins: registrations", () => {
           edits("other", (e) => e.update("pi", (d) => void (d.binary = "pi2"))),
         ])
         assert.strictEqual(runs, 1)
-        assert.strictEqual((yield* Harnesses).get("claude").binary, "glm")
+        assert.strictEqual((yield* (yield* Harnesses).get("claude")).binary, "glm")
       }),
     ),
   )
@@ -129,8 +129,8 @@ describe("plugins: registrations", () => {
         assert.include(listed.find((p) => p.id === "bad")?.error ?? "", "boom")
         assert.strictEqual(listed.find((p) => p.id === "glm")?.status, "active")
         const harnesses = yield* Harnesses
-        assert.strictEqual(harnesses.get("claude").binary, "glm")
-        assert.strictEqual(harnesses.get("pi").binary, "pi")
+        assert.strictEqual((yield* harnesses.get("claude")).binary, "glm")
+        assert.strictEqual((yield* harnesses.get("pi")).binary, "pi")
       }),
     ),
   )
@@ -139,7 +139,7 @@ describe("plugins: registrations", () => {
     registered((h) =>
       Effect.gen(function* () {
         const harnesses = yield* Harnesses
-        const before = harnesses.get("claude")
+        const before = yield* harnesses.get("claude")
         yield* h.activate([edits("drop", (e) => e.remove("claude"))])
         assert.isUndefined(harnesses.find("claude"))
         yield* h.activate([])

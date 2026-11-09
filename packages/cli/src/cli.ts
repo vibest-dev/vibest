@@ -209,6 +209,14 @@ const run = Command.make(
             return yield* new LaunchFailed({
               message: "this vibestd does not take --runtime on vibest run; run vibest update",
             })
+          if (
+            harness === undefined &&
+            /^\S+$/.test(prompt) &&
+            (yield* client["Harnesses.List"]({})).some((choice) => choice.harness === prompt)
+          )
+            return yield* new EmptyInput({
+              message: `the prompt is missing: ${prompt} is a harness; give the prompt after it`,
+            })
           return yield* client.Spawn({
             ...(request === undefined ? {} : { request }),
             harness,

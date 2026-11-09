@@ -32,7 +32,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
     R
   >
 }) {
-  const adapter = (yield* Harnesses).get(input.harness)
+  const adapter = yield* (yield* Harnesses).get(input.harness)
   const harness = yield* Harness
   const layout = yield* Layout
   const vibest = yield* VibestCommand
