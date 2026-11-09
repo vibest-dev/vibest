@@ -444,7 +444,7 @@ export const alive = (pid: number) => {
   const state = Bun.spawnSync(["ps", "-p", String(pid), "-o", "state="])
     .stdout.toString()
     .trim()
-  return state !== "" && state !== "Z"
+  return state !== "" && !state.startsWith("Z")
 }
 
 export const SESSIONS = `(SELECT s.id, s.project_id, s.role AS agent_type, s.directory, s.created_at, s.ended_at,
