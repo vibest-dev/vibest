@@ -167,7 +167,8 @@ export const readPing = (socket: string) =>
   connect(socket).pipe(
     Effect.flatMap((client) => client.Ping(undefined)),
     Effect.timeout("1 second"),
-    Effect.option,
+    Effect.map(Option.some),
+    Effect.catchCause(() => Effect.succeed(Option.none<Ping>())),
     Effect.scoped,
   )
 
