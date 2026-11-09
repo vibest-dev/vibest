@@ -11,7 +11,7 @@ import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Effect, Ref, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
-import { daemonPlan } from "../src/cli.ts"
+import { daemonPlan } from "../src/update.ts"
 import {
   eventsOf,
   FakeProcesses,

@@ -1,6 +1,6 @@
 # Schema
 
-Status: vibestd runs version 1 (`user_version = 1`, in `packages/core/src/db.ts`), the baseline: every later change
+Status: vibestd runs version 1 (`user_version = 1`, in `packages/core/src/db-schema.ts`), the baseline: every later change
 is a numbered SQL step, from 1 to 2 onward, run in order on `user_version`. The baseline replaced the earlier shape's
 `message` table and `session.metadata` JSON column with the append-only `event` table, keys projects by a UUID and
 their directory, and added the routing columns of the engine (architecture.md §1). The `Db` service still answers its callers with the old session row
@@ -211,7 +211,7 @@ before that and not yet consumed still counts. A report a `turn.end` consumed is
 
 ## The Db service
 
-- All SQL is in `packages/core/src/db.ts`, over one SQLite connection; rows are decoded with Schema. The session row
+- All SQL is in `packages/core/src/db.ts` and its `db-*.ts` modules, over one SQLite connection; rows are decoded with Schema. The session row
   callers read (`SessionRow`) is a read model: its process, turn and live fields come from the `event` table, and
   every change to them appends an event.
 - Opening: `inspectSchema` only reads, on a read-only connection, before the file is opened writable; it checks

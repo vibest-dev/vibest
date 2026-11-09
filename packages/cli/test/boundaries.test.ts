@@ -50,7 +50,13 @@ describe("runtime boundary", () => {
       "effect-herdr-sdk",
     ]
     const offenders: Array<string> = []
-    for (const rel of ["packages/cli/src/cli.ts", "packages/cli/src/herdr-plugin.ts"]) {
+    for (const rel of [
+      "packages/cli/src/cli.ts",
+      "packages/cli/src/caller.ts",
+      "packages/cli/src/doctor.ts",
+      "packages/cli/src/update.ts",
+      "packages/cli/src/herdr-plugin.ts",
+    ]) {
       const source = fs.readFileSync(path.join(root, rel), "utf8")
       for (const name of banned)
         if (new RegExp("\\b" + name + "\\b").test(source)) offenders.push(`${rel} imports ${name}`)
