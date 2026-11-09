@@ -65,7 +65,7 @@
                   "border": { "width": 1, "color": "border" },
                   "focus": { "width": 1, "color": "border" },
                   "lone": true,
-                  "header": { "content": { "mod": "vibest-pane" }, "height": 34, "position": "top", "reveal": "always" }
+                  "header": { "content": { "mod": "vibest-pane" }, "height": 28, "position": "top", "reveal": "always" }
                 }
               }
             },
@@ -79,7 +79,7 @@
               "active": "changes",
               "children": [
                 { "id": "changes", "type": "block", "content": { "mod": "changes" } },
-                { "id": "files", "type": "block", "content": { "mod": "files" } },
+                { "id": "files", "type": "block", "content": { "mod": "vibest-files" } },
                 { "id": "agents", "type": "block", "content": { "mod": "vibest-agents" } }
               ]
             }
