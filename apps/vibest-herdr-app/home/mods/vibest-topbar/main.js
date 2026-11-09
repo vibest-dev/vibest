@@ -3,6 +3,10 @@ import { h_flex } from "gpui-base";
 import { div as div2, svg as svg2, View } from "gpui-kit";
 import { focused, layout, panes, run, spaces, window } from "herdr";
 
+// src/shared/theme.ts
+import { theme } from "herdr";
+var themeColors = () => theme();
+
 // src/shared/thread-title.ts
 var leading = (s) => s.replace(/^[^\p{L}\p{N}]+/u, "").trim();
 var looksLikePath = (s) => /^[~/]|^[A-Za-z]:\\/.test(s) || s.includes("@");
@@ -16,10 +20,6 @@ var threadTitle = (tab, tabPanes) => {
     return live;
   return lead?.program?.agent ? lead.program.name : `Terminal ${tab.index}`;
 };
-
-// src/shared/theme.ts
-import { theme } from "herdr";
-var themeColors = () => theme();
 
 // src/shared/ui.ts
 import { div, svg } from "gpui-kit";
