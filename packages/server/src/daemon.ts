@@ -15,6 +15,7 @@ import { Restarting } from "@vibest/core/restarting"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import * as UpdateCheck from "@vibest/core/update-check"
 import { VERSION } from "@vibest/protocol/rpc"
 import { newId } from "@vibest/schema/id"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
@@ -90,6 +91,7 @@ const services = (host: Host, layout: Layout["Service"]) =>
       ),
     ),
     Layer.provideMerge(Subscriptions.live),
+    Layer.provideMerge(UpdateCheck.layer),
     Layer.provideMerge(Keychain.layer(host.keychain)),
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provideMerge(Inbox.layer),

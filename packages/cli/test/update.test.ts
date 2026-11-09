@@ -4,14 +4,18 @@ import net from "node:net"
 import { assert, describe, it } from "@effect/vitest"
 import { layer as builtinHarnesses } from "@vibest/core/harnesses"
 import { Layout } from "@vibest/core/paths"
+import { Project } from "@vibest/core/project"
+import { checkEveryHour, installMethod, isSemver, UpdateCheck } from "@vibest/core/update-check"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-import { Effect, FileSystem, Layer } from "effect"
+import * as Server from "@vibest/server/server"
+import { Deferred, Effect, FileSystem, Layer } from "effect"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { compareVersions, installMethod, isSemver, removeCommand, stageCommand, upgradeCommand } from "../src/cli.ts"
-import { runVibest, tempDirectory } from "./fakes.ts"
+import { compareVersions, removeCommand, stageCommand, upgradeCommand } from "../src/cli.ts"
+import { makeRepository, runVibest, tempDirectory, testLayer } from "./fakes.ts"
 
 describe("vibest update", () => {
   it("compareVersions orders versions as semver does", () => {
@@ -108,56 +112,74 @@ describe("vibest update", () => {
     )
   })
 
+  it.effect("vibestd looks up the latest vibest at start and every hour, in memory; a failed look clears checked", () =>
+    Effect.gen(function* () {
+      let calls = 0
+      let next: Effect.Effect<string, Error> = Effect.succeed("1.0.0")
+      const status = yield* checkEveryHour(
+        Effect.suspend(() => {
+          calls++
+          return next
+        }),
+      )
+      yield* TestClock.adjust("0 millis")
+      assert.deepStrictEqual(yield* status, { checked: 0, latest: "1.0.0", checking: false })
+      next = Effect.fail(new Error("offline"))
+      yield* TestClock.adjust("59 minutes")
+      assert.strictEqual(calls, 1)
+      yield* TestClock.adjust("1 minute")
+      assert.strictEqual(calls, 2)
+      assert.deepStrictEqual(yield* status, { checked: null, latest: "1.0.0", checking: false })
+      const answer = yield* Deferred.make<string>()
+      next = Deferred.await(answer)
+      yield* TestClock.adjust("1 hour")
+      assert.deepStrictEqual(yield* status, { checked: null, latest: "1.0.0", checking: true })
+      yield* Deferred.succeed(answer, "2.0.0")
+      yield* TestClock.adjust("0 millis")
+      assert.deepStrictEqual(yield* status, { checked: 7_200_000, latest: "2.0.0", checking: false })
+    }).pipe(Effect.scoped),
+  )
+
   it.effect(
-    "the user's own vibest says once a day that a newer vibest is out; agents never see it",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const home = yield* tempDirectory("vibest-notice-")
-        let hits = 0
-        let latest = "999.0.0"
-        const registry = yield* Effect.acquireRelease(
-          Effect.callback<http.Server>((resume) => {
-            const server = http.createServer((req, res) => {
-              hits++
-              res
-                .writeHead(200, { "content-type": "application/json" })
-                .end(JSON.stringify({ name: "@vibest/cli", version: latest }))
-            })
-            server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)))
-          }),
-          (server) => Effect.callback<void>((resume) => void server.close(() => resume(Effect.void))),
-        )
-        const port = (registry.address() as { port: number }).port
+    "the user's own vibest and vibest status print what vibestd knows of a newer vibest; agents never see it",
+    () => {
+      let latest: string | null = "999.0.0"
+      const served = Server.layer.pipe(
+        Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+        Layer.provide(
+          Layer.succeed(
+            UpdateCheck,
+            Effect.sync(() => ({ checked: 1, latest, checking: false })),
+          ),
+        ),
+        Layer.provideMerge(Project.layer),
+        Layer.provideMerge(testLayer()),
+      )
+      return Effect.gen(function* () {
+        const layout = yield* Layout
+        const repo = yield* makeRepository
         const run = (env: Record<string, string> = {}) =>
-          runVibest(
-            home,
-            {
-              HOME: home,
-              VIBEST_HOME: `${home}/vibest`,
-              VIBEST_HARNESSES: `${home}/harnesses`,
-              npm_config_registry: `http://127.0.0.1:${port}`,
-              ...env,
-            },
-            ["status"],
-          )
+          runVibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home, ...env }, ["status"])
         const notice = `vibest 999.0.0 is available (this is ${VERSION}); update with: vibest update`
-        assert.include((yield* run()).stderr, notice)
-        latest = VERSION
-        assert.include((yield* run()).stderr, notice)
-        assert.strictEqual(hits, 1, "within the day the cached answer stands")
+        const first = yield* run()
+        assert.include(first.stderr, notice)
+        assert.deepStrictEqual(JSON.parse(first.stdout).daemon.update, {
+          checked: 1,
+          latest: "999.0.0",
+          checking: false,
+        })
         assert.notInclude(
           (yield* run({ VIBEST_AGENT: "general", VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" })).stderr,
           "is available",
         )
         assert.notInclude((yield* run({ VIBEST_NO_UPDATE_CHECK: "1" })).stderr, "is available")
-        yield* fs.writeFileString(
-          `${home}/vibest/update-check.json`,
-          JSON.stringify({ checkedAt: 0, latest: "999.0.0" }),
-        )
+        latest = VERSION
         assert.notInclude((yield* run()).stderr, "is available")
-        assert.strictEqual(hits, 2, "a day later it asks again, and an up-to-date vibest says nothing")
-      }).pipe(Effect.scoped, Effect.provide(Layer.merge(Platform.services, builtinHarnesses))),
+        latest = null
+        assert.notInclude((yield* run()).stderr, "is available")
+        assert.isFalse(yield* (yield* FileSystem.FileSystem).exists(`${layout.home}/update-check.json`))
+      }).pipe(Effect.provide(served))
+    },
     60_000,
   )
 

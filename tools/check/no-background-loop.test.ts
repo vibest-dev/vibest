@@ -26,6 +26,9 @@ const ALLOWED: Record<string, Record<string, { readonly count: number; readonly 
   "packages/core/src/sessions.ts": {
     "Effect.forever": { count: 1, reason: "a blocking take from the delivered-rows queue (archive), not polling" },
   },
+  "packages/core/src/update-check.ts": {
+    "Effect.repeat": { count: 1, reason: "the hourly look-up of the latest vibest, approved by the owner" },
+  },
 }
 
 const files = (dir: string): Array<string> =>

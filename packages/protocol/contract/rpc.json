@@ -3939,6 +3939,59 @@
               }
             ]
           },
+          "update": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "checked": {
+                    "anyOf": [
+                      {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "Infinity",
+                              "-Infinity",
+                              "NaN"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "latest": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "checking": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "checked",
+                  "latest",
+                  "checking"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pid": {
             "anyOf": [
               {

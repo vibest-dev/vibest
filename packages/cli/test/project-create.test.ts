@@ -17,6 +17,7 @@ import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
 import { Effect, Exit, FileSystem, Layer, Path, type Scope } from "effect"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -26,6 +27,7 @@ import {
   FakeGit,
   FakeRuntime,
   runVibest,
+  stopRecorded,
   testLayer,
   type TestServices,
   until,
@@ -203,6 +205,7 @@ describe("multi-repository isolated workspace", () => {
       const sdk = yield* repositoryWithOneCommitOnMain(sources, "sdk")
       const directory = path.join(yield* scopedRealPathTempDirectory("vibest-project-"), "combo")
       const env = { HOME: home, VIBEST_HOME: home }
+      yield* Effect.addFinalizer(() => TestClock.withLive(stopRecorded(path.join(home, "vibestd.pid"))))
       const created = yield* runVibest(sources, env, ["project", "create", directory, "--from", app, "--from", sdk])
       assert.strictEqual(created.code, 0, created.stderr)
       assert.match(created.stderr, new RegExp(`warning: ${app}: uncommitted changes were not copied`))

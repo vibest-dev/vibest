@@ -158,6 +158,7 @@ export class World {
         GIT_COMMITTER_EMAIL: "e2e@vibest.invalid",
         npm_config_registry: `http://127.0.0.1:${this.releases.port}`,
         VIBEST_DOWNLOAD_URL: `http://127.0.0.1:${this.releases.port}`,
+        VIBEST_NO_UPDATE_CHECK: "1",
       },
       extra,
     )
