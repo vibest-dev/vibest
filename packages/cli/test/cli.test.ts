@@ -334,38 +334,6 @@ describe("vibest CLI", () => {
       assert.isTrue(history.some((row) => row.kind === "result" && row.message.includes("kept finding")))
     }),
   )
-
-  test(
-    "vibest --env outside herdr is the new pane's environment and is not on the typed command",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const layout = yield* Layout
-      const repo = yield* makeRepository
-      const secret = "probe-value-9f3c"
-      const run = (args: ReadonlyArray<string>) =>
-        vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home, VIBEST_NO_UPDATE_CHECK: "1" }, args)
-      const started = yield* run([
-        "--runtime",
-        "herdr",
-        "--harness",
-        "pi",
-        "--headless",
-        "--env",
-        "MAIN_PROBE=" + secret,
-      ])
-      assert.strictEqual(started.code, 0, started.stderr)
-      assert.notInclude(started.stdout, secret)
-      assert.notInclude(started.stderr, secret)
-      const open = (yield* herdr.callsTo("open"))[0]!
-      const typed = ((yield* herdr.callsTo("run"))[0]!.argv as ReadonlyArray<string>).join(" ")
-      assert.notInclude(open.argv.join(" "), secret)
-      assert.notInclude(typed, secret)
-      assert.notInclude(typed, "--env")
-      assert.strictEqual(open.env.MAIN_PROBE, undefined)
-      assert.deepStrictEqual(JSON.parse(open.env.VIBEST_MAIN_ENV!), { MAIN_PROBE: secret })
-      assert.strictEqual(open.env.VIBEST_HOME, layout.home)
-    }),
-  )
 })
 
 describe("vibest CLI without vibestd", () => {

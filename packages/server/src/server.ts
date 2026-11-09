@@ -165,28 +165,7 @@ export const Shutdown = Context.Reference<Deferred.Deferred<void>>("vibest/Daemo
   defaultValue: () => Deferred.makeUnsafe<void>(),
 })
 
-export type MainEnv = Map<string, { readonly sessionId: string; readonly env: Readonly<Record<string, string>> }>
-export const MainEnv = Context.Reference<MainEnv>("vibest/MainEnv", { defaultValue: () => new Map() })
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
-
-const envOffArgv = (argv: ReadonlyArray<string>) => {
-  const command: Array<string> = []
-  const env: Record<string, string> = {}
-  for (let i = 0; i < argv.length; i++) {
-    const next = argv[i + 1]
-    if (argv[i] === "--env" && next !== undefined && next.includes("=")) {
-      const eq = next.indexOf("=")
-      const key = next.slice(0, eq)
-      if (key !== "") {
-        env[key] = next.slice(eq + 1)
-        i++
-        continue
-      }
-    }
-    command.push(argv[i]!)
-  }
-  return { command, env }
-}
 
 export const DRAIN_TIMEOUT = Duration.seconds(5)
 export const PRESENT_TIMEOUT = Duration.seconds(5)
@@ -337,7 +316,6 @@ export const handlers = VibestRpcs.toLayer(
     const subscriptions = yield* Subscriptions
     const identity = yield* Identity
     const shutdown = yield* Shutdown
-    const mainEnv = yield* MainEnv
     const drain = yield* Drain
     const bus = yield* Bus
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -734,8 +712,6 @@ export const handlers = VibestRpcs.toLayer(
       Launch: ({ argv, focus, machine, runtime, callerEnv, runtimeSession }) =>
         Effect.gen(function* () {
           const { id, directory: root } = yield* scope("Launch")
-          const { command, env } = envOffArgv(argv)
-          const passed = Object.keys(env).length > 0 ? env : undefined
           const at = yield* machineFromCaller({ machine, callerEnv, runtimeSession })
           const current = yield* db.coordinatorOf(id)
           const decision = yield* plugins.start({
@@ -766,14 +742,13 @@ export const handlers = VibestRpcs.toLayer(
             label: "vibest",
             home: layout.home,
             focus,
-            ...(passed !== undefined ? { env: { [Launch.MAIN_ENV]: JSON.stringify(passed) } } : {}),
           })
           const run = rt.run
           if (run === undefined) {
             yield* rt.close(terminal).pipe(Effect.ignore)
             return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
           }
-          yield* run(terminal, Launch.inParent(command, root, rt.kind)).pipe(
+          yield* run(terminal, Launch.inParent(argv, root, rt.kind)).pipe(
             Effect.catch((error) =>
               rt
                 .close(terminal)
@@ -1016,18 +991,7 @@ export const handlers = VibestRpcs.toLayer(
           return { directory: project.directory, place }
         }),
 
-      "Project.CoordinatorSession": ({
-        harness,
-        fresh,
-        terminal,
-        machine,
-        runtime,
-        provider,
-        model,
-        routing,
-        pid,
-        env,
-      }) =>
+      "Project.CoordinatorSession": ({ harness, fresh, terminal, machine, runtime, provider, model, routing, pid }) =>
         Effect.gen(function* () {
           const { id: projectId, directory } = yield* scope("Project.CoordinatorSession")
           const kind = runtime ?? (yield* onlyRuntime)?.kind
@@ -1067,8 +1031,6 @@ export const handlers = VibestRpcs.toLayer(
                     { runtime: kind, address },
                     { provider, model, routing, pid, projectDirectory: directory },
                   )
-                  if (env && Object.keys(env).length > 0) mainEnv.set(projectId, { sessionId: saved.sessionId, env })
-                  else mainEnv.delete(projectId)
                   claimed = { ...saved, runtime: runtimeEnv(kind, address) }
                   return claimed
                 }),
@@ -1136,7 +1098,6 @@ export const handlers = VibestRpcs.toLayer(
               message: `${id} is not a main agent; only a main agent starts this way`,
             })
           yield* db.patchLive(id, { ready: null })
-          const kept = mainEnv.get(main.projectId)
           return {
             harness: main.harnessId,
             harnessSessionId: main.harnessSessionId,
@@ -1144,7 +1105,6 @@ export const handlers = VibestRpcs.toLayer(
             model: main.model,
             projectId: main.projectId,
             ...(main.runtime && main.address ? { runtime: runtimeEnv(main.runtime, main.address) } : {}),
-            ...(kept?.sessionId === id ? { env: kept.env } : {}),
           }
         }),
 
@@ -1193,7 +1153,7 @@ export const handlers = VibestRpcs.toLayer(
           return yield* stopOnce(
             instance,
             "Daemon.Handoff",
-            spawnDaemon(command, ["--import"], { [HANDOFF_ENV]: JSON.stringify([...mainEnv]) }).pipe(
+            spawnDaemon(command, ["--import"]).pipe(
               Effect.mapError(
                 (e) => new LaunchFailed({ message: `${quoted} did not start: ${e.message}; vibestd keeps running` }),
               ),

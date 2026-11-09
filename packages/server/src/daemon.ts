@@ -57,7 +57,7 @@ export interface Host {
   readonly checkDatabase: (filename: string) => Effect.Effect<void, Error>
 }
 
-export { HANDOFF_ENV, type MainEnv } from "./server.ts"
+export { HANDOFF_ENV } from "./server.ts"
 
 export const HANDOFF_TIMEOUT = Duration.seconds(30)
 
@@ -100,7 +100,7 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Layer.provide(Bus.layer),
   )
 
-export const run = (host: Host, options: { readonly handoff?: boolean; readonly mainEnv?: Server.MainEnv } = {}) =>
+export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
@@ -164,11 +164,7 @@ export const run = (host: Host, options: { readonly handoff?: boolean; readonly 
     yield* Layer.build(
       services(host, layout).pipe(
         Layer.provide(
-          Layer.mergeAll(
-            Layer.succeed(Server.Identity, identity),
-            Layer.succeed(Server.Shutdown, shutdown),
-            Layer.succeed(Server.MainEnv, options.mainEnv ?? new Map()),
-          ),
+          Layer.mergeAll(Layer.succeed(Server.Identity, identity), Layer.succeed(Server.Shutdown, shutdown)),
         ),
       ),
     )

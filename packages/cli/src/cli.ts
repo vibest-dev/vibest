@@ -157,10 +157,8 @@ const daemon = (host: Daemon.Host) =>
         Effect.andThen(
           Effect.gen(function* () {
             if (foreground) {
-              const raw = process.env[Daemon.HANDOFF_ENV]
               delete process.env[Daemon.HANDOFF_ENV]
-              const mainEnv: Daemon.MainEnv | undefined = handoff && raw ? new Map(JSON.parse(raw)) : undefined
-              return yield* Daemon.run(host, { handoff, ...(mainEnv ? { mainEnv } : {}) })
+              return yield* Daemon.run(host, { handoff })
             }
             const layout = yield* Layout
             if (!(yield* probe(layout.socket))) yield* startDaemon
@@ -339,12 +337,6 @@ const mainFlags = {
   ),
   provider: Flag.String("provider").pipe(Flag.optional),
   model: Flag.String("model").pipe(Flag.optional),
-  env: Flag.KeyValuePair("env").pipe(
-    Flag.withDescription(
-      "KEY=VALUE for the main agent's harness, never stored: vibestd keeps it in memory for a restart in place (vibest update); a vibestd stop or a new terminal loses it; run vibest --env again then",
-    ),
-    Flag.optional,
-  ),
   session: sessionFlag,
   headless: Flag.Boolean("headless").pipe(
     Flag.withDescription("Outside herdr: do not attach to the session"),
@@ -377,28 +369,24 @@ const startMain =
     readonly harness: Option.Option<HarnessId>
     readonly provider: Option.Option<string>
     readonly model: Option.Option<string>
-    readonly env: Option.Option<Record<string, string>>
     readonly session: Option.Option<string>
     readonly headless: boolean
     readonly runtime: Option.Option<string>
     readonly inParent: Option.Option<string>
   }) =>
     Effect.gen(function* () {
-      delete process.env[Launch.MAIN_ENV]
       yield* userOnly("")
       if (Option.isNone(o.inParent)) yield* updateNotice
       const harness = Option.getOrUndefined(o.harness)
       const provider = Option.getOrUndefined(o.provider)
       const model = Option.getOrUndefined(o.model)
       const runtimeKind = Option.getOrUndefined(o.runtime)
-      const env = Option.getOrElse(o.env, (): Record<string, string> => ({}))
       const again = [
         ...(yield* VibestCommand),
         ...(harness ? ["--harness", harness] : []),
         ...(provider ? ["--provider", provider] : []),
         ...(model ? ["--model", model] : []),
         ...(runtimeKind ? ["--runtime", runtimeKind] : []),
-        ...Object.entries(env).flatMap(([k, v]) => ["--env", `${k}=${v}`]),
         ...(o.fresh ? ["--new"] : []),
       ]
       const claim = (yield* caller).claim
@@ -464,13 +452,10 @@ const startMain =
             model: chosen.model,
             routing: { decidedBy: chosen.decidedBy, trace: chosen.trace },
             pid: process.pid,
-            ...(Object.keys(env).length > 0 ? { env } : {}),
           }),
         ),
       )
-      return yield* Effect.sync(() =>
-        exec(started.command.file, started.command.args, { ...env, ...started.command.env }),
-      )
+      return yield* Effect.sync(() => exec(started.command.file, started.command.args, started.command.env))
     })
 
 const send = Command.make("send", { id, message: text("message") }, (o) =>
@@ -886,7 +871,6 @@ const integrationStart = (exec: Exec, host: Daemon.Host) =>
           runtime: got.runtime,
         }),
       }).pipe(Effect.provide(Harness.layer))
-      delete process.env[Launch.MAIN_ENV]
       return yield* Effect.sync(() => exec(main.file, main.args, { ...got.env, ...main.env }))
     }),
   ).pipe(Command.withDescription("Internal: the main agent's harness started again in its shell, on its conversation"))

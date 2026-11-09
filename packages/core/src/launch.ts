@@ -103,28 +103,6 @@ export const inParent = (argv: ReadonlyArray<string>, root: string, runtime: str
   return [...rest, "--runtime", runtime, "--in-parent", root]
 }
 
-export const MAIN_ENV = "VIBEST_MAIN_ENV"
-
-export const mainEnvPairs = (raw: string | undefined): Record<string, string> => {
-  if (raw === undefined || raw === "") return {}
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return {}
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {}
-  const out: Record<string, string> = {}
-  for (const [key, value] of Object.entries(parsed)) if (key !== "" && typeof value === "string") out[key] = value
-  return out
-}
-
-export const commandEnv = (
-  flags: Readonly<Record<string, string>>,
-  marked: boolean,
-  carried: string | undefined,
-): Record<string, string> => (Object.keys(flags).length > 0 ? flags : marked ? mainEnvPairs(carried) : {})
-
 export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(function* (
   h: Runtime,
   machine: Machine,

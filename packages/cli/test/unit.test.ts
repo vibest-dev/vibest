@@ -1908,13 +1908,6 @@ layer(Layer.merge(Platform.services, builtinHarnesses))("on the platform", (it) 
 })
 
 describe("pure", () => {
-  it("an unmarked command ignores VIBEST_MAIN_ENV; the command Launch typed uses it", () => {
-    const carried = JSON.stringify({ MAIN_PROBE: "from-flag" })
-    assert.deepStrictEqual(Launch.commandEnv({}, false, carried), {})
-    assert.deepStrictEqual(Launch.commandEnv({}, true, carried), { MAIN_PROBE: "from-flag" })
-    assert.deepStrictEqual(Launch.commandEnv({ MAIN_PROBE: "from-flag" }, true, carried), { MAIN_PROBE: "from-flag" })
-  })
-
   it.effect("~/.vibest layout: VIBEST_HOME, else $HOME/.vibest; the old product's OMO_HOME is not read", () =>
     Effect.gen(function* () {
       const layout = (env: Record<string, string>) =>
