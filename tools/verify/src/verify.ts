@@ -61,11 +61,11 @@ await all([
     [
       "build the release archive",
       ["bun", "scripts/build-archive.ts", target, release],
-      { cwd: path.join(root, "apps/vibest-herdr") },
+      { cwd: path.join(root, "packages/cli") },
     ],
     [
       "install.sh",
-      ["sh", "-c", 'curl -fsSL "$0" | sh', `file://${path.join(root, "apps/vibest-herdr/install.sh")}`],
+      ["sh", "-c", 'curl -fsSL "$0" | sh', `file://${path.join(root, "packages/cli/install.sh")}`],
       {
         env: {
           ...process.env,
@@ -77,7 +77,7 @@ await all([
     ],
   ]),
   (async () => {
-    for (const pkg of [path.join(root, "apps/vibest-herdr"), platform])
+    for (const pkg of [path.join(root, "packages/cli"), platform])
       if (!(await run(`pack ${path.relative(root, pkg)}`, ["pnpm", "pack", "--pack-destination", packs], { cwd: pkg })))
         return false
     const tarballs = fs.readdirSync(packs).map((f) => path.join(packs, f))

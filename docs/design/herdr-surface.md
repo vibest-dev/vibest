@@ -184,7 +184,7 @@ need its own cleanup. Because env is lost on restart, the agent's identity must 
 - agent view (open question 5): set only on an explicit user action (`plugin:vibest` source), clear with the
   source guard, never set automatically; it is a shared single slot.
 
-**Plugin.** Draft in `apps/vibest-herdr/herdr-plugin/` (`herdr-plugin.toml`, `bin/vibest.sh`): actions
+**Plugin.** Draft in `packages/cli/herdr-plugin/` (`herdr-plugin.toml`, `bin/vibest.sh`): actions
 `open-main`, `run`, `stop`, `reschedule`, `runs`, `subscriptions`, `palette`; panes `run` and `palette` (popups),
 `runs` and `subscriptions` (overlays); one startup hook. Every command execs `vibest herdr <verb>`; vibest reads
 `HERDR_PLUGIN_CONTEXT_JSON`. This needs a `vibest herdr` command group (herdr-product only, D14): `startup`
@@ -208,7 +208,7 @@ fragile.
   needs a herdr update before `--machine` works.
 - `agent.start` into a `tab.create` pane and how `display_agent` shows next to a herdr-detected agent in a real
   client were not observed (headless server only).
-- `apps/vibest-herdr/package.json` `files` does not include `herdr-plugin` yet (not changed here).
+- `packages/cli/package.json` `files` does not include `herdr-plugin` yet (not changed here).
 
 ## 6. How runtime-herdr drives herdr
 
