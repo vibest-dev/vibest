@@ -4,6 +4,7 @@ import { Context, Effect, Layer, String as Str } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { inboxMethods } from "./db-inbox.ts"
+import { type PeerStart, peerStartData } from "./db-remote.ts"
 import {
   SessionRow,
   summaryIn,
@@ -22,6 +23,7 @@ import { migrate } from "./db-schema.ts"
 import { makeStore } from "./db-store.ts"
 import type { HarnessId } from "./harness.ts"
 
+export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"
 export { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 export {
   AddressJson,
@@ -73,8 +75,10 @@ const make = Effect.gen(function* () {
     clearMainAt,
     unusedId,
     conversationOf,
+    remote,
   } = store
   return {
+    ...remote.queries,
     projectAt: (root: string) =>
       sql<{ id: string; directory: string }>`SELECT id, directory FROM project WHERE directory = ${root}
         UNION ALL SELECT p.id, p.directory FROM project_repository r JOIN project p ON p.id = r.project_id
@@ -195,6 +199,7 @@ const make = Effect.gen(function* () {
       task?: string,
       parentSessionId?: string,
       request?: string,
+      origin?: PeerStart,
     ): Effect.Effect<boolean | SpawnedBefore> =>
       tx(
         Effect.gen(function* () {
@@ -209,7 +214,10 @@ const make = Effect.gen(function* () {
           const [entry] = yield* sql<{
             id: string | null
           }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
-          const reportTo = parentSessionId ?? (row.agent === "main" ? undefined : (entry?.id ?? undefined))
+          const reportTo =
+            origin !== undefined
+              ? undefined
+              : (parentSessionId ?? (row.agent === "main" ? undefined : (entry?.id ?? undefined)))
           const stopped = row.metadata.archived || row.metadata.removed
           yield* sql`INSERT INTO session ${sql.insert({
             id: row.id,
@@ -224,6 +232,8 @@ const make = Effect.gen(function* () {
             createdAt: row.createdAt,
             ...(stopped ? { endedAt: row.lastActive } : {}),
           })}`
+          if (origin !== undefined)
+            yield* append({ sessionId: row.id, type: "peer.start", at: row.createdAt, data: peerStartData(origin) })
           const processAt = row.startedAt ?? row.createdAt
           const processId = yield* startProcess(
             row.id,
@@ -291,7 +301,7 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    resolveSession: (input: string) =>
+    resolveSession: (input: string, scope?: { readonly peer: string; readonly project: string }) =>
       Effect.gen(function* () {
         if (!/^[0-9a-f-]{8,36}$/.test(input))
           return yield* new NoSuchSession({
@@ -300,8 +310,12 @@ const make = Effect.gen(function* () {
               ? `${input}: a session id or a prefix of at least 8 of its characters`
               : `no session ${input}`,
           })
-        const rows = yield* sql<{ id: string }>`SELECT id FROM session WHERE id >= ${input} AND id < ${`${input}~`}
-          ORDER BY id LIMIT 11`.pipe(Effect.orDie)
+        const rows = yield* sql<{
+          id: string
+        }>`SELECT s.id FROM session s WHERE s.id >= ${input} AND s.id < ${`${input}~`}
+          ${scope === undefined ? sql`` : sql`AND ${remote.ofPeer(scope.peer, scope.project)}`} ORDER BY s.id LIMIT 11`.pipe(
+          Effect.orDie,
+        )
         if (rows.length === 0) return yield* new NoSuchSession({ id: input, message: `no session ${input}` })
         if (rows.length > 1) return yield* new AmbiguousSession({ prefix: input, matches: rows.map((r) => r.id) })
         return rows[0]!.id

@@ -100,7 +100,10 @@ const checks: ReadonlyArray<Check> = [
         await until(
           "the main agent in vibest ls",
           async () => {
-            main = (await w.json<Array<Entry>>(["ls"], { cwd: repo })).find((e) => e.agent === "main")?.id ?? ""
+            main =
+              (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
+                (e) => e.agent === "main",
+              )?.id ?? ""
             return main !== ""
           },
           60_000,
@@ -118,7 +121,10 @@ const checks: ReadonlyArray<Check> = [
         const sampler = (async () => {
           while (sampling) {
             const at = Date.now()
-            const listed = await w.json<Array<Entry>>(["ls"], { cwd: repo }).catch(() => [] as Array<Entry>)
+            const listed = await w
+              .json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo })
+              .then((l) => l.sessions)
+              .catch(() => [] as Array<Entry>)
             const end = Date.now()
             for (const e of listed)
               samples.set(e.id, [...(samples.get(e.id) ?? []), { at, end, status: e.status, turnState: e.turnState }])
@@ -252,7 +258,10 @@ const checks: ReadonlyArray<Check> = [
         await until(
           "the main agent in vibest ls",
           async () => {
-            main = (await w.json<Array<Entry>>(["ls"], { cwd: repo })).find((e) => e.agent === "main")?.id ?? ""
+            main =
+              (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
+                (e) => e.agent === "main",
+              )?.id ?? ""
             return main !== ""
           },
           90_000,
@@ -337,7 +346,10 @@ const checks: ReadonlyArray<Check> = [
         await until(
           "the main agent in vibest ls",
           async () => {
-            main = (await w.json<Array<Entry>>(["ls"], { cwd: repo })).find((e) => e.agent === "main")?.id ?? ""
+            main =
+              (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
+                (e) => e.agent === "main",
+              )?.id ?? ""
             return main !== ""
           },
           90_000,
@@ -428,7 +440,10 @@ const checks: ReadonlyArray<Check> = [
         })
         await until(
           "the main agent in vibest ls",
-          async () => (await w.json<Array<Entry>>(["ls"], { cwd: repo })).some((e) => e.agent === "main"),
+          async () =>
+            (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).some(
+              (e) => e.agent === "main",
+            ),
           60_000,
         )
         const sub = (

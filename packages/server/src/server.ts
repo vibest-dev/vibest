@@ -17,13 +17,12 @@ import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
 import { Restarting } from "@vibest/core/restarting"
 import { envelope } from "@vibest/core/results"
 import { machinesListing, NoRuntime, Runtimes, type Terminal } from "@vibest/core/runtimes"
-import { NoSuchSession, runtimeEnv, Sessions } from "@vibest/core/sessions"
+import { defaultSessionName, NoSuchSession, runtimeEnv, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { UpdateCheck } from "@vibest/core/update-check"
 import { NotInRepository } from "@vibest/core/worktree"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import {
-  ACCESS,
   Caller,
   CAPABILITIES,
   DaemonBusy,
@@ -61,11 +60,7 @@ import { RpcSerialization, RpcServer } from "effect/rpc"
 import { AdmissionLive, CallerGateLive, noteOpen, ProtocolGateLive } from "./gates.ts"
 import * as Hooks from "./hooks.ts"
 import { placeOf, sameCoordinator, sessionListing, toInfo } from "./listing.ts"
-
-type Access = typeof ACCESS
-type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyof Access]
-
-const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
+import { type MethodOf, remoteHandlers } from "./remote-handlers.ts"
 
 export const Identity = Context.Reference<DaemonIdentity>("vibest/DaemonIdentity", { defaultValue: () => ({}) })
 
@@ -116,16 +111,20 @@ export const handlers = VibestRpcs.toLayer(
     const agent = (method: MethodOf<"agent" | "owner">) =>
       Effect.gen(function* () {
         const c = yield* Caller
-        if (c._tag === "Session")
+        if (c._tag === "Session" || c._tag === "Peer")
           return yield* new Forbidden({
             method,
-            message: `session ${c.sessionId} may not call ${method}; sessions only report to their coordinator (vibest report)`,
+            message:
+              c._tag === "Peer"
+                ? `a peer vibestd may not call ${method}`
+                : `session ${c.sessionId} may not call ${method}; sessions only report to their coordinator (vibest report)`,
           })
         return c
       })
 
     const managed = (method: MethodOf<"owner">, input: string) =>
       Effect.gen(function* () {
+        if ((yield* Caller)._tag === "Peer") return yield* peerSession(method, input)
         const c = yield* agent(method)
         const id = yield* db.resolveSession(input)
         const session = yield* db.getSession(id)
@@ -210,7 +209,7 @@ export const handlers = VibestRpcs.toLayer(
           address: encodeAddress(coord.address),
         }
       })
-    const { listed, watched, snapshotProjects, watchDeltas } = sessionListing({ db, sessions, runtimes })
+    const { listed, listedRows, watched, snapshotProjects, watchDeltas } = sessionListing({ db, sessions, runtimes })
 
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
 
@@ -268,7 +267,17 @@ export const handlers = VibestRpcs.toLayer(
         return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
       })
 
+    const { remote, routed, peerScope, peerSession, methods } = yield* remoteHandlers({
+      project: (method) =>
+        agent(method).pipe(
+          Effect.flatMap((c) => projectOf(c, method)),
+          Effect.map((p) => p.id),
+        ),
+      cliOnly,
+    })
+
     return VibestRpcs.of({
+      ...methods,
       Ping: () =>
         machinesListing(runtimes, []).pipe(
           Effect.map((machines) =>
@@ -294,6 +303,13 @@ export const handlers = VibestRpcs.toLayer(
       Spawn: (input) =>
         Effect.gen(function* () {
           const c = yield* agent("Spawn")
+          if (input.machine !== undefined) {
+            const project = yield* projectOf(c, "Spawn")
+            return yield* remote.spawn(input.machine, input, {
+              project: project.id,
+              ...(c._tag === "Coordinator" ? { coordinator: c.sessionId } : {}),
+            })
+          }
           if (input.agent === "coordinator" || input.agent === "main")
             return yield* new Forbidden({
               method: "Spawn",
@@ -478,56 +494,97 @@ export const handlers = VibestRpcs.toLayer(
         }),
 
       Send: ({ id: input, message, request }) =>
-        managed("Send", input).pipe(
-          Effect.flatMap((id) => sessions.send(id, message, request).pipe(Effect.as({ id }))),
+        routed(
+          "Send",
+          input,
+          (id) =>
+            managed("Send", id).pipe(
+              Effect.flatMap((id) => sessions.send(id, message, request).pipe(Effect.as({ id }))),
+            ),
+          (at, project) => remote.send(at, project, { message, ...(request === undefined ? {} : { request }) }),
         ),
       Interrupt: ({ id: input }) =>
-        managed("Interrupt", input).pipe(
-          Effect.flatMap((id) => sessions.interrupt(id).pipe(Effect.map((out) => ({ id, ...out })))),
+        routed(
+          "Interrupt",
+          input,
+          (id) =>
+            managed("Interrupt", id).pipe(
+              Effect.flatMap((id) => sessions.interrupt(id).pipe(Effect.map((out) => ({ id, ...out })))),
+            ),
+          (at, project) => remote.interrupt(at, project),
         ),
       Remove: ({ id: input, keepWorktree }) =>
-        managed("Remove", input).pipe(
-          Effect.flatMap((id) =>
-            sessions
-              .remove(id, { keepWorktree })
-              .pipe(
-                Effect.catchTag("RuntimeError", (e) =>
-                  e.code === "unreachable"
-                    ? Effect.fail(new RuntimeUnreachable({ session: id, message: e.message }))
-                    : Effect.die(e),
-                ),
+        routed(
+          "Remove",
+          input,
+          (id) =>
+            managed("Remove", id).pipe(
+              Effect.flatMap((id) =>
+                sessions
+                  .remove(id, { keepWorktree })
+                  .pipe(
+                    Effect.catchTag("RuntimeError", (e) =>
+                      e.code === "unreachable"
+                        ? Effect.fail(new RuntimeUnreachable({ session: id, message: e.message }))
+                        : Effect.die(e),
+                    ),
+                  ),
               ),
-          ),
-          Effect.map((out) => out ?? null),
+              Effect.map((out) => out ?? null),
+            ),
+          (at, project) => remote.remove(at, project, keepWorktree === undefined ? {} : { keepWorktree }),
         ),
 
       List: ({ stopped, all }) =>
         Effect.gen(function* () {
+          if ((yield* Caller)._tag === "Peer") {
+            const { peer, project } = yield* peerScope("List")
+            const mine = yield* db.peerSessions(peer, project)
+            const rows = (yield* sessions.list({ stopped: stopped === true })).filter((row) => mine.has(row.id))
+            return { sessions: yield* listedRows(rows), machines: [] }
+          }
           const c = yield* agent("List")
-          if (c._tag === "Coordinator") return yield* listed(c.projectId, stopped === true)
-          if (all === true) return yield* listed(undefined, stopped === true)
-          const found = yield* findAt(c.repositoryRoot ?? "").pipe(
-            Effect.map((row) => row?.id),
-            Effect.catchTag("NotInRepository", () => Effect.succeed("all" as const)),
-          )
-          if (found === "all") return yield* listed(undefined, stopped === true)
-          if (found === undefined) return []
-          return yield* listed(found, stopped === true)
+          const found =
+            c._tag === "Coordinator"
+              ? c.projectId
+              : all === true
+                ? undefined
+                : yield* findAt(c.repositoryRoot ?? "").pipe(
+                    Effect.map((row) => row?.id ?? null),
+                    Effect.catchTag("NotInRepository", () => Effect.succeed(undefined)),
+                  )
+          const local = found === null ? [] : yield* listed(found, stopped === true)
+          const away = yield* remote.list(found ?? undefined, stopped)
+          return { sessions: [...local, ...away.sessions], machines: away.machines }
         }),
 
       Get: ({ id: input }) =>
-        Effect.gen(function* () {
-          yield* agent("Get")
-          const id = yield* db.resolveSession(input)
-          const row = yield* sessions.get(id)
-          const session = toInfo(row, (yield* db.sessionBriefs([id])).get(id))
-          return { ...session, result: (yield* db.latestInbox(id, "result")) ?? null }
-        }),
+        routed(
+          "Get",
+          input,
+          (input) =>
+            Effect.gen(function* () {
+              const id =
+                (yield* Caller)._tag === "Peer"
+                  ? yield* peerSession("Get", input)
+                  : yield* agent("Get").pipe(Effect.andThen(db.resolveSession(input)))
+              const row = yield* sessions.get(id)
+              const session = toInfo(row, (yield* db.sessionBriefs([id])).get(id))
+              return { ...session, result: (yield* db.latestInbox(id, "result")) ?? null }
+            }),
+          (at, project) => remote.get(at, project),
+        ),
 
       Peek: ({ id: input, lines }) =>
-        managed("Peek", input).pipe(
-          Effect.flatMap((id) => sessions.peek(id, lines ?? 30)),
-          Effect.map((text) => ({ text })),
+        routed(
+          "Peek",
+          input,
+          (id) =>
+            managed("Peek", id).pipe(
+              Effect.flatMap((id) => sessions.peek(id, lines ?? 30)),
+              Effect.map((text) => ({ text })),
+            ),
+          (at, project) => remote.peek(at, project, lines === undefined ? {} : { lines }),
         ),
 
       Report: ({ message }) =>

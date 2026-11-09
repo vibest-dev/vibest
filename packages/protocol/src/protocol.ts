@@ -1,4 +1,4 @@
-export const PROTOCOL = 6
+export const PROTOCOL = 7
 
 export const MISMATCH_ACTION = "vibest update"
 
@@ -35,6 +35,15 @@ export const HARNESS_HEADER = "vibest-harness"
 export const CWD_HEADER = "vibest-cwd"
 export const RUNTIME_HEADER = "vibest-runtime"
 export const PLUGIN_VERSION_HEADER = "vibest-plugin-version"
+export const PEER_HEADER = "vibest-peer"
+export const PEER_PROJECT_HEADER = "vibest-peer-project"
+
+export const peerHeaders = (peer: string, project?: string): Record<string, string> => ({
+  [PROTOCOL_HEADER]: String(PROTOCOL),
+  [CALLER_HEADER]: "peer",
+  [PEER_HEADER]: peer,
+  ...(project === undefined ? {} : { [PEER_PROJECT_HEADER]: project }),
+})
 
 export const POLL_ROUTE = "/inbox/poll"
 export const ACK_ROUTE = "/inbox/ack"

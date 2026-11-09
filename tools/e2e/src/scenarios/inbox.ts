@@ -81,7 +81,10 @@ const claudeMain = async (
   await until(
     "the main agent in vibest ls",
     async () => {
-      main = (await w.json<Array<Entry>>(["ls"], { cwd: repo })).find((e) => e.agent === "main")?.id ?? ""
+      main =
+        (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
+          (e) => e.agent === "main",
+        )?.id ?? ""
       return main !== ""
     },
     60_000,
@@ -473,7 +476,10 @@ const checks: ReadonlyArray<Check> = [
           env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
-        const mains = async () => (await w.json<Array<Entry>>(["ls"], { cwd: repo })).filter((e) => e.agent === "main")
+        const mains = async () =>
+          (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).filter(
+            (e) => e.agent === "main",
+          )
         await until("the main agent in vibest ls", async () => (await mains()).length === 1, 30_000)
         const reached = (what: string, marker: string) =>
           until(what, () => model.seen.some((m) => m.includes("<agent-") && m.includes(marker)), 180_000).catch(

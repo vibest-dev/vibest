@@ -1,3 +1,19 @@
+import {
+  AlreadyAdded,
+  AmbiguousPeer,
+  ListedMachine,
+  MachineFailed,
+  MachineIncompatible,
+  MachineInfo,
+  MachineUnavailable,
+  NoCommit,
+  NoProject,
+  NoSuchPeer,
+  OutboxItem,
+  PeerInfo,
+  PromptTooLarge,
+  UnknownMachine,
+} from "@vibest/schema/machine"
 import { MessageStatus } from "@vibest/schema/model"
 import { AgentRefused, PluginInfo, Routing } from "@vibest/schema/plugin"
 import { ProjectInfoResult, ProjectSearchInput } from "@vibest/schema/project"
@@ -118,6 +134,7 @@ export type CallerShape =
       readonly repositoryRoot?: string
     }
   | { readonly _tag: "Session"; readonly sessionId: string; readonly projectId: string }
+  | { readonly _tag: "Peer"; readonly peerId: string; readonly projectId?: string }
 
 export class Caller extends Context.Service<Caller, CallerShape>()("vibest/Caller") {}
 
@@ -225,8 +242,11 @@ export const SessionInfo = Schema.Struct({
       endedAt: Schema.NullOr(Schema.Number),
     }),
   ),
+  machine: Schema.optional(Schema.String),
 })
 export type SessionInfo = typeof SessionInfo.Type
+
+const LINE_ERRORS = [UnknownMachine, MachineUnavailable, MachineIncompatible] as const
 
 export const InboxMessage = Schema.Struct({ ...InboxRow.fields, details: Schema.Record(Schema.String, Schema.Unknown) })
 export type InboxMessage = typeof InboxMessage.Type
@@ -294,17 +314,26 @@ export class VibestRpcs extends RpcGroup.make(
           archive: Schema.optional(Schema.Boolean),
           runtime: Schema.optional(Schema.String),
           request: Schema.optional(Schema.String),
+          machine: Schema.optional(Schema.String),
         },
         success: Schema.Struct({
           id: Schema.String,
           harness: Schema.Literals(HARNESS_IDS),
           provider: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
+          machine: Schema.optional(Schema.String),
           ...Routing.fields,
         }),
         error: Schema.Union([
           InvalidCaller,
           Forbidden,
+          MachineFailed,
+          UnknownMachine,
+          MachineUnavailable,
+          MachineIncompatible,
+          NoProject,
+          NoCommit,
+          PromptTooLarge,
           LimitReached,
           AllocationFailed,
           HarnessUnavailable,
@@ -365,7 +394,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Send", {
         payload: { id: Schema.String, message: Schema.String, request: Schema.optional(Schema.String) },
         success: Schema.Struct({ id: Schema.String }),
-        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
+        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
       }),
     ),
   ),
@@ -374,7 +403,15 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Interrupt", {
         payload: { id: Schema.String },
         success: Schema.Struct({ id: Schema.String, message: Schema.String }),
-        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, SessionBusy, RuntimeUnreachable, NoRuntime]),
+        error: Schema.Union([
+          Forbidden,
+          NoSuchSession,
+          AmbiguousSession,
+          SessionBusy,
+          RuntimeUnreachable,
+          NoRuntime,
+          ...LINE_ERRORS,
+        ]),
       }),
     ),
   ),
@@ -383,14 +420,22 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Remove", {
         payload: { id: Schema.String, keepWorktree: Schema.optional(Schema.Boolean) },
         success: Schema.NullOr(RemoveOutcome),
-        error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, SessionBusy, RuntimeUnreachable, NoRuntime]),
+        error: Schema.Union([
+          Forbidden,
+          NoSuchSession,
+          AmbiguousSession,
+          SessionBusy,
+          RuntimeUnreachable,
+          NoRuntime,
+          ...LINE_ERRORS,
+        ]),
       }),
     ),
   ),
   scoped(
     Rpc.make("List", {
       payload: { stopped: Schema.optional(Schema.Boolean), all: Schema.optional(Schema.Boolean) },
-      success: Schema.Array(SessionInfo),
+      success: Schema.Struct({ sessions: Schema.Array(SessionInfo), machines: Schema.Array(ListedMachine) }),
       error: Schema.Union([Forbidden]),
     }),
   ),
@@ -398,14 +443,14 @@ export class VibestRpcs extends RpcGroup.make(
     Rpc.make("Get", {
       payload: { id: Schema.String },
       success: SessionStatusInfo,
-      error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession]),
+      error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, ...LINE_ERRORS]),
     }),
   ),
   scoped(
     Rpc.make("Peek", {
       payload: { id: Schema.String, lines: Schema.optional(Schema.Number) },
       success: Schema.Struct({ text: Schema.String }),
-      error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, NoRuntime, RuntimeUnreachable]),
+      error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, NoRuntime, RuntimeUnreachable, ...LINE_ERRORS]),
     }),
   ),
   scoped(
@@ -664,10 +709,91 @@ export class VibestRpcs extends RpcGroup.make(
       error: Forbidden,
     }),
   ),
+  scoped(
+    Rpc.make("Peer.Hello", {
+      payload: { id: Schema.String, name: Schema.String, callsMe: Schema.String },
+      success: Schema.Struct({ id: Schema.String, name: Schema.String, version: Schema.String }),
+      error: Forbidden,
+    }),
+  ),
+  scoped(
+    admitted(
+      Rpc.make("Peer.Spawn", {
+        payload: {
+          repository: Schema.String,
+          commit: Schema.String,
+          prompt: Schema.String,
+          harness: Schema.optional(Schema.Literals(HARNESS_IDS)),
+          provider: Schema.optional(Schema.String),
+          model: Schema.optional(Schema.String),
+          title: Schema.optional(Schema.String),
+          runtime: Schema.optional(Schema.String),
+          parent: Schema.optional(Schema.String),
+          reportTo: Schema.optional(Schema.String),
+          request: Schema.String,
+        },
+        success: Schema.Struct({
+          session: Schema.String,
+          harness: Schema.Literals(HARNESS_IDS),
+          provider: Schema.optional(Schema.String),
+          model: Schema.optional(Schema.String),
+          directory: Schema.String,
+          ...Routing.fields,
+        }),
+        error: Schema.Union([
+          InvalidCaller,
+          Forbidden,
+          NoProject,
+          NoCommit,
+          PromptTooLarge,
+          LimitReached,
+          AllocationFailed,
+          HarnessUnavailable,
+          NoHarnessChosen,
+          NoRuntime,
+          AgentRefused,
+          NoSuchSession,
+          RuntimeUnreachable,
+          RuntimeIncompatible,
+        ]),
+      }),
+    ),
+  ),
+  scoped(Rpc.make("Peer.Outbox", { success: OutboxItem, error: Forbidden, stream: true })),
+  scoped(Rpc.make("Peer.Ack", { payload: { ids: Schema.Array(Schema.String) }, error: Forbidden })),
+  scoped(Rpc.make("Peers.List", { success: Schema.Array(PeerInfo), error: Forbidden })),
+  scoped(
+    Rpc.make("Peers.Remove", {
+      payload: { peer: Schema.String },
+      success: Schema.Struct({ outbox: Schema.Number }),
+      error: Schema.Union([Forbidden, NoSuchPeer, AmbiguousPeer]),
+    }),
+  ),
+  scoped(
+    Rpc.make("Machine.Add", {
+      payload: { name: Schema.String, target: Schema.String },
+      success: Schema.Struct({
+        name: Schema.String,
+        id: Schema.String,
+        vibestd: Schema.String,
+        version: Schema.String,
+      }),
+      error: Schema.Union([Forbidden, MachineFailed, MachineIncompatible, AlreadyAdded]),
+    }),
+  ),
+  scoped(Rpc.make("Machine.List", { success: Schema.Array(MachineInfo), error: Forbidden })),
+  scoped(
+    Rpc.make("Machine.Remove", {
+      payload: { name: Schema.String },
+      error: Schema.Union([Forbidden, UnknownMachine]),
+    }),
+  ),
 ) {}
 
+type Access = "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self" | "peer"
+
 export const ACCESS = {
-  Ping: "open",
+  Ping: ["open", "peer"],
   Plugins: "open",
   "Harnesses.List": "open",
   "Runtimes.Doctor": "open",
@@ -679,8 +805,8 @@ export const ACCESS = {
   Report: "session",
   Spawn: "agent",
   Launch: "agent",
-  List: "agent",
-  Get: "agent",
+  List: ["agent", "peer"],
+  Get: ["agent", "peer"],
   "Inbox.Subscribe": "coordinator",
   Watch: "cli",
   "Session.Seen": "cli",
@@ -694,19 +820,31 @@ export const ACCESS = {
   "Project.Create": "cli",
   "Project.Info": "agent",
   "Project.Search": "agent",
-  Send: "owner",
-  Interrupt: "owner",
-  Peek: "owner",
-  Remove: "owner",
+  Send: ["owner", "peer"],
+  Interrupt: ["owner", "peer"],
+  Peek: ["owner", "peer"],
+  Remove: ["owner", "peer"],
   "Daemon.Stop": "cli",
   "Daemon.Handoff": "cli",
   "Session.Ready": "self",
   "Agents.Outdated": "cli",
   "Agents.Restart": "cli",
-} as const satisfies Record<
-  RpcGroup.Rpcs<typeof VibestRpcs>["_tag"],
-  "open" | "session" | "agent" | "coordinator" | "owner" | "cli" | "self"
->
+  "Peer.Hello": "peer",
+  "Peer.Spawn": "peer",
+  "Peer.Outbox": "peer",
+  "Peer.Ack": "peer",
+  "Peers.List": "cli",
+  "Peers.Remove": "cli",
+  "Machine.Add": "cli",
+  "Machine.List": "cli",
+  "Machine.Remove": "cli",
+} as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly [Access, "peer"]>
+
+export const PEER_CALLS: ReadonlySet<string> = new Set(
+  Object.entries(ACCESS)
+    .filter(([, access]) => ([] as ReadonlyArray<string>).concat(access).includes("peer"))
+    .map(([method]) => method),
+)
 
 export const CAPABILITIES = {
   http: true,
@@ -716,4 +854,5 @@ export const CAPABILITIES = {
   projects: true,
   harnesses: true,
   spawnRuntime: true,
+  machines: true,
 } as const

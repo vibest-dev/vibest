@@ -2,6 +2,8 @@ import { shellQuote } from "@vibest/schema/layout"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 
+import { REMOTE_TABLES } from "./db-remote.ts"
+
 export const APPLICATION_ID = 0x76696265
 export const SCHEMA_VERSION = 1
 
@@ -131,11 +133,12 @@ export const migrate = Effect.gen(function* () {
     const installed = yield* sql.withTransaction(
       Effect.gen(function* () {
         if ((yield* objectCount) !== 0) return false
-        for (const statement of SCHEMA) yield* sql.unsafe(statement)
+        for (const statement of [...SCHEMA, ...REMOTE_TABLES]) yield* sql.unsafe(statement)
         return true
       }),
     )
     if (installed) return
   }
   if ((yield* inspectSchema) !== "ready") return yield* mismatch(0, 0, "empty after install")
+  yield* sql.withTransaction(Effect.forEach(REMOTE_TABLES, (statement) => sql.unsafe(statement), { discard: true }))
 })

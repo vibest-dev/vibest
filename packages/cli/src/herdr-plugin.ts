@@ -226,7 +226,9 @@ const theDaemon = {
   interrupt: (id: string) => ask("/", (client) => client.Interrupt({ id })).pipe(Effect.asVoid),
   list: (directory: string | undefined) =>
     ask(directory ?? "/", (client) => client.List(directory === undefined ? { all: true } : {})).pipe(
-      Effect.map((rows) => rows.filter((row) => row.exitedAt === null).map(toLive)),
+      Effect.map((listed) =>
+        listed.sessions.filter((row) => row.exitedAt === null && row.machine === undefined).map(toLive),
+      ),
     ),
   usage: () =>
     ask("/", (client) => client.Subscriptions()).pipe(

@@ -4,6 +4,7 @@ import { Clock, Context, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
 import { Bus, type EngineEvent, type LiveEvent, type StoredEvent, type StoredType } from "./bus.ts"
+import { remoteQueries } from "./db-remote.ts"
 import {
   encodeAddress,
   SessionRow,
@@ -434,6 +435,15 @@ export const makeStore = Effect.gen(function* () {
       })
     })
 
+  const remote = remoteQueries({
+    sql,
+    now,
+    tx,
+    notify,
+    present: (project, recipient) => Effect.map(anySession(recipient), (found) => placed(project, found?.current)),
+    insertInbox: insertInboxSql,
+  })
+
   const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number, request?: string) =>
     Effect.gen(function* () {
       if (row.kind === "send") {
@@ -473,14 +483,17 @@ export const makeStore = Effect.gen(function* () {
               at,
             )
           : undefined
+      const origin = yield* remote.peerStartOf(row.sessionId)
       const id = yield* insertInboxSql({
-        recipient: recipient ?? row.sessionId,
+        recipient: origin === undefined ? (recipient ?? row.sessionId) : row.sessionId,
         kind: row.kind,
         sender: row.sessionId,
         content: row.message,
         ...(resultEventId === undefined ? {} : { resultEventId }),
-        status: present ? "pending" : "dropped",
+        status: origin === undefined && present ? "pending" : "dropped",
       })
+      if (origin !== undefined)
+        yield* remote.queueForPeer(origin, { sessionId: row.sessionId, kind: row.kind, content: row.message, at })
       return (yield* inboxIn([id]))[0]!
     })
 
@@ -495,8 +508,10 @@ export const makeStore = Effect.gen(function* () {
       if (patch.name !== undefined && patch.name !== current.name)
         yield* sql`UPDATE session SET name = ${patch.name} WHERE id = ${id}`
       const ending = !!(next.metadata.archived || next.metadata.removed)
-      if (ending && !(current.metadata.archived || current.metadata.removed))
+      if (ending && !(current.metadata.archived || current.metadata.removed)) {
         yield* sql`UPDATE session SET ended_at = ${yield* now} WHERE id = ${id} AND ended_at IS NULL`
+        yield* sql`DELETE FROM outbox WHERE session_id = ${id}`
+      }
       const p = (yield* anySession(id))!.current
       const routing = patch.metadata?.routing
       const choicePatched =
@@ -670,6 +685,7 @@ export const makeStore = Effect.gen(function* () {
     clearMainAt,
     unusedId,
     conversationOf,
+    remote,
   }
 })
 

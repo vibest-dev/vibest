@@ -69,13 +69,17 @@ describe("vibest CLI", () => {
       assert.strictEqual((yield* herdr.callsTo("send"))[0]!.text, task)
 
       const live = ["idle", "working", "blocked", "done", "unknown"]
-      const listed = decodeJson((yield* run(["ls"])).stdout) as Array<{
-        id: string
-        status: string
-        turnState: string
-        task: string
-        latest: { status: string; summary: string; endedAt: number | null }
-      }>
+      const { sessions: listed, machines } = decodeJson((yield* run(["ls"])).stdout) as {
+        sessions: Array<{
+          id: string
+          status: string
+          turnState: string
+          task: string
+          latest: { status: string; summary: string; endedAt: number | null }
+        }>
+        machines: Array<unknown>
+      }
+      assert.deepStrictEqual(machines, [])
       assert.deepInclude(listed[0], {
         id,
         turnState: "open",
@@ -119,7 +123,11 @@ describe("vibest CLI", () => {
       yield* until(db.getSession(other), (w) => w?.turnState === "open")
       yield* db.updateSession(id, { status: "unknown", exitedAt: 1 })
       const ids = (args: ReadonlyArray<string>) =>
-        run(args).pipe(Effect.map((r) => (decodeJson(r.stdout) as Array<{ id: string }>).map((w) => w.id).sort()))
+        run(args).pipe(
+          Effect.map((r) =>
+            (decodeJson(r.stdout) as { sessions: Array<{ id: string }> }).sessions.map((w) => w.id).sort(),
+          ),
+        )
       assert.deepStrictEqual(yield* ids(["ls"]), [other])
       assert.deepStrictEqual(yield* ids(["ls", "--all"]), [id, other].sort())
       assert.deepStrictEqual(yield* ids(["ls", "-a"]), [id, other].sort())

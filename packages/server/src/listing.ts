@@ -243,5 +243,5 @@ export const sessionListing = (deps: {
       ]
     })
 
-  return { listed, watched, snapshotProjects, watchDeltas }
+  return { listed, listedRows, watched, snapshotProjects, watchDeltas }
 }

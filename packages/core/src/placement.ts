@@ -190,6 +190,7 @@ export const sessionPlacement = (deps: {
     firstPrompt: string,
     splitFrom?: string,
     env?: Readonly<Record<string, string>>,
+    commit?: string,
   ) {
     const folders = yield* listProjectRepositories(root)
     const peer = splitFrom !== undefined ? yield* peerRow(session, splitFrom) : undefined
@@ -230,7 +231,7 @@ export const sessionPlacement = (deps: {
       if (folders) {
         yield* undoOnFailure(createIsolatedWorktrees(folders, worktree), () => discardIsolatedWorktrees(worktree))
       } else {
-        yield* undoOnFailure(addWorktree(root, worktree), () => removeWorktree(root, worktree))
+        yield* undoOnFailure(addWorktree(root, worktree, commit), () => removeWorktree(root, worktree))
       }
     }
     if (!folders) yield* copyIncluded(root, worktree)
@@ -258,8 +259,9 @@ export const sessionPlacement = (deps: {
     firstPrompt: string,
     splitFrom?: string,
     env?: Readonly<Record<string, string>>,
+    commit?: string,
   ) =>
-    launchRaw(h, machine, session, root, firstPrompt, splitFrom, env).pipe(
+    launchRaw(h, machine, session, root, firstPrompt, splitFrom, env, commit).pipe(
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           const e = Cause.squash(cause)

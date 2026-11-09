@@ -172,7 +172,7 @@ const checks: ReadonlyArray<Check> = [
         )
         const fresh = await w.run(w.repository, [path.join(bin, "vibest"), "ls"], { env })
         expect(
-          fresh.code === 0 && Array.isArray(JSON.parse(fresh.stdout)),
+          fresh.code === 0 && Array.isArray(JSON.parse(fresh.stdout).sessions),
           `the updated vibest on an empty database: ${out(fresh)}`,
         )
       } finally {

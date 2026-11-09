@@ -82,7 +82,7 @@ export {
 } from "@vibest/schema/session"
 
 export { CONFIRM_TIMEOUT, READY_TIMEOUT, STOP_WAIT } from "./prompting.ts"
-export { allocationNameSource, peerAdmitPause, type SpawnInput, type Spawned } from "./spawn.ts"
+export { allocationNameSource, defaultSessionName, peerAdmitPause, type SpawnInput, type Spawned } from "./spawn.ts"
 
 export const START_TIMEOUT = Duration.seconds(120)
 export const HOOK_GRACE = Duration.seconds(10)

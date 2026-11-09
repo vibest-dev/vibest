@@ -129,9 +129,11 @@ const checks: ReadonlyArray<Check> = [
               `${e.message}; tool results ${JSON.stringify(results)}; folders ${JSON.stringify(dirs)}${peek ? `; its screen:\n${peek.stdout}` : ""}`,
             )
           })
-        const main = (await w.json<Array<{ id: string; agent: string }>>(["ls"], { cwd: repo })).find(
-          (e) => e.agent === "main",
-        )?.id
+        const main = (
+          await w
+            .json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"], { cwd: repo })
+            .then((l) => l.sessions)
+        ).find((e) => e.agent === "main")?.id
         const own = path.join(
           w.vibestHome,
           "projects",
@@ -258,7 +260,8 @@ const checks: ReadonlyArray<Check> = [
         { mode: 0o755 },
       )
       const env = { PATH: `${shim}:${w.env().PATH}` }
-      const listed = JSON.parse(await w.ok(["ls"], { cwd: outside, env })) as Array<{ agent: string }>
+      const listed = (JSON.parse(await w.ok(["ls"], { cwd: outside, env })) as { sessions: Array<{ agent: string }> })
+        .sessions
       expect(
         listed.some((row) => row.agent === "main"),
         `ls outside a project: ${JSON.stringify(listed)}`,
@@ -268,7 +271,7 @@ const checks: ReadonlyArray<Check> = [
       await fs.mkdir(repo)
       const init = await w.run(repo, ["git", "init", "-q"])
       expect(init.code === 0, init.stderr)
-      const none = JSON.parse(await w.ok(["ls"], { cwd: repo, env })) as Array<unknown>
+      const none = (JSON.parse(await w.ok(["ls"], { cwd: repo, env })) as { sessions: Array<unknown> }).sessions
       expect(none.length === 0, `ls in a repository that is no project: ${JSON.stringify(none)}`)
     },
   },
@@ -361,7 +364,7 @@ const checks: ReadonlyArray<Check> = [
       await fs.writeFile(path.join(full, "keep"), "keep\n")
       const refused = await w.vibest(["project", "create", "full", "--from", "../a"], { cwd })
       expect(refused.code !== 0 && refused.stderr.includes("not empty"), refused.stderr)
-      expect(await fs.readFile(path.join(full, "keep"), "utf8"), "the non-empty target was touched")
+      expect((await fs.readFile(path.join(full, "keep"), "utf8")) === "keep\n", "the non-empty target was touched")
     },
   },
 ]
