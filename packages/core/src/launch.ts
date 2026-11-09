@@ -94,6 +94,23 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   }
 })
 
+export const IDENTITY_ENV = [
+  "VIBEST_SESSION_ID",
+  "VIBEST_PROJECT_ID",
+  "VIBEST_PROJECT_DIR",
+  "VIBEST_AGENT",
+  "VIBEST_HARNESS",
+  "VIBEST_RUNTIME",
+  "VIBEST_HOME",
+  "VIBEST_COMMAND",
+] as const
+
+export const identityPairs = (env: Readonly<Record<string, string>>) =>
+  IDENTITY_ENV.flatMap((key) => {
+    const value = env[key]
+    return value === undefined ? [] : [`${key}=${value}`]
+  })
+
 export const inParent = (argv: ReadonlyArray<string>, root: string, runtime: string) => {
   const rest: Array<string> = []
   for (let i = 0; i < argv.length; i++) {

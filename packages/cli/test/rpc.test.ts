@@ -444,7 +444,6 @@ describe("vibest.sock", () => {
         ["Report", c.Report({ message: "x" })],
         ["Daemon.Stop", c["Daemon.Stop"]({ instance: "x" })],
         ["Daemon.Handoff", c["Daemon.Handoff"]({ instance: "x", command: ["vibest"] })],
-        ["Session.Start", c["Session.Start"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
         ["Session.Ready", c["Session.Ready"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
         ["Agents.Outdated", c["Agents.Outdated"]()],
         ["Agents.Restart", c["Agents.Restart"]({ ids: [id] })],

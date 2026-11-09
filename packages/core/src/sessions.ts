@@ -53,6 +53,7 @@ import {
 } from "./harness.ts"
 import { Inbox } from "./inbox.ts"
 import { keyedLock } from "./keyed-lock.ts"
+import { coordinatorCommand, identityPairs } from "./launch.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, VibestCommand, safeRepositoryDirectory } from "./paths.ts"
 import { sessionPlacement } from "./placement.ts"
@@ -1402,6 +1403,7 @@ export class Sessions extends Context.Service<
           scope,
         ).pipe(Effect.asVoid)
 
+      const vibestCommand = yield* VibestCommand
       const { outdated, restart, restartLater } = sessionRestart({
         db,
         bus,
@@ -1414,6 +1416,32 @@ export class Sessions extends Context.Service<
         locked: (id) => locked(id),
         checkLater: (id) => Effect.forkIn(checkLocked(id), scope).pipe(Effect.asVoid),
         launchArgv: (session, resume) => launchArgv(session, resume).pipe(Effect.provideContext(platform)),
+        mainArgv: (main) =>
+          Effect.gen(function* () {
+            yield* db.patchLive(main.id, { ready: null })
+            const root = main.projectDirectory ?? (yield* db.projectDirectory(main.projectId)) ?? ""
+            const command = yield* coordinatorCommand({
+              harness: main.harnessId,
+              root,
+              provider: main.provider,
+              model: main.model,
+              passEnv: [],
+              session: Effect.succeed({
+                sessionId: main.id,
+                harnessSessionId: main.harnessSessionId,
+                projectId: main.projectId,
+                ...(main.runtime && main.address ? { runtime: runtimeEnv(main.runtime, main.address) } : {}),
+              }),
+            })
+            return ["env", ...identityPairs(command.env), command.file, ...command.args]
+          }).pipe(
+            Effect.provideService(Harness, harness),
+            Effect.provideService(Harnesses, harnesses),
+            Effect.provideService(Layout, layout),
+            Effect.provideService(VibestCommand, vibestCommand),
+            Effect.provideService(FileSystem.FileSystem, fs),
+            Effect.provideService(Path.Path, path),
+          ),
         worktreeOf,
         withPlatform: (effect) => effect.pipe(Effect.provideContext(platform)),
         awaitReady,

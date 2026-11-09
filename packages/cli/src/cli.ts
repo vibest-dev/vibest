@@ -15,10 +15,8 @@ import {
   startDaemon,
   withVibest,
 } from "@vibest/client/client"
-import { callerKeys } from "@vibest/core/caller"
 import * as Guard from "@vibest/core/guard"
 import { Harness, type HarnessAdapter, Harnesses, HARNESS_IDS, type HarnessId, preflight } from "@vibest/core/harness"
-import * as Launch from "@vibest/core/launch"
 import { catalogModels } from "@vibest/core/models"
 import { askLine, askYesNo, interactive, Layout, shellQuote, VibestCommand, writeAtomic } from "@vibest/core/paths"
 import { makeSources } from "@vibest/core/plugin-sources"
@@ -844,43 +842,12 @@ const guard = Command.make("guard", { harness: hookHarness }, (o) =>
   ),
 )
 
-const integrationStart = (exec: Exec, host: Daemon.Host) =>
-  Command.make("start", { id }, (o) =>
-    Effect.gen(function* () {
-      const plugins = yield* callerPlugins(host.builtinPlugins).pipe(Effect.provideService(PluginLoader, host.plugins))
-      const got = yield* Effect.flatMap(caller, (c) =>
-        withVibest(c.claim, (client) => client["Session.Start"]({ id: o.id }), { start: false }).pipe(
-          Effect.retry({
-            while: (e) => (e as { readonly _tag?: string })._tag === "DaemonUnavailable",
-            schedule: Schedule.spaced("500 millis"),
-            times: 60,
-          }),
-        ),
-      )
-      const { root } = yield* projectRoot((yield* Path.Path).resolve("."))
-      const main = yield* Launch.coordinatorCommand({
-        harness: got.harness,
-        root,
-        provider: got.provider,
-        model: got.model,
-        passEnv: callerKeys(plugins),
-        session: Effect.succeed({
-          sessionId: o.id,
-          harnessSessionId: got.harnessSessionId,
-          projectId: got.projectId,
-          runtime: got.runtime,
-        }),
-      }).pipe(Effect.provide(Harness.layer))
-      return yield* Effect.sync(() => exec(main.file, main.args, { ...got.env, ...main.env }))
-    }),
-  ).pipe(Command.withDescription("Internal: the main agent's harness started again in its shell, on its conversation"))
-
-const integration = (exec: Exec, host: Daemon.Host) =>
+const integration = () =>
   Command.make("integration").pipe(
     Command.withDescription(
-      "Internal: called by vibest's plugin in each harness (user prompt, turn-end result, pre-tool guard) and by a main agent's restart; not for direct use",
+      "Internal: called by vibest's plugin in each harness (user prompt, turn-end result, pre-tool guard); not for direct use",
     ),
-    Command.withSubcommands([guard, prompt, stop, ready, integrationStart(exec, host)]),
+    Command.withSubcommands([guard, prompt, stop, ready]),
   )
 
 type Finding = { readonly mark: "ok" | "problem" | "note"; readonly text: string; readonly fix?: string }
@@ -1422,7 +1389,7 @@ export const command = (host: Daemon.Host, exec: Exec) =>
       project,
       plugins,
       subscriptions,
-      integration(exec, host),
+      integration(),
       doctor,
       update,
       herdrCommands(userOnly),

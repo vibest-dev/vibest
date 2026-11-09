@@ -6,7 +6,6 @@ import { awaitEvent, Bus } from "./bus.ts"
 import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
 import type { HarnessAdapter, HarnessId } from "./harness.ts"
 import type { Inbox } from "./inbox.ts"
-import { VibestCommand } from "./paths.ts"
 import { errorMessage } from "./plugins.ts"
 import type { Processes } from "./processes.ts"
 import type { Restarting } from "./restarting.ts"
@@ -118,6 +117,7 @@ export const sessionRestart = (deps: {
   readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly checkLater: (id: string) => Effect.Effect<void>
   readonly launchArgv: (session: SessionRow, resume: boolean) => Effect.Effect<ReadonlyArray<string>, unknown>
+  readonly mainArgv: (main: CoordinatorRow) => Effect.Effect<ReadonlyArray<string>, unknown>
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, unknown>
   readonly withPlatform: <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) => Effect.Effect<A, E>
   readonly awaitReady: (
@@ -263,7 +263,7 @@ export const sessionRestart = (deps: {
         pid: main.pid,
         harnessSessionId: main.harnessSessionId,
         interrupted,
-        argv: Effect.map(VibestCommand, (vibest) => [...vibest, "integration", "start", id]),
+        argv: deps.mainArgv(main),
         liveNow: Effect.gen(function* () {
           const row = yield* db.coordinatorOf(projectId)
           return row?.id === id ? { ...row, ready: yield* db.readyAt(id) } : undefined

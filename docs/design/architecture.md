@@ -1024,9 +1024,9 @@ id a harness made for a coordinator; the last report wins). Of the rest:
   watches Ping. `Daemon.Handoff` (`handoff` capability) checks that `command` opens the database, drains as
   `Daemon.Stop` does, starts `command daemon --foreground --import`, then hands over its sockets and lock; a
   failure before that leaves it serving. `spawnDaemon`'s `env` reaches only the new vibestd's environment.
-- `Session.Start` gives a main agent restarted in its own shell (`vibest integration start <id>`) its row and its
-  `--env` from memory (absent after a stop without a handoff). `Session.Ready` is the integration saying the harness
-  takes input, with the harness's own `pid`; vibestd hands over a first or restarted turn only after it.
+- A restart in place types the main agent's harness command, with vibest's identity variables, into its shell.
+  `Session.Ready` is the integration saying the harness takes input, with the harness's own `pid`; vibestd hands over a
+  first or restarted turn only after it.
 - `Agents.Outdated` lists live agents whose integration is not this vibestd's (`blocked`: why one cannot restart in
   place). `Agents.Restart` returns at once and, once process `after` exited, restarts them in place: subagents
   first (at most 4 at a time), then main agents; SIGTERM to the harness alone, then the runtime runs it again on

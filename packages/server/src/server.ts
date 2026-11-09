@@ -626,11 +626,6 @@ export const handlers = VibestRpcs.toLayer(
       Effect.gen(function* () {
         const c = yield* Caller
         if ((c._tag === "Session" || c._tag === "Coordinator") && c.sessionId === id) return undefined
-        if (c._tag === "Cli") {
-          const found = Option.getOrUndefined(yield* findAt(c.repositoryRoot).pipe(Effect.option))
-          const main = found === undefined ? undefined : yield* db.coordinatorOf(found.id)
-          if (main?.id === id) return main
-        }
         return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
       })
 
@@ -1087,25 +1082,6 @@ export const handlers = VibestRpcs.toLayer(
               }).pipe(Effect.provideService(Bus, bus))
             }),
           )
-        }),
-
-      "Session.Start": ({ id }) =>
-        Effect.gen(function* () {
-          const main = yield* self("Session.Start", id)
-          if (main === undefined)
-            return yield* new NoSuchSession({
-              id,
-              message: `${id} is not a main agent; only a main agent starts this way`,
-            })
-          yield* db.patchLive(id, { ready: null })
-          return {
-            harness: main.harnessId,
-            harnessSessionId: main.harnessSessionId,
-            provider: main.provider,
-            model: main.model,
-            projectId: main.projectId,
-            ...(main.runtime && main.address ? { runtime: runtimeEnv(main.runtime, main.address) } : {}),
-          }
         }),
 
       "Session.Ready": ({ id, pid }) =>

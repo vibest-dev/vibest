@@ -603,21 +603,6 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
-    Rpc.make("Session.Start", {
-      payload: { id: Schema.String },
-      success: Schema.Struct({
-        harness: Schema.Literals(HARNESS_IDS),
-        harnessSessionId: Schema.NullOr(Schema.String),
-        provider: Schema.NullOr(Schema.String),
-        model: Schema.NullOr(Schema.String),
-        projectId: Schema.String,
-        runtime: Schema.optional(Schema.String),
-        env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-      }),
-      error: Schema.Union([Forbidden, NoSuchSession]),
-    }),
-  ),
-  scoped(
     Rpc.make("Session.Ready", {
       payload: { id: Schema.String, pid: Schema.optional(Schema.Number) },
       error: Schema.Union([Forbidden, NoSuchSession]),
@@ -678,7 +663,6 @@ export const ACCESS = {
   Remove: "owner",
   "Daemon.Stop": "cli",
   "Daemon.Handoff": "cli",
-  "Session.Start": "self",
   "Session.Ready": "self",
   "Agents.Outdated": "cli",
   "Agents.Restart": "cli",
