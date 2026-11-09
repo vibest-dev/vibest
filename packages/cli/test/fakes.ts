@@ -343,11 +343,12 @@ export interface TestOptions extends FakeRuntimeOptions {
   >
   readonly pluginTimeout?: Duration.Input
   readonly db?: (db: Db["Service"]) => Db["Service"]
+  readonly missingBinary?: ReadonlyArray<HarnessId>
 }
 
 const harnessOf = (options: TestOptions) =>
   Layer.succeed(Harness, {
-    available: () => Effect.succeed(true),
+    available: (id) => Effect.succeed(!(options.missingBinary ?? []).includes(id)),
     plugin: (id) =>
       (options.hooked ?? HARNESS_IDS).includes(id)
         ? Effect.succeed(`/vibest/harnesses/${id}`)

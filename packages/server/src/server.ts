@@ -1,6 +1,7 @@
 import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { projectActivity, raisesSeen, unseenDone } from "@vibest/core/activity"
 import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
+import { callerTarget, filterCallerEnv, mainPlace, specHits } from "@vibest/core/caller"
 import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { harnessCatalog, harnessOptions, Harnesses, HarnessUnavailable, isHarnessId } from "@vibest/core/harness"
@@ -413,6 +414,17 @@ export const handlers = VibestRpcs.toLayer(
       machine === undefined
         ? { id: "local" }
         : { id: machine.id, ...(machine.target !== undefined ? { target: machine.target } : {}) }
+    const machineFromCaller = (input: {
+      readonly machine?: { readonly id: string; readonly target?: string | undefined } | undefined
+      readonly callerEnv?: Readonly<Record<string, string>> | undefined
+      readonly runtimeSession?: string | undefined
+    }) =>
+      Effect.gen(function* () {
+        if (input.callerEnv === undefined && input.runtimeSession === undefined) return machineOf(input.machine)
+        const specs = yield* plugins.callers
+        const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv ?? {}), input.runtimeSession)
+        return { id: "local", ...(target !== undefined ? { target } : {}) }
+      })
     const projectLocked = keyedLock<string>()
     const seenLocked = keyedLock<string>()
 
@@ -675,7 +687,7 @@ export const handlers = VibestRpcs.toLayer(
             })
           const project = yield* projectOf(c, "Spawn")
           return yield* sessions.spawn({
-            machine: machineOf(input.machine),
+            machine: yield* machineFromCaller(input),
             root: project.directory,
             projectId: project.id,
             name: input.name ?? defaultSessionName(input.prompt),
@@ -719,12 +731,12 @@ export const handlers = VibestRpcs.toLayer(
 
       Republish: () => sessions.republish,
 
-      Launch: ({ argv, focus, machine, runtime }) =>
+      Launch: ({ argv, focus, machine, runtime, callerEnv, runtimeSession }) =>
         Effect.gen(function* () {
           const { id, directory: root } = yield* scope("Launch")
           const { command, env } = envOffArgv(argv)
           const passed = Object.keys(env).length > 0 ? env : undefined
-          const at = machineOf(machine)
+          const at = yield* machineFromCaller({ machine, callerEnv, runtimeSession })
           const current = yield* db.coordinatorOf(id)
           const decision = yield* plugins.start({
             project: root,
@@ -978,6 +990,32 @@ export const handlers = VibestRpcs.toLayer(
           }
         }),
 
+      "Project.MainPlace": ({ callerEnv, runtime, inParent }) =>
+        Effect.gen(function* () {
+          yield* cliOnly("Project.MainPlace")
+          const c = yield* Caller
+          if (c._tag !== "Cli")
+            return yield* new Forbidden({
+              method: "Project.MainPlace",
+              message: "only the user runs Project.MainPlace",
+            })
+          const project = yield* resolveAt(c.repositoryRoot)
+          const specs = yield* plugins.callers
+          const env = filterCallerEnv(specs, callerEnv)
+          const marked = inParent !== undefined && inParent === project.directory
+          const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
+          const place = mainPlace({ marked, runtime, hits })
+          if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
+          if (place.in === "terminal" && !marked) {
+            const spec = specs.find((item) => item.kind === place.runtime)
+            if (spec?.ready !== undefined && !(yield* spec.ready(env).pipe(Effect.orDie)))
+              return yield* new LaunchFailed({
+                message: spec.missing ?? `this ${place.runtime} terminal could not be named`,
+              })
+          }
+          return { directory: project.directory, place }
+        }),
+
       "Project.CoordinatorSession": ({
         harness,
         fresh,
@@ -1006,24 +1044,53 @@ export const handlers = VibestRpcs.toLayer(
                   method: "Project.CoordinatorSession",
                   message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
                 })
-              const saved = yield* db.coordinatorLaunch(
-                projectId,
+              const address = { machine: machineOf(machine).id, id: terminal }
+              let claimed:
+                | {
+                    readonly sessionId: string
+                    readonly harnessSessionId: string | null
+                    readonly projectId: string
+                    readonly runtime: string
+                  }
+                | undefined
+              const command = yield* Launch.coordinatorCommand({
                 harness,
-                fresh,
-                { runtime: kind, address: { machine: machineOf(machine).id, id: terminal } },
-                { provider, model, routing, pid, projectDirectory: directory },
+                root: directory,
+                provider: provider ?? null,
+                model: model ?? null,
+                passEnv: [],
+                session: Effect.gen(function* () {
+                  const saved = yield* db.coordinatorLaunch(
+                    projectId,
+                    harness,
+                    fresh,
+                    { runtime: kind, address },
+                    { provider, model, routing, pid, projectDirectory: directory },
+                  )
+                  if (env && Object.keys(env).length > 0) mainEnv.set(projectId, { sessionId: saved.sessionId, env })
+                  else mainEnv.delete(projectId)
+                  claimed = { ...saved, runtime: runtimeEnv(kind, address) }
+                  return claimed
+                }),
+              }).pipe(
+                Effect.catchTag("SystemPromptDirUnsafe", (error) =>
+                  Effect.fail(new LaunchFailed({ message: error.message })),
+                ),
+                Effect.catchTag("ConfigError", (error) => Effect.die(error)),
               )
-              if (env && Object.keys(env).length > 0) mainEnv.set(projectId, { sessionId: saved.sessionId, env })
-              else mainEnv.delete(projectId)
+              if (claimed === undefined) return yield* Effect.die("coordinator command returned without a session")
               const rt = Option.getOrUndefined(yield* runtimes.route(kind).pipe(Effect.option))
               if (rt?.present !== undefined)
                 yield* rt
-                  .present(
-                    { machine: machineOf(machine).id, id: terminal },
-                    { mainSession: saved.sessionId, projectId },
-                  )
+                  .present(address, { mainSession: claimed.sessionId, projectId })
                   .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
-              return { ...saved, runtime: runtimeEnv(kind, { machine: machineOf(machine).id, id: terminal }) }
+              return {
+                sessionId: claimed.sessionId,
+                harnessSessionId: claimed.harnessSessionId,
+                projectId: claimed.projectId,
+                runtime: claimed.runtime,
+                command: { file: command.file, args: [...command.args], env: { ...command.env } },
+              }
             }),
           )
         }),

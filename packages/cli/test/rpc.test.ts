@@ -31,6 +31,7 @@ import {
   until,
   writeResult,
   projectOf,
+  systemPromptFile,
 } from "./fakes.ts"
 
 const served = (options?: TestOptions) =>
@@ -422,6 +423,7 @@ describe("vibest.sock", () => {
         ["Launch", c.Launch({ argv: [], focus: false })],
         ["Project.StartMain", c["Project.StartMain"]({ runtime: "herdr" })],
         ["Project.Open", c["Project.Open"]({})],
+        ["Project.MainPlace", c["Project.MainPlace"]({ callerEnv: {} })],
         ["List", c.List({ stopped: true })],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
@@ -533,6 +535,166 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
       assert.deepStrictEqual(yield* c.List({}), [])
     }),
+  )
+
+  test(
+    "Project.MainPlace names the detected terminal, launches a named runtime that is not here, and a marked root only when it matches",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const opened = yield* c["Project.Open"]({})
+      const here = yield* c["Project.MainPlace"]({ callerEnv: { HC_ID: "t1", HERDR_ID: "p1" } })
+      assert.strictEqual(here.directory, opened.directory)
+      assert.deepStrictEqual(here.place, { in: "terminal", runtime: "hc", terminal: "t1" })
+      assert.deepStrictEqual((yield* c["Project.MainPlace"]({ callerEnv: { HC_ID: "t1" }, runtime: "herdr" })).place, {
+        in: "launch",
+        runtime: "herdr",
+      })
+      assert.deepStrictEqual(
+        (yield* c["Project.MainPlace"]({
+          callerEnv: { HC_ID: "t1", HERDR_ID: "p1" },
+          runtime: "herdr",
+          inParent: opened.directory,
+        })).place,
+        { in: "terminal", runtime: "herdr", terminal: "p1" },
+      )
+      assert.deepStrictEqual(
+        (yield* c["Project.MainPlace"]({
+          callerEnv: { HC_ID: "t1" },
+          runtime: "herdr",
+          inParent: "/not-the-root",
+        })).place,
+        { in: "launch", runtime: "herdr" },
+      )
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "runtime-hc",
+          caller: {
+            kind: "hc",
+            env: ["HC_ID"],
+            terminal: (env) => Effect.succeed(env.HC_ID),
+          },
+          effect: () => Effect.void,
+        }),
+        Plugin.define({
+          id: "runtime-herdr-caller",
+          caller: {
+            kind: "herdr",
+            env: ["HERDR_ID"],
+            terminal: (env) => Effect.succeed(env.HERDR_ID),
+          },
+          effect: () => Effect.void,
+        }),
+      ],
+    },
+  )
+
+  test(
+    "a runtime that is not ready is LaunchFailed with the plugin's missing message",
+    Effect.gen(function* () {
+      const c = asCli(yield* client, yield* makeRepository)
+      const refused = yield* Effect.flip(c["Project.MainPlace"]({ callerEnv: { HC_ID: "t1" } }))
+      assert.strictEqual(refused._tag, "LaunchFailed")
+      assert.strictEqual(refused.message, "hc socket is down")
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "runtime-hc",
+          caller: {
+            kind: "hc",
+            env: ["HC_ID"],
+            terminal: (env) => Effect.succeed(env.HC_ID),
+            ready: () => Effect.succeed(false),
+            missing: "hc socket is down",
+          },
+          effect: () => Effect.void,
+        }),
+      ],
+    },
+  )
+
+  test(
+    "Project.CoordinatorSession returns the harness command and writes the system prompt before the claim is used",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const fs = yield* FileSystem.FileSystem
+      const layout = yield* Layout
+      const c = asCli(yield* client, repo)
+      const started = yield* c["Project.CoordinatorSession"]({
+        harness: "pi",
+        fresh: true,
+        terminal: "test/p1",
+        runtime: "herdr",
+      })
+      assert.strictEqual(started.command.file, "pi")
+      assert.strictEqual(started.command.env.VIBEST_SESSION_ID, started.sessionId)
+      assert.strictEqual(started.command.env.VIBEST_PROJECT_DIR, layout.project(started.projectId))
+      assert.strictEqual(yield* fs.exists(yield* systemPromptFile(started.sessionId)), true)
+      assert.strictEqual(yield* fs.exists(layout.artifacts(started.projectId)), true)
+    }),
+  )
+
+  test(
+    "a harness not on PATH fails before any row is claimed",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const db = yield* Db
+      const c = asCli(yield* client, repo)
+      const failed = yield* Effect.flip(
+        c["Project.CoordinatorSession"]({ harness: "pi", fresh: true, terminal: "test/p9", runtime: "herdr" }),
+      )
+      assert.strictEqual(failed._tag, "HarnessUnavailable")
+      assert.deepStrictEqual(yield* db.listSessions(), [])
+    }),
+    { missingBinary: ["pi"] },
+  )
+
+  test(
+    "Spawn and Launch open at the caller target, and runtimeSession wins",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const herdr = yield* FakeRuntime
+      const socket = JSON.stringify({ socketPath: "/h.sock" })
+      const named = JSON.stringify({ session: "other" })
+      yield* c.Spawn({
+        harness: "pi",
+        prompt: "do it",
+        callerEnv: { HERDR_SOCKET_PATH: "/h.sock", SECRET: "no" },
+      })
+      yield* until(herdr.callsTo("open"), (calls) => calls.length > 0)
+      assert.strictEqual((yield* herdr.callsTo("open"))[0]?.target, socket)
+      yield* c.Launch({
+        argv: ["/bin/vibest"],
+        focus: false,
+        runtime: "herdr",
+        callerEnv: { HERDR_SOCKET_PATH: "/h.sock" },
+        runtimeSession: "other",
+      })
+      assert.strictEqual((yield* herdr.callsTo("open")).at(-1)?.target, named)
+    }),
+    {
+      plugins: [
+        Plugin.define({
+          id: "runtime-herdr-caller",
+          caller: {
+            kind: "herdr",
+            env: ["HERDR_SOCKET_PATH"],
+            terminal: () => Effect.succeed("pane"),
+            target: (env, named) =>
+              named !== undefined
+                ? JSON.stringify({ session: named })
+                : env.HERDR_SOCKET_PATH === undefined
+                  ? undefined
+                  : JSON.stringify({ socketPath: env.HERDR_SOCKET_PATH }),
+          },
+          effect: () => Effect.void,
+        }),
+      ],
+    },
   )
 
   test(
@@ -969,8 +1131,8 @@ describe("vibest.sock", () => {
       assert.strictEqual((yield* c["Project.StartMain"]({ runtime: "herdr" })).harness, "pi")
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
       assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
-      yield* c["Project.CoordinatorSession"]({ harness: "cursor", fresh: false, terminal: "test/p1" })
-      assert.strictEqual((yield* c["Project.StartMain"]({ runtime: "herdr" })).harness, "cursor")
+      yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
+      assert.strictEqual((yield* c["Project.StartMain"]({ runtime: "herdr" })).harness, "claude")
     }),
     {
       plugins: [

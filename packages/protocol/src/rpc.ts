@@ -278,6 +278,8 @@ export class VibestRpcs extends RpcGroup.make(
           env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
           agent: Schema.optional(Schema.String),
           machine: Schema.optional(RuntimeMachine),
+          callerEnv: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+          runtimeSession: Schema.optional(Schema.String),
           peer: Schema.optional(Schema.String),
           archive: Schema.optional(Schema.Boolean),
           runtime: Schema.optional(Schema.String),
@@ -326,6 +328,8 @@ export class VibestRpcs extends RpcGroup.make(
           argv: Schema.Array(Schema.String),
           focus: Schema.Boolean,
           machine: Schema.optional(RuntimeMachine),
+          callerEnv: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+          runtimeSession: Schema.optional(Schema.String),
           runtime: Schema.optional(Schema.String),
         },
         success: Schema.Struct({
@@ -443,6 +447,11 @@ export class VibestRpcs extends RpcGroup.make(
           harnessSessionId: Schema.NullOr(Schema.String),
           projectId: Schema.String,
           runtime: Schema.optional(Schema.String),
+          command: Schema.Struct({
+            file: Schema.String,
+            args: Schema.Array(Schema.String),
+            env: Schema.Record(Schema.String, Schema.String),
+          }),
         }),
         error: Schema.Union([
           InvalidCaller,
@@ -451,6 +460,8 @@ export class VibestRpcs extends RpcGroup.make(
           ProjectMoved,
           RuntimeUnreachable,
           RuntimeIncompatible,
+          HarnessUnavailable,
+          LaunchFailed,
         ]),
       }),
     ),
@@ -498,6 +509,30 @@ export class VibestRpcs extends RpcGroup.make(
         candidates: Schema.optional(Schema.Array(Schema.String)),
       }),
       error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
+    }),
+  ),
+  scoped(
+    Rpc.make("Project.MainPlace", {
+      payload: {
+        callerEnv: Schema.Record(Schema.String, Schema.String),
+        runtime: Schema.optional(Schema.String),
+        inParent: Schema.optional(Schema.String),
+      },
+      success: Schema.Struct({
+        directory: Schema.String,
+        place: Schema.Union([
+          Schema.Struct({
+            in: Schema.Literals(["terminal"]),
+            runtime: Schema.String,
+            terminal: Schema.String,
+          }),
+          Schema.Struct({
+            in: Schema.Literals(["launch"]),
+            runtime: Schema.String,
+          }),
+        ]),
+      }),
+      error: Schema.Union([InvalidCaller, Forbidden, NotInRepository, ProjectMoved, LaunchFailed]),
     }),
   ),
   scoped(
@@ -630,6 +665,7 @@ export const ACCESS = {
   Watch: "cli",
   "Session.Seen": "cli",
   "Project.Open": "cli",
+  "Project.MainPlace": "cli",
   "Project.CoordinatorSession": "agent",
   "Project.StartMain": "agent",
   "Project.RunningCoordinator": "agent",

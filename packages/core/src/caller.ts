@@ -98,21 +98,13 @@ const present = (keys: ReadonlyArray<string>, env: Readonly<Record<string, strin
     return value !== undefined && value !== ""
   })
 
-export const callerHits = (
-  plugins: ReadonlyArray<Candidate>,
+export const specHits = (
+  specs: ReadonlyArray<Pick<CallerSpec, "kind" | "env" | "terminal">>,
   env: Readonly<Record<string, string | undefined>>,
   runtime?: string,
 ) =>
   Effect.gen(function* () {
-    const matches: Array<{
-      readonly kind: string
-      readonly terminal: NonNullable<ReturnType<typeof caller>>["terminal"]
-    }> = []
-    for (const candidate of plugins) {
-      const spec = caller(candidate.plugin)
-      if (spec === undefined || !present(spec.env, env)) continue
-      matches.push({ kind: spec.kind, terminal: spec.terminal })
-    }
+    const matches = specs.filter((spec) => present(spec.env, env))
     const chosen = runtime === undefined ? matches[0] : matches.find((hit) => hit.kind === runtime)
     const terminal = chosen === undefined ? undefined : yield* chosen.terminal(env)
     return matches.map((hit) => ({
@@ -120,6 +112,29 @@ export const callerHits = (
       terminal: hit === chosen ? terminal : undefined,
     }))
   })
+
+export const callerHits = (
+  plugins: ReadonlyArray<Candidate>,
+  env: Readonly<Record<string, string | undefined>>,
+  runtime?: string,
+) =>
+  specHits(
+    plugins.flatMap((candidate) => {
+      const spec = caller(candidate.plugin)
+      return spec === undefined ? [] : [spec]
+    }),
+    env,
+    runtime,
+  )
+
+export const filterCallerEnv = (
+  specs: ReadonlyArray<{ readonly env: ReadonlyArray<string> }>,
+  env: Readonly<Record<string, string | undefined>>,
+): Record<string, string | undefined> => {
+  const out: Record<string, string | undefined> = {}
+  for (const spec of specs) for (const key of spec.env) if (!(key in out) && env[key] !== undefined) out[key] = env[key]
+  return out
+}
 
 export const callerByKind = (plugins: ReadonlyArray<Candidate>, kind: string) => {
   for (const candidate of plugins) {
