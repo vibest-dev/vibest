@@ -14,17 +14,19 @@ const find = (node: LayoutNode | undefined, id: string): LayoutNode | undefined 
   return undefined
 }
 
+const RIGHT_PANEL = "right-panel"
+
 const panelButton = (t: Theme, root: LayoutNode | undefined, child: string, name: string): Chain => {
-  const panel = find(root, "panel")
-  const on = Boolean(panel && !panel.hidden && find(root, "panel-body")?.active === child)
+  const panel = find(root, RIGHT_PANEL)
+  const on = Boolean(panel && !panel.hidden && panel.active === child)
   return iconButton(
     t,
     `panel-${child}`,
     name,
     () => {
-      if (on) return run("layout.hide", { id: "panel" })
-      run("layout.select", { stack: "panel-body", child })
-      run("layout.show", { id: "panel" })
+      if (on) return run("layout.hide", { id: RIGHT_PANEL })
+      run("layout.select", { stack: RIGHT_PANEL, child })
+      run("layout.show", { id: RIGHT_PANEL })
     },
     { on },
   )
@@ -99,6 +101,7 @@ export const topbar = (t: Theme): Chain => {
         )
         .child(panelButton(t, root, "files", "files"))
         .child(panelButton(t, root, "changes", "git-compare"))
+        .child(panelButton(t, root, "vibest-sessions", "monitor"))
         .child(
           iconButton(t, "zoom", zoomed ? "minus" : "square", () => run("pane.zoom", pane ? { pane } : {}), {
             on: zoomed,

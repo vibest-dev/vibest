@@ -217,14 +217,15 @@ var find = (node, id) => {
   }
   return;
 };
+var RIGHT_PANEL = "right-panel";
 var panelButton = (t, root, child, name) => {
-  const panel = find(root, "panel");
-  const on = Boolean(panel && !panel.hidden && find(root, "panel-body")?.active === child);
+  const panel = find(root, RIGHT_PANEL);
+  const on = Boolean(panel && !panel.hidden && panel.active === child);
   return iconButton(t, `panel-${child}`, name, () => {
     if (on)
-      return run3("layout.hide", { id: "panel" });
-    run3("layout.select", { stack: "panel-body", child });
-    run3("layout.show", { id: "panel" });
+      return run3("layout.hide", { id: RIGHT_PANEL });
+    run3("layout.select", { stack: RIGHT_PANEL, child });
+    run3("layout.show", { id: RIGHT_PANEL });
   }, { on });
 };
 var topbar = (t) => {
@@ -236,7 +237,7 @@ var topbar = (t) => {
   const pane = focused()?.pane;
   const zoomed = Boolean(tab?.zoomed);
   const inset = w?.platform === "macos" && !w.fullscreen && find(root, "sidebar")?.hidden ? TRAFFIC_LIGHTS_INSET : 12;
-  return h_flex4().size_full().min_w(0).pl(inset).pr(12).gap(12).items_center().bg(t.background).text_size(14).font_medium().child(h_flex4().flex_1().min_w(0).gap(8).items_center().when(space !== undefined, (el) => el.child(svg3(icon("folder")).size(14).flex_none().text_color(t.muted)).child(div5().flex_none().max_w(160).truncate().text_color(t.muted).child(space?.name)).child(div5().flex_none().text_color(t.dim).child("/")).child(div5().min_w(0).truncate().text_color(t.foreground).child(tab ? threadTitle(tab, tabPanes) : "")).when(Boolean(space?.branch), (el) => el.child(h_flex4().flex_none().h(20).px(6).gap(4).items_center().rounded(6).border(1).border_color(t.border).text_size(12).font_weight(400).text_color(t.muted).child(svg3(icon("git-branch")).size(12)).child(div5().max_w(160).truncate().child(space?.branch)))))).child(h_flex4().flex_none().gap(4).items_center().child(iconButton(t, "split", "terminal", () => run3("pane.split", { direction: "right", ...pane ? { pane } : {} }))).child(panelButton(t, root, "files", "files")).child(panelButton(t, root, "changes", "git-compare")).child(iconButton(t, "zoom", zoomed ? "minus" : "square", () => run3("pane.zoom", pane ? { pane } : {}), {
+  return h_flex4().size_full().min_w(0).pl(inset).pr(12).gap(12).items_center().bg(t.background).text_size(14).font_medium().child(h_flex4().flex_1().min_w(0).gap(8).items_center().when(space !== undefined, (el) => el.child(svg3(icon("folder")).size(14).flex_none().text_color(t.muted)).child(div5().flex_none().max_w(160).truncate().text_color(t.muted).child(space?.name)).child(div5().flex_none().text_color(t.dim).child("/")).child(div5().min_w(0).truncate().text_color(t.foreground).child(tab ? threadTitle(tab, tabPanes) : "")).when(Boolean(space?.branch), (el) => el.child(h_flex4().flex_none().h(20).px(6).gap(4).items_center().rounded(6).border(1).border_color(t.border).text_size(12).font_weight(400).text_color(t.muted).child(svg3(icon("git-branch")).size(12)).child(div5().max_w(160).truncate().child(space?.branch)))))).child(h_flex4().flex_none().gap(4).items_center().child(iconButton(t, "split", "terminal", () => run3("pane.split", { direction: "right", ...pane ? { pane } : {} }))).child(panelButton(t, root, "files", "files")).child(panelButton(t, root, "changes", "git-compare")).child(panelButton(t, root, "vibest-sessions", "monitor")).child(iconButton(t, "zoom", zoomed ? "minus" : "square", () => run3("pane.zoom", pane ? { pane } : {}), {
     on: zoomed
   })).when(Boolean(w?.buttons), (el) => el.child(iconButton(t, "minimize", "minus", () => run3("window.minimize"))).child(iconButton(t, "maximize", "square", () => run3("window.maximize"))).child(iconButton(t, "close-window", "x", () => run3("window.close")))));
 };

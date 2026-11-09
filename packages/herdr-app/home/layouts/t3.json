@@ -22,13 +22,13 @@
       "resizable": false,
       "children": [
         {
-          "id": "brand",
+          "id": "sidebar-header",
           "type": "block",
           "size": { "px": 52 },
           "window_drag": true,
           "content": { "mod": "t3", "props": { "part": "header" } }
         },
-        { "id": "threads", "type": "block", "content": { "mod": "t3" } },
+        { "id": "sidebar-threads", "type": "block", "content": { "mod": "t3", "props": { "part": "threads" } } },
         {
           "id": "sidebar-footer",
           "type": "block",
@@ -38,7 +38,7 @@
       ]
     },
     {
-      "id": "work",
+      "id": "workspace",
       "type": "column",
       "resizable": false,
       "background": "background",
@@ -51,12 +51,12 @@
           "content": { "mod": "t3", "props": { "part": "topbar" } }
         },
         {
-          "id": "work-body",
+          "id": "workspace-body",
           "type": "row",
           "divider": { "width": 1, "color": "border" },
           "children": [
             {
-              "id": "main",
+              "id": "terminals",
               "type": "block",
               "padding": 8,
               "content": {
@@ -72,22 +72,17 @@
               }
             },
             {
-              "id": "panel",
-              "type": "column",
+              "id": "right-panel",
+              "type": "stack",
               "hidden": true,
               "size": { "px": 540 },
               "min": 360,
               "max": 900,
+              "active": "changes",
               "children": [
-                {
-                  "id": "panel-body",
-                  "type": "stack",
-                  "active": "changes",
-                  "children": [
-                    { "id": "changes", "type": "block", "content": { "mod": "changes" } },
-                    { "id": "files", "type": "block", "content": { "mod": "files" } }
-                  ]
-                }
+                { "id": "changes", "type": "block", "content": { "mod": "changes" } },
+                { "id": "files", "type": "block", "content": { "mod": "files" } },
+                { "id": "vibest-sessions", "type": "block", "content": { "mod": "vibest-sessions" } }
               ]
             }
           ]
