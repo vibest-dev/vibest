@@ -66,6 +66,11 @@ export const topbarView = (t: Theme, state: TopbarState, win: TopbarWindow): Ele
     .bg(t.chrome)
     .text_size(14)
     .font_medium()
+    .child(
+      iconButton(t, "toggle-sidebar", "panel-left", () => run("layout.toggle", { id: "sidebar" }), {
+        on: !state.sidebarHidden,
+      }),
+    )
     .child(state.breadcrumb ? breadcrumbView(t, state.breadcrumb) : div().flex_1())
     .child(
       h_flex()

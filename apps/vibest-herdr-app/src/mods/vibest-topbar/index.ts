@@ -11,6 +11,6 @@ export default class Topbar extends View {
     const state = topbarState(layout(), spaces(), panes())
     const w = window()
     const lights = w?.platform === "macos" && !w.fullscreen && state.sidebarHidden
-    return topbarView(themeColors(), state, { inset: lights ? TRAFFIC_LIGHTS_INSET : 12, buttons: Boolean(w?.buttons) })
+    return topbarView(themeColors(), state, { inset: lights ? TRAFFIC_LIGHTS_INSET : 8, buttons: Boolean(w?.buttons) })
   }
 }
