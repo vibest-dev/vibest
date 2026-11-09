@@ -5,8 +5,7 @@
   "traffic_lights": [16, 13],
   "preview": "layouts/vibest.svg",
   "terminal_padding": [12, 12],
-  "background": "background",
-  "divider": { "width": 1, "color": "border" },
+  "background": "chrome",
   "children": [
     {
       "id": "sidebar",
