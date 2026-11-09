@@ -516,7 +516,6 @@ describe("vibest.sock", () => {
       const root = yield* sh(repo, "rev-parse", "--show-toplevel")
       const main = yield* db.coordinatorOf(yield* projectOf(repo))
       assert.ok(main)
-      assert.notStrictEqual(main!.identityInShell, true)
       assert.deepStrictEqual(opened, {
         runtime: "herdr",
         terminal: opened.terminal,

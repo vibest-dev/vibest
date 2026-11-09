@@ -828,7 +828,7 @@ export const handlers = VibestRpcs.toLayer(
           )
           if (opened === undefined) return yield* Effect.die("launch opened no terminal")
           const pane = opened
-          yield* run(pane, Launch.restartArgv(false, command)).pipe(
+          yield* run(pane, Launch.restartArgv(command)).pipe(
             Effect.catch((error) =>
               rt
                 .close(pane)

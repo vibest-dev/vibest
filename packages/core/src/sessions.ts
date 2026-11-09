@@ -1432,7 +1432,7 @@ export class Sessions extends Context.Service<
                 ...(main.runtime && main.address ? { runtime: runtimeEnv(main.runtime, main.address) } : {}),
               }),
             })
-            return restartArgv(main.identityInShell === true, command)
+            return restartArgv(command)
           }).pipe(
             Effect.provideService(Harness, harness),
             Effect.provideService(Harnesses, harnesses),

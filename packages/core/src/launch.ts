@@ -106,17 +106,11 @@ export const identityPairs = (env: Readonly<Record<string, string>>) =>
     return value === undefined ? [] : [`${key}=${value}`]
   })
 
-export const restartArgv = (
-  identityInShell: boolean,
-  command: {
-    readonly file: string
-    readonly args: ReadonlyArray<string>
-    readonly env: Readonly<Record<string, string>>
-  },
-) =>
-  identityInShell
-    ? [command.file, ...command.args]
-    : ["env", ...identityPairs(command.env), command.file, ...command.args]
+export const restartArgv = (command: {
+  readonly file: string
+  readonly args: ReadonlyArray<string>
+  readonly env: Readonly<Record<string, string>>
+}) => ["env", ...identityPairs(command.env), command.file, ...command.args]
 
 export const flagValue = (argv: ReadonlyArray<string>, name: string) => {
   const value = argv[argv.indexOf(name) + 1]
