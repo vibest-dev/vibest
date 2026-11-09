@@ -1,0 +1,18 @@
+{
+  "name": "@vibest/herdr-app",
+  "version": "0.0.1-beta.17",
+  "private": true,
+  "description": "Files for a herdr-app home: a read-only panel of vibest sessions, and a layout, themes and mod styled after T3 Code.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vibest-dev/vibest.git",
+    "directory": "packages/herdr-app"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/herdr-app"
+  }
+}

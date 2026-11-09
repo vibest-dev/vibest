@@ -319,7 +319,7 @@ importers:
         specifier: 'catalog:'
         version: 4.0.2(effect@4.0.2)
 
-  packages/herdr-app-mod: {}
+  packages/herdr-app: {}
 
   packages/integration/claude:
     devDependencies:

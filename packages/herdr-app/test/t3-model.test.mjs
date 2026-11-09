@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { elapsed, pill, projects, relativeTime, threadTitle } from "../mods/t3/model.js"
+import { elapsed, pill, projects, relativeTime, threadTitle } from "../home/mods/t3/model.js"
 
 const shell = { key: "shell", name: "zsh", agent: false, shell: true }
 const claude = { key: "claude", name: "Claude Code", agent: true, shell: false }

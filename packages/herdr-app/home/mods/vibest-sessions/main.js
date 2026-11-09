@@ -1,9 +1,9 @@
-// src/mod.ts
+// src/sessions/main.ts
 import { h_flex, v_flex } from "gpui-base";
 import { div, View } from "gpui-kit";
 import { appHome, exec, theme } from "herdr";
 
-// src/sessions.ts
+// src/sessions/model.ts
 var STRIPPED = ["VIBEST_SESSION_ID", "VIBEST_AGENT", "VIBEST_PROJECT_ID"];
 var cliArgv = (command) => [
   ...STRIPPED.flatMap((name) => ["-u", name]),
@@ -157,7 +157,7 @@ var closePull = (pull) => ({
   again: false
 });
 
-// src/mod.ts
+// src/sessions/main.ts
 class VibestSessions extends View {
   sessions;
   note;

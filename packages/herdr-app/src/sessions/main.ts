@@ -20,7 +20,7 @@ import {
   snapshotNote,
   statusText,
   statusVerdict,
-} from "./sessions.ts"
+} from "./model.ts"
 
 export default class VibestSessions extends View {
   sessions!: readonly SessionRow[]

@@ -16,7 +16,7 @@ import {
   settleList,
   statusText,
   statusVerdict,
-} from "../src/sessions.ts"
+} from "../src/sessions/model.ts"
 
 const socket = "/run/user/501/herdr-core/default.sock"
 
