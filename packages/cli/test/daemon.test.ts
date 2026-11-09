@@ -12,11 +12,9 @@ import { SocketServer } from "effect/socket/SocketServer"
 
 import * as Platform from "#platform"
 
-import { pingOf, recordedInfo, runVibest, tempDirectory } from "./fakes.ts"
+import { PATH_WITHOUT_HARNESS_CLIS, pingOf, recordedInfo, runVibest, tempDirectory } from "./fakes.ts"
 
 const execFile = util.promisify(childProcess.execFile)
-
-const PATH_WITHOUT_HARNESS_CLIS = "/usr/bin:/bin"
 
 const daemon = (home: string) =>
   runVibest(home, { HOME: home, VIBEST_HOME: home, PATH: PATH_WITHOUT_HARNESS_CLIS }, ["daemon", "--foreground"])

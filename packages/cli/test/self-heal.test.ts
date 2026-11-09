@@ -17,7 +17,15 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { replaceDaemon, type Timing } from "../src/replace.ts"
-import { pingOf, projectOf, recordedInfo, runVibest, stopRecorded, tempDirectory } from "./fakes.ts"
+import {
+  PATH_WITHOUT_HARNESS_CLIS,
+  pingOf,
+  projectOf,
+  recordedInfo,
+  runVibest,
+  stopRecorded,
+  tempDirectory,
+} from "./fakes.ts"
 
 const typed = (text: string, terminal = true) =>
   Stdio.layerTest({
@@ -36,8 +44,10 @@ const isolatedHome = (home: string) =>
         VIBEST_HOME: process.env.VIBEST_HOME,
         VIBEST_SESSION_ID: process.env.VIBEST_SESSION_ID,
         VIBEST_AGENT: process.env.VIBEST_AGENT,
+        PATH: process.env.PATH,
       }
       process.env.VIBEST_HOME = home
+      process.env.PATH = PATH_WITHOUT_HARNESS_CLIS
       delete process.env.VIBEST_SESSION_ID
       delete process.env.VIBEST_AGENT
       return saved
@@ -243,7 +253,7 @@ layer(Layer.mergeAll(Platform.services, builtinHarnesses))(
           }).pipe(
             Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)), Layer.provide(Bus.layer))),
           )
-          const env = { HOME: layout.home, VIBEST_HOME: layout.home, PATH: "/usr/bin:/bin" }
+          const env = { HOME: layout.home, VIBEST_HOME: layout.home }
           const daemon = yield* Effect.forkScoped(runVibest(layout.home, env, ["daemon", "--foreground"]))
           yield* Effect.gen(function* () {
             const old = yield* pingOf(layout.socket)

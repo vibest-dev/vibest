@@ -23,7 +23,6 @@ import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import {
   Clock,
-  Config,
   ConfigProvider,
   Context,
   Deferred,
@@ -163,6 +162,8 @@ export const withStdin = (input: string, command: string, args: ReadonlyArray<st
     return ["-c", STDIN_FROM_FILE, "sh", file, command, ...args] as const
   })
 
+export const PATH_WITHOUT_HARNESS_CLIS = "/usr/bin:/bin"
+
 const mainTs = `${import.meta.dirname}/../src/main.ts`
 
 export const runVibest = (cwd: string, env: Record<string, string>, args: ReadonlyArray<string>, stdin = "") =>
@@ -171,7 +172,7 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
     const handle = yield* spawner.spawn(
       ChildProcess.make("sh", yield* withStdin(stdin, process.execPath, [mainTs, ...args]), {
         cwd,
-        env: { PATH: yield* Config.String("PATH"), ...env },
+        env: { PATH: PATH_WITHOUT_HARNESS_CLIS, ...env },
         extendEnv: false,
         stdin: "ignore",
       }),
