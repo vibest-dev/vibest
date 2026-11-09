@@ -43,16 +43,22 @@ export const callerHits = (
   Effect.gen(function* () {
     const matches: Array<{
       readonly kind: string
+      readonly overOtherCallers: boolean
       readonly terminal: NonNullable<ReturnType<typeof caller>>["terminal"]
     }> = []
     for (const candidate of plugins) {
       const spec = caller(candidate.plugin)
       if (spec === undefined || !present(spec.env, env)) continue
-      matches.push({ kind: spec.kind, terminal: spec.terminal })
+      matches.push({ kind: spec.kind, overOtherCallers: spec.overOtherCallers === true, terminal: spec.terminal })
     }
-    const chosen = runtime === undefined ? matches[0] : matches.find((hit) => hit.kind === runtime)
+    const preferred = runtime === undefined ? matches.find((hit) => hit.overOtherCallers) : undefined
+    const chosen = runtime === undefined ? (preferred ?? matches[0]) : matches.find((hit) => hit.kind === runtime)
+    const listed =
+      preferred === undefined || preferred === matches[0]
+        ? matches
+        : [preferred, ...matches.filter((hit) => hit !== preferred)]
     const terminal = chosen === undefined ? undefined : yield* chosen.terminal(env)
-    return matches.map((hit) => ({
+    return listed.map((hit) => ({
       kind: hit.kind,
       terminal: hit === chosen ? terminal : undefined,
     }))

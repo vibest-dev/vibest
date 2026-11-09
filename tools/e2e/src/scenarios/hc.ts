@@ -297,7 +297,7 @@ const checks: ReadonlyArray<Check> = [
         const opened = await core.hc("run", "--bg", "--keep", "--name", "caller", "--json")
         expect(opened.code === 0, `hc run: ${opened.stderr}${opened.stdout}`)
         const caller = await core.get("caller")
-        const typed = await core.hc("send", "caller", `cd ${repo} && vibest --harness pi --env ${env}`)
+        const typed = await core.hc("send", "caller", `cd ${repo} && ${vibestTyped} --harness pi --env ${env}`)
         expect(typed.code === 0, `hc send: ${typed.stderr}`)
         const runtimeOf = (id: string) =>
           JSON.parse(

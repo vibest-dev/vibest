@@ -66,6 +66,62 @@ describe("caller plugins", () => {
     }),
   )
 
+  it.effect("hc's variables win over herdr's even when herdr is loaded first", () =>
+    Effect.gen(function* () {
+      const calls: Array<string> = []
+      const watch = (
+        kind: string,
+        env: ReadonlyArray<string>,
+        terminal: string,
+        overOtherCallers = false,
+      ): Candidate => ({
+        source: kind,
+        revision: "-",
+        options: {},
+        plugin: Plugin.define({
+          id: kind,
+          caller: {
+            kind,
+            env,
+            ...(overOtherCallers ? { overOtherCallers: true } : {}),
+            terminal: () => {
+              calls.push(kind)
+              return Effect.succeed(terminal)
+            },
+          },
+          effect: () => Effect.void,
+        }),
+      })
+      const loaded = [
+        watch("herdr", ["HERDR_PANE_ID", "HERDR_SOCKET_PATH"], "herdr-term"),
+        watch("hc", ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"], "hc-term", true),
+        watch("rex", ["REX_PANE"], "rex-term"),
+      ]
+      const env = {
+        REX_PANE: "rex-9",
+        HC_TERMINAL_ID: "t1",
+        HC_TERMINAL_SOCKET: "/hc.sock",
+        HERDR_PANE_ID: "p1",
+        HERDR_SOCKET_PATH: "/herdr.sock",
+      }
+      const hits = yield* callerHits(loaded, env)
+      assert.deepStrictEqual(calls, ["hc"])
+      assert.deepStrictEqual(mainPlace({ marked: false, runtime: undefined, hits }), {
+        in: "terminal",
+        runtime: "hc",
+        terminal: "hc-term",
+      })
+      calls.length = 0
+      const named = yield* callerHits(loaded, env, "herdr")
+      assert.deepStrictEqual(calls, ["herdr"])
+      assert.deepStrictEqual(mainPlace({ marked: false, runtime: "herdr", hits: named }), {
+        in: "terminal",
+        runtime: "herdr",
+        terminal: "herdr-term",
+      })
+    }),
+  )
+
   it.effect("without an earlier plugin's environment the next one in load order wins", () =>
     Effect.gen(function* () {
       const hits = yield* callerHits(plugins, {
@@ -234,6 +290,12 @@ describe("caller plugins", () => {
     const hc = sources.indexOf("builtin:runtime-herdr-core")
     const herdr = sources.indexOf("builtin:runtime-herdr")
     assert.ok(hc >= 0 && herdr > hc)
+    const callerOf = (source: string) => {
+      const plugin = Platform.daemon.builtinPlugins.find((candidate) => candidate.source === source)?.plugin
+      return plugin !== undefined && "caller" in plugin ? plugin.caller : undefined
+    }
+    assert.strictEqual(callerOf("builtin:runtime-herdr-core")?.overOtherCallers, true)
+    assert.notStrictEqual(callerOf("builtin:runtime-herdr")?.overOtherCallers, true)
   })
 
   it.live("a user runtime env key does not reach a process vibestd starts", () =>
