@@ -272,6 +272,18 @@ const checks: ReadonlyArray<Check> = [
       expect(none.length === 0, `ls in a repository that is no project: ${JSON.stringify(none)}`)
     },
   },
+
+  {
+    id: "S38",
+    title: "herdr open-main focuses the main agent's pane through vibestd",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      await w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi } })
+      const context = JSON.stringify({ workspace_cwd: w.repository })
+      const focused = await w.ok(["herdr", "open-main"], { env: { HERDR_PLUGIN_CONTEXT_JSON: context } })
+      expect(focused.startsWith("focused "), `open-main: ${focused}`)
+    },
+  },
 ]
 
 export default checks

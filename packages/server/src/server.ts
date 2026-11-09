@@ -1050,6 +1050,26 @@ export const handlers = VibestRpcs.toLayer(
           )
         }),
 
+      "Project.FocusCoordinator": () =>
+        Effect.gen(function* () {
+          yield* cliOnly("Project.FocusCoordinator")
+          const c = yield* Caller
+          if (c._tag !== "Cli" || c.repositoryRoot === undefined)
+            return yield* new Forbidden({
+              method: "Project.FocusCoordinator",
+              message: "only the user runs Project.FocusCoordinator",
+            })
+          const project = yield* resolveAt(c.repositoryRoot)
+          const coord = yield* db.coordinatorOf(project.id)
+          const address = coord?.address
+          if (!coord?.runtime || !address || address.id === "") return null
+          const runtime = Option.getOrUndefined(yield* runtimes.route(coord.runtime).pipe(Effect.option))
+          const place = placeOf(coord.runtime, address)
+          if (runtime?.focus === undefined) return { place, focused: false }
+          yield* runtime.focus(address).pipe(Effect.orDie)
+          return { place, focused: true }
+        }),
+
       "Project.RunningCoordinator": ({ terminal }) =>
         scope("Project.RunningCoordinator").pipe(Effect.flatMap(({ id }) => runningCoordinator(id, terminal))),
 

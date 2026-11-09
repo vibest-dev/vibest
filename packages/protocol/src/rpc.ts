@@ -536,6 +536,13 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
+    Rpc.make("Project.FocusCoordinator", {
+      payload: {},
+      success: Schema.NullOr(Schema.Struct({ place: Schema.String, focused: Schema.Boolean })),
+      error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
+    }),
+  ),
+  scoped(
     Rpc.make("Project.RunningCoordinator", {
       payload: { terminal: Schema.String, machine: Schema.optional(RuntimeMachine) },
       success: Schema.NullOr(
@@ -653,6 +660,7 @@ export const ACCESS = {
   "Project.MainPlace": "cli",
   "Project.CoordinatorSession": "agent",
   "Project.StartMain": "agent",
+  "Project.FocusCoordinator": "cli",
   "Project.RunningCoordinator": "agent",
   "Project.StopCoordinator": "agent",
   "Project.Info": "agent",
