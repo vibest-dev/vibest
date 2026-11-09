@@ -22,7 +22,6 @@ var commandNote = (result, fallback) => {
   const trimmed = (result.stderr || result.stdout).trim();
   return (trimmed === "" ? fallback : trimmed).slice(0, 180);
 };
-var settleList = (result) => result.code === 0 ? { ok: true, stdout: result.stdout } : { ok: false, note: commandNote(result, "vibest ls failed") };
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 var text = (value) => typeof value === "string" ? value : undefined;
 var parseOwnedAddress = (id) => {
@@ -204,9 +203,9 @@ class AgentList {
         else if (!verdict.list)
           note = verdict.message;
         else {
-          const listed = settleList(await exec("env", cliArgv("ls"), { cwd }));
-          if (!listed.ok)
-            note = listed.note;
+          const listed = await exec("env", cliArgv("ls"), { cwd });
+          if (listed.code !== 0)
+            note = commandNote(listed, "vibest ls failed");
           else {
             const parsed = parseSessions(listed.stdout);
             if (parsed === undefined)
@@ -289,6 +288,14 @@ import { openOverlay, panes, pickFolder, run as run2, spaces } from "herdr";
 // src/threads/model.ts
 var leading = (s) => s.replace(/^[^\p{L}\p{N}]+/u, "").trim();
 var looksLikePath = (s) => /^[~/]|^[A-Za-z]:\\/.test(s) || s.includes("@");
+var parseFolded = (stored) => {
+  try {
+    const value = JSON.parse(stored ?? "[]");
+    return Array.isArray(value) ? value.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+};
 var threadTitle = (tab, tabPanes) => {
   if (tab.named)
     return tab.name;
@@ -358,7 +365,7 @@ var CLOCK_MS = 30000;
 
 class ThreadList {
   hovered = null;
-  folded = new Set(JSON.parse(localStorage.getItem("folded") ?? "[]"));
+  folded = new Set(parseFolded(localStorage.getItem("folded")));
   now = Date.now();
   constructor(cx) {
     cx.timer.every(CLOCK_MS, (ticked) => {

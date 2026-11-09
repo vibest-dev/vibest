@@ -6,7 +6,6 @@ import {
   parseOwnedAddress,
   parseSessions,
   type SessionRow,
-  settleList,
   statusVerdict,
 } from "../src/agents/cli.ts"
 import {
@@ -106,9 +105,10 @@ describe("agents panel", () => {
       "DaemonUnavailable: vibestd is unreachable on /tmp/vibest.sock (not running, or this process may not connect to its socket); ask the user to check it, or to run: vibest daemon",
     )
     assert.equal(commandNote({ code: 1, stdout: "", stderr: "" }, "vibest could not be run"), "vibest could not be run")
-    const unknown = settleList({ code: 2, stdout: "", stderr: "Unknown option: --no-start" })
-    assert.deepEqual(unknown, { ok: false, note: "Unknown option: --no-start" })
-    assert.equal("args" in unknown, false)
+    assert.equal(
+      commandNote({ code: 2, stdout: "", stderr: "Unknown option: --no-start" }, "vibest ls failed"),
+      "Unknown option: --no-start",
+    )
     assert.deepEqual(statusVerdict(JSON.stringify(runningStatus)), { list: true })
     assert.deepEqual(
       statusVerdict(

@@ -1,7 +1,7 @@
 import type { PaneInfo, SpaceInfo, TabInfo } from "herdr"
 import { describe, expect, it } from "vitest"
 
-import { elapsed, pill, projects, relativeTime, threadTitle } from "../src/threads/model.ts"
+import { elapsed, parseFolded, pill, projects, relativeTime, threadTitle } from "../src/threads/model.ts"
 
 const shell = { key: "shell", name: "zsh", agent: false, shell: true }
 const claude = { key: "claude", name: "Claude Code", agent: true, shell: false }
@@ -57,6 +57,16 @@ describe("pill", () => {
     expect(pill("done")?.label).toBe("Done")
     expect(pill("idle")).toBeNull()
     expect(pill(null)).toBeNull()
+  })
+})
+
+describe("parseFolded", () => {
+  it("keeps the folded project ids and starts empty when the stored value is missing or corrupt", () => {
+    expect(parseFolded('["sp1","sp2"]')).toEqual(["sp1", "sp2"])
+    expect(parseFolded(null)).toEqual([])
+    expect(parseFolded("{")).toEqual([])
+    expect(parseFolded('{"sp1":true}')).toEqual([])
+    expect(parseFolded('["sp1",3]')).toEqual(["sp1"])
   })
 })
 

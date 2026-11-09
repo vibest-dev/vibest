@@ -46,7 +46,8 @@ One mod, `vibest`, draws each part named by its `props.part`. `src/` is split by
 - `threads/`: `model.ts` (projects, thread titles, status pills, relative times) and `view.ts`;
 - `agents/`: `cli.ts` (running `vibest status` and `vibest ls --no-start --all-projects`, parsing their JSON),
   `model.ts` (grouping, row text, stale-result handling) and `view.ts`;
-- `host.d.ts`: the parts of herdr-app's `herdr`, `gpui-kit` and `gpui-base` modules the mod uses.
+- `host.d.ts`: a hand-copied subset of herdr-app's type files (`herdr.d.ts`, `gpui-kit.d.ts`) for the `herdr`, `gpui-kit`
+  and `gpui-base` modules the mod uses.
 
 The Agents panel reads once when it starts and again on **Refresh**; there is no timer. Each read runs, with
 `VIBEST_SESSION_ID`, `VIBEST_AGENT` and `VIBEST_PROJECT_ID` removed so the CLI acts as the owner,
@@ -72,5 +73,6 @@ cp -R packages/vibest-herdr-app/home/* "$H/"
 herdr-app do layout.switch --name vibest
 ```
 
-`herdr-app check` writes `gpui-kit.d.ts` and `jsconfig.json` beside the mod; they are gitignored. `ctrl-shift-l`
+`herdr-app check` renders only the fallback part (threads), not the header, footer, topbar or agents parts. It writes
+`gpui-kit.d.ts` and `jsconfig.json` beside the mod; they are gitignored. `ctrl-shift-l`
 switches back to another layout; deleting the copied files removes it.

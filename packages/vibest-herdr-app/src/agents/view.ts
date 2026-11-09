@@ -2,7 +2,7 @@ import { h_flex, v_flex } from "gpui-base"
 import { div } from "gpui-kit"
 import { appHome, exec, type Theme } from "herdr"
 
-import { cliArgv, commandNote, parseSessions, type SessionRow, settleList, statusVerdict } from "./cli.ts"
+import { cliArgv, commandNote, parseSessions, type SessionRow, statusVerdict } from "./cli.ts"
 import {
   closePull,
   completePull,
@@ -56,8 +56,8 @@ export class AgentList {
         if (verdict === undefined) note = "vibest status was not understood"
         else if (!verdict.list) note = verdict.message
         else {
-          const listed = settleList(await exec("env", cliArgv("ls"), { cwd }))
-          if (!listed.ok) note = listed.note
+          const listed = await exec("env", cliArgv("ls"), { cwd })
+          if (listed.code !== 0) note = commandNote(listed, "vibest ls failed")
           else {
             const parsed = parseSessions(listed.stdout)
             if (parsed === undefined) note = "vibest ls was not understood"

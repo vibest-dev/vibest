@@ -35,13 +35,6 @@ export const commandNote = (
   return (trimmed === "" ? fallback : trimmed).slice(0, 180)
 }
 
-export const settleList = (result: {
-  readonly code: number
-  readonly stdout: string
-  readonly stderr: string
-}): { readonly ok: true; readonly stdout: string } | { readonly ok: false; readonly note: string } =>
-  result.code === 0 ? { ok: true, stdout: result.stdout } : { ok: false, note: commandNote(result, "vibest ls failed") }
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 

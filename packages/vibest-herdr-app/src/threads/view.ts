@@ -3,13 +3,13 @@ import { div, svg } from "gpui-kit"
 import { openOverlay, panes, pickFolder, run, spaces, type Theme } from "herdr"
 
 import { icon, iconButton } from "../ui.ts"
-import { elapsed, pill, type Project, projects, relativeTime, type Thread } from "./model.ts"
+import { elapsed, parseFolded, pill, type Project, projects, relativeTime, type Thread } from "./model.ts"
 
 const CLOCK_MS = 30000
 
 export class ThreadList {
   hovered: string | null = null
-  folded = new Set<string>(JSON.parse(localStorage.getItem("folded") ?? "[]") as string[])
+  folded = new Set(parseFolded(localStorage.getItem("folded")))
   now = Date.now()
 
   constructor(cx: Cx) {

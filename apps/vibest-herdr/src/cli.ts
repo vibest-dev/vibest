@@ -83,8 +83,13 @@ export const userOnly = (command: string) =>
       : Effect.void,
   )
 
-const vibest = <A, E, R>(f: (client: VibestClient, agent: boolean) => Effect.Effect<A, E, R>) =>
-  Effect.flatMap(caller, (c) => withVibest(c.claim, (client) => f(client, c.agent), { start: !c.agent }))
+const vibest = <A, E, R>(
+  f: (client: VibestClient, agent: boolean) => Effect.Effect<A, E, R>,
+  options: { readonly noStart?: boolean } = {},
+) =>
+  Effect.flatMap(caller, (c) =>
+    withVibest(c.claim, (client) => f(client, c.agent), { start: !c.agent && options.noStart !== true }),
+  )
 
 const requested = <A, E, R>(
   f: (
@@ -676,20 +681,13 @@ const ls = Command.make(
     Effect.gen(function* () {
       const cwd = (yield* Path.Path).resolve(".")
       const outsideProject = Option.isNone(yield* projectRoot(cwd).pipe(Effect.option))
-      const who = yield* caller
-      yield* withVibest(
-        who.claim,
+      yield* vibest(
         (client) =>
-          client
-            .List({
-              stopped: o.all,
-              ...(outsideProject || o.allProjects ? { all: true } : {}),
-            })
-            .pipe(
-              Effect.map((sessions) => sessions.map(titled)),
-              Effect.flatMap(json),
-            ),
-        { start: !who.agent && !o.noStart },
+          client.List({ stopped: o.all, ...(outsideProject || o.allProjects ? { all: true } : {}) }).pipe(
+            Effect.map((sessions) => sessions.map(titled)),
+            Effect.flatMap(json),
+          ),
+        { noStart: o.noStart },
       )
     }),
 ).pipe(

@@ -21,6 +21,15 @@ export interface Project {
 const leading = (s: string): string => s.replace(/^[^\p{L}\p{N}]+/u, "").trim()
 const looksLikePath = (s: string): boolean => /^[~/]|^[A-Za-z]:\\/.test(s) || s.includes("@")
 
+export const parseFolded = (stored: string | null): string[] => {
+  try {
+    const value: unknown = JSON.parse(stored ?? "[]")
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : []
+  } catch {
+    return []
+  }
+}
+
 export const threadTitle = (tab: TabInfo, tabPanes: readonly PaneInfo[]): string => {
   if (tab.named) return tab.name
   const lead = tabPanes.find((p) => p.program?.agent) ?? tabPanes.find((p) => p.terminal) ?? tabPanes[0]
