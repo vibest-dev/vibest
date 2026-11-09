@@ -81,7 +81,14 @@ import {
 } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
-import { allocationParentBlocked, gitState, type GitState, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
+import {
+  allocationParentBlocked,
+  Git,
+  gitState,
+  type GitState,
+  mainCheckout,
+  repositoryDirectoryName,
+} from "./worktree.ts"
 export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
   JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" ? { terminal: address.id } : {}) })
 
@@ -110,7 +117,7 @@ export const TAIL_LINES = 30
 export const STOP_WAIT = Duration.seconds(10)
 const STARTUP_DIALOG_POLL = Schedule.spaced("500 millis")
 
-type Platform = FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner
+type Platform = FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner | Git
 
 interface Tracked {
   readonly sawWorking: Ref.Ref<boolean>
@@ -482,7 +489,7 @@ export class Sessions extends Context.Service<
       ) => Effect.Effect<
         Collected,
         RuntimeError | NoSuchSession | PlatformError.PlatformError,
-        ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+        ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path | Git
       > = () => Effect.die("collectResult")
 
       const prompt = Effect.fn("Sessions.prompt")(function* (

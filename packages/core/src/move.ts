@@ -5,13 +5,19 @@ import { Cause, Clock, Context, Crypto, Effect, Exit, FileSystem, Path } from "e
 import { ChildProcessSpawner } from "effect/process"
 
 import type { Db, SessionRow } from "./db.ts"
+import type { Git } from "./git.ts"
 import { Harness, harnessOptions, Harnesses, preflight, type HarnessAdapter, isHarnessId } from "./harness.ts"
 import { errorMessage, type Plugins } from "./plugins.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { type Machine, type Runtime, type Terminal } from "./runtimes.ts"
 import type { Subscriptions } from "./subscriptions/service.ts"
 
-export type MovePlatform = FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner
+export type MovePlatform =
+  | FileSystem.FileSystem
+  | Path.Path
+  | Crypto.Crypto
+  | ChildProcessSpawner.ChildProcessSpawner
+  | Git
 
 export interface LimitMove {
   readonly rerun: (

@@ -32,11 +32,11 @@ import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import {
+  FakeGit,
   FakeRuntime,
   FakeProcesses,
   makeRepository,
   settled,
-  sh,
   testLayer,
   TURNS,
   type TestOptions,
@@ -173,10 +173,9 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(row.turnState, "open")
 
       const wt = yield* sessionWorktree(id)
-      assert.strictEqual(yield* sh(wt, "branch", "--show-current"), "")
-      assert.strictEqual(yield* sh(repo, "branch", "--list", "herdr-*"), "")
+      assert.deepStrictEqual(yield* (yield* FakeGit).git.linkedWorktrees(repo), [wt])
+      assert.strictEqual(yield* fs.readFileString(path.join(wt, "README.md")), "hi\n")
       assert.isFalse(yield* fs.exists(path.join(wt, "CLAUDE.md")))
-      assert.strictEqual(yield* sh(wt, "status", "--porcelain"), "")
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.deepStrictEqual([placed.project, placed.cwd], [repo, wt])
       assert.deepInclude(placed.env, { VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
@@ -2526,15 +2525,13 @@ describe.concurrent("Sessions", () => {
       const path = yield* Path.Path
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* fs.writeFileString(path.join(repo, "cfg"), "file\n")
-      yield* sh(repo, "add", "cfg")
-      yield* sh(repo, "commit", "-q", "-m", "cfg")
-      yield* fs.remove(path.join(repo, "cfg"))
       yield* fs.makeDirectory(path.join(repo, "cfg"))
       yield* fs.writeFileString(path.join(repo, "cfg", "x"), "x\n")
       yield* fs.writeFileString(path.join(repo, "a.json"), "{}\n")
-      yield* fs.writeFileString(path.join(repo, ".git", "info", "exclude"), "a.json\ncfg/\n", { flag: "a" })
-      yield* fs.writeFileString(path.join(repo, ".worktreeinclude"), "a.json\ncfg/x\n")
+      yield* (yield* FakeGit).update(repo, {
+        files: { "README.md": "hi\n", cfg: "a tracked file\n" },
+        includes: ["a.json", "cfg/x"],
+      })
       const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
       yield* until(db.getSession(id), (w) => !!w && w.exitedAt !== null)
       assert.lengthOf(yield* (yield* FakeRuntime).callsTo("open"), 0)
@@ -2556,8 +2553,8 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const repo = yield* makeRepository
       for (const f of ["a.json", "b.json"]) yield* fs.writeFileString(path.join(repo, f), `${f}\n`)
-      yield* fs.writeFileString(path.join(repo, ".git", "info", "exclude"), "a.json\nb.json\n", { flag: "a" })
-      yield* fs.writeFileString(path.join(repo, ".worktreeinclude"), "a.json\nb.json\n")
+      const fakeGit = yield* FakeGit
+      yield* fakeGit.update(repo, { includes: ["a.json", "b.json"] })
       const copied: Array<string> = []
       const faulty = FileSystem.FileSystem.of({
         ...fs,
@@ -2589,7 +2586,7 @@ describe.concurrent("Sessions", () => {
       )
       assert.include(row!.message, "(EIO)")
       assert.isFalse(yield* fs.exists(worktree))
-      assert.notInclude(yield* sh(repo, "worktree", "list", "--porcelain"), worktree)
+      assert.notInclude(yield* fakeGit.git.linkedWorktrees(repo), worktree)
       for (const f of ["a.json", "b.json"]) assert.strictEqual(yield* fs.readFileString(path.join(repo, f)), `${f}\n`)
     }),
   )
@@ -2625,6 +2622,7 @@ describe.concurrent("Sessions", () => {
     "remove keeps what git would lose (changes, untracked files, commits on no branch, a lock) and tries again when asked",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
+      const fakeGit = yield* FakeGit
       const repo = yield* makeRepository
       const kept = (out: { readonly worktree: string; readonly reasons: ReadonlyArray<string> }, why: string) => {
         assert.strictEqual(out.worktree, "kept")
@@ -2632,29 +2630,28 @@ describe.concurrent("Sessions", () => {
       }
       const a = yield* idleSession(repo)
       const wa = yield* sessionWorktree(a.id)
-      yield* fs.writeFileString(`${wa}/README.md`, "changed\n")
+      const dirty = { branch: "", pushed: false, saved: false, why: "uncommitted changes" }
+      yield* fakeGit.checkout(wa, { state: dirty })
       kept((yield* a.sessions.remove(a.id))!, "uncommitted changes")
       assert.isNotNull((yield* a.db.getSession(a.id))!.exitedAt)
       assert.isTrue(yield* fs.exists(yield* systemPromptFile(a.id)))
-      yield* sh(wa, "checkout", "--", "README.md")
-      yield* fs.writeFileString(`${wa}/new.txt`, "x")
       kept((yield* a.sessions.remove(a.id))!, "uncommitted changes")
-      yield* sh(wa, "switch", "-q", "-c", "keep/a")
-      yield* sh(wa, "add", ".")
-      yield* sh(wa, "commit", "-q", "-m", "work")
+      yield* fakeGit.checkout(wa, { state: { branch: "keep/a", pushed: false, saved: true, why: "" } })
       assert.deepInclude((yield* a.sessions.remove(a.id))!, { worktree: "removed", branch: "keep/a" })
 
       const b = yield* idleSession(repo)
       const wb = yield* sessionWorktree(b.id)
-      yield* fs.writeFileString(`${wb}/b.txt`, "b")
-      yield* sh(wb, "add", ".")
-      yield* sh(wb, "commit", "-q", "-m", "b")
+      yield* fakeGit.checkout(wb, {
+        state: { branch: "", pushed: false, saved: false, why: "commits not on any branch" },
+      })
       kept((yield* b.sessions.remove(b.id))!, "commits not on any branch")
-      yield* sh(wb, "update-ref", "refs/remotes/origin/b", "HEAD")
+      yield* fakeGit.checkout(wb, { state: { branch: "", pushed: false, saved: true, why: "" } })
       assert.deepInclude((yield* b.sessions.remove(b.id))!, { worktree: "removed", branch: null })
 
       const c = yield* idleSession(repo)
-      yield* sh(repo, "worktree", "lock", yield* sessionWorktree(c.id))
+      yield* fakeGit.checkout(yield* sessionWorktree(c.id), {
+        refuseRemove: "fatal: cannot remove a locked working tree, lock reason: initializing",
+      })
       kept((yield* c.sessions.remove(c.id))!, "git refused")
       assert.isTrue(yield* fs.exists(yield* sessionWorktree(c.id)))
 
@@ -2668,17 +2665,17 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "remove: ignored files alone do not keep the worktree, with or without .worktreeinclude; a file git does not ignore does",
+    "remove: files git calls clean do not keep the worktree, a copied .worktreeinclude file included; what git calls uncommitted does",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
+      const fakeGit = yield* FakeGit
       const repo = yield* makeRepository
-      yield* fs.writeFileString(`${repo}/.git/info/exclude`, "local.env\nCLAUDE.md\n", { flag: "a" })
       const a = yield* idleSession(repo)
       yield* fs.writeFileString(`${yield* sessionWorktree(a.id)}/local.env`, "K=1\n")
       assert.deepInclude((yield* a.sessions.remove(a.id))!, { worktree: "removed", reasons: [] })
       assert.isFalse(yield* fs.exists(yield* sessionWorktree(a.id)))
 
-      yield* fs.writeFileString(`${repo}/.worktreeinclude`, "CLAUDE.md\n")
+      yield* fakeGit.update(repo, { includes: ["CLAUDE.md"] })
       const b = yield* idleSession(repo)
       assert.strictEqual(yield* fs.readFileString(`${yield* sessionWorktree(b.id)}/CLAUDE.md`), "local rules\n")
       yield* fs.writeFileString(`${yield* sessionWorktree(b.id)}/CLAUDE.md`, "edited in the worktree\n")
@@ -2687,6 +2684,8 @@ describe.concurrent("Sessions", () => {
 
       const c = yield* idleSession(repo)
       yield* fs.writeFileString(`${yield* sessionWorktree(c.id)}/notes.txt`, "mine\n")
+      const dirty = { branch: "", pushed: false, saved: false, why: "uncommitted changes" }
+      yield* fakeGit.checkout(yield* sessionWorktree(c.id), { state: dirty })
       const out = (yield* c.sessions.remove(c.id))!
       assert.strictEqual(out.worktree, "kept")
       assert.match(out.reasons.join("\n"), /uncommitted changes/)
@@ -2694,6 +2693,7 @@ describe.concurrent("Sessions", () => {
       assert.isTrue(yield* fs.exists(`${yield* sessionWorktree(c.id)}/CLAUDE.md`))
       yield* fs.remove(`${yield* sessionWorktree(c.id)}/notes.txt`)
       yield* fs.writeFileString(`${yield* sessionWorktree(c.id)}/README.md`, "modified")
+      yield* fakeGit.checkout(yield* sessionWorktree(c.id), { state: dirty })
       assert.deepInclude((yield* c.sessions.remove(c.id))!, {
         worktree: "kept",
         reasons: ["worktree kept: uncommitted changes"],
@@ -2783,9 +2783,10 @@ describe.concurrent("Sessions", () => {
 
       const b = yield* idleSession(repo)
       const wb = yield* sessionWorktree(b.id)
-      yield* sh(repo, "worktree", "move", wb, `${wb}-moved`)
+      const fakeGit = yield* FakeGit
+      yield* fakeGit.git.removeWorktree(repo, wb)
       yield* fs.makeDirectory(wb)
-      yield* sh(wb, "init", "-q")
+      yield* fakeGit.repository(wb)
       yield* fs.writeFileString(`${wb}/mine.txt`, "the user's")
       const out = (yield* b.sessions.remove(b.id))!
       assert.deepInclude(out, { worktree: "kept" })

@@ -28,7 +28,14 @@ import { isUsageLimitError } from "./results.ts"
 import { type Machine, type RuntimesShape, type Runtime, type Terminal } from "./runtimes.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { removeSystemPrompt, type SystemPromptDirUnsafe } from "./system-prompt.ts"
-import { addWorktree, copyIncluded, git, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
+import {
+  addWorktree,
+  copyIncluded,
+  type Git,
+  mainCheckout,
+  removeWorktree,
+  repositoryDirectoryName,
+} from "./worktree.ts"
 
 class AgentOwnLimit extends Data.TaggedError("AgentOwnLimit")<{ readonly message: string }> {}
 
@@ -82,7 +89,7 @@ export const sessionPlacement = (deps: {
     terminal: Terminal,
     root: string,
     firstPrompt: string,
-  ) => Effect.Effect<void, unknown, FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner | Path.Path>
+  ) => Effect.Effect<void, unknown, FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner | Path.Path | Git>
   readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
   const { db, runtimes, layout, fs } = deps
@@ -223,7 +230,7 @@ export const sessionPlacement = (deps: {
       if (folders) {
         yield* undoOnFailure(createIsolatedWorktrees(folders, worktree), () => discardIsolatedWorktrees(worktree))
       } else {
-        yield* undoOnFailure(addWorktree(root, worktree), () => git(root, "worktree", "remove", worktree))
+        yield* undoOnFailure(addWorktree(root, worktree), () => removeWorktree(root, worktree))
       }
     }
     if (!folders) yield* copyIncluded(root, worktree)

@@ -7,9 +7,10 @@ export { ProjectCreateFailed }
 import {
   addWorktree,
   copyIncluded,
-  git,
+  Git,
   gitState,
   mainCheckout,
+  removeWorktree,
   repositoryDirectoryName,
   type GitState,
 } from "./worktree.ts"
@@ -28,8 +29,6 @@ export interface CreatedProject {
   readonly folders: ReadonlyArray<ProjectFolder>
 }
 
-const optionalGit = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orElseSucceed(() => undefined))
-
 const resolveAgainst = (path: Path.Path, base: string | undefined, given: string) =>
   base === undefined ? path.resolve(given) : path.resolve(base, given)
 
@@ -41,52 +40,26 @@ const inspect = (directory: string, given: string, base: string | undefined) =>
     const absolute = resolveAgainst(path, base, given)
     const info = yield* fs.stat(absolute).pipe(Effect.mapError(() => refuse("not found")))
     if (info.type !== "Directory") return yield* refuse("not a directory")
-    const top = yield* git(absolute, "rev-parse", "--show-toplevel").pipe(
-      Effect.mapError(() => refuse("not a git repository")),
-    )
+    const git = yield* Git
+    const top = yield* git.topLevel(absolute).pipe(Effect.mapError(() => refuse("not a git repository")))
     const source = yield* fs.realPath(top).pipe(Effect.mapError((e) => refuse(e.message)))
     const inside = path.relative(source, directory)
     if (!inside.startsWith("..") && !path.isAbsolute(inside))
       return yield* refuse(`${directory} would be inside this repository`)
-    const branch = yield* git(source, "branch", "--show-current").pipe(Effect.mapError((e) => refuse(e.message)))
+    const branch = yield* git.currentBranch(source).pipe(Effect.mapError((e) => refuse(e.message)))
     if (!branch) return yield* refuse("HEAD is detached; switch to a branch first")
     const name = yield* repositoryDirectoryName(source).pipe(Effect.mapError((e) => refuse(e.message)))
     if (!safeRepositoryDirectory(name))
       return yield* refuse(`repository name ${JSON.stringify(name)} cannot be a folder name`)
-    const origin = (yield* optionalGit(source, "config", "--get", "remote.origin.url")) || undefined
-    const status = yield* git(source, "status", "--porcelain", "--branch", "--untracked-files=all").pipe(
-      Effect.mapError((e) => refuse(e.message)),
-    )
-    const uncommitted = status.split("\n").slice(1).filter(Boolean)
+    const origin = yield* git.originUrl(source)
+    const uncommitted = yield* git.uncommitted(source).pipe(Effect.mapError((e) => refuse(e.message)))
     return { name, source, path: path.join(directory, name), branch, origin, uncommitted } satisfies ProjectFolder
   })
 
 const copy = (folder: ProjectFolder) =>
-  Effect.gen(function* () {
-    const { source, path: dest, branch, origin } = folder
-    yield* git(source, "clone", "--quiet", "--no-hardlinks", "--branch", branch, "--", source, dest)
-    yield* git(dest, "remote", "remove", "origin")
-    if (origin === undefined) return
-    yield* git(dest, "remote", "add", "origin", origin)
-    yield* git(
-      dest,
-      "fetch",
-      "--quiet",
-      "--no-tags",
-      "--",
-      source,
-      "+refs/remotes/origin/*:refs/remotes/origin/*",
-      "^refs/remotes/origin/HEAD",
-    )
-    const head = yield* optionalGit(source, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
-    if (head?.startsWith("origin/"))
-      yield* optionalGit(dest, "remote", "set-head", "origin", head.slice("origin/".length))
-    if ((yield* optionalGit(source, "config", "--get", `branch.${branch}.remote`)) !== "origin") return
-    const merge = yield* optionalGit(source, "config", "--get", `branch.${branch}.merge`)
-    if (!merge) return
-    yield* git(dest, "config", `branch.${branch}.remote`, "origin")
-    yield* git(dest, "config", `branch.${branch}.merge`, merge)
-  }).pipe(
+  Git.use((git) =>
+    git.copyRepository({ source: folder.source, dest: folder.path, branch: folder.branch, origin: folder.origin }),
+  ).pipe(
     Effect.mapError(
       (e) => new ProjectCreateFailed({ message: `copy ${folder.source} -> ${folder.path}: ${e.message}` }),
     ),
@@ -157,7 +130,7 @@ export interface ProjectRepository {
 const ownGitCheckout = (dir: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
-    const top = yield* git(dir, "rev-parse", "--show-toplevel").pipe(Effect.option)
+    const top = yield* Git.use((git) => git.topLevel(dir)).pipe(Effect.option)
     if (Option.isNone(top)) return false
     return (yield* fs.realPath(top.value)) === (yield* fs.realPath(dir))
   })
@@ -172,8 +145,8 @@ export const listProjectRepositories = Effect.fn("listProjectRepositories")(func
     ),
   )
   if (info === undefined || info.type !== "Directory") return undefined
-  if ((yield* git(directory, "rev-parse", "--is-inside-work-tree").pipe(Effect.orElseSucceed(() => ""))) === "true")
-    return undefined
+  const git = yield* Git
+  if (yield* git.insideWorkTree(directory)) return undefined
   const found: ProjectRepository[] = []
   for (const name of (yield* fs.readDirectory(directory)).slice().sort()) {
     if (!safeRepositoryDirectory(name)) continue
@@ -185,20 +158,13 @@ export const listProjectRepositories = Effect.fn("listProjectRepositories")(func
       ),
     )
     if (stat === undefined || stat.type !== "Directory" || !(yield* ownGitCheckout(child))) continue
-    const branch = yield* git(child, "branch", "--show-current").pipe(Effect.orElseSucceed(() => ""))
+    const branch = yield* git.currentBranch(child).pipe(Effect.orElseSucceed(() => ""))
     found.push({ name, path: child, branch })
   }
   return found.length > 0 ? found : undefined
 })
 
-const isMainCheckout = (dir: string) =>
-  git(dir, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir").pipe(
-    Effect.map((out) => {
-      const [gitDir, common = ""] = out.split("\n")
-      return gitDir !== "" && gitDir === common
-    }),
-    Effect.orElseSucceed(() => false),
-  )
+const isMainCheckout = (dir: string) => Git.use((git) => git.isMainCheckout(dir))
 
 export const projectRoot = Effect.fn("projectRoot")(function* (directory: string) {
   const children = yield* listProjectRepositories(directory)
@@ -248,7 +214,7 @@ export const projectRepositories = Effect.fn("projectRepositories")(function* (r
   for (const checkout of checkouts) {
     const path = yield* fs.realPath(checkout)
     if (places.some((place) => place.path === path)) continue
-    places.push({ path, remote: (yield* optionalGit(path, "config", "--get", "remote.origin.url")) || undefined })
+    places.push({ path, remote: yield* Git.use((git) => git.originUrl(path)) })
   }
   return places
 })
@@ -260,7 +226,7 @@ const removeWorktrees = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     for (const { repository, worktree } of worktrees.toReversed())
-      yield* git(repository, "worktree", "remove", worktree).pipe(Effect.ignore)
+      yield* removeWorktree(repository, worktree).pipe(Effect.ignore)
     const left = yield* fs.readDirectory(workspace).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>))
     if (left.length === 0) yield* fs.remove(workspace, { recursive: true }).pipe(Effect.ignore)
   })

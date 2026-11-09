@@ -7,6 +7,7 @@ import * as Platform from "@vibest/cli/platform/bun"
 import {
   authed,
   FakeRuntime,
+  makeRepository,
   savedSession,
   tempDirectory,
   testLayer,
@@ -134,7 +135,7 @@ const turnEnd = (mode: string, sessionId: string, notes: Array<string> = []) => 
 })
 
 const cli = Effect.gen(function* () {
-  const root = (yield* Path.Path).resolve(".")
+  const root = yield* makeRepository
   return authed(yield* connect((yield* Layout).socket), cliHeaders(root))
 })
 

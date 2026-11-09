@@ -6,10 +6,12 @@ import { makeSources } from "@vibest/core/plugin-sources"
 import { DEFAULT_TIMEOUT, PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { Plugin } from "@vibest/plugin"
 import { run as runDaemon, type Host } from "@vibest/server/daemon"
-import { Effect, FileSystem, Layer, Path } from "effect"
+import { ConfigProvider, Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
+
+import { PATH_WITHOUT_HARNESS_CLIS } from "./fakes.ts"
 
 const callerPlugins = (builtins: ReadonlyArray<Candidate>) =>
   Effect.gen(function* () {
@@ -331,6 +333,9 @@ describe("caller plugins", () => {
         Effect.provideService(Layout, layout),
         Effect.provideService(VibestCommand, ["/bin/vibest"]),
         Effect.provide(builtinHarnesses),
+        Effect.provide(
+          ConfigProvider.layer(ConfigProvider.fromUnknown({ HOME: dir, PATH: PATH_WITHOUT_HARNESS_CLIS })),
+        ),
         Effect.forkScoped,
       )
       yield* Effect.gen(function* () {

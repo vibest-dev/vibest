@@ -19,11 +19,11 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import {
+  FakeGit,
   authed,
   FakeRuntime,
   makeRepository,
   settled,
-  sh,
   tempDirectory,
   testLayer,
   type TestOptions,
@@ -513,7 +513,7 @@ describe("vibest.sock", () => {
         focus: true,
         runtime: "herdr",
       })
-      const root = yield* sh(repo, "rev-parse", "--show-toplevel")
+      const root = repo
       const main = yield* db.coordinatorOf(yield* projectOf(repo))
       assert.ok(main)
       assert.deepStrictEqual(opened, {
@@ -557,12 +557,8 @@ describe("vibest.sock", () => {
         Effect.gen(function* () {
           const dir = path.join(parent, name)
           yield* fs.makeDirectory(dir)
-          yield* sh(dir, "init", "-q", "-b", "main")
-          yield* sh(dir, "config", "user.email", "t@example.com")
-          yield* sh(dir, "config", "user.name", "t")
           yield* fs.writeFileString(path.join(dir, "f"), "x\n")
-          yield* sh(dir, "add", "f")
-          yield* sh(dir, "commit", "-q", "-m", "f")
+          yield* (yield* FakeGit).repository(dir, { files: { f: "x\n" } })
         })
       yield* init("a")
       yield* init("b")
@@ -729,7 +725,7 @@ describe("vibest.sock", () => {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const linked = `${yield* tempDirectory("vibest-linked-")}/wt`
-      yield* sh(repo, "worktree", "add", "-q", "--detach", linked)
+      yield* (yield* FakeGit).git.addWorktree(repo, linked)
       yield* asCli(yield* client, linked).Launch({
         callerEnv: {},
         argv: ["/bin/vibest", "--harness", "pi"],
@@ -1259,7 +1255,7 @@ describe("vibest.sock", () => {
       const listed = yield* asCli(yield* client, outside).List({})
       assert.deepStrictEqual(listed.map((row) => row.id).sort(), [one.id, two.id].sort())
       const bare = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "vibest-bare-" }))
-      yield* sh(bare, "init", "-q")
+      yield* (yield* FakeGit).repository(bare, { branch: "main" })
       assert.deepStrictEqual(yield* asCli(yield* client, bare).List({}), [])
     }),
   )

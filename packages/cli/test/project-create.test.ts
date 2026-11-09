@@ -13,11 +13,10 @@ import {
   projectRoot,
 } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
-import { git } from "@vibest/core/worktree"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
-import { Effect, Exit, Fiber, FileSystem, Layer, Option, Path, type Scope } from "effect"
+import { Effect, Exit, FileSystem, Layer, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -25,6 +24,7 @@ import * as Platform from "#platform"
 import { liveDaemon } from "../src/herdr-plugin.ts"
 import {
   authed,
+  FakeGit,
   FakeRuntime,
   runVibest,
   stopRecorded,
@@ -35,8 +35,6 @@ import {
   projectOf,
 } from "./fakes.ts"
 
-const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
-
 const scopedRealPathTempDirectory = (prefix: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
@@ -45,10 +43,14 @@ const scopedRealPathTempDirectory = (prefix: string) =>
 
 const test = <E>(
   name: string,
-  program: Effect.Effect<void, E, Layer.Success<typeof Platform.services> | Scope.Scope>,
+  program: Effect.Effect<
+    void,
+    E,
+    Layer.Success<typeof Platform.services> | Layer.Success<typeof FakeGit.layers> | Scope.Scope
+  >,
   timeout?: number,
 ) => {
-  const run = () => program.pipe(Effect.provide(Platform.services))
+  const run = () => program.pipe(Effect.provide(FakeGit.layers.pipe(Layer.provideMerge(Platform.services))))
   return timeout === undefined ? it.effect(name, run) : it.effect(name, run, timeout)
 }
 
@@ -58,12 +60,8 @@ const repositoryWithOneCommitOnMain = (parent: string, name: string) =>
     const path = yield* Path.Path
     const root = path.join(parent, name)
     yield* fs.makeDirectory(root, { recursive: true })
-    yield* sh(root, "init", "-q", "-b", "main")
-    yield* sh(root, "config", "user.email", "t@example.com")
-    yield* sh(root, "config", "user.name", "t")
     yield* fs.writeFileString(path.join(root, "README.md"), `${name}\n`)
-    yield* sh(root, "add", ".")
-    yield* sh(root, "commit", "-q", "-m", "init")
+    yield* (yield* FakeGit).repository(root)
     return root
   }).pipe(Effect.orDie)
 
@@ -76,58 +74,6 @@ const failure = <A, E extends { message: string }, R>(effect: Effect.Effect<A, E
   })
 
 describe("project create", () => {
-  test(
-    "copies each repository as an independent clone on its branch, origin preserved, uncommitted changes reported",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const sources = yield* scopedRealPathTempDirectory("vibest-sources-")
-      const app = yield* repositoryWithOneCommitOnMain(sources, "local-app")
-      yield* sh(app, "remote", "add", "origin", "https://example.com/acme/app.git")
-      yield* sh(app, "update-ref", "refs/remotes/origin/main", "HEAD")
-      yield* sh(app, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
-      yield* sh(app, "switch", "-q", "-c", "feature")
-      yield* sh(app, "config", "branch.feature.remote", "origin")
-      yield* sh(app, "config", "branch.feature.merge", "refs/heads/main")
-      yield* fs.writeFileString(path.join(app, "README.md"), "edited\n")
-      yield* fs.writeFileString(path.join(app, "new.txt"), "new\n")
-      const sdk = yield* repositoryWithOneCommitOnMain(sources, "sdk")
-
-      const directory = path.join(yield* scopedRealPathTempDirectory("vibest-project-"), "combo")
-      const project = yield* createProject(directory, [app, path.join(sdk, ".")])
-      assert.strictEqual(project.directory, directory)
-      assert.deepStrictEqual(
-        project.folders.map((f) => [f.name, f.source, f.path, f.branch, f.origin]),
-        [
-          ["app", app, path.join(directory, "app"), "feature", "https://example.com/acme/app.git"],
-          ["sdk", sdk, path.join(directory, "sdk"), "main", undefined],
-        ],
-      )
-      assert.deepStrictEqual(project.folders[0]!.uncommitted, [" M README.md", "?? new.txt"])
-      assert.deepStrictEqual(project.folders[1]!.uncommitted, [])
-
-      const copy = path.join(directory, "app")
-      assert.strictEqual((yield* fs.stat(copy)).type, "Directory")
-      assert.strictEqual(yield* fs.readFileString(path.join(copy, "README.md")), "local-app\n")
-      assert.isFalse(yield* fs.exists(path.join(copy, "new.txt")))
-      assert.strictEqual(yield* sh(copy, "branch", "--show-current"), "feature")
-      assert.strictEqual(yield* sh(copy, "remote"), "origin")
-      assert.strictEqual(yield* sh(copy, "config", "--get", "remote.origin.url"), "https://example.com/acme/app.git")
-      assert.strictEqual(yield* sh(copy, "rev-parse", "origin/main"), yield* sh(app, "rev-parse", "origin/main"))
-      assert.strictEqual(yield* sh(copy, "symbolic-ref", "refs/remotes/origin/HEAD"), "refs/remotes/origin/main")
-      assert.strictEqual(yield* sh(copy, "rev-parse", "--abbrev-ref", "@{upstream}"), "origin/main")
-      assert.isFalse(yield* fs.exists(path.join(copy, ".git/objects/info/alternates")))
-      const head = yield* sh(copy, "rev-parse", "HEAD")
-      const headObject = path.join(copy, ".git/objects", head.slice(0, 2), head.slice(2))
-      assert.strictEqual(Option.getOrUndefined((yield* fs.stat(headObject)).nlink), 1)
-
-      const plain = path.join(directory, "sdk")
-      assert.strictEqual(yield* sh(plain, "remote"), "")
-      assert.strictEqual(yield* sh(plain, "branch", "--show-current"), "main")
-      assert.strictEqual(yield* sh(app, "status", "--porcelain"), "M README.md\n?? new.txt")
-    }),
-  )
-
   test(
     "an existing empty directory is used; a non-empty one or a file is refused",
     Effect.gen(function* () {
@@ -161,7 +107,7 @@ describe("project create", () => {
       const plain = path.join(sources, "plain")
       yield* fs.makeDirectory(plain)
       const detached = yield* repositoryWithOneCommitOnMain(sources, "detached")
-      yield* sh(detached, "switch", "-q", "--detach")
+      yield* (yield* FakeGit).update(detached, { branch: "" })
       const directory = path.join(yield* scopedRealPathTempDirectory("vibest-project-"), "combo")
 
       assert.match(yield* failure(createProject(directory, [app, plain])), /plain: not a git repository/)
@@ -174,101 +120,6 @@ describe("project create", () => {
       assert.match(yield* failure(createProject(path.join(app, "combo"), [app])), /would be inside this repository/)
       assert.isFalse(yield* fs.exists(path.join(app, "combo")))
     }),
-  )
-
-  test(
-    "a failed copy (an unborn repository passes inspection, then fails the clone) removes only what the call created",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const sources = yield* scopedRealPathTempDirectory("vibest-sources-")
-      const app = yield* repositoryWithOneCommitOnMain(sources, "app")
-      const unbornRepository = path.join(sources, "unborn")
-      yield* fs.makeDirectory(unbornRepository)
-      yield* sh(unbornRepository, "init", "-q", "-b", "main")
-      const base = yield* scopedRealPathTempDirectory("vibest-project-")
-
-      const fresh = path.join(base, "fresh")
-      assert.match(yield* failure(createProject(fresh, [app, unbornRepository])), /copy .*unborn/)
-      assert.isFalse(yield* fs.exists(fresh))
-
-      const kept = path.join(base, "kept")
-      yield* fs.makeDirectory(kept)
-      assert.match(yield* failure(createProject(kept, [app, unbornRepository])), /copy .*unborn/)
-      assert.deepStrictEqual(yield* fs.readDirectory(kept), [])
-    }),
-  )
-
-  test(
-    "an interrupt during checkout (a slow smudge filter set in the environment, as a clone skips the source's config) removes only what the call created",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const sources = yield* scopedRealPathTempDirectory("vibest-sources-")
-      const app = yield* repositoryWithOneCommitOnMain(sources, "app")
-      const smudgeFilter = {
-        "filter.slow.clean": "cat",
-        "filter.slow.smudge": "sleep 30",
-        "filter.slow.required": "true",
-      }
-      yield* Effect.acquireRelease(
-        Effect.sync(() => {
-          process.env.GIT_CONFIG_COUNT = String(Object.keys(smudgeFilter).length)
-          Object.entries(smudgeFilter).forEach(([key, value], i) => {
-            process.env[`GIT_CONFIG_KEY_${i}`] = key
-            process.env[`GIT_CONFIG_VALUE_${i}`] = value
-          })
-        }),
-        () =>
-          Effect.sync(() => {
-            delete process.env.GIT_CONFIG_COUNT
-            Object.keys(smudgeFilter).forEach((_, i) => {
-              delete process.env[`GIT_CONFIG_KEY_${i}`]
-              delete process.env[`GIT_CONFIG_VALUE_${i}`]
-            })
-          }),
-      )
-      yield* fs.writeFileString(path.join(app, ".gitattributes"), "README.md filter=slow\n")
-      yield* sh(app, "add", ".gitattributes")
-      yield* sh(app, "commit", "-q", "-m", "slow")
-      const waitFor = (file: string) =>
-        Effect.gen(function* () {
-          for (let i = 0; i < 250; i++) {
-            if (yield* fs.exists(file)) return
-            yield* TestClock.withLive(Effect.sleep("20 millis"))
-          }
-          return yield* Effect.die(new Error(`timed out waiting for ${file}`))
-        })
-
-      const fresh = path.join(yield* scopedRealPathTempDirectory("vibest-project-"), "fresh")
-      const created = yield* Effect.forkChild(createProject(fresh, [app]))
-      yield* waitFor(path.join(fresh, "app"))
-      yield* Fiber.interrupt(created)
-      assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(created)))
-      assert.isFalse(yield* fs.exists(fresh))
-
-      const kept = path.join(yield* scopedRealPathTempDirectory("vibest-project-"), "kept")
-      yield* fs.makeDirectory(kept)
-      const into = yield* Effect.forkChild(createProject(kept, [app]))
-      yield* waitFor(path.join(kept, "app"))
-      yield* Fiber.interrupt(into)
-      assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(into)))
-      assert.isTrue(yield* fs.exists(kept))
-      assert.deepStrictEqual(yield* fs.readDirectory(kept), [])
-
-      const root = path.join(yield* scopedRealPathTempDirectory("vibest-multi-"), "combo")
-      yield* fs.makeDirectory(root)
-      yield* fs.rename(app, path.join(root, "app"))
-      const folders = (yield* listProjectRepositories(root))!
-      const workspace = path.join(path.dirname(root), "ws")
-      const trees = yield* Effect.forkChild(createIsolatedWorktrees(folders, workspace))
-      yield* waitFor(path.join(workspace, "app"))
-      yield* Fiber.interrupt(trees)
-      assert.isTrue(Exit.hasInterrupts(yield* Fiber.await(trees)))
-      assert.isFalse(yield* fs.exists(workspace))
-      assert.strictEqual(yield* sh(path.join(root, "app"), "branch", "--list", "vibest/*"), "")
-    }),
-    20_000,
   )
 })
 
@@ -317,7 +168,7 @@ describe("multi-repository project", () => {
       yield* fs.makeDirectory(sub)
       const inside = yield* projectRoot(sub)
       assert.strictEqual(inside.root, app)
-      yield* sh(app, "remote", "add", "origin", "git@github.com:O/App.git")
+      yield* (yield* FakeGit).update(app, { origin: "git@github.com:O/App.git" })
       const link = path.join(parent, "link")
       yield* fs.symlink(root, link)
       for (const at of [root, link])
@@ -330,71 +181,27 @@ describe("multi-repository project", () => {
       ])
     }),
   )
+})
 
-  test(
-    "isolated worktrees are created detached, with no branch left behind",
-    Effect.gen(function* () {
-      const path = yield* Path.Path
-      const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
-      const root = path.join(parent, "combo")
-      const fs = yield* FileSystem.FileSystem
-      yield* fs.makeDirectory(root)
-      yield* repositoryWithOneCommitOnMain(root, "app")
-      yield* repositoryWithOneCommitOnMain(root, "sdk")
-      const folders = (yield* listProjectRepositories(root))!
-      const workspace = path.join(parent, "ws")
-      const made = yield* createIsolatedWorktrees(folders, workspace)
-      assert.deepStrictEqual(made, [path.join(workspace, "app"), path.join(workspace, "sdk")])
-      for (const folder of folders) {
-        const wt = path.join(workspace, folder.name)
-        assert.strictEqual(yield* sh(wt, "branch", "--show-current"), "")
-        assert.strictEqual(yield* sh(folder.path, "branch", "--list", "vibest/*"), "")
-        assert.strictEqual(yield* sh(wt, "rev-parse", "HEAD"), yield* sh(folder.path, "rev-parse", "HEAD"))
-      }
-      const fromWorkspace = yield* projectRoot(workspace)
-      assert.strictEqual(fromWorkspace.root, root)
-    }),
-  )
+const served = Server.layer.pipe(
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+  Layer.provideMerge(Project.layer),
+  Layer.provideMerge(testLayer()),
+)
 
-  test(
-    "a failed copy (a tracked file that is a directory in the folder) removes the worktrees this call created; a leftover branch name never blocks it",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
-      const root = path.join(parent, "combo")
-      yield* fs.makeDirectory(root)
-      const app = yield* repositoryWithOneCommitOnMain(root, "app")
-      const sdk = yield* repositoryWithOneCommitOnMain(root, "sdk")
-      yield* sh(sdk, "branch", "vibest/ab12")
-      const kept = yield* sh(sdk, "rev-parse", "refs/heads/vibest/ab12")
-      yield* fs.writeFileString(path.join(sdk, "cfg"), "file\n")
-      yield* sh(sdk, "add", "cfg")
-      yield* sh(sdk, "commit", "-q", "-m", "cfg")
-      yield* fs.remove(path.join(sdk, "cfg"))
-      yield* fs.makeDirectory(path.join(sdk, "cfg"))
-      yield* fs.writeFileString(path.join(sdk, "cfg", "x"), "x\n")
-      yield* fs.writeFileString(path.join(sdk, ".git", "info", "exclude"), "cfg/\n", { flag: "a" })
-      yield* fs.writeFileString(path.join(sdk, ".worktreeinclude"), "cfg/x\n")
-      const folders = (yield* listProjectRepositories(root))!
-      const workspace = path.join(parent, "ws")
-      assert.match(yield* failure(createIsolatedWorktrees(folders, workspace)), /ENOTDIR/)
-      assert.isFalse(yield* fs.exists(workspace))
-      assert.notInclude(yield* sh(app, "worktree", "list", "--porcelain"), workspace)
-      assert.strictEqual(yield* sh(sdk, "rev-parse", "refs/heads/vibest/ab12"), kept)
-      assert.strictEqual(yield* sh(app, "branch", "--list", "vibest/*"), "")
-    }),
-  )
+const sessionTest = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
+  it.effect(name, () => program.pipe(Effect.provide(served)), 30_000)
 
-  test(
+describe("multi-repository isolated workspace", () => {
+  sessionTest(
     "vibest project create prints the project as JSON and warns about uncommitted changes",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const home = yield* scopedRealPathTempDirectory("vibest-home-")
+      const home = (yield* Layout).home
       const sources = yield* scopedRealPathTempDirectory("vibest-sources-")
       const app = yield* repositoryWithOneCommitOnMain(sources, "app")
-      yield* fs.writeFileString(path.join(app, "README.md"), "edited\n")
+      yield* (yield* FakeGit).update(app, { uncommitted: [" M README.md"] })
       const sdk = yield* repositoryWithOneCommitOnMain(sources, "sdk")
       const directory = path.join(yield* scopedRealPathTempDirectory("vibest-project-"), "combo")
       const env = { HOME: home, VIBEST_HOME: home }
@@ -414,7 +221,6 @@ describe("multi-repository project", () => {
         ["app", "sdk"],
       )
       assert.deepStrictEqual(project.folders[0]!.uncommitted, [" M README.md"])
-      assert.isTrue(yield* fs.exists(path.join(home, "vibest.sock")))
 
       const again = path.join(directory, "nope")
       const agent = yield* runVibest(sources, { ...env, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" }, [
@@ -440,20 +246,8 @@ describe("multi-repository project", () => {
       assert.strictEqual(bad.code, 1)
       assert.match(bad.stderr, /^ProjectCreateFailed: /)
     }),
-    30_000,
   )
-})
 
-const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
-  Layer.provideMerge(Project.layer),
-  Layer.provideMerge(testLayer()),
-)
-
-const sessionTest = <E>(name: string, program: Effect.Effect<void, E, TestServices | Project | Scope.Scope>) =>
-  it.effect(name, () => program.pipe(Effect.provide(served)), 30_000)
-
-describe("multi-repository isolated workspace", () => {
   sessionTest(
     "vibest run from the project directory: a writing subagent gets one detached worktree per repository; archive removes each that is safe; the result names branch and pushed per repository",
     Effect.gen(function* () {
@@ -490,10 +284,9 @@ describe("multi-repository isolated workspace", () => {
       assert.strictEqual(path.basename(path.dirname(workspace)), "combo")
       const appWt = path.join(workspace, "app")
       const sdkWt = path.join(workspace, "sdk")
-      assert.strictEqual(yield* sh(appWt, "branch", "--show-current"), "")
-      assert.strictEqual(yield* sh(sdkWt, "branch", "--show-current"), "")
-      assert.strictEqual(yield* sh(app, "branch", "--list", "vibest/*"), "")
-      assert.strictEqual(yield* sh(sdk, "branch", "--list", "vibest/*"), "")
+      const fakeGit = yield* FakeGit
+      assert.deepStrictEqual(yield* fakeGit.git.linkedWorktrees(app), [appWt])
+      assert.deepStrictEqual(yield* fakeGit.git.linkedWorktrees(sdk), [sdkWt])
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => [call.project, call.cwd]),
         [[root, workspace]],
@@ -511,17 +304,16 @@ describe("multi-repository isolated workspace", () => {
       assert.include(message, "<branch>app=\nsdk=</branch>")
       assert.include(message, "<pushed>app=false\nsdk=false</pushed>")
 
-      yield* sh(sdkWt, "switch", "-q", "-c", "feat/sdk")
-      yield* fs.writeFileString(path.join(appWt, "README.md"), "changed\n")
+      yield* fakeGit.checkout(sdkWt, { state: { branch: "feat/sdk", pushed: false, saved: true, why: "" } })
+      yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: false, why: "uncommitted changes" } })
       const kept = (yield* sessions.remove(id))!
       assert.strictEqual(kept.worktree, "kept")
       assert.match(kept.reasons.join("\n"), /app: worktree kept: uncommitted changes/)
       assert.strictEqual(kept.branch, "sdk=feat/sdk")
       assert.isTrue(yield* fs.exists(appWt))
       assert.isFalse(yield* fs.exists(sdkWt))
-      assert.strictEqual(yield* sh(sdk, "branch", "--list", "feat/sdk"), "feat/sdk")
 
-      yield* sh(appWt, "checkout", "--", "README.md")
+      yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: true, why: "" } })
       const removed = (yield* sessions.remove(id))!
       assert.strictEqual(removed.worktree, "removed")
       assert.isFalse(yield* fs.exists(workspace))

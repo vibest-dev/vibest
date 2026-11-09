@@ -15,6 +15,12 @@ pnpm e2e [area…]             # scripted checks: the built binary, real herdr a
 pnpm verify [area…]          # the superset: all of the above, then the E2E checks on a curl and an npm install of this checkout
 ```
 
+Unit tests run no git: they state the repository facts they need on the in-memory `FakeGit`
+(`packages/cli/test/fake-git.ts`). The exceptions are `packages/cli/test/git.test.ts`, which tests the live `Git`
+layer against real git with its own `HOME` and identity, and the live herdr tests
+`packages/cli/test/runtime-herdr-close.test.ts`, `runtime-herdr-main.test.ts` and `runtime-herdr-subagent.test.ts`,
+which are skipped without herdr (the last two start a real Pi when it is on `PATH`).
+
 `pnpm verify` is what says vibest works as a user gets it: run it before calling a change done, then prove the
 `agent` and `runtime` checks it lists (docs/testing/feature-map.md) with evidence. E2E gives every run a temp
 `VIBEST_HOME` and the user's real `HOME` (the harness logins live there), reads the user's harness config without

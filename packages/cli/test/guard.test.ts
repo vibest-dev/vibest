@@ -14,7 +14,7 @@ import { ChildProcessSpawner } from "effect/process"
 import * as Platform from "#platform"
 
 import * as Cli from "../src/cli.ts"
-import { makeRepository, tempDirectory } from "./fakes.ts"
+import { FakeGit, makeRepository, tempDirectory } from "./fakes.ts"
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
 const both = (command: string) => [shellBlock(command, source, true), shellBlock(command, source, false)]
@@ -649,7 +649,7 @@ describe("vibest --session inside herdr", () => {
     () =>
       Effect.gen(function* () {
         const touched = { exec: false, host: false, socket: false }
-        const repo = yield* makeRepository.pipe(Effect.provide(Platform.services))
+        const repo = yield* makeRepository.pipe(Effect.provide(FakeGit.layer), Effect.provide(Platform.services))
         const back = process.cwd()
         process.chdir(repo)
         const host = new Proxy({ builtinPlugins: [] } as unknown as Host, {
@@ -700,7 +700,7 @@ describe("vibest --session inside herdr", () => {
   it.effect("below the root continues in this process and types no --env", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
-      const repo = yield* makeRepository
+      const repo = yield* makeRepository.pipe(Effect.provide(FakeGit.layer))
       const sub = repo + "/sub"
       yield* fs.makeDirectory(sub)
       const back = process.cwd()

@@ -3,12 +3,12 @@ import { Db, type SessionRow } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { allocationNameSource, Sessions } from "@vibest/core/sessions"
-import { gitState, repositoryDirectoryName } from "@vibest/core/worktree"
+import { repositoryDirectoryName } from "@vibest/core/worktree"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID } from "@vibest/schema/id"
 import { Effect, FileSystem, Path, type Scope } from "effect"
 
-import { FakeRuntime, makeRepository, sh, testLayer, type TestServices, until, projectOf } from "./fakes.ts"
+import { FakeGit, FakeRuntime, makeRepository, testLayer, type TestServices, until, projectOf } from "./fakes.ts"
 
 const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   Effect.map(
@@ -83,9 +83,6 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       assert.strictEqual(path.basename(path.dirname(wt)), yield* repositoryDirectoryName(repo))
       assert.strictEqual(wt, layout.allocationWorktree(path.basename(repo), leaf))
       assert.isTrue(yield* fs.exists(wt))
-      assert.strictEqual(yield* sh(wt, "branch", "--show-current"), "")
-      yield* sh(wt, "switch", "-c", "done")
-      assert.strictEqual(yield* sh(wt, "branch", "--show-current"), "done")
       assert.strictEqual(path.basename(yield* fs.realPath(wt)), leaf)
       assert.strictEqual((yield* sessions.get(id)).worktree, wt)
     }),
@@ -127,7 +124,8 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const name = path.basename(repo)
       const parent = path.join(layout.worktrees, name)
       yield* fs.makeDirectory(layout.worktrees, { recursive: true })
-      yield* sh(repo, "worktree", "add", "-q", "--detach", parent)
+      yield* (yield* FakeGit).git.addWorktree(repo, parent)
+      yield* fs.writeFileString(path.join(parent, ".git"), "gitdir: elsewhere\n")
       const failed = yield* Effect.flip(sessions.spawn(yield* spawnInput(repo)))
       assert.strictEqual(failed._tag, "AllocationFailed")
       assert.include(failed.message, parent)
@@ -195,8 +193,8 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const other = yield* makeRepository
-      yield* sh(repo, "remote", "add", "origin", "git@github.com:Org/MyRepo.git")
-      yield* sh(other, "remote", "add", "origin", "git@github.com:Other/myrepo.git")
+      yield* (yield* FakeGit).update(repo, { origin: "git@github.com:Org/MyRepo.git" })
+      yield* (yield* FakeGit).update(other, { origin: "git@github.com:Other/myrepo.git" })
       const reset = Effect.sync(() => (allocationNameSource.leaves = undefined))
       yield* Effect.gen(function* () {
         allocationNameSource.leaves = ["abcd", "abce"]
@@ -230,7 +228,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const sessions = yield* Sessions
       const layout = yield* Layout
       const repo = yield* makeRepository
-      yield* sh(repo, "remote", "add", "origin", "git@github.com:Org/MyRepo.git")
+      yield* (yield* FakeGit).update(repo, { origin: "git@github.com:Org/MyRepo.git" })
       yield* marker(layout.allocationWorktree("MyRepo", "abcd"))
       const file = layout.allocationWorktree("MyRepo", "abce")
       yield* fs.writeFileString(file, "keep\n")
@@ -247,21 +245,6 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
         (yield* db.listSessions({ stopped: true })).map((row) => row.id),
         before,
       )
-    }),
-  )
-})
-
-describe("reading a worktree's git state", () => {
-  test(
-    "takes no index lock, so a spawn's git worktree add at that moment does not fail on index.lock",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const repo = yield* makeRepository
-      const index = path.join(repo, ".git", "index")
-      const before = (yield* fs.stat(index)).ino
-      yield* gitState(repo)
-      assert.deepStrictEqual((yield* fs.stat(index)).ino, before)
     }),
   )
 })

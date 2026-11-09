@@ -6,9 +6,9 @@ import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Effect, FileSystem, HashMap, PubSub, type Scope } from "effect"
 
 import {
+  FakeGit,
   FakeRuntime,
   makeRepository,
-  sh,
   testLayer,
   type TestServices,
   until,
@@ -52,7 +52,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.deepStrictEqual([placed.near, placed.project, placed.cwd], ["main:coord", repo, wt])
       assert.strictEqual((yield* herdr.agent(id))!.terminal.split(":")[0], "main")
-      assert.strictEqual(yield* sh(wt, "branch", "--show-current"), "")
+      assert.deepStrictEqual(yield* (yield* FakeGit).git.linkedWorktrees(repo), [wt])
       const shown = (yield* herdr.callsTo("present"))[0]!
       assert.deepInclude(shown, {
         terminal: (yield* herdr.agent(id))!.terminal,

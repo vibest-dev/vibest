@@ -1,4 +1,3 @@
-import fs from "node:fs/promises"
 import net from "node:net"
 
 import { readPing } from "@vibest/client/client"
@@ -18,14 +17,12 @@ import { Runtimes, registry } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
-import { git } from "@vibest/core/worktree"
 import type * as VibestPlugin from "@vibest/plugin"
 import { harnessChoicePlugin } from "@vibest/plugin-harness-choice"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import {
   Clock,
-  Config,
   ConfigProvider,
   Context,
   Deferred,
@@ -48,9 +45,10 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
+import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime, type FakeRuntimeOptions } from "./fake-runtime.ts"
 
-export { FakeRuntime }
+export { FakeGit, FakeRuntime }
 
 export const TEST_HERDR = "herdr"
 
@@ -112,8 +110,6 @@ export const nextTurnStart = (subscription: PubSub.Subscription<EngineEvent>, id
     ),
   )
 
-export const sh = (cwd: string, ...args: string[]) => git(cwd, ...args).pipe(Effect.orDie)
-
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
@@ -166,6 +162,8 @@ export const withStdin = (input: string, command: string, args: ReadonlyArray<st
     return ["-c", STDIN_FROM_FILE, "sh", file, command, ...args] as const
   })
 
+export const PATH_WITHOUT_HARNESS_CLIS = "/usr/bin:/bin"
+
 const mainTs = `${import.meta.dirname}/../src/main.ts`
 
 export const runVibest = (cwd: string, env: Record<string, string>, args: ReadonlyArray<string>, stdin = "") =>
@@ -174,7 +172,7 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
     const handle = yield* spawner.spawn(
       ChildProcess.make("sh", yield* withStdin(stdin, process.execPath, [mainTs, ...args]), {
         cwd,
-        env: { PATH: yield* Config.String("PATH"), ...env },
+        env: { PATH: PATH_WITHOUT_HARNESS_CLIS, ...env },
         extendEnv: false,
         stdin: "ignore",
       }),
@@ -186,33 +184,13 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
     return { stdout, stderr, code }
   }).pipe(Effect.scoped, Effect.orDie)
 
-let repositoryTemplate: Promise<string> | undefined
-const templateRepository = Effect.promise(() => {
-  repositoryTemplate ??= Effect.runPromise(
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const root = yield* fs.makeTempDirectory({ prefix: "vibest-repo-template-" }).pipe(Effect.orDie)
-      yield* sh(root, "init", "-q", "-b", "main")
-      yield* sh(root, "config", "user.email", "t@example.com")
-      yield* sh(root, "config", "user.name", "t")
-      yield* fs.writeFileString(path.join(root, "README.md"), "hi\n")
-      yield* sh(root, "add", ".")
-      yield* sh(root, "commit", "-q", "-m", "init")
-      yield* fs.writeFileString(path.join(root, "CLAUDE.md"), "local rules\n")
-      return root
-    }).pipe(Effect.provide(Platform.services)),
-  ).catch((error: unknown) => {
-    repositoryTemplate = undefined
-    throw error
-  })
-  return repositoryTemplate
-})
-
 export const makeRepository = Effect.gen(function* () {
-  const source = yield* templateRepository
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
   const root = yield* tempDirectory("vibest-repo-")
-  yield* Effect.promise(() => fs.cp(source, root, { recursive: true }))
+  yield* fs.writeFileString(path.join(root, "README.md"), "hi\n")
+  yield* fs.writeFileString(path.join(root, "CLAUDE.md"), "local rules\n")
+  yield* (yield* FakeGit).repository(root, { files: { "README.md": "hi\n" } })
   return root
 }).pipe(Effect.orDie)
 
@@ -439,6 +417,7 @@ const over = (options: TestOptions) => {
       Layer.provideMerge(ownTmpdir),
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
+      Layer.provideMerge(FakeGit.layers),
       Layer.provideMerge(Platform.services),
       Layer.provideMerge(Bus.layer),
     ),
