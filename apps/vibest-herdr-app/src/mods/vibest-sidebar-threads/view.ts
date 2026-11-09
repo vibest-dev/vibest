@@ -78,7 +78,7 @@ export class ThreadsView {
       .pr(10)
       .gap(10)
       .items_center()
-      .rounded(6)
+      .rounded(10)
       .flex_none()
       .border(1)
       .border_color(thread.active ? t.border : t.chrome)

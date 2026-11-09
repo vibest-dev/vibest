@@ -1,5 +1,5 @@
 {
-  "background": "#fcfcfc",
+  "background": "#f3f4f6",
   "foreground": "#18181b",
   "selection": "#d1d6dd",
   "cursor": "#26384e",
@@ -22,13 +22,13 @@
     "#a5a5a5"
   ],
   "colors": {
-    "canvas": "#fcfcfc",
-    "chrome": "#f4f4f5",
+    "canvas": "#f9f9f9",
+    "chrome": "#f9f9f9",
     "surface": "#ffffff",
     "popover": "#ffffff",
     "raised": "#ffffff",
     "hover": "#f4f4f5",
-    "selected": "#ffffff",
+    "selected": "#f1f1f2",
     "border": "#e4e4e7",
     "input": "#d4d4d8",
     "foreground": "#18181b",
