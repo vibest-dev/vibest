@@ -1,7 +1,8 @@
 import { h_flex, v_flex } from "gpui-base"
-import { div } from "gpui-kit"
-import { appHome, exec, type Theme } from "herdr"
+import { type Context, div, type Element } from "gpui-kit"
+import { appHome, exec } from "herdr"
 
+import type { Theme } from "../../shared/theme.ts"
 import { commandNote, LS_ARGV, parseSessions, type SessionRow } from "./cli.ts"
 import {
   closePull,
@@ -24,7 +25,7 @@ export class AgentList {
   asOf = ""
   pull: Pull = idlePull()
 
-  constructor(cx: Cx) {
+  constructor(cx: Context) {
     this.request(cx)
   }
 
@@ -32,7 +33,7 @@ export class AgentList {
     this.pull = closePull(this.pull)
   }
 
-  request(cx: Cx): void {
+  request(cx: Context): void {
     const next = requestPull(this.pull)
     const started = !this.pull.running && next.running
     this.pull = next
@@ -43,7 +44,7 @@ export class AgentList {
     })
   }
 
-  async read(cx: Cx, token: number): Promise<void> {
+  async read(cx: Context, token: number): Promise<void> {
     let note = ""
     let asOf = ""
     let sessions: readonly SessionRow[] = []
@@ -81,7 +82,7 @@ export class AgentList {
     }
   }
 
-  sessionRow(colors: Theme, session: SessionRow): Chain {
+  sessionRow(colors: Theme, session: SessionRow): Element {
     return h_flex()
       .id(`session-${session.id}`)
       .gap(8)
@@ -95,7 +96,7 @@ export class AgentList {
       .child(div().flex_none().text_color(colors.dim).child(shortId(session)))
   }
 
-  render(colors: Theme): Chain {
+  render(colors: Theme): Element {
     const rows = groupSessions(this.sessions).flatMap((group) => [
       div()
         .id(`project-${group.projectId}`)

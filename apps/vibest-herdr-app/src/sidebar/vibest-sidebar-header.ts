@@ -1,10 +1,11 @@
 import { h_flex } from "gpui-base"
-import { div, View } from "gpui-kit"
-import { type Theme, theme, window } from "herdr"
+import { div, type Element, View } from "gpui-kit"
+import { window } from "herdr"
 
+import { type Theme, themeColors } from "../shared/theme.ts"
 import { TRAFFIC_LIGHTS_INSET } from "../shared/ui.ts"
 
-const header = (t: Theme): Chain => {
+const header = (t: Theme): Element => {
   const w = window()
   const inset = w?.platform === "macos" && !w.fullscreen ? TRAFFIC_LIGHTS_INSET : 16
   return h_flex()
@@ -19,7 +20,7 @@ const header = (t: Theme): Chain => {
 }
 
 export default class SidebarHeader extends View {
-  render(): unknown {
-    return header(theme())
+  render(): Element {
+    return header(themeColors())
   }
 }

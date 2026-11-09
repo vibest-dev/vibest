@@ -4,8 +4,9 @@ import { describe, expect, it } from "vitest"
 import { threadTitle } from "../src/shared/thread-title.ts"
 import { elapsed, parseFolded, pill, projects, relativeTime } from "../src/sidebar/threads/model.ts"
 
-const shell = { key: "shell", name: "zsh", agent: false, shell: true }
-const claude = { key: "claude", name: "Claude Code", agent: true, shell: false }
+const program = { icon: null as string | null, tint: false, tile: null as string | null, color: null as string | null }
+const shell = { ...program, key: "shell", name: "zsh", agent: false, shell: true }
+const claude = { ...program, key: "claude", name: "Claude Code", agent: true, shell: false }
 const tab = (over: Partial<TabInfo> = {}): TabInfo => ({
   id: "tb1",
   index: 1,
@@ -13,7 +14,9 @@ const tab = (over: Partial<TabInfo> = {}): TabInfo => ({
   named: false,
   active: false,
   status: null,
+  panes: 1,
   settled: false,
+  settled_at: null,
   zoomed: false,
   changed_at: null,
   working_since: null,
@@ -24,7 +27,14 @@ const pane = (over: Partial<PaneInfo> = {}): PaneInfo => ({
   terminal: "t1",
   tab: "tb1",
   title: "",
+  cwd: null,
+  branch: null,
+  status: null,
+  app: null,
   program: shell,
+  focused: false,
+  zoomed: false,
+  movable: false,
   ...over,
 })
 
@@ -93,7 +103,10 @@ describe("projects", () => {
     const spaces: SpaceInfo[] = [
       {
         id: "sp1",
+        index: 1,
         name: "api",
+        named: false,
+        folder: "",
         machine: null,
         branch: null,
         active: true,

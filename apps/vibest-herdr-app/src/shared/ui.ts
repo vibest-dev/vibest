@@ -1,5 +1,6 @@
-import { div, svg } from "gpui-kit"
-import type { Theme } from "herdr"
+import { type Context, div, type Element, svg } from "gpui-kit"
+
+import type { Theme } from "./theme.ts"
 
 export const TRAFFIC_LIGHTS_INSET = 90
 
@@ -9,9 +10,9 @@ export const iconButton = (
   t: Theme,
   id: string,
   name: string,
-  action: (cx: Cx) => void,
+  action: (cx: Context) => void,
   { size = 28, on = false }: { readonly size?: number; readonly on?: boolean } = {},
-): Chain =>
+): Element =>
   div()
     .id(id)
     .size(size)

@@ -1,7 +1,8 @@
 import { h_flex, v_flex } from "gpui-base"
-import { div, svg } from "gpui-kit"
-import { openOverlay, panes, pickFolder, run, spaces, type Theme } from "herdr"
+import { type Context, div, type Element, svg } from "gpui-kit"
+import { openOverlay, panes, pickFolder, run, spaces } from "herdr"
 
+import type { Theme } from "../../shared/theme.ts"
 import { icon, iconButton } from "../../shared/ui.ts"
 import { elapsed, parseFolded, pill, type Project, projects, relativeTime, type Thread } from "./model.ts"
 
@@ -12,7 +13,7 @@ export class ThreadList {
   folded = new Set(parseFolded(localStorage.getItem("folded")))
   now = Date.now()
 
-  constructor(cx: Cx) {
+  constructor(cx: Context) {
     cx.timer.every(CLOCK_MS, (ticked) => {
       this.now = Date.now()
       ticked.notify()
@@ -20,7 +21,7 @@ export class ThreadList {
   }
 
   hover(id: string) {
-    return (on: boolean, cx: Cx) => {
+    return (on: boolean, cx: Context) => {
       if (on) this.hovered = id
       else if (this.hovered === id) this.hovered = null
       cx.notify()
@@ -33,7 +34,7 @@ export class ThreadList {
     localStorage.setItem("folded", JSON.stringify([...this.folded]))
   }
 
-  toolbar(t: Theme): Chain {
+  toolbar(t: Theme): Element {
     const active = spaces().find((s) => s.active)
     return h_flex()
       .px(8)
@@ -65,14 +66,14 @@ export class ThreadList {
       .child(iconButton(t, "new-thread", "square-pen", () => run("tab.new", active ? { space: active.id } : {})))
   }
 
-  addProject(cx: Cx): void {
+  addProject(cx: Context): void {
     cx.spawn(async () => {
       const folder = await pickFolder({ prompt: "Add project" })
       if (folder) run("space.new", { folder })
     })
   }
 
-  status(t: Theme, thread: Thread): Chain {
+  status(t: Theme, thread: Thread): Element {
     const p = pill(thread.status)
     if (!p) return div().text_size(12).text_color(t.dim).child(relativeTime(thread.changedAt, this.now))
     const color = t[p.tone]
@@ -88,7 +89,7 @@ export class ThreadList {
       .child(since ? `${p.label} ${since}` : p.label)
   }
 
-  threadRow(t: Theme, project: Project, thread: Thread): Chain {
+  threadRow(t: Theme, project: Project, thread: Thread): Element {
     const id = `thread-${thread.id}`
     return h_flex()
       .id(id)
@@ -124,7 +125,7 @@ export class ThreadList {
       .child(h_flex().h(24).min_w(32).flex_none().justify_end().items_center().child(this.status(t, thread)))
   }
 
-  projectRow(t: Theme, project: Project): Chain {
+  projectRow(t: Theme, project: Project): Element {
     const id = `project-${project.id}`
     const folded = this.folded.has(project.id)
     const hovered = this.hovered === id
@@ -169,15 +170,7 @@ export class ThreadList {
       .when(Boolean(project.machine), (el) =>
         el.child(div().flex_none().text_size(12).text_color(t.dim).child(project.machine)),
       )
-      .when(folded && tone !== null && !hovered, (el) =>
-        el.child(
-          div()
-            .size(6)
-            .flex_none()
-            .rounded_full()
-            .bg(tone ?? ""),
-        ),
-      )
+      .when(folded && tone !== null && !hovered, (el) => el.child(div().size(6).flex_none().rounded_full().bg(tone)))
       .when(folded && !hovered, (el) =>
         el.child(div().flex_none().text_size(12).text_color(t.dim).child(String(project.threads.length))),
       )
@@ -194,7 +187,7 @@ export class ThreadList {
       )
   }
 
-  list(t: Theme): Chain {
+  list(t: Theme): Element {
     const all = projects(spaces(), panes())
     if (!all.length)
       return v_flex()
@@ -228,7 +221,7 @@ export class ThreadList {
       )
   }
 
-  render(t: Theme): Chain {
+  render(t: Theme): Element {
     return v_flex().size_full().bg(t.chrome).child(this.toolbar(t)).child(this.list(t))
   }
 }

@@ -1,6 +1,9 @@
-// src/panel/agents/main.ts
+// src/panel/agents/vibest-agents.ts
 import { View } from "gpui-kit";
+
+// src/shared/theme.ts
 import { theme } from "herdr";
+var themeColors = () => theme();
 
 // src/panel/agents/view.ts
 import { h_flex, v_flex } from "gpui-base";
@@ -205,7 +208,7 @@ class AgentList {
   }
 }
 
-// src/panel/agents/main.ts
+// src/panel/agents/vibest-agents.ts
 class Agents extends View {
   list;
   init(_props, cx) {
@@ -215,7 +218,7 @@ class Agents extends View {
     this.list.close();
   }
   render() {
-    return this.list.render(theme());
+    return this.list.render(themeColors());
   }
 }
 export {

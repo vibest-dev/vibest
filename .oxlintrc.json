@@ -14,6 +14,7 @@
   },
   "ignorePatterns": [
     "apps/vibest-herdr-app/home/mods/*/main.js",
+    "apps/vibest-herdr-app/types",
     "dist",
     "node_modules",
     ".cache",

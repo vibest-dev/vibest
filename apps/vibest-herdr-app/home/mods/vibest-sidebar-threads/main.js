@@ -1,6 +1,9 @@
-// src/sidebar/threads/main.ts
+// src/sidebar/threads/vibest-sidebar-threads.ts
 import { View } from "gpui-kit";
+
+// src/shared/theme.ts
 import { theme } from "herdr";
+var themeColors = () => theme();
 
 // src/sidebar/threads/view.ts
 import { h_flex, v_flex } from "gpui-base";
@@ -9,6 +12,7 @@ import { openOverlay, panes, pickFolder, run, spaces } from "herdr";
 
 // src/shared/ui.ts
 import { div, svg } from "gpui-kit";
+var TRAFFIC_LIGHTS_INSET = 90;
 var icon = (name) => `mods/workspace-chrome/${name}.svg`;
 var iconButton = (t, id, name, action, { size = 28, on = false } = {}) => div().id(id).size(size).flex_none().flex().items_center().justify_center().rounded(8).when(on, (el) => el.bg(t.selected)).text_color(on ? t.foreground : t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).cursor_pointer().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => {
   cx.stop_propagation();
@@ -173,7 +177,7 @@ class ThreadList {
         height: 260,
         props: { tab: "space", target: { id: project.id } }
       });
-    }).child(svg2(icon("folder")).size(16).flex_none().text_color(t.muted)).child(div2().flex_1().min_w(0).truncate().text_size(14).font_medium().text_color(project.active ? t.foreground : t.muted).child(project.name)).when(Boolean(project.machine), (el) => el.child(div2().flex_none().text_size(12).text_color(t.dim).child(project.machine))).when(folded && tone !== null && !hovered, (el) => el.child(div2().size(6).flex_none().rounded_full().bg(tone ?? ""))).when(folded && !hovered, (el) => el.child(div2().flex_none().text_size(12).text_color(t.dim).child(String(project.threads.length)))).when(hovered, (el) => el.child(iconButton(t, `new-${project.id}`, "square-pen", () => run("tab.new", { space: project.id }), { size: 24 }))).child(svg2(icon(folded ? "chevron-right" : "chevron-down")).size(12).flex_none().text_color(t.muted));
+    }).child(svg2(icon("folder")).size(16).flex_none().text_color(t.muted)).child(div2().flex_1().min_w(0).truncate().text_size(14).font_medium().text_color(project.active ? t.foreground : t.muted).child(project.name)).when(Boolean(project.machine), (el) => el.child(div2().flex_none().text_size(12).text_color(t.dim).child(project.machine))).when(folded && tone !== null && !hovered, (el) => el.child(div2().size(6).flex_none().rounded_full().bg(tone))).when(folded && !hovered, (el) => el.child(div2().flex_none().text_size(12).text_color(t.dim).child(String(project.threads.length)))).when(hovered, (el) => el.child(iconButton(t, `new-${project.id}`, "square-pen", () => run("tab.new", { space: project.id }), { size: 24 }))).child(svg2(icon(folded ? "chevron-right" : "chevron-down")).size(12).flex_none().text_color(t.muted));
   }
   list(t) {
     const all = projects(spaces(), panes());
@@ -189,14 +193,14 @@ class ThreadList {
   }
 }
 
-// src/sidebar/threads/main.ts
+// src/sidebar/threads/vibest-sidebar-threads.ts
 class SidebarThreads extends View {
   list;
   init(_props, cx) {
     this.list = new ThreadList(cx);
   }
   render() {
-    return this.list.render(theme());
+    return this.list.render(themeColors());
   }
 }
 export {

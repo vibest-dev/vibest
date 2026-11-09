@@ -1,9 +1,17 @@
 import { h_flex } from "gpui-base"
-import { div, svg, View } from "gpui-kit"
-import { focused, layout, type LayoutNode, panes, run, spaces, type Theme, theme, window } from "herdr"
+import { div, type Element, svg, View } from "gpui-kit"
+import { focused, layout, panes, run, spaces, window } from "herdr"
 
+import { type Theme, themeColors } from "../shared/theme.ts"
 import { threadTitle } from "../shared/thread-title.ts"
 import { icon, iconButton, TRAFFIC_LIGHTS_INSET } from "../shared/ui.ts"
+
+interface LayoutNode {
+  readonly id?: string
+  readonly hidden?: boolean
+  readonly active?: string
+  readonly children?: readonly LayoutNode[]
+}
 
 const find = (node: LayoutNode | undefined, id: string): LayoutNode | undefined => {
   if (node?.id === id) return node
@@ -16,7 +24,7 @@ const find = (node: LayoutNode | undefined, id: string): LayoutNode | undefined 
 
 const RIGHT_PANEL = "right-panel"
 
-const panelButton = (t: Theme, root: LayoutNode | undefined, child: string, name: string): Chain => {
+const panelButton = (t: Theme, root: LayoutNode | undefined, child: string, name: string): Element => {
   const panel = find(root, RIGHT_PANEL)
   const on = Boolean(panel && !panel.hidden && panel.active === child)
   return iconButton(
@@ -32,7 +40,7 @@ const panelButton = (t: Theme, root: LayoutNode | undefined, child: string, name
   )
 }
 
-const topbar = (t: Theme): Chain => {
+const topbar = (t: Theme): Element => {
   const w = window()
   const root = layout() as LayoutNode | undefined
   const space = spaces().find((s) => s.active)
@@ -117,7 +125,7 @@ const topbar = (t: Theme): Chain => {
 }
 
 export default class Topbar extends View {
-  render(): unknown {
-    return topbar(theme())
+  render(): Element {
+    return topbar(themeColors())
   }
 }

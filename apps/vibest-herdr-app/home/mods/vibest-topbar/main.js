@@ -1,7 +1,7 @@
-// src/workspace/topbar.ts
+// src/workspace/vibest-topbar.ts
 import { h_flex } from "gpui-base";
 import { div as div2, svg as svg2, View } from "gpui-kit";
-import { focused, layout, panes, run, spaces, theme, window } from "herdr";
+import { focused, layout, panes, run, spaces, window } from "herdr";
 
 // src/shared/thread-title.ts
 var leading = (s) => s.replace(/^[^\p{L}\p{N}]+/u, "").trim();
@@ -17,6 +17,10 @@ var threadTitle = (tab, tabPanes) => {
   return lead?.program?.agent ? lead.program.name : `Terminal ${tab.index}`;
 };
 
+// src/shared/theme.ts
+import { theme } from "herdr";
+var themeColors = () => theme();
+
 // src/shared/ui.ts
 import { div, svg } from "gpui-kit";
 var TRAFFIC_LIGHTS_INSET = 90;
@@ -26,7 +30,7 @@ var iconButton = (t, id, name, action, { size = 28, on = false } = {}) => div().
   action(cx);
 }).child(svg(icon(name)).size(16));
 
-// src/workspace/topbar.ts
+// src/workspace/vibest-topbar.ts
 var find = (node, id) => {
   if (node?.id === id)
     return node;
@@ -64,7 +68,7 @@ var topbar = (t) => {
 
 class Topbar extends View {
   render() {
-    return topbar(theme());
+    return topbar(themeColors());
   }
 }
 export {

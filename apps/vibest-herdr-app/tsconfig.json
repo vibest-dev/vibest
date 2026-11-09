@@ -1,5 +1,16 @@
 {
-  "extends": "@vibest/tsconfig/base.json",
-  "compilerOptions": { "types": [], "customConditions": [] },
-  "include": ["src", "test"]
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "strictNullChecks": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "paths": { "herdr": ["./types/herdr-app-0.1.13/herdr.d.ts"] }
+  },
+  "include": ["src", "test", "types/herdr-app-0.1.13/gpui-kit.d.ts"]
 }

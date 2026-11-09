@@ -9,6 +9,7 @@
   "experimentalSortImports": {},
   "ignorePatterns": [
     "apps/vibest-herdr-app/home/mods/*/main.js",
+    "apps/vibest-herdr-app/types/**",
     "**/dist/**",
     "**/node_modules/**",
     "packages/effect-herdr-sdk/src/generated/**",

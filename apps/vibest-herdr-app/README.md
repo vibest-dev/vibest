@@ -54,17 +54,20 @@ right panel has no frame of its own, because the shipped Diff and Files mods, li
 
 ## Mods
 
-Each layout block that shows vibest content is its own mod, named after its block, and `src/` mirrors the layout tree:
+Each layout block that shows vibest content is its own mod, named after its block. `src/` mirrors the layout tree,
+and each mod's entry file carries the mod's name:
 
-- `sidebar/header.ts` (`vibest-sidebar-header`) and `sidebar/footer.ts` (`vibest-sidebar-footer`);
-- `sidebar/threads/` (`vibest-sidebar-threads`): `model.ts` (projects, status pills, relative times), `view.ts` and
-  the `main.ts` entry;
-- `workspace/topbar.ts` (`vibest-topbar`);
-- `panel/agents/` (`vibest-agents`): `cli.ts` (the `vibest ls` command line and parsing its JSON), `model.ts`
-  (grouping, row text, stale-result handling), `view.ts` and the `main.ts` entry;
-- `shared/`: what more than one mod uses: `ui.ts` (the icon button), `thread-title.ts` (threads and top bar) and
-  `host.d.ts`, a hand-copied subset of herdr-app's type files (`herdr.d.ts`, `gpui-kit.d.ts`) for the `herdr`,
-  `gpui-kit` and `gpui-base` modules the mods use.
+- `sidebar/vibest-sidebar-header.ts` and `sidebar/vibest-sidebar-footer.ts`;
+- `sidebar/threads/vibest-sidebar-threads.ts`, with `model.ts` (projects, status pills, relative times) and `view.ts`;
+- `workspace/vibest-topbar.ts`;
+- `panel/agents/vibest-agents.ts`, with `cli.ts` (the `vibest ls` command line and parsing its JSON), `model.ts`
+  (grouping, row text, stale-result handling) and `view.ts`;
+- `shared/`: what more than one mod uses: `theme.ts` (the theme colors, typed), `ui.ts` (the icon button) and
+  `thread-title.ts` (threads and top bar).
+
+Types come from herdr-app 0.1.13's own `herdr.d.ts` and `gpui-kit.d.ts`, vendored unchanged in
+`types/herdr-app-0.1.13/`; `tsconfig.json` maps `herdr` to the first and uses the compiler options of the
+`jsconfig.json` herdr-app writes beside a mod.
 
 The Agents panel reads once when it starts and again on **Refresh**; there is no timer. Each read runs, with
 `VIBEST_SESSION_ID`, `VIBEST_AGENT` and `VIBEST_PROJECT_ID` removed so the CLI acts as the owner,
@@ -78,8 +81,9 @@ The panel expects the herdr-app home to be outside a git repository: `vibest ls`
 outside one, and inside a checkout it would list that project's sessions only.
 
 The mods run in herdr-app's gpui-kit JavaScript: no Node, Effect or `setTimeout`, and a mod cannot import files from
-another mod's folder, so `scripts/build.ts` bundles each entry into `home/mods/<name>/main.js`, inlining what it uses
-from `src/shared/`, with `gpui-kit`, `gpui-base` and `herdr` left external.
+another mod's folder, so the `build` script (one `bun build` of the five entries, without splitting) writes each
+entry to `home/mods/<name>/main.js`, inlining what it uses from `src/shared/`, with `gpui-kit`, `gpui-base` and
+`herdr` left external.
 
 ## Build, test, install
 

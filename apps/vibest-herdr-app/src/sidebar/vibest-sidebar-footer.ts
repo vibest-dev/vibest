@@ -1,10 +1,11 @@
 import { h_flex } from "gpui-base"
-import { div, View } from "gpui-kit"
-import { run, type Theme, theme, updates } from "herdr"
+import { div, type Element, View } from "gpui-kit"
+import { run, updates } from "herdr"
 
+import { type Theme, themeColors } from "../shared/theme.ts"
 import { iconButton } from "../shared/ui.ts"
 
-const footer = (t: Theme): Chain => {
+const footer = (t: Theme): Element => {
   const ready = Boolean(updates()?.app?.ready)
   return h_flex()
     .size_full()
@@ -26,7 +27,7 @@ const footer = (t: Theme): Chain => {
 }
 
 export default class SidebarFooter extends View {
-  render(): unknown {
-    return footer(theme())
+  render(): Element {
+    return footer(themeColors())
   }
 }
