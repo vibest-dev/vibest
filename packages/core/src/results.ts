@@ -1,4 +1,5 @@
-import { type HarnessAdapter, type HarnessId } from "./harness.ts"
+import type { HarnessId } from "./harness.ts"
+import type { HarnessDefinition } from "./host.ts"
 
 export const jsonObject = (raw: string): Record<string, unknown> | undefined => {
   try {
@@ -10,7 +11,7 @@ export const jsonObject = (raw: string): Record<string, unknown> | undefined => 
   }
 }
 
-export const promptOf = (adapter: HarnessAdapter, agent: string, raw: string) => {
+export const promptOf = (adapter: HarnessDefinition, agent: string, raw: string) => {
   const event = jsonObject(raw)
   const prompt = event && adapter.userPrompt?.(event, agent === "coordinator")
   return prompt?.text
@@ -66,7 +67,12 @@ export type TurnEnded = {
   readonly interrupted: boolean
 }
 
-export const turnEndOf = (adapter: HarnessAdapter, agent: string, raw: string, at: number): TurnEnded | undefined => {
+export const turnEndOf = (
+  adapter: HarnessDefinition,
+  agent: string,
+  raw: string,
+  at: number,
+): TurnEnded | undefined => {
   const event = jsonObject(raw)
   const payload = event && adapter.turnEnd?.(event, agent === "coordinator")?.result
   return payload ? turnEndFrom(adapter, payload, at) : undefined
@@ -74,7 +80,7 @@ export const turnEndOf = (adapter: HarnessAdapter, agent: string, raw: string, a
 
 const PLAIN_ID_NOT_A_FLAG = /^\w[\w.:-]{0,127}$/
 export const turnEndFrom = (
-  adapter: HarnessAdapter,
+  adapter: HarnessDefinition,
   payload: Readonly<Record<string, unknown>>,
   at: number,
 ): TurnEnded => {

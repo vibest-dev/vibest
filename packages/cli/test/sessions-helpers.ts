@@ -1,7 +1,6 @@
 import { it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
-import { claude } from "@vibest/core/harnesses/claude"
 import { Sessions } from "@vibest/core/sessions"
 import { isLimited, Plugin, stillLimited } from "@vibest/plugin"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -9,6 +8,7 @@ import { Effect, type Scope } from "effect"
 import { SqlClient } from "effect/sql"
 
 import {
+  CLAUDE,
   FakeRuntime,
   settled,
   testLayer,
@@ -39,7 +39,7 @@ export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
 
 export const claudeEnd = (reason: string) =>
   (
-    claude.turnEnd!(
+    CLAUDE.turnEnd!(
       { hook_event_name: "TurnComplete", session_id: "c1", reason, last_assistant_message: "" },
       false,
     ) as {

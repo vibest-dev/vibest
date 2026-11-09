@@ -17,7 +17,8 @@ import { ChildProcessSpawner } from "effect/process"
 
 import { awaitEvent, awaitOn, Bus, type EngineEvent } from "./bus.ts"
 import type { Db, SessionRow } from "./db.ts"
-import type { Harnesses, HarnessAdapter } from "./harness.ts"
+import type { Harnesses } from "./harness.ts"
+import type { HarnessDefinition } from "./host.ts"
 import {
   agentState,
   type AgentState,
@@ -56,7 +57,7 @@ export const sessionPrompting = (deps: {
 }) => {
   const { db, harnesses, bus, track, platform, collectResult } = deps
   const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
-  const awaitReady = (h: Runtime, terminal: Terminal, adapter: HarnessAdapter, id: string) =>
+  const awaitReady = (h: Runtime, terminal: Terminal, adapter: HarnessDefinition, id: string) =>
     Effect.gen(function* () {
       const reports = adapter.ready === "integration"
       if (h.state === undefined && !reports) return "unknown" as AgentState

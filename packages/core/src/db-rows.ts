@@ -2,7 +2,6 @@ import { MessageStatus } from "@vibest/schema/model"
 import { AgentStatus, InboxKind, InboxRow, InboxStatus, RuntimeAddress, TurnState } from "@vibest/schema/session"
 import { Schema } from "effect"
 
-import { HARNESS_IDS } from "./harness.ts"
 import { Routing } from "./plugins.ts"
 import type { TurnEnded } from "./results.ts"
 
@@ -36,7 +35,7 @@ export const SessionRow = Schema.Struct({
   id: Schema.String,
   projectId: Schema.String,
   agent: Schema.String,
-  harnessId: Schema.Literals(HARNESS_IDS),
+  harnessId: Schema.String,
   harnessSessionId: Schema.NullOr(Schema.String),
   runtime: Schema.String,
   address: AddressJson,
@@ -63,7 +62,7 @@ export type SessionPatch = Partial<Omit<SessionRow, "id" | "projectId" | "agent"
 export const CoordinatorRow = Schema.Struct({
   id: Schema.String,
   projectId: Schema.String,
-  harnessId: Schema.Literals(HARNESS_IDS),
+  harnessId: Schema.String,
   harnessSessionId: Schema.NullOr(Schema.String),
   runtime: Schema.NullOr(Schema.String),
   address: Schema.NullOr(AddressJson),

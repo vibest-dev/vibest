@@ -1,9 +1,9 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
+import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
-import { AgentRefused } from "@vibest/core/plugins"
 import { Sessions } from "@vibest/core/sessions"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID } from "@vibest/schema/id"
@@ -27,6 +27,90 @@ import {
 import { spawnInput, spawnWorking, sessionWorktree, test, pick, sqlNotices } from "./sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
+  const withMain = (repo: string) =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      return yield* db.coordinatorLaunch(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
+        { provider: "openai", model: "fake-strong" },
+      )
+    })
+  const chosen = (id: string) =>
+    Effect.gen(function* () {
+      const row = yield* (yield* Db).getSession(id)
+      return [row!.harnessId, row!.provider, row!.model]
+    })
+
+  test(
+    "spawn without a harness from the main agent inherits its harness, provider and model",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const main = yield* withMain(repo)
+      const input = { ...(yield* spawnInput(repo)), harness: undefined, parentSessionId: main.sessionId }
+      const { id } = yield* (yield* Sessions).spawn(input)
+      assert.deepStrictEqual(yield* chosen(id), ["pi", "openai", "fake-strong"])
+    }),
+  )
+
+  test(
+    "spawn without a harness from a plain terminal inherits the project's main agent; an explicit harness drops its provider and model; a model alone keeps the rest",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      yield* withMain(repo)
+      const sessions = yield* Sessions
+      const base = { ...(yield* spawnInput(repo)), harness: undefined }
+      const inherited = yield* sessions.spawn(base)
+      assert.deepStrictEqual(yield* chosen(inherited.id), ["pi", "openai", "fake-strong"])
+      const explicit = yield* sessions.spawn({ ...base, harness: "claude", name: "explicit" })
+      assert.deepStrictEqual(yield* chosen(explicit.id), ["claude", null, null])
+      const model = yield* sessions.spawn({ ...base, model: "fake-model", name: "model" })
+      assert.deepStrictEqual(yield* chosen(model.id), ["pi", "openai", "fake-model"])
+    }),
+  )
+
+  test(
+    "spawn without a harness and nothing to inherit is NoHarnessChosen",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const error = yield* Effect.flip((yield* Sessions).spawn({ ...(yield* spawnInput(repo)), harness: undefined }))
+      assert.strictEqual(error._tag, "NoHarnessChosen")
+      assert.include(error.message, "no harness to inherit")
+    }),
+  )
+
+  test(
+    "a definition updated by a plugin changes the next spawn's argv",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const herdr = yield* FakeRuntime
+      yield* (yield* Harnesses).transform((editor) =>
+        editor.update("pi", (definition) => {
+          const before = definition.launchArgs
+          definition.launchArgs = (input) => [...before(input), "--from-plugin"]
+        }),
+      )
+      yield* spawnWorking(repo)
+      assert.strictEqual((yield* herdr.callsTo("open"))[0]!.argv.at(-1), "--from-plugin")
+    }),
+  )
+
+  test(
+    "a session whose harness no plugin provides still lists, and a restart says no plugin provides it",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const { id } = yield* spawnWorking(repo)
+      yield* (yield* Harnesses).transform((editor) => editor.remove("pi"))
+      const sessions = yield* Sessions
+      assert.strictEqual((yield* sessions.list()).find((row) => row.id === id)?.harnessId, "pi")
+      const [restarted] = yield* sessions.restart([id])
+      assert.isFalse(restarted!.ok)
+      assert.include(restarted!.message, "no loaded plugin provides its harness")
+    }),
+  )
+
   test(
     "spawn: detached worktree with copied files, env on the tab, rules, unchanged prompt",
     Effect.gen(function* () {
@@ -189,31 +273,22 @@ describe.concurrent("Sessions", () => {
   test(
     "an explicit harness whose plugin is missing is refused with that problem",
     Effect.gen(function* () {
-      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
-        Effect.filterOrFail(
-          (e): e is AgentRefused => e._tag === "AgentRefused",
-          () => new Error("not refused"),
-        ),
-      )
-      assert.deepInclude(refused, { plugin: "harness-choice" })
-      assert.include(refused.reason, "pi: vibest's pi plugin is missing")
-      assert.strictEqual(refused.reason.includes("claude"), false)
+      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository)))
+      assert.strictEqual(refused._tag, "HarnessUnavailable")
+      assert.include(refused.message, "vibest's pi plugin is missing")
+      assert.strictEqual(refused.message.includes("claude"), false)
     }),
     { hooked: [] },
   )
 
   test(
-    "spawn with no logged-in harness is refused, naming the model failures",
+    "spawn of a harness that is not logged in is refused, naming the model failure",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db
-      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository))).pipe(
-        Effect.filterOrFail(
-          (e): e is AgentRefused => e._tag === "AgentRefused",
-          () => new Error("not refused"),
-        ),
-      )
-      assert.include(refused.reason, "pi: pi model discovery failed: Not logged in")
+      const refused = yield* Effect.flip((yield* Sessions).spawn(yield* spawnInput(yield* makeRepository)))
+      assert.strictEqual(refused._tag, "HarnessUnavailable")
+      assert.include(refused.message, "Not logged in")
       assert.strictEqual(yield* herdr.callCount, 0)
       assert.deepStrictEqual(yield* db.listSessions(), [])
     }),

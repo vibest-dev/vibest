@@ -1,6 +1,5 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { cursor } from "@vibest/core/harnesses/cursor"
 import { Sessions } from "@vibest/core/sessions"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { prompt, turnEnd } from "@vibest/server/hooks"
@@ -8,7 +7,17 @@ import { Clock, Effect, Fiber, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import { FakeRuntime, makeRepository, settled, TURNS, until, untilVirtual, writeResult, projectOf } from "./fakes.ts"
+import {
+  CURSOR,
+  FakeRuntime,
+  makeRepository,
+  settled,
+  TURNS,
+  until,
+  untilVirtual,
+  writeResult,
+  projectOf,
+} from "./fakes.ts"
 import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
@@ -516,15 +525,15 @@ describe.concurrent("Sessions", () => {
       assert.isFalse((yield* herdr.callsTo("send")).some((c) => c.keys?.includes("enter")))
       yield* turnEnd(
         db,
-        cursor,
+        CURSOR,
         { id, agent: "general" },
         JSON.stringify({ hook_event_name: "afterAgentResponse", text: "done" }),
       )
       const thought = JSON.stringify({ hook_event_name: "afterAgentThought" })
-      yield* prompt(sessions, cursor, { id, agent: "general" }, thought)
+      yield* prompt(sessions, db, CURSOR, { id, agent: "general" }, thought)
       assert.strictEqual((yield* db.getSession(id))!.status, "idle")
       yield* untilVirtual(db.getSession(id), (w) => w?.turnState === "completed")
-      yield* prompt(sessions, cursor, { id, agent: "general" }, thought)
+      yield* prompt(sessions, db, CURSOR, { id, agent: "general" }, thought)
       yield* settled
       assert.strictEqual((yield* db.getSession(id))!.status, "idle")
       yield* sessions.send(id, "next")

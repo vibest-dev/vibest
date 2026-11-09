@@ -13,7 +13,7 @@ import {
   type TurnState,
   failureOf,
 } from "./db.ts"
-import type { HarnessAdapter } from "./harness.ts"
+import type { HarnessDefinition } from "./host.ts"
 import { nextBatch } from "./inbox.ts"
 import type { LimitMove } from "./move.ts"
 import { workspaceGit } from "./project-create.ts"
@@ -44,9 +44,9 @@ export const sessionRounds = (deps: {
     readonly beginUserTurn: (id: string, text: string, patch: SessionPatch) => Effect.Effect<boolean>
   }
   readonly harnesses: {
-    readonly all: ReadonlyArray<HarnessAdapter>
-    readonly get: (id: SessionRow["harnessId"]) => HarnessAdapter
-    readonly find: (id: string | null | undefined) => HarnessAdapter | undefined
+    readonly all: ReadonlyArray<HarnessDefinition>
+    readonly get: (id: SessionRow["harnessId"]) => HarnessDefinition
+    readonly find: (id: string | null | undefined) => HarnessDefinition | undefined
   }
   readonly track: (id: string) => Effect.Effect<{ readonly prompting: Ref.Ref<boolean> }>
   readonly lock: (id: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>

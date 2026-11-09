@@ -1,11 +1,13 @@
+import type { Harness as PluginHarness } from "@vibest/plugin"
 import type { HarnessChoice } from "@vibest/protocol/rpc"
+import { HarnessUnavailable } from "@vibest/schema/session"
 import { Config, Effect, Option, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { type HarnessAdapter, HARNESS_IDS, type HarnessId, HarnessUnavailable } from "./harness.ts"
+import type { HarnessDefinition } from "./host.ts"
 
 export const Model = Schema.Struct({
-  harness: Schema.Literals(HARNESS_IDS),
+  harness: Schema.String,
   provider: Schema.NullOr(Schema.String),
   model: Schema.String,
   name: Schema.String,
@@ -14,22 +16,11 @@ export const Model = Schema.Struct({
 })
 export type Model = typeof Model.Type
 
-export interface RawModel {
-  readonly model: string
-  readonly provider?: string | undefined
-  readonly name?: string | undefined
-  readonly description?: string | undefined
-  readonly default: boolean
-}
-
-export interface ModelLister {
-  readonly args: (provider: string | null) => ReadonlyArray<string>
-  readonly request?: string
-  readonly answer: (lines: ReadonlyArray<string>) => ReadonlyArray<RawModel> | undefined
-}
+export type RawModel = PluginHarness.RawModel
+export type ModelLister = PluginHarness.ModelLister
 
 export const normalizeModels = (
-  harness: HarnessId,
+  harness: string,
   provider: string | null,
   raw: ReadonlyArray<RawModel>,
 ): ReadonlyArray<Model> =>
@@ -44,29 +35,10 @@ export const normalizeModels = (
     }))
     .filter((m) => !provider || m.provider === provider)
 
-export const jsonLines = (...messages: ReadonlyArray<unknown>) => messages.map((m) => `${JSON.stringify(m)}\n`).join("")
-
-export const findMessage = <A>(schema: Schema.Codec<A, unknown>) => {
-  const decode = Schema.decodeUnknownOption(Schema.fromJsonString(schema))
-  return (lines: ReadonlyArray<string>): A | undefined => {
-    for (const line of lines) {
-      const r = decode(line)
-      if (r._tag === "Some") return r.value
-    }
-    return undefined
-  }
-}
-
-export const withConfigured = (
-  models: ReadonlyArray<RawModel>,
-  configured: Omit<RawModel, "default"> | undefined,
-): ReadonlyArray<RawModel> =>
-  models.some((m) => m.default) || !configured ? models : [...models, { ...configured, default: true }]
-
-export const listModels = Effect.fn("listModels")(function* (adapter: HarnessAdapter, provider: string | null) {
+export const listModels = Effect.fn("listModels")(function* (adapter: HarnessDefinition, provider: string | null) {
   const { id, binary, checkProvider, models: lister } = adapter
   const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
-  const providerError = checkProvider(provider)
+  const providerError = checkProvider?.(provider)
   if (providerError) return yield* unavailable(providerError)
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const cwd = yield* Config.String("HOME").pipe(Config.withDefault(""), Effect.orDie)
@@ -105,25 +77,17 @@ export const listModels = Effect.fn("listModels")(function* (adapter: HarnessAda
   return models
 })
 
-export const catalogModels = (
+export const forProvider = (
   choices: ReadonlyArray<HarnessChoice>,
-  adapters: { readonly get: (id: HarnessId) => Pick<HarnessAdapter, "binary" | "checkProvider"> },
-  provider: string | null,
-) => {
-  const models: Array<Omit<Model, "description">> = []
-  const errors: Array<string> = []
-  for (const c of choices) {
-    const adapter = adapters.get(c.harness)
-    const problem = c.problem ?? (provider === null ? undefined : adapter.checkProvider(provider))
-    if (problem !== undefined) {
-      errors.push(`${c.harness}: ${problem}`)
-      continue
-    }
-    const kept = c.models
-      .filter((m) => provider === null || m.provider === provider)
-      .map((m) => ({ harness: c.harness, ...m }))
-    if (kept.length === 0) errors.push(`${c.harness}: ${adapter.binary} lists no models for provider "${provider}"`)
-    models.push(...kept)
-  }
-  return { models, errors }
-}
+  definitions: { readonly find: (id: string) => Pick<HarnessDefinition, "checkProvider"> | undefined },
+  provider: string,
+): ReadonlyArray<HarnessChoice> =>
+  choices.map((c) => {
+    if (c.problem !== null) return c
+    const refused = definitions.find(c.harness)?.checkProvider?.(provider)
+    if (refused !== undefined) return { ...c, problem: refused, models: [] }
+    const models = c.models.filter((m) => m.provider === provider)
+    return models.length === 0
+      ? { ...c, problem: `${c.binary} lists no models for provider "${provider}"`, models: [] }
+      : { ...c, models }
+  })

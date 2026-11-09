@@ -39,7 +39,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const unavailable = (message: string) => new HarnessUnavailable({ harness: input.harness, message })
   if (!adapter.coordinatorArgs)
     return yield* unavailable(`${input.harness} is not currently supported as the coordinator`)
-  const providerError = adapter.checkProvider(input.provider)
+  const providerError = adapter.checkProvider?.(input.provider)
   if (providerError) return yield* unavailable(providerError)
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   const pluginDir = yield* harness.plugin(input.harness)

@@ -12,8 +12,8 @@ import {
   Harnesses,
   HarnessUnavailable,
   type HarnessId,
-  isHarnessId,
   preflight,
+  unprovided,
 } from "./harness.ts"
 import { directoryLock, type keyedLock } from "./keyed-lock.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, type Layout, safeRepositoryDirectory } from "./paths.ts"
@@ -149,14 +149,20 @@ export const sessionSpawn = (deps: {
         : main !== undefined && main.id === input.parentSessionId
           ? main.runtime || undefined
           : undefined
+    const from =
+      input.harness !== undefined
+        ? undefined
+        : (worker ??
+          main ??
+          (input.parentSessionId === undefined ? yield* db.coordinatorOf(input.projectId) : undefined))
     const decision = yield* plugins.start({
       project: root,
       agentType: agent,
       parentSessionId: input.parentSessionId,
       prompt: input.prompt,
-      harness: input.harness,
-      provider: input.provider,
-      model: input.model,
+      harness: input.harness ?? from?.harnessId,
+      provider: input.provider ?? from?.provider ?? undefined,
+      model: input.model ?? from?.model ?? undefined,
       harnesses: yield* harnessOptions.pipe(
         Effect.provideService(Harness, harness),
         Effect.provideService(Harnesses, harnesses),
@@ -176,7 +182,7 @@ export const sessionSpawn = (deps: {
         ? { target: input.machine.target }
         : {}),
     }
-    const runtimeKind = rt.kind
+    const runtimeKind = rt.id
     const routed = (e: HarnessUnavailable) =>
       Object.keys(decision.decidedBy).length === 0
         ? e
@@ -185,8 +191,7 @@ export const sessionSpawn = (deps: {
             message: `${e.message} (routed: ${describeSpawn({ ...decision, harness: e.harness })})`,
           })
     const harnessId = decision.harness
-    if (!isHarnessId(harnessId))
-      return yield* routed(new HarnessUnavailable({ harness: harnessId, message: `unknown harness ${harnessId}` }))
+    if (harnesses.find(harnessId) === undefined) return yield* routed(unprovided(harnessId, harnesses.all))
     yield* preflight(harnessId, provider ?? null, model ?? null).pipe(
       Effect.provideService(Harness, harness),
       Effect.provideService(Harnesses, harnesses),
