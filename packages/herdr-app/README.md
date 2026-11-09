@@ -1,26 +1,76 @@
-# @vibest/herdr-app-mod
+# @vibest/herdr-app
 
-A [herdr-app](https://github.com/herdrdev/herdr-app) **0.1.13** panel that lists live vibest sessions. It is a snapshot, not a terminal navigator: herdr-app does not name this window's core, so the panel does not focus anything.
+Vibest's own interface for [herdr-app](https://herdr.dev) **0.1.13**: a layout, two themes and one mod. The layout
+started from T3 Code's look: herdr spaces are projects and their tabs are threads in a 256 px sidebar; a 52 px top
+bar carries the `project / thread` breadcrumb and branch; the middle is the shown tab's terminals; a right panel holds
+Diff (shipped `changes`), Files (shipped `files`) and **Agents**, the vibest sessions of every project.
 
-The host types are `~/.config/herdr-app/herdr.d.ts` and `AGENTS.md` from that app (upstream `defaults/AGENTS.md`). This is not a herdr-core plugin and not a legacy Herdr integration (`herdr-plugin.toml`, herdr 0.9.5). `mod.json` uses `place` and `size`. `title` is not a mod key in 0.1.13.
+Private: not published, not part of a release.
 
-## Read
+## Files
 
-Shown once, and again on **Refresh**. No timer. The line under the title is the snapshot time. A newer Refresh or `close(cx)` drops an older result. `exec` is limited to 30 seconds and 8 MiB and has no cancel handle (`herdr.d.ts`). An `exec` already started keeps running (`AGENTS.md`). `View.close(cx)` is what the host calls when the copy is removed or the app quits (`gpui-kit.d.ts`). A live window was not used to watch that call.
+`home/` is exactly what goes into a herdr-app home (`~/.config/herdr-app`, or `$HERDR_APP_HOME`):
 
-Each read runs `env -u VIBEST_SESSION_ID -u VIBEST_AGENT -u VIBEST_PROJECT_ID VIBEST_NO_UPDATE_CHECK=1 vibest status`, then, only if that daemon is this vibest, `env -u VIBEST_SESSION_ID -u VIBEST_AGENT -u VIBEST_PROJECT_ID vibest ls --no-start --all-projects`. The three variables are removed so the CLI is the owner, not a session that inherited the app environment. `VIBEST_NO_UPDATE_CHECK=1` is only on `status`: `updateNotice` returns on it, so a curl install or `VIBEST_HARNESSES` does not write `update-check.json` or create a missing home. `ls` does not set that variable. A non-zero `ls`, including an unknown flag, is shown and not retried without the flags.
+| Path in `home/`                                       | What it is                                            |
+| ----------------------------------------------------- | ----------------------------------------------------- |
+| `layouts/vibest.json`, `layouts/vibest.svg`           | the layout and its preview                            |
+| `themes/vibest-light.json`, `themes/vibest-dark.json` | the light and dark themes the layout follows          |
+| `mods/vibest/main.js`, `mods/vibest/mod.json`         | the mod, built from `src/` (committed; `place: none`) |
 
-`status` does not start vibestd. `ls` without `--no-start` does, for a user, when the daemon is down (`withVibest` in `packages/client/src/client.ts`). `--no-start` passes `start: false`. `--all-projects` sends `List` `all: true` from any directory. `--all` still means exited sessions. A session caller stays forbidden. `ls` prints `title`, not `name`. A body that is not that JSON is an error, not a partial list.
+The layout also uses the shipped `changes`, `files`, `menu`, `picker` and `machine-add` mods and the icons in
+`mods/workspace-chrome/`.
 
-Rows show the daemon `status` and `turnState`. A session that is not `hc` on this machine, or whose terminal id has no `@socket`, says so. Every local `hc` row says `core not proven`. Nothing calls `terminals()`, `panes()`, `pane.focus`, or `terminal.keep`.
+## Layout
 
-The runtime is gpui-kit JavaScript. It does not load `@vibest/client`, Effect, or Node.
-
-## Build and check
-
-```sh
-pnpm --filter @vibest/herdr-app-mod build
-herdr-app check packages/herdr-app-mod
+```
+root (row)
+├─ sidebar (column, 256 px)
+│  ├─ sidebar-header   vibest part "header": the Vibest wordmark
+│  ├─ sidebar-threads  vibest part "threads": projects and their threads
+│  └─ sidebar-footer   vibest part "footer": settings, add machine, palette
+└─ workspace (column)
+   ├─ topbar           vibest part "topbar": breadcrumb, branch, split, panel toggles, zoom
+   └─ workspace-body (row)
+      ├─ terminals     the shown tab's terminals
+      └─ right-panel (stack, hidden, 540 px): changes | files | agents (vibest part "agents")
 ```
 
-`herdr-app check` writes `gpui-kit.d.ts` beside the mod. That file is generated and gitignored. Check does not run the `cx.spawn` read. Copying into `~/.config/herdr-app/mods` is not done here.
+The top bar's Files, Diff and Agents buttons select that child of `right-panel` and show it; pressing the shown one
+hides the panel.
+
+## Mod
+
+One mod, `vibest`, draws each part named by its `props.part`. `src/` is split by part:
+
+- `header.ts`, `footer.ts`, `topbar.ts`, `ui.ts` (the icon button they share);
+- `threads/`: `model.ts` (projects, thread titles, status pills, relative times) and `view.ts`;
+- `agents/`: `cli.ts` (running `vibest status` and `vibest ls --no-start --all-projects`, parsing their JSON),
+  `model.ts` (grouping, row text, stale-result handling) and `view.ts`;
+- `host.d.ts`: the parts of herdr-app's `herdr`, `gpui-kit` and `gpui-base` modules the mod uses.
+
+The Agents panel reads once when it starts and again on **Refresh**; there is no timer. Each read runs, with
+`VIBEST_SESSION_ID`, `VIBEST_AGENT` and `VIBEST_PROJECT_ID` removed so the CLI acts as the owner,
+`VIBEST_NO_UPDATE_CHECK=1 vibest status`, then, only when that daemon is this vibest, `vibest ls --no-start
+--all-projects`. Neither starts vibestd. A newer Refresh or the copy closing drops an older result. `exec` is capped at
+30 s and 8 MiB and cannot be cancelled. Rows are grouped by project: the title takes the width, then the status and
+turn state, then the short id; the tooltip has the full id, the harness and, for a session that is not a local herdr-core
+terminal, why. The panel does not focus terminals: herdr-app does not name the core of this window.
+
+The mod runs in herdr-app's gpui-kit JavaScript: no Node, Effect or `setTimeout`, and it cannot import files from
+another mod's folder, so `scripts/build.ts` bundles `src/main.ts` into `home/mods/vibest/main.js` with `gpui-kit`,
+`gpui-base` and `herdr` left external.
+
+## Build, test, install
+
+```sh
+pnpm --filter @vibest/herdr-app build   # rewrites home/mods/vibest/main.js; commit it
+pnpm --filter @vibest/herdr-app test    # vitest over the threads and agents models
+herdr-app check packages/herdr-app/home/mods/vibest
+
+H=${HERDR_APP_HOME:-~/.config/herdr-app}
+cp -R packages/herdr-app/home/* "$H/"
+herdr-app do layout.switch --name vibest
+```
+
+`herdr-app check` writes `gpui-kit.d.ts` and `jsconfig.json` beside the mod; they are gitignored. `ctrl-shift-l`
+switches back to another layout; deleting the copied files removes it.

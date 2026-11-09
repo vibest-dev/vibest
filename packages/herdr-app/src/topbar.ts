@@ -2,7 +2,7 @@ import { h_flex } from "gpui-base"
 import { div, svg } from "gpui-kit"
 import { focused, layout, type LayoutNode, panes, run, spaces, type Theme, window } from "herdr"
 
-import { threadTitle } from "./model.ts"
+import { threadTitle } from "./threads/model.ts"
 import { icon, iconButton, TRAFFIC_LIGHTS_INSET } from "./ui.ts"
 
 const find = (node: LayoutNode | undefined, id: string): LayoutNode | undefined => {
@@ -101,7 +101,7 @@ export const topbar = (t: Theme): Chain => {
         )
         .child(panelButton(t, root, "files", "files"))
         .child(panelButton(t, root, "changes", "git-compare"))
-        .child(panelButton(t, root, "vibest-sessions", "monitor"))
+        .child(panelButton(t, root, "agents", "monitor"))
         .child(
           iconButton(t, "zoom", zoomed ? "minus" : "square", () => run("pane.zoom", pane ? { pane } : {}), {
             on: zoomed,

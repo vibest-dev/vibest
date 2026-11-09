@@ -1,16 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 
 import {
-  closePull,
-  completePull,
-  groupSessions,
-  idlePull,
-  projectHeading,
-  requestPull,
-  rowNote,
-} from "../src/sessions/model.ts"
-import { sessionStatus } from "../src/shared/format.ts"
-import {
   cliArgv,
   commandNote,
   parseOwnedAddress,
@@ -18,7 +8,20 @@ import {
   type SessionRow,
   settleList,
   statusVerdict,
-} from "../src/shared/vibest.ts"
+} from "../src/agents/cli.ts"
+import {
+  closePull,
+  completePull,
+  groupSessions,
+  idlePull,
+  projectHeading,
+  requestPull,
+  rowNote,
+  rowTitle,
+  rowTooltip,
+  sessionStatus,
+  shortId,
+} from "../src/agents/model.ts"
 
 const socket = "/run/user/501/herdr-core/default.sock"
 
@@ -64,7 +67,7 @@ const runningStatus = {
   runtimes: [{ kind: "hc", status: "online" }],
 }
 
-describe("herdr-app mod", () => {
+describe("agents panel", () => {
   it("parses status the way vibest status prints it", () => {
     assert.deepEqual(cliArgv("status"), [
       "-u",
@@ -150,11 +153,23 @@ describe("herdr-app mod", () => {
 
   it("names why a session is not this window's terminal", () => {
     const row = session()
-    assert.equal(rowNote(row), "core not proven")
+    assert.equal(rowNote(row), "")
     assert.equal(rowNote(session({ machine: "vps" })), "on another machine")
     assert.equal(rowNote(session({ runtime: "herdr", socket: "", coreAddress: "" })), "runtime herdr")
     assert.equal(rowNote(session({ socket: "", coreAddress: "" })), "no local terminal")
     assert.equal(rowNote(session({ coreAddress: "vps/t7" })), "no local terminal")
+  })
+
+  it("puts the title first and the full id and harness in the tooltip", () => {
+    const row = session()
+    assert.equal(rowTitle(row), "Fix the guard")
+    assert.equal(rowTitle(session({ title: "", agent: "" })), "349f65b2")
+    assert.equal(shortId(row), "349f65b2")
+    assert.equal(rowTooltip(row), "349f65b2-1111-4111-8111-111111111111 · pi")
+    assert.equal(
+      rowTooltip(session({ machine: "vps" })),
+      "349f65b2-1111-4111-8111-111111111111 · pi · on another machine",
+    )
   })
 
   it("drops a snapshot when a newer read or unload wins", () => {

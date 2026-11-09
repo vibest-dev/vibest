@@ -1,4 +1,4 @@
-import type { SessionRow } from "../shared/vibest.ts"
+import type { SessionRow } from "./cli.ts"
 
 export interface SessionGroup {
   readonly projectId: string
@@ -19,10 +19,15 @@ export const rowNote = (session: SessionRow): string => {
   if (session.runtime !== "hc") return `runtime ${session.runtime || "unknown"}`
   if (session.machine !== "local") return "on another machine"
   if (session.socket === "" || session.coreAddress.includes("/")) return "no local terminal"
-  return "core not proven"
+  return ""
 }
 
-export const rowTitle = (row: SessionRow): string => row.title || row.agent || row.id.slice(0, 8)
+export const shortId = (row: SessionRow): string => row.id.slice(0, 8)
+
+export const rowTooltip = (row: SessionRow): string =>
+  [row.id, row.harness, rowNote(row)].filter((part) => part !== "").join(" · ")
+
+export const rowTitle = (row: SessionRow): string => row.title || row.agent || shortId(row)
 
 export const snapshotNote = (asOf: string): string => `Snapshot ${asOf} UTC, not a watch.`
 
@@ -74,3 +79,6 @@ export const closePull = (pull: Pull): Pull => ({
   running: false,
   again: false,
 })
+
+export const sessionStatus = (row: SessionRow): string =>
+  row.turnState === "" || row.turnState === "none" ? row.status : `${row.status}/${row.turnState}`

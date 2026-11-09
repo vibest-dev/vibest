@@ -15,5 +15,5 @@ export const header = (t: Theme): Chain => {
     .gap(4)
     .bg(t.chrome)
     .text_size(14)
-    .child(div().font_medium().text_color(t.foreground).child("Herdr"))
+    .child(div().font_medium().text_color(t.foreground).child("Vibest"))
 }

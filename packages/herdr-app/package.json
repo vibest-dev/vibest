@@ -2,7 +2,7 @@
   "name": "@vibest/herdr-app",
   "version": "0.0.1-beta.17",
   "private": true,
-  "description": "Files for a herdr-app home: a read-only panel of vibest sessions, and a layout, themes and mod styled after T3 Code.",
+  "description": "Vibest's herdr-app interface: a layout, light and dark themes, and one mod with a T3 Code style sidebar and a panel of vibest sessions.",
   "license": "MIT",
   "repository": {
     "type": "git",

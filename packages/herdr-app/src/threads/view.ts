@@ -2,9 +2,8 @@ import { h_flex, v_flex } from "gpui-base"
 import { div, svg } from "gpui-kit"
 import { openOverlay, panes, pickFolder, run, spaces, type Theme } from "herdr"
 
-import { elapsed, pill, relativeTime } from "../shared/format.ts"
-import { type Project, projects, type Thread } from "./model.ts"
-import { icon, iconButton } from "./ui.ts"
+import { icon, iconButton } from "../ui.ts"
+import { elapsed, pill, type Project, projects, relativeTime, type Thread } from "./model.ts"
 
 const CLOCK_MS = 30000
 

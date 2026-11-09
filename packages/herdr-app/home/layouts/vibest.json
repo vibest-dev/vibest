@@ -3,8 +3,8 @@
   "type": "row",
   "titlebar": "none",
   "traffic_lights": [16, 19],
-  "preview": "layouts/t3.svg",
-  "theme": { "light": "t3-light", "dark": "t3-dark" },
+  "preview": "layouts/vibest.svg",
+  "theme": { "light": "vibest-light", "dark": "vibest-dark" },
   "ui_font": ".SystemUIFont",
   "font": "Menlo",
   "font_size": 13,
@@ -26,14 +26,14 @@
           "type": "block",
           "size": { "px": 52 },
           "window_drag": true,
-          "content": { "mod": "t3", "props": { "part": "header" } }
+          "content": { "mod": "vibest", "props": { "part": "header" } }
         },
-        { "id": "sidebar-threads", "type": "block", "content": { "mod": "t3", "props": { "part": "threads" } } },
+        { "id": "sidebar-threads", "type": "block", "content": { "mod": "vibest", "props": { "part": "threads" } } },
         {
           "id": "sidebar-footer",
           "type": "block",
           "size": { "px": 48 },
-          "content": { "mod": "t3", "props": { "part": "footer" } }
+          "content": { "mod": "vibest", "props": { "part": "footer" } }
         }
       ]
     },
@@ -48,7 +48,7 @@
           "type": "block",
           "size": { "px": 52 },
           "window_drag": true,
-          "content": { "mod": "t3", "props": { "part": "topbar" } }
+          "content": { "mod": "vibest", "props": { "part": "topbar" } }
         },
         {
           "id": "workspace-body",
@@ -82,7 +82,7 @@
               "children": [
                 { "id": "changes", "type": "block", "content": { "mod": "changes" } },
                 { "id": "files", "type": "block", "content": { "mod": "files" } },
-                { "id": "vibest-sessions", "type": "block", "content": { "mod": "vibest-sessions" } }
+                { "id": "agents", "type": "block", "content": { "mod": "vibest", "props": { "part": "agents" } } }
               ]
             }
           ]

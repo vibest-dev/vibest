@@ -1,9 +1,8 @@
 import { h_flex, v_flex } from "gpui-base"
-import { div, View } from "gpui-kit"
-import { appHome, exec, type Theme, theme } from "herdr"
+import { div } from "gpui-kit"
+import { appHome, exec, type Theme } from "herdr"
 
-import { sessionStatus } from "../shared/format.ts"
-import { cliArgv, commandNote, parseSessions, type SessionRow, settleList, statusVerdict } from "../shared/vibest.ts"
+import { cliArgv, commandNote, parseSessions, type SessionRow, settleList, statusVerdict } from "./cli.ts"
 import {
   closePull,
   completePull,
@@ -12,26 +11,24 @@ import {
   projectHeading,
   type Pull,
   requestPull,
-  rowNote,
   rowTitle,
+  rowTooltip,
+  sessionStatus,
+  shortId,
   snapshotNote,
 } from "./model.ts"
 
-export default class VibestSessions extends View {
-  sessions!: readonly SessionRow[]
-  note!: string
-  asOf!: string
-  pull!: Pull
+export class AgentList {
+  sessions: readonly SessionRow[] = []
+  note = "Reading vibestd…"
+  asOf = ""
+  pull: Pull = idlePull()
 
-  init(_props: unknown, cx: Cx): void {
-    this.sessions = []
-    this.note = "Reading vibestd…"
-    this.asOf = ""
-    this.pull = idlePull()
+  constructor(cx: Cx) {
     this.request(cx)
   }
 
-  close(_cx: Cx): void {
+  close(): void {
     this.pull = closePull(this.pull)
   }
 
@@ -95,26 +92,20 @@ export default class VibestSessions extends View {
   }
 
   sessionRow(colors: Theme, session: SessionRow): Chain {
-    const row = h_flex()
+    return h_flex()
       .id(`session-${session.id}`)
-      .gap(6)
+      .gap(8)
       .px(2)
       .py(2)
       .items_center()
       .rounded(4)
-      .child(div().flex_1().truncate().text_color(colors.foreground).child(rowTitle(session)))
-      .child(
-        div()
-          .flex_none()
-          .text_color(colors.dim)
-          .child(`${session.harness} ${sessionStatus(session)}`),
-      )
-      .child(div().flex_none().text_color(colors.dim).child(session.id.slice(0, 8)))
-    return row.child(div().flex_none().text_color(colors.dim).child(rowNote(session)))
+      .tooltip(rowTooltip(session))
+      .child(div().flex_1().min_w(0).truncate().text_color(colors.foreground).child(rowTitle(session)))
+      .child(div().flex_none().text_color(colors.muted).child(sessionStatus(session)))
+      .child(div().flex_none().text_color(colors.dim).child(shortId(session)))
   }
 
-  render(_cx: Cx): Chain {
-    const colors = theme()
+  render(colors: Theme): Chain {
     const rows = groupSessions(this.sessions).flatMap((group) => [
       div()
         .id(`project-${group.projectId}`)
@@ -124,7 +115,7 @@ export default class VibestSessions extends View {
       ...group.sessions.map((session) => this.sessionRow(colors, session)),
     ])
     return v_flex()
-      .id("vibest-sessions")
+      .id("agents")
       .size_full()
       .bg(colors.surface)
       .p(10)
@@ -135,11 +126,11 @@ export default class VibestSessions extends View {
         h_flex()
           .gap(8)
           .items_center()
-          .child(div().font_semibold().text_color(colors.foreground).child("Vibest"))
+          .child(div().font_semibold().text_color(colors.foreground).child("Agents"))
           .child(div().flex_1())
           .child(
             div()
-              .id("vibest-refresh")
+              .id("agents-refresh")
               .px(6)
               .py(2)
               .rounded(4)
