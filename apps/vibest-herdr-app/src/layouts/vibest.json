@@ -3,7 +3,7 @@
   "type": "row",
   "titlebar": "none",
   "theme": { "light": "vibest-light", "dark": "vibest-dark" },
-  "traffic_lights": [17, 16],
+  "traffic_lights": [13, 12],
   "preview": "layouts/vibest.svg",
   "terminal_padding": [12, 12],
   "background": "chrome",
@@ -20,7 +20,7 @@
         {
           "id": "sidebar-header",
           "type": "block",
-          "size": { "px": 40 },
+          "size": { "px": 32 },
           "window_drag": true,
           "content": { "mod": "vibest-sidebar-header" }
         },
@@ -42,7 +42,7 @@
         {
           "id": "topbar",
           "type": "block",
-          "size": { "px": 40 },
+          "size": { "px": 32 },
           "window_drag": true,
           "content": { "mod": "vibest-topbar" }
         },
