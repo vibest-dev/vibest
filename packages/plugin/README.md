@@ -53,20 +53,22 @@ import { Effect } from "effect"
 
 declare const mine: Omit<Runtime.RuntimeDefinition, "id" | "caller">
 
+const definition: Runtime.RuntimeDefinition = {
+  ...mine,
+  id: "mine",
+  caller: { env: ["MINE_TERM"], terminal: (env) => Effect.succeed(env.MINE_TERM) },
+}
+
 export default Plugin.define({
   id: "runtime-mine",
-  effect: (context) =>
-    context.runtime
-      .transform((editor) =>
-        editor.add({
-          ...mine,
-          id: "mine",
-          caller: { env: ["MINE_TERM"], terminal: (env) => Effect.succeed(env.MINE_TERM) },
-        }),
-      )
-      .pipe(Effect.asVoid),
+  effect: (context) => context.runtime.transform((editor) => editor.add(definition)).pipe(Effect.asVoid),
 })
 ```
+
+Keep stable references in runtime definitions: build the definition (and any function you put in it with `update`)
+once, outside the transform, because every registry commit runs all transforms again, and a member that is a new
+inline arrow each time makes vibest treat the runtime as replaced (a `live.reset` and a `machine.connect` per connected
+machine).
 
 `runtimeContract(definition, { cwd })` from `@vibest/plugin/testing` checks a definition against a real local
 instance.
