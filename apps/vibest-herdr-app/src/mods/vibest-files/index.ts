@@ -140,7 +140,7 @@ export default class Files extends View {
         }),
       )
     return h_flex()
-      .h(currentFit().header)
+      .h(currentFit().header + currentFit().inset)
       .flex_none()
       .px(6)
       .gap(4)

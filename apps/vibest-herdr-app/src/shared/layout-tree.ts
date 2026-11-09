@@ -5,6 +5,7 @@ export interface LayoutNode {
   readonly padding?: number | readonly number[]
   readonly size?: { readonly px?: number }
   readonly traffic_lights?: readonly number[]
+  readonly terminal_padding?: readonly number[]
   readonly content?: {
     readonly pane?: { readonly border?: { readonly width?: number }; readonly header?: { readonly height?: number } }
   }
