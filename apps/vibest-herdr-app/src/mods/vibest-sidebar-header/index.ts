@@ -1,5 +1,5 @@
 import { h_flex } from "gpui-base"
-import { div, type Element, View } from "gpui-kit"
+import { type Element, View } from "gpui-kit"
 import { run, window } from "herdr"
 
 import { iconButton } from "../../shared/icon-button.ts"
@@ -15,11 +15,8 @@ const header = (t: Theme): Element => {
     .pr(12)
     .pt(8)
     .items_center()
-    .gap(4)
     .bg(t.chrome)
-    .text_size(14)
     .child(iconButton(t, "toggle-sidebar", "panel-left", () => run("layout.toggle", { id: "sidebar" })))
-    .child(div().font_medium().text_color(t.foreground).child("Vibest"))
 }
 
 export default class SidebarHeader extends View {
