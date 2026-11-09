@@ -17,7 +17,7 @@
       ],
       "outputs": ["dist/**", "bin/vibest", "harnesses/**"]
     },
-    "vibest-herdr-app#build": { "outputs": ["mods/*/main.js"] },
+    "vibest-herdr-app#build": { "outputs": ["dist/**"] },
     "@vibest/claude#build": { "cache": false },
     "@vibest/cursor#build": { "cache": false },
     "@vibest/pi#build": { "cache": false },

@@ -11,8 +11,8 @@
   },
   "type": "module",
   "scripts": {
-    "build": "bun build mods/*/index.ts --root mods --entry-naming \"[dir]/main.[ext]\" --outdir mods --format esm --target browser --external gpui-kit --external gpui-base --external herdr",
-    "check": "for mod in mods/*/; do herdr-app check \"$mod\" || exit 1; done",
+    "build": "bun build.ts",
+    "check": "for mod in dist/mods/*/; do herdr-app check \"$mod\" || exit 1; rm -f \"$mod\"gpui-kit.d.ts \"$mod\"herdr.d.ts \"$mod\"jsconfig.json; done",
     "typecheck": "tsrs --noEmit --fast",
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run apps/vibest-herdr-app"
   }

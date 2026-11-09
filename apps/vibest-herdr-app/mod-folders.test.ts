@@ -4,15 +4,12 @@ interface ViteImportMeta {
   glob(pattern: readonly string[], options: { query: "?raw"; import: "default"; eager: true }): Record<string, string>
 }
 
-const sources = (import.meta as unknown as ViteImportMeta).glob(
-  ["./mods/*/*.ts", "./shared/*.ts", "!./mods/*/*.d.ts"],
-  {
-    query: "?raw",
-    import: "default",
-    eager: true,
-  },
-)
-const manifests = (import.meta as unknown as ViteImportMeta).glob(["./mods/*/mod.json"], {
+const sources = (import.meta as unknown as ViteImportMeta).glob(["./src/mods/*/*.ts", "./src/shared/*.ts"], {
+  query: "?raw",
+  import: "default",
+  eager: true,
+})
+const manifests = (import.meta as unknown as ViteImportMeta).glob(["./src/mods/*/mod.json"], {
   query: "?raw",
   import: "default",
   eager: true,
@@ -42,7 +39,7 @@ describe("mod folders", () => {
   it("lets a mod import only its own folder and shared/, and shared/ only itself", () => {
     const crossings = files.flatMap((file) =>
       imports(file)
-        .filter((target) => folderOf(target) !== folderOf(file) && folderOf(target) !== "./shared")
+        .filter((target) => folderOf(target) !== folderOf(file) && folderOf(target) !== "./src/shared")
         .map((target) => `${file} -> ${target}`),
     )
     expect(crossings).toEqual([])

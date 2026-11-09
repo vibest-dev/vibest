@@ -14,6 +14,3 @@ packages/integration/cursor/.cursor-plugin/
 packages/integration/cursor/hooks/
 apps/vibest-herdr/harnesses/
 packages/integration/pi/dist/
-apps/vibest-herdr-app/mods/*/gpui-kit.d.ts
-apps/vibest-herdr-app/mods/*/herdr.d.ts
-apps/vibest-herdr-app/mods/*/jsconfig.json

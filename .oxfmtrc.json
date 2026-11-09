@@ -8,9 +8,6 @@
   "trailingComma": "all",
   "experimentalSortImports": {},
   "ignorePatterns": [
-    "apps/vibest-herdr-app/mods/*/main.js",
-    "apps/vibest-herdr-app/mods/*/*.d.ts",
-    "apps/vibest-herdr-app/mods/*/jsconfig.json",
     "apps/vibest-herdr-app/types/**",
     "**/dist/**",
     "**/node_modules/**",
