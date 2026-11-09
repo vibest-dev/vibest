@@ -1,1 +1,1 @@
-export const TRAFFIC_LIGHTS_INSET = 73
+export const TRAFFIC_LIGHTS_INSET = 65

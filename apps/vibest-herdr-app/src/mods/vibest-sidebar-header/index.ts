@@ -8,7 +8,7 @@ import { TRAFFIC_LIGHTS_INSET } from "../../shared/traffic-lights.ts"
 
 const header = (t: Theme): Element => {
   const w = window()
-  const inset = w?.platform === "macos" && !w.fullscreen ? TRAFFIC_LIGHTS_INSET : 16
+  const inset = w?.platform === "macos" && !w.fullscreen ? TRAFFIC_LIGHTS_INSET : 8
   return h_flex()
     .size_full()
     .pl(inset)

@@ -7,6 +7,7 @@
   "preview": "layouts/vibest.svg",
   "terminal_padding": [12, 12],
   "background": "chrome",
+  "padding": [0, 8],
   "children": [
     {
       "id": "sidebar",
@@ -49,7 +50,7 @@
         {
           "id": "workspace-body",
           "type": "row",
-          "padding": 8,
+          "padding": [8, 0],
           "gap": 8,
           "children": [
             {
