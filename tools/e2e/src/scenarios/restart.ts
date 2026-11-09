@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { answerFolderTrust } from "../drivers/claude.ts"
+import { answerFolderTrust, typeAndEnter } from "../drivers/claude.ts"
 import {
   ask,
   claudeEnv,
@@ -234,9 +234,11 @@ const checks: ReadonlyArray<Check> = [
         const before = main()!
         const daemonBefore = await w.daemonPid()
         const address = async () =>
-          (await w.json<Array<{ id: string; address: unknown }>>(["ls"], { cwd: repo, env })).find(
-            (e) => e.id === before.id,
-          )?.address
+          (
+            await w
+              .json<{ sessions: Array<{ id: string; address: unknown }> }>(["ls"], { cwd: repo, env })
+              .then((l) => l.sessions)
+          ).find((e) => e.id === before.id)?.address
         const addressBefore = await address()
         await ok(["run", "pi", "--session", session, "--env", piEnv, ask("slow")])
         await until("the main agent's held turn", () => model.held() > 0, 120_000)
@@ -518,8 +520,14 @@ const checks: ReadonlyArray<Check> = [
         const before = main()!
 
         await install.point(binary)
-        await herdr(socket, "pane.send_text", { pane_id: pane(), text: UPDATE })
-        await herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
+        await typeAndEnter(
+          screen,
+          {
+            text: (text) => herdr(socket, "pane.send_text", { pane_id: pane(), text }),
+            enter: () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] }),
+          },
+          UPDATE,
+        )
 
         await until(
           "the main agent restarted on this integration",

@@ -32,6 +32,19 @@ such a rewatch one more read follows a second later, because Bun 1.4's `fs.watch
 directories' events right after a watch closes (drop it when Bun no longer does). A teardown that times out is left
 running, so an old revision's finalizers can overlap the new setup.
 
+## Machine hooks
+
+`ctx.machine.hook("connect" | "remove", callback, { runtime? })` subscribes to `machine.connect` and `machine.remove`
+and returns a `Registration`; `{ runtime: id }` scopes the hook to one runtime (`Plugins.machine(hook, event,
+runtime?)`: with a runtime, the hooks scoped to it plus the unscoped ones run; without one, all of them). Unlike
+`agent.*`, every subscriber runs, one after another, even after one crashed or timed out; each is bounded by 30 s (hc's
+own dial goes over ssh), not the 5 s host default. The event's `notes` come back tagged with the plugin, and a crash or
+a timeout becomes a note of its own (`plugin <id> crashed: …`, `plugin <id> timed out after 30s`). Each commit of the
+runtime registry publishes the ids of the runtime definitions it added or replaced (`Runtimes.added`), and `connect`
+fires for each of them on every connected machine, so a runtime plugin loaded later catches up. When they fire:
+[multi-machine.md](multi-machine.md#terminals-on-other-machines). `@vibest/plugin/testing` `machineHooks(plugin)`
+fires a plugin's machine hooks in its own tests.
+
 ## Loading on Bun
 
 In `platform/bun.ts` and `platform/plugin-source.ts` (after OpenCode V2's `source.bun.ts`): inside the

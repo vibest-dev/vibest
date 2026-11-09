@@ -1,6 +1,6 @@
-import type { Claim } from "@vibest/client/client"
+import { type Claim, type VibestClient, withVibest } from "@vibest/client/client"
 import { Forbidden } from "@vibest/protocol/rpc"
-import { Config, Effect, Option, Path } from "effect"
+import { Config, Console, Effect, Option, Path, Schema } from "effect"
 
 export const caller = Effect.gen(function* () {
   const path = yield* Path.Path
@@ -23,3 +23,9 @@ export const userOnly = (command: string) =>
         )
       : Effect.void,
   )
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+export const json = (value: unknown) => Console.log(encodeJson(value))
+
+export const vibest = <A, E, R>(f: (client: VibestClient, agent: boolean) => Effect.Effect<A, E, R>) =>
+  Effect.flatMap(caller, (c) => withVibest(c.claim, (client) => f(client, c.agent), { start: !c.agent }))

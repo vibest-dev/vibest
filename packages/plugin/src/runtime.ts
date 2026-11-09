@@ -5,6 +5,14 @@ import type { Transform } from "./registration.ts"
 export interface Machine {
   readonly id: string
   readonly target?: string
+  readonly link?: Readonly<Record<string, string>>
+}
+
+export interface Located {
+  readonly missing: boolean
+  readonly terminals: ReadonlyMap<string, Terminal>
+  readonly as?: string
+  readonly note?: string
 }
 
 export interface Terminal {
@@ -56,12 +64,6 @@ export interface RuntimeCaller {
   readonly target?: (env: CallerValues, named?: string) => string | undefined
 }
 
-export interface RuntimeLocation {
-  readonly address?: string
-  readonly missing?: true
-  readonly reason?: string
-}
-
 export interface RuntimeDefinition {
   readonly id: string
   readonly caller?: RuntimeCaller
@@ -106,12 +108,8 @@ export interface RuntimeDefinition {
   readonly prepare?: (machine: Machine) => Effect.Effect<void, RuntimeError>
   readonly doctor?: (machine: Machine, harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>
   readonly attach?: (machine: Machine) => ReadonlyArray<string>
-  readonly link?: (machine: Machine) => Effect.Effect<Readonly<Record<string, string>> | undefined>
-  readonly locate?: (
-    machine: Machine,
-    link: Readonly<Record<string, string>>,
-    terminal: string,
-  ) => Effect.Effect<RuntimeLocation, RuntimeError>
+  readonly link?: () => Effect.Effect<Readonly<Record<string, string>> | undefined>
+  readonly locate?: (machine: Machine, sessions: ReadonlyArray<string>) => Effect.Effect<Located>
 }
 
 export interface RuntimeEditor {

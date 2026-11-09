@@ -10,6 +10,8 @@ export interface RepositoryFacts {
   readonly files?: Readonly<Record<string, string>>
   readonly copyFails?: string
   readonly addFails?: string
+  readonly head?: string
+  readonly commits?: ReadonlyArray<string>
 }
 
 export interface CheckoutFacts {
@@ -114,9 +116,9 @@ export class FakeGit extends Context.Service<
               ...(found.repository.facts.files === undefined ? {} : { files: found.repository.facts.files }),
             })
           }),
-        addWorktree: (root, path) =>
+        addWorktree: (root, path, commit) =>
           Effect.gen(function* () {
-            const args = ["worktree", "add", "--detach", path]
+            const args = ["worktree", "add", "--detach", path, ...(commit === undefined ? [] : [commit])]
             const found = yield* inRepository(args, root)
             if (found.repository.facts.addFails !== undefined)
               return yield* refused(args, found.repository.facts.addFails)
@@ -131,6 +133,14 @@ export class FakeGit extends Context.Service<
             found.repository.checkouts.set(yield* real(path), { facts: {} })
             yield* checkOut(found.repository, path, args)
           }),
+        head: (dir) =>
+          Effect.flatMap(inRepository(["rev-parse", "HEAD"], dir), (found) =>
+            found.repository.facts.head === undefined
+              ? Effect.fail(refused(["rev-parse", "HEAD"], "fatal: ambiguous argument 'HEAD'"))
+              : Effect.succeed(found.repository.facts.head),
+          ),
+        hasCommit: (dir, commit) =>
+          Effect.map(locate(dir), (found) => found?.repository.facts.commits?.includes(commit) ?? false),
         removeWorktree: (root, path) =>
           Effect.gen(function* () {
             const args = ["worktree", "remove", path]

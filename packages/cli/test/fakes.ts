@@ -6,11 +6,16 @@ import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harness, Harnesses, HarnessUnavailable, makeHarnesses } from "@vibest/core/harness"
 import type { HarnessDefinition, HarnessesShape, RuntimeDefinition, RuntimesShape } from "@vibest/core/host"
+import { VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
+import { Machines, MachineTransport } from "@vibest/core/machines"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout } from "@vibest/core/paths"
-import { makeHost, Plugins } from "@vibest/core/plugins"
+import { Peers } from "@vibest/core/peer"
+import { type Candidate, makeHost, Plugins } from "@vibest/core/plugins"
 import { type Liveness, Processes } from "@vibest/core/processes"
+import { Remote } from "@vibest/core/remote"
+import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
 import { turnEndFrom } from "@vibest/core/results"
 import { make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
@@ -19,6 +24,7 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
+import { randomId } from "@vibest/schema/id"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import {
   Clock,
@@ -324,7 +330,12 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly db?: (db: Db["Service"]) => Db["Service"]
   readonly missingBinary?: ReadonlyArray<string>
   readonly harnesses?: ReadonlyArray<HarnessDefinition>
+  readonly sshHosts?: Readonly<Record<string, string>>
+  readonly transport?: MachineTransport["Service"]
+  readonly sessions?: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]
 }
+
+const noTransport: MachineTransport["Service"] = () => Effect.fail(new Error("no machine transport in this test"))
 
 const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
 
@@ -505,6 +516,19 @@ const harnessOf = (options: TestOptions) =>
           ),
   })
 
+type PluginEntry = NonNullable<TestOptions["plugins"]>[number]
+
+const candidateOf = (entry: PluginEntry): Candidate => {
+  const plugin = "effect" in entry ? entry : entry.plugin
+  const pluginOptions = "effect" in entry ? {} : (entry.options ?? {})
+  return { source: `test:${plugin.id}`, revision: "-", options: pluginOptions, plugin }
+}
+
+export class PluginHost extends Context.Service<
+  PluginHost,
+  { readonly load: (added: ReadonlyArray<PluginEntry>) => Effect.Effect<void> }
+>()("test/PluginHost") {}
+
 const over = (options: TestOptions) => {
   const runtime = Layer.effect(
     Runtimes,
@@ -518,25 +542,23 @@ const over = (options: TestOptions) => {
       ),
     ),
   )
-  const candidates = [
+  const candidates: ReadonlyArray<Candidate> = [
     { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
-    ...(options.plugins ?? []).map((entry) => {
-      const plugin = "effect" in entry ? entry : entry.plugin
-      const pluginOptions = "effect" in entry ? {} : (entry.options ?? {})
-      return { source: `test:${plugin.id}`, revision: "-", options: pluginOptions, plugin }
-    }),
+    ...(options.plugins ?? []).map(candidateOf),
   ]
-  const hostOptions = options.pluginTimeout ? { timeout: options.pluginTimeout } : {}
-  const plugins = Layer.effect(
-    Plugins,
-    options.activateLate
-      ? Effect.gen(function* () {
-          const host = yield* makeHost(hostOptions)
-          host.ready.closeUnsafe()
-          yield* host.activate(candidates).pipe(Effect.andThen(host.ready.open), Effect.forkScoped)
-          return host.service
-        })
-      : Plugins.make(candidates, hostOptions),
+  const plugins = Layer.effectContext(
+    Effect.gen(function* () {
+      const host = yield* makeHost(options.pluginTimeout ? { timeout: options.pluginTimeout } : {})
+      if (options.activateLate) {
+        host.ready.closeUnsafe()
+        yield* host.activate(candidates).pipe(Effect.andThen(host.ready.open), Effect.forkScoped)
+      } else yield* host.activate(candidates)
+      return Context.make(Plugins, host.service).pipe(
+        Context.add(PluginHost, {
+          load: (added) => host.activate([...candidates, ...added.map(candidateOf)]),
+        }),
+      )
+    }),
   ).pipe(Layer.provideMerge(Subscriptions.layer))
   const fakeIntegrationReportsReadyOnStart = Layer.effectDiscard(
     Effect.gen(function* () {
@@ -549,7 +571,18 @@ const over = (options: TestOptions) => {
     }),
   )
   return Layer.provideMerge(FakeRuntime.layer(options))(
-    Layer.effect(Sessions, Sessions.make({ maxSessions: options.maxSessions })).pipe(
+    Layer.merge(Peers.layer, Remote.layer).pipe(
+      Layer.provideMerge(
+        Layer.effect(
+          Sessions,
+          Effect.flatMap(Sessions.make({ maxSessions: options.maxSessions }), (s) =>
+            Effect.map(Db, (db) => (options.sessions ?? ((x) => x))(s, db)),
+          ),
+        ),
+      ),
+      Layer.provideMerge(
+        Machines.layer.pipe(Layer.provide(Layer.succeed(MachineTransport, options.transport ?? noTransport))),
+      ),
       Layer.provideMerge(fakeIntegrationReportsReadyOnStart),
       Layer.provideMerge(plugins),
       Layer.provideMerge(Inbox.layer),
@@ -574,8 +607,12 @@ const over = (options: TestOptions) => {
       Layer.provideMerge(Drain.layer),
       Layer.provideMerge(Restarting.layer),
       Layer.provideMerge(FakeGit.layers),
+      Layer.provideMerge(
+        Layer.succeed(SshHosts, { hostName: (alias) => Effect.succeed(options.sshHosts?.[alias] ?? alias) }),
+      ),
       Layer.provideMerge(Platform.services),
       Layer.provideMerge(Bus.layer),
+      Layer.provideMerge(Layer.sync(VibestdIdentity, () => ({ id: randomId(), name: "test-host" }))),
     ),
   )
 }
@@ -592,7 +629,7 @@ export type TestServices = Layer.Success<ReturnType<typeof testLayer>> | FakeRun
 
 export class GaveUp extends Schema.TaggedError<GaveUp>()("GaveUp", { helper: Schema.String }) {}
 
-const yieldToIo = TestClock.withLive(Effect.sleep("10 millis"))
+export const yieldToIo = TestClock.withLive(Effect.sleep("10 millis"))
 
 const UNTIL_ATTEMPTS = 2000
 

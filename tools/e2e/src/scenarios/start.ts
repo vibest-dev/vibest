@@ -15,7 +15,8 @@ type Entry = {
   routing?: { trace: Array<{ hook: string }> }
 }
 
-const mains = async (w: World) => (await w.json<Array<Entry>>(["ls"])).filter((e) => e.agent === "main")
+const mains = async (w: World) =>
+  (await w.json<{ sessions: Array<Entry> }>(["ls"]).then((l) => l.sessions)).filter((e) => e.agent === "main")
 const start = (w: World) => w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi }, timeoutMs: 60_000 })
 
 const herdr = (socket: string, method: string, params: Record<string, unknown>) =>
@@ -205,9 +206,9 @@ const move = (harness: "claude" | "pi"): Check => ({
       await until("only a shell in A", shellOnly, 30_000).catch(async () =>
         fail(`A runs ${JSON.stringify(await foreground(socket, a))}`),
       )
-      const mains = (await w.json<Array<{ agent: string; address: { id: string } }>>(["ls"])).filter(
-        (e) => e.agent === "main",
-      )
+      const mains = (
+        await w.json<{ sessions: Array<{ agent: string; address: { id: string } }> }>(["ls"]).then((l) => l.sessions)
+      ).filter((e) => e.agent === "main")
       expect(mains.length === 1 && mains[0]!.address.id.endsWith(b), `main agents: ${JSON.stringify(mains)}`)
     } finally {
       pi.stop()

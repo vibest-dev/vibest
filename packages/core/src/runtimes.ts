@@ -1,6 +1,6 @@
 import * as VibestPlugin from "@vibest/plugin"
 import { NoRuntime } from "@vibest/schema/session"
-import { Cause, Context, Effect, Fiber, FileSystem, Layer, type Scope, Stream } from "effect"
+import { Cause, Context, Effect, Fiber, FileSystem, Layer, PubSub, type Scope, Stream } from "effect"
 
 import { Bus, type LiveEvent } from "./bus.ts"
 import type { HostEnv as HostEnvShape, RuntimesShape } from "./host.ts"
@@ -39,29 +39,43 @@ const notLoaded = (id: string, loaded: ReadonlyArray<Runtime>) =>
     message: `the runtime "${id}" is not loaded${loaded.length === 0 ? "" : `; loaded: ${loaded.map((runtime) => runtime.id).join(", ")}`}`,
   })
 
+const sameMembers = (a: Runtime, b: Runtime) => {
+  const keys = Object.keys(a) as Array<keyof Runtime>
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
+}
+
 export const make: Effect.Effect<RuntimesShape, never, Bus | Scope.Scope> = Effect.gen(function* () {
   const bus = yield* Bus
   const env = yield* HostEnv
   const own = yield* Effect.scope
-  const merging = new Map<Runtime, Fiber.Fiber<void>>()
+  const merging = new Map<string, { readonly runtime: Runtime; readonly fiber: Fiber.Fiber<void> }>()
+  const added = yield* PubSub.unbounded<ReadonlyArray<string>>()
   const reconcile = (list: ReadonlyArray<Runtime>) =>
     Effect.gen(function* () {
-      for (const [runtime, fiber] of merging)
-        if (!list.includes(runtime)) {
-          merging.delete(runtime)
-          yield* Fiber.interrupt(fiber)
-        }
+      for (const [id, entry] of merging) {
+        const next = list.find((runtime) => runtime.id === id)
+        if (next !== undefined && sameMembers(next, entry.runtime)) continue
+        merging.delete(id)
+        yield* Fiber.interrupt(entry.fiber)
+      }
+      const fresh: Array<string> = []
       for (const runtime of list) {
-        if (merging.has(runtime)) continue
+        const kept = merging.get(runtime.id)
+        if (kept !== undefined) {
+          merging.set(runtime.id, { runtime, fiber: kept.fiber })
+          continue
+        }
+        fresh.push(runtime.id)
         const fiber = yield* runtime.events.pipe(
           Stream.runForEach((event) => bus.observe(live(runtime.id, event))),
           Effect.catchCause(() => Effect.void),
           Effect.forkIn(own),
         )
-        merging.set(runtime, fiber)
+        merging.set(runtime.id, { runtime, fiber })
         yield* bus.observe({ type: "live.reset", runtime: runtime.id, machine: "local" })
       }
       env.drop(list.flatMap((runtime) => runtime.caller?.env ?? []))
+      if (fresh.length > 0) yield* PubSub.publish(added, fresh)
     })
   const registry = Registry.definitions<Runtime>("runtime", reconcile)
   const all = Effect.sync(() => registry.get())
@@ -100,6 +114,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | Scope.Scope> = Effe
           ),
         ),
       ),
+    added: Stream.fromPubSub(added),
     callers: Effect.sync(() =>
       registry
         .get()
@@ -159,6 +174,24 @@ export const paneTail = (h: Runtime, terminal: Terminal | undefined, lines = 30)
         Effect.orElseSucceed(() => ""),
       )
     : Effect.succeed("")
+
+export const runtimesHere = (runtimes: RuntimesShape) =>
+  Effect.flatMap(runtimes.statuses({ id: "local" }), (rows) =>
+    Effect.forEach(
+      rows,
+      ({ runtime, status }) =>
+        (runtime.link?.() ?? Effect.succeed(undefined)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+          Effect.map((link) => ({
+            kind: runtime.id,
+            status: status.status,
+            ...("reason" in status ? { reason: status.reason } : {}),
+            ...(link === undefined ? {} : { link }),
+          })),
+        ),
+      { concurrency: "unbounded" },
+    ),
+  )
 
 export const machinesListing = (
   runtimes: RuntimesShape,

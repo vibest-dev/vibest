@@ -3,7 +3,7 @@ import path from "node:path"
 
 import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
 import type { Check } from "../check.ts"
-import { answerFolderTrust } from "../drivers/claude.ts"
+import { answerFolderTrust, typeAndEnter } from "../drivers/claude.ts"
 import {
   ask,
   claudeConfigOf,
@@ -81,7 +81,10 @@ const claudeMain = async (
   await until(
     "the main agent in vibest ls",
     async () => {
-      main = (await w.json<Array<Entry>>(["ls"], { cwd: repo })).find((e) => e.agent === "main")?.id ?? ""
+      main =
+        (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
+          (e) => e.agent === "main",
+        )?.id ?? ""
       return main !== ""
     },
     60_000,
@@ -143,8 +146,10 @@ const claudeMain = async (
     return shown(`General Agent "${title}" completed (${shortId})`, marker)
   }
   const enter = () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
-  const typeIn = async (text: string) => {
-    await herdr(socket, "pane.send_text", { pane_id: pane(), text })
+  const typeText = (text: string) => herdr(socket, "pane.send_text", { pane_id: pane(), text })
+  const typeIn = (text: string) => typeAndEnter(screen, { text: typeText, enter }, text)
+  const typeInShell = async (text: string) => {
+    await typeText(text)
     await enter()
   }
   const claudePid = async () => {
@@ -168,6 +173,7 @@ const claudeMain = async (
     start,
     result,
     typeIn,
+    typeInShell,
     enter,
     claudePid,
     screen,
@@ -344,7 +350,7 @@ const checks: ReadonlyArray<Check> = [
             )
           },
         )
-        await c.typeIn([binary, "--harness", "claude"].join(" "))
+        await c.typeInShell([binary, "--harness", "claude"].join(" "))
         await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
         await round("cmresumed")
         expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
@@ -426,7 +432,7 @@ const checks: ReadonlyArray<Check> = [
             .split(/\s+/)
         const [, pgid, tpgid] = ps(stopped!)
         if (pgid === tpgid) process.kill(stopped!, "SIGCONT")
-        else await c.typeIn("fg")
+        else await c.typeInShell("fg")
         const resumed = stopped!
         stopped = undefined
         await until(
@@ -473,7 +479,10 @@ const checks: ReadonlyArray<Check> = [
           env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
-        const mains = async () => (await w.json<Array<Entry>>(["ls"], { cwd: repo })).filter((e) => e.agent === "main")
+        const mains = async () =>
+          (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).filter(
+            (e) => e.agent === "main",
+          )
         await until("the main agent in vibest ls", async () => (await mains()).length === 1, 30_000)
         const reached = (what: string, marker: string) =>
           until(what, () => model.seen.some((m) => m.includes("<agent-") && m.includes(marker)), 180_000).catch(

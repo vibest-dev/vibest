@@ -18,13 +18,13 @@ import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
 import { Restarting } from "@vibest/core/restarting"
 import { envelope } from "@vibest/core/results"
 import { machinesListing, NoRuntime, Runtimes, type Terminal } from "@vibest/core/runtimes"
-import { NoSuchSession, runtimeEnv, Sessions } from "@vibest/core/sessions"
+import { defaultSessionName, NoSuchSession, runtimeEnv, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { UpdateCheck } from "@vibest/core/update-check"
 import { NotInRepository } from "@vibest/core/worktree"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import {
-  ACCESS,
+  type ACCESS,
   Caller,
   CAPABILITIES,
   DaemonBusy,
@@ -63,11 +63,10 @@ import { AdmissionLive, CallerGateLive, noteOpen, ProtocolGateLive } from "./gat
 import * as Hooks from "./hooks.ts"
 import { integrationHandlers } from "./integration.ts"
 import { placeOf, sameCoordinator, sessionListing, toInfo } from "./listing.ts"
+import { remoteHandlers } from "./remote-handlers.ts"
 
 type Access = typeof ACCESS
-type MethodOf<A> = { [K in keyof Access]: Access[K] extends A ? K : never }[keyof Access]
-
-const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
+type MethodOf<A> = { [K in keyof Access]: Access[K] extends A | readonly [A, "peer"] ? K : never }[keyof Access]
 
 export const Identity = Context.Reference<DaemonIdentity>("vibest/DaemonIdentity", { defaultValue: () => ({}) })
 
@@ -122,40 +121,11 @@ export const handlers = VibestRpcs.toLayer(
     const agent = (method: MethodOf<"agent" | "owner">) =>
       Effect.gen(function* () {
         const c = yield* Caller
-        if (c._tag === "Session")
-          return yield* new Forbidden({
-            method,
-            message: `session ${c.sessionId} may not call ${method}; sessions only report to their coordinator (vibest report)`,
-          })
-        return c
-      })
-
-    const managed = (method: MethodOf<"owner">, input: string) =>
-      Effect.gen(function* () {
-        const c = yield* agent(method)
-        const id = yield* db.resolveSession(input)
-        const session = yield* db.getSession(id)
-        if (!session) {
-          const identity = yield* db.sessionIdentity(id)
-          if (identity?.agent === "coordinator") {
-            const directory = yield* db.projectDirectory(identity.projectId)
-            const name =
-              directory !== undefined && directory !== ""
-                ? directory.slice(directory.lastIndexOf("/") + 1)
-                : identity.projectId
-            return yield* new NoSuchSession({
-              id,
-              message: `${id} is the main agent of project ${name}. Stop it in its terminal.`,
-            })
-          }
-          return yield* new NoSuchSession({ id, message: `no session ${id}` })
-        }
-        if (c._tag === "Coordinator" && session.projectId !== c.projectId)
-          return yield* new Forbidden({
-            method,
-            message: `${id} belongs to another coordinator; only it or the user may manage it`,
-          })
-        return id
+        if (c._tag === "Cli" || c._tag === "Coordinator") return c
+        return yield* new Forbidden({
+          method,
+          message: `only the user or a main agent calls ${method}; sessions only report to their coordinator (vibest report)`,
+        })
       })
 
     const atProject = (directory: string) =>
@@ -280,7 +250,39 @@ export const handlers = VibestRpcs.toLayer(
         return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
       })
 
+    const { reach, routed, spawnOn, methods } = yield* remoteHandlers({ agent, projectOf, findAt, listed, cliOnly })
+
+    const managed = (method: MethodOf<"owner">, input: string) =>
+      Effect.gen(function* () {
+        const { c, scope } = yield* reach(method)
+        const id = yield* db.resolveSession(input, scope)
+        if (c === undefined) return id
+        const session = yield* db.getSession(id)
+        if (!session) {
+          const identity = yield* db.sessionIdentity(id)
+          if (identity?.agent === "coordinator") {
+            const directory = yield* db.projectDirectory(identity.projectId)
+            const name =
+              directory !== undefined && directory !== ""
+                ? directory.slice(directory.lastIndexOf("/") + 1)
+                : identity.projectId
+            return yield* new NoSuchSession({
+              id,
+              message: `${id} is the main agent of project ${name}. Stop it in its terminal.`,
+            })
+          }
+          return yield* new NoSuchSession({ id, message: `no session ${id}` })
+        }
+        if (c._tag === "Coordinator" && session.projectId !== c.projectId)
+          return yield* new Forbidden({
+            method,
+            message: `${id} belongs to another coordinator; only it or the user may manage it`,
+          })
+        return id
+      })
+
     return VibestRpcs.of({
+      ...methods,
       Ping: () =>
         machinesListing(runtimes, []).pipe(
           Effect.map((machines) =>
@@ -312,6 +314,7 @@ export const handlers = VibestRpcs.toLayer(
               message: `${input.agent} is reserved for the main agent (vibest)`,
             })
           const project = yield* projectOf(c, "Spawn")
+          if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c, project.id)
           return yield* sessions.spawn({
             machine: yield* machineFromCaller(input),
             root: project.directory,
@@ -487,57 +490,52 @@ export const handlers = VibestRpcs.toLayer(
           }
         }),
 
-      Send: ({ id: input, message, request }) =>
-        managed("Send", input).pipe(
-          Effect.flatMap((id) => sessions.send(id, message, request).pipe(Effect.as({ id }))),
-        ),
-      Interrupt: ({ id: input }) =>
-        managed("Interrupt", input).pipe(
-          Effect.flatMap((id) => sessions.interrupt(id).pipe(Effect.map((out) => ({ id, ...out })))),
-        ),
-      Remove: ({ id: input, keepWorktree }) =>
-        managed("Remove", input).pipe(
-          Effect.flatMap((id) =>
-            sessions
-              .remove(id, { keepWorktree })
-              .pipe(
-                Effect.catchTag("RuntimeError", (e) =>
-                  e.code === "unreachable"
-                    ? Effect.fail(new RuntimeUnreachable({ session: id, message: e.message }))
-                    : Effect.die(e),
-                ),
-              ),
+      Send: (p) =>
+        routed.Send(p, (id) =>
+          managed("Send", id).pipe(
+            Effect.flatMap((id) => sessions.send(id, p.message, p.request).pipe(Effect.as({ id }))),
           ),
-          Effect.map((out) => out ?? null),
+        ),
+      Interrupt: (p) =>
+        routed.Interrupt(p, (id) =>
+          managed("Interrupt", id).pipe(
+            Effect.flatMap((id) => sessions.interrupt(id).pipe(Effect.map((out) => ({ id, ...out })))),
+          ),
+        ),
+      Remove: (p) =>
+        routed.Remove(p, (id) =>
+          managed("Remove", id).pipe(
+            Effect.flatMap((id) =>
+              sessions
+                .remove(id, { keepWorktree: p.keepWorktree })
+                .pipe(
+                  Effect.catchTag("RuntimeError", (e) =>
+                    e.code === "unreachable"
+                      ? Effect.fail(new RuntimeUnreachable({ session: id, message: e.message }))
+                      : Effect.die(e),
+                  ),
+                ),
+            ),
+            Effect.map((out) => out ?? null),
+          ),
         ),
 
-      List: ({ stopped, all }) =>
-        Effect.gen(function* () {
-          const c = yield* agent("List")
-          if (c._tag === "Coordinator") return yield* listed(c.projectId, stopped === true)
-          if (all === true) return yield* listed(undefined, stopped === true)
-          const found = yield* findAt(c.repositoryRoot ?? "").pipe(
-            Effect.map((row) => row?.id),
-            Effect.catchTag("NotInRepository", () => Effect.succeed("all" as const)),
-          )
-          if (found === "all") return yield* listed(undefined, stopped === true)
-          if (found === undefined) return []
-          return yield* listed(found, stopped === true)
-        }),
+      Get: (p) =>
+        routed.Get(p, (input) =>
+          Effect.gen(function* () {
+            const id = yield* db.resolveSession(input, (yield* reach("Get")).scope)
+            const row = yield* sessions.get(id)
+            const session = toInfo(row, (yield* db.sessionBriefs([id])).get(id))
+            return { ...session, result: (yield* db.latestInbox(id, "result")) ?? null }
+          }),
+        ),
 
-      Get: ({ id: input }) =>
-        Effect.gen(function* () {
-          yield* agent("Get")
-          const id = yield* db.resolveSession(input)
-          const row = yield* sessions.get(id)
-          const session = toInfo(row, (yield* db.sessionBriefs([id])).get(id))
-          return { ...session, result: (yield* db.latestInbox(id, "result")) ?? null }
-        }),
-
-      Peek: ({ id: input, lines }) =>
-        managed("Peek", input).pipe(
-          Effect.flatMap((id) => sessions.peek(id, lines ?? 30)),
-          Effect.map((text) => ({ text })),
+      Peek: (p) =>
+        routed.Peek(p, (id) =>
+          managed("Peek", id).pipe(
+            Effect.flatMap((id) => sessions.peek(id, p.lines ?? 30)),
+            Effect.map((text) => ({ text })),
+          ),
         ),
 
       Report: ({ message }) =>
@@ -585,7 +583,7 @@ export const handlers = VibestRpcs.toLayer(
               ),
               Effect.forkScoped,
             )
-            const sessionRows = yield* watched(yield* listed(undefined, false))
+            const sessionRows = yield* watched(yield* listed({ _tag: "All" }, false))
             const snapshot: WatchEvent = {
               _tag: "Snapshot",
               projects: yield* snapshotProjects(sessionRows),

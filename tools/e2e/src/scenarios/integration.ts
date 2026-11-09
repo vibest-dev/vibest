@@ -33,9 +33,11 @@ import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
 
 const listed = async (w: World, id: string, cwd = w.repository) =>
-  (await w.json<Array<{ id: string; status: string; turnState: string; worktree: string }>>(["ls"], { cwd })).find(
-    (e) => e.id === id,
-  )
+  (
+    await w
+      .json<{ sessions: Array<{ id: string; status: string; turnState: string; worktree: string }> }>(["ls"], { cwd })
+      .then((l) => l.sessions)
+  ).find((e) => e.id === id)
 const turnState = async (w: World, id: string, cwd = w.repository) => (await listed(w, id, cwd))?.turnState
 
 const latest = async (w: World, id: string, cwd = w.repository) =>
@@ -167,7 +169,9 @@ const checks: ReadonlyArray<Check> = [
           await until(`${id}'s result`, async () => (await turnState(w, id)) === "completed", 120_000)
           expect(/pong/.test((await latest(w, id))?.message ?? ""), `${id}: ${(await latest(w, id))?.message}`)
         }
-        const main = (await w.json<Array<{ id: string; agent: string }>>(["ls"])).find((e) => e.agent === "main")
+        const main = (
+          await w.json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"]).then((l) => l.sessions)
+        ).find((e) => e.agent === "main")
         expect(main !== undefined, "no main agent")
         await until(
           "the Pi main agent's ready report",
@@ -476,7 +480,11 @@ const checks: ReadonlyArray<Check> = [
             expect(!(await Bun.file(ran).exists()), "herdr ran: herdr-ran.txt exists")
             const message = (await latest(w, id))?.message ?? ""
             expect(/summary: guard test/.test(message), `the session's result: ${message}`)
-            const pane = (await w.json<Array<{ id: string; address?: { id: string } }>>(["ls"]))
+            const pane = (
+              await w
+                .json<{ sessions: Array<{ id: string; address?: { id: string } }> }>(["ls"])
+                .then((l) => l.sessions)
+            )
               .find((e) => e.id === id)
               ?.address?.id.split("/")[1]
             const info = (await herdr(socket, "pane.process_info", { pane_id: pane ?? "" })).process_info as {

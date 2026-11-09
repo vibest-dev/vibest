@@ -5,11 +5,16 @@ import { Drain } from "@vibest/core/drain"
 import { Git } from "@vibest/core/git"
 import { Harness, Harnesses } from "@vibest/core/harness"
 import type { HostEnv as HostEnvShape } from "@vibest/core/host"
+import { type HostFacts, loadIdentity, VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
+import { Machines, MachineTransport } from "@vibest/core/machines"
 import { Layout, VibestCommand } from "@vibest/core/paths"
+import { Peers } from "@vibest/core/peer"
 import { Builtins, Plugins, PluginLoader, type Candidate } from "@vibest/core/plugins"
 import { type ProcessPlatform, Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
+import { Remote } from "@vibest/core/remote"
+import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
 import { HostEnv, Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
@@ -55,6 +60,8 @@ export interface Host {
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, Error>) | undefined, Error, Scope.Scope>
   readonly checkDatabase: (filename: string) => Effect.Effect<void, Error>
+  readonly host: Omit<HostFacts, "pid">
+  readonly transport: MachineTransport["Service"]
 }
 
 export { HANDOFF_ENV } from "./server.ts"
@@ -78,9 +85,13 @@ const services = (host: Host, layout: Layout["Service"]) =>
     Server.layer.pipe(Layer.provide(host.socketServer(layout.socket))),
     Http.layer.pipe(Layer.provide(host.httpServer(layout.httpSocket))),
   ).pipe(
+    Layer.provideMerge(Remote.layer),
+    Layer.provideMerge(Machines.layer.pipe(Layer.provide(Layer.succeed(MachineTransport, host.transport)))),
+    Layer.provideMerge(Peers.layer),
     Layer.provideMerge(Sessions.layer),
     Layer.provideMerge(Processes.layer(host.processes)),
     Layer.provideMerge(Git.layer),
+    Layer.provideMerge(SshHosts.layer),
     Layer.provideMerge(
       Plugins.layer.pipe(
         Layer.provide(Layer.succeed(Builtins, host.builtins)),
@@ -155,6 +166,8 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
           yield* fs.copyFile(`${layout.database}${suffix}`, `${backup}${suffix}`)
       yield* Effect.log(`vibestd took over from the previous one; its database is backed up at ${backup}`)
     }
+    const self = yield* loadIdentity(layout.identity, { ...host.host, pid: host.processes.pid })
+    if (self.warning !== undefined) yield* Effect.logWarning(self.warning)
     const identity = {
       pid: host.processes.pid,
       instance: yield* newId(),
@@ -165,7 +178,11 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
     yield* Layer.build(
       services(host, layout).pipe(
         Layer.provide(
-          Layer.mergeAll(Layer.succeed(Server.Identity, identity), Layer.succeed(Server.Shutdown, shutdown)),
+          Layer.mergeAll(
+            Layer.succeed(Server.Identity, identity),
+            Layer.succeed(Server.Shutdown, shutdown),
+            Layer.succeed(VibestdIdentity, { id: self.identity.id, name: self.identity.name }),
+          ),
         ),
       ),
     )

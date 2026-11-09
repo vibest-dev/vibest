@@ -27,6 +27,7 @@ export { AgentRefused, Change, HookFailed, PluginInfo, Routing, TraceEntry } fro
 export { type Candidate, pluginEntries, PluginLoader } from "./plugin-sources.ts"
 
 export const DEFAULT_TIMEOUT = Duration.seconds(5)
+export const MACHINE_TIMEOUT = Duration.seconds(30)
 const ACTIVATION_WAIT = Duration.seconds(10)
 const DEBOUNCE = Duration.millis(100)
 const RECHECK = Duration.seconds(1)
@@ -35,6 +36,12 @@ type Short = keyof VibestPlugin.AgentHooks
 type HookName = `agent.${Short}`
 type EventOf<N extends HookName> = N extends `agent.${infer S extends Short}` ? VibestPlugin.AgentHooks[S] : never
 type ErrorOf<N extends HookName> = N extends `agent.${infer S extends Short}` ? VibestPlugin.AgentFailures[S] : never
+
+export type MachineHook = keyof VibestPlugin.MachineHooks
+export type MachineEventInput = Omit<VibestPlugin.MachineEvent, "notes">
+export interface PluginNote extends VibestPlugin.MachineNote {
+  readonly plugin?: string
+}
 
 export const describeSpawn = (s: {
   harness: string
@@ -75,6 +82,14 @@ type Registered<N extends HookName> = {
   readonly callback: HookFn<N>
 }
 type HookBuckets = { [N in HookName]: ReadonlyArray<Registered<N>> }
+type MachineRegistered = {
+  readonly plugin: string
+  readonly name: MachineHook
+  readonly runtime: string | undefined
+  readonly scope: Scope.Scope
+  readonly stats: Stats
+  readonly callback: (event: VibestPlugin.MachineEvent) => Effect.Effect<void>
+}
 const emptyBuckets = (): HookBuckets => ({ "agent.start.before": [], "agent.fail": [] })
 const HOOKS: ReadonlyArray<Short> = ["start.before", "fail"]
 type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
@@ -85,6 +100,7 @@ type Running = {
   readonly candidate: Loaded
   readonly scope: Scope.Closeable
   hooks: HookBuckets
+  machine: ReadonlyArray<MachineRegistered>
   broken: string | undefined
 }
 type Slot = {
@@ -189,7 +205,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin
       const scope = yield* Scope.fork(root)
-      const running: Running = { candidate, scope, hooks: emptyBuckets(), broken: undefined }
+      const running: Running = { candidate, scope, hooks: emptyBuckets(), machine: [], broken: undefined }
       const remember = <N extends HookName>(name: N, callback: HookFn<N>) =>
         Effect.gen(function* () {
           const entry: Registered<N> = { plugin: plugin.id, stats, callback }
@@ -213,9 +229,34 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         }
         return remember(`agent.${short}`, callback as unknown as HookFn<HookName>)
       }
+      const machine: VibestPlugin.MachineDomain["hook"] = (name, callback, options) => {
+        if (name !== "connect" && name !== "remove")
+          return Effect.die(
+            new Error(
+              `unsupported hook ${JSON.stringify(`machine.${String(name)}`)}; supported: machine.connect, machine.remove`,
+            ),
+          )
+        return Effect.gen(function* () {
+          const entry: MachineRegistered = {
+            plugin: plugin.id,
+            name,
+            runtime: options?.runtime,
+            scope,
+            stats,
+            callback,
+          }
+          running.machine = [...running.machine, entry]
+          const dispose = Effect.sync(() => {
+            running.machine = running.machine.filter((e) => e !== entry)
+          })
+          yield* Effect.addFinalizer(() => dispose)
+          return { dispose } satisfies VibestPlugin.Registration
+        })
+      }
       const context: VibestPlugin.Context = {
         options: candidate.options,
         agent: { hook },
+        machine: { hook: machine },
         runtime: { transform: runtimes.transform, reload: runtimes.reload },
         harness: { transform: harnesses.transform, reload: harnesses.reload },
         subscription: { report: (input) => subscriptions.report(input) },
@@ -438,8 +479,50 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       )
     })
 
+    const machine = Effect.fn("Plugins.machine")(function* (
+      short: MachineHook,
+      input: MachineEventInput,
+      runtime?: string,
+    ) {
+      const name = `machine.${short}`
+      return yield* withHooks(name, () =>
+        Effect.gen(function* () {
+          const notes: Array<PluginNote> = []
+          const ran: Array<string> = []
+          const subscribers = slots.flatMap((s) =>
+            s.running && s.running.broken === undefined
+              ? s.running.machine.filter(
+                  (hook) =>
+                    hook.name === short &&
+                    (runtime === undefined || hook.runtime === undefined || hook.runtime === runtime),
+                )
+              : [],
+          )
+          for (const hook of subscribers) {
+            const own: Array<VibestPlugin.MachineNote> = []
+            const exit = yield* runBounded(hook.callback({ ...input, notes: own }), hook.scope, MACHINE_TIMEOUT)
+            hook.stats.calls++
+            if (!ran.includes(hook.plugin)) ran.push(hook.plugin)
+            notes.push(...own.map((note) => ({ plugin: hook.plugin, ...note })))
+            const problem = Option.isNone(exit)
+              ? `plugin ${hook.plugin} timed out after ${Duration.format(MACHINE_TIMEOUT)}`
+              : Exit.isFailure(exit.value)
+                ? `plugin ${hook.plugin} crashed: ${errorMessage(exit.value.cause)}`
+                : undefined
+            if (problem === undefined) continue
+            if (Option.isNone(exit)) hook.stats.timedOut++
+            else hook.stats.crashed++
+            hook.stats.lastError = problem
+            notes.push({ plugin: hook.plugin, message: problem })
+            yield* Effect.logWarning(`${name} ${input.name}: ${problem}`)
+          }
+          return { plugins: ran, notes }
+        }),
+      )
+    })
+
     const list = settled.pipe(Effect.andThen(Effect.sync(() => slots.map(info))))
-    return { service: Plugins.of({ start, fail, list, settled }), activate, ready }
+    return { service: Plugins.of({ start, fail, list, settled, machine }), activate, ready }
   })
 
 export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Plugins") {

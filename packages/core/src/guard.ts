@@ -200,6 +200,7 @@ const vibestArgs = (vibest: ReadonlyArray<string>, argv: ReadonlyArray<string>) 
 }
 
 const HERDR_CONTROL = new Set(["agent", "pane", "tab", "workspace", "worktree", "server", "session"])
+const USER_MACHINE_COMMANDS = new Set(["connect", "machine"])
 const GH_UNSAFE = new Set(["alias", "extension", "ext", "config", "auth"])
 const firstWord = (words: ReadonlyArray<string>) => words.find((w) => !w.startsWith("-")) ?? ""
 
@@ -224,6 +225,8 @@ export const shellBlock = (
     if (p.identity)
       return "vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT; a command that changes or clears them is refused."
     const words = args.slice(0, args.includes("--") ? args.indexOf("--") : undefined)
+    if (USER_MACHINE_COMMANDS.has(firstWord(words)))
+      return `vibest ${firstWord(words)} manages connections between machines; only the user runs it.`
     const at = words.indexOf("integration")
     if (at !== -1 && words[at + 1] === "stop")
       return "vibest integration stop is the harness's turn-end hook, not an agent command."

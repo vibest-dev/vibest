@@ -88,7 +88,7 @@ const checks: ReadonlyArray<Check> = [
       expect(r.code !== 0, `run exited 0: ${r.stdout}`)
       expect(r.stderr.includes("e2e says no"), `reason not shown: ${r.stderr}`)
       expect((await fs.readdir(worktrees).catch(() => [])).length === before.length, "a worktree was created")
-      const { length } = await w.json<Array<unknown>>(["ls", "--all"])
+      const { length } = await w.json<{ sessions: Array<unknown> }>(["ls", "--all"]).then((l) => l.sessions)
       expect(length === 0, "a session row was written")
       expect(
         (await list(w)).some((p) => p.id === "refuse" && p.refused === 1),

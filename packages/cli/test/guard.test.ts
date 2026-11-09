@@ -36,6 +36,13 @@ const CLIS = new Set(HARNESSES.map((definition) => definition.binary))
 const both = (command: string) => [shellBlock(command, source, true, CLIS), shellBlock(command, source, false, CLIS)]
 
 describe("Shell denials", () => {
+  it("vibest connect and vibest machine are refused for every agent", () => {
+    for (const command of ["vibest connect", "vibest machine add mb root@h", "vibest machine ls"]) {
+      for (const refused of both(command)) assert.include(refused ?? "", "only the user runs it", command)
+    }
+    assert.deepStrictEqual(both("vibest run pi -- 'vibest machine add x y'"), [undefined, undefined])
+  })
+
   it("run anything no rule names: unlisted programs, env prefixes, any shell syntax, quoted task data, any vibest command", () => {
     for (const command of [
       "touch x",

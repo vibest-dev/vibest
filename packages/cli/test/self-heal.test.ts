@@ -2,15 +2,16 @@ import net from "node:net"
 import path from "node:path"
 
 import { assert, layer } from "@effect/vitest"
-import { cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
+import { accepts, cliHeaders, connect, probe, protocolHeaders, readPing, startDaemon } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
-import { VERSION } from "@vibest/protocol/rpc"
+import { PingResult, VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { readDaemonInfo } from "@vibest/server/daemon"
-import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Stdio, Stream } from "effect"
+import { Cause, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Schedule, Stdio, Stream } from "effect"
+import { Rpc, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -588,6 +589,31 @@ layer(Platform.services)(
           const reply = yield* Effect.promise(() => daemon.pingReply!)
           assert.strictEqual(reply.code, "EPIPE")
           assert.ok(daemon.methods.includes("Ping"))
+        }).pipe(Effect.scoped, Effect.timeout("10 seconds"), TestClock.withLive),
+      15_000,
+    )
+
+    it.effect(
+      "a Ping that a stopping vibestd interrupts is no answer, not an interrupt of the caller (vibest daemon restart polls Ping while the old vibestd stops)",
+      () =>
+        Effect.gen(function* () {
+          const socket = path.join(yield* tempDirectory("vibest-sock-"), "vibest.sock")
+          const PingOnly = RpcGroup.make(Rpc.make("Ping", { success: PingResult }))
+          let pings = 0
+          yield* Layer.launch(
+            RpcServer.layer(PingOnly).pipe(
+              Layer.provide(
+                PingOnly.toLayer({ Ping: () => Effect.sync(() => pings++).pipe(Effect.andThen(Effect.interrupt)) }),
+              ),
+              Layer.provide(RpcServer.layerProtocolSocketServer),
+              Layer.provide(RpcSerialization.layerNdJsonRpc()),
+              Layer.provide(Platform.daemon.socketServer(socket)),
+            ),
+          ).pipe(Effect.forkScoped)
+          yield* accepts(socket).pipe(Effect.repeat({ until: (up) => up, schedule: Schedule.spaced("20 millis") }))
+          const exit = yield* Effect.exit(readPing(socket))
+          assert.deepStrictEqual(exit, Exit.succeed(Option.none()))
+          assert.strictEqual(pings, 1)
         }).pipe(Effect.scoped, Effect.timeout("10 seconds"), TestClock.withLive),
       15_000,
     )

@@ -7,6 +7,8 @@ export class GitError extends Schema.TaggedError<GitError>()("GitError", {
   message: Schema.String,
 }) {}
 
+const SHA = /^[0-9a-f]{7,64}$/
+
 export interface GitState {
   readonly branch: string
   readonly pushed: boolean
@@ -32,7 +34,9 @@ export class Git extends Context.Service<
     readonly currentBranch: (dir: string) => Effect.Effect<string, GitError>
     readonly uncommitted: (dir: string) => Effect.Effect<ReadonlyArray<string>, GitError>
     readonly copyRepository: (copy: RepositoryCopy) => Effect.Effect<void, GitError>
-    readonly addWorktree: (root: string, path: string) => Effect.Effect<void, GitError>
+    readonly addWorktree: (root: string, path: string, commit?: string) => Effect.Effect<void, GitError>
+    readonly head: (dir: string) => Effect.Effect<string, GitError>
+    readonly hasCommit: (dir: string, commit: string) => Effect.Effect<boolean>
     readonly removeWorktree: (root: string, path: string) => Effect.Effect<void, GitError>
     readonly linkedWorktrees: (root: string) => Effect.Effect<ReadonlyArray<string>>
     readonly includedFiles: (
@@ -151,7 +155,18 @@ export class Git extends Context.Service<
           yield* git(dest, "config", `branch.${branch}.remote`, "origin")
           yield* git(dest, "config", `branch.${branch}.merge`, merge)
         }),
-        addWorktree: (root, worktree) => git(root, "worktree", "add", "--detach", worktree).pipe(Effect.asVoid),
+        addWorktree: (root, worktree, commit) =>
+          git(root, "worktree", "add", "--detach", worktree, ...(commit === undefined ? [] : [commit])).pipe(
+            Effect.asVoid,
+          ),
+        head: (dir) => git(dir, "rev-parse", "HEAD"),
+        hasCommit: (dir, commit) =>
+          SHA.test(commit)
+            ? git(dir, "cat-file", "-e", `${commit}^{commit}`).pipe(
+                Effect.as(true),
+                Effect.orElseSucceed(() => false),
+              )
+            : Effect.succeed(false),
         removeWorktree: (root, worktree) => git(root, "worktree", "remove", worktree).pipe(Effect.asVoid),
         linkedWorktrees: (root) =>
           git(root, "worktree", "list", "--porcelain").pipe(

@@ -4,6 +4,7 @@ import { Clock, Context, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
 import { Bus, type EngineEvent, type LiveEvent, type StoredEvent, type StoredType } from "./bus.ts"
+import { peerStartOf, remoteQueries } from "./db-remote.ts"
 import {
   encodeAddress,
   SessionRow,
@@ -434,6 +435,16 @@ export const makeStore = Effect.gen(function* () {
       })
     })
 
+  const remote = remoteQueries({
+    sql,
+    now,
+    tx,
+    notify,
+    present: (project, recipient) => Effect.map(anySession(recipient), (found) => placed(project, found?.current)),
+    queuedBy,
+    insertInbox: insertInboxSql,
+  })
+
   const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number, request?: string) =>
     Effect.gen(function* () {
       if (row.kind === "send") {
@@ -447,22 +458,20 @@ export const makeStore = Effect.gen(function* () {
         })
         return (yield* inboxIn([id]))[0]!
       }
-      const [route] = yield* sql<{ recipient: string | null; entry: number | null; project: string }>`SELECT
+      const [route] = yield* sql<{
+        recipient: string | null
+        entry: number | null
+        project: string
+        origin: string | null
+      }>`SELECT
           CASE WHEN r.id IS NOT NULL AND r.ended_at IS NULL THEN r.id ELSE p.entry_session_id END AS recipient,
-          (p.entry_session_id IS NOT NULL) AS entry, p.id AS project
+          (p.entry_session_id IS NOT NULL) AS entry, p.id AS project,
+          (SELECT pe.data FROM event pe WHERE pe.session_id = s.id AND pe.type = 'peer.start' LIMIT 1) AS origin
         FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session r ON r.id = s.report_to_session_id
         WHERE s.id = ${row.sessionId}`
-      const recipient = route?.recipient ?? null
-      const [entry] =
-        route === undefined
-          ? []
-          : yield* sql<{ id: string | null }>`SELECT entry_session_id AS id FROM project WHERE id = ${route.project}`
-      const toEntry = recipient !== null && recipient === entry?.id
-      const present =
-        recipient !== null && (!toEntry || placed(route!.project, (yield* anySession(recipient))?.current))
-      const resultEventId =
+      const ended =
         row.kind === "result"
-          ? yield* endTurn(
+          ? endTurn(
               row.sessionId,
               end ?? {
                 status: roundStatus(row.details.status),
@@ -472,16 +481,32 @@ export const makeStore = Effect.gen(function* () {
               },
               at,
             )
-          : undefined
-      const id = yield* insertInboxSql({
-        recipient: recipient ?? row.sessionId,
-        kind: row.kind,
-        sender: row.sessionId,
-        content: row.message,
-        ...(resultEventId === undefined ? {} : { resultEventId }),
-        status: present ? "pending" : "dropped",
-      })
-      return (yield* inboxIn([id]))[0]!
+          : Effect.succeed(undefined)
+      const insert = (recipient: string, status: "pending" | "dropped", resultEventId: number | undefined) =>
+        insertInboxSql({
+          recipient,
+          kind: row.kind,
+          sender: row.sessionId,
+          content: row.message,
+          ...(resultEventId === undefined ? {} : { resultEventId }),
+          status,
+        }).pipe(Effect.flatMap((id) => inboxIn([id])))
+      const origin = yield* peerStartOf(row.sessionId, route?.origin ?? null)
+      if (origin !== undefined) {
+        const [queued] = yield* insert(row.sessionId, "dropped", yield* ended)
+        yield* remote.queueForPeer(origin, { sessionId: row.sessionId, kind: row.kind, content: row.message, at })
+        return queued!
+      }
+      const recipient = route?.recipient ?? null
+      const [entry] =
+        route === undefined
+          ? []
+          : yield* sql<{ id: string | null }>`SELECT entry_session_id AS id FROM project WHERE id = ${route.project}`
+      const toEntry = recipient !== null && recipient === entry?.id
+      const present =
+        recipient !== null && (!toEntry || placed(route!.project, (yield* anySession(recipient))?.current))
+      const [queued] = yield* insert(recipient ?? row.sessionId, present ? "pending" : "dropped", yield* ended)
+      return queued!
     })
 
   const updateSession = (id: string, patch: SessionPatch) =>
@@ -495,8 +520,10 @@ export const makeStore = Effect.gen(function* () {
       if (patch.name !== undefined && patch.name !== current.name)
         yield* sql`UPDATE session SET name = ${patch.name} WHERE id = ${id}`
       const ending = !!(next.metadata.archived || next.metadata.removed)
-      if (ending && !(current.metadata.archived || current.metadata.removed))
+      if (ending && !(current.metadata.archived || current.metadata.removed)) {
         yield* sql`UPDATE session SET ended_at = ${yield* now} WHERE id = ${id} AND ended_at IS NULL`
+        yield* sql`DELETE FROM outbox WHERE session_id = ${id}`
+      }
       const p = (yield* anySession(id))!.current
       const routing = patch.metadata?.routing
       const choicePatched =
@@ -670,6 +697,7 @@ export const makeStore = Effect.gen(function* () {
     clearMainAt,
     unusedId,
     conversationOf,
+    remote,
   }
 })
 

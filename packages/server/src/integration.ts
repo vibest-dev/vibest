@@ -27,7 +27,10 @@ export const integrationHandlers = Effect.gen(function* () {
         const definition = harnesses.find(harness)
         if (definition === undefined) return yield* unprovided(harness, harnesses.all)
         const caller = yield* Caller
-        const own = caller._tag === "Cli" ? {} : { VIBEST_PROJECT_DIR: layout.project(caller.projectId) }
+        const own =
+          caller._tag === "Cli" || caller.projectId === undefined
+            ? {}
+            : { VIBEST_PROJECT_DIR: layout.project(caller.projectId) }
         const reason = yield* Guard.check(agent, input).pipe(
           Effect.provideService(Harnesses, harnesses),
           Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: own }), { asPrimary: true })),

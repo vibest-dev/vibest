@@ -1,7 +1,7 @@
-import { type Effect, Schema } from "effect"
+import { type Effect, Schema, type Scope } from "effect"
 
 import type { HarnessDomain } from "./harness.ts"
-import type { Hooks } from "./registration.ts"
+import type { Hooks, Registration } from "./registration.ts"
 import type { RuntimeDomain } from "./runtime.ts"
 
 export * as Harness from "./harness.ts"
@@ -88,6 +88,23 @@ export interface MachineRuntime {
   readonly reason?: string | undefined
 }
 
+export interface MachineNote {
+  readonly message: string
+  readonly fix?: string
+}
+
+export interface MachineRuntimeThere extends MachineRuntime {
+  readonly link?: Readonly<Record<string, string>> | undefined
+}
+
+export interface MachineEvent {
+  readonly name: string
+  readonly target: string
+  readonly vibestd: string
+  readonly runtimes: ReadonlyArray<MachineRuntimeThere>
+  readonly notes: Array<MachineNote>
+}
+
 export interface MachineInfo {
   readonly machine: string
   readonly runtimes: ReadonlyArray<MachineRuntime>
@@ -151,6 +168,23 @@ export interface AgentDomain {
   readonly hook: Hooks<AgentHooks, AgentFailures>
 }
 
+export interface MachineHooks {
+  readonly connect: MachineEvent
+  readonly remove: MachineEvent
+}
+
+export interface MachineHookOptions {
+  readonly runtime?: string
+}
+
+export interface MachineDomain {
+  readonly hook: <Name extends keyof MachineHooks>(
+    name: Name,
+    callback: (event: MachineHooks[Name]) => Effect.Effect<void>,
+    options?: MachineHookOptions,
+  ) => Effect.Effect<Registration, never, Scope.Scope>
+}
+
 export interface SubscriptionDomain {
   readonly report: (input: SubscriptionReport) => Effect.Effect<void>
 }
@@ -160,6 +194,7 @@ export type PluginOptions = Readonly<Record<string, unknown>>
 export interface Context {
   readonly options: PluginOptions
   readonly agent: AgentDomain
+  readonly machine: MachineDomain
   readonly runtime: RuntimeDomain
   readonly harness: HarnessDomain
   readonly subscription: SubscriptionDomain

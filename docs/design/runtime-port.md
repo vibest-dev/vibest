@@ -49,6 +49,8 @@ see it); each is the runtime's to honor as it can.
 | `seen`, `see`                | —                                                                                                                | —                              | —                                        | never `done` in Watch                          |
 | `prepare(machine)`           | `herdr machine add <target> --remote-session vibest`                                                             | `rex hosts add`                | `tern remote setup`                      | the user prepares the machine                  |
 | `attach(machine)`            | `herdr --session vibest`                                                                                         | — (Rex.app)                    | `tern`                                   | none                                           |
+| `link()`                     | —                                                                                                                | —                              | —                                        | other machines cannot show its terminals       |
+| `locate(machine, sessions)`  | —                                                                                                                | —                              | —                                        | remote rows: "cannot be shown here"            |
 | `doctor(machine, harnesses)` | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs                 | what tern needs                          | `vibest doctor` shows `status` only            |
 
 How the required members map: herdr `tab.create` (env) + `agent.start`, `pane.send_*`, `pane.read`,
@@ -56,6 +58,12 @@ How the required members map: herdr `tab.create` (env) + `agent.start`, `pane.se
 `terminal.format`, `terminal.process`, `block.close`; tern `split|new tab -- argv` (env via `/usr/bin/env`), `send`,
 `capture`, `process --json`, `close`. Remote: herdr `ssh <target> herdr --session vibest remote-api-bridge`
 (herdr ≥ 0.9.1 both sides), rex `-S <host>` over Tailscale, tern `tern ssh <target> tern …`.
+
+`link()` and `locate(machine, sessions)` let one machine show another's terminals (hc implements both:
+[runtime-herdr-core.md](runtime-herdr-core.md), [multi-machine.md](multi-machine.md#terminals-on-other-machines)):
+`link` is what the same runtime elsewhere needs to reach this machine's terminals, sent in `Peer.Hello`; `locate`
+answers `missing` when the runtime has no machine with the link's id, else the local terminal ids of those sessions,
+`as` (its name for the machine) and a `note` when it cannot show them. It is read-only and runs inside `vibest ls`.
 
 Core helpers over the interface, so no plugin writes them: `readFile(machine, path)` (local: the file system; remote:
 `exec` `cat`), and the hidden-terminal `exec`.

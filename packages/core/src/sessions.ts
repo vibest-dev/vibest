@@ -32,7 +32,7 @@ import { ChildProcessSpawner } from "effect/process"
 
 import { sessionArchive } from "./archive.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
-import { Db, type SessionRow } from "./db.ts"
+import { Db, type SessionFilter, type SessionRow } from "./db.ts"
 import { Drain } from "./drain.ts"
 import * as Engine from "./engine.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
@@ -82,7 +82,7 @@ export {
 } from "@vibest/schema/session"
 
 export { CONFIRM_TIMEOUT, READY_TIMEOUT, STOP_WAIT } from "./prompting.ts"
-export { allocationNameSource, peerAdmitPause, type SpawnInput, type Spawned } from "./spawn.ts"
+export { allocationNameSource, defaultSessionName, peerAdmitPause, type SpawnInput, type Spawned } from "./spawn.ts"
 
 export const START_TIMEOUT = Duration.seconds(120)
 export const HOOK_GRACE = Duration.seconds(10)
@@ -126,7 +126,7 @@ export class Sessions extends Context.Service<
     >
     readonly get: (id: string) => Effect.Effect<SessionView, NoSuchSession>
     readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
-    readonly list: (filter?: { projectId?: string; stopped?: boolean }) => Effect.Effect<ReadonlyArray<SessionView>>
+    readonly list: (filter?: SessionFilter) => Effect.Effect<ReadonlyArray<SessionView>>
     readonly check: (id: string) => Effect.Effect<void>
     readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void, never, FileSystem.FileSystem>
     readonly republish: Effect.Effect<number>
@@ -695,7 +695,7 @@ export class Sessions extends Context.Service<
       })
 
       const get = (id: string) => getRow(id).pipe(Effect.flatMap(view), Effect.provideContext(platform))
-      const list = (filter: { projectId?: string; stopped?: boolean } = {}) =>
+      const list = (filter: SessionFilter = {}) =>
         db.listSessions(filter).pipe(
           Effect.flatMap((rows) =>
             Effect.forEach(rows, (row) =>

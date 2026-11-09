@@ -4,7 +4,8 @@ What a client outside this TypeScript workspace (for example `apps/desktop`) bui
 and checked by `pnpm test`; never edit them by hand.
 
 - `rpc.json`: `{ protocol, capabilities, methods }`. Each method has its `access` (who may call it: `open`, `cli`,
-  `agent`, `owner`, `coordinator`, `session`, `self`), whether it is a `stream`, and draft 2020-12 JSON Schemas of its
+  `agent`, `owner`, `coordinator`, `session`, `self`, `peer`; a pair such as `["agent", "peer"]` when another
+  machine's vibestd may call it too), whether it is a `stream`, and draft 2020-12 JSON Schemas of its
   `payload`, `success` (for a stream: one element) and `error` (the method's errors and those of its middleware:
   `ProtocolRejected`, `InvalidCaller`, `NoSuchSession`, `DaemonStopping`). Regenerate with
   `pnpm --filter @vibest/protocol contract`.

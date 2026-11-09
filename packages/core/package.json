@@ -12,6 +12,7 @@
     "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run packages/core"
   },
   "dependencies": {
+    "@vibest/client": "workspace:*",
     "@vibest/plugin": "workspace:*",
     "@vibest/protocol": "workspace:*",
     "@vibest/schema": "workspace:*",

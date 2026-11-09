@@ -1,5 +1,7 @@
 import { Cause, Duration, Effect, Exit, Option, Ref, Schema, type Scope, Stream } from "effect"
 
+import type { MachineEvent, MachineHooks, MachineNote } from "./index.ts"
+import type * as Plugin from "./plugin.ts"
 import type * as Runtime from "./runtime.ts"
 
 export type { RuntimeDefinition } from "./runtime.ts"
@@ -186,3 +188,78 @@ export const runtimeContract = (
       Duration.fromInputUnsafe("5 seconds"),
     )
   }).pipe(Effect.asVoid)
+
+export const machineHooks = (
+  plugin: Plugin.Plugin,
+  options: Readonly<Record<string, unknown>> = {},
+): Effect.Effect<
+  {
+    readonly runtimes: ReadonlyArray<Runtime.RuntimeDefinition>
+    readonly fire: (
+      hook: keyof MachineHooks,
+      event: Omit<MachineEvent, "notes">,
+      runtime?: string,
+    ) => Effect.Effect<ReadonlyArray<MachineNote>>
+  },
+  never,
+  Scope.Scope
+> =>
+  Effect.gen(function* () {
+    const runtimes: Array<Runtime.RuntimeDefinition> = []
+    const hooks: Array<{
+      readonly name: string
+      readonly runtime: string | undefined
+      readonly callback: (event: MachineEvent) => Effect.Effect<void>
+    }> = []
+    const editor: Runtime.RuntimeEditor = {
+      list: () => runtimes,
+      get: (id) => runtimes.find((definition) => definition.id === id),
+      add: (definition) => {
+        const at = runtimes.findIndex((existing) => existing.id === definition.id)
+        if (at === -1) runtimes.push(definition)
+        else runtimes[at] = definition
+      },
+      update: (id, update) => {
+        const at = runtimes.findIndex((definition) => definition.id === id)
+        if (at === -1) return
+        const copy = { ...runtimes[at]! }
+        update(copy)
+        runtimes[at] = copy
+      },
+      remove: (id) => {
+        const at = runtimes.findIndex((definition) => definition.id === id)
+        if (at !== -1) runtimes.splice(at, 1)
+      },
+    }
+    const registration = { dispose: Effect.void }
+    yield* plugin.effect({
+      options,
+      agent: { hook: () => Effect.succeed(registration) },
+      machine: {
+        hook: (name, callback, hookOptions) =>
+          name === "connect" || name === "remove"
+            ? Effect.sync(() => {
+                hooks.push({ name, runtime: hookOptions?.runtime, callback })
+                return registration
+              })
+            : Effect.die(new Error(`unsupported hook machine.${String(name)}`)),
+      },
+      runtime: { transform: (f) => Effect.sync(() => (f(editor), registration)), reload: () => Effect.void },
+      harness: { transform: () => Effect.succeed(registration), reload: () => Effect.void },
+      subscription: { report: () => Effect.void },
+    })
+    return {
+      runtimes,
+      fire: (hook, input, runtime) =>
+        Effect.gen(function* () {
+          const event: MachineEvent = { ...input, notes: [] }
+          for (const entry of hooks)
+            if (
+              entry.name === hook &&
+              (runtime === undefined || entry.runtime === undefined || entry.runtime === runtime)
+            )
+              yield* entry.callback(event)
+          return event.notes
+        }),
+    }
+  })

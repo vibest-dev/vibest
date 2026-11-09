@@ -1,12 +1,16 @@
 import { dlopen, FFIType } from "bun:ffi"
 import fs from "node:fs"
 import fsPromises from "node:fs/promises"
+import os from "node:os"
 
 import { BunHttpServer, BunRuntime, BunServices, BunSocket, BunSocketServer } from "@effect/platform-bun"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { pre } from "@vibest/builtins"
+import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
+import { MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
+import type { MachineTransport } from "@vibest/core/machines"
 import { type PluginLoader } from "@vibest/core/plugins"
 import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibest/core/processes"
 import { UserPlatform } from "@vibest/core/system-prompt"
@@ -180,6 +184,47 @@ const lock: Host["lock"] = (file) =>
     ),
   )
 
+const ioreg = Effect.tryPromise((signal) =>
+  new Response(
+    Bun.spawn(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      signal,
+    }).stdout,
+  ).text(),
+)
+
+const hostId = readHostId(
+  process.platform === "darwin"
+    ? { ioreg, files: [] }
+    : { files: process.platform === "linux" ? MACHINE_ID_FILES : [] },
+).pipe(Effect.provide(BunServices.layer))
+
+const transport: MachineTransport["Service"] = (argv) =>
+  Effect.acquireRelease(
+    Effect.try({
+      try: () => Bun.spawn([...argv], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env } }),
+      catch: (e) => (e instanceof Error ? e : new Error(String(e))),
+    }),
+    (proc) => Effect.sync(() => proc.kill()),
+  ).pipe(
+    Effect.flatMap((proc) => {
+      const stderr = new Response(proc.stderr).text().catch(() => "")
+      const exited = Effect.promise(async () => ({ code: (await proc.exited) ?? undefined, stderr: await stderr }))
+      const writable = new WritableStream<Uint8Array>({
+        write: async (chunk) => {
+          proc.stdin.write(chunk)
+          await proc.stdin.flush()
+        },
+        close: async () => {
+          await proc.stdin.end()
+        },
+      })
+      return Effect.map(stdioSocket({ readable: proc.stdout, writable }), (socket) => ({ socket, exited }))
+    }),
+  )
+
 const dropEnv = (names: ReadonlyArray<string>) => {
   for (const name of names) delete process.env[name]
 }
@@ -196,6 +241,8 @@ export const daemon: Omit<Host, "runtime"> = {
   processes,
   lock,
   checkDatabase,
+  host: { name: os.hostname(), id: hostId },
+  transport,
 }
 
 export const selfCommand: ReadonlyArray<string> =

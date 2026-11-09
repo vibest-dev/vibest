@@ -4,7 +4,7 @@ import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Option, Path } fr
 import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 
-import type { Db, SessionRow } from "./db.ts"
+import type { Db, PeerStart, SessionRow } from "./db.ts"
 import type { Drain } from "./drain.ts"
 import {
   harnessOptions,
@@ -27,6 +27,8 @@ import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "
 export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
 export const allocationNameSource: { leaves: ReadonlyArray<string> | undefined } = { leaves: undefined }
 
+export const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
+
 export interface SpawnInput {
   readonly machine: Machine
   readonly root: string
@@ -43,6 +45,8 @@ export interface SpawnInput {
   readonly runtime?: string | undefined
   readonly parentSessionId?: string | undefined
   readonly request?: string | undefined
+  readonly commit?: string | undefined
+  readonly origin?: PeerStart | undefined
 }
 
 export interface Spawned extends Routing {
@@ -269,15 +273,14 @@ export const sessionSpawn = (deps: {
           createdAt: now,
           lastActive: now,
         }
-        const inserted = yield* db.insertSession(
-          draft,
-          input.projectId,
-          options.maxSessions,
+        const inserted = yield* db.insertSession(draft, input.projectId, {
+          max: options.maxSessions,
           cwd,
-          decision.prompt,
-          input.parentSessionId,
-          input.request,
-        )
+          task: decision.prompt,
+          parentSessionId: input.parentSessionId,
+          request: input.request,
+          origin: input.origin,
+        })
         const unreserve = shared === undefined ? fs.remove(cwd, { recursive: true }).pipe(Effect.ignore) : Effect.void
         if (inserted === false) {
           yield* unreserve
@@ -320,7 +323,13 @@ export const sessionSpawn = (deps: {
           locks
             .withLock(id)(
               Deferred.succeed(held, undefined).pipe(
-                Effect.andThen(launch(rt, machine, row, root, decision.prompt, input.peer, input.env)),
+                Effect.andThen(
+                  launch(rt, machine, row, root, decision.prompt, {
+                    splitFrom: input.peer,
+                    env: input.env,
+                    commit: input.commit,
+                  }),
+                ),
               ),
             )
             .pipe(Effect.ensuring(leave), logged(`spawn ${id}`), Effect.provideContext(platform)),

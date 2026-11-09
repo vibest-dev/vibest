@@ -92,17 +92,13 @@ describe("reconcile: a terminal whose agent has not started", () => {
         createdAt: 1,
         lastActive: 1,
       }
-      yield* db.insertSession(
-        { ...row, id: alive, address: { machine: "local", id: "w8:starting" } },
-        projectId,
-        undefined,
-        repo,
-      )
+      yield* db.insertSession({ ...row, id: alive, address: { machine: "local", id: "w8:starting" } }, projectId, {
+        cwd: repo,
+      })
       yield* db.insertSession(
         { ...row, id: gone, name: "gone", address: { machine: "local", id: "w8:gone" } },
         projectId,
-        undefined,
-        repo,
+        { cwd: repo },
       )
       yield* Sessions.make({ maxSessions: undefined })
       yield* until(db.getSession(gone), (session) => session?.exitedAt != null)
@@ -142,8 +138,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
           lastActive: 1,
         },
         projectId,
-        undefined,
-        repo,
+        { cwd: repo },
       )
       yield* Sessions.make({ maxSessions: undefined })
       yield* settled
@@ -188,8 +183,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
           lastActive: 1,
         },
         projectId,
-        undefined,
-        repo,
+        { cwd: repo },
       )
       const reads = () =>
         Effect.gen(function* () {
@@ -244,8 +238,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
           lastActive: 1,
         },
         projectId,
-        undefined,
-        repo,
+        { cwd: repo },
       )
       const reads = () =>
         Effect.gen(function* () {
