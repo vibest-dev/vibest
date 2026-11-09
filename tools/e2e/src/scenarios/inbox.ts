@@ -143,8 +143,18 @@ const claudeMain = async (
     return shown(`General Agent "${title}" completed (${shortId})`, marker)
   }
   const enter = () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
+  const squeeze = (s: string) => s.replace(/\s+/g, "")
   const typeIn = async (text: string) => {
     await herdr(socket, "pane.send_text", { pane_id: pane(), text })
+    const aBusyClaudeTakesTextAndAQuickEnterAsOnePasteAndSendsNothing = `"${text}" in the main agent's input`
+    await until(
+      aBusyClaudeTakesTextAndAQuickEnterAsOnePasteAndSendsNothing,
+      async () => {
+        const s = await screen()
+        return squeeze(s.slice(s.lastIndexOf("❯"))).includes(squeeze(text))
+      },
+      30_000,
+    )
     await enter()
   }
   const claudePid = async () => {
