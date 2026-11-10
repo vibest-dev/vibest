@@ -133,7 +133,7 @@ const fakeMachine = (options: {
     },
     { ...pi, subscription: (dir: string) => onMachine(piSubscription(dir)) },
   ]
-  const fakes = Subscriptions.layer.pipe(
+  const fakes = Subscriptions.testLayer.pipe(
     Layer.provideMerge(harnessesLayer(definitions)),
     Layer.provideMerge(harnessLayer(options.installed)),
   )
@@ -500,7 +500,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       )
     }).pipe(
       Effect.provide(
-        Subscriptions.layer.pipe(
+        Subscriptions.testLayer.pipe(
           Layer.provideMerge(
             harnessesLayer([
               { ...claude, subscription: () => Effect.never },
@@ -518,7 +518,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       const fake = loggedOut(yield* home)
       yield* fake.provide(
         Effect.gen(function* () {
-          yield* Layer.build(Subscriptions.live.pipe(Layer.provide(fake.layer)))
+          yield* Layer.build(Subscriptions.layer.pipe(Layer.provide(fake.layer)))
           yield* TestClock.adjust("1 second")
           assert.strictEqual(fake.spawned.length, 1)
           yield* TestClock.adjust("1 hour")
@@ -533,7 +533,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       const fake = loggedOut(yield* home)
       yield* fake.provide(
         Effect.gen(function* () {
-          const context = yield* Layer.build(Subscriptions.live.pipe(Layer.provide(fake.layer)))
+          const context = yield* Layer.build(Subscriptions.layer.pipe(Layer.provide(fake.layer)))
           const subs = Context.get(context, Subscriptions)
           yield* TestClock.adjust("59 seconds")
           yield* subs.list

@@ -114,9 +114,9 @@ export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsS
     return Subscriptions.of({ list, report, poll })
   })
 
-  static readonly layer = Layer.effect(Subscriptions, Subscriptions.make)
+  static readonly testLayer = Layer.effect(Subscriptions, Subscriptions.make)
 
-  static readonly live = Layer.effect(
+  static readonly layer = Layer.effect(
     Subscriptions,
     Effect.gen(function* () {
       const service = yield* Subscriptions.make

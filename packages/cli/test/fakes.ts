@@ -523,7 +523,7 @@ const harnessOf = (options: TestOptions) =>
           ),
   })
 
-export const subscriptionsLayer = Subscriptions.layer.pipe(Layer.provide(harnessOf({})))
+export const subscriptionsLayer = Subscriptions.testLayer.pipe(Layer.provide(harnessOf({})))
 
 type PluginEntry = NonNullable<TestOptions["plugins"]>[number]
 
@@ -568,7 +568,7 @@ const over = (options: TestOptions) => {
         }),
       )
     }),
-  ).pipe(Layer.provideMerge(Subscriptions.layer))
+  ).pipe(Layer.provideMerge(Subscriptions.testLayer))
   const fakeIntegrationReportsReadyOnStart = Layer.effectDiscard(
     Effect.gen(function* () {
       const fake = yield* FakeRuntime

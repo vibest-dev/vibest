@@ -100,7 +100,7 @@ const services = (host: Host) =>
     Layer.provideMerge(Git.layer),
     Layer.provideMerge(SshHosts.layer),
     Layer.provideMerge(Plugins.layer),
-    Layer.provideMerge(Subscriptions.live),
+    Layer.provideMerge(Subscriptions.layer),
     Layer.provideMerge(UpdateCheck.layer),
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provideMerge(Inbox.layer),
