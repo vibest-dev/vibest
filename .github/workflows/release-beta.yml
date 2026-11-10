@@ -1,17 +1,32 @@
 name: Release
 
-# One entry point and one version for every package: the workspace members.
-# A v* tag publishes that version under `beta`, and as the latest GitHub Release (install.sh and an archive per platform).
-# Manual runs (workflow_dispatch) publish one canary version of every package to npm only.
-# The self-hosted build job builds, tests and packs once; the darwin job checks those tarballs on an arm64 Mac; the
-# publish job publishes exactly those tarballs (tools/verify/src/release-artifacts.ts checks them on both platforms).
-# Only the owner starts it: the tag comes from `pnpm release` (.agents/rules/release.md); anyone else's run is skipped.
-# Every job checks it: the owner both started the run (actor) and started this attempt (triggering_actor, which differs
-# on a rerun), since rerunning one job reuses the others' earlier results without evaluating their conditions.
+# The only way to release (.agents/rules/release.md): start this workflow on main from the Actions page, or
+#   gh workflow run release-beta.yml -R vibest-dev/vibest --ref main -f version=prerelease
+# version: prerelease, patch, minor or major (bumped from @vibest/cli's version), an exact version, or canary.
+# One version for every package: the workspace members.
+# build (self-hosted) bumps every package version and commits and tags v<version> in its own checkout only, then runs
+# every gate on that commit: build, typecheck and lint, format, unit tests, the packed tarballs, and the E2E checks on
+# the curl and npm installs of tools/verify. darwin checks the same tarballs on an arm64 Mac. publish waits for the
+# owner's approval (environment `release`), then pushes the tested commit to main and the tag, publishes exactly the
+# tarballs build checked to npm, and makes the GitHub Release (install.sh and an archive per platform).
+# canary publishes one canary version to npm under `canary`: no commit, no tag, no GitHub Release.
+# dry_run runs every gate and stops: nothing is pushed or published.
+# Only the owner starts it; anyone else's run is skipped. Every job checks it: the owner both started the run (actor)
+# and started this attempt (triggering_actor, which differs on a rerun), since rerunning one job reuses the others'
+# earlier results without evaluating their conditions.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "prerelease, patch, minor, major, an exact version (0.0.1-beta.18), or canary"
+        required: true
+        default: prerelease
+        type: string
+      dry_run:
+        description: "Run every gate, then stop: no push, no publish"
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: release
@@ -26,11 +41,16 @@ jobs:
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
       (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
     runs-on: [self-hosted, Linux, X64, vibest, rn]
-    timeout-minutes: 45
+    timeout-minutes: 90
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
+      - name: Release only from main
+        if: ${{ !inputs.dry_run && inputs.version != 'canary' && github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::a release runs on main, not $GITHUB_REF; start it with --ref main, or set dry_run"
+          exit 1
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -52,33 +72,51 @@ jobs:
           bun-version: 1.4.4
       - run: pnpm install --frozen-lockfile --prefer-offline --store-dir "$PNPM_STORE_DIR"
 
-      # The version every job checks and publishes, computed once. Versions are set only in this checkout, never committed.
+      # The version every job checks and publishes, set once in this checkout. A release commits it and tags v<version>
+      # here; publish pushes that commit and tag after the owner approves.
       - name: Version
         id: version
+        env:
+          INPUT: ${{ inputs.version }}
         run: |
-          version=$(node -p 'require("./packages/cli/package.json").version')
-          # The same files as the root `release` script. A package left behind fails the run before anything is published.
-          for f in packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json; do
-            v=$(node -p "const j = require('./$f'); [j.version, j.version].join(' ')")
-            if [ "$v" != "$version $version" ]; then echo "::error::$f is $v, not $version"; exit 1; fi
-          done
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-              echo "::error::tag $GITHUB_REF_NAME does not match @vibest/cli $version"; exit 1
-            fi
-            tag=beta
-          else
+          # Every workspace package moves together: workspace:* resolves to it, and the binary embeds it (Hello compares it).
+          # The same files as the root `bump` script. A package left behind fails the run before anything is built.
+          same() {
+            for f in packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json; do
+              v=$(node -p "require('./$f').version")
+              if [ "$v" != "$1" ]; then echo "::error::$f is $v, not $1"; exit 1; fi
+            done
+          }
+          current=$(node -p 'require("./packages/cli/package.json").version')
+          same "$current"
+          if [ "$INPUT" = canary ]; then
             # g<sha>: a prerelease identifier of only digits may not start with 0.
-            version="${version%%-*}-canary.$(date -u +%Y%m%d%H%M%S).g$(git rev-parse --short=7 HEAD)"
+            version="${current%%-*}-canary.$(date -u +%Y%m%d%H%M%S).g$(git rev-parse --short=7 HEAD)"
             tag=canary
-            # Every workspace package moves together: workspace:* resolves to it, and the binary embeds it (Hello compares it).
             pnpm -r exec npm pkg set version="$version"
+          else
+            pnpm run bump --release "$INPUT"
+            version=$(node -p 'require("./packages/cli/package.json").version')
+            if [ "$version" = "$current" ]; then echo "::error::version $INPUT does not change $current"; exit 1; fi
+            case "$version" in *-*) tag=beta ;; *) tag=latest ;; esac
+            if [ -n "$(git ls-remote --tags origin "refs/tags/v$version")" ]; then
+              echo "::error::tag v$version already exists"; exit 1
+            fi
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit --quiet -am "chore: release v$version"
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              tag --annotate --message "v$version" "v$version"
           fi
+          same "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Release $version under the npm dist-tag $tag" >> "$GITHUB_STEP_SUMMARY"
 
       - run: pnpm run build
+      # typecheck also runs check:runtime and lint (oxlint).
       - run: pnpm run typecheck
+      - run: pnpm run format:check
+      # Leave room for the other job sharing this host.
       - run: pnpm run test --maxWorkers=2
       # Packs every package to publish (the darwin-arm64 binary is cross-compiled here), checks the tarballs, installs
       # @vibest/cli with the linux-x64 binary from them and runs it; keeps the tarballs and their publish order.
@@ -86,10 +124,15 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: bun tools/verify/src/release-artifacts.ts "$VERSION" --out "$RUNNER_TEMP/release/npm"
+      - name: E2E probe
+        run: |
+          for b in herdr hc pi claude cursor-agent python3 git curl; do printf '%s: ' "$b"; command -v "$b" || echo missing; done
+          echo "SHELL=$SHELL HOME=$HOME"
+          bun tools/e2e/src/main.ts || true
       # What install.sh downloads (releases/latest/download/...): an archive per platform, install.sh itself, and
-      # `version`, which `vibest update` reads. Only for a v* tag.
+      # `version`, which `vibest update` reads. Not for a canary.
       - name: GitHub Release files
-        if: github.ref_type == 'tag'
+        if: inputs.version != 'canary'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -100,6 +143,14 @@ jobs:
           done
           cp packages/cli/install.sh "$out/install.sh"
           printf '%s\n' "$VERSION" > "$out/version"
+      # The release commit and its tag, for publish to push: the gates ran on exactly this tree.
+      - name: Release commit
+        if: inputs.version != 'canary'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ! git diff --quiet HEAD; then echo "::error::the gates changed tracked files"; git diff --stat HEAD; exit 1; fi
+          git bundle create "$RUNNER_TEMP/release/release.bundle" "refs/tags/v$VERSION" "^$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: release
@@ -109,8 +160,7 @@ jobs:
 
   # The same tarballs on a GitHub-hosted arm64 Mac: @vibest/cli installed with the darwin-arm64 binary and run.
   # GitHub-hosted time is kept minimal: no install, build, typecheck or test here (the build job did them), only the
-  # check script (run by Node, which strips its types) on the downloaded tarballs. Like every job here, it runs only
-  # for a v* tag or the owner's workflow_dispatch canary, never for a pull request.
+  # check script (run by Node, which strips its types) on the downloaded tarballs.
   darwin:
     needs: build
     if: >-
@@ -139,26 +189,52 @@ jobs:
   publish:
     needs: [build, darwin]
     if: >-
+      !inputs.dry_run &&
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
       (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
-    # GitHub-hosted: npm provenance and trusted publishing (OIDC) refuse self-hosted runners. It only downloads the
-    # artifact and publishes it (npm, then the GitHub Release of a tag): no checkout, install, build or check.
+    # The owner approves here: the environment's required reviewer. Its deploy key (RELEASE_PUSH_KEY) is the one actor
+    # that bypasses "CI required on main", and only jobs of this environment on main can read it.
+    environment: release
+    # GitHub-hosted: npm provenance and trusted publishing (OIDC) refuse self-hosted runners. It downloads the artifact
+    # and pushes and publishes it as it is: no install, build or check.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write # the GitHub Release of a v* tag
+      contents: write # the GitHub Release
       id-token: write # npm trusted publishing (OIDC) and provenance
     env:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
-      # npm 11.5.1 or later publishes with OIDC; no token.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 26.13.0
       - uses: actions/download-artifact@v4
         with:
           name: release
           path: ${{ runner.temp }}/release
+
+      # Main gets the tested commit as a fast-forward of the commit the run started from: if main moved meanwhile, the
+      # push fails and nothing is published; start a new run.
+      - uses: actions/checkout@v4
+        if: needs.build.outputs.tag != 'canary'
+        with:
+          persist-credentials: false
+      - name: Push the release commit and tag
+        if: needs.build.outputs.tag != 'canary'
+        env:
+          RELEASE_PUSH_KEY: ${{ secrets.RELEASE_PUSH_KEY }}
+        run: |
+          git fetch --quiet "$RUNNER_TEMP/release/release.bundle" "refs/tags/v$VERSION:refs/tags/v$VERSION"
+          test "$(git rev-parse "v$VERSION^{commit}^")" = "$GITHUB_SHA"
+          key="$RUNNER_TEMP/push-key"
+          (umask 077 && printf '%s\n' "$RELEASE_PUSH_KEY" > "$key")
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/known_hosts"
+          GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts" \
+            git push --atomic "git@github.com:$GITHUB_REPOSITORY.git" \
+            "v$VERSION^{commit}:refs/heads/main" "refs/tags/v$VERSION:refs/tags/v$VERSION"
+          rm -f "$key"
+
+      # npm 11.5.1 or later publishes with OIDC; no token.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
 
       # The checked tarballs, not rebuilt or repacked, dependencies first (publish-order); versions already on npm are
       # skipped. The registry can lag behind a successful publish. Publishing is not atomic: a failure can leave only
@@ -180,9 +256,9 @@ jobs:
 
       # Marked latest, so the download URLs move to it.
       - name: GitHub Release
-        if: github.ref_type == 'tag'
+        if: needs.build.outputs.tag != 'canary'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release/github/* -R "$GITHUB_REPOSITORY" \
+          gh release create "v$VERSION" "$RUNNER_TEMP"/release/github/* -R "$GITHUB_REPOSITORY" \
             --title "vibest $VERSION" --latest --verify-tag
