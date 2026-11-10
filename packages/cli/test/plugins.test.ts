@@ -3,9 +3,7 @@ import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
-import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { mainCheckout } from "@vibest/core/worktree"
 import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore, type Registration } from "@vibest/plugin"
 import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope } from "effect"
@@ -14,6 +12,8 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import {
+  runtimesLayer,
+  subscriptionsLayer,
   FakeRuntime,
   makeRepository,
   testLayer,
@@ -255,9 +255,9 @@ describe("plugins: spawn hook", () => {
       )
     }).pipe(
       Effect.scoped,
-      Effect.provide(Subscriptions.layer),
+      Effect.provide(subscriptionsLayer),
       Effect.provide(harnessesLayer()),
-      Effect.provide(Runtimes.layer),
+      Effect.provide(runtimesLayer),
       Effect.provide(Bus.layer),
     ),
   )
@@ -298,9 +298,9 @@ describe("plugins: spawn hook", () => {
         )
       }).pipe(
         Effect.scoped,
-        Effect.provide(Subscriptions.layer),
+        Effect.provide(subscriptionsLayer),
         Effect.provide(harnessesLayer()),
-        Effect.provide(Runtimes.layer),
+        Effect.provide(runtimesLayer),
         Effect.provide(Bus.layer),
       ),
   )
@@ -325,10 +325,10 @@ const loaded = (dir: string) =>
   Plugins.layer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, { ...Platform.plugins, prepare: Effect.void })),
     Layer.provide(Layer.succeed(Builtins, [])),
-    Layer.provide(Subscriptions.layer),
+    Layer.provide(subscriptionsLayer),
     Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
-    Layer.provide(Runtimes.layer),
+    Layer.provide(runtimesLayer),
     Layer.provide(Bus.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),

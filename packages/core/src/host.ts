@@ -5,7 +5,6 @@ import type { HarnessUnavailable, NoRuntime } from "@vibest/schema/session"
 import type { Subscription } from "@vibest/schema/subscription"
 import type { Effect, Stream } from "effect"
 
-import type { Harness, Harnesses } from "./harness.ts"
 import type { FailInput, MachineEventInput, MachineHook, PluginNote, SpawnDecision, StartInput } from "./plugins.ts"
 
 export type RuntimeDefinition = PluginRuntime.RuntimeDefinition
@@ -49,7 +48,7 @@ export interface PluginsShape {
 export interface SubscriptionsShape {
   readonly list: Effect.Effect<ReadonlyArray<Subscription>>
   readonly report: (input: SubscriptionReport) => Effect.Effect<void>
-  readonly poll: Effect.Effect<void, never, Harnesses | Harness>
+  readonly poll: Effect.Effect<void>
 }
 
 export interface HostEnv {

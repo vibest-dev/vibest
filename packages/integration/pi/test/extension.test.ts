@@ -50,7 +50,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 }))
 
 const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
   Layer.provideMerge(testLayer()),
 )
@@ -217,7 +217,7 @@ describe("pi-vibest", () => {
         assert.isFalse(yield* fs.exists((yield* Path.Path).join(layout.home, "vibestd.log")))
         assert.deepStrictEqual(notes, [])
         yield* Layer.build(
-          Server.layer.pipe(Layer.provide(Platform.daemon.socketServer(layout.socket)), Layer.provide(Project.layer)),
+          Server.layer.pipe(Layer.provide(Platform.socketServer(layout.socket)), Layer.provide(Project.layer)),
         )
         yield* TestClock.adjust("2 seconds")
         yield* until(
@@ -274,7 +274,7 @@ describe("pi-vibest", () => {
         yield* TestClock.withLive(Effect.sleep("200 millis"))
         assert.isUndefined(yield* db.readyAt(id))
         yield* Layer.build(
-          Server.layer.pipe(Layer.provide(Platform.daemon.socketServer(layout.socket)), Layer.provide(Project.layer)),
+          Server.layer.pipe(Layer.provide(Platform.socketServer(layout.socket)), Layer.provide(Project.layer)),
         )
         yield* untilVirtual(db.readyAt(id), (at) => at !== undefined)
       }).pipe(Effect.scoped, Effect.provide(testLayer())),
@@ -314,7 +314,7 @@ describe("pi-vibest", () => {
           address: { machine: "local", id: "w1:p8" },
         })
         const vibestd = Server.layer.pipe(
-          Layer.provide(Platform.daemon.socketServer(layout.socket)),
+          Layer.provide(Platform.socketServer(layout.socket)),
           Layer.provide(Project.layer),
         )
         const first = yield* Scope.make()

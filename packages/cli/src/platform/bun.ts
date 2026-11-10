@@ -10,12 +10,15 @@ import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
 import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
 import { MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
-import type { MachineTransport } from "@vibest/core/machines"
-import { type PluginLoader } from "@vibest/core/plugins"
-import { type Liveness, livenessOf, type ProcessPlatform, validPid } from "@vibest/core/processes"
+import { MachineTransport } from "@vibest/core/machines"
+import { Layout } from "@vibest/core/paths"
+import { messageOf } from "@vibest/core/plugin-sources"
+import { Builtins, PluginLoader } from "@vibest/core/plugins"
+import { type Liveness, livenessOf, type ProcessPlatform, Processes, validPid } from "@vibest/core/processes"
+import { HostEnv } from "@vibest/core/runtimes"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
-import type { Host } from "@vibest/server/daemon"
+import { DatabaseOpenFailed, type Host, LockFailed } from "@vibest/server/daemon"
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
@@ -57,16 +60,19 @@ const sqliteLayer = (filename: string, readonly: boolean) =>
 const PRIVATE_FILE = 0o600
 
 const privateDatabase = (filename: string) =>
-  Effect.tryPromise(async () => {
-    await (await fsPromises.open(filename, "a", PRIVATE_FILE)).close()
-    await fsPromises.chmod(filename, PRIVATE_FILE)
-    for (const suffix of ["-wal", "-shm"]) {
-      try {
-        await fsPromises.chmod(filename + suffix, PRIVATE_FILE)
-      } catch (error) {
-        if ((error as { code?: string }).code !== "ENOENT") throw error
+  Effect.tryPromise({
+    try: async () => {
+      await (await fsPromises.open(filename, "a", PRIVATE_FILE)).close()
+      await fsPromises.chmod(filename, PRIVATE_FILE)
+      for (const suffix of ["-wal", "-shm"]) {
+        try {
+          await fsPromises.chmod(filename + suffix, PRIVATE_FILE)
+        } catch (error) {
+          if ((error as { code?: string }).code !== "ENOENT") throw error
+        }
       }
-    }
+    },
+    catch: (e) => new DatabaseOpenFailed({ file: filename, message: messageOf(e) }),
   })
 
 const inspectFile = (filename: string) =>
@@ -82,7 +88,7 @@ const inspectFile = (filename: string) =>
             ...(e.older === undefined ? {} : { older: e.older }),
             file: filename,
           })
-        : e,
+        : new DatabaseOpenFailed({ file: filename, message: e.message }),
     ),
   )
 
@@ -98,11 +104,11 @@ export const sqlite = (filename: string) =>
     }),
   )
 
-export const checkDatabase = (filename: string) =>
+export const checkDatabase: Host["checkDatabase"] = (filename) =>
   Effect.gen(function* () {
     if (!(yield* Effect.promise(() => Bun.file(filename).exists()))) return
     yield* inspectFile(filename)
-  }).pipe(Effect.mapError((e) => (e instanceof Error ? e : new Error(String(e)))))
+  })
 
 export const runMain = BunRuntime.runMain
 
@@ -149,7 +155,9 @@ const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", 
 })
 const LOCK_EX_NB = 2 | 4
 
-const lock: Host["lock"] = (file) =>
+const lockFailed = (file: string) => (e: unknown) => new LockFailed({ file, message: messageOf(e) })
+
+export const lock: Host["lock"] = (file) =>
   Effect.acquireRelease(
     Effect.try({
       try: () => {
@@ -158,7 +166,7 @@ const lock: Host["lock"] = (file) =>
         fs.closeSync(fd)
         return undefined
       },
-      catch: (e) => e as Error,
+      catch: lockFailed(file),
     }),
     (fd) =>
       Effect.sync(() => {
@@ -179,7 +187,7 @@ const lock: Host["lock"] = (file) =>
                 fs.ftruncateSync(fd, 0)
                 fs.writeSync(fd, text, 0)
               },
-              catch: (e) => e as Error,
+              catch: lockFailed(file),
             }),
     ),
   )
@@ -231,18 +239,25 @@ const dropEnv = (names: ReadonlyArray<string>) => {
 
 export const services = platform
 
-export const daemon: Omit<Host, "runtime"> = {
-  sqlite,
-  socketServer: (path) => BunSocketServer.layer({ path }),
-  httpServer: (path) => BunHttpServer.layerServer({ unix: path }),
-  plugins,
-  builtins: pre,
-  env: { drop: dropEnv },
-  processes,
+export const socketServer = (path: string) => BunSocketServer.layer({ path })
+
+export const daemon: Host = {
+  layer: Layer.mergeAll(
+    Layer.unwrap(Effect.map(Layout, (layout) => sqlite(layout.database))),
+    Layer.succeed(MachineTransport, transport),
+    Layer.succeed(PluginLoader, plugins),
+    Layer.succeed(Builtins, pre),
+    Layer.succeed(HostEnv, { drop: dropEnv }),
+    Processes.layer(processes),
+  ),
+  servers: Layer.unwrap(
+    Effect.map(Layout, (layout) =>
+      Layer.merge(socketServer(layout.socket), BunHttpServer.layerServer({ unix: layout.httpSocket })),
+    ),
+  ),
   lock,
   checkDatabase,
-  host: { name: os.hostname(), id: hostId },
-  transport,
+  facts: { name: os.hostname(), id: hostId, pid: process.pid },
 }
 
 export const selfCommand: ReadonlyArray<string> =

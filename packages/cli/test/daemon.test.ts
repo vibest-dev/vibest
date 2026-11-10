@@ -226,15 +226,14 @@ describe.concurrent("vibestd.pid lock", () => {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
         const slowClose: Host = {
           ...Platform.daemon,
-          socketServer: (path) =>
-            Layer.effect(
-              SocketServer,
-              Effect.gen(function* () {
-                const server = yield* SocketServer
-                yield* Effect.addFinalizer(() => Effect.sleep("1500 millis"))
-                return server
-              }),
-            ).pipe(Layer.provide(Platform.daemon.socketServer(path))),
+          servers: Layer.effect(
+            SocketServer,
+            Effect.gen(function* () {
+              const server = yield* SocketServer
+              yield* Effect.addFinalizer(() => Effect.sleep("1500 millis"))
+              return server
+            }),
+          ).pipe(Layer.provideMerge(Platform.daemon.servers)),
         }
         const old = yield* run(slowClose).pipe(
           Effect.provideService(Layout, layout),

@@ -4,7 +4,6 @@ import { Harness, HarnessUnavailable } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
 import { Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
-import { Runtimes } from "@vibest/core/runtimes"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin"
 import { claude, cursor, pi } from "@vibest/plugin-harnesses"
@@ -34,7 +33,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { harnessesLayer, makeRepository, runVibest, testLayer } from "./fakes.ts"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer, makeRepository, runVibest, testLayer } from "./fakes.ts"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const CURSOR_SECRET = "cursor-token-do-not-log"
@@ -134,9 +133,9 @@ const fakeMachine = (options: {
     },
     { ...pi, subscription: (dir: string) => onMachine(piSubscription(dir)) },
   ]
-  const fakes = Layer.mergeAll(
-    Subscriptions.layer.pipe(Layer.provideMerge(harnessesLayer(definitions))),
-    harnessLayer(options.installed),
+  const fakes = Subscriptions.testLayer.pipe(
+    Layer.provideMerge(harnessesLayer(definitions)),
+    Layer.provideMerge(harnessLayer(options.installed)),
   )
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -153,7 +152,7 @@ const fakeMachine = (options: {
 }
 
 const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
   Layer.provideMerge(testLayer()),
 )
@@ -501,7 +500,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       )
     }).pipe(
       Effect.provide(
-        Subscriptions.layer.pipe(
+        Subscriptions.testLayer.pipe(
           Layer.provideMerge(
             harnessesLayer([
               { ...claude, subscription: () => Effect.never },
@@ -519,7 +518,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       const fake = loggedOut(yield* home)
       yield* fake.provide(
         Effect.gen(function* () {
-          yield* Layer.build(Subscriptions.live.pipe(Layer.provide(fake.layer)))
+          yield* Layer.build(Subscriptions.layer.pipe(Layer.provide(fake.layer)))
           yield* TestClock.adjust("1 second")
           assert.strictEqual(fake.spawned.length, 1)
           yield* TestClock.adjust("1 hour")
@@ -534,7 +533,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       const fake = loggedOut(yield* home)
       yield* fake.provide(
         Effect.gen(function* () {
-          const context = yield* Layer.build(Subscriptions.live.pipe(Layer.provide(fake.layer)))
+          const context = yield* Layer.build(Subscriptions.layer.pipe(Layer.provide(fake.layer)))
           const subs = Context.get(context, Subscriptions)
           yield* TestClock.adjust("59 seconds")
           yield* subs.list
@@ -587,9 +586,9 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         })
         return { seen, list: yield* subs.list }
       }).pipe(
-        Effect.provide(Subscriptions.layer),
+        Effect.provide(subscriptionsLayer),
         Effect.provide(harnessesLayer()),
-        Effect.provide(Runtimes.layer),
+        Effect.provide(runtimesLayer),
         Effect.provide(Bus.layer),
         Effect.scoped,
       )

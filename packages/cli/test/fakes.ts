@@ -18,14 +18,16 @@ import { Remote } from "@vibest/core/remote"
 import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
 import { turnEndFrom } from "@vibest/core/results"
-import { make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
+import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
+import type { DaemonIdentity } from "@vibest/protocol/rpc"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { randomId } from "@vibest/schema/id"
 import { readDaemonInfo } from "@vibest/server/daemon"
+import * as Server from "@vibest/server/server"
 import {
   Clock,
   ConfigProvider,
@@ -333,6 +335,7 @@ export interface TestOptions extends FakeRuntimeOptions {
   readonly sshHosts?: Readonly<Record<string, string>>
   readonly transport?: MachineTransport["Service"]
   readonly sessions?: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]
+  readonly identity?: DaemonIdentity
 }
 
 const noTransport: MachineTransport["Service"] = () => Effect.fail(new Error("no machine transport in this test"))
@@ -470,6 +473,10 @@ export const harnessesFrom = (
     harnesses.transform((editor) => definitions.forEach((definition) => editor.add(definition))),
   )
 
+export const noHostEnv = Layer.succeed(HostEnv, { drop: () => {} })
+
+export const runtimesLayer = Runtimes.layer.pipe(Layer.provide(noHostEnv))
+
 export const harnessesLayer = (definitions: ReadonlyArray<HarnessDefinition> = HARNESSES) =>
   Layer.effect(Harnesses, harnessesFrom(definitions))
 
@@ -488,7 +495,7 @@ export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCal
 
 export const runtimesFrom = (
   definitions: ReadonlyArray<RuntimeDefinition>,
-): Effect.Effect<RuntimesShape, never, Bus | Scope.Scope> =>
+): Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Scope> =>
   Effect.tap(makeRuntimes, (runtimes) =>
     runtimes.transform((editor) => definitions.forEach((definition) => editor.add(definition))),
   )
@@ -515,6 +522,8 @@ const harnessOf = (options: TestOptions) =>
             ]),
           ),
   })
+
+export const subscriptionsLayer = Subscriptions.testLayer.pipe(Layer.provide(harnessOf({})))
 
 type PluginEntry = NonNullable<TestOptions["plugins"]>[number]
 
@@ -559,7 +568,7 @@ const over = (options: TestOptions) => {
         }),
       )
     }),
-  ).pipe(Layer.provideMerge(Subscriptions.layer))
+  ).pipe(Layer.provideMerge(Subscriptions.testLayer))
   const fakeIntegrationReportsReadyOnStart = Layer.effectDiscard(
     Effect.gen(function* () {
       const fake = yield* FakeRuntime
@@ -612,7 +621,14 @@ const over = (options: TestOptions) => {
       ),
       Layer.provideMerge(Platform.services),
       Layer.provideMerge(Bus.layer),
-      Layer.provideMerge(Layer.sync(VibestdIdentity, () => ({ id: randomId(), name: "test-host" }))),
+      Layer.provideMerge(
+        Layer.mergeAll(
+          Layer.sync(VibestdIdentity, () => ({ id: randomId(), name: "test-host" })),
+          noHostEnv,
+          Layer.succeed(Server.Identity, options.identity ?? {}),
+          Layer.effect(Server.Shutdown, Deferred.make<void>()),
+        ),
+      ),
     ),
   )
 }

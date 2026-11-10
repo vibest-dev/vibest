@@ -607,7 +607,7 @@ layer(Platform.services)(
               ),
               Layer.provide(RpcServer.layerProtocolSocketServer),
               Layer.provide(RpcSerialization.layerNdJsonRpc()),
-              Layer.provide(Platform.daemon.socketServer(socket)),
+              Layer.provide(Platform.socketServer(socket)),
             ),
           ).pipe(Effect.forkScoped)
           yield* accepts(socket).pipe(Effect.repeat({ until: (up) => up, schedule: Schedule.spaced("20 millis") }))

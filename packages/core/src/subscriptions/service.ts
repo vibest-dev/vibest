@@ -46,6 +46,7 @@ const wrote = (
 export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsShape>()("vibest/Subscriptions") {
   static readonly make = Effect.gen(function* () {
     const harnesses = yield* Harnesses
+    const harness = yield* Harness
     const rows = yield* Ref.make(new Map<string, Row>())
     const modify = (harness: HarnessId, provider: string, f: (prev: Row | undefined, now: number) => Row) =>
       Effect.gen(function* () {
@@ -105,7 +106,6 @@ export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsS
           )
       }).pipe(Effect.catchCause(() => Effect.logWarning(`subscriptions: ${definition.id} poll failed`)))
     const poll = Effect.gen(function* () {
-      const harness = yield* Harness
       const home = yield* homeDir
       for (const definition of harnesses.all)
         if (definition.subscription && (yield* harness.available(definition.id))) yield* read(definition, home)
@@ -114,14 +114,13 @@ export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsS
     return Subscriptions.of({ list, report, poll })
   })
 
-  static readonly layer = Layer.effect(Subscriptions, Subscriptions.make)
+  static readonly testLayer = Layer.effect(Subscriptions, Subscriptions.make)
 
-  static readonly live = Layer.effect(
+  static readonly layer = Layer.effect(
     Subscriptions,
     Effect.gen(function* () {
       const service = yield* Subscriptions.make
       const harnesses = yield* Harnesses
-      const context = yield* Effect.context<PollServices>()
       const scope = yield* Effect.scope
       const lock = yield* Semaphore.make(1)
       let polledAt = Number.NEGATIVE_INFINITY
@@ -132,7 +131,7 @@ export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsS
           const now = yield* Clock.currentTimeMillis
           if (now - polledAt < Duration.toMillis(MINUTE) || harnesses.all.length === 0) return undefined
           polledAt = now
-          running = yield* Effect.forkIn(service.poll.pipe(Effect.provideContext(context)), scope)
+          running = yield* Effect.forkIn(service.poll, scope)
           return running
         }),
       )
@@ -148,5 +147,3 @@ export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsS
     }),
   )
 }
-
-type PollServices = Harness | Harnesses

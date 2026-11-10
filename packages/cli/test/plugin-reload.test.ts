@@ -6,7 +6,6 @@ import { Harnesses } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, type Candidate, makeHost, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin, type AgentStartBefore, type Harness, type Runtime } from "@vibest/plugin"
 import {
   Context,
@@ -27,7 +26,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { harnessesLayer } from "./fakes.ts"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./fakes.ts"
 
 const events: Array<string> = []
 const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.void) =>
@@ -80,9 +79,9 @@ const host = <A, E>(f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Ef
   makeHost().pipe(
     Effect.flatMap(f),
     Effect.scoped,
-    Effect.provide(Subscriptions.layer),
+    Effect.provide(subscriptionsLayer),
     Effect.provide(harnessesLayer()),
-    Effect.provide(Runtimes.layer),
+    Effect.provide(runtimesLayer),
     Effect.provide(Bus.layer),
   )
 
@@ -93,9 +92,9 @@ describe("plugins: registrations", () => {
     makeHost().pipe(
       Effect.flatMap(f),
       Effect.scoped,
-      Effect.provide(Subscriptions.layer),
+      Effect.provide(subscriptionsLayer),
       Effect.provide(harnessesLayer()),
-      Effect.provide(Runtimes.layer),
+      Effect.provide(runtimesLayer),
       Effect.provide(Bus.layer),
     )
 
@@ -458,10 +457,10 @@ const supervise = (dir: string) =>
   Plugins.layer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, loader)),
     Layer.provide(Layer.succeed(Builtins, [])),
-    Layer.provide(Subscriptions.layer),
+    Layer.provide(subscriptionsLayer),
     Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
-    Layer.provide(Runtimes.layer),
+    Layer.provide(runtimesLayer),
     Layer.provide(Bus.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),
@@ -696,10 +695,10 @@ describe("plugins: supervisor", () => {
       const built = yield* Plugins.layer.pipe(
         Layer.provide(Layer.succeed(PluginLoader, loader)),
         Layer.provide(Layer.succeed(Builtins, [runtimePlugin])),
-        Layer.provide(Subscriptions.layer),
+        Layer.provide(subscriptionsLayer),
         Layer.provide(harnessesLayer()),
         Layer.provide(Layer.effect(Layout, Layout.make(dir))),
-        Layer.provideMerge(Runtimes.layer),
+        Layer.provideMerge(runtimesLayer),
         Layer.provide(Bus.layer),
         Layer.build,
       )

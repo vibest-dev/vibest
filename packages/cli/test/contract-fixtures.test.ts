@@ -35,7 +35,7 @@ const FIXED_TIME = 1767225600000
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g
 
 const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
   Layer.provideMerge(testLayer()),
 )

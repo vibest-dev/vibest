@@ -145,7 +145,7 @@ describe("vibest update", () => {
     () => {
       let latest: string | null = "999.0.0"
       const served = Server.layer.pipe(
-        Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+        Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
         Layer.provide(
           Layer.succeed(
             UpdateCheck,

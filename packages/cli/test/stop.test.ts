@@ -33,21 +33,10 @@ import {
 const INSTANCE = "00000000-0000-4000-8000-000000000001"
 
 const serve = (options: TestOptions = {}) =>
-  Layer.unwrap(
-    Effect.gen(function* () {
-      const shutdown = yield* Deferred.make<void>()
-      return Server.layer.pipe(
-        Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
-        Layer.provideMerge(
-          Layer.mergeAll(
-            Layer.succeed(Server.Identity, { instance: INSTANCE }),
-            Layer.succeed(Server.Shutdown, shutdown),
-          ),
-        ),
-        Layer.provideMerge(Project.layer),
-        Layer.provideMerge(testLayer(options)),
-      )
-    }),
+  Server.layer.pipe(
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
+    Layer.provideMerge(Project.layer),
+    Layer.provideMerge(testLayer({ ...options, identity: { instance: INSTANCE } })),
   )
 
 const test = <E>(
