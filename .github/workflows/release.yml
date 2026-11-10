@@ -11,9 +11,9 @@ name: Release
 # Started by hand, not by a push to main: the owner chooses when. The file name stays release.yml: npm trusted
 # publishing binds each package to it.
 # It never pushes to main. build checks the version is not released yet, runs the release gate on that commit (the
-# whole of pnpm verify but the macOS-only H4, which keeps the linux-x64 curl archive it checked), and packs and checks
-# the npm tarballs. darwin (macos-latest) runs pnpm verify H4 on the same commit (keeping the darwin-arm64 curl archive
-# it checked) and checks the same tarballs. Both record the SHA-256 of every file they keep. publish waits for the
+# whole of pnpm verify but the macOS-only H4, which keeps the linux-x64 curl archive and the npm tarballs it installed),
+# and checks those tarballs. darwin (macos-latest) runs pnpm verify H4 on the same commit (keeping the darwin-arm64 curl
+# archive it checked; its npm install takes build's exact tarballs) and checks the same tarballs. Both record the SHA-256 of every file they keep. publish waits for the
 # owner's approval (environment `release`), checks those hashes, tags that commit v<version> (GITHUB_TOKEN; no ruleset
 # covers tags), publishes exactly those npm tarballs and makes the GitHub Release from exactly those archives (notes
 # from CHANGELOG.md when it has this version, else GitHub's). Nothing is rebuilt after verify checked it.
@@ -183,14 +183,19 @@ jobs:
             done
           }
           same "$(node -p 'require("./packages/cli/package.json").version')"
+          # The newest release: a new one follows it, so Latest and the beta dist-tag never move backwards.
+          last=$(git ls-remote --tags "$repo" 'v*-beta.*' \
+            | sed -n 's#^[0-9a-f]*\trefs/tags/v\([0-9]*\.[0-9]*\.[0-9]*-beta\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)
           if [ -n "$INPUT" ]; then
             version=$INPUT
             if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
               echo "::error::$version is not a beta version (x.y.z-beta.n); stable releases are not supported yet"; exit 1
             fi
+            if [ -n "$last" ] && [ "$version" != "$last" ] \
+              && [ "$(printf '%s\n%s\n' "$last" "$version" | sort -V | tail -n 1)" != "$version" ]; then
+              echo "::error::$version is older than the newest release, $last"; exit 1
+            fi
           else
-            last=$(git ls-remote --tags "$repo" 'v*-beta.*' \
-              | sed -n 's#^[0-9a-f]*\trefs/tags/v\([0-9]*\.[0-9]*\.[0-9]*-beta\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)
             if [ -z "$last" ]; then echo "::error::no v<x.y.z>-beta.<n> tag to follow; pass -f version=<version>"; exit 1; fi
             version="${last%.*}.$((${last##*.} + 1))"
           fi
@@ -224,9 +229,12 @@ jobs:
 
       # The release gate: the whole of pnpm verify on the commit to release (build, typecheck and lint, unit tests, the
       # curl and npm installs, and every E2E check on each, --strict), --no-cache so every check runs. H4 is macOS-only:
-      # verify leaves it to the darwin job's verify of the same commit, and publish needs both. The linux-x64 archive
-      # the curl install was checked with is kept: it is the one the GitHub Release gets.
-      - run: pnpm run verify --no-cache --elsewhere H4 --keep-archive "$RUNNER_TEMP/release/github"
+      # verify leaves it to the darwin job's verify of the same commit, and publish needs both. What it installed is
+      # kept and is what ships: the linux-x64 archive of the curl install (the GitHub Release's), and every package
+      # tarball, packed once (--packs), of which the npm install took @vibest/cli and @vibest/cli-linux-x64.
+      - run: >-
+          pnpm run verify --no-cache --elsewhere H4
+          --keep-archive "$RUNNER_TEMP/release/github" --packs "$RUNNER_TEMP/release/npm"
       # On a failure: each check's evidence (redacted) and the vibestd log of every world E2E kept.
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -237,12 +245,13 @@ jobs:
             /tmp/vbe-*/vibest/vibestd.log
           if-no-files-found: ignore
           retention-days: 7
-      # Packs every package to publish (the darwin-arm64 binary is cross-compiled here), checks the tarballs, installs
-      # @vibest/cli with the linux-x64 binary from them and runs it; keeps the tarballs and their publish order.
-      - name: Pack and check
+      # Checks the tarballs verify packed (one per published package; the darwin-arm64 binary is cross-compiled here)
+      # without repacking them: what each holds, @vibest/cli with the linux-x64 binary installed from them and run.
+      # Writes their publish order, dependencies first.
+      - name: Check the tarballs
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: bun tools/verify/src/release-artifacts.ts "$VERSION" --out "$RUNNER_TEMP/release/npm"
+        run: bun tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
       # What install.sh downloads (releases/latest/download/...): an archive per platform (linux-x64 here, from verify;
       # darwin-arm64 from the darwin job), install.sh itself, and `version`, which `vibest update` reads.
       - name: GitHub Release files
@@ -275,9 +284,10 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  # On a GitHub-hosted arm64 Mac: pnpm verify H4 (the macOS-only check build's verify leaves to it) on the same commit,
-  # keeping the darwin-arm64 archive its curl install was checked with, and build's tarballs: @vibest/cli installed with
-  # the darwin-arm64 binary and run.
+  # On a GitHub-hosted arm64 Mac: pnpm verify H4 (the macOS-only check build's verify leaves to it) on the same commit:
+  # its curl install from the darwin-arm64 archive it builds and keeps, its npm install from build's exact tarballs
+  # (@vibest/cli and the cross-compiled @vibest/cli-darwin-arm64, not repacked). Then build's tarballs are checked again
+  # here, with the darwin-arm64 binary installed and run.
   darwin:
     needs: build
     if: >-
@@ -310,7 +320,7 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: pnpm install --frozen-lockfile --prefer-offline
-      - run: pnpm run verify --no-cache H4 --keep-archive "$RUNNER_TEMP/darwin/github"
+      - run: pnpm run verify --no-cache H4 --keep-archive "$RUNNER_TEMP/darwin/github" --packs "$RUNNER_TEMP/release/npm"
       - name: Check the tarballs
         run: node tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
       - name: Check the archive and record its hash
@@ -462,7 +472,7 @@ jobs:
         run: |
           while read -r name _; do
             for _ in 1 2 3 4 5 6 7 8 9 10; do
-              at=$(npm view "$name" "dist-tags.$DIST_TAG" </dev/null)
+              at=$(npm view "$name" "dist-tags.$DIST_TAG" </dev/null || true)
               [ "$at" = "$VERSION" ] && break
               sleep 15
             done

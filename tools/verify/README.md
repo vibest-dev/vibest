@@ -11,6 +11,9 @@ pnpm verify --elsewhere H4       # leave these checks to another machine's verif
                                  # macOS-only H4 to its macOS job, which runs pnpm verify H4 on the same commit)
 pnpm verify --keep-archive <dir> # build this platform's release archive into <dir> and keep it: the Release workflow
                                  # publishes the archive the curl install was checked with
+pnpm verify --packs <dir>        # empty <dir>: pack every published package into it once and keep the tarballs; with
+                                 # tarballs in it: pack nothing. Either way the npm install takes @vibest/cli and this
+                                 # platform's binary package from <dir>, so the Release workflow publishes what it checked
 ```
 
 verify is a deterministic program: CI runs it and it passes or fails. It does not read the capability docs in
@@ -38,9 +41,9 @@ Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `update`, `star
 
 Nothing is published: no GitHub Release, no npm package, nothing in `~/.local`.
 
-`bun tools/verify/src/release-artifacts.ts <version> [--out <dir> | --from <dir>]` is the Release workflow's check
-before Publish: it packs every published package (or, with `--from`, takes the tarballs an earlier `--out` run kept in
-`<dir>`), checks each tarball holds what its package.json declares (files, bin, main, exports, the harness plugins),
-installs the packed `@vibest/cli` with this platform's binary package into an empty npm prefix and checks that
-`vibest --version` prints `<version>`. `--out` keeps the checked tarballs and `publish-order` (dependencies first),
-which the publish job publishes as they are. No harness, no model.
+`bun tools/verify/src/release-artifacts.ts <version> --from <dir>` is the Release workflow's check before Publish, on
+the tarballs `pnpm verify --packs <dir>` kept; it packs nothing. It checks `<dir>` holds exactly one tarball of each
+published package, that each holds what its package.json declares (files, bin, main, exports, the harness plugins) and
+`<version>`, installs `@vibest/cli` with this platform's binary package from them into an empty npm prefix and checks
+that `vibest --version` prints `<version>`. It writes `publish-order` (dependencies first), which the publish job
+publishes in that order, or checks an existing one. No harness, no model.

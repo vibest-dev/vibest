@@ -11,17 +11,18 @@
    `main` from the Actions page or with `gh workflow run release.yml -R vibest-dev/vibest --ref main`. It releases a
    chosen known-good commit of `main` (`-f commit=<sha>`, which must be an ancestor of `main`; without it, the head of
    `main`): every job builds, verifies, tags and publishes exactly that commit. `-f version=<x.y.z-beta.n>` names the
-   version; without it, the next beta after the highest `v<x.y.z>-beta.<n>` tag. It sets that version in every
-   package.json of its own checkout only and fails when the version is already tagged or on npm. It
-   runs the release gate on that tree (the whole of `pnpm verify --no-cache`, the single entry for all verification,
-   on GitHub-hosted runners: `ubuntu-latest` runs it with `--elsewhere H4`, and `macos-latest` runs
-   `pnpm verify --no-cache H4`, the macOS-only check, on the same commit and version), packs the npm tarballs and
-   checks them on Linux and macOS, keeps the curl archive each platform's verify installed and checked
-   (`--keep-archive`), records the SHA-256 of every kept file, then waits for the owner's approval (environment
+   version, which must be newer than the newest release; without it, the next beta after the highest
+   `v<x.y.z>-beta.<n>` tag. It sets that version in every package.json of its own checkout only and fails when the
+   version is already tagged or on npm. It runs the release gate on that tree (the whole of `pnpm verify --no-cache`,
+   the single entry for all verification, on GitHub-hosted runners: `ubuntu-latest` runs it with `--elsewhere H4`, and
+   `macos-latest` runs `pnpm verify --no-cache H4`, the macOS-only check, on the same commit and version). It keeps what
+   verify installed and checked: each platform's curl archive (`--keep-archive`) and the npm tarballs, packed once on
+   Linux (`--packs`; the macOS verify installs those same tarballs), checks the tarballs on Linux and macOS without
+   repacking them, records the SHA-256 of every kept file, then waits for the owner's approval (environment
    `release`). Only after the approval does it check those hashes, tag that commit `v<version>` (with
    `GITHUB_TOKEN`), publish exactly those tarballs to npm, make the GitHub Release from exactly those archives, and check
-   every package's dist-tag. Nothing is rebuilt after verify checked it. A CHANGELOG.md section for the version
-   (`## <version>`) is optional.
+   every package's dist-tag. Nothing is rebuilt or repacked after verify checked it. A CHANGELOG.md section for the
+   version (`## <version>`) is optional.
 
    There is no local release or publish path: nobody tags or publishes from a machine.
 
