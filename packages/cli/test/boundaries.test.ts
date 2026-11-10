@@ -2,6 +2,8 @@ import fs from "node:fs"
 import path from "node:path"
 
 import { assert, describe, it } from "@effect/vitest"
+import { commands, harnesses, runtimes } from "@vibest/builtins"
+import { Effect } from "effect"
 
 const root = path.resolve(import.meta.dirname, "../../..")
 const PACKAGES = ["schema", "core", "server", "protocol", "client"]
@@ -61,4 +63,80 @@ describe("runtime boundary", () => {
     }
     assert.deepStrictEqual(offenders, [])
   })
+
+  it("neutral packages do not name a builtin runtime or harness", () => {
+    const names = new Set<string>()
+    for (const harness of harnesses) {
+      names.add(harness.definition.id)
+      names.add(harness.definition.binary)
+    }
+    for (const runtime of runtimes) names.add(runtime.id)
+    for (const command of commands(() => Effect.void)) {
+      assert.strictEqual(typeof command.name, "string")
+      names.add(command.name)
+    }
+    names.delete("")
+    assert.isAbove(names.size, 0)
+    const packages = ["core", "server", "cli", "protocol"]
+    const offenders: Array<string> = []
+    for (const name of packages) {
+      const dir = path.join(root, "packages", name, "src")
+      for (const file of fs.readdirSync(dir, { recursive: true, encoding: "utf8" })) {
+        if (!/\.tsx?$/.test(file)) continue
+        const rel = path.join("packages", name, "src", file)
+        const source = fs.readFileSync(path.join(root, rel), "utf8")
+        for (const literal of stringLiterals(source))
+          if (names.has(literal)) offenders.push(`${rel} names ${JSON.stringify(literal)}`)
+      }
+    }
+    assert.deepStrictEqual(offenders, [])
+  })
 })
+
+const stringLiterals = (source: string): Array<string> => {
+  const found: Array<string> = []
+  let i = 0
+  while (i < source.length) {
+    const c = source[i]!
+    if (c === "/" && source[i + 1] === "/") {
+      const end = source.indexOf("\n", i + 2)
+      i = end === -1 ? source.length : end + 1
+      continue
+    }
+    if (c === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2)
+      i = end === -1 ? source.length : end + 2
+      continue
+    }
+    if (c !== '"' && c !== "'" && c !== "`") {
+      i++
+      continue
+    }
+    const quote = c
+    let body = ""
+    let closed = false
+    i++
+    for (; i < source.length; i++) {
+      const ch = source[i]!
+      if (ch === "\\") {
+        const next = source[i + 1]
+        if (next === undefined) break
+        body += next
+        i++
+        continue
+      }
+      if (quote === "`" && ch === "$" && source[i + 1] === "{") {
+        closed = false
+        break
+      }
+      if (ch === quote) {
+        closed = true
+        i++
+        break
+      }
+      body += ch
+    }
+    if (closed) found.push(body)
+  }
+  return found
+}

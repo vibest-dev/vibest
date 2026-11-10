@@ -879,7 +879,7 @@ Which harness an Agent runs on is decided in two steps. First core fills what th
 (`packages/core/src/spawn.ts`): a `vibest run` without a harness takes the harness, provider and model of its caller's
 session row (the calling session, else the project's main agent when the user runs it from a plain terminal); a named
 harness replaces all three, and `--provider` or `--model` alone overrides only that field; with nothing to inherit the
-start fails with `NoHarnessChosen` ("no harness to inherit: name one, for example `vibest run claude -- <prompt>`").
+start fails with `NoHarnessChosen` ("no harness to inherit: name one, for example `vibest run <harness> -- <prompt>`").
 The main agent started by `vibest` without `--harness` reuses the harness the project's main agent last used, and a
 project's first start without it fails asking for `--harness`. Then the `agent.start.before` chain (§7) runs, every
 plugin in order, each able to keep or overwrite what came before. There is no default harness and no builtin that

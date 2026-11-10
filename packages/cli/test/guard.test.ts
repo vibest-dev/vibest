@@ -4,6 +4,7 @@ import { Db } from "@vibest/core/db"
 import { coordinator, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
+import { type Runtime, Runtimes, type RuntimesShape } from "@vibest/core/runtimes"
 import { spawnWorking } from "@vibest/core/test/lib/sessions-helpers"
 import { Forbidden } from "@vibest/protocol/rpc"
 import type { Host } from "@vibest/server/daemon"
@@ -34,7 +35,15 @@ import { FakeGit, HARNESSES, harnessesLayer, makeRepository, runVibest, tempDire
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
 const CLIS = new Set(HARNESSES.map((definition) => definition.binary))
-const both = (command: string) => [shellBlock(command, source, true, CLIS), shellBlock(command, source, false, CLIS)]
+const RUNTIME_PROGRAMS = new Set(["herdr"])
+const both = (command: string) => [
+  shellBlock(command, source, true, CLIS, RUNTIME_PROGRAMS),
+  shellBlock(command, source, false, CLIS, RUNTIME_PROGRAMS),
+]
+const namedRuntimes = (ids: ReadonlyArray<string>) =>
+  Layer.succeed(Runtimes, {
+    all: Effect.succeed(ids.map((id) => ({ id }) as Runtime)),
+  } as unknown as RuntimesShape)
 
 describe("Shell denials", () => {
   it("vibest connect and vibest machine are refused for every agent", () => {
@@ -117,9 +126,19 @@ describe("Shell denials", () => {
       "echo a | xargs -n 1 herdr pane close",
       "cat <<EOF\nx\nEOF\nherdr pane list",
     ])
-      for (const reason of both(command)) assert.match(reason ?? "", /^Agents must not control herdr/, command)
+      for (const reason of both(command))
+        assert.match(reason ?? "", /^Agents must not control a terminal runtime/, command)
     for (const command of ["herdr --help", "herdr", "ls && herdr status", "env A=1 /opt/bin/herdr --version"])
-      assert.deepStrictEqual(both(command), [undefined, "Sessions do not run herdr; vibest manages it."], command)
+      assert.deepStrictEqual(
+        both(command),
+        [undefined, "Sessions do not run a terminal runtime; vibest manages it."],
+        command,
+      )
+    assert.isUndefined(shellBlock("hc pane list", source, true, CLIS, RUNTIME_PROGRAMS))
+    assert.match(
+      shellBlock("hc pane list", source, true, CLIS, new Set(["hc"])) ?? "",
+      /^Agents must not control a terminal runtime/,
+    )
   })
 
   it("refuse vibest with its identity variables changed or cleared, however it is wrapped or spelled", () => {
@@ -206,7 +225,7 @@ describe("Shell denials", () => {
   })
 })
 
-layer(Layer.merge(Platform.services, harnessesLayer()))("role rules", (it) => {
+layer(Layer.mergeAll(Platform.services, harnessesLayer(), namedRuntimes(["herdr"])))("role rules", (it) => {
   it.effect("Coordinator: file edits only in its project folder (VIBEST_PROJECT_DIR), symlinks and .. followed", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -780,7 +799,7 @@ describe("vibest integration guard through vibestd", () => {
         const refused = yield* guard("herdr pane list")
         assert.strictEqual(refused.code, 0, refused.stderr)
         const reason =
-          "Agents must not control herdr agents, panes, tabs, workspaces or worktrees; vibest manages them."
+          "Agents must not control a terminal runtime's agents, panes, tabs, workspaces or worktrees; vibest manages them."
         assert.deepStrictEqual(JSON.parse(refused.stdout), {
           permission: "deny",
           user_message: reason,
