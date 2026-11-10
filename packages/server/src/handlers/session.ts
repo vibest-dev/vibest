@@ -64,7 +64,7 @@ export const make = (
     ) =>
       Effect.gen(function* () {
         const toOrigin =
-          caller._tag === "Session" ? yield* db.sendToOrigin(caller.sessionId, input, p.message, p.request) : undefined
+          caller._tag === "Session" ? yield* db.sendToOrigin(caller.sessionId, input, p.message) : undefined
         if (toOrigin === false)
           return yield* new NoSuchSession({
             id: input,

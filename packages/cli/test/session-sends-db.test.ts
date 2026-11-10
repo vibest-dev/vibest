@@ -115,8 +115,7 @@ describe("sends from sessions", () => {
           },
         })
         assert.isUndefined(yield* db.sendToOrigin(B, "eeeeeeee", "hi"))
-        assert.isTrue(yield* db.sendToOrigin(B, "dddddddd", "hi", "req-1"))
-        assert.isTrue(yield* db.sendToOrigin(B, "dddddddd", "hi", "req-1"))
+        assert.isTrue(yield* db.sendToOrigin(B, "dddddddd", "hi"))
         const out = yield* sql<{ kind: string; content: string }>`SELECT kind, content FROM outbox`
         assert.deepStrictEqual(
           out.map((o) => o.kind),
@@ -138,9 +137,8 @@ describe("sends from sessions", () => {
           task: "b",
           origin: { peer: "22222222-2222-4222-8222-222222222222", project: "p", reportTo: X },
         })
-        assert.isFalse(yield* db.sendToOrigin(B, "cccccccc", "hi", "req-1"))
+        assert.isFalse(yield* db.sendToOrigin(B, "cccccccc", "hi"))
         assert.deepStrictEqual(yield* sql`SELECT 1 FROM outbox`, [])
-        assert.deepStrictEqual(yield* sql`SELECT 1 FROM inbox WHERE request = 'req-1'`, [])
       }),
     ),
   )

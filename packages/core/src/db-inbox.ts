@@ -16,7 +16,6 @@ export const inboxMethods = (store: Store) => {
     findSession,
     liveRecipient,
     queueSend,
-    queueInbox,
     tellSender,
     tellSendersOf,
     queueForPeer,
@@ -51,13 +50,12 @@ export const inboxMethods = (store: Store) => {
 
     insertNoticeTo: (recipient: string, message: string) => tx(tellSender(recipient, message)).pipe(Effect.orDie),
 
-    sendToOrigin: (sessionId: string, target: string, message: string, request?: string) =>
+    sendToOrigin: (sessionId: string, target: string, message: string) =>
       tx(
         Effect.gen(function* () {
           const origin = yield* origins(sessionId)
           const creator = origin?.reportTo
           if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return undefined
-          if (request !== undefined && (yield* queuedBy(sessionId, request)) !== undefined) return true
           const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sessionId}`
           const written = yield* queueForPeer(origin.peer, creator, {
             sessionId,
@@ -71,16 +69,7 @@ export const inboxMethods = (store: Store) => {
               ["message", message],
             ),
           })
-          if (!written) return false
-          yield* queueInbox({
-            recipient: sessionId,
-            kind: "send",
-            sender: sessionId,
-            content: message,
-            status: "dropped",
-            request,
-          })
-          return true
+          return written
         }),
       ).pipe(Effect.orDie),
 
