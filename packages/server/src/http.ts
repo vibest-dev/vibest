@@ -17,6 +17,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 
 import { admit, checkProtocol, identify, reader } from "./gates.ts"
 import * as Hooks from "./hooks.ts"
+import { services } from "./services.ts"
 
 export type Request = {
   readonly path: string
@@ -146,6 +147,7 @@ export const node = LayerNode.make({
   name: "vibest/HttpServer",
   layer,
   deps: [
+    services,
     Db.node,
     Drain.node,
     Harnesses.node,

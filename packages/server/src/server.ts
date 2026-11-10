@@ -61,6 +61,7 @@ import * as Hooks from "./hooks.ts"
 import { integrationHandlers } from "./integration.ts"
 import { placeOf, sameCoordinator, sessionListing, toInfo } from "./listing.ts"
 import { remoteHandlers } from "./remote-handlers.ts"
+import { services } from "./services.ts"
 
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A | readonly [A, "peer"] ? K : never }[keyof Access]
@@ -892,6 +893,7 @@ export const node = LayerNode.make({
   name: "vibest/RpcServer",
   layer,
   deps: [
+    services,
     Bus.node,
     Db.node,
     Drain.node,
