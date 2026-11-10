@@ -4,24 +4,33 @@ import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
 import { callerTarget, filterCallerEnv, mainPlace, specHits } from "@vibest/core/caller"
 import { AddressJson, Db, encodeAddress } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
+import { Harness, harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
 import type { HarnessDefinition } from "@vibest/core/host"
+import { VibestdIdentity } from "@vibest/core/identity"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import * as Launch from "@vibest/core/launch"
+import { Machines } from "@vibest/core/machines"
 import { Layout, shellQuote } from "@vibest/core/paths"
+import { Peers } from "@vibest/core/peer"
 import { describeSpawn, Plugins } from "@vibest/core/plugins"
+import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
 import { createProject } from "@vibest/core/project-create"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
+import { Remote } from "@vibest/core/remote"
 import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
+import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
 import { envelope } from "@vibest/core/results"
 import { machinesListing, NoRuntime, Runtimes, type Terminal } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, runtimeEnv, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import * as UpdateCheckNode from "@vibest/core/update-check"
 import { UpdateCheck } from "@vibest/core/update-check"
-import { NotInRepository } from "@vibest/core/worktree"
+import { Git, NotInRepository } from "@vibest/core/worktree"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import {
   type ACCESS,
@@ -45,6 +54,7 @@ import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Queue, Schem
 import * as Headers from "effect/http/Headers"
 import { ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
+import * as SocketServer from "effect/socket/SocketServer"
 
 import { AdmissionLive, CallerGateLive, noteOpen, ProtocolGateLive, reader } from "./gates.ts"
 import * as Hooks from "./hooks.ts"
@@ -55,9 +65,13 @@ import { remoteHandlers } from "./remote-handlers.ts"
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A | readonly [A, "peer"] ? K : never }[keyof Access]
 
-export class Identity extends Context.Service<Identity, DaemonIdentity>()("vibest/DaemonIdentity") {}
+export class Identity extends Context.Service<Identity, DaemonIdentity>()("vibest/DaemonIdentity") {
+  static readonly node = LayerNode.unbound(Identity)
+}
 
-export class Shutdown extends Context.Service<Shutdown, Deferred.Deferred<void>>()("vibest/DaemonShutdown") {}
+export class Shutdown extends Context.Service<Shutdown, Deferred.Deferred<void>>()("vibest/DaemonShutdown") {
+  static readonly node = LayerNode.unbound(Shutdown)
+}
 
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
@@ -871,3 +885,39 @@ export const layer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(RpcServer.layerProtocolSocketServer),
   Layer.provide(RpcSerialization.layerNdJsonRpc()),
 )
+
+export const socketServer = LayerNode.unbound<SocketServer.SocketServerError>()(SocketServer.SocketServer)
+
+export const node = LayerNode.make({
+  name: "vibest/RpcServer",
+  layer,
+  deps: [
+    Bus.node,
+    Db.node,
+    Drain.node,
+    Git.node,
+    Harness.node,
+    Harnesses.node,
+    Identity.node,
+    Inbox.node,
+    Machines.node,
+    Peers.node,
+    Plugins.node,
+    Processes.node,
+    Project.node,
+    Remote.node,
+    Restarting.node,
+    Runtimes.node,
+    Sessions.node,
+    Shutdown.node,
+    SshHosts.node,
+    Subscriptions.node,
+    UpdateCheckNode.node,
+    VibestdIdentity.node,
+    socketServer,
+    PlatformNode.childProcessSpawner,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ],
+})

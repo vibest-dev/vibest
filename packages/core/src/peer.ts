@@ -12,6 +12,7 @@ import { Context, Effect, Layer, Stream } from "effect"
 
 import { Bus } from "./bus.ts"
 import { Db, type OutboxRow } from "./db.ts"
+import { LayerNode } from "./effect/layer-node.ts"
 import { Git } from "./git.ts"
 import { VibestdIdentity } from "./identity.ts"
 import { repositoryIdentity } from "./repository-url.ts"
@@ -120,4 +121,10 @@ const make = Effect.gen(function* () {
 
 export class Peers extends Context.Service<Peers, Effect.Success<typeof make>>()("vibest/Peers") {
   static readonly layer = Layer.effect(Peers, make)
+
+  static readonly node = LayerNode.make({
+    service: Peers,
+    layer: Peers.layer,
+    deps: [Bus.node, Db.node, Git.node, Sessions.node, VibestdIdentity.node],
+  })
 }

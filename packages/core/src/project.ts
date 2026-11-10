@@ -1,6 +1,8 @@
 import { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
 import { Layout } from "./paths.ts"
 export { ProjectInfoResult, ProjectKind, ProjectSearchInput } from "@vibest/schema/project"
 
@@ -66,4 +68,10 @@ export class Project extends Context.Service<
       return Project.of({ info, search })
     }),
   )
+
+  static readonly node = LayerNode.make({
+    service: Project,
+    layer: Project.layer,
+    deps: [PlatformNode.fileSystem, PlatformNode.layout, PlatformNode.path],
+  })
 }

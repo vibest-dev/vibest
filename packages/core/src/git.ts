@@ -2,6 +2,9 @@ import { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
+
 export class GitError extends Schema.TaggedError<GitError>()("GitError", {
   args: Schema.Array(Schema.String),
   message: Schema.String,
@@ -202,4 +205,10 @@ export class Git extends Context.Service<
       })
     }),
   )
+
+  static readonly node = LayerNode.make({
+    service: Git,
+    layer: Git.layer,
+    deps: [PlatformNode.childProcessSpawner, PlatformNode.fileSystem, PlatformNode.path],
+  })
 }

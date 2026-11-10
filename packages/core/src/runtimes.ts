@@ -3,6 +3,7 @@ import { NoRuntime } from "@vibest/schema/session"
 import { Cause, Context, Effect, Fiber, FileSystem, Layer, PubSub, type Scope, Stream } from "effect"
 
 import { Bus, type LiveEvent } from "./bus.ts"
+import { LayerNode } from "./effect/layer-node.ts"
 import type { HostEnv as HostEnvShape, RuntimesShape } from "./host.ts"
 import * as Registry from "./registry.ts"
 
@@ -32,7 +33,9 @@ const live = (runtime: string, event: RuntimeEvent): LiveEvent => {
   }
 }
 
-export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {}
+export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {
+  static readonly node = LayerNode.unbound(HostEnv)
+}
 
 const notLoaded = (id: string, loaded: ReadonlyArray<Runtime>) =>
   new NoRuntime({
@@ -130,6 +133,8 @@ const messageOf = (cause: Cause.Cause<unknown>) => {
 
 export class Runtimes extends Context.Service<Runtimes, RuntimesShape>()("vibest/Runtimes") {
   static readonly layer = Layer.effect(Runtimes, make)
+
+  static readonly node = LayerNode.make({ service: Runtimes, layer: Runtimes.layer, deps: [Bus.node, HostEnv.node] })
 }
 
 export const readFile = (machine: Machine, file: string): Effect.Effect<string, Error, FileSystem.FileSystem> =>

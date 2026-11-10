@@ -2,6 +2,7 @@ import type * as VibestPlugin from "@vibest/plugin"
 import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
+import { LayerNode } from "./effect/layer-node.ts"
 import { Layout } from "./paths.ts"
 
 export class PluginLoader extends Context.Service<
@@ -16,7 +17,9 @@ export class PluginLoader extends Context.Service<
     readonly load: (entry: string, files: ReadonlyArray<string>) => Promise<unknown>
     readonly watch: (directory: string, changed: (name: string) => void) => () => void
   }
->()("vibest/PluginLoader") {}
+>()("vibest/PluginLoader") {
+  static readonly node = LayerNode.unbound(PluginLoader)
+}
 
 export interface Candidate {
   readonly source: string

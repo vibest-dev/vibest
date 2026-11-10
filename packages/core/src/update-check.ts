@@ -2,6 +2,7 @@ import { type UpdateStatus, VERSION } from "@vibest/protocol/rpc"
 import { Clock, Config, Context, Duration, Effect, Exit, Layer, Option, Ref, Schedule, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
 
+import { LayerNode } from "./effect/layer-node.ts"
 import { VibestCommand } from "./paths.ts"
 
 export class UpdateError extends Schema.TaggedError<UpdateError>()("UpdateError", { message: Schema.String }) {}
@@ -91,3 +92,5 @@ export const layer = Layer.effect(
     return yield* checkEveryHour(latestOf(method))
   }).pipe(Effect.orDie),
 )
+
+export const node = LayerNode.make({ service: UpdateCheck, layer, deps: [] })

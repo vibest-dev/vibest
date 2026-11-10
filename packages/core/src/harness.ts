@@ -5,6 +5,8 @@ import { HarnessUnavailable } from "@vibest/schema/session"
 import { Clock, Config, Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
 import type { HarnessDefinition, HarnessesShape } from "./host.ts"
 import type { Model } from "./models.ts"
 import * as Registry from "./registry.ts"
@@ -40,6 +42,8 @@ export const makeHarnesses: Effect.Effect<HarnessesShape> = Effect.sync(() => {
 
 export class Harnesses extends Context.Service<Harnesses, HarnessesShape>()("vibest/Harnesses") {
   static readonly layer = Layer.effect(Harnesses, makeHarnesses)
+
+  static readonly node = LayerNode.make({ service: Harnesses, layer: Harnesses.layer, deps: [] })
 }
 
 export const hasNewline = (args: ReadonlyArray<string>) => args.some((a) => /[\r\n]/.test(a))
@@ -123,6 +127,12 @@ export class Harness extends Context.Service<
     })
 
   static readonly layer = Layer.effect(Harness, Harness.make())
+
+  static readonly node = LayerNode.make({
+    service: Harness,
+    layer: Harness.layer,
+    deps: [Harnesses.node, PlatformNode.childProcessSpawner, PlatformNode.fileSystem, PlatformNode.path],
+  })
 }
 
 export const preflight = Effect.fn("preflight")(function* (id: string, provider: string | null, model: string | null) {

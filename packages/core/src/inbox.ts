@@ -2,8 +2,10 @@ import type { Polled } from "@vibest/protocol/protocol"
 import { shortId } from "@vibest/schema/id"
 import { Cause, Context, Duration, Effect, Layer, Option, Queue, Stream } from "effect"
 
+import { Bus } from "./bus.ts"
 import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
 import { Drain } from "./drain.ts"
+import { LayerNode } from "./effect/layer-node.ts"
 import * as Engine from "./engine.ts"
 import { Harnesses } from "./harness.ts"
 import { keyedLock } from "./keyed-lock.ts"
@@ -297,4 +299,10 @@ export class Inbox extends Context.Service<
       })
     }),
   )
+
+  static readonly node = LayerNode.make({
+    service: Inbox,
+    layer: Inbox.layer,
+    deps: [Bus.node, Db.node, Drain.node, Harnesses.node, Restarting.node, Runtimes.node],
+  })
 }

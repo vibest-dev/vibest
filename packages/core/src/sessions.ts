@@ -33,6 +33,8 @@ import { sessionArchive } from "./archive.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
 import { Db, type SessionFilter, type SessionRow } from "./db.ts"
 import { Drain } from "./drain.ts"
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
 import * as Engine from "./engine.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox } from "./inbox.ts"
@@ -64,7 +66,7 @@ import type { Platform, Tracked } from "./session-types.ts"
 import { sessionSpawn, type SpawnInput, type Spawned } from "./spawn.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
-import { type Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
+import { Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
 export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
   JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" ? { terminal: address.id } : {}) })
 
@@ -86,6 +88,26 @@ export { allocationNameSource, defaultSessionName, peerAdmitPause, type SpawnInp
 export const START_TIMEOUT = Duration.seconds(120)
 export const HOOK_GRACE = Duration.seconds(10)
 export const TAIL_LINES = 30
+
+const SESSION_DEPS = [
+  Bus.node,
+  Db.node,
+  Drain.node,
+  Git.node,
+  Harness.node,
+  Harnesses.node,
+  Inbox.node,
+  Plugins.node,
+  Processes.node,
+  Restarting.node,
+  Runtimes.node,
+  Subscriptions.node,
+  PlatformNode.childProcessSpawner,
+  PlatformNode.crypto,
+  PlatformNode.fileSystem,
+  PlatformNode.layout,
+  PlatformNode.path,
+] as const
 
 const newTracked: Effect.Effect<Tracked> = Effect.all({
   sawWorking: Ref.make(false),
@@ -888,4 +910,8 @@ export class Sessions extends Context.Service<
       Effect.flatMap((max) => Sessions.make({ maxSessions: Option.getOrUndefined(max) })),
     ),
   )
+  static readonly configured = (options: { readonly maxSessions: number | undefined }) =>
+    LayerNode.make({ service: Sessions, layer: Layer.effect(Sessions, Sessions.make(options)), deps: SESSION_DEPS })
+
+  static readonly node = LayerNode.make({ service: Sessions, layer: Sessions.layer, deps: SESSION_DEPS })
 }
