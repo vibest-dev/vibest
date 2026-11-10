@@ -335,36 +335,6 @@ match, compares every read-model table with the replay; a difference or a fact t
 the first differing row or the fact's `seq`. A database from before the ledger is refused, as vibestd refuses it.
 E2E runs it on every world's database at the end of each check.
 
-### Converting a v1 database
-
-The v1 to ledger conversion is not a migration: vibestd refuses a v1 database. The owner converts one by hand, with
-vibestd stopped, using a script kept outside the repository that runs `importInPlace` on the file and then adds the
-`migration` table with every id in `migrations` applied, so the file is what a new install would have.
-`packages/core/src/import/translate.ts` is pure: it reads a snapshot of every v1 table and gives the
-facts in v1 event order (an inbox row's `inbox.queued` is translated before the row's first other event, since an older
-migration backfilled some queued events with later ids), with `seq` starting above every v1 event id and inbox id, so an
-old inbox id never names a new row. It fails, naming the v1 row, on an event type it does not know, a reference to a
-missing process, turn or inbox row, an inbox row without its `inbox.queued` event, a turn end whose report is not an
-event id, and any `machine` other than `local`; four known oddities and every second end of an already ended turn are
-counted instead. All problems are collected and reported together. `importInPlace` runs in one transaction on the
-database file (no backup copy; `PRAGMA defer_foreign_keys` stays on until the outermost transaction ends): read,
-translate, drop the v1 tables, install the ledger, append the facts, then the referee. Any failure rolls the whole
-file back.
-
-The referee (`referee.ts`) reads both databases through the same set of reads and compares them field by field: session
-rows and columns, projects, coordinators, inbox rows (as the `Db` reads them, and the stored columns of every row
-including tasks), briefs, both latest-report fences, `hadTerminal`, `untakenTask`, `rescheduleSource`, `queuedBy`,
-`spawnedBy`, machines, peers, each peer's outbox, and each `peer:` key. `v1-read.ts` holds frozen copies of the v1 `Db`
-reads and must not change; `ledger-read.ts` holds the same reads over the read model, which the `Db` reads through, so
-the referee judges what users see. A v1 subagent whose harness changed before it first opened and whose next
-placeholder then failed to launch reads as still alive in v1 and ended in v2; the referee fails such a database rather
-than guess. `vibest daemon import-check --v2` runs the same import from a read-only source into `:memory:` and prints its
-report (events, facts, time, the counts, the referee's result).
-
-`packages/core/test/fixtures/v1/*.sql` are v1 databases made through the v1 `Db` before it was removed (the generator
-went with it); `referee-fails.sql` is the case above. `tools/bench/src/import-check.ts` seeds 100 000 v1 events and
-times `import-check --v2`; it must stay under 30 s.
-
 ## Hot paths
 
 - Pending rows: read when a fact for their recipient arrives, and once in a reconcile (at start, when a runtime
