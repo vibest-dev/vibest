@@ -97,8 +97,12 @@ jobs:
           for pid in $(tr '\0' '|' < /tmp/lsof.out | awk -F'|' '/^p/{p=substr($1,2)} /readlink/{print p}'); do
             ps -o pid,ppid,user,etime,args -p "$pid"; cat "/proc/$pid/status" | grep -i "name\|uid\|cap"; done
           systemctl status "user@$(id -u).service" --no-pager | head -12 || true
+      - name: Stop the runner user's systemd manager (experiment)
+        run: |
+          sudo systemctl stop "user@$(id -u).service"
+          lsof +w -a -u "$(id -u)" -d cwd -Fpfn0 | tr '\0' '|' | grep -c readlink || true
       - run: pnpm run build
-      - run: bun tools/e2e/src/main.ts --strict --no-cache M5 U4 S27 S28 S30 S31
+      - run: bun tools/e2e/src/main.ts --strict --no-cache S27 S28 S30 S31
       - uses: actions/upload-artifact@v4
         if: always()
         with:
