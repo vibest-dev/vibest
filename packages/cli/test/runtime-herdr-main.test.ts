@@ -11,8 +11,7 @@ import {
   piOnPath,
   barePiArgv,
   coldPiStartupAttempts,
-  started,
-  stopSession,
+  stopStartedSessions,
   layer,
   waitFor,
   withSession,
@@ -20,9 +19,7 @@ import {
 } from "./runtime-herdr-live.ts"
 
 describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
-  afterAll(async () => {
-    for (const name of started) await stopSession(name)
-  })
+  afterAll(() => stopStartedSessions(), 30_000)
 
   it.live.skipIf(!piOnPath)(
     "the main agent in place, a harness a shell ran that herdr detected and no open named, is still ours: state reads it, and send submits (Enter included)",

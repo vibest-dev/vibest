@@ -10,8 +10,7 @@ import {
   piOnPath,
   barePiArgv,
   coldPiStartupAttempts,
-  started,
-  stopSession,
+  stopStartedSessions,
   layer,
   waitFor,
   withSession,
@@ -19,9 +18,7 @@ import {
 } from "./runtime-herdr-live.ts"
 
 describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
-  afterAll(async () => {
-    for (const name of started) await stopSession(name)
-  })
+  afterAll(() => stopStartedSessions(), 30_000)
 
   it.live.skipIf(!piOnPath)(
     "every subagent's way: open starts a harness as a named agent that state reads and send prompts, whatever its pane id (past p9 herdr's ids carry uppercase)",

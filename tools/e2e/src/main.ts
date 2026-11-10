@@ -19,7 +19,19 @@ import restart from "./scenarios/restart.ts"
 import start from "./scenarios/start.ts"
 import terminalStatus from "./scenarios/terminal-status.ts"
 import update from "./scenarios/update.ts"
-import { binary, checkout, compiled, harnesses, method, privateIn, redact, Skip, World } from "./world.ts"
+import {
+  binary,
+  checkout,
+  compiled,
+  harnesses,
+  method,
+  privateIn,
+  redact,
+  removeExpiredWorlds,
+  removeWorldDir,
+  Skip,
+  World,
+} from "./world.ts"
 
 const areas: Record<string, ReadonlyArray<Check>> = {
   daemon,
@@ -87,6 +99,8 @@ for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
   }
 }
 
+await removeExpiredWorlds()
+
 type Outcome = "pass" | "cached" | "fail" | "skip" | "flaky-under-load"
 type Result = {
   id: string
@@ -128,7 +142,16 @@ const once = async ({ area, check }: (typeof checks)[number], evidenceName: stri
   const left = await herdrSessionsLeft(world.herdrSession)
   if (left.length > 0) problem(`herdr sessions left after the check: ${left.join(", ")}`)
   await fs.writeFile(path.join(evidence, `${evidenceName}.json`), redact(JSON.stringify(world.log, null, 2)))
-  if (outcome !== "fail") await fs.rm(world.root, { recursive: true, force: true })
+  if (outcome !== "fail") {
+    await removeWorldDir(world.root)
+    if (
+      await fs.stat(world.root).then(
+        () => true,
+        () => false,
+      )
+    )
+      problem(`world left at ${world.root}`)
+  }
   return {
     id: check.id,
     area,
