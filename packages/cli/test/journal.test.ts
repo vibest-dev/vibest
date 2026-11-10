@@ -672,6 +672,61 @@ describe("journal", () => {
     }).pipe(Effect.provide(memory())),
   )
 
+  it.effect("projects and publishes the stored form, so routing given in another key order equals its replay", () =>
+    Effect.gen(function* () {
+      const { journal, sql, published } = yield* ledger
+      const routing = {
+        trace: [{ ms: 1, plugin: "p", hook: "h", outcome: "ok", changes: [{ to: "pi", field: "harness" }] }],
+        decidedBy: {},
+      }
+      yield* journal.commit(
+        Effect.gen(function* () {
+          yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
+          yield* journal.emit(Catalog["session.created"], {
+            projectId: P,
+            sessionId: MAIN,
+            data: { role: "main", name: "main", directory: "", archiveOnCompletion: false },
+          })
+          yield* journal.emit(Catalog["process.started"], {
+            sessionId: MAIN,
+            data: { harness: "pi", runtime: "herdr", routing: routing as never },
+          })
+        }),
+      )
+      const stored =
+        '{"decidedBy":{},"trace":[{"plugin":"p","hook":"h","outcome":"ok","ms":1,"changes":[{"field":"harness","to":"pi"}]}]}'
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT routing FROM process"), [{ routing: stored }])
+      const started = published.flat().find((fact) => fact.type === "process.started")!
+      assert.strictEqual(JSON.stringify(started.data.routing), stored)
+      assert.strictEqual(yield* replayDifference(sql), undefined)
+    }).pipe(Effect.provide(memory())),
+  )
+
+  it.effect("a fact that takes its project from its session dies when the caller gives one", () =>
+    Effect.gen(function* () {
+      const { journal, sql } = yield* ledger
+      const exit = yield* journal
+        .commit(
+          Effect.gen(function* () {
+            yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
+            yield* journal.emit(Catalog["session.created"], {
+              projectId: P,
+              sessionId: MAIN,
+              data: { role: "main", name: "main", directory: "", archiveOnCompletion: false },
+            })
+            yield* journal.emit(Catalog["session.renamed"], {
+              projectId: OTHER_PROJECT,
+              sessionId: MAIN,
+              data: { name: "x" },
+            })
+          }),
+        )
+        .pipe(Effect.exit)
+      assert.isTrue(Exit.hasDies(exit))
+      assert.strictEqual(yield* eventCount(sql), 0)
+    }).pipe(Effect.provide(memory())),
+  )
+
   it.effect("a fact may be earlier than the one before it", () =>
     Effect.gen(function* () {
       const { journal, sql } = yield* ledger

@@ -181,8 +181,13 @@ export const makeJournal = (published: (facts: ReadonlyArray<Fact>) => Effect.Ef
 
     const projectOf = (definition: Definition, input: Emit<Definition>) =>
       Effect.gen(function* () {
+        const takesProject = definition.envelope === "project" || definition.type === "session.created"
+        if (!takesProject && input.projectId !== undefined)
+          return yield* Effect.die(
+            new Error(`${definition.type} takes its project from its session, not from the caller`),
+          )
         if (definition.envelope === "none") return undefined
-        if (definition.envelope === "project" || definition.type === "session.created") {
+        if (takesProject) {
           if (input.projectId === undefined) return yield* Effect.die(new Error(`${definition.type} needs a project`))
           return input.projectId
         }
@@ -205,14 +210,14 @@ export const makeJournal = (published: (facts: ReadonlyArray<Fact>) => Effect.Ef
         const data = yield* encodeData(definition, input.data as never).pipe(Effect.orDie)
         const [row] = yield* sql<{ seq: number }>`INSERT INTO event (at, type, project_id, session_id, data)
           VALUES (${at}, ${definition.type}, ${projectId ?? null}, ${input.sessionId ?? null}, ${data}) RETURNING seq`
-        const fact = {
+        const fact = yield* decodeRow({
           seq: row!.seq,
           at,
           type: definition.type,
-          ...(projectId === undefined ? {} : { projectId }),
-          ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
-          data: input.data,
-        } as Fact
+          project_id: projectId ?? null,
+          session_id: input.sessionId ?? null,
+          data,
+        }).pipe(Effect.orDie)
         yield* project(fact, sql)
         buffer.facts.push(fact)
         return fact.seq
