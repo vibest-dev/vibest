@@ -1,6 +1,8 @@
 import { ID, randomId } from "@vibest/schema/id"
 import { Context, Duration, Effect, FileSystem, Option, Schema } from "effect"
 
+import { LayerNode } from "./effect/layer-node.ts"
+
 export const HOST_ID_TIMEOUT = Duration.seconds(2)
 export const MACHINE_ID_FILES = ["/etc/machine-id", "/var/lib/dbus/machine-id"] as const
 
@@ -14,7 +16,9 @@ const IdentityJson = Schema.fromJsonString(IdentityFile)
 
 export class VibestdIdentity extends Context.Service<VibestdIdentity, { readonly id: string; readonly name: string }>()(
   "vibest/VibestdIdentity",
-) {}
+) {
+  static readonly node = LayerNode.unbound(VibestdIdentity)
+}
 
 export class IdentityUnreadable extends Schema.TaggedError<IdentityUnreadable>()("IdentityUnreadable", {
   file: Schema.String,

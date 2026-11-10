@@ -3,6 +3,8 @@ import { AgentRefused, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibe
 import { Cause, Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
 
 import { timeoutWithoutWaiting } from "./bounded.ts"
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
 import { Harnesses } from "./harness.ts"
 import * as Hooks from "./hooks.ts"
 import { errorMessage } from "./hooks.ts"
@@ -61,6 +63,7 @@ type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
 export const Builtins = Context.Reference<ReadonlyArray<Candidate>>("vibest/Plugins/Builtins", {
   defaultValue: () => [],
 })
+export const builtinsNode = LayerNode.make({ service: Builtins, layer: Layer.succeed(Builtins, []), deps: [] })
 type Running = {
   readonly candidate: Loaded
   readonly scope: Scope.Closeable
@@ -471,4 +474,20 @@ export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Pl
       return host.service
     }),
   )
+
+  static readonly node = LayerNode.make({
+    service: Plugins,
+    layer: Plugins.layer,
+    deps: [
+      builtinsNode,
+      Harnesses.node,
+      PluginLoader.node,
+      Runtimes.node,
+      Subscriptions.node,
+      PlatformNode.crypto,
+      PlatformNode.fileSystem,
+      PlatformNode.layout,
+      PlatformNode.path,
+    ],
+  })
 }

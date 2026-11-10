@@ -4,10 +4,13 @@ import util from "node:util"
 
 import { assert, describe, it } from "@effect/vitest"
 import { connect, probe } from "@vibest/client/client"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import { ID, randomId } from "@vibest/schema/id"
 import { type Host, run } from "@vibest/server/daemon"
+import * as Server from "@vibest/server/server"
 import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Layer, Scope } from "effect"
 import { RpcClient } from "effect/rpc"
 import { SocketServer } from "effect/socket/SocketServer"
@@ -226,14 +229,23 @@ describe.concurrent("vibestd.pid lock", () => {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
         const slowClose: Host = {
           ...Platform.daemon,
-          servers: Layer.effect(
-            SocketServer,
-            Effect.gen(function* () {
-              const server = yield* SocketServer
-              yield* Effect.addFinalizer(() => Effect.sleep("1500 millis"))
-              return server
-            }),
-          ).pipe(Layer.provideMerge(Platform.daemon.servers)),
+          replacements: [
+            ...Platform.daemon.replacements,
+            Server.socketServer.replace(
+              LayerNode.make({
+                name: "test/SlowCloseSocketServer",
+                layer: Layer.effect(
+                  SocketServer,
+                  Effect.gen(function* () {
+                    const server = yield* SocketServer
+                    yield* Effect.addFinalizer(() => Effect.sleep("1500 millis"))
+                    return server
+                  }),
+                ).pipe(Layer.provideMerge(Layer.unwrap(Effect.map(Layout, (l) => Platform.socketServer(l.socket))))),
+                deps: [PlatformNode.layout],
+              }),
+            ),
+          ],
         }
         const old = yield* run(slowClose).pipe(
           Effect.provideService(Layout, layout),

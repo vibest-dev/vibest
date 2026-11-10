@@ -73,6 +73,11 @@ export const SCHEMA = [
     BEGIN SELECT RAISE(ABORT, 'event is append-only'); END`,
 ]
 
+export class DatabaseOpenFailed extends Schema.TaggedError<DatabaseOpenFailed>()("DatabaseOpenFailed", {
+  file: Schema.String,
+  message: Schema.String,
+}) {}
+
 export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("SchemaMismatch", {
   version: Schema.Number,
   applicationId: Schema.Number,

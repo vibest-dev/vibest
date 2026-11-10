@@ -2,6 +2,8 @@ import { type Captured, capture } from "@vibest/plugin"
 import { Context, Duration, Effect, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
+import { LayerNode } from "./effect/layer-node.ts"
+
 export type Liveness = "exited" | "alive" | "unknown"
 
 export const livenessOf = (probe: () => void): Liveness => {
@@ -66,6 +68,8 @@ export class Processes extends Context.Service<
         })
       }),
     )
+
+  static readonly node = LayerNode.unbound(Processes)
 }
 
 export const runFor = (command: string, args: ReadonlyArray<string>, timeout: Duration.Input) =>

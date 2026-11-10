@@ -34,6 +34,7 @@ import { RpcClient, type RpcClientError } from "effect/rpc"
 import type * as Socket from "effect/socket/Socket"
 
 import { Db, type MachineRow } from "./db.ts"
+import { LayerNode } from "./effect/layer-node.ts"
 import { VibestdIdentity } from "./identity.ts"
 import { keyedLock } from "./keyed-lock.ts"
 import { errorMessage, type MachineHook, type PluginNote, Plugins } from "./plugins.ts"
@@ -49,7 +50,9 @@ export interface Pipe {
 export class MachineTransport extends Context.Service<
   MachineTransport,
   (argv: ReadonlyArray<string>) => Effect.Effect<Pipe, Error, Scope.Scope>
->()("vibest/MachineTransport") {}
+>()("vibest/MachineTransport") {
+  static readonly node = LayerNode.unbound(MachineTransport)
+}
 
 export const ADD_TIMEOUT = Duration.seconds(30)
 export const RETRY_FIRST = Duration.millis(500)
@@ -576,4 +579,10 @@ const make = Effect.gen(function* () {
 
 export class Machines extends Context.Service<Machines, Effect.Success<typeof make>>()("vibest/Machines") {
   static readonly layer = Layer.effect(Machines, make)
+
+  static readonly node = LayerNode.make({
+    service: Machines,
+    layer: Machines.layer,
+    deps: [Db.node, MachineTransport.node, Plugins.node, Runtimes.node, VibestdIdentity.node],
+  })
 }

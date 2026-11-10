@@ -2,6 +2,8 @@ import { type UpdateStatus, VERSION } from "@vibest/protocol/rpc"
 import { Clock, Config, Context, Duration, Effect, Exit, Layer, Option, Ref, Schedule, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
 import { VibestCommand } from "./paths.ts"
 import { messageOf } from "./plugin-sources.ts"
 
@@ -89,3 +91,5 @@ export const layer = Layer.effect(
     return yield* checkEveryHour(latestOf(method))
   }).pipe(Effect.orDie),
 )
+
+export const node = LayerNode.make({ service: UpdateCheck, layer, deps: [PlatformNode.httpClient] })

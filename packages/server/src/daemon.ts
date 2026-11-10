@@ -1,35 +1,28 @@
-import { accepts, DAEMON_START_TIMEOUT, probe, SocketConnector, stopByHand } from "@vibest/client/client"
-import { Bus } from "@vibest/core/bus"
-import { Db, type SchemaMismatch } from "@vibest/core/db"
-import { Drain } from "@vibest/core/drain"
-import { Git } from "@vibest/core/git"
-import { Harness, Harnesses } from "@vibest/core/harness"
+import { accepts, DAEMON_START_TIMEOUT, probe, type SocketConnector, stopByHand } from "@vibest/client/client"
+import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/db"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
 import { type HostFacts, loadIdentity, VibestdIdentity } from "@vibest/core/identity"
-import { Inbox } from "@vibest/core/inbox"
-import { Machines, type MachineTransport } from "@vibest/core/machines"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { Peers } from "@vibest/core/peer"
-import { type PluginLoader, Plugins } from "@vibest/core/plugins"
-import type { Processes } from "@vibest/core/processes"
-import { Project } from "@vibest/core/project"
-import { Remote } from "@vibest/core/remote"
-import { SshHosts } from "@vibest/core/repository-url"
-import { Restarting } from "@vibest/core/restarting"
-import { type HostEnv, Runtimes } from "@vibest/core/runtimes"
-import { Sessions } from "@vibest/core/sessions"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
-import * as UpdateCheck from "@vibest/core/update-check"
-import { VERSION } from "@vibest/protocol/rpc"
+import { type DaemonIdentity, VERSION } from "@vibest/protocol/rpc"
 import { newId } from "@vibest/schema/id"
-import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
-import { FetchHttpClient } from "effect/http"
-import type { HttpServer } from "effect/http/HttpServer"
-import type { ServeError } from "effect/http/HttpServerError"
+import {
+  Clock,
+  type Context,
+  type Crypto,
+  Deferred,
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  type Path,
+  Schedule,
+  type Scope,
+  Schema,
+} from "effect"
 import type { ChildProcessSpawner } from "effect/process"
-import type { SocketServer, SocketServerError } from "effect/socket/SocketServer"
-import type { SqlClient, SqlError } from "effect/sql"
 
-import * as Http from "./http.ts"
+import { daemon } from "./app.ts"
 import * as Server from "./server.ts"
 
 export const DaemonInfo = Schema.Struct({
@@ -53,20 +46,9 @@ export class LockFailed extends Schema.TaggedError<LockFailed>()("LockFailed", {
   file: Schema.String,
   message: Schema.String,
 }) {}
-export class DatabaseOpenFailed extends Schema.TaggedError<DatabaseOpenFailed>()("DatabaseOpenFailed", {
-  file: Schema.String,
-  message: Schema.String,
-}) {}
-
-export type PlatformServices = SqlClient.SqlClient | MachineTransport | PluginLoader | HostEnv | Processes
 
 export interface Host {
-  readonly layer: Layer.Layer<
-    PlatformServices,
-    DatabaseOpenFailed | SchemaMismatch | SqlError.SqlError,
-    Layout | ChildProcessSpawner.ChildProcessSpawner
-  >
-  readonly servers: Layer.Layer<SocketServer | HttpServer, SocketServerError | ServeError, Layout>
+  readonly replacements: LayerNode.Replacements
   readonly lock: (
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, LockFailed>) | undefined, LockFailed, Scope.Scope>
@@ -91,29 +73,30 @@ export class DaemonSocketInUse extends Schema.TaggedError<DaemonSocketInUse>()("
   message: Schema.String,
 }) {}
 
-const services = (host: Host) =>
-  Layer.merge(Server.layer, Http.layer).pipe(
-    Layer.provide(host.servers),
-    Layer.provideMerge(Remote.layer),
-    Layer.provideMerge(Machines.layer),
-    Layer.provideMerge(Peers.layer),
-    Layer.provideMerge(Sessions.layer),
-    Layer.provideMerge(Git.layer),
-    Layer.provideMerge(SshHosts.layer),
-    Layer.provideMerge(Plugins.layer),
-    Layer.provideMerge(Subscriptions.layer),
-    Layer.provideMerge(UpdateCheck.layer),
-    Layer.provideMerge(FetchHttpClient.layer),
-    Layer.provideMerge(Inbox.layer),
-    Layer.provideMerge(Project.layer),
-    Layer.provideMerge(Harness.layer),
-    Layer.provideMerge(Db.layer),
-    Layer.provideMerge(Runtimes.layer),
-    Layer.provideMerge(Harnesses.layer),
-    Layer.provide(Drain.layer),
-    Layer.provide(Restarting.layer),
-    Layer.provide(Bus.layer),
-  )
+const replacements = (
+  host: Host,
+  ambient: Context.Context<
+    FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner | Layout
+  >,
+  given: {
+    readonly identity: DaemonIdentity
+    readonly shutdown: Deferred.Deferred<void>
+    readonly self: VibestdIdentity["Service"]
+  },
+): LayerNode.Replacements => {
+  const platform = LayerNode.make({ name: "vibest/HostPlatform", layer: Layer.succeedContext(ambient), deps: [] })
+  return [
+    PlatformNode.fileSystem.replace(platform),
+    PlatformNode.path.replace(platform),
+    PlatformNode.crypto.replace(platform),
+    PlatformNode.childProcessSpawner.replace(platform),
+    PlatformNode.layout.replace(platform),
+    ...host.replacements,
+    Server.Identity.node.replace(Layer.succeed(Server.Identity, given.identity)),
+    Server.Shutdown.node.replace(Layer.succeed(Server.Shutdown, given.shutdown)),
+    VibestdIdentity.node.replace(Layer.succeed(VibestdIdentity, given.self)),
+  ]
+}
 
 export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
   Effect.gen(function* () {
@@ -179,17 +162,17 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
       startedAt: yield* Clock.currentTimeMillis,
     }
     const shutdown = yield* Deferred.make<void>()
+    const ambient = yield* Effect.context<
+      FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner | Layout
+    >()
     yield* Layer.build(
-      services(host).pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            host.layer,
-            Layer.succeed(Server.Identity, identity),
-            Layer.succeed(Server.Shutdown, shutdown),
-            Layer.succeed(VibestdIdentity, { id: self.identity.id, name: self.identity.name }),
-          ),
-        ),
-      ),
+      LayerNode.compile(daemon, {
+        replacements: replacements(host, ambient, {
+          identity,
+          shutdown,
+          self: { id: self.identity.id, name: self.identity.name },
+        }),
+      }),
     )
     yield* fs.chmod(layout.socket, 0o600)
     yield* fs.chmod(layout.httpSocket, 0o600)
