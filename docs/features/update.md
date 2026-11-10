@@ -55,3 +55,10 @@ keeps answering. Once the database fits, a restart replaces it.
 One `vibest update` run by an older vibest on an older protocol ends with the agents on the old integration restarted
 by the vibest it installed: the old vibest exits 0, and the main agent and the subagent keep their session and
 conversation with a new harness process.
+
+## U12. This vibest replaces an older-protocol daemon
+
+One `vibest update` run by this vibest, while vibestd is an older vibest on an older protocol, hands that vibestd over
+even when an agent's turn end lands while it drains, and restarts the agents on the old integration: the main agent and
+the subagent keep their session and conversation with a new harness process, and the new vibestd is no child of a
+vibest process.

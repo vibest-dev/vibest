@@ -282,9 +282,10 @@ export const spawnDaemon = (
           "sh",
           [
             "-c",
-            `mkdir -p "$1" && shift && exec "$@" >>"${log}" 2>&1`,
+            'mkdir -p "$1" && log=$2 && shift 2 && { "$@" >>"$log" 2>&1 & }',
             "sh",
             layout.home,
+            log,
             ...command,
             "daemon",
             "--foreground",
@@ -296,11 +297,16 @@ export const spawnDaemon = (
             extendEnv: true,
             stdin: "ignore",
             stdout: "ignore",
-            stderr: "ignore",
+            stderr: "pipe",
           },
         ),
       )
       yield* handle.unref
+      const [said, code] = yield* Effect.all([Stream.mkString(Stream.decodeText(handle.stderr)), handle.exitCode], {
+        concurrency: "unbounded",
+      })
+      if (code !== 0)
+        return yield* Effect.fail(new Error(`vibestd was not started (exit ${code}): ${said.trim() || "no output"}`))
     }).pipe(
       Effect.scoped,
       Effect.mapError((e) => new DaemonUnavailable({ socket: layout.socket, message: e.message })),

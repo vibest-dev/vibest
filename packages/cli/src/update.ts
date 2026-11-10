@@ -11,7 +11,7 @@ import {
 import * as Guard from "@vibest/core/guard"
 import { askYesNo, interactive, Layout, shellQuote, VibestCommand } from "@vibest/core/paths"
 import { installMethod, latestOf, releasesUrl, UpdateError } from "@vibest/core/update-check"
-import { PROTOCOL } from "@vibest/protocol/protocol"
+import { PROTOCOL, PROTOCOL_HEADER } from "@vibest/protocol/protocol"
 import { type Ping, VERSION } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
 import { Cause, Config, Console, Duration, Effect, Exit, FileSystem, Option, Path, Schedule } from "effect"
@@ -164,7 +164,7 @@ const handoffDaemon = (old: Ping, target: { readonly version: string; readonly c
       connect(layout.socket).pipe(
         Effect.flatMap((c) => c["Daemon.Handoff"]({ instance: old.instance!, command: target.command })),
       ),
-      cliHeaders((yield* Path.Path).resolve(".")),
+      { ...cliHeaders((yield* Path.Path).resolve(".")), [PROTOCOL_HEADER]: String(old.protocol) },
     ).pipe(Effect.scoped, Effect.exit)
     if (Exit.isFailure(reply)) {
       const e = Option.getOrUndefined(Cause.findErrorOption(reply.cause)) as { readonly message?: string } | undefined

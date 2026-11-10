@@ -513,6 +513,25 @@ describe.concurrent("Processes", () => {
   )
 
   it.live(
+    "a zombie (a child its parent never reaps, as an old vibestd under a parent that does not wait) is exited; its live parent is alive",
+    () =>
+      Effect.gen(function* () {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const parent = yield* spawner.spawn(ChildProcess.make("sh", ["-c", "true & echo $!; exec sleep 30"]))
+        yield* Effect.addFinalizer(() => parent.kill().pipe(Effect.ignore))
+        const zombie = Number((yield* parent.stdout.pipe(Stream.decodeText, Stream.take(1), Stream.mkString)).trim())
+        assert.isTrue(zombie > 0)
+        yield* until(
+          Effect.sync(() => Platform.liveness(zombie)),
+          (seen) => seen === "exited",
+        )
+        assert.doesNotThrow(() => process.kill(zombie, 0), "kill 0 alone reports the zombie as alive")
+        assert.strictEqual(Platform.liveness(zombie), "exited")
+        assert.strictEqual(Platform.liveness(Number(parent.pid)), "alive")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.live(
     "a helper that outlives its timeout and ignores SIGTERM: SIGKILL to its own group, ended and reaped before the run returns",
     () =>
       Effect.gen(function* () {

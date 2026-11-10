@@ -1,6 +1,6 @@
 import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { raisesSeen } from "@vibest/core/activity"
-import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
+import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { callerTarget, filterCallerEnv, mainPlace, specHits } from "@vibest/core/caller"
 import { AddressJson, Db, encodeAddress } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -36,9 +36,7 @@ import {
   type ACCESS,
   Caller,
   CAPABILITIES,
-  DaemonBusy,
   type DaemonIdentity,
-  DaemonStopping,
   Forbidden,
   InvalidCaller,
   VibestRpcs,
@@ -62,6 +60,7 @@ import { integrationHandlers } from "./integration.ts"
 import { placeOf, sameCoordinator, sessionListing, toInfo } from "./listing.ts"
 import { remoteHandlers } from "./remote-handlers.ts"
 import { services } from "./services.ts"
+import { stopOnce as stopDaemon } from "./stop.ts"
 
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A | readonly [A, "peer"] ? K : never }[keyof Access]
@@ -76,7 +75,7 @@ export class Shutdown extends Context.Service<Shutdown, Deferred.Deferred<void>>
 
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
-export const DRAIN_TIMEOUT = Duration.seconds(5)
+export { DRAIN_TIMEOUT } from "./stop.ts"
 export const PRESENT_TIMEOUT = Duration.seconds(5)
 
 export const WATCH_BACKLOG = 10_000
@@ -192,45 +191,7 @@ export const handlers = VibestRpcs.toLayer(
 
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
 
-    const stopOnce = <E, R>(instance: string, method: string, before: Effect.Effect<void, E, R>) =>
-      Effect.gen(function* () {
-        if (!(yield* drain.begin)) return yield* new DaemonStopping({ method })
-        let last: Array<{ id: string; reason: string }> = []
-        const blockers = Effect.gen(function* () {
-          last = (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" }))
-          if (last.length > 0) return last
-          last = [{ id: "inbox", reason: "checking unsettled delivery" }]
-          last = (yield* db.sendingInbox).map((row) => ({
-            id: `inbox ${row.id}`,
-            reason: `${row.kind} for session ${row.sessionId}: delivery not settled`,
-          }))
-          return last
-        })
-        return yield* Effect.gen(function* () {
-          const none = blockers.pipe(
-            Effect.map((pending) => (pending.length === 0 ? Option.some(true) : Option.none())),
-          )
-          const idle = yield* awaitEvent(
-            none,
-            (event) =>
-              event.type === "live.drain" || event.type === "inbox.status" ? none : Effect.succeed(Option.none()),
-            DRAIN_TIMEOUT,
-            Effect.map(none, Option.isSome),
-          ).pipe(Effect.provideService(Bus, bus))
-          if (!idle) return yield* new DaemonBusy({ blockers: last })
-          yield* before
-          yield* Effect.uninterruptible(
-            Effect.gen(function* () {
-              if (!(yield* drain.accept))
-                return yield* new DaemonBusy({
-                  blockers: (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" })),
-                })
-              yield* Deferred.succeed(shutdown, undefined)
-            }),
-          )
-          return { instance }
-        }).pipe(Effect.ensuring(drain.reopen))
-      })
+    const stopOnce = stopDaemon({ drain, bus, sendingInbox: db.sendingInbox, shutdown })
 
     const cliOnly = (method: MethodOf<"cli">) =>
       Effect.flatMap(Caller, (c) =>
