@@ -7,9 +7,9 @@ import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { Harness, Harnesses } from "@vibest/core/harness"
-import type { HarnessDefinition } from "@vibest/core/host"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
+import { type HookCaller, Integration } from "@vibest/core/integration"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import { Machines } from "@vibest/core/machines"
 import { MainAgent } from "@vibest/core/main-agent"
@@ -46,14 +46,13 @@ import {
 } from "@vibest/protocol/rpc"
 import { LaunchFailed } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
-import { Clock, Context, Deferred, Effect, Layer, Queue, Stream } from "effect"
+import { Context, Deferred, Effect, Layer, Queue, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 import * as SocketServer from "effect/socket/SocketServer"
 
 import { AdmissionLive, CallerGateLive, noteOpen, ProtocolGateLive, reader } from "./gates.ts"
-import * as Hooks from "./hooks.ts"
 import { integrationHandlers } from "./integration.ts"
 import { sessionListing, toInfo } from "./listing.ts"
 import { remoteHandlers } from "./remote-handlers.ts"
@@ -93,21 +92,20 @@ export const handlers = VibestRpcs.toLayer(
     const drain = yield* Drain
     const bus = yield* Bus
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const harnesses = yield* Harnesses
     const mainAgent = yield* MainAgent
+    const integration = yield* Integration
 
-    const hook = <E>(
+    const hook = (
       sessionId: string,
       harness: string,
       headers: Headers.Headers,
-      run: (who: Hooks.HookCaller, definition: HarnessDefinition) => Effect.Effect<void, E>,
+      run: (who: HookCaller) => Effect.Effect<void>,
     ) =>
       Effect.gen(function* () {
         yield* noteOpen(db, reader(headers), sessionId)
         const row = yield* db.sessionIdentity(sessionId)
-        const definition = harnesses.find(harness)
-        if (!row || row.harness !== harness || definition === undefined) return
-        yield* run(row, definition)
+        if (!row || row.harness !== harness) return
+        yield* run({ id: row.id, agent: row.agent, harness })
       }).pipe(Effect.orDie)
 
     const agent = (method: MethodOf<"agent" | "owner">) =>
@@ -161,7 +159,7 @@ export const handlers = VibestRpcs.toLayer(
 
     const { listed, watched, snapshotProjects, watchDeltas } = sessionListing({ db, sessions, runtimes })
 
-    const integration = yield* integrationHandlers
+    const integrationRpcs = yield* integrationHandlers
     const stopOnce = stopDaemon({ drain, bus, sendingInbox: db.sendingInbox, shutdown })
 
     const cliOnly = (method: MethodOf<"cli">) =>
@@ -264,7 +262,7 @@ export const handlers = VibestRpcs.toLayer(
 
       Plugins: () => plugins.list,
 
-      ...integration,
+      ...integrationRpcs,
 
       "Runtimes.Doctor": ({ harnesses }) =>
         Effect.flatMap(runtimes.statuses({ id: "local" }), (rows) =>
@@ -447,10 +445,10 @@ export const handlers = VibestRpcs.toLayer(
         ),
 
       TurnEnd: ({ sessionId, harness, event }, { headers }) =>
-        hook(sessionId, harness, headers, (who, definition) => Hooks.turnEnd(db, definition, who, event)),
+        hook(sessionId, harness, headers, (who) => integration.turnEnd(who, event)),
 
       Prompt: ({ sessionId, harness, event }, { headers }) =>
-        hook(sessionId, harness, headers, (who, definition) => Hooks.prompt(sessions, db, definition, who, event)),
+        hook(sessionId, harness, headers, (who) => integration.prompt(who, event)),
 
       "Project.StartMain": ({ harness, provider, model, runtime }) =>
         Effect.gen(function* () {
@@ -548,7 +546,7 @@ export const handlers = VibestRpcs.toLayer(
       "Session.Ready": ({ id, pid }) =>
         Effect.gen(function* () {
           yield* self("Session.Ready", id)
-          yield* db.patchLive(id, { ready: yield* Clock.currentTimeMillis, ...(pid === undefined ? {} : { pid }) })
+          yield* integration.ready(id, pid)
         }),
 
       "Agents.Outdated": () => cliOnly("Agents.Outdated").pipe(Effect.andThen(sessions.outdated)),
@@ -641,6 +639,7 @@ export const node = LayerNode.make({
     Harnesses.node,
     Identity.node,
     Inbox.node,
+    Integration.node,
     MainAgent.node,
     Machines.node,
     Peers.node,
