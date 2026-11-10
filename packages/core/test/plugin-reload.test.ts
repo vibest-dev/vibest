@@ -26,9 +26,8 @@ import {
 } from "effect"
 import { TestClock } from "effect/testing"
 
-import * as Platform from "#platform"
-
-import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./fakes.ts"
+import * as Platform from "../../cli/src/platform/bun.ts"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
 
 const events: Array<string> = []
 const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.void) =>

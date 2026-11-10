@@ -4,18 +4,11 @@ import { peerAdmitPause, Sessions } from "@vibest/core/sessions"
 import { Deferred, Effect, Fiber, FileSystem, HashMap, Path } from "effect"
 import { TestClock } from "effect/testing"
 
-import {
-  callerPlugin,
-  FakeProcesses,
-  FakeRuntime,
-  makeRepository,
-  resultText,
-  systemPromptFile,
-  until,
-  untilVirtual,
-  writeResult,
-} from "./fakes.ts"
-import { spawnInput, spawnWorking, idleSession, sessionWorktree, test } from "./sessions-helpers.ts"
+import { FakeProcesses } from "./lib/fake-processes.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { resultText, systemPromptFile, until, untilVirtual, writeResult } from "./lib/observe.ts"
+import { callerPlugin, makeRepository } from "./lib/session.ts"
+import { spawnInput, spawnWorking, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
   test(

@@ -5,26 +5,19 @@ import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { Sessions } from "@vibest/core/sessions"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID } from "@vibest/schema/id"
 import { Cause, Clock, Effect, Exit, Fiber, FileSystem, Path } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import {
-  FakeGit,
-  FakeRuntime,
-  FakeProcesses,
-  makeRepository,
-  settled,
-  TURNS,
-  until,
-  untilVirtual,
-  writeResult,
-  systemPromptFile,
-  projectOf,
-} from "./fakes.ts"
-import { spawnInput, spawnWorking, sessionWorktree, test, pick, sqlNotices } from "./sessions-helpers.ts"
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
+import { FakeGit } from "./lib/fake-git.ts"
+import { FakeProcesses } from "./lib/fake-processes.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { settled, TURNS, until, untilVirtual, writeResult, systemPromptFile } from "./lib/observe.ts"
+import { makeRepository } from "./lib/session.ts"
+import { spawnInput, spawnWorking, sessionWorktree, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
   const withMain = (repo: string) =>

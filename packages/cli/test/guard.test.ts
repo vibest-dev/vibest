@@ -4,6 +4,7 @@ import { Db } from "@vibest/core/db"
 import { coordinator, type Rules, session, shellBlock, splitCommand } from "@vibest/core/guard"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
+import { spawnWorking } from "@vibest/core/test/lib/sessions-helpers"
 import { Forbidden } from "@vibest/protocol/rpc"
 import type { Host } from "@vibest/server/daemon"
 import * as Server from "@vibest/server/server"
@@ -30,7 +31,6 @@ import * as Platform from "#platform"
 
 import * as Cli from "../src/cli.ts"
 import { FakeGit, HARNESSES, harnessesLayer, makeRepository, runVibest, tempDirectory, testLayer } from "./fakes.ts"
-import { spawnWorking } from "./sessions-helpers.ts"
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
 const CLIS = new Set(HARNESSES.map((definition) => definition.binary))

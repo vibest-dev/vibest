@@ -3,14 +3,8 @@ import net from "node:net"
 import { readPing } from "@vibest/client/client"
 import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
-import { Harness, Harnesses } from "@vibest/core/harness"
-import type { HarnessDefinition } from "@vibest/core/host"
-import { MachineTransport } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
 import { ProcessPlatform, Processes } from "@vibest/core/processes"
-import { SshHosts } from "@vibest/core/repository-url"
-import { Sessions } from "@vibest/core/sessions"
-import { systemPromptRoot } from "@vibest/core/system-prompt"
 import { projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
 import { FakeProcesses } from "@vibest/core/test/lib/fake-processes"
 import {
@@ -18,33 +12,18 @@ import {
   CURSOR,
   HARNESSES,
   PI,
-  harnessLayer,
   harnessesLayer,
   runtimesLayer,
   subscriptionsLayer,
 } from "@vibest/core/test/lib/harnesses"
-import { eventsOf as readEvents } from "@vibest/core/test/lib/observe"
-import {
-  dbReplacement,
-  pluginsHost,
-  runtimeNode,
-  sessionLayer,
-  sessionsNode,
-  sshHosts,
-  transportLayer,
-} from "@vibest/core/test/lib/session"
-import * as VibestPlugin from "@vibest/plugin"
-import type { DaemonIdentity } from "@vibest/protocol/rpc"
 import { readDaemonInfo } from "@vibest/server/daemon"
-import * as Server from "@vibest/server/server"
-import { type Duration, Effect, FileSystem, Layer, Option, Path, PubSub, Stream } from "effect"
+import { Effect, FileSystem, Layer, Option, PubSub, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { SqlClient } from "effect/sql"
 
 import * as Platform from "#platform"
 
 import { FakeGit } from "./fake-git.ts"
-import { FakeRuntime, type FakeRuntimeOptions, KIND } from "./fake-runtime.ts"
+import { FakeRuntime } from "./fake-runtime.ts"
 
 export {
   CLAUDE,
@@ -89,18 +68,6 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
     },
   })
 
-export const resultText = (id: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const [row] = yield* sql<{ text: string | null }>`SELECT CASE WHEN EXISTS (
-        SELECT 1 FROM event te WHERE te.type = 'turn.end' AND json_extract(te.data, '$.report') = r.id)
-      THEN NULL ELSE json_extract(r.data, '$.text') END AS text
-      FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' ORDER BY r.id DESC LIMIT 1`.pipe(
-      Effect.orDie,
-    )
-    return row?.text ?? ""
-  })
-
 export const busEvents = Effect.gen(function* () {
   return yield* (yield* Bus).subscribe
 })
@@ -122,19 +89,6 @@ export const savedSession = (sessionId: string) =>
     const main = yield* db.coordinatorOf(projectId)
     return main?.id === sessionId ? main.harnessSessionId : null
   })
-
-export const processEnds = (sessionId: string) =>
-  readEvents(sessionId, "process.end").pipe(Effect.map((rows) => rows.map((r) => r.data.reason)))
-
-export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS ended_at, te.id AS end_id,
-    (SELECT max(e.inbox_id) FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
-      AND json_extract(e.data, '$.to') = 'delivered') AS inbox_id,
-    coalesce(json_extract(t.data, '$.typed'), (SELECT group_concat(c, char(10) || char(10)) FROM (SELECT i.content AS c
-      FROM inbox i WHERE i.id IN (SELECT e.inbox_id FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
-        AND json_extract(e.data, '$.to') = 'delivered') ORDER BY i.id)), '') AS input,
-    CASE WHEN te.id IS NULL THEN 'working' ELSE json_extract(te.data, '$.status') END AS status,
-    (SELECT r.content FROM inbox r WHERE r.result_event_id = te.id) AS output
-  FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
 
 const STDIN_FROM_FILE = 'f=$1; shift; exec "$@" <"$f"'
 
@@ -168,80 +122,31 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
     return { stdout, stderr, code }
   }).pipe(Effect.scoped, Effect.orDie)
 
-export interface TestOptions extends FakeRuntimeOptions {
-  readonly hooked?: ReadonlyArray<string>
-  readonly unusable?: ReadonlyArray<string>
-  readonly models?: ReadonlyArray<string>
-  readonly maxSessions?: number
-  readonly plugins?: ReadonlyArray<
-    | VibestPlugin.Plugin.Plugin
-    | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
-  >
-  readonly pluginTimeout?: Duration.Input
-  readonly activateLate?: boolean
-  readonly db?: (db: Db["Service"]) => Db["Service"]
-  readonly missingBinary?: ReadonlyArray<string>
-  readonly harnesses?: ReadonlyArray<HarnessDefinition>
-  readonly sshHosts?: Readonly<Record<string, string>>
-  readonly transport?: MachineTransport["Service"]
-  readonly sessions?: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]
-  readonly identity?: DaemonIdentity
-}
-
 export const processesOn = (platform: ProcessPlatform["Service"]) =>
   Processes.layer.pipe(Layer.provide(Layer.succeed(ProcessPlatform, platform)))
 
-export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCaller) =>
-  VibestPlugin.Plugin.define({
-    id: `runtime-${id}-caller`,
-    effect: (context) =>
-      context.runtime
-        .transform((editor) => {
-          const own = editor.get(id)
-          if (own === undefined) editor.add({ ...editor.get(KIND)!, id, caller })
-          else editor.update(id, (definition) => (definition.caller = caller))
-        })
-        .pipe(Effect.asVoid),
-  })
-
-export { makeRepository, PluginHost, type PluginEntry } from "@vibest/core/test/lib/session"
-export { GaveUp, eventsOf, settled, until, untilVirtual, writeResult, yieldToIo } from "@vibest/core/test/lib/observe"
-
-export const testLayer = (options: TestOptions = {}) =>
-  sessionLayer(
-    [
-      runtimeNode.replace(FakeRuntime.layer(options)),
-      Harness.node.replace(harnessLayer(harnessStandIn(options))),
-      Harnesses.node.replace(harnessesLayer(options.harnesses)),
-      Sessions.node.replace(sessionsNode(options.maxSessions, options.sessions)),
-      ...(options.db === undefined ? [] : [dbReplacement(options.db)]),
-      SshHosts.node.replace(sshHosts(options.sshHosts)),
-      MachineTransport.node.replace(transportLayer(options.transport)),
-      ...(options.identity === undefined
-        ? []
-        : [Server.Identity.node.replace(Layer.succeed(Server.Identity, options.identity))]),
-    ],
-    pluginsHost(options.plugins ?? [], {
-      ...(options.pluginTimeout === undefined ? {} : { timeout: options.pluginTimeout }),
-      ...(options.activateLate === undefined ? {} : { activateLate: options.activateLate }),
-    }),
-  )
-
-const harnessStandIn = (options: TestOptions) => ({
-  ...(options.hooked === undefined ? {} : { hooked: options.hooked }),
-  ...(options.unusable === undefined ? {} : { unusable: options.unusable }),
-  ...(options.models === undefined ? {} : { models: options.models }),
-  ...(options.missingBinary === undefined ? {} : { missingBinary: options.missingBinary }),
-  ...(options.harnesses === undefined ? {} : { harnesses: options.harnesses }),
-})
-
-export const systemPromptFile = (id: string) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path
-    return path.join(yield* systemPromptRoot, id, "system-prompt.md")
-  })
-
-export type TestServices = Layer.Success<ReturnType<typeof testLayer>> | FakeRuntime
+export {
+  makeRepository,
+  PluginHost,
+  callerPlugin,
+  sessionFrom as testLayer,
+  type PluginEntry,
+  type TestOptions,
+  type TestServices,
+} from "@vibest/core/test/lib/session"
+export {
+  GaveUp,
+  TURNS,
+  eventsOf,
+  processEnds,
+  resultText,
+  settled,
+  systemPromptFile,
+  until,
+  untilVirtual,
+  writeResult,
+  yieldToIo,
+} from "@vibest/core/test/lib/observe"
 
 export const pingOf = (socket: string) =>
   Effect.gen(function* () {

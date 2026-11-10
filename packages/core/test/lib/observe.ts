@@ -2,7 +2,8 @@ import { Db } from "@vibest/core/db"
 import { Harnesses } from "@vibest/core/harness"
 import { turnEndFrom } from "@vibest/core/results"
 import { Sessions } from "@vibest/core/sessions"
-import { Clock, Effect, Predicate, Schema } from "effect"
+import { systemPromptRoot } from "@vibest/core/system-prompt"
+import { Clock, Effect, Path, Predicate, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
@@ -61,3 +62,34 @@ export const eventsOf = (sessionId: string, type?: string) =>
       WHERE session_id = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY id`
     return rows.map((r) => ({ id: r.id, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
   }).pipe(Effect.orDie)
+
+export const resultText = (id: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ text: string | null }>`SELECT CASE WHEN EXISTS (
+        SELECT 1 FROM event te WHERE te.type = 'turn.end' AND json_extract(te.data, '$.report') = r.id)
+      THEN NULL ELSE json_extract(r.data, '$.text') END AS text
+      FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' ORDER BY r.id DESC LIMIT 1`.pipe(
+      Effect.orDie,
+    )
+    return row?.text ?? ""
+  })
+
+export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS ended_at, te.id AS end_id,
+    (SELECT max(e.inbox_id) FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
+      AND json_extract(e.data, '$.to') = 'delivered') AS inbox_id,
+    coalesce(json_extract(t.data, '$.typed'), (SELECT group_concat(c, char(10) || char(10)) FROM (SELECT i.content AS c
+      FROM inbox i WHERE i.id IN (SELECT e.inbox_id FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
+        AND json_extract(e.data, '$.to') = 'delivered') ORDER BY i.id)), '') AS input,
+    CASE WHEN te.id IS NULL THEN 'working' ELSE json_extract(te.data, '$.status') END AS status,
+    (SELECT r.content FROM inbox r WHERE r.result_event_id = te.id) AS output
+  FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
+
+export const processEnds = (sessionId: string) =>
+  eventsOf(sessionId, "process.end").pipe(Effect.map((rows) => rows.map((r) => r.data.reason)))
+
+export const systemPromptFile = (id: string) =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path
+    return path.join(yield* systemPromptRoot, id, "system-prompt.md")
+  })

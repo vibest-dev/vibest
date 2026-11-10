@@ -3,7 +3,7 @@ import { Db } from "@vibest/core/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { Harness, Harnesses } from "@vibest/core/harness"
-import type { RuntimeDefinition } from "@vibest/core/host"
+import type { HarnessDefinition, RuntimeDefinition } from "@vibest/core/host"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { MachineTransport } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
@@ -14,6 +14,7 @@ import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin"
+import type { DaemonIdentity } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { Clock, ConfigProvider, Context, Deferred, type Duration, Effect, FileSystem, Layer, Path, Ref } from "effect"
 
@@ -22,7 +23,7 @@ import * as App from "../../../server/src/app.ts"
 import * as Server from "../../../server/src/server.ts"
 import { tempDirectory } from "./directory.ts"
 import { FakeGit } from "./fake-git.ts"
-import { FakeRuntime } from "./fake-runtime.ts"
+import { FakeRuntime, KIND, type FakeRuntimeOptions } from "./fake-runtime.ts"
 import { harnessLayer, harnessesLayer, noHostEnv } from "./harnesses.ts"
 import { compile, fakeGit, fakeProcesses, fakeRuntime, platform } from "./layers.ts"
 
@@ -205,3 +206,68 @@ export const sshHosts = (hosts: Readonly<Record<string, string>> | undefined) =>
 
 export const transportLayer = (transport: MachineTransport["Service"] | undefined) =>
   Layer.succeed(MachineTransport, transport ?? noTransport)
+
+export interface TestOptions extends FakeRuntimeOptions {
+  readonly hooked?: ReadonlyArray<string>
+  readonly unusable?: ReadonlyArray<string>
+  readonly models?: ReadonlyArray<string>
+  readonly maxSessions?: number
+  readonly plugins?: ReadonlyArray<
+    | VibestPlugin.Plugin.Plugin
+    | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
+  >
+  readonly pluginTimeout?: Duration.Input
+  readonly activateLate?: boolean
+  readonly db?: (db: Db["Service"]) => Db["Service"]
+  readonly missingBinary?: ReadonlyArray<string>
+  readonly harnesses?: ReadonlyArray<HarnessDefinition>
+  readonly sshHosts?: Readonly<Record<string, string>>
+  readonly transport?: MachineTransport["Service"]
+  readonly sessions?: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]
+  readonly identity?: DaemonIdentity
+}
+
+export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCaller) =>
+  VibestPlugin.Plugin.define({
+    id: `runtime-${id}-caller`,
+    effect: (context) =>
+      context.runtime
+        .transform((editor) => {
+          const own = editor.get(id)
+          if (own === undefined) editor.add({ ...editor.get(KIND)!, id, caller })
+          else editor.update(id, (definition) => (definition.caller = caller))
+        })
+        .pipe(Effect.asVoid),
+  })
+
+const harnessStandIn = (options: TestOptions) => ({
+  ...(options.hooked === undefined ? {} : { hooked: options.hooked }),
+  ...(options.unusable === undefined ? {} : { unusable: options.unusable }),
+  ...(options.models === undefined ? {} : { models: options.models }),
+  ...(options.missingBinary === undefined ? {} : { missingBinary: options.missingBinary }),
+  ...(options.harnesses === undefined ? {} : { harnesses: options.harnesses }),
+})
+
+export const sessionFrom = (options: TestOptions = {}) =>
+  sessionLayer(
+    [
+      runtimeNode.replace(FakeRuntime.layer(options)),
+      Harness.node.replace(harnessLayer(harnessStandIn(options))),
+      Harnesses.node.replace(harnessesLayer(options.harnesses)),
+      Sessions.node.replace(sessionsNode(options.maxSessions, options.sessions)),
+      ...(options.db === undefined ? [] : [dbReplacement(options.db)]),
+      SshHosts.node.replace(sshHosts(options.sshHosts)),
+      MachineTransport.node.replace(transportLayer(options.transport)),
+      ...(options.identity === undefined
+        ? []
+        : [Server.Identity.node.replace(Layer.succeed(Server.Identity, options.identity))]),
+    ],
+    pluginsHost(options.plugins ?? [], {
+      ...(options.pluginTimeout === undefined ? {} : { timeout: options.pluginTimeout }),
+      ...(options.activateLate === undefined ? {} : { activateLate: options.activateLate }),
+    }),
+  )
+
+export type TestServices = Layer.Success<ReturnType<typeof sessionFrom>> | FakeRuntime
+
+export { sessionFrom as testLayer }

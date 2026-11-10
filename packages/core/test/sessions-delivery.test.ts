@@ -3,23 +3,17 @@ import { Db } from "@vibest/core/db"
 import { Harnesses } from "@vibest/core/harness"
 import { Integration } from "@vibest/core/integration"
 import { Sessions } from "@vibest/core/sessions"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Clock, Effect, Fiber, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import {
-  CURSOR,
-  FakeRuntime,
-  makeRepository,
-  settled,
-  TURNS,
-  until,
-  untilVirtual,
-  writeResult,
-  projectOf,
-} from "./fakes.ts"
-import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./sessions-helpers.ts"
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { CURSOR } from "./lib/harnesses.ts"
+import { settled, TURNS, until, untilVirtual, writeResult } from "./lib/observe.ts"
+import { makeRepository } from "./lib/session.ts"
+import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
   test(

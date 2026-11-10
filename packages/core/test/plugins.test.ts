@@ -9,20 +9,12 @@ import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore, type Regi
 import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
-import * as Platform from "#platform"
-
-import {
-  runtimesLayer,
-  subscriptionsLayer,
-  FakeRuntime,
-  makeRepository,
-  testLayer,
-  type TestOptions,
-  type TestServices,
-  until,
-  harnessesLayer,
-  projectOf,
-} from "./fakes.ts"
+import * as Platform from "../../cli/src/platform/bun.ts"
+import { projectOf } from "./lib/directory.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
+import { until } from "./lib/observe.ts"
+import { makeRepository, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
   Effect.map(projectOf(repo), (projectId) => ({
