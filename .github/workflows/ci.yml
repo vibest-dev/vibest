@@ -14,8 +14,8 @@ concurrency:
 
 jobs:
   check:
-    # Either VIBEST runner (same labels). Linux runs the workspace build, including the darwin-arm64
-    # cross-compile and the linux-x64 glibc package, and the suite. The host binary is an ELF.
+    # Linux runs the workspace build, including the darwin-arm64 cross-compile and the linux-x64 glibc package, and the
+    # suite. The host binary is an ELF.
     # This job does not execute the macOS binary or an installed linux package.
     if: >-
       github.event_name == 'push' ||
@@ -23,29 +23,24 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository &&
         contains(fromJSON(vars.TRUSTED_PR_AUTHORS || '[]'), github.event.pull_request.user.login)
       )
-    runs-on: [self-hosted, Linux, X64, vibest, rn]
+    # GitHub-hosted: free for this public repository, and a fresh VM each run.
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      # Persistent caches live beside _work, so checkout stays clean without actions/cache tarballs
-      # on every run. The runner user creates them, so they need no setup on the host.
-      - name: Prepare persistent CI caches
-        run: |
-          cache_root="${RUNNER_WORKSPACE}/../.vibest-ci-cache"
-          mkdir -p "${cache_root}/pnpm-store" "${cache_root}/turbo"
-          {
-            echo "PNPM_STORE_DIR=${cache_root}/pnpm-store"
-            echo "TURBO_CACHE_DIR=${cache_root}/turbo"
-          } >> "$GITHUB_ENV"
-
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 26.13.0
-
-      - uses: pnpm/action-setup@v4
+          cache: pnpm
+      # Turborepo's local cache, carried between runs (a run saves under its commit, restores the newest earlier one).
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
@@ -55,10 +50,9 @@ jobs:
           test "$(uname -s)" = Linux
           test "$(uname -m)" = x86_64
 
-      - run: pnpm install --frozen-lockfile --prefer-offline --store-dir "$PNPM_STORE_DIR"
+      - run: pnpm install --frozen-lockfile --prefer-offline
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm run format:check
-      # Leave room for the other job sharing this host.
-      - run: pnpm run test --maxWorkers=2
+      - run: pnpm run test
       # pnpm e2e needs a local herdr and the real CLIs, so it runs locally (pnpm e2e, pnpm verify), not here.

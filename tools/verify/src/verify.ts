@@ -6,7 +6,22 @@ import path from "node:path"
 
 const root = path.resolve(import.meta.dirname, "../../..")
 const noCache = process.argv.includes("--no-cache")
-const only = process.argv.slice(2).filter((a) => a !== "--no-cache")
+const flagSlots = new Set<number>()
+const valueOf = (flag: string, what: string) => {
+  const at = process.argv.indexOf(flag)
+  if (at === -1) return undefined
+  const value = process.argv[at + 1]
+  if (value === undefined || value.startsWith("--")) {
+    console.error(`${flag} takes ${what}`)
+    process.exit(1)
+  }
+  flagSlots.add(at).add(at + 1)
+  return value
+}
+const elsewhere = valueOf("--elsewhere", "check ids, comma-separated")
+const keepArchive = valueOf("--keep-archive", "a directory")
+const keptPacks = valueOf("--packs", "a directory")
+const only = process.argv.filter((a, i) => i >= 2 && a !== "--no-cache" && !flagSlots.has(i))
 const NPM_SMOKE = ["I1", "I2", "U1", "U9", "U10", "H1"]
 
 type Options = { cwd?: string; env?: NodeJS.ProcessEnv }
@@ -48,11 +63,28 @@ if (!fs.existsSync(platform)) {
   process.exit(1)
 }
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-verify-"))
-const release = path.join(dir, "release")
+const release = keepArchive ? path.resolve(keepArchive) : path.join(dir, "release")
 const curl = path.join(dir, "curl")
-const packs = path.join(dir, "packs")
+const packs = keptPacks ? path.resolve(keptPacks) : path.join(dir, "packs")
 const npm = path.join(dir, "npm")
-fs.mkdirSync(packs)
+fs.mkdirSync(packs, { recursive: true })
+const tarballsIn = (folder: string) =>
+  fs
+    .readdirSync(folder)
+    .filter((f) => f.endsWith(".tgz"))
+    .map((f) => path.join(folder, f))
+const packedName = (tarball: string): string =>
+  JSON.parse(childProcess.execFileSync("tar", ["-xzOf", tarball, "package/package.json"], { encoding: "utf8" })).name
+const alreadyPacked = tarballsIn(packs).length > 0
+const toPack = keptPacks
+  ? (
+      JSON.parse(
+        childProcess.execFileSync("pnpm", ["-r", "ls", "--json", "--depth", "-1"], { cwd: root, encoding: "utf8" }),
+      ) as Array<{ path: string; private?: boolean }>
+    )
+      .filter((p) => !p.private)
+      .map((p) => p.path)
+  : [path.join(root, "packages/cli"), platform]
 
 if (!(await run("build", ["pnpm", "run", "build"]))) process.exit(1)
 await all([
@@ -77,11 +109,27 @@ await all([
     ],
   ]),
   (async () => {
-    for (const pkg of [path.join(root, "packages/cli"), platform])
-      if (!(await run(`pack ${path.relative(root, pkg)}`, ["pnpm", "pack", "--pack-destination", packs], { cwd: pkg })))
-        return false
-    const tarballs = fs.readdirSync(packs).map((f) => path.join(packs, f))
-    return run("npm install", ["npm", "install", "--no-audit", "--no-fund", "--prefix", npm, ...tarballs])
+    if (!alreadyPacked)
+      for (const pkg of toPack)
+        if (
+          !(await run(`pack ${path.relative(root, pkg)}`, ["pnpm", "pack", "--pack-destination", packs], { cwd: pkg }))
+        )
+          return false
+    const installed = new Set(["@vibest/cli", `@vibest/cli-${target}`])
+    const tarballs = tarballsIn(packs).filter((t) => installed.has(packedName(t)))
+    if (tarballs.length !== installed.size) {
+      console.error(`verify: ${packs} does not hold exactly one tarball of each of ${[...installed].join(", ")}`)
+      return false
+    }
+    return run(alreadyPacked ? `npm install (from ${packs})` : "npm install", [
+      "npm",
+      "install",
+      "--no-audit",
+      "--no-fund",
+      "--prefix",
+      npm,
+      ...tarballs,
+    ])
   })(),
 ])
 
@@ -110,7 +158,14 @@ const npmChecks = only.length > 0 || noCache ? only : layoutKnown ? NPM_SMOKE : 
 const e2e = (method: string, install: string, ids: ReadonlyArray<string>) =>
   run(
     `e2e on the ${method} install${ids === NPM_SMOKE ? ` (smoke: ${ids.join(" ")})` : ""}`,
-    ["bun", "tools/e2e/src/main.ts", "--strict", ...(noCache ? ["--no-cache"] : []), ...ids],
+    [
+      "bun",
+      "tools/e2e/src/main.ts",
+      "--strict",
+      ...(noCache ? ["--no-cache"] : []),
+      ...(elsewhere ? ["--elsewhere", elsewhere] : []),
+      ...ids,
+    ],
     {
       env: { ...process.env, VIBEST_E2E_METHOD: method, VIBEST_E2E_INSTALL: install },
     },
@@ -127,4 +182,6 @@ if (failedLegs.length) {
   console.error(`\nverify: failed on the ${failedLegs.join(" and ")} install`)
   process.exit(1)
 }
-console.log("\nverify: passed.")
+console.log(
+  `\nverify: passed.${elsewhere ? ` Not run here, for another machine's verify to prove: ${elsewhere.split(",").join(" ")}.` : ""}`,
+)
