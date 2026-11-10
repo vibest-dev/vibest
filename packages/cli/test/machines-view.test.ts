@@ -146,7 +146,7 @@ describe("another machine's terminals here", () => {
           ],
         )
         assert.deepStrictEqual(added.notes, [
-          { message: "mb's herdr terminals cannot be shown here; vibest peek mb/<id> reads them" },
+          { message: "mb's herdr agents cannot be shown here; vibest peek mb/<id> reads them" },
           { plugin: "view-a", message: "added mb" },
         ])
         const [row] = yield* a.cli(a.raw["Machine.List"]())
@@ -155,7 +155,7 @@ describe("another machine's terminals here", () => {
           [
             [
               "herdr",
-              { visible: false, note: "mb's herdr terminals cannot be shown here; vibest peek mb/<id> reads them" },
+              { visible: false, note: "mb's herdr agents cannot be shown here; vibest peek mb/<id> reads them" },
             ],
             ["view", { visible: true, as: "mb" }],
           ],

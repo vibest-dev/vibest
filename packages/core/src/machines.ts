@@ -44,7 +44,7 @@ const EXIT_WAIT = Duration.seconds(1)
 export const REPAIR_PAUSE = Duration.seconds(30)
 
 export const cannotShow = (name: string, kind: string) =>
-  `${name}'s ${kind} terminals cannot be shown here; vibest peek ${name}/<id> reads them`
+  `${name}'s ${kind} agents cannot be shown here; vibest peek ${name}/<id> reads them`
 
 const shownKind = (here: ReadonlyArray<{ readonly id: string; readonly name?: string }>, kind: string) =>
   here.find((runtime) => runtime.id === kind)?.name ?? kind
@@ -230,8 +230,7 @@ const make = Effect.gen(function* () {
           repairs.delete(key)
           return again as View
         }
-        const note =
-          again.note ?? (notes.map(noteText).join("; ") || `${name}'s ${label} terminals are not in ${label} here`)
+        const note = again.note ?? (notes.map(noteText).join("; ") || `${name}'s agents are not in ${label} here`)
         repairs.set(key, { at: yield* Clock.currentTimeMillis, note })
         return { terminals: NONE, note } as View
       }),
