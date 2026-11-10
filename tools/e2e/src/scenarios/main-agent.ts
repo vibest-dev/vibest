@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
-import { alive, expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type Proc = { name: string; argv?: Array<string> | null }
@@ -91,10 +91,12 @@ const turn = async (w: World, socket: string, pane: string, prompt: string, answ
 }
 
 const exitMain = async (w: World, socket: string, pane: string, id: string) => {
-  const pid = row<{ p: number | null }>(w, `SELECT pid AS p FROM ${SESSIONS} s WHERE id = ?`, id)?.p
-  expect(pid != null, `no pid for the main agent ${id}`)
   await herdr(socket, "pane.close", { pane_id: pane })
-  await until("the main agent's harness gone", () => !alive(pid!), 30_000)
+  await until(
+    "the main agent's process.end",
+    () => row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, id)?.e != null,
+    30_000,
+  )
 }
 
 const toolsModel = (readme: string) => {
