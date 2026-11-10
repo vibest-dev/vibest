@@ -1,5 +1,6 @@
-import { Context, Effect, FileSystem, Layer, Option, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { capture } from "@vibest/plugin"
+import { Context, Effect, FileSystem, Layer } from "effect"
+import type { ChildProcessSpawner } from "effect/process"
 
 const CLI_TIMEOUT = "10 seconds"
 
@@ -10,23 +11,17 @@ export const securityArgs = (service: string) => ["security", "find-generic-pass
 
 export const claudeCredentialsFile = (home: string) => `${home}/.claude/.credentials.json`
 
-const security = (service: string) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const [command, ...args] = securityArgs(service)
-    const handle = yield* spawner.spawn(ChildProcess.make(command, args, { stdin: "ignore" }))
-    const [text, , code] = yield* Effect.all(
-      [Stream.mkString(Stream.decodeText(handle.stdout)), Stream.runDrain(handle.stderr), handle.exitCode],
-      { concurrency: "unbounded" },
-    )
-    const value = text.replace(/\n$/, "")
-    return code === 0 && value !== "" ? value : undefined
-  }).pipe(
-    Effect.scoped,
-    Effect.timeoutOption(CLI_TIMEOUT),
-    Effect.map(Option.getOrUndefined),
+const security = (service: string) => {
+  const [command, ...args] = securityArgs(service)
+  return capture(command, args, { stdin: "ignore", timeout: CLI_TIMEOUT }).pipe(
+    Effect.map((run) => {
+      if (run === undefined || run.exitCode !== 0) return undefined
+      const value = run.stdout.replace(/\n$/, "")
+      return value === "" ? undefined : value
+    }),
     Effect.orElseSucceed(() => undefined),
   )
+}
 
 const read = (
   service: string,

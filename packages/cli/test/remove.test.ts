@@ -23,6 +23,7 @@ import {
   writeResult,
   systemPromptFile,
   projectOf,
+  processesOn,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
@@ -433,7 +434,7 @@ describe.concurrent("Processes", () => {
         }
         const p = yield* Effect.gen(function* () {
           return yield* Processes
-        }).pipe(Effect.provide(Processes.layer(platform)))
+        }).pipe(Effect.provide(processesOn(platform)))
         for (const pid of [0, -1, 1.5, Number.NaN]) assert.strictEqual(yield* p.liveness(pid), "unknown")
         assert.strictEqual(yield* p.liveness(7), "alive")
         assert.deepStrictEqual(asked, [7])
@@ -456,7 +457,7 @@ describe.concurrent("Processes", () => {
             return yield* Processes
           }).pipe(
             Effect.provide(
-              Processes.layer({
+              processesOn({
                 liveness: Platform.liveness,
                 terminate: () => {
                   throw new Error("this test must not signal a process")

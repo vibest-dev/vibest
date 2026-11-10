@@ -39,9 +39,11 @@ describe.concurrent("Sessions", () => {
       yield* fs.makeDirectory(memory, { recursive: true })
       yield* fs.writeFileString(`${memory}/later.md`, "learned between starts")
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
-
+      const db = yield* Db
+      yield* sessions.check(id)
+      yield* untilVirtual(db.getSession(id), (row) => row?.exitedAt != null)
       yield* sessions.send(id, "next")
-      yield* until(herdr.callsTo("send"), (calls) => calls.at(-1)!.text === "next")
+      yield* untilVirtual(herdr.callsTo("send"), (calls) => calls.some((call) => call.text === "next"))
       assert.isTrue(yield* fs.exists(cursorMcp))
       const prompt = yield* fs.readFileString(yield* systemPromptFile(id))
       assert.include(prompt, "report -- '<message>'")

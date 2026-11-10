@@ -17,6 +17,7 @@ import {
   Crypto,
   Duration,
   Effect,
+  FiberSet,
   FileSystem,
   HashMap,
   Layer,
@@ -25,6 +26,7 @@ import {
   PlatformError,
   Predicate,
   Ref,
+  Stream,
   SynchronizedRef,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
@@ -33,6 +35,8 @@ import { sessionArchive } from "./archive.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
 import { Db, type SessionFilter, type SessionRow } from "./db.ts"
 import { Drain } from "./drain.ts"
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
 import * as Engine from "./engine.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox } from "./inbox.ts"
@@ -64,7 +68,7 @@ import type { Platform, Tracked } from "./session-types.ts"
 import { sessionSpawn, type SpawnInput, type Spawned } from "./spawn.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
-import { type Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
+import { Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
 export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
   JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" ? { terminal: address.id } : {}) })
 
@@ -86,6 +90,26 @@ export { allocationNameSource, defaultSessionName, peerAdmitPause, type SpawnInp
 export const START_TIMEOUT = Duration.seconds(120)
 export const HOOK_GRACE = Duration.seconds(10)
 export const TAIL_LINES = 30
+
+const SESSION_DEPS = [
+  Bus.node,
+  Db.node,
+  Drain.node,
+  Git.node,
+  Harness.node,
+  Harnesses.node,
+  Inbox.node,
+  Plugins.node,
+  Processes.node,
+  Restarting.node,
+  Runtimes.node,
+  Subscriptions.node,
+  PlatformNode.childProcessSpawner,
+  PlatformNode.crypto,
+  PlatformNode.fileSystem,
+  PlatformNode.layout,
+  PlatformNode.path,
+] as const
 
 const newTracked: Effect.Effect<Tracked> = Effect.all({
   sawWorking: Ref.make(false),
@@ -131,6 +155,7 @@ export class Sessions extends Context.Service<
     readonly inMemory: Effect.Effect<{
       readonly tracked: number
       readonly locks: number
+      readonly reconciles: number
     }>
     readonly outdated: Effect.Effect<ReadonlyArray<Outdated>>
     readonly restart: (ids: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<Restarted>>
@@ -195,20 +220,7 @@ export class Sessions extends Context.Service<
         (id: string, settlement = false) =>
         <A, E, R>(effect: Effect.Effect<A, E, R>) =>
           drain.work(`session ${id}`, locks.withLock(id)(effect), settlement)
-      const logged =
-        (what: string) =>
-        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-          effect.pipe(Effect.catchCause((cause) => Effect.logWarning(`${what}: ${Cause.pretty(cause)}`)))
-
-      const sessionAt = (terminal: Terminal) =>
-        db
-          .listSessions()
-          .pipe(
-            Effect.map(
-              (rows) =>
-                rows.find((row) => row.address.machine === terminal.machine && row.address.id === terminal.id)?.id,
-            ),
-          )
+      const logged = Engine.logFailure
 
       const notice = (session: SessionRow, message: string) =>
         inbox.enqueue({ sessionId: session.id, kind: "notice", message, details: {} })
@@ -447,7 +459,7 @@ export class Sessions extends Context.Service<
             return
           }
           if (!(yield* Ref.getAndSet(r.launchRechecked, true)))
-            yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkLocked(id))
+            yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkSession(id))
         } else yield* Ref.set(r.launchRechecked, false)
         if (!(yield* harnesses.get(session.harnessId)).ownSessionId && h.session !== undefined) {
           const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
@@ -489,11 +501,11 @@ export class Sessions extends Context.Service<
           )
           return yield* deliverQueued(h, { ...session, turnState: "not_started" }, terminal)
         }
-        if (idle && !ended) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkLocked(id))
+        if (idle && !ended) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
         const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
-        if (grace > 0) return yield* engine.arm(`grace:${id}`, Duration.millis(grace), checkLocked(id))
+        if (grace > 0) return yield* engine.arm(`grace:${id}`, Duration.millis(grace), checkSession(id))
         yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
         yield* finish(
           session,
@@ -503,8 +515,10 @@ export class Sessions extends Context.Service<
         )
       })
 
-      const checkLocked = (id: string): Effect.Effect<void> =>
-        locked(id)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform))
+      const checkSession = (id: string): Effect.Effect<unknown, unknown> =>
+        locked(id)(check(id)).pipe(Effect.provideContext(platform))
+
+      const checkLocked = (id: string): Effect.Effect<void> => logged(`check ${id}`)(checkSession(id))
 
       const unreachable = (session: SessionRow) => (e: { readonly message: string }) =>
         Effect.fail(new RuntimeUnreachable({ session: session.runtime, message: e.message }))
@@ -603,12 +617,12 @@ export class Sessions extends Context.Service<
               if (session !== undefined) yield* undelivered(session, [row], errorMessage(cause))
             })
           yield* locked(id)(deliver(id).pipe(Effect.catchCause(failed)))
-        }).pipe(logged(`send ${id}`), Effect.provideContext(platform))
+        }).pipe(Effect.provideContext(platform))
 
       const deliverNext = (id: string) =>
         locked(id)(
           db.pendingInbox(id).pipe(Effect.flatMap((pending) => (pending.length === 0 ? Effect.void : deliver(id)))),
-        ).pipe(logged(`deliver ${id}`), Effect.provideContext(platform))
+        ).pipe(Effect.provideContext(platform))
 
       const interrupt = (id: string) =>
         getRow(id).pipe(
@@ -703,12 +717,12 @@ export class Sessions extends Context.Service<
           Effect.provideContext(platform),
         )
 
-      const onTerminal = (terminal: Terminal, working: boolean) =>
+      const onTerminal = (runtime: string, terminal: Terminal, working: boolean) =>
         Effect.gen(function* () {
-          const id = yield* sessionAt(terminal)
+          const id = yield* db.sessionAt(runtime, terminal)
           if (id === undefined) return
           if (working) yield* Ref.set((yield* track(id)).sawWorking, true)
-          yield* checkLocked(id)
+          yield* checkSession(id)
         })
 
       const turnStarted = (id: string, at: number) =>
@@ -717,7 +731,7 @@ export class Sessions extends Context.Service<
           if (session?.turnState === "open" && at >= session.turnPromptedAt) yield* sawTurnStart(id)
         })
 
-      const handle = (event: EngineEvent): Effect.Effect<void> => {
+      const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
         switch (event.type) {
           case "turn.reported":
             return resultReady(event.sessionId)
@@ -726,9 +740,9 @@ export class Sessions extends Context.Service<
           case "inbox.queued":
             return queued(event.sessionId, event.inboxId)
           case "live.state":
-            return onTerminal(event.terminal, event.state === "working")
+            return onTerminal(event.runtime, event.terminal, event.state === "working")
           case "live.exited":
-            return onTerminal(event.terminal, false)
+            return onTerminal(event.runtime, event.terminal, false)
           case "process.end":
             return forget(event.sessionId)
           case "live.reset":
@@ -743,6 +757,7 @@ export class Sessions extends Context.Service<
         }
       }
 
+      let reconciles = 0
       const reconcile = (where: "all" | { readonly runtime: string; readonly machine?: string }) =>
         Effect.gen(function* () {
           const here = (yield* db.listSessions()).filter(
@@ -775,23 +790,22 @@ export class Sessions extends Context.Service<
             { concurrency: 8, discard: true },
           )
           for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
+          reconciles++
         })
 
-      yield* Effect.forkIn(
-        inbox.delivered.pipe(
-          Effect.flatMap(({ row, done }) =>
-            Effect.forkIn(
-              archiveDelivered(row).pipe(
-                Effect.ensuring(done),
-                logged(`archive ${row.sessionId}`),
-                Effect.provideContext(platform),
-              ),
-              scope,
+      const archives = yield* FiberSet.make()
+      yield* Stream.fromQueue(inbox.delivered).pipe(
+        Stream.runForEach(({ row, done }) =>
+          FiberSet.run(
+            archives,
+            archiveDelivered(row).pipe(
+              Effect.ensuring(done),
+              logged(`archive ${row.sessionId}`),
+              Effect.provideContext(platform),
             ),
           ),
-          Effect.forever,
         ),
-        scope,
+        Effect.forkIn(scope),
       )
 
       const resultReady = (id: string) =>
@@ -874,7 +888,7 @@ export class Sessions extends Context.Service<
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: Effect.gen(function* () {
           const map = yield* SynchronizedRef.get(tracked)
-          return { tracked: HashMap.size(map), locks: locks.size() }
+          return { tracked: HashMap.size(map), locks: locks.size(), reconciles }
         }),
         outdated,
         restart,
@@ -888,4 +902,8 @@ export class Sessions extends Context.Service<
       Effect.flatMap((max) => Sessions.make({ maxSessions: Option.getOrUndefined(max) })),
     ),
   )
+  static readonly configured = (options: { readonly maxSessions: number | undefined }) =>
+    LayerNode.make({ service: Sessions, layer: Layer.effect(Sessions, Sessions.make(options)), deps: SESSION_DEPS })
+
+  static readonly node = LayerNode.make({ service: Sessions, layer: Sessions.layer, deps: SESSION_DEPS })
 }

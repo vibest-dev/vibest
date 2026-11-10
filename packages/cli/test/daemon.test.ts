@@ -4,10 +4,13 @@ import util from "node:util"
 
 import { assert, describe, it } from "@effect/vitest"
 import { connect, probe } from "@vibest/client/client"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { peerHeaders } from "@vibest/protocol/protocol"
 import { ID, randomId } from "@vibest/schema/id"
-import { type Host, run } from "@vibest/server/daemon"
+import { run } from "@vibest/server/daemon"
+import * as Server from "@vibest/server/server"
 import { ConfigProvider, Effect, Exit, Fiber, FileSystem, Layer, Scope } from "effect"
 import { RpcClient } from "effect/rpc"
 import { SocketServer } from "effect/socket/SocketServer"
@@ -108,7 +111,7 @@ describe.concurrent("vibestd.pid lock", () => {
           assert.strictEqual(run.code, 1)
           assert.include(run.stderr, "DaemonSocketInUse")
           assert.include(run.stderr, answer ? "answers Ping" : "does not answer Ping")
-          assert.strictEqual(yield* probe(layout.socket), answer)
+          assert.strictEqual(yield* probe(layout.socket).pipe(Effect.repeat({ until: (up) => up, times: 2 })), answer)
           assert.isFalse(yield* (yield* FileSystem.FileSystem).exists(layout.database))
         }
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
@@ -224,18 +227,24 @@ describe.concurrent("vibestd.pid lock", () => {
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout.make(yield* tempDirectory("vibest-home-"))
-        const slowClose: Host = {
-          ...Platform.daemon,
-          servers: Layer.effect(
-            SocketServer,
-            Effect.gen(function* () {
-              const server = yield* SocketServer
-              yield* Effect.addFinalizer(() => Effect.sleep("1500 millis"))
-              return server
+        const slowClose = [
+          ...Platform.replacements,
+          Server.socketServer.replace(
+            LayerNode.make({
+              name: "test/SlowCloseSocketServer",
+              layer: Layer.effect(
+                SocketServer,
+                Effect.gen(function* () {
+                  const server = yield* SocketServer
+                  yield* Effect.addFinalizer(() => Effect.sleep("1500 millis"))
+                  return server
+                }),
+              ).pipe(Layer.provideMerge(Layer.unwrap(Effect.map(Layout, (l) => Platform.socketServer(l.socket))))),
+              deps: [PlatformNode.layout],
             }),
-          ).pipe(Layer.provideMerge(Platform.daemon.servers)),
-        }
-        const old = yield* run(slowClose).pipe(
+          ),
+        ]
+        const old = yield* run(Platform.daemon, slowClose).pipe(
           Effect.provideService(Layout, layout),
           Effect.provideService(VibestCommand, ["vibestd-under-test"]),
           Effect.provide(

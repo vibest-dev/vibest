@@ -18,6 +18,7 @@ import type { ChildProcessSpawner } from "effect/process"
 import type { CoordinatorRow, EndReason, SessionPatch, SessionRow } from "./db.ts"
 import type { HarnessUnavailable } from "./harness.ts"
 import type { LimitMove } from "./move.ts"
+import { messageOf } from "./plugin-sources.ts"
 import {
   createIsolatedWorktrees,
   discardIsolatedWorktrees,
@@ -276,10 +277,7 @@ export const sessionPlacement = (deps: {
             lastActive: t,
             end: "launch_failed",
           })
-          yield* deps.notice(
-            session,
-            `${session.id} failed to start ${session.harnessId}: ${e instanceof Error ? e.message : String(e)}`,
-          )
+          yield* deps.notice(session, `${session.id} failed to start ${session.harnessId}: ${messageOf(e)}`)
         }),
       ),
     )
@@ -288,8 +286,8 @@ export const sessionPlacement = (deps: {
     db.coordinatorOf(projectId).pipe(Effect.map((main) => main?.projectDirectory))
 
   const recount = Effect.fn("Sessions.recount")(function* (kind: string, projectId: string) {
-    const h = yield* runtimes.route(kind).pipe(Effect.option)
-    if (Option.isNone(h)) return
+    const h = runtimes.find(kind)
+    if (h === undefined) return
     const rows = (yield* db.listSessions({ projectId })).filter(
       (row) => row.runtime === kind && !(row.metadata.archived || row.metadata.removed),
     )
@@ -297,19 +295,14 @@ export const sessionPlacement = (deps: {
     let shown = false
     for (const session of rows) {
       if (session.address.id === "") continue
-      yield* show(
-        h.value,
-        session,
-        session.address,
-        stored ?? (yield* projectRoot(yield* deps.worktreeOf(session))).root,
-      )
+      yield* show(h, session, session.address, stored ?? (yield* projectRoot(yield* deps.worktreeOf(session))).root)
       shown = true
     }
     if (shown) return
     const main = yield* db.coordinatorOf(projectId)
     if (main?.runtime !== kind || !main.address || main.address.id === "" || stored === undefined) return
-    if (h.value.present === undefined) return
-    yield* h.value
+    if (h.present === undefined) return
+    yield* h
       .present(main.address, {
         agent: "",
         harness: "",
@@ -348,11 +341,11 @@ export const sessionPlacement = (deps: {
     )
     const labelled = yield* Effect.forEach(rows, (session) =>
       Effect.gen(function* () {
-        const h = yield* runtimes.route(session.runtime).pipe(Effect.option)
-        if (Option.isNone(h)) return 0
+        const h = runtimes.find(session.runtime)
+        if (h === undefined) return 0
         const stored = yield* storedDirectory(session.projectId)
         const root = stored ?? (yield* projectRoot(yield* deps.worktreeOf(session))).root
-        yield* show(h.value, session, session.address, root)
+        yield* show(h, session, session.address, root)
         return 1
       }).pipe(Effect.orElseSucceed(() => 0)),
     )

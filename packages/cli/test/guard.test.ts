@@ -23,6 +23,7 @@ import {
 } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
 import { Command } from "effect/cli"
+import { FetchHttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
@@ -592,7 +593,7 @@ describe("wizard entry", () => {
           },
         })
         const exit = yield* Command.runWith(
-          Cli.command(host, () => {
+          Cli.command(host, [], () => {
             touched.exec = true
           }),
           { version: "0.0.0-test" },
@@ -624,6 +625,7 @@ describe("wizard entry", () => {
           Effect.provide(Stdio.layerTest({})),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(Path.layer),
+          Effect.provide(FetchHttpClient.layer),
           Effect.provide(
             ConfigProvider.layer(
               ConfigProvider.fromUnknown({
@@ -665,7 +667,7 @@ describe("vibest --session inside herdr", () => {
           },
         })
         const exit = yield* Command.runWith(
-          Cli.command(host, () => {
+          Cli.command(host, [], () => {
             touched.exec = true
           }),
           { version: "0.0.0-test" },
@@ -716,7 +718,7 @@ describe("vibest --session inside herdr", () => {
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })
       const exit = yield* Command.runWith(
-        Cli.command(host, () => {}),
+        Cli.command(host, [], () => {}),
         { version: "0.0.0-test" },
       )(["--harness", "pi", "--env", "MAIN_PROBE=" + secret]).pipe(
         Effect.provideService(SocketConnector, () => {

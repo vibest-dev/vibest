@@ -1,9 +1,11 @@
 import type { Polled } from "@vibest/protocol/protocol"
 import { shortId } from "@vibest/schema/id"
-import { Cause, Context, Duration, Effect, Layer, Option, Queue, Stream } from "effect"
+import { Context, Duration, Effect, Layer, Queue, Stream } from "effect"
 
+import { Bus } from "./bus.ts"
 import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
 import { Drain } from "./drain.ts"
+import { LayerNode } from "./effect/layer-node.ts"
 import * as Engine from "./engine.ts"
 import { Harnesses } from "./harness.ts"
 import { keyedLock } from "./keyed-lock.ts"
@@ -69,7 +71,7 @@ export class Inbox extends Context.Service<
     readonly enqueue: (row: NewInboxRow) => Effect.Effect<InboxRow>
     readonly deliver: (projectId: string) => Effect.Effect<void>
     readonly stream: (projectId: string) => Stream.Stream<string>
-    readonly delivered: Effect.Effect<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>
+    readonly delivered: Queue.Queue<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>
     readonly poll: (projectId: string) => Effect.Effect<Polled>
     readonly ack: (
       projectId: string,
@@ -122,13 +124,11 @@ export class Inbox extends Context.Service<
             if (restarting.has(coord.id)) return
             const address = encodeAddress(coord.address)
             const guard = { projectId, runtime: coord.runtime, address }
-            const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
-            if (Option.isNone(h)) return
-            const presence = yield* coordinatorIdle(h.value, coord.address)
+            const h = runtimes.find(coord.runtime)
+            if (h === undefined) return
+            const presence = yield* coordinatorIdle(h, coord.address)
             if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
-          }).pipe(
-            Effect.catchCause((cause) => Effect.logWarning(`deliver to project ${projectId}: ${Cause.pretty(cause)}`)),
-          ),
+          }).pipe(Engine.logFailure(`deliver to project ${projectId}`)),
         )
 
       const mainOf = (id: string) =>
@@ -290,11 +290,17 @@ export class Inbox extends Context.Service<
         enqueue: db.insertInbox,
         deliver,
         stream,
-        delivered: Queue.take(delivered),
+        delivered,
         poll,
         ack,
         locks: Effect.sync(() => locks.size()),
       })
     }),
   )
+
+  static readonly node = LayerNode.make({
+    service: Inbox,
+    layer: Inbox.layer,
+    deps: [Bus.node, Db.node, Drain.node, Harnesses.node, Restarting.node, Runtimes.node],
+  })
 }

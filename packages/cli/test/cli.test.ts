@@ -708,7 +708,7 @@ it.effect("vibest execs the daemon command over the process environment and neve
     delete process.env.VIBEST_AGENT
     const seen: Array<{ file: string; args: ReadonlyArray<string>; env: Record<string, string> }> = []
     const exit = yield* Command.runWith(
-      Cli.command(Platform.daemon, (file, args, env) => {
+      Cli.command(Platform.daemon, Platform.replacements, (file, args, env) => {
         seen.push({
           file,
           args,
@@ -809,7 +809,7 @@ test(
     process.env[HANDOFF_ENV] = "from-the-old-daemon"
     const fiber = yield* Effect.forkChild(
       Command.runWith(
-        Cli.command(Platform.daemon, () => {}),
+        Cli.command(Platform.daemon, Platform.replacements, () => {}),
         { version: "0.0.0-test" },
       )(["daemon", "--foreground", "--import"]).pipe(
         Effect.provide(
