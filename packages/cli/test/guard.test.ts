@@ -1,3 +1,4 @@
+import { BunSocket } from "@effect/platform-bun"
 import { assert, describe, it, layer } from "@effect/vitest"
 import { SocketConnector as VibestSocketConnector } from "@vibest/client/socket-connector"
 import { Db } from "@vibest/core/db"
@@ -610,10 +611,7 @@ describe("wizard entry", () => {
             touched.socket = true
             return Effect.die("socket")
           }),
-          Effect.provideService(VibestSocketConnector, () => {
-            touched.socket = true
-            return Effect.die("socket")
-          }),
+          Effect.provideService(VibestSocketConnector, (endpoint) => BunSocket.makeNet({ path: endpoint })),
           Effect.provideService(
             Crypto.Crypto,
             Crypto.make({

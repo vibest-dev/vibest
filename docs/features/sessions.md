@@ -43,3 +43,10 @@ most N lines with `--lines N`, and refuses an id it does not know.
 
 Archiving a session while a process still works in its worktree keeps the worktree and names that process as the
 reason.
+
+## S40. An inherited agent identity is not trusted
+
+A program started from inside an agent session (a GUI app, a terminal server) inherits that agent's `VIBEST_*`
+environment, and terminals it opens later pass it on. `vibest` trusts that identity only when it runs in the claimed
+session's own terminal; anywhere else it treats the caller as the user, so the owner can run every command there. The
+agent itself, in its own terminal, is still refused the user's commands.

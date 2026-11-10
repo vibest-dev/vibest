@@ -387,6 +387,7 @@ describe("vibest.sock", () => {
         ["Project.StartMain", c["Project.StartMain"]({ runtime: "herdr" })],
         ["Project.Open", c["Project.Open"]({})],
         ["Project.MainPlace", c["Project.MainPlace"]({ callerEnv: {} })],
+        ["Session.Here", c["Session.Here"]({ id, callerEnv: {} })],
         ["List", c.List({ stopped: true })],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],

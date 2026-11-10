@@ -605,6 +605,13 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
+    Rpc.make("Session.Here", {
+      payload: { id: Schema.String, callerEnv: Schema.Record(Schema.String, Schema.String) },
+      success: Schema.Boolean,
+      error: Forbidden,
+    }),
+  ),
+  scoped(
     Rpc.make("Project.FocusCoordinator", {
       payload: {},
       success: Schema.NullOr(Schema.Struct({ place: Schema.String, focused: Schema.Boolean })),
@@ -830,6 +837,7 @@ export const ACCESS = {
   "Session.Seen": "cli",
   "Project.Open": "cli",
   "Project.MainPlace": "cli",
+  "Session.Here": "cli",
   "Project.CoordinatorSession": "agent",
   "Project.StartMain": "agent",
   "Project.FocusCoordinator": "cli",
@@ -873,4 +881,5 @@ export const CAPABILITIES = {
   watch: true,
   projects: true,
   spawnRuntime: true,
+  sessionHere: true,
 } as const

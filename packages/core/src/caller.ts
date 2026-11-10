@@ -92,3 +92,6 @@ export const callerTarget = (
   }
   return undefined
 }
+
+export const sameTerminal = (session: string, caller: string | undefined) =>
+  caller !== undefined && (session === caller || session.startsWith(`${caller}/`))
