@@ -21,10 +21,11 @@ layer against real git with its own `HOME` and identity, and the live herdr test
 `packages/cli/test/runtime-herdr-close.test.ts`, `runtime-herdr-main.test.ts` and `runtime-herdr-subagent.test.ts`,
 which are skipped without herdr (the last two start a real Pi when it is on `PATH`).
 
-`pnpm verify` is the deterministic gate: CI runs it, and it passes or fails. What vibest can do, and when each
+The scripts (`pnpm test`, `pnpm e2e`, `pnpm verify`) are deterministic: CI runs them, and they pass or fail. They do
+not say a change works on their own. What vibest can do, and when each
 capability counts as working, is written in plain language in [docs/features/](docs/features/), one file per area,
 each capability under its id; a new or changed capability goes there, and the E2E check about it carries that id in its
-name. To say a change works, follow the `verify-features` skill
+name. To say a change works, an agent runs the `verify-features` skill
 ([.agents/skills/verify-features/SKILL.md](.agents/skills/verify-features/SKILL.md)): read the capabilities, run `pnpm
 verify`, use its results, verify the rest by hand in an isolated real environment, and report each capability with
 evidence. E2E gives every run a temp

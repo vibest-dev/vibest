@@ -41,7 +41,7 @@
     },
     "//#e2e": {
       "dependsOn": ["@vibest/cli#build"],
-      "inputs": ["tools/e2e/src/**", "docs/features/**"],
+      "inputs": ["tools/e2e/src/**"],
       "outputs": [],
       "cache": true
     }

@@ -46,7 +46,8 @@ follow its text in a real environment and record what you ran and saw.
 
 ## 5. Report
 
-Write one report per run to `tools/e2e/evidence/<UTC time>-features/report.md` (create the folder):
+Write one report per run to `tools/e2e/evidence/<run>/features.md`, where `<run>` is the evidence folder of this
+run's `pnpm verify` curl leg (the whole gate), next to its `report.json`:
 
 - the commit (`git rev-parse HEAD`), the date, and the `pnpm verify` exit status with its evidence folders;
 - one line per capability id in scope, in the order of `docs/features`: `<ID> verified|failed|not verified`, then the
