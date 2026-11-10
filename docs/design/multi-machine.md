@@ -266,7 +266,8 @@ carries `detached: no` and the refusal note says to restart that session on B on
 Limits: a profile is found by target string and session, so B saved by the user under another ssh alias gets a second
 profile; herdr has no server id, so a target that now reaches another herdr server goes unnoticed; `vibest ls` cannot
 say whether herdr's link to B is up; B's `link` is read when A connects, so its version and `detached` are as of then;
-and the catalog is global for the user on A, so the profile shows in every herdr session's TUI there.
+and the catalog is global for the user on A, so the profile shows in every herdr session's TUI there. Agents started on B before agents of other machines opened in `default` live in B's session `vibest`, which the
+mirror does not save, so A shows them as having no saved machine until they end.
 
 Not covered yet: Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote row (its own PR);
 replacing a mirror row when B's vibestd moved to another hc session on the same host.
