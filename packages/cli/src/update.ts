@@ -333,7 +333,8 @@ export const update = Command.make(
         return yield* new UpdateError({
           message: `vibest ${target.version}: ${failed}${back === undefined ? "" : `. To go back to vibest ${VERSION} instead: ${back}`}`,
         })
-      if (target.version !== VERSION)
+      const serving = Option.getOrUndefined(yield* readPing(layout.socket))
+      if (target.version !== VERSION && serving?.version === target.version)
         return yield* runInherit([
           ...target.command,
           "update",

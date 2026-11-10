@@ -66,7 +66,7 @@ export class IncompatibleDaemon extends Schema.TaggedError<IncompatibleDaemon>()
     if (this.missing !== undefined)
       return `vibestd is older (${this.daemonVersion || "unknown"}); run ${MISMATCH_ACTION}. ${described(this.daemonVersion, this.daemon)} on ${this.socket} has no ${this.missing}, which ${self} needs. If \`vibest daemon restart\` cannot replace it: ${byHand}.`
     if (this.daemonProtocol !== null && this.daemonProtocol > PROTOCOL)
-      return `${self} speaks protocol ${PROTOCOL}, older than ${described(this.daemonVersion, this.daemon)} on ${this.socket}, which speaks ${got}. Run ${MISMATCH_ACTION} (again, if this was ${MISMATCH_ACTION}): the newest vibest finishes the update and restarts the agents still on the old integration.`
+      return `${self} speaks protocol ${PROTOCOL}, older than ${described(this.daemonVersion, this.daemon)} on ${this.socket}, which speaks ${got}. Run ${MISMATCH_ACTION} (again, if this was ${MISMATCH_ACTION}): the newest vibest finishes the update and restarts the agents still on the old integration. To keep vibest ${this.client.version} instead (\`vibest daemon restart\` cannot, as vibestd refuses this older protocol): ${byHand}.`
     const mismatch = protocolMismatch(
       PROTOCOL,
       this.daemonProtocol ?? 0,
