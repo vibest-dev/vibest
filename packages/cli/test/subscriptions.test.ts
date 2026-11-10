@@ -13,19 +13,7 @@ import { claudeSubscription } from "@vibest/plugin-harnesses/subscriptions/claud
 import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
 import { piSubscription } from "@vibest/plugin-harnesses/subscriptions/pi"
 import * as Server from "@vibest/server/server"
-import {
-  ByteSize,
-  ConfigProvider,
-  Context,
-  Effect,
-  Fiber,
-  FileSystem,
-  Layer,
-  Logger,
-  Option,
-  Path,
-  Stream,
-} from "effect"
+import { ConfigProvider, Context, Effect, Fiber, FileSystem, Layer, Logger, Option, Path, Stream } from "effect"
 import { Sink } from "effect"
 import { Headers, HttpClient, HttpClientResponse } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
@@ -162,28 +150,8 @@ const home = Effect.gen(function* () {
   return yield* fs.makeTempDirectoryScoped({ prefix: "vibest-subs-" })
 }).pipe(Effect.provide(Platform.services), Effect.orDie)
 
-const clockSafeKeychain = FileSystem.makeNoop({
-  stat: () =>
-    Effect.succeed({
-      type: "File",
-      mtime: Option.none(),
-      atime: Option.none(),
-      birthtime: Option.none(),
-      dev: 0,
-      ino: Option.none(),
-      mode: 0,
-      nlink: Option.none(),
-      uid: Option.none(),
-      gid: Option.none(),
-      rdev: Option.none(),
-      size: ByteSize.zero,
-      blksize: Option.none(),
-      blocks: Option.none(),
-    }),
-})
-
 describe("subscription polls and vibest subscriptions over fake CLIs, keychain and HTTP: nothing touches the network", () => {
-  it.effect("Claude reports its login with no usage limits; a missing Cursor token keeps the last limits", () =>
+  it.effect("Claude and Cursor report their logins with no usage limits", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -200,7 +168,6 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         "pi --list-models": ["provider model", "example-proxy m", "custom-proxy c", "anthropic a"].join("\n"),
         "pi auth check --provider example-proxy --json --no-refresh": JSON.stringify({
           status: "ready",
-          provider: "example-proxy",
           authType: "api_key",
         }),
         "pi auth check --provider custom-proxy --json --no-refresh": JSON.stringify({
@@ -256,7 +223,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         ]),
         [
           ["claude", "", "subscription", "max", undefined, undefined],
-          ["cursor", "", "subscription", "Ultra", "token unreadable", 2],
+          ["cursor", "", "subscription", "Ultra", undefined, undefined],
           ["pi", "anthropic", "none", undefined, undefined, undefined],
           ["pi", "custom-proxy", "none", undefined, undefined, undefined],
           ["pi", "example-proxy", "api-key", undefined, undefined, 7],
@@ -275,7 +242,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
     }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("a usage response replaces plugin limits; a hung CLI and a non-200 do not", () =>
+  it.effect("a poll reports no usage limits and replaces a plugin's limits; a hung CLI keeps the last limits", () =>
     Effect.gen(function* () {
       const dir = yield* home
       const fs = yield* FileSystem.FileSystem
@@ -318,11 +285,11 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       )
       assert.deepStrictEqual(listed.find((row) => row.harness === "claude")?.limits, [])
       assert.strictEqual(listed.find((row) => row.harness === "claude")?.error, undefined)
-      assert.strictEqual(listed.find((row) => row.harness === "cursor")?.limits[0]?.percent, 35.891)
-      assert.deepStrictEqual(
-        fresh.requests.map((r) => r.authorization).sort(),
-        [`Bearer ${CURSOR_SECRET}`, `Bearer ${CURSOR_SECRET}`].sort(),
-      )
+      const cursorRow = listed.find((row) => row.harness === "cursor")
+      assert.deepStrictEqual(cursorRow?.limits, [])
+      assert.strictEqual(cursorRow?.error, undefined)
+      assert.strictEqual(cursorRow?.account.plan, "Ultra")
+      assert.deepStrictEqual(fresh.requests, [])
       assert.notInclude(JSON.stringify({ logs: fresh.logs, listed }), CLAUDE_SECRET)
       assert.notInclude(JSON.stringify(listed), CURSOR_SECRET)
 
@@ -395,79 +362,6 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       assert.include(rows[0]?.error, "Library/Keychains")
       assert.deepStrictEqual(fake.spawned, [])
       assert.deepStrictEqual(fake.requests, [])
-    }),
-  )
-
-  it.effect("a failed GetHardLimit is an error and does not mark Cursor limited", () =>
-    Effect.gen(function* () {
-      const dir = yield* home
-      yield* Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        yield* fs.makeDirectory(`${dir}/Library/Keychains`, { recursive: true })
-        yield* fs.writeFileString(`${dir}/Library/Keychains/login.keychain-db`, "fake keychain; no real CLI")
-      }).pipe(Effect.provide(Platform.services))
-      const fake = fakeMachine({
-        installed: ["cursor"],
-        home: dir,
-        commands: {
-          "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
-          "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
-        },
-        passwords: { [CURSOR_ACCESS_TOKEN]: CURSOR_SECRET },
-        http: {
-          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage": {
-            status: 200,
-            body: {
-              billingCycleEnd: "1794886804000",
-              planUsage: { totalPercentUsed: 100, autoPercentUsed: 10, apiPercentUsed: 10, limit: 40000 },
-            },
-          },
-          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetHardLimit": { status: 500, body: {} },
-        },
-      })
-      const row = yield* fake.provide(
-        Effect.gen(function* () {
-          const subs = yield* Subscriptions
-          yield* subs.poll
-          return (yield* subs.list).find((entry) => entry.harness === "cursor")!
-        }),
-      )
-      assert.include(row.error ?? "", "GetHardLimit")
-      assert.strictEqual(
-        row.limits.some((limit) => limit.status === "limited"),
-        false,
-      )
-    }),
-  )
-
-  it.effect("a failed GetHardLimit and a failed usage request keep both errors", () =>
-    Effect.gen(function* () {
-      const usageUrl = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
-      const fake = fakeMachine({
-        installed: ["cursor"],
-        home: yield* home,
-        commands: {
-          "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
-          "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
-        },
-        passwords: { [CURSOR_ACCESS_TOKEN]: CURSOR_SECRET },
-        http: {
-          "https://api2.cursor.sh/aiserver.v1.DashboardService/GetHardLimit": { status: 500, body: {} },
-        },
-        httpHang: [usageUrl],
-        fileSystem: clockSafeKeychain,
-      })
-      const row = yield* fake.provide(
-        Effect.gen(function* () {
-          const subs = yield* Subscriptions
-          const pending = yield* Effect.forkChild(subs.poll)
-          yield* TestClock.adjust("10 seconds")
-          yield* Fiber.join(pending)
-          return (yield* subs.list).find((entry) => entry.harness === "cursor")!
-        }),
-      )
-      assert.include(row.error ?? "", "GetHardLimit answered 500")
-      assert.include(row.error ?? "", "usage endpoint failed")
     }),
   )
 

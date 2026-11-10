@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 
-import { claudeAccount, cursorAccount, cursorUsage, piAccount } from "../src/subscriptions/index.ts"
+import { claudeAccount, cursorAccount, piAccount } from "../src/subscriptions/index.ts"
 import { providersFromList } from "../src/subscriptions/pi.ts"
 
 describe("claude", () => {
@@ -34,53 +34,6 @@ describe("cursor", () => {
     })
     assert.deepStrictEqual(cursorAccount(status), { kind: "subscription" })
     assert.deepStrictEqual(cursorAccount({ status: "unauthenticated", isAuthenticated: false }), { kind: "none" })
-  })
-
-  it("reads the monthly buckets from GetCurrentPeriodUsage", () => {
-    const usage = {
-      billingCycleStart: "1792208404000",
-      billingCycleEnd: "1794886804000",
-      planUsage: {
-        totalSpend: 111262,
-        includedSpend: 40000,
-        limit: 40000,
-        autoPercentUsed: 36.289,
-        apiPercentUsed: 23.94,
-        totalPercentUsed: 35.891,
-      },
-      spendLimitUsage: { limitType: "user" },
-    }
-    assert.deepStrictEqual(cursorUsage(usage, { noUsageBasedAllowed: true }), [
-      { window: "monthly", percent: 35.891, status: "available", resetTime: 1794886804000 },
-      { window: "monthly-auto", percent: 36.289, status: "available", resetTime: 1794886804000 },
-      { window: "monthly-api", percent: 23.94, status: "available", resetTime: 1794886804000 },
-    ])
-    const full = { billingCycleEnd: "0", planUsage: { includedSpend: 40000, limit: 40000 } }
-    assert.deepStrictEqual(cursorUsage(full, { noUsageBasedAllowed: true }), [
-      { window: "monthly", percent: 100, status: "limited", resetTime: null },
-    ])
-    assert.strictEqual(cursorUsage(full, { hardLimit: 50 })[0]?.status, "available")
-    assert.deepStrictEqual(cursorUsage({ spendLimitUsage: { limitType: "team" } }), [])
-    const capped = {
-      billingCycleEnd: "1794886804000",
-      planUsage: { totalPercentUsed: 100, autoPercentUsed: 100, apiPercentUsed: 100, limit: 40000 },
-    }
-    assert.deepStrictEqual(
-      cursorUsage(capped).map((limit) => limit.status),
-      ["available", "available", "available"],
-    )
-    const split = {
-      billingCycleEnd: "1794886804000",
-      planUsage: { totalPercentUsed: 30, autoPercentUsed: 100, apiPercentUsed: 20, limit: 40000 },
-    }
-    assert.deepStrictEqual(
-      cursorUsage(split, { noUsageBasedAllowed: true }).map((limit) => [limit.window, limit.status]),
-      [
-        ["monthly", "available"],
-        ["monthly-auto", "available"],
-        ["monthly-api", "available"],
-      ],
-    )
   })
 })
 
