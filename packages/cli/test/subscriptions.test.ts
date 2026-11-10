@@ -33,7 +33,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { runtimesLayer, harnessesLayer, makeRepository, runVibest, testLayer } from "./fakes.ts"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer, makeRepository, runVibest, testLayer } from "./fakes.ts"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
 const CURSOR_SECRET = "cursor-token-do-not-log"
@@ -133,9 +133,9 @@ const fakeMachine = (options: {
     },
     { ...pi, subscription: (dir: string) => onMachine(piSubscription(dir)) },
   ]
-  const fakes = Layer.mergeAll(
-    Subscriptions.layer.pipe(Layer.provideMerge(harnessesLayer(definitions))),
-    harnessLayer(options.installed),
+  const fakes = Subscriptions.layer.pipe(
+    Layer.provideMerge(harnessesLayer(definitions)),
+    Layer.provideMerge(harnessLayer(options.installed)),
   )
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
@@ -586,7 +586,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         })
         return { seen, list: yield* subs.list }
       }).pipe(
-        Effect.provide(Subscriptions.layer),
+        Effect.provide(subscriptionsLayer),
         Effect.provide(harnessesLayer()),
         Effect.provide(runtimesLayer),
         Effect.provide(Bus.layer),

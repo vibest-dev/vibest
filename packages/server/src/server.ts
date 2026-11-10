@@ -41,20 +41,7 @@ import {
 } from "@vibest/protocol/rpc"
 import { LaunchFailed } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
-import {
-  Clock,
-  Context,
-  Deferred,
-  Duration,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  Queue,
-  Schema,
-  Stream,
-} from "effect"
+import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
@@ -97,16 +84,12 @@ export const handlers = VibestRpcs.toLayer(
     const bus = yield* Bus
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const harnesses = yield* Harnesses
-    const files = yield* Effect.context<FileSystem.FileSystem | Path.Path | Layout>()
 
     const hook = <E>(
       sessionId: string,
       harness: string,
       headers: Headers.Headers,
-      run: (
-        who: Hooks.HookCaller,
-        definition: HarnessDefinition,
-      ) => Effect.Effect<void, E, FileSystem.FileSystem | Path.Path | Layout>,
+      run: (who: Hooks.HookCaller, definition: HarnessDefinition) => Effect.Effect<void, E>,
     ) =>
       Effect.gen(function* () {
         yield* noteOpen(db, headers, sessionId)
@@ -114,7 +97,7 @@ export const handlers = VibestRpcs.toLayer(
         const definition = harnesses.find(harness)
         if (!row || row.harness !== harness || definition === undefined) return
         yield* run(row, definition)
-      }).pipe(Effect.provideContext(files), Effect.orDie)
+      }).pipe(Effect.orDie)
 
     const agent = (method: MethodOf<"agent" | "owner">) =>
       Effect.gen(function* () {

@@ -523,6 +523,8 @@ const harnessOf = (options: TestOptions) =>
           ),
   })
 
+export const subscriptionsLayer = Subscriptions.layer.pipe(Layer.provide(harnessOf({})))
+
 type PluginEntry = NonNullable<TestOptions["plugins"]>[number]
 
 const candidateOf = (entry: PluginEntry): Candidate => {

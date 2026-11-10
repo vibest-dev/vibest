@@ -27,7 +27,6 @@ import {
   Ref,
   SynchronizedRef,
 } from "effect"
-import type { Scope } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { sessionArchive } from "./archive.ts"
@@ -110,8 +109,7 @@ export class Sessions extends Context.Service<
       input: SpawnInput,
     ) => Effect.Effect<
       Spawned,
-      AllocationFailed | LimitReached | HarnessUnavailable | NoHarnessChosen | NoRuntime | AgentRefused | NoSuchSession,
-      Scope.Scope
+      AllocationFailed | LimitReached | HarnessUnavailable | NoHarnessChosen | NoRuntime | AgentRefused | NoSuchSession
     >
     readonly send: (id: string, message: string, request?: string) => Effect.Effect<void, NoSuchSession>
     readonly interrupt: (
@@ -128,7 +126,7 @@ export class Sessions extends Context.Service<
     readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
     readonly list: (filter?: SessionFilter) => Effect.Effect<ReadonlyArray<SessionView>>
     readonly check: (id: string) => Effect.Effect<void>
-    readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void, never, FileSystem.FileSystem>
+    readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void>
     readonly republish: Effect.Effect<number>
     readonly inMemory: Effect.Effect<{
       readonly tracked: number
@@ -872,7 +870,7 @@ export class Sessions extends Context.Service<
             yield* bus.observe({ type: "live.turn_start", sessionId: id, at: now })
             yield* userPrompt(id, text, now)
             yield* db.markWorking(id)
-          }),
+          }).pipe(Effect.provideContext(platform)),
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: Effect.gen(function* () {
           const map = yield* SynchronizedRef.get(tracked)

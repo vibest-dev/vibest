@@ -1,12 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { type Candidate, Plugins } from "@vibest/core/plugins"
-import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused, Plugin } from "@vibest/plugin"
 import { Effect } from "effect"
 
 import glmOnly from "../../../packages/plugin/examples/glm-only.ts"
-import { runtimesLayer, harnessesLayer } from "./fakes.ts"
+import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./fakes.ts"
 
 const candidate = (id: string, plugin: Plugin.Plugin, options: Record<string, unknown> = {}): Candidate => ({
   source: id,
@@ -54,7 +53,7 @@ const run = <A, E, R>(plugins: ReadonlyArray<Candidate>, f: (p: Plugins["Service
   Plugins.make(plugins).pipe(
     Effect.flatMap(f),
     Effect.scoped,
-    Effect.provide(Subscriptions.layer),
+    Effect.provide(subscriptionsLayer),
     Effect.provide(harnessesLayer()),
     Effect.provide(runtimesLayer),
     Effect.provide(Bus.layer),
