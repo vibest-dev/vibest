@@ -264,7 +264,9 @@ export const runCaptured = (
   })
 
 export const importCheck = (command: ReadonlyArray<string>) =>
-  runCaptured([...command, "daemon", "import-check"], Duration.seconds(120))
+  Effect.flatMap(Layout, (layout) =>
+    runCaptured([...command, "daemon", "import-check"], Duration.seconds(120), { VIBEST_HOME: layout.home }),
+  )
 
 export const spawnDaemon = (
   command: ReadonlyArray<string>,
