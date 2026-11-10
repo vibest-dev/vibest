@@ -176,9 +176,11 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const { id } = decodeJson((yield* vibest(repo, cli, ["run", "--runtime", "herdr", "pi", "do it"])).stdout) as {
+      const printed = decodeJson((yield* vibest(repo, cli, ["run", "--runtime", "herdr", "pi", "do it"])).stdout) as {
         id: string
       }
+      assert.deepStrictEqual(Object.keys(printed), ["id"])
+      const { id } = printed
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       const asSession = (sessionId: string, args: ReadonlyArray<string>) =>
         Effect.flatMap(db.sessionIdentity(sessionId), (row) =>

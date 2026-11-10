@@ -13,7 +13,6 @@ import {
   type Integration,
   type SessionBrief,
   type SpawnedBefore,
-  summaryIn,
   toInbox,
   type TurnReport,
 } from "./db-rows.ts"
@@ -255,33 +254,23 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         turnId: number | null
         status: string | null
         endedAt: number | null
-        resultContent: string | null
-        reportSeq: number | null
-        reportAt: number | null
-        reportData: string | null
+        answer: string | null
       }>`SELECT s.id,
           (SELECT i.content FROM inbox i WHERE i.recipient_session_id = s.id AND i.kind = 'task'
             ORDER BY i.id LIMIT 1) AS task,
-          t.id AS turn_id, t.status, t.ended_at,
-          (SELECT i.content FROM inbox i WHERE i.result_turn_id = t.id ORDER BY i.id LIMIT 1) AS result_content,
-          r.seq AS report_seq, r.at AS report_at, r.data AS report_data
+          t.id AS turn_id, t.status, t.ended_at, t.answer
         FROM session s LEFT JOIN turn t ON t.id = s.turn_id
-          LEFT JOIN event r ON r.seq = t.report_seq AND r.type = 'turn.reported'
         WHERE ${sql.in("s.id", ids)}`
       const found = new Map<string, SessionBrief>()
       for (const row of rows) {
-        const answer =
-          row.reportData === null
-            ? undefined
-            : (yield* reportOf({ seq: row.reportSeq!, at: row.reportAt!, data: row.reportData, sessionId: row.id }))
-                .text
         const raw = row.turnId === null ? undefined : (row.status ?? "working")
         const status = raw !== undefined && MESSAGE_STATUSES.has(raw) ? (raw as MessageStatusName) : undefined
-        const summary =
-          (row.resultContent === null ? undefined : summaryIn(row.resultContent)) ?? answer?.split("\n")[0] ?? ""
         found.set(row.id, {
           task: row.task ?? null,
-          latest: status === undefined ? null : { status, summary, endedAt: row.endedAt ?? null },
+          latest:
+            status === undefined
+              ? null
+              : { status, summary: row.answer?.trim().split("\n")[0] ?? "", endedAt: row.endedAt ?? null },
         })
       }
       return found as ReadonlyMap<string, SessionBrief>

@@ -145,10 +145,8 @@ const daemon = (host: Daemon.Host, replacements: LayerNode.Replacements) =>
           "Replace the running vibestd with this vibest, after a yes on a terminal; agents keep running and queued messages are kept, but unfinished daemon operations may refuse the restart. Then offers to restart the agents on another integration in place, with their conversations",
         ),
       ),
-      Command.make(
-        "import-check",
-        { ledger: Flag.Boolean("v2").pipe(Flag.withHidden, Flag.withDefault(false)) },
-        ({ ledger }) => userOnly("daemon import-check").pipe(Effect.andThen(Daemon.checkImport(host, ledger))),
+      Command.make("import-check", {}, () =>
+        userOnly("daemon import-check").pipe(Effect.andThen(Daemon.checkImport(host))),
       ),
     ]),
   )
@@ -241,11 +239,11 @@ const run = Command.make(
           })
         }),
       )
-      yield* json(spawned)
+      yield* json({ id: spawned.id })
     }),
 ).pipe(
   Command.withDescription(
-    "Start a session on a task and print its id at once. The coordinator gets the result as a message when the session's turn ends; anyone else reads it with vibest result. vibest makes each session its own worktree (detached, no branch); in a project of several repositories (a directory of git repositories) that is one worktree of every repository, side by side. The main agent may run it from anywhere in its project, also from inside one repository. Never tell the session to make its own worktree, clone or copy",
+    'Start a session on a task and print {"id":"<session id>"} at once; the routing that plugins decided is in the routing field of vibest ls and vibest result. The coordinator gets the result as a message when the session\'s turn ends; anyone else reads it with vibest result. vibest makes each session its own worktree (detached, no branch); in a project of several repositories (a directory of git repositories) that is one worktree of every repository, side by side. The main agent may run it from anywhere in its project, also from inside one repository. Never tell the session to make its own worktree, clone or copy',
   ),
 )
 

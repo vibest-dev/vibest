@@ -61,8 +61,11 @@ const sessions = (w: World, cwd = w.repository) =>
 
 const entry = async (w: World, id: string) => (await sessions(w)).find((e) => e.id === id)
 
-const runId = async (w: World, args: ReadonlyArray<string>, env: Record<string, string> = {}) =>
-  (JSON.parse(await w.ok(["run", ...args], { env, timeoutMs: 90_000 })) as { id: string }).id
+const runId = async (w: World, args: ReadonlyArray<string>, env: Record<string, string> = {}) => {
+  const printed = JSON.parse(await w.ok(["run", ...args], { env, timeoutMs: 90_000 })) as { id: string }
+  expect(Object.keys(printed).join() === "id", `vibest run prints only the id: ${JSON.stringify(printed)}`)
+  return printed.id
+}
 
 const resultOf = (w: World, id: string, marker: string) =>
   until(

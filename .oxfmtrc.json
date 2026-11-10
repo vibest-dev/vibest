@@ -9,6 +9,7 @@
   "experimentalSortImports": {},
   "ignorePatterns": [
     "**/dist/**",
+    "tools/oxlint/anti-slop/**",
     "**/node_modules/**",
     "packages/effect-herdr-sdk/src/generated/**",
     "packages/effect-herdr-sdk/schema/**",

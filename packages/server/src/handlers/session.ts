@@ -166,7 +166,11 @@ export const make = (
             const id = yield* db.resolveSession(input, (yield* reach("Get")).scope)
             const row = yield* sessions.get(id)
             const session = toInfo(row, (yield* db.sessionBriefs([id])).get(id))
-            return { ...session, result: (yield* db.latestInbox(id, "result")) ?? null }
+            return {
+              ...session,
+              result: (yield* db.latestInbox(id, "result")) ?? null,
+              answer: (yield* db.latestAnswer(id)) ?? null,
+            }
           }),
         ),
 

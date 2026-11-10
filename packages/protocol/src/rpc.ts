@@ -250,7 +250,19 @@ const LINE_ERRORS = [UnknownMachine, MachineUnavailable, MachineIncompatible] as
 export const InboxMessage = Schema.Struct({ ...InboxRow.fields, details: Schema.Record(Schema.String, Schema.Unknown) })
 export type InboxMessage = typeof InboxMessage.Type
 
-export const SessionStatusInfo = Schema.Struct({ ...SessionInfo.fields, result: Schema.NullOr(InboxMessage) })
+export const SessionAnswer = Schema.Struct({
+  turn: Schema.Number,
+  status: Schema.String,
+  text: Schema.NullOr(Schema.String),
+  failure: Schema.NullOr(Schema.String),
+  endedAt: Schema.Number,
+})
+
+export const SessionStatusInfo = Schema.Struct({
+  ...SessionInfo.fields,
+  result: Schema.NullOr(InboxMessage),
+  answer: Schema.optional(Schema.NullOr(SessionAnswer)),
+})
 
 export const HarnessModel = Schema.Struct({
   provider: Schema.NullOr(Schema.String),

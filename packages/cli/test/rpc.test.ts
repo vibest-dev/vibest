@@ -133,6 +133,35 @@ describe("vibest.sock", () => {
   )
 
   test(
+    "a Cursor afterAgentResponse stop ends the turn with its text as turn.answer and as Get's answer",
+    Effect.gen(function* () {
+      const raw = yield* client
+      const db = yield* Db
+      const sql = yield* SqlClient.SqlClient
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Sessions
+      const c = asCli(raw, yield* makeRepository)
+      const { id } = yield* c.Spawn({ callerEnv: {}, harness: "cursor", prompt: "work" })
+      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      yield* TestClock.adjust("2 seconds")
+      yield* raw.TurnEnd(
+        {
+          sessionId: id,
+          harness: "cursor",
+          event: JSON.stringify({ hook_event_name: "afterAgentResponse", text: "cursor said this" }),
+        },
+        { headers: protocolHeaders() },
+      )
+      yield* herdr.endTurn(id)
+      yield* until(sessions.check(id).pipe(Effect.andThen(db.getSession(id))), (w) => w?.turnState === "completed")
+      const [turn] = yield* sql<{ answer: string | null }>`SELECT answer FROM turn WHERE session_id = ${id}`
+      assert.strictEqual(turn?.answer, "cursor said this")
+      const answer = (yield* c.Get({ id })).answer
+      assert.deepInclude(answer, { status: "completed", text: "cursor said this", failure: null })
+    }),
+  )
+
+  test(
     "List cuts a task past 500 characters; Get keeps it, and latest is the newest message",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
