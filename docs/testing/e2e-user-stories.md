@@ -5,7 +5,7 @@ Each story is run for real: herdr, CLI agents, models, under the isolation of [e
 
 **Status** says what can be checked now:
 
-- **now**: today's code (omac semantics: coordinator, session, `run <harness>`, `--peer`, `--archive-on-completion`).
+- **now**: today's code (omac semantics: coordinator, session, `run <harness>`, `--peer`, `--archive-on-idle`).
 - **after refactor**: needs the vibest domain (Run, `--agent`, `--in`, `once`/`kept`, DynamicWorkflow).
   Until then, the story is the acceptance test for that refactor.
 
@@ -122,8 +122,8 @@ _I want some workers to stay for follow-up questions and others to vanish when d
 
 - Kept (default): after the result, `vibest send <id> "also handle empty files"` gets a second answer in the main
   conversation; the pane stays until `vibest archive`.
-- Once: `--archive-on-completion` now (`--once` after refactor) closes the pane and removes the clean worktree right
-  after the completed result reaches the main Agent; a dirty or unpushed worktree is kept, and the reason is shown.
+- Once: `--archive-on-idle` now (`--once` after refactor) closes the pane and removes the clean worktree right
+  once the Agent is idle after a completed turn with nothing it sent or was sent still waiting; a dirty or unpushed worktree is kept, and the reason is shown.
 
 Status: now.
 

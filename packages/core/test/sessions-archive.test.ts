@@ -317,6 +317,12 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* until(latestNotice(w.id), (m) => m.includes("not archived"))
       assert.include(yield* latestNotice(w.id), "its harness already exited")
       assert.isFalse(yield* archived(w.db, w.id))
+      yield* ackResult(w)
+      yield* letForkedArchiveRun
+      yield* w.sessions.check(w.id)
+      yield* letForkedArchiveRun
+      const skips = (yield* sqlNotices(w.id)).filter((m) => m.includes("not archived"))
+      assert.lengthOf(skips, 1)
     }),
   )
 

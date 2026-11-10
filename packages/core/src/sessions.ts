@@ -116,6 +116,7 @@ const newTracked: Effect.Effect<Tracked> = Effect.all({
   blockedNotified: Ref.make(false),
   prompting: Ref.make(false),
   stopping: Ref.make(false),
+  archiveTold: Ref.make(false),
   launchRechecked: Ref.make(false),
 })
 

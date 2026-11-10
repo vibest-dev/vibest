@@ -154,8 +154,12 @@ export const sessionArchive = (deps: {
           yield* Effect.gen(function* () {
             const session = yield* getRow(id)
             if (session.metadata.archived || session.metadata.removed) return
-            const skip = (why: string) => notice(session, `${id} not archived (vibest run --archive-on-idle): ${why}`)
-            if (session.turnState !== "completed") return
+            const tell = (message: string) =>
+              Ref.getAndSet(r.archiveTold, true).pipe(
+                Effect.flatMap((told) => (told ? Effect.void : notice(session, message))),
+              )
+            const skip = (why: string) => tell(`${id} not archived (vibest run --archive-on-idle): ${why}`)
+            if (session.turnState !== "completed") return yield* Ref.set(r.archiveTold, false)
             const h = yield* live(session)
             const terminal = session.address
             const seen = yield* agentState(h, terminal)
@@ -181,7 +185,16 @@ export const sessionArchive = (deps: {
                 ? Effect.failCause(cause)
                 : getRow(id).pipe(
                     Effect.flatMap((session) =>
-                      notice(session, `${id} auto-archive failed: ${errorMessage(cause)}; run vibest archive ${id}`),
+                      Ref.getAndSet(r.archiveTold, true).pipe(
+                        Effect.flatMap((told) =>
+                          told
+                            ? Effect.void
+                            : notice(
+                                session,
+                                `${id} auto-archive failed: ${errorMessage(cause)}; run vibest archive ${id}`,
+                              ),
+                        ),
+                      ),
                     ),
                   ),
             ),

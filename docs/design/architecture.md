@@ -136,7 +136,7 @@ subagents. Everything else in this list is planned; each item says what runs tod
 The coordinator mode is the configuration of the default plugin `@vibest/plugin-coordinator` (planned as its own
 package; today the same behaviour is built into core and the builtin skills): a `main` definition (spawn,
 message children, inspect tools, entry), a `worker` definition, the `delegate` and `pipeline` skills,
-archive-on-completion, and the notice policy. In `agent.start.before` it sets `reportTo` to the entry session
+archive-on-idle, and the notice policy. In `agent.start.before` it sets `reportTo` to the entry session
 when the user runs `vibest run` in a project that has one.
 
 Every other mode is configuration of the same engine (planned):
@@ -282,8 +282,8 @@ or change values.
 **Agent lifetime** (`vibest run --once`, else the definition's `lifetime`, else the configuration default, which
 is `kept`). An Agent is reused by its id; one that may be needed again should be `kept` from the start:
 
-- `once`: the Agent ends `completed` when its turn ended normally (`completed`), that result was delivered to the main
-  Agent, no Message for it is pending, and it is still idle (omac `--archive-on-idle`); a `failed` turn
+- `once`: the Agent ends `completed` when its turn ended normally (`completed`), it is idle, and no Message it sent or was
+  sent is pending (omac `--archive-on-idle`; a result that ended dropped or failed no longer waits); a `failed` turn
   (the harness or turn reported an error) keeps it. Ending closes the pane and releases its Workspace (§3.3).
 - `kept`: when the Agent answers, it stays `idle` with its pane open. `vibest send` continues the conversation,
   and every new answer returns to the main Agent. `vibest stop <agent>` ends it, closes the pane, and releases
