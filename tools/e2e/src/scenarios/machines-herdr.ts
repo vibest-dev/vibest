@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
-import { agentName, binary, expect, readDb, row, Skip, until, writeEvidence, type World } from "../world.ts"
+import { agentName, binary, expect, readDb, redact, row, Skip, until, writeEvidence, type World } from "../world.ts"
 import { fakeSsh, sh, stopVibestd, subModel } from "./machines.ts"
 
 type Listed = { id: string; machine?: string; runtime?: string; address?: { machine: string; id: string } }
@@ -25,7 +25,7 @@ const setup = async (w: World, evidence: string) => {
   const piA = await piDir(w, "pi-a", main.url)
   const piB = await piDir(w, "pi-b", subs.url)
   const loginPath = w.env().PATH!
-  const sessions = { a: `${w.herdrSession}-a`, b: "vibest" }
+  const sessions = { a: `${w.herdrSession}-a`, b: "default" }
   const xdg = (dir: string) => ({
     XDG_RUNTIME_DIR: path.join(dir, "r"),
     XDG_STATE_HOME: path.join(dir, "s"),
@@ -123,7 +123,7 @@ const setup = async (w: World, evidence: string) => {
   const herdrA = herdrOn("a")
   const profiles = async () => {
     const r = await herdrA("machine", "list", "--json")
-    await fs.appendFile(path.join(evidence, "M7-herdr-machine-list.txt"), `${r.code}\n${r.stdout}${r.stderr}\n`)
+    await fs.appendFile(path.join(evidence, "M7-herdr-machine-list.txt"), redact(`${r.code}\n${r.stdout}${r.stderr}\n`))
     expect(r.code === 0, `herdr machine list on A: ${r.stderr}`)
     return JSON.parse(r.stdout) as Array<Profile>
   }
@@ -155,7 +155,7 @@ const setup = async (w: World, evidence: string) => {
   const herdrB = herdrOn("b")
   const serverB = async (name: string) => {
     const r = await herdrB("--session", sessions.b, "status", "server", "--json")
-    await fs.appendFile(path.join(evidence, `M7-b-server-${name}.json`), `${r.code}\n${r.stdout}${r.stderr}\n`)
+    await fs.appendFile(path.join(evidence, `M7-b-server-${name}.json`), redact(`${r.code}\n${r.stdout}${r.stderr}\n`))
     return JSON.parse(r.stdout) as { running: boolean; capabilities?: { detached_server_daemon: boolean } | null }
   }
   const stopB = async () => {
@@ -172,7 +172,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M7",
     title:
-      "herdr terminals on another machine: machine add saves B's herdr session as a herdr machine on A (isolated XDG state, through herdr's own command, which never installs: against a host without herdr it fails and saves nothing); a plain herdr server on B is refused with a restart note and nothing saved; the session B's vibestd starts itself is its own session leader and is saved by the next ls; a run --machine row's address names B's pane under that machine and herdr --machine reaches B's agent; a prompt typed there through herdr starts a typed turn on B whose result arrives once; a profile removed in herdr is added back by the next ls; after B's herdr session stops, B's vibestd starts it again as its own session leader and the saved machine reaches the new agent; machine rm removes it",
+      "herdr terminals on another machine: an agent run --machine starts opens in herdr's default session on B; machine add saves that session as a herdr machine on A (isolated XDG state, through herdr's own command, which never installs: against a host without herdr it fails and saves nothing); a plain herdr server on B is refused with a restart note and nothing saved; a run --machine row's address names B's pane under that machine and herdr --machine reaches B's agent; a prompt typed there through herdr starts a typed turn on B whose result arrives once; a profile removed in herdr is added back by the next ls; after B's session stops, B's vibestd starts it again as its own session leader for the next run --machine and the same saved machine reaches the new agent; machine rm removes it",
     run: async (w, evidence) => {
       let s: Setup | undefined
       try {
@@ -197,21 +197,6 @@ const checks: ReadonlyArray<Check> = [
         )
         expect((await s.profiles()).length === 0, "herdr saved B's plain herdr server")
         await s.stopB()
-
-        const started = JSON.parse(await s.okB(["run", "--runtime", "herdr", "pi", "--", ask("hzero")])) as {
-          id: string
-        }
-        await until(
-          "B's own agent started its herdr session",
-          async () => (await s!.serverB("vibestd")).running,
-          30_000,
-        )
-        expect(
-          (await s.serverB("vibestd")).capabilities?.detached_server_daemon === true,
-          "the herdr session B's vibestd started is not its own session leader",
-        )
-        await until("B's own agent answered", () => s!.subs.asked("hzero"), 120_000)
-        await writeEvidence(path.join(evidence, "M7-b-run.txt"), started.id)
 
         const listed = JSON.parse(await s.okA(["machine", "ls"])) as Array<MachineView>
         await writeEvidence(path.join(evidence, "M7-machine-ls-added.json"), JSON.stringify(listed, null, 2))
@@ -276,6 +261,7 @@ const checks: ReadonlyArray<Check> = [
           "the profile was not added back",
         )
 
+        const kept = (await s.profiles()).map((p) => p.id)
         await s.stopB()
         const again = (JSON.parse(await s.okA(["run", "--machine", "mb", "pi", "--", ask("hnine")])) as { id: string })
           .id
@@ -291,7 +277,11 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(
           (await s.serverB("restarted")).capabilities?.detached_server_daemon === true,
-          "the restarted herdr session on B is not its own session leader",
+          "the herdr session B's vibestd started again is not its own session leader",
+        )
+        expect(
+          JSON.stringify((await s.profiles()).map((p) => p.id)) === JSON.stringify(kept),
+          "A's saved herdr machine changed when B's session restarted",
         )
         const bAgain = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
           again.slice(3).startsWith(r.id.slice(0, 8)),

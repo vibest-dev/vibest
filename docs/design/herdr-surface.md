@@ -170,8 +170,9 @@ session, enabled, selected}` with the target as typed (`b-host`); a non-interact
 exits 0 ("Saved SSH machine … Remote server is ready."), against a host without herdr exits non-zero and saves
 nothing, and against a session whose server is not its own session leader (`herdr server` started from a shell)
 exits 1 with "remote server is not ready for saved machines; machine was not saved" and stops nothing; a session that
-vibestd started with `herdr server --session` spawned detached (`setsid`) reports `detached_server_daemon: true` in
-`herdr status server --json` and is saved, also after it is stopped and vibestd starts it again; `herdr --machine
+vibestd started with `herdr server --session default` spawned detached (`setsid`, for an agent `run --machine`
+opened there) reports `detached_server_daemon: true` in `herdr status server --json`, and the saved machine keeps
+reaching it after it is stopped and vibestd starts it again; `herdr --machine
 <label-or-id> agent get <name>` reaches B's agent. herdr's ssh calls are `ssh -C -F <its config> -S
 <control path> -o ControlMaster=auto -o ControlPersist=600 -T <target> …`, with options after the target too, and
 scripts on stdin through `/bin/sh -s`. vibest mirrors its machines into these saved machines:

@@ -252,14 +252,15 @@ disabled one gets the `enable` note and stays disabled: the user disabled it), w
 herdr link (a note: B's herdr is offline, or online with no session named). A's own herdr is not version-checked: an
 old one fails `herdr machine list`, and that failure is the note. `connect` gives up with a note after 25 s, inside the
 machine hook's 30 s bound. `remove` runs `herdr machine remove <id>` for the profile of the link's session, or with no
-link the one with the event's target and session `vibest` (several: a note); removing a profile leaves B's sessions
+link the one with the event's target and session `default` (several: a note); removing a profile leaves B's sessions
 running. There is no re-check on a herdr server restart: the catalog is a client state file that a restart keeps, and
 `ensure` repairs at the next use.
 
 herdr saves only a B session whose server is its own session leader (`getsid(0) == getpid()`, reported as
-`detached_server_daemon` by `ping`). vibestd on B starts a missing session with `herdr server --session <s>` spawned
-detached, which makes the server a session leader (`setsid`), so B's own sessions are saved, also after they restart
-(E2E M7). A session started some other way, such as `herdr server` typed in a shell, is refused; B's `link` then
+`detached_server_daemon` by `ping`). Agents of other machines open in B's session `default`; when it is not running,
+vibestd on B starts it with `herdr server --session default` spawned detached, which makes the server a session
+leader (`setsid`), so the profile A saved keeps reaching B's agents after that session restarts (E2E M7). The first
+`herdr machine add` may start that session itself through ssh, as herdr does for any saved machine. A session started some other way, such as `herdr server` typed in a shell, is refused; B's `link` then
 carries `detached: no` and the refusal note says to restart that session on B once no agent runs there.
 
 Limits: a profile is found by target string and session, so B saved by the user under another ssh alias gets a second
