@@ -11,5 +11,6 @@ export interface Tracked {
   readonly blockedNotified: Ref.Ref<boolean>
   readonly prompting: Ref.Ref<boolean>
   readonly stopping: Ref.Ref<boolean>
+  readonly archiveTold: Ref.Ref<boolean>
   readonly launchRechecked: Ref.Ref<boolean>
 }

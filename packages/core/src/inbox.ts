@@ -72,7 +72,6 @@ export class Inbox extends Context.Service<
     readonly enqueue: (row: NewInboxRow) => Effect.Effect<InboxRow>
     readonly deliver: (projectId: string) => Effect.Effect<void>
     readonly stream: (projectId: string) => Stream.Stream<string>
-    readonly delivered: Queue.Queue<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>
     readonly poll: (projectId: string) => Effect.Effect<Polled>
     readonly ack: (
       projectId: string,
@@ -91,21 +90,10 @@ export class Inbox extends Context.Service<
       const harnesses = yield* Harnesses
       const restarting = yield* Restarting
       const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.inbox
-      const delivered = yield* Queue.unbounded<{ readonly row: InboxRow; readonly done: Effect.Effect<void> }>()
-      const publishDelivered = (rows: ReadonlyArray<InboxRow>) => {
-        Queue.offerAllUnsafe(
-          delivered,
-          rows.map((row) => ({ row, done: drain.track(`completion inbox ${row.id}`) })),
-        )
-      }
       const markDelivered = (ids: ReadonlyArray<number>) =>
         drain.work(
           `settle inbox ${ids.join(",")}`,
-          Effect.uninterruptible(
-            db
-              .setInboxStatus(ids, "delivered", "sending")
-              .pipe(Effect.flatMap((rows) => Effect.sync(() => publishDelivered(rows)))),
-          ),
+          Effect.uninterruptible(db.setInboxStatus(ids, "delivered", "sending")),
           true,
         )
 
@@ -232,7 +220,7 @@ export class Inbox extends Context.Service<
               origin === undefined
                 ? Effect.succeed(undefined)
                 : claimNext(projectId, "subscribe", origin, (ids) =>
-                    leases.hold(recipient, ids, undefined, (ended) => db.setInboxStatus(ended, "failed", "sending")),
+                    leases.hold(recipient, ids, undefined, (ended) => db.failLeased(ended)),
                   ).pipe(Effect.map((rows) => (rows === undefined ? undefined : text(rows))))
             return Stream.unfold(0, () =>
               Effect.gen(function* () {
@@ -280,7 +268,6 @@ export class Inbox extends Context.Service<
             Effect.gen(function* () {
               const rows = yield* db.settleLeased(projectId, ids, release)
               yield* leases.settle([...ids, ...release])
-              publishDelivered(rows)
               return rows.map((r) => r.id)
             }),
           ),
@@ -291,7 +278,6 @@ export class Inbox extends Context.Service<
         enqueue: db.insertInbox,
         deliver,
         stream,
-        delivered,
         poll,
         ack,
         locks: Effect.sync(() => locks.size()),

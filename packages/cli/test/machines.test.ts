@@ -661,7 +661,7 @@ describe("vibest run --machine and remote sessions", () => {
       const run = (more: object) =>
         Effect.flip(coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {}, ...more })))
       assert.include((yield* run({ env: { A: "1" } })).message, "--env is not sent to another machine")
-      assert.include((yield* run({ archive: true })).message, "--archive-on-completion")
+      assert.include((yield* run({ archive: true })).message, "--archive-on-idle")
       assert.include((yield* run({ agent: "reviewer" })).message, "--agent is not sent to another machine")
       assert.include((yield* run({ runtimeSession: "s1" })).message, "--session is not sent to another machine")
       const reserved = yield* run({ agent: "main" })

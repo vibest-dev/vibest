@@ -499,7 +499,7 @@ const checks: ReadonlyArray<Check> = [
     id: "S31",
     covers: ["S7"],
     title:
-      "vibest run --archive-on-completion, vibestd killed (kill -9) after the completed result was delivered and before the archive: the next vibestd archives it once, with no notice",
+      "vibest run --archive-on-idle, vibestd killed (kill -9) after the completed result was delivered and before the archive: the next vibestd archives it once, with no notice",
     run: async (w) => {
       const p = await piProject(w, "s31")
       try {
@@ -513,7 +513,7 @@ const checks: ReadonlyArray<Check> = [
         let sub = ""
         for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
-          const id = await p.runSub(`a${attempt}`, "--archive-on-completion")
+          const id = await p.runSub(`a${attempt}`, "--archive-on-idle")
           await until(`${id} held`, () => p.model.held() > 0, 60_000)
           p.model.releaseOne()
           for (const deadline = Date.now() + 60_000; state(id)?.status !== "delivered"; await Bun.sleep(1))

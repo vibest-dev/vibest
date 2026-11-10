@@ -179,7 +179,8 @@ export const makeStore = Effect.gen(function* () {
   const inbox = reads.inboxWhere
   const inboxIn = (ids: ReadonlyArray<number>) => inbox(sql.in("m.id", ids))
   const findSend = (sessionId: string, status: InboxStatus) =>
-    inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind != 'task' AND m.status = ${storedStatus(status)}`)
+    inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind != 'task' AND m.status = ${storedStatus(status)}
+        AND NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = m.recipient_session_id)`)
   const entryOf = (projectIdValue: string) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
 
   const openTurn = (sessionId: string) =>
@@ -464,6 +465,31 @@ export const makeStore = Effect.gen(function* () {
       return queued!
     })
 
+  const tellSender = (sender: string, content: string) =>
+    Effect.gen(function* () {
+      if (yield* noticeTo(sender, content)) return
+      yield* insertInboxRow({ sessionId: sender, kind: "notice", message: content, details: {} })
+    })
+
+  const tellSendersOf = (ids: ReadonlyArray<number>, reason: string) =>
+    Effect.gen(function* () {
+      if (ids.length === 0) return
+      const sends = yield* sql<{
+        sender: string
+        recipient: string
+        content: string
+      }>`SELECT sender_session_id AS sender, recipient_session_id AS recipient, content FROM inbox
+        WHERE ${sql.in("id", ids)} AND kind = 'send' AND sender_session_id IS NOT NULL ORDER BY id`
+      const groups = Map.groupBy(sends, (s) => `${s.sender}\n${s.recipient}`)
+      for (const group of groups.values()) {
+        const { sender, recipient } = group[0]!
+        yield* tellSender(
+          sender,
+          `A message to ${recipient} was not delivered: ${reason}\n\n${group.map((s) => s.content).join("\n\n")}`,
+        )
+      }
+    })
+
   const updateSession = (id: string, patch: SessionPatch) =>
     Effect.gen(function* () {
       if (Object.keys(patch).length === 0) return
@@ -554,7 +580,11 @@ export const makeStore = Effect.gen(function* () {
         )
           return
       }
-      yield* moveInbox(sql`status = 'pending' AND recipient_session_id = ${entryOf(projectIdValue)}`, "dropped")
+      const dropped = yield* moveInbox(
+        sql`status = 'pending' AND recipient_session_id = ${entryOf(projectIdValue)}`,
+        "dropped",
+      )
+      yield* tellSendersOf(dropped, "the main agent is not running")
     })
 
   const sessionAt = (runtime: string, address: RuntimeAddress) =>
@@ -628,8 +658,11 @@ export const makeStore = Effect.gen(function* () {
     queueInbox,
     queueSend,
     noticeTo,
+    tellSender,
+    tellSendersOf,
     liveRecipient,
     queueForPeer,
+    origins,
     linkTask,
     endProcess,
     startProcess,

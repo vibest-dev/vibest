@@ -185,22 +185,22 @@ describe.concurrent("after a vibestd stop", () => {
     { hooked: ["pi"] },
   )
 
-  const deliveredNotArchived = Effect.gen(function* () {
+  const idleArchiveSession = Effect.gen(function* () {
     const w = yield* idleSession(yield* makeRepository, { archive: true })
     const result = (yield* w.db.latestInbox(w.id, "result"))!
     assert.strictEqual(result.details.status, "completed")
-    yield* w.db.setInboxStatus([result.id], "delivered")
-    return w
+    return { ...w, result }
   })
 
   test(
-    "a session with archive-on-completion that has a message pending is left to it by the next vibestd",
+    "a session with archive-on-idle that has a message pending gets it from the next vibestd before it is archived",
     Effect.gen(function* () {
-      const { id, db } = yield* deliveredNotArchived
+      const { id, db, result } = yield* idleArchiveSession
       const sent = (yield* db.insertSend(id, "more"))!
+      yield* db.setInboxStatus([result.id], "delivered")
       yield* nextVibestd(Effect.map(db.inboxWithStatus(id, "pending"), (rows) => !rows.some((r) => r.id === sent.id)))
       yield* settled
-      assert.isUndefined((yield* db.getSession(id))!.metadata.archived)
+      assert.strictEqual((yield* db.inboxWithStatus(id, "delivered")).filter((r) => r.id === sent.id).length, 1)
     }),
     { hooked: ["pi"] },
   )

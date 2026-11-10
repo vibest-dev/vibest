@@ -63,6 +63,8 @@ export const make = (
       p: PayloadOf<"Send">,
     ) =>
       Effect.gen(function* () {
+        if (caller._tag === "Session" && (yield* db.sendToOrigin(caller.sessionId, input, p.message)))
+          return { id: input }
         const id = yield* db.resolveSession(input)
         const target = yield* db.sessionIdentity(id)
         if (target?.projectId !== caller.projectId)

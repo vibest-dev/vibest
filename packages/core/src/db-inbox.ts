@@ -4,7 +4,7 @@ import { Effect } from "effect"
 
 import { encodeAddress, storedStatus, type SessionPatch, type NewInboxRow, type TurnEnd } from "./db-rows.ts"
 import type { Store } from "./db-store.ts"
-import type { TurnEnded } from "./results.ts"
+import { envelope, type TurnEnded } from "./results.ts"
 
 export const inboxMethods = (store: Store) => {
   const {
@@ -16,7 +16,10 @@ export const inboxMethods = (store: Store) => {
     findSession,
     liveRecipient,
     queueSend,
-    noticeTo,
+    tellSender,
+    tellSendersOf,
+    queueForPeer,
+    origins,
     currentProcessId,
     findCoordinators,
     inbox,
@@ -45,7 +48,41 @@ export const inboxMethods = (store: Store) => {
         }),
       ).pipe(Effect.orDie),
 
-    insertNoticeTo: (recipient: string, message: string) => tx(noticeTo(recipient, message)).pipe(Effect.orDie),
+    insertNoticeTo: (recipient: string, message: string) => tx(tellSender(recipient, message)).pipe(Effect.orDie),
+
+    sendToOrigin: (sessionId: string, target: string, message: string) =>
+      tx(
+        Effect.gen(function* () {
+          const origin = yield* origins(sessionId)
+          const creator = origin?.reportTo
+          if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return false
+          const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sessionId}`
+          yield* queueForPeer(origin.peer, creator, {
+            sessionId,
+            kind: "notice",
+            content: envelope(
+              "agent-message",
+              [
+                ["agent-id", sessionId],
+                ["title", from?.name ?? ""],
+              ],
+              ["message", message],
+            ),
+          })
+          return true
+        }),
+      ).pipe(Effect.orDie),
+
+    failLeased: (ids: ReadonlyArray<number>) =>
+      tx(
+        Effect.gen(function* () {
+          const failed = yield* moveInbox(sql`${sql.in("id", ids)} AND status = 'delivering'`, "failed")
+          yield* tellSendersOf(
+            failed,
+            "the main agent stopped before it took the message; it may or may not have arrived",
+          )
+        }),
+      ).pipe(Effect.orDie),
 
     queuedBy: (sessionId: string, request: string) =>
       queuedBy(sessionId, request).pipe(
@@ -53,11 +90,26 @@ export const inboxMethods = (store: Store) => {
         Effect.orDie,
       ),
 
+    inboxParties: (inboxId: number) =>
+      sql<{
+        recipient: string | null
+        sender: string | null
+      }>`SELECT recipient_session_id AS recipient, sender_session_id AS sender FROM inbox WHERE id = ${inboxId}`.pipe(
+        Effect.map((rows) =>
+          [rows[0]?.recipient, rows[0]?.sender].filter((id): id is string => typeof id === "string"),
+        ),
+        Effect.orDie,
+      ),
+
     archiveIfNoPending: (id: string) =>
       tx(
         Effect.gen(function* () {
           const s = yield* findSession(id)
-          if (s === undefined || (yield* findSend(id, "pending")).length > 0) return false
+          if (s === undefined) return false
+          const waiting = yield* sql<{ id: number }>`SELECT id FROM inbox
+            WHERE (recipient_session_id = ${id} OR sender_session_id = ${id}) AND status IN ('pending', 'delivering')
+            LIMIT 1`
+          if (waiting.length > 0) return false
           yield* updateSession(id, { metadata: { ...s.metadata, archived: true, removed: true } })
           return true
         }),
@@ -200,16 +252,21 @@ export const inboxMethods = (store: Store) => {
               JOIN project q ON q.entry_session_id = s.id
               JOIN process p ON p.id = s.process_id
               WHERE ${pollHarnesses.length === 0 ? sql`0` : sql`p.harness IN ${sql.in(pollHarnesses)}`})`
-          const toEntry = sql`recipient_session_id IN (SELECT entry_session_id FROM project)`
+          const toEntry = sql`EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = recipient_session_id)`
           const claimed = sql`status = 'delivering' AND ${toEntry}`
           yield* moveInbox(sql`${claimed} AND ${polling}`, "pending")
-          yield* moveInbox(claimed, "failed")
+          const lost = yield* moveInbox(claimed, "failed")
+          yield* tellSendersOf(
+            lost,
+            "vibestd stopped while handing it to the main agent; it may or may not have arrived",
+          )
           const cut = yield* sql<{
             id: number
             recipient: string
             sender: string | null
             content: string
-          }>`SELECT id, recipient_session_id AS recipient, sender_session_id AS sender, content FROM inbox
+          }>`SELECT id, recipient_session_id AS recipient,
+              CASE WHEN kind = 'send' THEN sender_session_id END AS sender, content FROM inbox
             WHERE status = 'delivering' AND NOT ${toEntry} ORDER BY id`
           const bySenderAndSession = new Map<string, Array<(typeof cut)[number]>>()
           for (const row of cut) {
@@ -229,8 +286,8 @@ export const inboxMethods = (store: Store) => {
               recipient,
               rows.map((r) => r.content),
             )
-            if (sender !== null && (yield* noticeTo(sender, message))) continue
-            yield* insertInboxRow({ sessionId: recipient, kind: "notice", message, details: {} })
+            if (sender !== null) yield* tellSender(sender, message)
+            else yield* insertInboxRow({ sessionId: recipient, kind: "notice", message, details: {} })
           }
         }),
       ).pipe(Effect.orDie),

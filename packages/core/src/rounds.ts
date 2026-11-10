@@ -53,7 +53,12 @@ export const sessionRounds = (deps: {
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
   readonly undelivered: (
     session: SessionRow,
-    rows: ReadonlyArray<{ readonly id: number; readonly message: string; readonly sender?: string | null }>,
+    rows: ReadonlyArray<{
+      readonly id: number
+      readonly message: string
+      readonly kind?: string
+      readonly sender?: string | null
+    }>,
     reason: string,
   ) => Effect.Effect<unknown>
   readonly logged: (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<void | A, never, R>
