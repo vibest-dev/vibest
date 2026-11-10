@@ -53,12 +53,6 @@ export const connect = (cli: Cli, event: Event) =>
       })
       return
     }
-    if (there.link?.detached === "no") {
-      event.notes.push({
-        message: `${event.name}'s herdr session ${session} runs as a herdr server that is not its own session leader, which herdr here cannot save as a machine; restart that session on ${event.name} once no agent runs there`,
-      })
-      return
-    }
     const rows = yield* profiles(cli)
     const mine = mirrorOf(rows, event.target, session)
     const label = labelFor(event.name, session)
@@ -83,7 +77,11 @@ export const connect = (cli: Cli, event: Event) =>
       message:
         added.code === 0
           ? `herdr: added ${label} here; the herdr sidebar shows its agents`
-          : `herdr here could not add ${label}: ${said(added)}`,
+          : `herdr here could not add ${label}: ${said(added)}${
+              there.link?.detached === "no"
+                ? `; ${event.name}'s herdr session ${session} was not started as its own session leader, which herdr does not save as a machine: restart that session on ${event.name} once no agent runs there`
+                : ""
+            }`,
     })
   }).pipe(
     Effect.timeoutOption(CONNECT_BUDGET),

@@ -186,13 +186,16 @@ describe("runtime-herdr machines: connect", () => {
     }),
   )
 
-  it.effect("a B session whose server is not its own session leader gets the restart note and no add", () =>
+  it.effect("when B's server is not its own session leader, herdr's refusal gets the restart hint", () =>
     Effect.gen(function* () {
-      const herdr = fake()
+      const herdr = fake({ addFails: "error: remote server is not ready for saved machines\n" })
       const e = event({ session: "vibest", version: "0.9.5", detached: "no" })
       yield* connect(herdr.cli, e)
-      assert.deepStrictEqual(herdr.calls, [])
-      assert.include(e.notes[0]!.message, "racknerd's herdr session vibest runs as a herdr server that is not its own")
+      assert.strictEqual(adds(herdr.calls).length, 1)
+      assert.include(
+        e.notes[0]!.message,
+        "not ready for saved machines; racknerd's herdr session vibest was not started",
+      )
       assert.include(e.notes[0]!.message, "restart that session on racknerd once no agent runs there")
       assert.isUndefined(e.notes[0]!.fix)
     }),

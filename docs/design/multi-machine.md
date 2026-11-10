@@ -244,20 +244,28 @@ the herdr CLI only where the API has none: saved machines are a client-side cata
 list`, inside the pool), and a server that is not running has no socket to ask (`herdr server`, inside the pool).
 
 Its mirror (`runtime-herdr/src/mirror.ts`) keeps that profile: `connect` runs `herdr machine add <target> --label
-<name>/<session> --remote-session <session>` with stdin not a terminal, so herdr never installs, updates or restarts
-anything on B (it refuses instead, and its words become the note with the same command as the fix, which run by hand
-can ask). It adds nothing when the profile exists (a disabled one gets the `enable` note and stays disabled: the user
-disabled it), when another profile holds the label (a `rename` note), when B's or A's herdr is older than 0.9.5 (no
-machine API forwarding; an `update` note), or when B has no herdr link. `remove` runs `herdr machine remove <id>` for
-the profile of the link's session, or with no link the one with the event's target and session `vibest` (several: a
-note); removing a profile leaves B's sessions running. There is no re-check on a herdr server restart: the catalog is
-a client state file that a restart keeps, and `ensure` repairs at the next use. Limits: a profile is found by target
-string and session, so B saved by the user under another ssh alias gets a second profile; herdr has no server id, so
-a target that now reaches another herdr server goes unnoticed; `vibest ls` cannot say whether herdr's link to B is up;
-the catalog is global for the user on A, so the profile shows in every herdr session's TUI there; and herdr adds only a
-B session whose server herdr itself started as a detached daemon (by a TUI or its own `remote-client-bridge`), so a
-session that vibestd on B started with `herdr server --session` is refused ("remote server is not ready for saved
-machines") until it restarts.
+<name>/<session> --remote-session <session>` with stdin not a terminal, so herdr never installs, updates, restarts or
+stops anything on B (it refuses instead, and its words become the note, with no command as the fix: the same add run by
+hand in a terminal can offer to stop B's server and end B's agents). It adds nothing when the profile exists (a
+disabled one gets the `enable` note and stays disabled: the user disabled it), when another profile holds the label (a
+`rename` note), when B's herdr is older than 0.9.5 (no machine API forwarding; an `update` note), or when B has no
+herdr link (a note: B's herdr is offline, or online with no session named). A's own herdr is not version-checked: an
+old one fails `herdr machine list`, and that failure is the note. `connect` gives up with a note after 25 s, inside the
+machine hook's 30 s bound. `remove` runs `herdr machine remove <id>` for the profile of the link's session, or with no
+link the one with the event's target and session `vibest` (several: a note); removing a profile leaves B's sessions
+running. There is no re-check on a herdr server restart: the catalog is a client state file that a restart keeps, and
+`ensure` repairs at the next use.
+
+herdr saves only a B session whose server is its own session leader (`getsid(0) == getpid()`, reported as
+`detached_server_daemon` by `ping`). vibestd on B starts a missing session with `herdr server --session <s>` spawned
+detached, which makes the server a session leader (`setsid`), so B's own sessions are saved, also after they restart
+(E2E M7). A session started some other way, such as `herdr server` typed in a shell, is refused; B's `link` then
+carries `detached: no` and the refusal note says to restart that session on B once no agent runs there.
+
+Limits: a profile is found by target string and session, so B saved by the user under another ssh alias gets a second
+profile; herdr has no server id, so a target that now reaches another herdr server goes unnoticed; `vibest ls` cannot
+say whether herdr's link to B is up; B's `link` is read when A connects, so its version and `detached` are as of then;
+and the catalog is global for the user on A, so the profile shows in every herdr session's TUI there.
 
 Not covered yet: Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote row (its own PR);
 replacing a mirror row when B's vibestd moved to another hc session on the same host.

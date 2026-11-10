@@ -168,9 +168,11 @@ Proved by E2E M7 (isolated `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR
 `ssh` that runs B's commands in B's environment): `herdr machine list --json` is an array of `{id, label, target,
 session, enabled, selected}` with the target as typed (`b-host`); a non-interactive `machine add` against a ready B
 exits 0 ("Saved SSH machine … Remote server is ready."), against a host without herdr exits non-zero and saves
-nothing, and against a session whose server was started with `herdr server` (not a detached daemon) exits 1 with
-"remote server is not ready for saved machines; machine was not saved"; `herdr --machine <label-or-id> agent list`
-prints `{"id":…,"result":{"agents":[…],"type":"agent_list"}}`. herdr's ssh calls are `ssh -C -F <its config> -S
+nothing, and against a session whose server is not its own session leader (`herdr server` started from a shell)
+exits 1 with "remote server is not ready for saved machines; machine was not saved" and stops nothing; a session that
+vibestd started with `herdr server --session` spawned detached (`setsid`) reports `detached_server_daemon: true` in
+`herdr status server --json` and is saved, also after it is stopped and vibestd starts it again; `herdr --machine
+<label-or-id> agent get <name>` reaches B's agent. herdr's ssh calls are `ssh -C -F <its config> -S
 <control path> -o ControlMaster=auto -o ControlPersist=600 -T <target> …`, with options after the target too, and
 scripts on stdin through `/bin/sh -s`. vibest mirrors its machines into these saved machines:
 [multi-machine.md](multi-machine.md#terminals-on-other-machines).

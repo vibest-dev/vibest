@@ -14,6 +14,34 @@ type MachineView = {
 
 export const sh = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 
+export const fakeSsh = (root: string, exports: string, empty: string) =>
+  [
+    "#!/bin/sh",
+    `[ "$1" = -G ] && { [ "$3" = gh-shop ] && echo "hostname Example.com" || echo "hostname $3"; exit 0; }`,
+    `printf '%s\\n' "$*" >> ${sh(path.join(root, "ssh.log"))}`,
+    `echo $$ >> ${sh(path.join(root, "ssh.pids"))}`,
+    `[ -e ${sh(path.join(root, "down"))} ] && { echo "ssh: connect to host b-host port 22: Connection refused" >&2; exit 255; }`,
+    "host=",
+    "while [ $# -gt 0 ]; do",
+    '  case "$1" in',
+    "    -O) exit 0;;",
+    "    -[bcDEeFIiJLlmopQRSWw]) shift 2;;",
+    "    -[bcDEeFIiJLlmopQRSWw]*) shift;;",
+    '    --) shift; [ -z "$host" ] && { host=$1; shift; }; break;;',
+    "    -*) shift;;",
+    '    *) [ -n "$host" ] && break; host=$1; shift;;',
+    "  esac",
+    "done",
+    'command="$*"',
+    'case "$host" in',
+    `  *refused-host*) echo "ssh: connect to host refused-host port 22: Connection refused" >&2; exit 255;;`,
+    `  *bare-host*) exec env -i HOME=${sh(empty)} PATH=/usr/bin:/bin sh -c "$command";;`,
+    `  *self-host*) exec sh -c "$command";;`,
+    "esac",
+    `exec env ${exports} sh -c "$command"`,
+    "",
+  ].join("\n")
+
 export const subModel = () => {
   const held = new Map<string, () => void>()
   const asked: Array<string> = []
@@ -91,26 +119,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean } = {}) =>
     ...(options.bSession ? ["-u HC_SOCKET"] : []),
     ...Object.entries(bEnv).flatMap(([k, v]) => (v === undefined ? [] : [`${k}=${sh(v)}`])),
   ].join(" ")
-  const log = path.join(w.root, "ssh.log")
-  await fs.writeFile(
-    path.join(bin, "ssh"),
-    [
-      "#!/bin/sh",
-      `[ "$1" = -G ] && { [ "$3" = gh-shop ] && echo "hostname Example.com" || echo "hostname $3"; exit 0; }`,
-      `printf '%s\\n' "$*" >> ${sh(log)}`,
-      `echo $$ >> ${sh(path.join(w.root, "ssh.pids"))}`,
-      "for last; do :; done",
-      `[ -e ${sh(path.join(w.root, "down"))} ] && { echo "ssh: connect to host b-host port 22: Connection refused" >&2; exit 255; }`,
-      'case "$*" in',
-      `  *refused-host*) echo "ssh: connect to host refused-host port 22: Connection refused" >&2; exit 255;;`,
-      `  *bare-host*) exec env -i HOME=${sh(empty)} PATH=/usr/bin:/bin sh -c "$last";;`,
-      `  *self-host*) exec sh -c "$last";;`,
-      "esac",
-      `exec env ${exports} sh -c "$last"`,
-      "",
-    ].join("\n"),
-    { mode: 0o755 },
-  )
+  await fs.writeFile(path.join(bin, "ssh"), fakeSsh(w.root, exports, empty), { mode: 0o755 })
   const bRepo = path.join(b, "shop")
   const cloned = await w.run(w.root, ["git", "clone", "-q", w.origin, bRepo])
   expect(cloned.code === 0, `git clone: ${cloned.stderr}`)
@@ -189,6 +198,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean } = {}) =>
     await hcA("server", "stop")
   }
   const aSocket = w.hcSocket
+  const log = path.join(w.root, "ssh.log")
   return { b, bEnv, aEnv, aSocket, onA, okA, onB, okB, bDb, identity, notices, run, subs, main, log, stop, hcA, hcB }
 }
 
