@@ -314,6 +314,7 @@ const statusCore = async (
 const checks: ReadonlyArray<Check> = [
   {
     id: "T1-claude",
+    covers: ["G7"],
     title: "native Claude statuses in an isolated herdr-core",
     run: (w, evidence) =>
       statusCore(
@@ -480,6 +481,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "T1-pi",
+    covers: ["G7"],
     title: "native Pi statuses in an isolated herdr-core",
     run: (w, evidence) =>
       statusCore(w, evidence, "T1-pi", "pi", async ({ env, model, hc, terminal, visible, status, worker }) => {

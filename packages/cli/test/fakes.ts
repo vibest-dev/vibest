@@ -3,20 +3,18 @@ import net from "node:net"
 import { readPing } from "@vibest/client/client"
 import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
-import { Drain } from "@vibest/core/drain"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
+import { Git } from "@vibest/core/git"
 import { Harness, Harnesses, HarnessUnavailable, makeHarnesses } from "@vibest/core/harness"
 import type { HarnessDefinition, HarnessesShape, RuntimeDefinition, RuntimesShape } from "@vibest/core/host"
 import { VibestdIdentity } from "@vibest/core/identity"
-import { Inbox } from "@vibest/core/inbox"
-import { Machines, MachineTransport } from "@vibest/core/machines"
+import { MachineTransport } from "@vibest/core/machines"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout } from "@vibest/core/paths"
-import { Peers } from "@vibest/core/peer"
 import { type Candidate, makeHost, Plugins } from "@vibest/core/plugins"
-import { type Liveness, Processes } from "@vibest/core/processes"
-import { Remote } from "@vibest/core/remote"
+import { type Liveness, ProcessPlatform, Processes } from "@vibest/core/processes"
 import { SshHosts } from "@vibest/core/repository-url"
-import { Restarting } from "@vibest/core/restarting"
 import { turnEndFrom } from "@vibest/core/results"
 import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
@@ -26,6 +24,7 @@ import * as VibestPlugin from "@vibest/plugin"
 import type { DaemonIdentity } from "@vibest/protocol/rpc"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
 import { randomId } from "@vibest/schema/id"
+import * as App from "@vibest/server/app"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import * as Server from "@vibest/server/server"
 import {
@@ -475,6 +474,9 @@ export const harnessesFrom = (
 
 export const noHostEnv = Layer.succeed(HostEnv, { drop: () => {} })
 
+export const processesOn = (platform: ProcessPlatform["Service"]) =>
+  Processes.layer.pipe(Layer.provide(Layer.succeed(ProcessPlatform, platform)))
+
 export const runtimesLayer = Runtimes.layer.pipe(Layer.provide(noHostEnv))
 
 export const harnessesLayer = (definitions: ReadonlyArray<HarnessDefinition> = HARNESSES) =>
@@ -539,97 +541,151 @@ export class PluginHost extends Context.Service<
 >()("test/PluginHost") {}
 
 const over = (options: TestOptions) => {
-  const runtime = Layer.effect(
-    Runtimes,
-    Effect.flatMap(FakeRuntime, (fake) => runtimesFrom([fake.runtime])),
-  )
-  const home = Layer.effect(Layout, tempDirectory("vibest-home-").pipe(Effect.flatMap(Layout.make)))
-  const ownTmpdir = Layer.unwrap(
-    tempDirectory("vibest-tmp-").pipe(
-      Effect.map((dir) =>
-        ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: { TMPDIR: dir } }), { asPrimary: true }),
+  const platform = LayerNode.make({ name: "test/Platform", layer: Platform.services, deps: [] })
+  const home = LayerNode.make({
+    service: Layout,
+    layer: Layer.effect(Layout, tempDirectory("vibest-home-").pipe(Effect.flatMap(Layout.make))),
+    deps: [platform],
+  })
+  const ownTmpdir = LayerNode.make({
+    name: "test/Tmpdir",
+    layer: Layer.unwrap(
+      tempDirectory("vibest-tmp-").pipe(
+        Effect.map((dir) =>
+          ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: { TMPDIR: dir } }), { asPrimary: true }),
+        ),
       ),
     ),
-  )
+    deps: [platform],
+  })
+  const fakeRuntime = LayerNode.make({ service: FakeRuntime, layer: FakeRuntime.layer(options), deps: [platform] })
+  const runtimes = LayerNode.make({
+    service: Runtimes,
+    layer: Layer.effect(
+      Runtimes,
+      Effect.flatMap(FakeRuntime, (fake) => runtimesFrom([fake.runtime])),
+    ),
+    deps: [fakeRuntime, Bus.node, HostEnv.node],
+  })
+  const fakeProcesses = LayerNode.make({ service: FakeProcesses, layer: FakeProcesses.layer, deps: [] })
+  const processes = LayerNode.make({
+    service: Processes,
+    layer: Layer.effect(
+      Processes,
+      Effect.gen(function* () {
+        return (yield* FakeProcesses).processes
+      }),
+    ),
+    deps: [fakeProcesses],
+  })
+  const fakeGit = LayerNode.make({ name: "test/FakeGit", layer: FakeGit.layers, deps: [platform] })
+  const subscriptions = LayerNode.make({
+    service: Subscriptions,
+    layer: Subscriptions.testLayer,
+    deps: [Harness.node, Harnesses.node],
+  })
   const candidates: ReadonlyArray<Candidate> = [
     { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
     ...(options.plugins ?? []).map(candidateOf),
   ]
-  const plugins = Layer.effectContext(
-    Effect.gen(function* () {
-      const host = yield* makeHost(options.pluginTimeout ? { timeout: options.pluginTimeout } : {})
-      if (options.activateLate) {
-        host.ready.closeUnsafe()
-        yield* host.activate(candidates).pipe(Effect.andThen(host.ready.open), Effect.forkScoped)
-      } else yield* host.activate(candidates)
-      return Context.make(Plugins, host.service).pipe(
-        Context.add(PluginHost, {
-          load: (added) => host.activate([...candidates, ...added.map(candidateOf)]),
-        }),
-      )
-    }),
-  ).pipe(Layer.provideMerge(Subscriptions.testLayer))
-  const fakeIntegrationReportsReadyOnStart = Layer.effectDiscard(
-    Effect.gen(function* () {
-      const fake = yield* FakeRuntime
-      const db = yield* Db
-      let pid = 50_000
-      yield* Ref.set(fake.onStarted, (session) =>
-        Clock.currentTimeMillis.pipe(Effect.flatMap((at) => db.patchLive(session, { ready: at, pid: ++pid }))),
-      )
-    }),
-  )
-  return Layer.provideMerge(FakeRuntime.layer(options))(
-    Layer.merge(Peers.layer, Remote.layer).pipe(
-      Layer.provideMerge(
-        Layer.effect(
-          Sessions,
-          Effect.flatMap(Sessions.make({ maxSessions: options.maxSessions }), (s) =>
-            Effect.map(Db, (db) => (options.sessions ?? ((x) => x))(s, db)),
-          ),
-        ),
-      ),
-      Layer.provideMerge(
-        Machines.layer.pipe(Layer.provide(Layer.succeed(MachineTransport, options.transport ?? noTransport))),
-      ),
-      Layer.provideMerge(fakeIntegrationReportsReadyOnStart),
-      Layer.provideMerge(plugins),
-      Layer.provideMerge(Inbox.layer),
-      Layer.provideMerge(
-        (options.db ? Layer.effect(Db, Effect.map(Db, options.db)).pipe(Layer.provide(Db.layer)) : Db.layer).pipe(
-          Layer.provideMerge(Platform.sqlite(":memory:")),
-        ),
-      ),
-      Layer.provideMerge(runtime),
-      Layer.provideMerge(harnessOf(options)),
-      Layer.provideMerge(harnessesLayer(options.harnesses)),
-      Layer.provideMerge(
-        Layer.effect(
-          Processes,
-          Effect.gen(function* () {
-            return (yield* FakeProcesses).processes
+  const plugins = LayerNode.make({
+    name: "test/Plugins",
+    layer: Layer.effectContext(
+      Effect.gen(function* () {
+        const host = yield* makeHost(options.pluginTimeout ? { timeout: options.pluginTimeout } : {})
+        if (options.activateLate) {
+          host.ready.closeUnsafe()
+          yield* host.activate(candidates).pipe(Effect.andThen(host.ready.open), Effect.forkScoped)
+        } else yield* host.activate(candidates)
+        return Context.make(Plugins, host.service).pipe(
+          Context.add(PluginHost, {
+            load: (added) => host.activate([...candidates, ...added.map(candidateOf)]),
           }),
-        ).pipe(Layer.provideMerge(FakeProcesses.layer)),
-      ),
-      Layer.provideMerge(home),
-      Layer.provideMerge(ownTmpdir),
-      Layer.provideMerge(Drain.layer),
-      Layer.provideMerge(Restarting.layer),
-      Layer.provideMerge(FakeGit.layers),
-      Layer.provideMerge(
-        Layer.succeed(SshHosts, { hostName: (alias) => Effect.succeed(options.sshHosts?.[alias] ?? alias) }),
-      ),
-      Layer.provideMerge(Platform.services),
-      Layer.provideMerge(Bus.layer),
-      Layer.provideMerge(
-        Layer.mergeAll(
-          Layer.sync(VibestdIdentity, () => ({ id: randomId(), name: "test-host" })),
-          noHostEnv,
-          Layer.succeed(Server.Identity, options.identity ?? {}),
-          Layer.effect(Server.Shutdown, Deferred.make<void>()),
-        ),
-      ),
+        )
+      }),
     ),
+    deps: [Harnesses.node, Runtimes.node, Subscriptions.node, platform, home],
+  })
+  const fakeIntegrationReportsReadyOnStart = LayerNode.make({
+    name: "test/IntegrationReadyOnStart",
+    layer: Layer.effectDiscard(
+      Effect.gen(function* () {
+        const fake = yield* FakeRuntime
+        const db = yield* Db
+        let pid = 50_000
+        yield* Ref.set(fake.onStarted, (session) =>
+          Clock.currentTimeMillis.pipe(Effect.flatMap((at) => db.patchLive(session, { ready: at, pid: ++pid }))),
+        )
+      }),
+    ),
+    deps: [fakeRuntime, Db.node],
+  })
+  const configured = Sessions.configured({ maxSessions: options.maxSessions })
+  const decorate = options.sessions
+  const sessions =
+    decorate === undefined
+      ? configured
+      : LayerNode.make({
+          service: Sessions,
+          layer: Layer.effect(
+            Sessions,
+            Effect.gen(function* () {
+              return decorate(yield* Sessions, yield* Db)
+            }),
+          ),
+          deps: [configured, Db.node],
+        })
+  const decorateDb = options.db
+  const replacements: LayerNode.Replacements = [
+    PlatformNode.fileSystem.replace(platform),
+    PlatformNode.path.replace(platform),
+    PlatformNode.crypto.replace(platform),
+    PlatformNode.childProcessSpawner.replace(platform),
+    PlatformNode.layout.replace(home),
+    PlatformNode.sqlClient.replace(Platform.sqlite(":memory:")),
+    Runtimes.node.replace(runtimes),
+    Harness.node.replace(harnessOf(options)),
+    Harnesses.node.replace(harnessesLayer(options.harnesses)),
+    Processes.node.replace(processes),
+    Git.node.replace(fakeGit),
+    SshHosts.node.replace(
+      Layer.succeed(SshHosts, { hostName: (alias) => Effect.succeed(options.sshHosts?.[alias] ?? alias) }),
+    ),
+    Subscriptions.node.replace(subscriptions),
+    Plugins.node.replace(plugins),
+    Sessions.node.replace(sessions),
+    ...(decorateDb === undefined
+      ? []
+      : [
+          Db.node.replace(
+            Db.node.mapLayer((layer) => Layer.effect(Db, Effect.map(Db, decorateDb)).pipe(Layer.provide(layer))),
+          ),
+        ]),
+    MachineTransport.node.replace(Layer.succeed(MachineTransport, options.transport ?? noTransport)),
+    HostEnv.node.replace(noHostEnv),
+    VibestdIdentity.node.replace(Layer.sync(VibestdIdentity, () => ({ id: randomId(), name: "test-host" }))),
+    Server.Identity.node.replace(Layer.succeed(Server.Identity, options.identity ?? {})),
+    Server.Shutdown.node.replace(Layer.effect(Server.Shutdown, Deferred.make<void>())),
+  ]
+  return LayerNode.compile(
+    LayerNode.group([
+      ownTmpdir,
+      platform,
+      home,
+      PlatformNode.sqlClient,
+      HostEnv.node,
+      VibestdIdentity.node,
+      Server.Identity.node,
+      Server.Shutdown.node,
+      fakeProcesses,
+      Processes.node,
+      fakeGit,
+      fakeRuntime,
+      App.services,
+      plugins,
+      fakeIntegrationReportsReadyOnStart,
+    ]),
+    { replacements },
   )
 }
 

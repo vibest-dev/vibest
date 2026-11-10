@@ -9,8 +9,7 @@ import { ConfigProvider, Effect, Exit, Ref, Stream } from "effect"
 
 import {
   herdrOnPath,
-  started,
-  stopSession,
+  stopStartedSessions,
   layer,
   waitFor,
   withSession,
@@ -19,9 +18,7 @@ import {
 } from "./runtime-herdr-live.ts"
 
 describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
-  afterAll(async () => {
-    for (const name of started) await stopSession(name)
-  })
+  afterAll(() => stopStartedSessions(), 30_000)
 
   it.live(
     "close moves the last pane of a main checkout's workspace out before closing it: the linked worktree's pane survives; a worktree-less workspace closes directly, at most itself",

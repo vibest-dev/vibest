@@ -113,7 +113,10 @@ The run writes evidence to `tools/e2e/evidence/<run>/`: per check the commands, 
 `<id>.alone.json` for a rerun), files a check saves, and `report.json` with every check's tier, outcome, start time and
 duration, the wall time, the user files' hashes and the invariants. It signals and closes only the PIDs and panes it
 recorded. A skipped check is reported as skipped, never as passed. A failed check keeps its World for inspection; a
-passing one removes it.
+passing one removes it. A herdr server whose socket is inside the world is stopped before that remove, including one
+whose config directory is in the world rather than ~/.config/herdr/sessions. The next run removes a kept world older
+than a day, and that world's herdr sessions with it. The world's own vibestd is stopped first, only when its pid file
+names a vibest daemon whose socket is inside that world. A herdr session that is still running keeps its world.
 
 Checks that run a turn use a fake model (`tools/e2e/src/fake-model.ts`): a local Anthropic Messages server for Claude
 (the shadow `CLAUDE_CONFIG_DIR`, `ANTHROPIC_BASE_URL` and the fake `ANTHROPIC_API_KEY` passed as vibest's own `--env`)
@@ -220,3 +223,48 @@ layers. Concurrent tests of one file share a worker, and Vitest's 5 s default is
 overlap, so the timeout is 30 s. `vitest.setup.ts` drops `PI_PACKAGE_DIR`: a Pi install directory the parent exported
 may be gone when a child starts, and a test that starts `pi` would then read version 0.0.0 and exit before herdr sees
 it; the install beside `pi` is the one to use.
+
+## 5. Capabilities and their proof
+
+The capabilities are specified in [docs/features](../features/), one file per area, in plain language: each has an id
+and says when it counts as working. Those files are for the agent that leads a verification (the `verify-features`
+skill, `.agents/skills/verify-features/SKILL.md`); no script reads them. Each E2E check carries the id of the capability
+it is about in its name (`S10-start` and `S10-pi` are about `S10`) and lists in `covers` the other ids it also proves;
+`bun tools/e2e/src/main.ts --list` prints every check's id, tier and covers as JSON. I6 is the runner's own check after
+every run.
+
+Every check that runs a turn runs it on a fake model server (`tools/e2e/src/fake-model.ts`: Anthropic Messages for
+Claude, OpenAI-compatible for Pi) with shadow harness config, so its prompts and answers are scripted; no gate check runs
+a real model. No script can prove these, so the verifying agent does them by hand:
+
+- D9 needs a newer release published to npm.
+- I5 and I10 need the user's own Cursor login (`pnpm e2e --tier agent I5` runs I5's steps on it). Cursor cannot run on a
+  fake model: `cursor-agent --endpoint` speaks Cursor's own backend protocol, not a model API a fake can answer, and a
+  real model cannot be held between hook events.
+- S39 depends on timing: the Claude plugin polls every second and the Pi stream claims each message as it is queued, so
+  whether two reports share one delivery depends on when they are queued.
+- S13 has no assertion: S25 and S26 only record how long a status change takes to reach vibestd, so the verifying
+  agent checks by hand that the change arrives without waiting for the next poll.
+
+Notes on particular checks:
+
+- U3 has no release path that reaches it while releases share a schema; `rpc.test.ts` (Daemon.Handoff with a failing
+  import check) proves it in `pnpm test`.
+- U2, U4, U6 and U11 start from an old install that is a copy of this build whose version is patched to an older one,
+  until a published previous release shares this build's database schema; then they move to that release, downloaded
+  once into an E2E cache. U11's old install also has its protocol patched one lower, since only an older binary that
+  hands the restart step on can pass it.
+- T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG directories; it never contacts the user's herdr-core or changes
+  harness configuration outside that temporary root. Its fixture runtime plugin (`fixtures/status-runtime.ts`) also
+  proves G7. Coordinator status coverage is the follow-up in
+  [runtime-port.md](../design/runtime-port.md#terminal-status-ownership).
+- On macOS, Cursor model discovery and subscription probes need `Library/Keychains/login.keychain-db` as a regular file
+  under HOME. H4 puts a sentinel Cursor CLI on PATH and fails if it runs; when a World changes HOME it removes the
+  inherited SSH session variables, which H4 checks in a spawned process.
+- The guard rules themselves are `guard.test.ts`; without a vibest agent, or when vibestd cannot check the call,
+  `vibest integration guard` fails with no answer (`cli.test.ts`). Cursor's deny and allow answers through vibestd are
+  `guard.test.ts`; a stop refused with each unsettled daemon operation or delivery named (D7, and D8, whose handoff
+  drains the same way) is `stop.test.ts`; which installer U1 runs is `update.test.ts`; a main agent restarting through
+  `VIBEST_COMMAND` (I11) is `restart.test.ts`.
+- The machines checks run two vibest homes on one host: A's vibestd dials B through a fake `ssh` first on its PATH,
+  which runs the line with B's environment; agents on both sides run in isolated hc cores on fake models.

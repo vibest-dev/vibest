@@ -1,7 +1,7 @@
+import { capture } from "@vibest/plugin"
 import type { SubscriptionLimit } from "@vibest/schema/subscription"
-import { Effect, FileSystem, Option, Redacted, Stream } from "effect"
+import { Effect, FileSystem, Option, Redacted } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 export const record = (u: unknown): Record<string, unknown> | undefined =>
   typeof u === "object" && u !== null && !Array.isArray(u) ? (u as Record<string, unknown>) : undefined
@@ -29,20 +29,14 @@ export const parseJson = (text: string | undefined): unknown => {
 }
 
 export const runCli = (command: string, args: ReadonlyArray<string>, cwd: string) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const handle = yield* spawner.spawn(
-      ChildProcess.make(command, [...args], { stdin: "ignore", cwd, env: { HOME: cwd }, extendEnv: true }),
-    )
-    const [stdout] = yield* Effect.all(
-      [Stream.mkString(Stream.decodeText(handle.stdout)), Stream.runDrain(handle.stderr), handle.exitCode],
-      { concurrency: "unbounded" },
-    )
-    return stdout
+  capture(command, args, {
+    stdin: "ignore",
+    cwd,
+    env: { HOME: cwd },
+    extendEnv: true,
+    timeout: CLI_TIMEOUT,
   }).pipe(
-    Effect.scoped,
-    Effect.timeoutOption(CLI_TIMEOUT),
-    Effect.map((done) => (Option.isSome(done) ? done.value : undefined)),
+    Effect.map((run) => (run === undefined ? undefined : run.stdout)),
     Effect.orElseSucceed(() => undefined),
   )
 

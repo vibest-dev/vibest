@@ -6,6 +6,7 @@ import { cached, cacheKeys, rememberPasses } from "./runner/cache.ts"
 import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
 import { lastMs, pool, saveMs } from "./runner/pool.ts"
 import daemon from "./scenarios/daemon.ts"
+import delivery from "./scenarios/delivery.ts"
 import exits from "./scenarios/exits.ts"
 import harness from "./scenarios/harness.ts"
 import hc from "./scenarios/hc.ts"
@@ -13,13 +14,28 @@ import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
 import machinesHerdr from "./scenarios/machines-herdr.ts"
 import machines from "./scenarios/machines.ts"
+import mainAgent from "./scenarios/main-agent.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
 import restart from "./scenarios/restart.ts"
+import routing from "./scenarios/routing.ts"
+import sessions from "./scenarios/sessions.ts"
 import start from "./scenarios/start.ts"
 import terminalStatus from "./scenarios/terminal-status.ts"
 import update from "./scenarios/update.ts"
-import { binary, checkout, compiled, harnesses, method, privateIn, redact, Skip, World } from "./world.ts"
+import {
+  binary,
+  checkout,
+  compiled,
+  harnesses,
+  method,
+  privateIn,
+  redact,
+  removeExpiredWorlds,
+  removeWorldDir,
+  Skip,
+  World,
+} from "./world.ts"
 
 const areas: Record<string, ReadonlyArray<Check>> = {
   daemon,
@@ -33,10 +49,25 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   exits,
   restart,
   hc,
+  sessions,
+  delivery,
+  routing,
+  "main-agent": mainAgent,
   machines: [...machines, ...machinesHerdr],
   "terminal-status": terminalStatus,
 }
 const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check, id: check.id })))
+
+const userFileInvariantAfterEveryRun = [{ id: "I6", tier: "gate", covers: [] }]
+if (process.argv.includes("--list")) {
+  console.log(
+    JSON.stringify([
+      ...checks.map((c) => ({ id: c.id, tier: c.check.tier ?? "gate", covers: c.check.covers ?? [] })),
+      ...userFileInvariantAfterEveryRun,
+    ]),
+  )
+  process.exit(0)
+}
 
 const args = process.argv.slice(2)
 const strict = args.includes("--strict")
@@ -81,6 +112,8 @@ for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
   }
 }
 
+await removeExpiredWorlds()
+
 type Outcome = "pass" | "cached" | "fail" | "skip" | "flaky-under-load"
 type Result = {
   id: string
@@ -122,7 +155,16 @@ const once = async ({ area, check }: (typeof checks)[number], evidenceName: stri
   const left = await herdrSessionsLeft(world.herdrSession)
   if (left.length > 0) problem(`herdr sessions left after the check: ${left.join(", ")}`)
   await fs.writeFile(path.join(evidence, `${evidenceName}.json`), redact(JSON.stringify(world.log, null, 2)))
-  if (outcome !== "fail") await fs.rm(world.root, { recursive: true, force: true })
+  if (outcome !== "fail") {
+    await removeWorldDir(world.root)
+    if (
+      await fs.stat(world.root).then(
+        () => true,
+        () => false,
+      )
+    )
+      problem(`world left at ${world.root}`)
+  }
   return {
     id: check.id,
     area,

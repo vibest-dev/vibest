@@ -1,5 +1,9 @@
 import { ID, randomId } from "@vibest/schema/id"
-import { Context, Duration, Effect, FileSystem, Option, Schema } from "effect"
+import { Layout } from "@vibest/schema/layout"
+import { Context, Duration, Effect, FileSystem, Layer, Option, Schema } from "effect"
+
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
 
 export const HOST_ID_TIMEOUT = Duration.seconds(2)
 export const MACHINE_ID_FILES = ["/etc/machine-id", "/var/lib/dbus/machine-id"] as const
@@ -12,9 +16,35 @@ export const IdentityFile = Schema.Struct({
 export type IdentityFile = typeof IdentityFile.Type
 const IdentityJson = Schema.fromJsonString(IdentityFile)
 
+export class HostFacts extends Context.Service<
+  HostFacts,
+  {
+    readonly name: string
+    readonly id: Effect.Effect<string | undefined>
+    readonly pid: number
+  }
+>()("vibest/HostFacts") {
+  static readonly node = LayerNode.unbound(HostFacts)
+}
+
 export class VibestdIdentity extends Context.Service<VibestdIdentity, { readonly id: string; readonly name: string }>()(
   "vibest/VibestdIdentity",
-) {}
+) {
+  static readonly layer = Layer.effect(
+    VibestdIdentity,
+    Effect.gen(function* () {
+      const loaded = yield* loadIdentity((yield* Layout).identity, yield* HostFacts)
+      if (loaded.warning !== undefined) yield* Effect.logWarning(loaded.warning)
+      return { id: loaded.identity.id, name: loaded.identity.name }
+    }),
+  )
+
+  static readonly node = LayerNode.make({
+    service: VibestdIdentity,
+    layer: VibestdIdentity.layer,
+    deps: [HostFacts.node, PlatformNode.fileSystem, PlatformNode.layout],
+  })
+}
 
 export class IdentityUnreadable extends Schema.TaggedError<IdentityUnreadable>()("IdentityUnreadable", {
   file: Schema.String,
@@ -22,12 +52,6 @@ export class IdentityUnreadable extends Schema.TaggedError<IdentityUnreadable>()
   override get message() {
     return `${this.file} is not a vibest identity file: move it aside and start again (this machine then gets a new identity)`
   }
-}
-
-export interface HostFacts {
-  readonly name: string
-  readonly id: Effect.Effect<string | undefined>
-  readonly pid: number
 }
 
 export const ioregUuid = (text: string) => /"IOPlatformUUID" = "([^"]+)"/.exec(text)?.[1]
@@ -66,7 +90,7 @@ const writeIdentity = (file: string, pid: number, identity: IdentityFile) =>
     yield* fs.rename(tmp, file)
   })
 
-export const loadIdentity = (file: string, host: HostFacts) =>
+export const loadIdentity = (file: string, host: HostFacts["Service"]) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const hostId = yield* host.id

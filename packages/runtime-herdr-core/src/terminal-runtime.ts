@@ -1,8 +1,8 @@
 import type * as VibestPlugin from "@vibest/plugin"
-import { Runtime as RuntimeApi } from "@vibest/plugin"
+import { reconnectSchedule, Runtime as RuntimeApi } from "@vibest/plugin"
 import { ID, shortId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
-import { Deferred, Duration, Effect, PubSub, type Scope, Stream } from "effect"
+import { Clock, Deferred, Duration, Effect, PubSub, type Scope, Schedule, Stream } from "effect"
 import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
 export type Machine = VibestPlugin.Runtime.Machine
@@ -116,8 +116,7 @@ const failWith = <A, R>(effect: Effect.Effect<A, HcFailure, R>) => effect.pipe(E
 const SHELL_WAIT = Duration.seconds(30)
 export const FOLLOW_ATTEMPTS = 8
 
-export const followBackoff = (failures: number) =>
-  Duration.millis(Math.min(500 * 2 ** Math.max(failures - 1, 0), 30_000))
+const FOLLOW_BACKOFF = reconnectSchedule({ first: Duration.millis(500), max: Duration.seconds(30) })
 
 const EXIT_EVENTS = new Set(["finished", "removed", "lost"])
 
@@ -128,7 +127,7 @@ type Core = {
 }
 
 export const make = (deps: {
-  readonly connect: (socketPath: string) => HcShape
+  readonly connect: (socketPath: string) => Effect.Effect<HcShape>
   readonly socket: string
   readonly scope: Scope.Scope
   readonly typedLaunch?: Duration.Input
@@ -138,7 +137,7 @@ export const make = (deps: {
     const typedLaunchMs = Duration.toMillis(deps.typedLaunch ?? Duration.millis(TYPED_LAUNCH_MS))
     const events = yield* PubSub.unbounded<RuntimeEvent>()
     const cores = new Map<string, Core>()
-    const home = connect(deps.socket)
+    const home = yield* connect(deps.socket)
 
     const wake = (core: Core, address: string) =>
       Effect.forEach(core.waiting.get(address) ?? [], (waiter) => Deferred.succeed(waiter, undefined), {
@@ -204,6 +203,7 @@ export const make = (deps: {
     const follow = (socket: string, core: Core) =>
       Effect.gen(function* () {
         let failures = 0
+        let step = yield* Schedule.toStep(FOLLOW_BACKOFF)
         while (failures < FOLLOW_ATTEMPTS) {
           let subscribed = false
           yield* core.hc.subscribe({ labels: { [LABEL.runtime]: KIND } }).pipe(
@@ -218,9 +218,13 @@ export const make = (deps: {
             ),
             Effect.ignore,
           )
-          if (subscribed) yield* PubSub.publish(events, { type: "reset", machine: "local" })
+          if (subscribed) {
+            yield* PubSub.publish(events, { type: "reset", machine: "local" })
+            step = yield* Schedule.toStep(FOLLOW_BACKOFF)
+          }
           failures = subscribed ? 1 : failures + 1
-          yield* Effect.sleep(followBackoff(failures))
+          const [, delay] = yield* Effect.orDie(step(yield* Clock.currentTimeMillis, undefined))
+          yield* Effect.sleep(delay)
         }
       })
 
@@ -229,7 +233,7 @@ export const make = (deps: {
         const known = cores.get(socket)
         if (known !== undefined) return known
         const core: Core = {
-          hc: socket === deps.socket ? home : connect(socket),
+          hc: socket === deps.socket ? home : yield* connect(socket),
           busy: new Set(),
           waiting: new Map(),
         }

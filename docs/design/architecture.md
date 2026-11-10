@@ -212,7 +212,7 @@ the code sits in:
 | `packages/runtime-herdr`                                 | The Runtime port on herdr: `runtime.ts` and `pool.ts` (omac `herdr-pool.ts`). The only package besides `effect-herdr-sdk` and `packages/cli` that imports herdr.                                                                                                                      |
 | `packages/server`                                        | `server.ts`, `daemon.ts`.                                                                                                                                                                                                                                                             |
 | `packages/client`                                        | `client.ts`. Depends on `schema` and `protocol` only.                                                                                                                                                                                                                                 |
-| `packages/cli` (`@vibest/cli`)                           | `cli.ts`, `main.ts` (provides `RuntimeHerdr.layer` as the daemon `Host.runtime`), `replace.ts`, `platform/`, `bin/vibest.cjs`, the build script, and the omac CLI tests.                                                                                                              |
+| `packages/cli` (`@vibest/cli`)                           | `cli.ts`, `main.ts` (passes the platform's `Host` and `replacements` to the daemon), `replace.ts`, `platform/`, `bin/vibest.cjs`, the build script, and the omac CLI tests.                                                                                                           |
 | `packages/integration/claude`, `packages/integration/pi` | omac's `packages/claude`, `packages/pi-omac` (with its coordinator TUI). omac's standalone `extensions/pi-tui` package is removed. `packages/integration/cursor` is new.                                                                                                              |
 
 Each workspace package exports `./*` → `./src/*.ts`; imports name the module (`@vibest/core/db`).
@@ -447,11 +447,16 @@ How `packages/core/src/remove.ts` and `processes.ts` keep this:
   contract; vibestd still proves it by cwd before the worktree goes), and a close that failed proves nothing. The
   only signal vibest sends is SIGTERM to one harness pid it was told (a restart, a usage-limit move, a main agent
   moving terminal), never its group. A reused pid reads as alive, which can only keep more.
-- The cwd check is one lsof run (`lsof +w -a -u <uid> -d cwd -Fpfn0`, no shell) in its own process group, cut off
+- The cwd check is one lsof run (`lsof +w -a -u <uid> -d cwd -FpRcfn0`, no shell) in its own process group, cut off
   after 10 s, then SIGTERM and SIGKILL 1 s later; a helper stuck in uninterruptible I/O holds the run until it
   returns. The listing is trusted only when lsof exited 0 with nothing on stderr (warnings mean a partial listing),
   every set is well formed, no name is lsof's `(readlink: …)` or `(stat: …)` diagnostic, and vibestd's own process
-  is in it with its cwd (a sanity check, not a proof of completeness). A name lsof printed with escapes, or a
+  is in it with its cwd (a sanity check, not a proof of completeness). One exception keeps Linux hosts with a systemd
+  user manager answerable: that manager (`systemd`, started by pid 1) and its `(sd-pam)` child run as the user but no
+  one can read their cwd, so their `/proc/<pid>/cwd (readlink: …)` names are skipped; any other unreadable cwd, a
+  `(stat: …)` name, or one of them without its command and parent still makes the listing unknown. Ceiling: a program
+  of the same user that names itself `systemd`, is reparented to pid 1 and turns itself non-dumpable could hold the
+  worktree unseen. A name lsof printed with escapes, or a
   `(deleted)` cwd, counts as a holder of anything in the worktree it could stand for.
 - A main agent stopped so it can start in another terminal (`Project.StopCoordinator`): its row leaves its place
   first, so the harness's exit drops nothing, and from there to the answer the stop is uninterruptible, so a Ctrl-C
@@ -574,6 +579,19 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
   one `Layer`.
 - Configuration replaces entries at the composition root (`Database.entry.replace(Database.configured(...))`).
   Product identity and runtime are replacements, which is how one core yields several isolated products.
+- Implemented with `LayerNode` (`packages/core/src/effect/layer-node.ts`, ported with its tests from OpenCode's
+  `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; its release-tracking diagnostics are
+  left out, and `unbound<E>()(service)` declares the errors a host's replacement may fail with). Each service has a
+  `node` listing its `deps`; what the host supplies (sqlite, the sockets, the platform services, the daemon's
+  identity) is an unbound node. `packages/server/src/app.ts` holds the roots: `services`, and `daemon`, which adds
+  the RPC and HTTP servers. The daemon compiles `daemon` and the tests compile `services`, each with its own
+  replacements. The platform (`packages/cli/src/platform/bun.ts`) exports `replacements` for everything it supplies
+  (platform services, sqlite, the sockets, the machine transport, the plugin loader, the builtin plugins, the host
+  environment, the process platform, the host facts); its `Host` keeps only `lock` and `checkDatabase`, which run
+  before the graph is built. The daemon adds its `Layout`, `Identity` and `Shutdown`. The vibestd identity is the first root, so a malformed identity file stops vibestd before the database is opened. Dependencies of one node build concurrently and a group's roots build in order; a replacement drops
+  the replaced node's own dependencies, so a fake is never built beside the real service.
+- Today there is only the daemon scope: plugins and catalogs are the same for every Project. Tags exist in
+  `LayerNode` and are not declared until a project scope is built.
 
 | Scope       | Lives                                                               | Holds                                                                                                                    |
 | ----------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |

@@ -1,6 +1,7 @@
 import { Context, Deferred, Effect, Layer } from "effect"
 
 import { Bus } from "./bus.ts"
+import { LayerNode } from "./effect/layer-node.ts"
 
 const make = Effect.gen(function* () {
   const bus = yield* Bus
@@ -55,4 +56,6 @@ const make = Effect.gen(function* () {
 
 export class Drain extends Context.Service<Drain, Effect.Success<typeof make>>()("vibest/Drain") {
   static readonly layer = Layer.effect(Drain, make)
+
+  static readonly node = LayerNode.make({ service: Drain, layer: Drain.layer, deps: [Bus.node] })
 }

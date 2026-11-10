@@ -1,3 +1,4 @@
+import { reconnectSchedule } from "@vibest/plugin"
 import { RuntimeUnreachable as HerdrUnreachable, type RuntimeLocation as HerdrLocation } from "@vibest/schema/session"
 import {
   Context,
@@ -45,9 +46,7 @@ const SessionList = Schema.fromJsonString(
   }),
 )
 
-const RECONNECT_BACKOFF = Schedule.exponential("1 second").pipe(
-  Schedule.modifyDelay(({ duration }) => Effect.succeed(Duration.min(duration, Duration.seconds(30)))),
-)
+const RECONNECT_BACKOFF = reconnectSchedule({ first: "1 second", max: "30 seconds" })
 
 export class HerdrPool extends Context.Service<
   HerdrPool,
