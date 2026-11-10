@@ -295,9 +295,6 @@ importers:
 
   packages/client:
     dependencies:
-      '@vibest/plugin':
-        specifier: workspace:*
-        version: link:../plugin
       '@vibest/protocol':
         specifier: workspace:*
         version: link:../protocol

@@ -11,7 +11,6 @@
     "typecheck": "tsrs --noEmit --fast"
   },
   "dependencies": {
-    "@vibest/plugin": "workspace:*",
     "@vibest/protocol": "workspace:*",
     "@vibest/schema": "workspace:*",
     "effect": "catalog:"
