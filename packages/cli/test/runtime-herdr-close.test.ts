@@ -28,7 +28,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
           const env = ConfigProvider.layer(ConfigProvider.fromUnknown({ HERDR_SOCKET_PATH: socketPath }))
           const open = (cwd: string) =>
             runtime
-              .open({ id: "local" }, { project: cwd, cwd, argv: ["/bin/sh"], env: {}, label: "close test" })
+              .open({ project: cwd, cwd, argv: ["/bin/sh"], env: {}, label: "close test" })
               .pipe(Effect.provide(env))
           return Effect.gen(function* () {
             const log = yield* Ref.make<ReadonlyArray<TerminalRuntime.RuntimeEvent>>([])

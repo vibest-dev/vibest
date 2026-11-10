@@ -78,7 +78,7 @@ describe("subagent runtime", () => {
       const { repo, projectId, sessions, parent } = yield* main
       const error = yield* Effect.flip(sessions.spawn(input(repo, projectId, { parentSessionId: parent })))
       assert.strictEqual(error._tag, "NoRuntime")
-      assert.match("message" in error ? error.message : "", /herdr is offline on local \(not running\)/)
+      assert.match("message" in error ? error.message : "", /herdr is offline \(not running\)/)
     }),
     [runtimeNode.replace(FakeRuntime.layer({ offline: "not running" }))],
   )

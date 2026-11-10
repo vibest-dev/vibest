@@ -1,4 +1,4 @@
-import { LaunchFailed, NoRuntime } from "@vibest/schema/session"
+import { LaunchFailed, NoRuntime, type RuntimeMachine } from "@vibest/schema/session"
 import { Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 
 import { Bus } from "./bus.ts"
@@ -14,7 +14,7 @@ import { describeSpawn, Plugins } from "./plugins.ts"
 import { Processes } from "./processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "./remove.ts"
 import { Restarting } from "./restarting.ts"
-import { machinesListing, Runtimes, type Machine, type Terminal } from "./runtimes.ts"
+import { machinesListing, Runtimes, type Terminal } from "./runtimes.ts"
 import { runtimeEnv } from "./sessions.ts"
 
 export const PRESENT_TIMEOUT = Duration.seconds(5)
@@ -131,7 +131,7 @@ const make = Effect.gen(function* () {
   const launch = Effect.fn("MainAgent.launch")(function* (input: {
     readonly projectId: string
     readonly root: string
-    readonly at: Machine
+    readonly at: RuntimeMachine
     readonly argv: ReadonlyArray<string>
     readonly focus: boolean
     readonly runtime: string | undefined
@@ -160,7 +160,7 @@ const make = Effect.gen(function* () {
       })
     const chosen = decision.harness
     const rt = yield* runtimes.route(decision.runtime)
-    yield* runtimes.online(rt, { id: decision.machine.id })
+    yield* runtimes.online(rt)
     const run = rt.run
     if (run === undefined)
       return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
@@ -179,7 +179,7 @@ const make = Effect.gen(function* () {
             const existing = yield* db.coordinatorOf(id)
             const sessionId =
               existing === undefined || fresh ? yield* db.allocateSessionId().pipe(Effect.orDie) : existing.id
-            const pane = yield* Launch.openInParentWorkspace(rt, at, {
+            const pane = yield* Launch.openInParentWorkspace(rt, at.target, {
               root,
               label: "vibest",
               home: layout.home,
@@ -246,7 +246,7 @@ const make = Effect.gen(function* () {
       runtime: rt.id,
       terminal: pane.id,
       place: placeOf(rt, pane),
-      attach: rt.attach?.(at) ?? null,
+      attach: rt.attach?.(at.target) ?? null,
       ...(routing === undefined ? {} : { routing }),
     }
   })
@@ -270,7 +270,7 @@ const make = Effect.gen(function* () {
     if (decision.runtime === undefined)
       return yield* new NoRuntime({ message: "no terminal runtime was chosen for the main agent" })
     const rt = yield* runtimes.route(decision.runtime)
-    yield* runtimes.online(rt, { id: decision.machine.id })
+    yield* runtimes.online(rt)
     return { ...decision, harness: decision.harness, runtime: rt.id }
   })
 

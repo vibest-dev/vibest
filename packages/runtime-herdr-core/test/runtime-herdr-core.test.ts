@@ -100,7 +100,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
               env: { VIBEST_SESSION_ID: "a09e0000-0000-4000-8000-000000000000", VIBEST_HARNESS: "pi" },
             })),
           ])
-            opened.push(yield* runtime.open({ id: "local" }, request))
+            opened.push(yield* runtime.open(request))
           const names = ["my-project-main", "my-project-main-2", "pi-a09e", "pi-a09e-2"]
           const listed = hcCli("ls", "--json")
           assert.strictEqual(listed.status, 0, listed.stderr)
@@ -125,9 +125,8 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
       withRuntime((runtime, hc) =>
         Effect.gen(function* () {
           const cwd = fs.realpathSync(root)
-          const local = { id: "local" }
-          const main = yield* runtime.open(local, { project: cwd, cwd, argv: [], env: {}, label: "main" })
-          const child = yield* runtime.open(local, {
+          const main = yield* runtime.open({ project: cwd, cwd, argv: [], env: {}, label: "main" })
+          const child = yield* runtime.open({
             project: cwd,
             cwd,
             argv: ["cat"],
@@ -162,10 +161,13 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
         Effect.gen(function* () {
           const cwd = fs.realpathSync(root)
           const marker = `keep${Math.random().toString(16).slice(2, 8)}`
-          const terminal = yield* runtime.open(
-            { id: "local" },
-            { project: cwd, cwd, argv: [], env: { VBT_KEEP: marker }, label: "keep" },
-          )
+          const terminal = yield* runtime.open({
+            project: cwd,
+            cwd,
+            argv: [],
+            env: { VBT_KEEP: marker },
+            label: "keep",
+          })
           const pid = (yield* hc.call("terminal.get", { terminal: parseTerminalId(terminal.id, socketPath).address }))
             .pid
           yield* runtime.send(terminal, { text: "kill -9 $$" })
@@ -200,7 +202,7 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
             Effect.forkScoped,
           )
           yield* Effect.sleep("300 millis")
-          const main = yield* runtime.open({ id: "local" }, { project: cwd, cwd, argv: [], env: {}, label: "main" })
+          const main = yield* runtime.open({ project: cwd, cwd, argv: [], env: {}, label: "main" })
           yield* runtime.present!(main, { [PRESENT_MAIN_SESSION]: "session-1", [PRESENT_PROJECT_ID]: "project-1" })
           const labels = (yield* hc.call("terminal.get", { terminal: parseTerminalId(main.id, socketPath).address }))
             .labels

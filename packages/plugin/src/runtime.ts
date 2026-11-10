@@ -2,10 +2,10 @@ import { type Effect, Schema, type Stream, type Types } from "effect"
 
 import type { Transform } from "./registration.ts"
 
-export interface Machine {
+export interface Peer {
   readonly id: string
-  readonly target?: string
-  readonly link?: Readonly<Record<string, string>>
+  readonly target: string
+  readonly link: Readonly<Record<string, string>>
 }
 
 export interface Located {
@@ -16,7 +16,6 @@ export interface Located {
 }
 
 export interface Terminal {
-  readonly machine: string
   readonly id: string
 }
 
@@ -25,7 +24,7 @@ export class RuntimeError extends Schema.TaggedError<RuntimeError>()("RuntimeErr
   message: Schema.String,
 }) {}
 
-export type MachineStatus =
+export type RuntimeStatus =
   | { readonly status: "online" }
   | { readonly status: "offline" | "blocked"; readonly reason: string }
 
@@ -52,7 +51,7 @@ export type RuntimeEvent =
   | { readonly type: "exited"; readonly terminal: Terminal }
   | { readonly type: "seen"; readonly terminal: Terminal }
   | { readonly type: "state"; readonly terminal: Terminal; readonly state: AgentState }
-  | { readonly type: "reset"; readonly machine: string }
+  | { readonly type: "reset" }
 
 export type CallerValues = Readonly<Record<string, string | undefined>>
 
@@ -68,22 +67,20 @@ export interface RuntimeDefinition {
   readonly id: string
   readonly name?: string
   readonly caller?: RuntimeCaller
-  readonly status: (machine: Machine) => Effect.Effect<MachineStatus>
+  readonly status: () => Effect.Effect<RuntimeStatus>
 
-  readonly open: (
-    machine: Machine,
-    input: {
-      readonly project: string
-      readonly cwd: string
-      readonly argv: ReadonlyArray<string>
-      readonly env: Readonly<Record<string, string>>
-      readonly label: string
-      readonly near?: Terminal
-      readonly split?: boolean
-      readonly focus?: boolean
-      readonly remote?: boolean
-    },
-  ) => Effect.Effect<Terminal, RuntimeError>
+  readonly open: (input: {
+    readonly project: string
+    readonly cwd: string
+    readonly argv: ReadonlyArray<string>
+    readonly env: Readonly<Record<string, string>>
+    readonly label: string
+    readonly near?: Terminal
+    readonly split?: boolean
+    readonly focus?: boolean
+    readonly target?: string
+    readonly remote?: boolean
+  }) => Effect.Effect<Terminal, RuntimeError>
   readonly send: (
     terminal: Terminal,
     input: { readonly text?: string; readonly keys?: ReadonlyArray<string> },
@@ -102,10 +99,10 @@ export interface RuntimeDefinition {
   readonly run?: (terminal: Terminal, argv: ReadonlyArray<string>) => Effect.Effect<void, RuntimeError>
   readonly focus?: (terminal: Terminal) => Effect.Effect<void, RuntimeError>
   readonly present?: (terminal: Terminal, info: Readonly<Record<string, string>>) => Effect.Effect<void, RuntimeError>
-  readonly doctor?: (machine: Machine, harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>
-  readonly attach?: (machine: Machine) => ReadonlyArray<string>
+  readonly doctor?: (harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>
+  readonly attach?: (target: string | undefined) => ReadonlyArray<string>
   readonly link?: () => Effect.Effect<Readonly<Record<string, string>> | undefined>
-  readonly locate?: (machine: Machine, sessions: ReadonlyMap<string, string>) => Effect.Effect<Located>
+  readonly locate?: (peer: Peer, sessions: ReadonlyMap<string, string>) => Effect.Effect<Located>
 }
 
 export interface RuntimeEditor {

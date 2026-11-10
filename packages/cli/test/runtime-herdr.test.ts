@@ -118,10 +118,13 @@ describe("open an agent", () => {
         return Effect.succeed({})
       })
       const id = "abcd1234-abcd-4abc-8abc-abcd1234abcd"
-      const terminal = yield* runtime.open(
-        { id: "local" },
-        { project: "/p", cwd: "/p", argv: ["pi", "--x"], env: { VIBEST_SESSION_ID: id }, label: "pi" },
-      )
+      const terminal = yield* runtime.open({
+        project: "/p",
+        cwd: "/p",
+        argv: ["pi", "--x"],
+        env: { VIBEST_SESSION_ID: id },
+        label: "pi",
+      })
       const start = calls.find((c) => c.method === "agent.start")
       assert.deepStrictEqual(start?.params, {
         name: TerminalRuntime.agentName(id),
@@ -142,18 +145,15 @@ describe("open an agent", () => {
         if (method === "pane.get") return Effect.succeed({ pane: { tab_id: "w1:t2" } })
         return Effect.succeed({})
       })
-      yield* runtime.open(
-        { id: "local" },
-        {
-          project: "/p",
-          cwd: "/p",
-          argv: ["pi"],
-          env: { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
-          label: "pi",
-          near: TerminalRuntime.terminalOf("work", "w9:p9"),
-          remote: true,
-        },
-      )
+      yield* runtime.open({
+        project: "/p",
+        cwd: "/p",
+        argv: ["pi"],
+        env: { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
+        label: "pi",
+        near: TerminalRuntime.terminalOf("work", "w9:p9"),
+        remote: true,
+      })
       assert.deepStrictEqual(resolved, [{ session: "default" }])
       assert.notInclude(
         calls.map((c) => JSON.stringify(c.params)),
@@ -211,16 +211,16 @@ describe("focus and the caller target", () => {
 describe("terminal ids", () => {
   it("a terminal is `<session>/<pane>[/<name>]`, the parts non-empty, the agent name telling a pane id herdr reused apart; the caller's location is the machine target", () => {
     const terminal = TerminalRuntime.terminalOf("s1", "w1:p1")
-    assert.deepStrictEqual(terminal, { machine: "local", id: "s1/w1:p1" })
+    assert.deepStrictEqual(terminal, { id: "s1/w1:p1" })
     assert.deepStrictEqual(TerminalRuntime.parseTerminal(terminal), { session: "s1", paneId: "w1:p1", name: undefined })
     assert.deepStrictEqual(
       TerminalRuntime.parseTerminal(TerminalRuntime.terminalOf("s1", "w1:p1", "vbt-w1:p1-ab12cd34")),
       { session: "s1", paneId: "w1:p1", name: "vbt-w1:p1-ab12cd34" },
     )
-    assert.isUndefined(TerminalRuntime.parseTerminal({ machine: "local", id: "/p" }))
-    assert.isUndefined(TerminalRuntime.parseTerminal({ machine: "local", id: "s/" }))
-    assert.isUndefined(TerminalRuntime.parseTerminal({ machine: "local", id: "pane" }))
-    assert.isUndefined(TerminalRuntime.parseTerminal({ machine: "local", id: "s/p/" }))
+    assert.isUndefined(TerminalRuntime.parseTerminal({ id: "/p" }))
+    assert.isUndefined(TerminalRuntime.parseTerminal({ id: "s/" }))
+    assert.isUndefined(TerminalRuntime.parseTerminal({ id: "pane" }))
+    assert.isUndefined(TerminalRuntime.parseTerminal({ id: "s/p/" }))
     assert.deepStrictEqual(TerminalRuntime.decodeTarget(TerminalRuntime.encodeTarget({ session: "other" })), {
       session: "other",
     })
@@ -259,7 +259,7 @@ describe("herdr event stream", () => {
       )
       yield* Effect.yieldNow
       yield* Deferred.succeed(open, undefined)
-      assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset", machine: "local" })
+      assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset" })
       assert.include(JSON.stringify(logs), "socket closed")
       assert.strictEqual(yield* Queue.size(seen), 0)
     }).pipe(

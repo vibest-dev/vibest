@@ -44,7 +44,6 @@ describe("runtime boundary", () => {
       "createProject",
       "coordinatorCommand",
       "specHits",
-      "callerMachine",
       "makeSources",
       "preflight",
       "effect-herdr-sdk",
