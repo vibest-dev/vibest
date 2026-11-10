@@ -13,7 +13,7 @@ export const text = (m: Message | undefined) =>
 export const ask = (task: string) =>
   `Do not run any tool. Reply with exactly two lines: the first is "done-${task}", the second is "status: completed".`
 
-const sseHeaders = { "content-type": "text/event-stream" }
+export const sseHeaders = { "content-type": "text/event-stream" }
 
 const chunk = (o: object) =>
   `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", created: 1, model: "m", ...o })}\n\n`
@@ -24,10 +24,10 @@ const done = (finish: string) =>
     usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
   }) + "data: [DONE]\n\n"
 
-const reply = (content: string) =>
+export const reply = (content: string) =>
   chunk({ choices: [{ index: 0, delta: { role: "assistant", content }, finish_reason: null }] }) + done("stop")
 
-const toolCall = (id: string, name: string, input: object) =>
+export const toolCall = (id: string, name: string, input: object) =>
   chunk({
     choices: [
       {
