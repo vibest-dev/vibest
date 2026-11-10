@@ -1,0 +1,20 @@
+name: Set the release version
+description: Sets the version in every package.json of VERSIONED (this checkout only) and records the tree
+inputs:
+  version:
+    description: The release version
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        # shellcheck disable=SC2086 # VERSIONED is a list of globs
+        node -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace(/"version": "[^"]*"/, `"version": "${process.env.VERSION}"`)) }' $VERSIONED
+        for f in $VERSIONED; do
+          v=$(node -p "require('./$f').version")
+          if [ "$v" != "$VERSION" ]; then echo "::error::$f is $v, not $VERSION"; exit 1; fi
+        done
+        git diff HEAD | shasum -a 256 > "$RUNNER_TEMP/versioned-tree"

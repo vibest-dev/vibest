@@ -10,13 +10,16 @@ name: Release
 # CHANGELOG.md section for it is optional. Beta only for now (.agents/rules/release.md says what stable will need).
 # Started by hand, not by a push to main: the owner chooses when. The file name stays release.yml: npm trusted
 # publishing binds each package to it.
-# It never pushes to main. build checks the version is not released yet, runs the release gate on that commit (the
-# whole of pnpm verify but the macOS-only H4, which keeps the linux-x64 curl archive and the npm tarballs it installed),
-# and checks those tarballs. darwin (macos-latest) runs pnpm verify H4 on the same commit (keeping the darwin-arm64 curl
-# archive it checked; its npm install takes build's exact tarballs) and checks the same tarballs. Both record the SHA-256 of every file they keep. publish waits for the
-# owner's approval (environment `release`), checks those hashes, tags that commit v<version> (GITHUB_TOKEN; no ruleset
-# covers tags), publishes exactly those npm tarballs and makes the GitHub Release from exactly those archives (notes
-# from CHANGELOG.md when it has this version, else GitHub's). Nothing is rebuilt after verify checked it.
+# It never pushes to main. plan decides the commit and the version. The release gate is pnpm verify, whose stages run as
+# parallel jobs on that commit with the version set (no job changes the tree): build builds once and packs what ships
+# (the linux-x64 curl archive and every npm tarball), checks the tarballs and records the SHA-256 of every file;
+# typecheck and test run the unit gates; e2e runs every E2E check of the gate on the curl install (the archive) and the
+# npm install (the tarballs) of build's exact bytes, in shards. darwin (macos-latest) runs pnpm verify H4 on the same
+# commit (keeping the darwin-arm64 curl archive it checked; its npm install takes build's exact tarballs) and checks
+# the same tarballs; it records the SHA-256 of the archive. publish waits for every job and for the owner's approval
+# (environment `release`), checks those hashes, tags that commit v<version> (GITHUB_TOKEN; no ruleset covers tags),
+# publishes exactly those npm tarballs and makes the GitHub Release from exactly those archives (notes from
+# CHANGELOG.md when it has this version, else GitHub's). Nothing is rebuilt after verify checked it.
 # Recovery: a release that stopped partway is finished by re-running the failed publish job of the same run (its
 # artifacts are kept 90 days). It keeps what is already done when it is exactly what this run would do, and fails on
 # anything else. A new run builds new bytes: it refuses a version that is already tagged.
@@ -71,13 +74,13 @@ env:
   VERSIONED: packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json
 
 jobs:
-  build:
+  # Decides the commit and the version every other job builds, verifies, tags and publishes. It changes nothing.
+  plan:
     if: >-
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
       (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
-    # GitHub-hosted (free for this public repository): a fresh VM each run.
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 10
     outputs:
       sha: ${{ steps.commit.outputs.sha }}
       version: ${{ steps.version.outputs.version }}
@@ -107,15 +110,186 @@ jobs:
         with:
           ref: ${{ steps.commit.outputs.sha }}
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+
+      - name: Version
+        id: version
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          INPUT: ${{ inputs.version }}
+        run: |
+          repo="https://github.com/$GITHUB_REPOSITORY.git"
+          same() {
+            for f in $VERSIONED; do
+              v=$(node -p "require('./$f').version")
+              if [ "$v" != "$1" ]; then echo "::error::$f is $v, not $1"; exit 1; fi
+            done
+          }
+          same "$(node -p 'require("./packages/cli/package.json").version')"
+          # The newest release: a new one follows it, so Latest and the beta dist-tag never move backwards.
+          last=$(git ls-remote --tags "$repo" 'v*-beta.*' \
+            | sed -n 's#^[0-9a-f]*\trefs/tags/v\([0-9]*\.[0-9]*\.[0-9]*-beta\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)
+          if [ -n "$INPUT" ]; then
+            version=$INPUT
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+              echo "::error::$version is not a beta version (x.y.z-beta.n); stable releases are not supported yet"; exit 1
+            fi
+            if [ -n "$last" ] && [ "$version" != "$last" ] \
+              && [ "$(printf '%s\n%s\n' "$last" "$version" | sort -V | tail -n 1)" != "$version" ]; then
+              echo "::error::$version is older than the newest release, $last"; exit 1
+            fi
+          else
+            if [ -z "$last" ]; then echo "::error::no v<x.y.z>-beta.<n> tag to follow; pass -f version=<version>"; exit 1; fi
+            version="${last%.*}.$((${last##*.} + 1))"
+          fi
+          # Beta only for now: under npm's `beta`, and as GitHub's Latest release (the installer and `vibest update`
+          # follow Latest).
+          dist_tag=beta
+          # Released already: a dry run only warns, so it can run the gates on any branch. A release that stopped
+          # partway is finished by re-running its publish job, not by a new run, which would build new bytes.
+          level=error
+          if [ "$DRY_RUN" = true ]; then level=warning; fi
+          tagged=$(git ls-remote --tags "$repo" "v$version*" \
+            | awk -v r="refs/tags/v$version" '{ s[$2] = $1 } END { print (r "^{}") in s ? s[r "^{}"] : s[r] }')
+          # The field, empty when the package or version does not exist (E404); any other npm error fails.
+          npm_view() {
+            if out=$(npm view "$1" "$2" 2>"$RUNNER_TEMP/npm-view.err" </dev/null); then printf '%s' "$out"; return; fi
+            grep -q 'code E404' "$RUNNER_TEMP/npm-view.err" && return
+            cat "$RUNNER_TEMP/npm-view.err" >&2; return 1
+          }
+          on_npm=$(npm_view "@vibest/cli@$version" version)
+          if [ -n "$tagged" ] || [ -n "$on_npm" ]; then
+            echo "::$level::$version is released already (tag: ${tagged:-none}, npm: ${on_npm:-none}); choose another version, or re-run the failed publish job of the run that started this release"
+            [ "$level" = warning ] || exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
+          echo "Release $version of $(git rev-parse HEAD) under the npm dist-tag $dist_tag" >> "$GITHUB_STEP_SUMMARY"
+
+  # The release gate is pnpm verify (tools/verify/src/verify.ts), whose stages run as parallel jobs on the same tree:
+  # this job builds once (build, archive, pack) and keeps the bytes that ship; typecheck and test are jobs of their own;
+  # e2e runs every check of the gate on each of the curl and npm installs of those exact bytes, split into shards.
+  # --no-cache everywhere, so every check runs. H4 is macOS-only: verify leaves it to the darwin job.
+  build:
+    needs: plan
+    if: >-
+      (github.actor == github.repository_owner || github.actor == 'iamdin') &&
+      (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
         with:
-          node-version: 26.13.0
-          cache: pnpm
-      - uses: oven-sh/setup-bun@v2
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: ./.github/actions/set-version
         with:
-          bun-version: 1.4.4
-      - run: pnpm install --frozen-lockfile --prefer-offline
+          version: ${{ env.VERSION }}
+      # What ships: the linux-x64 archive the curl install takes, and every package tarball, packed once. The e2e jobs
+      # install from these files, not from anything they build.
+      - run: >-
+          pnpm run verify --no-cache --stage build,archive,pack
+          --keep-archive "$RUNNER_TEMP/release/github" --packs "$RUNNER_TEMP/release/npm"
+      # Checks the tarballs (one per published package; the darwin-arm64 binary is cross-compiled here) without
+      # repacking them: what each holds, @vibest/cli with the linux-x64 binary installed from them and run.
+      # Writes their publish order, dependencies first.
+      - name: Check the tarballs
+        run: bun tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
+      # What install.sh downloads (releases/latest/download/...): an archive per platform (linux-x64 here, darwin-arm64
+      # from the darwin job), install.sh itself, and `version`, which `vibest update` reads.
+      - name: GitHub Release files
+        run: |
+          out="$RUNNER_TEMP/release/github"
+          test "$(ls "$out")" = vibest-linux-x64.tar.gz
+          check=$(mktemp -d) && tar -xzf "$out/vibest-linux-x64.tar.gz" -C "$check"
+          test "$("$check/bin/vibest" --version)" = "vibest v$VERSION"
+          cp packages/cli/install.sh "$out/install.sh"
+          printf '%s\n' "$VERSION" > "$out/version"
+      - uses: ./.github/actions/tree-unchanged
+      # The identity of every file publish ships, checked again before it ships them.
+      - name: Hashes
+        run: |
+          cd "$RUNNER_TEMP/release"
+          find npm github -type f | LC_ALL=C sort | xargs shasum -a 256 > SHA256SUMS-linux
+          { echo '```'; cat SHA256SUMS-linux; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      # Kept long enough to finish a release that stopped partway by re-running its publish job.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 90
+
+  typecheck:
+    needs: plan
+    if: >-
+      (github.actor == github.repository_owner || github.actor == 'iamdin') &&
+      (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: ./.github/actions/set-version
+        with:
+          version: ${{ needs.plan.outputs.version }}
+      - run: pnpm run verify --no-cache --stage typecheck
+      - uses: ./.github/actions/tree-unchanged
+
+  test:
+    needs: plan
+    if: >-
+      (github.actor == github.repository_owner || github.actor == 'iamdin') &&
+      (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: ./.github/actions/set-version
+        with:
+          version: ${{ needs.plan.outputs.version }}
+      - run: pnpm run verify --no-cache --stage build,test
+      - uses: ./.github/actions/tree-unchanged
+
+  # Every E2E check of the gate on each install of build's exact bytes (leg curl: the archive through install.sh; leg
+  # npm: the tarballs), split by tools/e2e/src/runner/shard.ts into shards balanced by measured duration. Every shard
+  # of the matrix must stay in step with SHARDS (tools/e2e/test/shard.test.ts proves the shards partition the checks).
+  e2e:
+    needs: [plan, build]
+    if: >-
+      (github.actor == github.repository_owner || github.actor == 'iamdin') &&
+      (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: [curl, npm]
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      SHARDS: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - uses: ./.github/actions/set-version
+        with:
+          version: ${{ needs.plan.outputs.version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
 
       - uses: actions/cache@v4
         with:
@@ -173,159 +347,48 @@ jobs:
           echo 'PATH="$HOME/.local/bin:$PATH"' >> "$profile"
           env -i HOME="$HOME" PATH=/usr/bin:/bin bash -l -i -c \
             'for b in herdr hc pi claude cursor-agent node; do printf "%s: " "$b"; "$b" --version 2>&1 | head -1 || exit 1; command -v "$b" >/dev/null || exit 1; done'
-
-      # The version every job checks and publishes, set in this checkout only.
-      - name: Version
-        id: version
-        env:
-          DRY_RUN: ${{ inputs.dry_run }}
-          INPUT: ${{ inputs.version }}
-        run: |
-          repo="https://github.com/$GITHUB_REPOSITORY.git"
-          same() {
-            for f in $VERSIONED; do
-              v=$(node -p "require('./$f').version")
-              if [ "$v" != "$1" ]; then echo "::error::$f is $v, not $1"; exit 1; fi
-            done
-          }
-          same "$(node -p 'require("./packages/cli/package.json").version')"
-          # The newest release: a new one follows it, so Latest and the beta dist-tag never move backwards.
-          last=$(git ls-remote --tags "$repo" 'v*-beta.*' \
-            | sed -n 's#^[0-9a-f]*\trefs/tags/v\([0-9]*\.[0-9]*\.[0-9]*-beta\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)
-          if [ -n "$INPUT" ]; then
-            version=$INPUT
-            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
-              echo "::error::$version is not a beta version (x.y.z-beta.n); stable releases are not supported yet"; exit 1
-            fi
-            if [ -n "$last" ] && [ "$version" != "$last" ] \
-              && [ "$(printf '%s\n%s\n' "$last" "$version" | sort -V | tail -n 1)" != "$version" ]; then
-              echo "::error::$version is older than the newest release, $last"; exit 1
-            fi
-          else
-            if [ -z "$last" ]; then echo "::error::no v<x.y.z>-beta.<n> tag to follow; pass -f version=<version>"; exit 1; fi
-            version="${last%.*}.$((${last##*.} + 1))"
-          fi
-          # Beta only for now: under npm's `beta`, and as GitHub's Latest release (the installer and `vibest update`
-          # follow Latest).
-          dist_tag=beta
-          # Released already: a dry run only warns, so it can run the gates on any branch. A release that stopped
-          # partway is finished by re-running its publish job, not by a new run, which would build new bytes.
-          level=error
-          if [ "$DRY_RUN" = true ]; then level=warning; fi
-          tagged=$(git ls-remote --tags "$repo" "v$version*" \
-            | awk -v r="refs/tags/v$version" '{ s[$2] = $1 } END { print (r "^{}") in s ? s[r "^{}"] : s[r] }')
-          # The field, empty when the package or version does not exist (E404); any other npm error fails.
-          npm_view() {
-            if out=$(npm view "$1" "$2" 2>"$RUNNER_TEMP/npm-view.err" </dev/null); then printf '%s' "$out"; return; fi
-            grep -q 'code E404' "$RUNNER_TEMP/npm-view.err" && return
-            cat "$RUNNER_TEMP/npm-view.err" >&2; return 1
-          }
-          on_npm=$(npm_view "@vibest/cli@$version" version)
-          if [ -n "$tagged" ] || [ -n "$on_npm" ]; then
-            echo "::$level::$version is released already (tag: ${tagged:-none}, npm: ${on_npm:-none}); choose another version, or re-run the failed publish job of the run that started this release"
-            [ "$level" = warning ] || exit 1
-          fi
-          # shellcheck disable=SC2086 # VERSIONED is a list of globs
-          VERSION=$version node -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace(/"version": "[^"]*"/, `"version": "${process.env.VERSION}"`)) }' $VERSIONED
-          same "$version"
-          git diff HEAD | shasum -a 256 > "$RUNNER_TEMP/versioned-tree"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
-          echo "Release $version of $(git rev-parse HEAD) under the npm dist-tag $dist_tag" >> "$GITHUB_STEP_SUMMARY"
-
-      # The release gate: the whole of pnpm verify on the commit to release (build, typecheck and lint, unit tests, the
-      # curl and npm installs, and every E2E check on each, --strict), --no-cache so every check runs. H4 is macOS-only:
-      # verify leaves it to the darwin job's verify of the same commit, and publish needs both. What it installed is
-      # kept and is what ships: the linux-x64 archive of the curl install (the GitHub Release's), and every package
-      # tarball, packed once (--packs), of which the npm install took @vibest/cli and @vibest/cli-linux-x64.
       - run: >-
-          pnpm run verify --no-cache --elsewhere H4
+          pnpm run verify --no-cache --elsewhere H4 --stage e2e
+          --leg ${{ matrix.leg }} --shard ${{ matrix.shard }}/${{ env.SHARDS }}
           --keep-archive "$RUNNER_TEMP/release/github" --packs "$RUNNER_TEMP/release/npm"
       # On a failure: each check's evidence (redacted) and the vibestd log of every world E2E kept.
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: e2e-evidence-linux
+          name: e2e-evidence-${{ matrix.leg }}-${{ matrix.shard }}
           path: |
             tools/e2e/evidence
             /tmp/vbe-*/vibest/vibestd.log
           if-no-files-found: ignore
           retention-days: 7
-      # Checks the tarballs verify packed (one per published package; the darwin-arm64 binary is cross-compiled here)
-      # without repacking them: what each holds, @vibest/cli with the linux-x64 binary installed from them and run.
-      # Writes their publish order, dependencies first.
-      - name: Check the tarballs
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: bun tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
-      # What install.sh downloads (releases/latest/download/...): an archive per platform (linux-x64 here, from verify;
-      # darwin-arm64 from the darwin job), install.sh itself, and `version`, which `vibest update` reads.
-      - name: GitHub Release files
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          out="$RUNNER_TEMP/release/github"
-          test "$(ls "$out")" = vibest-linux-x64.tar.gz
-          check=$(mktemp -d) && tar -xzf "$out/vibest-linux-x64.tar.gz" -C "$check"
-          test "$("$check/bin/vibest" --version)" = "vibest v$VERSION"
-          cp packages/cli/install.sh "$out/install.sh"
-          printf '%s\n' "$VERSION" > "$out/version"
-      # Everything above is built from this tree: the run's commit with only the version set, as the gates ran on it.
-      - name: Tree unchanged
-        run: |
-          if [ "$(git diff HEAD | shasum -a 256)" != "$(cat "$RUNNER_TEMP/versioned-tree")" ]; then
-            echo "::error::the gates changed tracked files"; git diff --stat HEAD; exit 1
-          fi
-      # The identity of every file publish ships, checked again before it ships them.
-      - name: Hashes
-        run: |
-          cd "$RUNNER_TEMP/release"
-          find npm github -type f | LC_ALL=C sort | xargs shasum -a 256 > SHA256SUMS-linux
-          { echo '```'; cat SHA256SUMS-linux; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      # Kept long enough to finish a release that stopped partway by re-running its publish job.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release
-          path: ${{ runner.temp }}/release
-          if-no-files-found: error
-          retention-days: 90
+      - uses: ./.github/actions/tree-unchanged
 
   # On a GitHub-hosted arm64 Mac: pnpm verify H4 (the macOS-only check build's verify leaves to it) on the same commit:
   # its curl install from the darwin-arm64 archive it builds and keeps, its npm install from build's exact tarballs
   # (@vibest/cli and the cross-compiled @vibest/cli-darwin-arm64, not repacked). Then build's tarballs are checked again
   # here, with the darwin-arm64 binary installed and run.
   darwin:
-    needs: build
+    needs: [plan, build]
     if: >-
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
       (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
     runs-on: macos-latest
     timeout-minutes: 45
     env:
-      VERSION: ${{ needs.build.outputs.version }}
+      VERSION: ${{ needs.plan.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.build.outputs.sha }}
+          ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
-      # The version build set, in this checkout only.
-      - name: Version
-        run: |
-          # shellcheck disable=SC2086 # VERSIONED is a list of globs
-          node -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace(/"version": "[^"]*"/, `"version": "${process.env.VERSION}"`)) }' $VERSIONED
+      - uses: ./.github/actions/set-version
+        with:
+          version: ${{ env.VERSION }}
       - uses: actions/download-artifact@v4
         with:
           name: release
           path: ${{ runner.temp }}/release
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 26.13.0
-          cache: pnpm
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
-      - run: pnpm install --frozen-lockfile --prefer-offline
+      - uses: ./.github/actions/setup
       - run: pnpm run verify --no-cache H4 --keep-archive "$RUNNER_TEMP/darwin/github" --packs "$RUNNER_TEMP/release/npm"
       - name: Check the tarballs
         run: node tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
@@ -345,7 +408,7 @@ jobs:
           retention-days: 90
 
   publish:
-    needs: [build, darwin]
+    needs: [plan, build, darwin, typecheck, test, e2e]
     if: >-
       !inputs.dry_run &&
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
@@ -360,9 +423,9 @@ jobs:
       contents: write # the tag and the GitHub Release
       id-token: write # npm trusted publishing (OIDC) and provenance
     env:
-      VERSION: ${{ needs.build.outputs.version }}
-      DIST_TAG: ${{ needs.build.outputs.dist_tag }}
-      SHA: ${{ needs.build.outputs.sha }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      DIST_TAG: ${{ needs.plan.outputs.dist_tag }}
+      SHA: ${{ needs.plan.outputs.sha }}
     # Every step is safe to re-run after a release that stopped partway: it keeps what is already done when it is exactly
     # what this run would do, and fails on anything else.
     steps:
@@ -385,8 +448,8 @@ jobs:
       # The commit the gates ran on, with GITHUB_TOKEN: nothing is pushed to a branch. CHANGELOG.md comes from it too.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.build.outputs.sha }}
-      - name: Tag v${{ needs.build.outputs.version }}
+          ref: ${{ needs.plan.outputs.sha }}
+      - name: Tag v${{ needs.plan.outputs.version }}
         run: |
           tagged=$(git ls-remote --tags origin "v$VERSION*" \
             | awk -v r="refs/tags/v$VERSION" '{ s[$2] = $1 } END { print (r "^{}") in s ? s[r "^{}"] : s[r] }')

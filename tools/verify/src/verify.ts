@@ -21,10 +21,24 @@ const valueOf = (flag: string, what: string) => {
 const elsewhere = valueOf("--elsewhere", "check ids, comma-separated")
 const keepArchive = valueOf("--keep-archive", "a directory")
 const keptPacks = valueOf("--packs", "a directory")
+const STAGES = ["build", "typecheck", "test", "archive", "pack", "e2e"]
+const stages = valueOf("--stage", `stage names from ${STAGES.join(", ")}, comma-separated`)?.split(",") ?? STAGES
+const legs = valueOf("--leg", "curl, npm or curl,npm")?.split(",") ?? ["curl", "npm"]
+const shard = valueOf("--shard", "k/n")
+const unknown = [...stages.filter((s) => !STAGES.includes(s)), ...legs.filter((l) => l !== "curl" && l !== "npm")]
+if (unknown.length) {
+  console.error(`verify: unknown ${unknown.join(", ")}; stages: ${STAGES.join(", ")}; legs: curl, npm`)
+  process.exit(1)
+}
+const has = (stage: string) => stages.includes(stage)
+const curlLeg = has("e2e") && legs.includes("curl")
+const npmLeg = has("e2e") && legs.includes("npm")
 const only = process.argv.filter((a, i) => i >= 2 && a !== "--no-cache" && !flagSlots.has(i))
 const NPM_SMOKE = ["I1", "I2", "U1", "U9", "U10", "H1"]
 
 type Options = { cwd?: string; env?: NodeJS.ProcessEnv }
+
+const gateEnv = noCache ? { ...process.env, TURBO_FORCE: "true" } : process.env
 
 const run = (title: string, argv: ReadonlyArray<string>, options: Options = {}) =>
   new Promise<boolean>((resolve) => {
@@ -86,35 +100,49 @@ const toPack = keptPacks
       .map((p) => p.path)
   : [path.join(root, "packages/cli"), platform]
 
-if (!(await run("build", ["pnpm", "run", "build"]))) process.exit(1)
-await all([
-  ...(only.length === 0 ? [run("typecheck", ["pnpm", "run", "typecheck"]), run("test", ["pnpm", "run", "test"])] : []),
-  steps([
-    [
-      "build the release archive",
-      ["bun", "scripts/build-archive.ts", target, release],
-      { cwd: path.join(root, "packages/cli") },
-    ],
-    [
-      "install.sh",
-      ["sh", "-c", 'curl -fsSL "$0" | sh', `file://${path.join(root, "packages/cli/install.sh")}`],
-      {
-        env: {
-          ...process.env,
-          VIBEST_DOWNLOAD_URL: `file://${release}`,
-          VIBEST_INSTALL: path.join(curl, "share"),
-          VIBEST_BIN: path.join(curl, "bin"),
+type Step = readonly [string, ReadonlyArray<string>, Options?]
+const archiveSteps: Array<Step> = has("archive")
+  ? [
+      [
+        "build the release archive",
+        ["bun", "scripts/build-archive.ts", target, release],
+        { cwd: path.join(root, "packages/cli") },
+      ],
+    ]
+  : []
+const curlSteps: Array<Step> = curlLeg
+  ? [
+      [
+        "install.sh",
+        ["sh", "-c", 'curl -fsSL "$0" | sh', `file://${path.join(root, "packages/cli/install.sh")}`],
+        {
+          env: {
+            ...process.env,
+            VIBEST_DOWNLOAD_URL: `file://${release}`,
+            VIBEST_INSTALL: path.join(curl, "share"),
+            VIBEST_BIN: path.join(curl, "bin"),
+          },
         },
-      },
-    ],
-  ]),
+      ],
+    ]
+  : []
+if (curlLeg && !has("archive") && !fs.existsSync(path.join(release, `vibest-${target}.tar.gz`))) {
+  console.error(`verify: ${release} holds no vibest-${target}.tar.gz to install`)
+  process.exit(1)
+}
+if (has("build") && !(await run("build", ["pnpm", "run", "build"], { env: gateEnv }))) process.exit(1)
+await all([
+  ...(only.length === 0 && has("typecheck") ? [run("typecheck", ["pnpm", "run", "typecheck"], { env: gateEnv })] : []),
+  ...(only.length === 0 && has("test") ? [run("test", ["pnpm", "run", "test"], { env: gateEnv })] : []),
+  steps([...archiveSteps, ...curlSteps]),
   (async () => {
-    if (!alreadyPacked)
+    if (has("pack") && !alreadyPacked)
       for (const pkg of toPack)
         if (
           !(await run(`pack ${path.relative(root, pkg)}`, ["pnpm", "pack", "--pack-destination", packs], { cwd: pkg }))
         )
           return false
+    if (!npmLeg) return true
     const installed = new Set(["@vibest/cli", `@vibest/cli-${target}`])
     const tarballs = tarballsIn(packs).filter((t) => installed.has(packedName(t)))
     if (tarballs.length !== installed.size) {
@@ -151,7 +179,7 @@ const common = childProcess.execFileSync("git", ["rev-parse", "--path-format=abs
   encoding: "utf8",
 })
 const layoutFile = path.join(common.trim(), "vibest-e2e", "npm-layout")
-const layout = layoutOf(npm)
+const layout = npmLeg ? layoutOf(npm) : ""
 const layoutKnown = fs.existsSync(layoutFile) && fs.readFileSync(layoutFile, "utf8") === layout
 const npmChecks = only.length > 0 || noCache ? only : layoutKnown ? NPM_SMOKE : []
 
@@ -164,14 +192,18 @@ const e2e = (method: string, install: string, ids: ReadonlyArray<string>) =>
       "--strict",
       ...(noCache ? ["--no-cache"] : []),
       ...(elsewhere ? ["--elsewhere", elsewhere] : []),
+      ...(shard ? ["--shard", shard] : []),
       ...ids,
     ],
     {
       env: { ...process.env, VIBEST_E2E_METHOD: method, VIBEST_E2E_INSTALL: install },
     },
   )
-const [curlOk, npmOk] = await Promise.all([e2e("curl", curl, only), e2e("npm", npm, npmChecks)])
-if (npmOk && npmChecks.length === 0) {
+const [curlOk, npmOk] = await Promise.all([
+  curlLeg ? e2e("curl", curl, only) : true,
+  npmLeg ? e2e("npm", npm, npmChecks) : true,
+])
+if (npmLeg && npmOk && npmChecks.length === 0 && !shard) {
   fs.mkdirSync(path.dirname(layoutFile), { recursive: true })
   fs.writeFileSync(layoutFile, layout)
 }

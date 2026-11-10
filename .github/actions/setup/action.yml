@@ -1,0 +1,15 @@
+name: Set up the toolchain
+description: pnpm, Node, Bun and the workspace dependencies, in a checkout
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 26.13.0
+        cache: pnpm
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.4.4
+    - run: pnpm install --frozen-lockfile --prefer-offline
+      shell: bash

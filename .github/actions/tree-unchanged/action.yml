@@ -1,0 +1,10 @@
+name: Tree unchanged
+description: Fails when the gates changed a tracked file of the versioned checkout
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        if [ "$(git diff HEAD | shasum -a 256)" != "$(cat "$RUNNER_TEMP/versioned-tree")" ]; then
+          echo "::error::the gates changed tracked files"; git diff --stat HEAD; exit 1
+        fi

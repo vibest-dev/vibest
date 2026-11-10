@@ -5,6 +5,7 @@ import type { Check } from "./check.ts"
 import { cached, cacheKeys, rememberPasses } from "./runner/cache.ts"
 import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
 import { lastMs, pool, saveMs } from "./runner/pool.ts"
+import { parseShard, shardOf } from "./runner/shard.ts"
 import daemon from "./scenarios/daemon.ts"
 import delivery from "./scenarios/delivery.ts"
 import exits from "./scenarios/exits.ts"
@@ -91,6 +92,12 @@ if (!["gate", "slow", "agent", "all"].includes(tier)) {
   process.exit(1)
 }
 const elsewhere = (valueOf("--elsewhere") ?? "").split(",").filter(Boolean)
+const shardText = valueOf("--shard")
+const shard = shardText === undefined ? undefined : parseShard(shardText)
+if (shardText !== undefined && shard === undefined) {
+  console.error("--shard takes k/n, for example 2/6")
+  process.exit(1)
+}
 const only = args.filter((a) => a !== "--strict" && a !== "--no-cache")
 const groupOf = (a: string, c: (typeof checks)[number]) => c.id.startsWith(`${a}-`)
 const named = (a: string, c: (typeof checks)[number]) => c.id === a || (c.check.covers ?? []).includes(a)
@@ -102,13 +109,15 @@ if (unknown.length) {
   process.exit(1)
 }
 const inTier = (c: (typeof checks)[number]) => tier === "all" || (c.check.tier ?? "gate") === tier
-const selected = checks.filter(
+const everySelected = checks.filter(
   (c) =>
     !elsewhere.includes(c.id) &&
     (only.length
       ? only.some((a) => named(a, c)) || ((only.includes(c.area) || only.some((a) => groupOf(a, c))) && inTier(c))
       : inTier(c)),
 )
+const selected = shard === undefined ? everySelected : shardOf(everySelected, shard)
+if (shard !== undefined) console.log(`SHARD ${shard.index}/${shard.count}: ${selected.map((c) => c.id).join(" ")}`)
 for (const id of elsewhere) console.log(`ELSEWHERE ${id}: not run here; another machine's run proves it`)
 
 for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
