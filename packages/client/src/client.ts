@@ -1,3 +1,4 @@
+import { capture } from "@vibest/plugin"
 import {
   CALLER_HEADER,
   MISMATCH_ACTION,
@@ -22,7 +23,6 @@ import {
   Predicate,
   Schedule,
   Schema,
-  Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, RpcSerialization } from "effect/rpc"
@@ -218,38 +218,21 @@ export const runCaptured = (
   timeout: Duration.Duration,
   env: Record<string, string> = {},
 ) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    return yield* spawner
-      .spawn(
-        ChildProcess.make(argv[0]!, argv.slice(1), {
-          stdin: "ignore",
-          env: { ...env, VIBEST_SESSION_ID: undefined, VIBEST_AGENT: undefined },
-          extendEnv: true,
-        }),
-      )
-      .pipe(
-        Effect.flatMap((handle) =>
-          Effect.all(
-            [
-              Stream.mkString(Stream.decodeText(handle.stderr)),
-              Stream.mkString(Stream.decodeText(handle.stdout)),
-              handle.exitCode,
-            ],
-            { concurrency: "unbounded" },
-          ),
-        ),
-        Effect.map(([stderr, stdout, code]) =>
-          code === 0 ? undefined : stderr.trim() || stdout.trim() || `exit ${code}`,
-        ),
-        Effect.scoped,
-        Effect.timeoutOrElse({
-          duration: timeout,
-          orElse: () => Effect.succeed(`no answer in ${Duration.format(timeout)}`),
-        }),
-        Effect.catch((e) => Effect.succeed(e.message)),
-      )
-  })
+  capture(argv[0]!, argv.slice(1), {
+    stdin: "ignore",
+    env: { ...env, VIBEST_SESSION_ID: undefined, VIBEST_AGENT: undefined },
+    extendEnv: true,
+    timeout,
+  }).pipe(
+    Effect.map((run) =>
+      run === undefined
+        ? `no answer in ${Duration.format(timeout)}`
+        : run.exitCode === 0
+          ? undefined
+          : run.stderr.trim() || run.stdout.trim() || `exit ${run.exitCode}`,
+    ),
+    Effect.catch((e) => Effect.succeed(e.message)),
+  )
 
 export const importCheck = (command: ReadonlyArray<string>) =>
   runCaptured([...command, "daemon", "import-check"], Duration.seconds(15))
