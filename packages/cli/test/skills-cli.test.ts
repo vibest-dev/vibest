@@ -23,12 +23,12 @@ const vibestCommands = (line: string) => {
 }
 
 describe("builtin skills: the invocations they print", () => {
-  it("no skill uses the removed --access, and a session later vibest send-ed was not started with --archive-on-completion", () => {
+  it("no skill uses the removed --access, and a session later vibest send-ed was not started with --archive-on-idle", () => {
     const errors: Array<string> = []
     for (const file of skillFiles()) {
       const rel = path.relative(root, file)
       const text = fs.readFileSync(file, "utf8")
-      if (/--archive(?!-on-completion)/.test(text)) errors.push(`${rel}: bare --archive`)
+      if (/--archive(?!-on-idle)/.test(text)) errors.push(`${rel}: bare --archive`)
       let archive: boolean | undefined
       const started = new Map<string, boolean>()
       const lines = text.split("\n")
@@ -37,12 +37,12 @@ describe("builtin skills: the invocations they print", () => {
         const at = `${rel}:${index + 1}`
         if (line.includes("--access")) errors.push(`${at}: --access`)
         for (const command of vibestCommands(line)) {
-          if (command.startsWith("vibest run ")) archive = /(?:^|\s)--archive-on-completion(?:\s|$)/.test(command)
+          if (command.startsWith("vibest run ")) archive = /(?:^|\s)--archive-on-idle(?:\s|$)/.test(command)
           const send = /^vibest send\s+(<[^>]+>)/.exec(command)
           if (!send?.[1]) continue
           const flag = started.get(send[1])
           if (flag === undefined) errors.push(`${at}: vibest send ${send[1]} was not started in this skill`)
-          else if (flag) errors.push(`${at}: vibest send ${send[1]} was started with --archive-on-completion`)
+          else if (flag) errors.push(`${at}: vibest send ${send[1]} was started with --archive-on-idle`)
         }
         const named = /Its id is (<[^>]+>)\./.exec(line)
         if (named?.[1]) {

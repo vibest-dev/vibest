@@ -47,7 +47,7 @@ const addressed = (machine: string, id: string) => `${machine}/${id}`
 const REFUSED = [
   ["env", "--env"],
   ["peer", "--peer"],
-  ["archive", "--archive-on-completion"],
+  ["archive", "--archive-on-idle"],
   ["agent", "--agent"],
   ["runtimeSession", "--session"],
 ] as const

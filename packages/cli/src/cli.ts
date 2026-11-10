@@ -184,9 +184,9 @@ const run = Command.make(
       ),
       Flag.optional,
     ),
-    archive: Flag.Boolean("archive-on-completion").pipe(
+    archive: Flag.Boolean("archive-on-idle").pipe(
       Flag.withDescription(
-        "Archive the session once it reports completed and that result reached you (as vibest archive: branch kept, worktree removed only when git loses nothing)",
+        "Archive the session the first time it is idle after a completed turn with nothing it sent or was sent still waiting (as vibest archive: branch kept, worktree removed only when git loses nothing)",
       ),
       Flag.withDefault(false),
     ),

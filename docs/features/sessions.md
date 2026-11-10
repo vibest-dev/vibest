@@ -25,9 +25,10 @@ session's own processes — the harness it recorded, that process's children, an
 keep it. Uncommitted changes, or commits on no branch, keep the worktree and say why; commits on a branch let the
 worktree go and the branch keeps them. `--keep-worktree` keeps a clean worktree and says it was asked to.
 
-## S7. Archive on completion
+## S7. Archive on idle
 
-`vibest run --archive-on-completion` archives the session once, after its completed result reached the main agent.
+`vibest run --archive-on-idle` archives the session the first time it is idle after a completed turn with nothing it sent
+or was sent still waiting, and sends no notice for a clean archive. `--archive-on-completion` is a usage error.
 
 ## S9. A limit on sessions
 

@@ -49,11 +49,26 @@ export const inboxMethods = (store: Store) => {
         Effect.orDie,
       ),
 
+    inboxParties: (inboxId: number) =>
+      sql<{
+        recipient: string | null
+        sender: string | null
+      }>`SELECT recipient_session_id AS recipient, sender_session_id AS sender FROM inbox WHERE id = ${inboxId}`.pipe(
+        Effect.map((rows) =>
+          [rows[0]?.recipient, rows[0]?.sender].filter((id): id is string => typeof id === "string"),
+        ),
+        Effect.orDie,
+      ),
+
     archiveIfNoPending: (id: string) =>
       tx(
         Effect.gen(function* () {
           const s = yield* findSession(id)
-          if (s === undefined || (yield* findSend(id, "pending")).length > 0) return false
+          if (s === undefined) return false
+          const waiting = yield* sql<{ id: number }>`SELECT id FROM inbox
+            WHERE (recipient_session_id = ${id} OR sender_session_id = ${id}) AND status IN ('pending', 'delivering')
+            LIMIT 1`
+          if (waiting.length > 0) return false
           yield* updateSession(id, { metadata: { ...s.metadata, archived: true, removed: true } })
           return true
         }),

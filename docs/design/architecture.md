@@ -136,7 +136,7 @@ subagents. Everything else in this list is planned; each item says what runs tod
 The coordinator mode is the configuration of the default plugin `@vibest/plugin-coordinator` (planned as its own
 package; today the same behaviour is built into core and the builtin skills): a `main` definition (spawn,
 message children, inspect tools, entry), a `worker` definition, the `delegate` and `pipeline` skills,
-archive-on-completion, and the notice policy. In `agent.start.before` it sets `reportTo` to the entry session
+archive-on-idle, and the notice policy. In `agent.start.before` it sets `reportTo` to the entry session
 when the user runs `vibest run` in a project that has one.
 
 Every other mode is configuration of the same engine (planned):
@@ -282,8 +282,8 @@ or change values.
 **Agent lifetime** (`vibest run --once`, else the definition's `lifetime`, else the configuration default, which
 is `kept`). An Agent is reused by its id; one that may be needed again should be `kept` from the start:
 
-- `once`: the Agent ends `completed` when its turn ended normally (`completed`), that result was delivered to the main
-  Agent, no Message for it is pending, and it is still idle (omac `--archive-on-completion`); a `failed` turn
+- `once`: the Agent ends `completed` when its turn ended normally (`completed`), it is idle, and no Message it sent or was
+  sent is pending (omac `--archive-on-idle`; a result that ended dropped or failed no longer waits); a `failed` turn
   (the harness or turn reported an error) keeps it. Ending closes the pane and releases its Workspace (§3.3).
 - `kept`: when the Agent answers, it stays `idle` with its pane open. `vibest send` continues the conversation,
   and every new answer returns to the main Agent. `vibest stop <agent>` ends it, closes the pane, and releases
@@ -403,7 +403,7 @@ How `packages/core/src/sessions.ts` keeps these:
   environment, so a caller's `--env` cannot point that shell at another vibestd.
 - On start: subscribe before writing anything, settle the deliveries a stop cut off, label terminals again (the
   runtime does not keep labels), then check every live session once. The same reconcile runs when a runtime
-  registers or comes back, and finishes archives and `--archive-on-completion` archives a stop cut off.
+  registers or comes back, and finishes archives and `--archive-on-idle` archives a stop cut off.
 
 How `packages/core/src/rounds.ts` ends a round (under the session's lock, except where noted):
 
@@ -476,8 +476,8 @@ An archive marks the session archived before anything is closed, so from then no
 back. A row that already exited is not closed again. A spawn reserves its worktree name with an atomic `mkdir`; a
 start cut off before its terminal was recorded is undone as a failed launch (its worktree goes when nothing can be
 lost, its reserved directory when still empty), while a resume or move falls back to its previous start.
-`--archive-on-completion` decides on the newest result, under the session's lock: a session with work again (a queued
-Message or a newer turn) stays, and a clean archive sends no notice, since each notice is a coordinator turn.
+`--archive-on-idle` decides under the session's lock, at a completed turn end and whenever a row it sent or was sent leaves
+`pending`/`delivering`: a session with work again (a queued Message, a row still waiting in either direction, or a newer turn) stays, and a clean archive sends no notice, since each notice is a coordinator turn.
 
 ## 4. Patterns
 
@@ -1151,7 +1151,7 @@ and are the acceptance for each part.
 | Starting an Agent                          | `spawn.ts`, `worktree.ts`, `harness.ts` (the `Harnesses` registry; the adapters are `packages/plugin-harnesses`) | session → Agent in a Run; Workspace types                                       | `sessions.test.ts`, `worktree-group.test.ts`                                                               |
 | Delivery and outcomes                      | `prompting.ts` (prompt), `sessions.ts` (turns), `inbox.ts`                                                       | turn state → Message `outcome`; coordinator → main Agent                        | `sessions.test.ts`, `self-heal.test.ts`                                                                    |
 | Results                                    | `results.ts`                                                                                                     | add Run id                                                                      | `unit.test.ts`                                                                                             |
-| Interrupt and stop                         | `sessions.ts`, `archive.ts`, `remove.ts`, `processes.ts`                                                         | archive → `stop`; `--archive-on-completion` → `once`                            | `remove.test.ts`, `stop-coordinator.test.ts`                                                               |
+| Interrupt and stop                         | `sessions.ts`, `archive.ts`, `remove.ts`, `processes.ts`                                                         | archive → `stop`; `--archive-on-idle` → `once`                                  | `remove.test.ts`, `stop-coordinator.test.ts`                                                               |
 | Main Agent launch and resume               | `launch.ts`, `main-agent.ts`, `sessions.ts`                                                                      | coordinator → main Agent of a Project                                           | `stop-coordinator.test.ts`                                                                                 |
 | Rules                                      | `rules.ts`                                                                                                       | subagent rules; main Agent rules become builtin skills                          | `unit.test.ts`                                                                                             |
 | Knowledge                                  | `project.ts`                                                                                                     | directory realpath → Project id                                                 | `project.test.ts`                                                                                          |
