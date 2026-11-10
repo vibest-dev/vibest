@@ -256,6 +256,56 @@ describe("v1 import", () => {
     }),
   )
 
+  const edited = (name: string, statements: ReadonlyArray<string>) => {
+    const file = fixtureFile(name)
+    const db = new Database(file)
+    const triggers = db.query("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'").all() as Array<{
+      name: string
+      sql: string
+    }>
+    for (const { name: trigger } of triggers) db.exec(`DROP TRIGGER "${trigger}"`)
+    for (const statement of statements) db.exec(statement)
+    for (const { sql } of triggers) db.exec(sql)
+    db.close()
+    return file
+  }
+
+  it.effect("an inbox row whose queued event has a higher id than its status event imports", () =>
+    Effect.gen(function* () {
+      const file = edited("sessions", [
+        `UPDATE event SET id = (SELECT max(id) + 1 FROM event) WHERE id = (SELECT q.id FROM event q
+          JOIN event s ON s.inbox_id = q.inbox_id AND s.type = 'inbox.status'
+          WHERE q.type = 'inbox.queued' ORDER BY q.id LIMIT 1)`,
+      ])
+      const v1 = new Database(file, { readonly: true })
+      const late = v1
+        .query(`SELECT count(*) AS n FROM event q JOIN event s ON s.inbox_id = q.inbox_id AND s.type = 'inbox.status'
+          WHERE q.type = 'inbox.queued' AND q.id > s.id`)
+        .get() as { n: number }
+      v1.close()
+      assert.strictEqual(late.n, 1)
+      const sql = yield* client(file)
+      const report = yield* importInPlace.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      assert.deepStrictEqual(report.differences, [])
+      assert.isUndefined(yield* equalToReplay(sql).pipe(Effect.provide(memory)))
+    }),
+  )
+
+  it.effect("import-check reports every translation problem at once", () =>
+    Effect.gen(function* () {
+      const file = edited("sessions", [
+        `INSERT INTO event (at, session_id, type, data) SELECT 1, id, 'bogus.one', '{}' FROM session LIMIT 1`,
+        `INSERT INTO event (at, session_id, type, data) SELECT 2, id, 'bogus.two', '{}' FROM session LIMIT 1`,
+      ])
+      const source = yield* client(file, true)
+      const error = yield* Effect.flip(importCheck(source).pipe(Effect.provide(memory)))
+      assert.instanceOf(error, ImportFailed)
+      assert.match(error.message, /2 problems/)
+      assert.match(error.message, /bogus\.one/)
+      assert.match(error.message, /bogus\.two/)
+    }),
+  )
+
   it("the highest v1 id is found among more ids than a call can take as arguments", () => {
     const events = Array.from({ length: 1_000_000 }, (_, i) => ({ id: i + 1 }))
     const inbox = Array.from({ length: 1_000_000 }, (_, i) => ({ id: i + 7 }))

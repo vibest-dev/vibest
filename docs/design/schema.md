@@ -339,11 +339,11 @@ keep decoding and re-encoding to the same bytes: add rows to it, never change or
 ### Importing a v1 database (not used yet)
 
 `packages/core/src/import/` turns the v1 tables into catalog facts. `translate.ts` is pure: it reads a snapshot of every
-v1 table and gives the facts in v1 event order, with `seq` starting above every v1 event id and inbox id, so an old
+v1 table and gives the facts in v1 event order (an inbox row's `inbox.queued` is translated before the row's first other event, since an older migration backfilled some queued events with later ids), with `seq` starting above every v1 event id and inbox id, so an old
 inbox id never names a new row. It fails, naming the v1 row, on an event type it does not know, a reference to a missing
 process, turn or inbox row, an inbox row without its `inbox.queued` event, a turn end whose report is not an event id, and any
 `machine` other than `local`; four known oddities and every second end of an already ended turn are counted instead and
-printed by the report. `importInPlace` runs in one transaction on the database
+printed by the report. All problems are collected and reported together. `importInPlace` runs in one transaction on the database
 file (no backup copy, foreign key checks deferred so it also works inside an outer transaction): read, translate, drop the v1 tables, install the ledger, append the facts, then the referee.
 `importCheck` does the same from a read-only source into a `:memory:` database; `vibest daemon import-check --v2` prints
 its report and exits non-zero when the referee finds a difference. Without `--v2` the command only checks that the

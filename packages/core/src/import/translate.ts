@@ -69,6 +69,15 @@ export const translate = (snapshot: Snapshot, importedAt: number): Translation =
   const liveProcess = new Map<string, number>()
   const openTurn = new Map<string, number>()
   const endedTurns = new Set<number>()
+  const problems: Array<string> = []
+  const attempt = (step: () => void) => {
+    try {
+      step()
+    } catch (error) {
+      if (!(error instanceof ImportFailed)) throw error
+      problems.push(error.message)
+    }
+  }
   const created = new Set<string>()
   const peerKeys = new Set<string>()
 
@@ -381,15 +390,29 @@ export const translate = (snapshot: Snapshot, importedAt: number): Translation =
     }
   }
 
-  for (const event of snapshot.events) {
-    createSession(sessionNamed(event.sessionId, `v1 event ${event.id} (${event.type})`))
-    translateEvent(event)
+  const queuedOf = new Map<number, V1Event>()
+  for (const event of snapshot.events)
+    if (event.type === "inbox.queued" && event.inboxId !== null && !queuedOf.has(event.inboxId))
+      queuedOf.set(event.inboxId, event)
+  const translated = new Set<number>()
+  const translateOnce = (event: V1Event) => {
+    if (translated.has(event.id)) return
+    translated.add(event.id)
+    attempt(() => {
+      createSession(sessionNamed(event.sessionId, `v1 event ${event.id} (${event.type})`))
+      translateEvent(event)
+    })
   }
-  const queued = new Set(snapshot.events.filter((e) => e.type === "inbox.queued").map((e) => e.inboxId))
+  for (const event of snapshot.events) {
+    const queued = event.inboxId === null ? undefined : queuedOf.get(event.inboxId)
+    if (queued !== undefined) translateOnce(queued)
+    translateOnce(event)
+  }
   for (const row of snapshot.inbox)
-    if (!queued.has(row.id)) fail(`v1 inbox row ${row.id}: it has no inbox.queued event`)
+    if (!queuedOf.has(row.id)) problems.push(`v1 inbox row ${row.id}: it has no inbox.queued event`)
 
-  for (const session of [...snapshot.sessions].sort((a, b) => a.createdAt - b.createdAt)) createSession(session)
+  for (const session of [...snapshot.sessions].sort((a, b) => a.createdAt - b.createdAt))
+    attempt(() => createSession(session))
 
   for (const session of snapshot.sessions
     .filter((s) => s.endedAt !== null)
@@ -414,14 +437,19 @@ export const translate = (snapshot: Snapshot, importedAt: number): Translation =
 
   for (const row of snapshot.outbox) {
     const source = `v1 outbox ${row.id}`
-    push(
-      "outbox.queued",
-      row.createdAt,
-      onSession(row.sessionId, source),
-      { id: row.id, peer: row.peerId, kind: row.kind, content: row.content },
-      source,
+    attempt(() =>
+      push(
+        "outbox.queued",
+        row.createdAt,
+        onSession(row.sessionId, source),
+        { id: row.id, peer: row.peerId, kind: row.kind, content: row.content },
+        source,
+      ),
     )
   }
+
+  if (problems.length > 0)
+    fail([`the v1 database has ${problems.length} problems the import does not guess past:`, ...problems].join("\n"))
 
   return { facts, eventSeq, inboxSeq, sources, counts }
 }
