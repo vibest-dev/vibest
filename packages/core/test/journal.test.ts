@@ -5,7 +5,7 @@ import { Catalog, type Fact } from "@vibest/schema/event"
 import { Effect, Exit, Fiber, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
-import * as Platform from "#platform"
+import { memorySqlite } from "./platform/bun.ts"
 
 const P = "11111111-1111-4111-8111-111111111111"
 const OTHER_PROJECT = "22222222-2222-4222-8222-222222222222"
@@ -17,7 +17,7 @@ const MACHINE = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 const ITEM = "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f"
 const ITEM_2 = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e"
 
-const memory = () => Layer.fresh(Platform.sqlite(":memory:"))
+const memory = () => Layer.fresh(memorySqlite)
 
 const ledger = Effect.gen(function* () {
   yield* installLedger
