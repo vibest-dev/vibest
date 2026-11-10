@@ -424,9 +424,15 @@ importers:
       '@effect/platform-node-shared':
         specifier: 4.0.2
         version: 4.0.2(effect@4.0.2)
+      '@vibest/client':
+        specifier: workspace:*
+        version: link:../client
       '@vibest/plugin':
         specifier: workspace:*
         version: link:../plugin
+      '@vibest/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@vibest/schema':
         specifier: workspace:*
         version: link:../schema

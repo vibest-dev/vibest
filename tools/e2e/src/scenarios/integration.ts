@@ -277,7 +277,7 @@ const checks: ReadonlyArray<Check> = [
         await withSession(w, "pi", ["--env", env], "guard and result", async ({ id }) => {
           await until("the session's result", async () => (await turnState(w, id)) === "completed", 120_000)
           expect(
-            results.some((r) => r.includes("Agents must not control herdr")),
+            results.some((r) => r.includes("Agents must not control a terminal runtime")),
             `the herdr call was not refused: ${JSON.stringify(results)}`,
           )
           expect(!(await Bun.file(ran).exists()), "herdr ran: pi-herdr-ran.txt exists")
@@ -446,7 +446,7 @@ const checks: ReadonlyArray<Check> = [
       await fs.mkdir(own.artifacts, { recursive: true })
       await fs.writeFile(path.join(own.artifacts, "guard-ok.md"), "ok-own\n")
       const ran = path.join(w.root, "herdr-ran.txt")
-      const herdrReason = "Sessions do not run herdr; vibest manages it."
+      const herdrReason = "Sessions do not run a terminal runtime; vibest manages it."
       const offLimits =
         "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR)."
       const calls = (tools: ReadonlyArray<string>): ReadonlyArray<{ step: Exclude<Step, string>; reason?: string }> => [

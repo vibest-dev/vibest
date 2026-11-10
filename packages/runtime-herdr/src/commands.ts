@@ -1,13 +1,14 @@
 import readline from "node:readline"
 
 import { type Claim, type VibestClient, withVibest } from "@vibest/client/client"
-import { VibestCommand } from "@vibest/core/paths"
 import { isLimited } from "@vibest/plugin"
 import type { SessionInfo } from "@vibest/protocol/rpc"
-import { agentName, KIND, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { shortId } from "@vibest/schema/id"
+import { VibestCommand } from "@vibest/schema/layout"
 import { Config, Console, Effect, Option, Schema } from "effect"
 import { Command } from "effect/cli"
+
+import { agentName, KIND, parseTerminal } from "./terminal-runtime.ts"
 
 export class BadPluginContext extends Schema.TaggedError<BadPluginContext>()("BadPluginContext", {
   message: Schema.String,
