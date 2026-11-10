@@ -580,4 +580,26 @@ describe.concurrent("Sessions", () => {
     }),
     { interruptIgnored: true },
   )
+
+  test(
+    "vibest interrupt while background work keeps the terminal working: an aborted turn end that lands before the Esc send returns closes the round as interrupted, with no result",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
+      const held = yield* herdr.hold("send")
+      const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
+      yield* held.reached
+      yield* writeResult(id, "claude", claudeEnd("aborted"))
+      yield* held.release()
+      yield* untilVirtual(
+        Effect.sync(() => interrupting.pollUnsafe()),
+        (exit) => exit !== undefined,
+      )
+      assert.include((yield* Fiber.join(interrupting)).message, "interrupted")
+      yield* sessions.check(id)
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted")
+      assert.isUndefined(yield* db.latestInbox(id, "result"))
+    }),
+    { interruptIgnored: true },
+  )
 })
