@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@oxlint/plugins": "1.90.0",
     "@types/bun": "1.4.2",
     "@vibest/tsconfig": "workspace:*",
     "lint-staged": "17.6.0",
