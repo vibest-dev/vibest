@@ -558,7 +558,7 @@ const checks: ReadonlyArray<Check> = [
         ).catch(failWith)
         await until(
           "the turn on the continue notice ended with its reply",
-          async () => noticed && /⏺ CONTINUED\s+\S.*· done/.test(await screen()),
+          async () => noticed && /[⏺●] CONTINUED\s+\S.*· done/.test(await screen()),
           120_000,
         ).catch(failWith)
         expect(updates === 1, `vibest update was asked for ${updates} times`)

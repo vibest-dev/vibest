@@ -94,9 +94,11 @@ jobs:
           echo "exit=$?"
           echo "stderr:"; cat /tmp/lsof.err
           tr '\0' '|' < /tmp/lsof.out | grep -v '^p[0-9]*|$' | grep -n 'readlink\|stat\|^p[0-9]*|$' | head -20
-          tr '\0' '|' < /tmp/lsof.out | head -60
+          for pid in $(tr '\0' '|' < /tmp/lsof.out | awk -F'|' '/^p/{p=substr($1,2)} /readlink/{print p}'); do
+            ps -o pid,ppid,user,etime,args -p "$pid"; cat "/proc/$pid/status" | grep -i "name\|uid\|cap"; done
+          systemctl status "user@$(id -u).service" --no-pager | head -12 || true
       - run: pnpm run build
-      - run: bun tools/e2e/src/main.ts --strict --no-cache M5 U4 S30 S10
+      - run: bun tools/e2e/src/main.ts --strict --no-cache M5 U4 S27 S28 S30 S31
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -209,6 +209,8 @@ const hostId = readHostId(
     : { files: process.platform === "linux" ? MACHINE_ID_FILES : [] },
 ).pipe(Effect.provide(BunServices.layer))
 
+const theExitSaysWhyTheLineEnded = () => undefined
+
 const transport: MachineTransport["Service"] = (argv) =>
   Effect.acquireRelease(
     Effect.try({
@@ -221,10 +223,13 @@ const transport: MachineTransport["Service"] = (argv) =>
       const stderr = new Response(proc.stderr).text().catch(() => "")
       const exited = Effect.promise(async () => ({ code: (await proc.exited) ?? undefined, stderr: await stderr }))
       const writable = new WritableStream<Uint8Array>({
-        write: async (chunk) => {
-          proc.stdin.write(chunk)
-          await proc.stdin.flush()
-        },
+        write: (chunk) =>
+          Promise.resolve()
+            .then(async () => {
+              proc.stdin.write(chunk)
+              await proc.stdin.flush()
+            })
+            .catch(theExitSaysWhyTheLineEnded),
         close: async () => {
           await proc.stdin.end()
         },
