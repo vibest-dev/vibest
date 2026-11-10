@@ -3,7 +3,33 @@
 Every vibest API is experimental until it is declared stable (`.agents/rules/api-stability.md`): it may change in any
 release. Each release lists what broke, who is affected and how to migrate under "Breaking changes".
 
-## Unreleased
+## 0.0.1-beta.18 (2026-11-10)
+
+### What's new
+
+- **Multi-machine over ssh**: `vibest machine add <name> <ssh target>` connects to another machine's vibestd;
+  `vibest run --machine <name>` starts an agent there, `<machine>/<id>` works wherever a session id does, `vibest ls`
+  lists every connected machine's sessions, and remote results come back to this machine's main agent.
+- **Remote terminal view** for herdr-core and herdr: a runtime shows and steps into another machine's agent terminals;
+  with herdr, `vibest machine add` and `rm` keep that machine's herdr session in this machine's saved herdr machines.
+- **Plugin API aligned with OpenCode V2**: a plugin is `{ id, effect }`; runtimes and harnesses are registered through
+  `transform` editors, and hooks return a disposable `Registration` (see Breaking changes).
+- **An event-driven vibestd**: no background polling, deliveries follow turn ends; every CLI command and the hourly
+  update check go through vibestd.
+- **`preferences.md`** replaces `instructions.md`, and memories reach an agent as an index of one-line summaries.
+
+### Fixes
+
+- `vibest interrupt` gives a result when background work keeps the terminal working after Esc.
+- `vibest update` and `vibest daemon restart` never leave the user stuck.
+- vibestd repairs operations a crash cut off; a retried `send` or `run` queues once.
+- Reconcile and delivery races with slow shells and killed harnesses.
+- A main agent's `--env` never reaches the typed command or shell history.
+- Reading git state takes no index lock, so it cannot fail a spawn.
+- An unavailable harness is refused instead of switched silently.
+- Pi ready reports are retried across a vibestd restart; Cursor reports to vibestd through plugin hooks and no longer
+  opens keychain dialogs under temporary homes.
+- Builtin runtimes register before vibestd admits a request.
 
 ### Breaking changes
 
