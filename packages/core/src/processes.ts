@@ -1,5 +1,6 @@
-import { Context, Duration, Effect, Layer, Option, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { type Captured, capture } from "@vibest/plugin"
+import { Context, Duration, Effect, Layer } from "effect"
+import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 
@@ -29,11 +30,7 @@ export const LSOF_KILL_AFTER = Duration.seconds(1)
 
 export const lsofArgs = (uid: number) => ["+w", "-a", "-u", String(uid), "-d", "cwd", "-Fpfn0"]
 
-export interface LsofRun {
-  readonly exitCode: number
-  readonly stdout: string
-  readonly stderr: string
-}
+export type ProcessRun = Captured
 
 export class Processes extends Context.Service<
   Processes,
@@ -76,27 +73,10 @@ export class Processes extends Context.Service<
 }
 
 export const runFor = (command: string, args: ReadonlyArray<string>, timeout: Duration.Input) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const handle = yield* spawner.spawn(ChildProcess.make(command, args, { forceKillAfter: LSOF_KILL_AFTER }))
-    const [stdout, stderr, exitCode] = yield* Effect.all(
-      [
-        Stream.mkString(Stream.decodeText(handle.stdout)),
-        Stream.mkString(Stream.decodeText(handle.stderr)),
-        handle.exitCode,
-      ],
-      { concurrency: "unbounded" },
-    )
-    return { exitCode, stdout, stderr } satisfies LsofRun
-  }).pipe(
-    Effect.scoped,
-    Effect.timeoutOption(timeout),
-    Effect.map(Option.getOrUndefined),
-    Effect.orElseSucceed(() => undefined),
-  )
+  capture(command, args, { timeout, forceKillAfter: LSOF_KILL_AFTER }).pipe(Effect.orElseSucceed(() => undefined))
 
 export const cwdHolders = (
-  run: LsofRun | undefined,
+  run: ProcessRun | undefined,
   self: number,
   dirs: ReadonlyArray<string>,
 ): ReadonlyArray<number> | undefined => {

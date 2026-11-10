@@ -623,6 +623,17 @@ export const makeStore = Effect.gen(function* () {
       )
     })
 
+  const sessionAt = (runtime: string, address: RuntimeAddress) =>
+    sql<{ id: string }>`SELECT s.id FROM session s
+      JOIN event p ON p.id = ${currentStart(sql`s.id`)}
+      WHERE s.role != 'main'
+        AND json_extract(p.data, '$.runtime') = ${runtime}
+        AND json_extract(p.data, '$.machine') = ${address.machine}
+        AND json_extract(p.data, '$.terminal') = ${address.id}
+        AND NOT EXISTS (SELECT 1 FROM event e WHERE e.process_id = p.id AND e.type = 'process.end')
+      ORDER BY s.created_at, s.id
+      LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
+
   const mainsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
       const rows = yield* sql<{ id: string; project: string }>`SELECT s.id, s.project_id AS project FROM session s
@@ -693,6 +704,7 @@ export const makeStore = Effect.gen(function* () {
     insertInboxRow,
     updateSession,
     dropWaiting,
+    sessionAt,
     mainsAt,
     clearMainAt,
     unusedId,

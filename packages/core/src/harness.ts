@@ -2,13 +2,13 @@ import type { HarnessOption } from "@vibest/plugin"
 import type { HarnessChoice } from "@vibest/protocol/rpc"
 import { VibestCommand } from "@vibest/schema/layout"
 import { HarnessUnavailable } from "@vibest/schema/session"
-import { Clock, Config, Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
+import { Cache, Config, Context, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import type { HarnessDefinition, HarnessesShape } from "./host.ts"
-import type { Model } from "./models.ts"
+import { listModels, type Model } from "./models.ts"
 import * as Registry from "./registry.ts"
 export { type HarnessId, HarnessUnavailable } from "@vibest/schema/session"
 export type { HarnessDefinition }
@@ -49,6 +49,7 @@ export class Harnesses extends Context.Service<Harnesses, HarnessesShape>()("vib
 export const hasNewline = (args: ReadonlyArray<string>) => args.some((a) => /[\r\n]/.test(a))
 
 export const MODELS_TTL = Duration.minutes(5)
+const MODEL_CACHE_CAPACITY = 32
 
 export class Harness extends Context.Service<
   Harness,
@@ -63,6 +64,10 @@ export class Harness extends Context.Service<
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const pinned = Context.make(ChildProcessSpawner.ChildProcessSpawner, spawner).pipe(
+        Context.add(FileSystem.FileSystem, fs),
+        Context.add(Path.Path, path),
+      )
       const harnesses = yield* Harnesses
       const self = yield* VibestCommand
       const pkg = self.length === 1 && path.isAbsolute(self[0]!) ? path.dirname(path.dirname(self[0]!)) : undefined
@@ -79,8 +84,21 @@ export class Harness extends Context.Service<
             ).pipe(Effect.map((found) => Option.getOrElse(found, () => path.join(pkg, "harnesses"))))
       const plugins = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))) || beside
       const searchPath = (yield* Config.String("PATH").pipe(Config.withDefault(""))).split(":").filter(Boolean)
-      const { listModels } = yield* Effect.promise(() => import("./models.ts"))
-      const cache = new Map<string, { readonly at: number; readonly models: ReadonlyArray<Model> }>()
+      const cached = yield* Cache.makeWith(
+        (key: string) => {
+          const split = key.indexOf("/")
+          const id = key.slice(0, split)
+          const provider = key.slice(split + 1)
+          const definition = harnesses.find(id)
+          return definition === undefined
+            ? Effect.fail(unprovided(id, harnesses.all))
+            : listModels(definition, provider === "" ? null : provider).pipe(Effect.provide(pinned))
+        },
+        {
+          capacity: MODEL_CACHE_CAPACITY,
+          timeToLive: (exit) => (Exit.isSuccess(exit) ? MODELS_TTL : Duration.zero),
+        },
+      )
       return Harness.of({
         available: (id) =>
           Effect.suspend(() => {
@@ -107,22 +125,7 @@ export class Harness extends Context.Service<
               return yield* unavailable(`vibest's ${id} plugin is missing: ${dir}`)
             return dir
           }),
-        models: (id, provider) =>
-          Effect.gen(function* () {
-            const key = `${id}/${provider ?? ""}`
-            const now = yield* Clock.currentTimeMillis
-            const hit = cache.get(key)
-            if (hit && now - hit.at < Duration.toMillis(MODELS_TTL)) return hit.models
-            const definition = harnesses.find(id)
-            if (definition === undefined) return yield* unprovided(id, harnesses.all)
-            const models = yield* listModels(definition, provider).pipe(
-              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-              Effect.provideService(FileSystem.FileSystem, fs),
-              Effect.provideService(Path.Path, path),
-            )
-            cache.set(key, { at: now, models })
-            return models
-          }),
+        models: (id, provider) => Cache.get(cached, `${id}/${provider ?? ""}`),
       })
     })
 

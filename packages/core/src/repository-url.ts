@@ -1,5 +1,6 @@
-import { Context, Duration, Effect, Layer, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { capture } from "@vibest/plugin"
+import { Context, Duration, Effect, Layer } from "effect"
+import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
@@ -34,22 +35,19 @@ export class SshHosts extends Context.Service<
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const known = new Map<string, string>()
       const ask = (alias: string) =>
-        Effect.gen(function* () {
-          const handle = yield* spawner.spawn(ChildProcess.make("ssh", ["-G", "--", alias]))
-          const [out, code] = yield* Effect.all([Stream.mkString(Stream.decodeText(handle.stdout)), handle.exitCode], {
-            concurrency: "unbounded",
-          })
-          const name = out
-            .split("\n")
-            .find((line) => line.startsWith("hostname "))
-            ?.slice("hostname ".length)
-            .trim()
-          if (code !== 0 || !name) return alias
-          known.set(alias, name)
-          return name
-        }).pipe(
-          Effect.scoped,
-          Effect.timeout(Duration.seconds(5)),
+        capture("ssh", ["-G", "--", alias], { timeout: Duration.seconds(5) }).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.map((run) => {
+            if (run === undefined || run.exitCode !== 0) return alias
+            const name = run.stdout
+              .split("\n")
+              .find((line) => line.startsWith("hostname "))
+              ?.slice("hostname ".length)
+              .trim()
+            if (!name) return alias
+            known.set(alias, name)
+            return name
+          }),
           Effect.orElseSucceed(() => alias),
         )
       return {

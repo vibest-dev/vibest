@@ -285,6 +285,8 @@ describe("reconcile: one look at every live session at start, when a runtime reg
   test(
     "a runtime registered after the start is reconciled: each of its sessions is read once",
     Effect.gen(function* () {
+      const sessions = yield* Sessions
+      yield* until(sessions.inMemory, (m) => m.reconciles >= 1)
       const read = yield* Ref.make<ReadonlyArray<string>>([])
       yield* idleSubagentsBetweenTurns(3, "late")
       const late = {

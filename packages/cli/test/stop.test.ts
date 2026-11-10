@@ -11,7 +11,20 @@ import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { CALLER_HEADER, PROJECT_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
 import * as Server from "@vibest/server/server"
-import { Cause, Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+import {
+  Cause,
+  Context,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  type Scope,
+  Stream,
+} from "effect"
 
 import * as Platform from "#platform"
 
@@ -288,7 +301,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       yield* draining
       assert.include(yield* (yield* Drain).pending, `completion inbox ${row.id}`)
       assert.isFalse(yield* shutdownDone)
-      const consequence = yield* inbox.delivered
+      const consequence = yield* Queue.take(inbox.delivered)
       assert.strictEqual(consequence.row.id, row.id)
       yield* consequence.done
       assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
