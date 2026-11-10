@@ -37,6 +37,7 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
       const definition: VibestPlugin.Runtime.RuntimeDefinition = {
         ...runtime,
         id: KIND,
+        name: "herdr-core",
         caller,
         link: () =>
           home.hello.pipe(

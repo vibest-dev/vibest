@@ -46,6 +46,9 @@ export const REPAIR_PAUSE = Duration.seconds(30)
 export const cannotShow = (name: string, kind: string) =>
   `${name}'s ${kind} terminals cannot be shown here; vibest peek ${name}/<id> reads them`
 
+const shownKind = (here: ReadonlyArray<{ readonly id: string; readonly name?: string }>, kind: string) =>
+  here.find((runtime) => runtime.id === kind)?.name ?? kind
+
 export const noteText = (note: PluginNote) => `${note.message}${note.fix === undefined ? "" : `; fix: ${note.fix}`}`
 
 export interface View {
@@ -179,15 +182,17 @@ const make = Effect.gen(function* () {
     Effect.map(runtimes.all, (here) =>
       (there.get(name)?.runtimes ?? [])
         .filter((r) => !here.some((h) => h.id === r.kind && h.locate !== undefined))
-        .map((r): PluginNote => ({ message: cannotShow(name, r.kind) })),
+        .map((r): PluginNote => ({ message: cannotShow(name, shownKind(here, r.kind)) })),
     )
 
   const ensure = (name: string, kind: string, sessions: ReadonlyMap<string, string>, always = false) =>
     lock.withLock(name)(
       Effect.gen(function* () {
         const row = yield* db.machineNamed(name)
-        const locate = (yield* runtimes.all).find((r) => r.id === kind)?.locate
-        if (row === undefined || locate === undefined) return { terminals: NONE, note: cannotShow(name, kind) } as View
+        const here = yield* runtimes.all
+        const locate = here.find((r) => r.id === kind)?.locate
+        const label = shownKind(here, kind)
+        if (row === undefined || locate === undefined) return { terminals: NONE, note: cannotShow(name, label) } as View
         const seen = there.get(name)
         const reported = seen?.runtimes.find((r) => r.kind === kind)
         if (reported?.link === undefined)
@@ -226,7 +231,7 @@ const make = Effect.gen(function* () {
           return again as View
         }
         const note =
-          again.note ?? (notes.map(noteText).join("; ") || `${name}'s ${kind} terminals are not in ${kind} here`)
+          again.note ?? (notes.map(noteText).join("; ") || `${name}'s ${label} terminals are not in ${label} here`)
         repairs.set(key, { at: yield* Clock.currentTimeMillis, note })
         return { terminals: NONE, note } as View
       }),
