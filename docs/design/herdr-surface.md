@@ -221,7 +221,11 @@ fragile.
 - **Agent names.** A vibest session's agent is `s-` and the first 30 hex digits of its id (herdr allows
   `[a-z][a-z0-9_-]{0,31}`), so `herdr agent list` shows which session runs where; any other agent `open` starts is
   `vbt-` and random hex. Never the pane id: it is reused and carries uppercase (`w1:pC`). herdr's `done` is `idle`.
-- **open.** The session is `near`'s, else the caller's location, else `HERDR_SOCKET_PATH`, else `vibest`. `near`
+- **open.** An agent another machine started (`remote`, from `Peer.Spawn`) opens in herdr's default session `default`
+  (`DEFAULT_SESSION_NAME`, also what `herdr machine add` uses without `--remote-session`), never beside a pane, so the
+  machine that started it can save that session as a herdr machine. Otherwise the session is `near`'s, else the
+  caller's location, else `HERDR_SOCKET_PATH`, else `vibest`. A missing session is started with `herdr server
+  --session <s>` spawned detached, so the server is its own session leader, as herdr saved machines require. `near`
   places the terminal only while its pane exists; a stale one (closed while vibestd was down, or herdr restarted)
   falls back to the Project's workspace: the checkout's worktree group, else a workspace with a pane at that path
   (symlinks resolved), else a new one. `tab.create` and `pane.split` are the only places env can be set. A command

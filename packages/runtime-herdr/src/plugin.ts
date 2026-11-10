@@ -3,7 +3,7 @@ import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem"
 import * as NodePath from "@effect/platform-node-shared/NodePath"
 import * as NodeSocket from "@effect/platform-node-shared/NodeSocket"
 import * as VibestPlugin from "@vibest/plugin"
-import { Config, Context, Effect, FileSystem, Layer, Option } from "effect"
+import { Context, Effect, FileSystem, Layer } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 
@@ -50,12 +50,7 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
           ...runtime,
           id: KIND,
           caller,
-          link: () =>
-            Config.option(Config.String("HERDR_SOCKET_PATH")).pipe(
-              Effect.map(Option.getOrUndefined),
-              Effect.orElseSucceed(() => undefined),
-              Effect.flatMap((socket) => Machines.link(pool, socket === "" ? undefined : socket)),
-            ),
+          link: () => Machines.link(pool),
           locate: (machine, sessions) => Machines.locate(cli, machine, sessions),
         }),
       )

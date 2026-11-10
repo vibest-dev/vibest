@@ -53,13 +53,10 @@ const profile = (extra: Partial<Profile> = {}): Profile => ({
   ...extra,
 })
 
-const pinging = (version: string, sockets: Record<string, string>) => {
+const pinging = (version: string) => {
   const asked: Array<string> = []
   const pool = HerdrPool.of({
-    resolve: (location) =>
-      "socketPath" in location && sockets[location.socketPath] !== undefined
-        ? Effect.succeed(sockets[location.socketPath]!)
-        : Effect.fail(new RuntimeUnreachable({ session: "?", message: "no session" })),
+    resolve: () => Effect.die("resolve reached"),
     client: (session) =>
       Effect.sync(() => {
         asked.push(session)
@@ -76,19 +73,17 @@ const pinging = (version: string, sockets: Record<string, string>) => {
 
 describe("runtime-herdr machines: link", () => {
   it.effect(
-    "the default session with its server's version over the socket; an ambient socket names its session or nothing",
+    "herdr's default session, where agents of other machines open, with its server's version over the socket",
     () =>
       Effect.gen(function* () {
-        const herdr = pinging("0.9.6", { "/s/work.sock": "work" })
-        assert.deepStrictEqual(yield* link(herdr.pool, undefined), { session: "vibest", version: "0.9.6" })
-        assert.deepStrictEqual(yield* link(herdr.pool, "/s/work.sock"), { session: "work", version: "0.9.6" })
-        assert.isUndefined(yield* link(herdr.pool, "/s/other.sock"))
-        assert.deepStrictEqual(herdr.asked, ["vibest", "work"])
+        const herdr = pinging("0.9.6")
+        assert.deepStrictEqual(yield* link(herdr.pool), { session: "default", version: "0.9.6" })
+        assert.deepStrictEqual(herdr.asked, ["default"])
         const down = HerdrPool.of({
           ...herdr.pool,
           client: (session) => Effect.fail(new RuntimeUnreachable({ session, message: "not running" })),
         })
-        assert.deepStrictEqual(yield* link(down, undefined), { session: "vibest" })
+        assert.deepStrictEqual(yield* link(down), { session: "default" })
       }),
   )
 })

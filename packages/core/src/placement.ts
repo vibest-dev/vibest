@@ -53,6 +53,7 @@ export const sessionPlacement = (deps: {
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly endProcess: (id: string, reason: EndReason) => Effect.Effect<boolean>
+    readonly startedByPeer: (id: string) => Effect.Effect<boolean>
   }
   readonly runtimes: RuntimesShape
   readonly layout: {
@@ -151,6 +152,7 @@ export const sessionPlacement = (deps: {
     },
   ) {
     const near = input.near !== undefined ? input.near : yield* nearMain(session, h.id)
+    const remote = yield* db.startedByPeer(session.id)
     const choice = {
       harnessId: session.harnessId,
       provider: session.provider,
@@ -167,6 +169,7 @@ export const sessionPlacement = (deps: {
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),
+        ...(remote ? { remote: true } : {}),
       })
       .pipe(Effect.onError(() => (input.endedByCaller ? Effect.void : db.endProcess(session.id, "launch_failed"))))
     const at = yield* Clock.currentTimeMillis

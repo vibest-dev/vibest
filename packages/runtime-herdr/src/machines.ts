@@ -3,7 +3,7 @@ import { Duration, Effect, Option, Schema, Stream } from "effect"
 import { ChildProcess, type ChildProcessSpawner } from "effect/process"
 
 import type { HerdrPool } from "./pool.ts"
-import { parseTerminal } from "./terminal-runtime.ts"
+import { parseTerminal, REMOTE_SESSION } from "./terminal-runtime.ts"
 
 export interface Ran {
   readonly code: number
@@ -117,15 +117,9 @@ export const locate = (
     }
   }).pipe(Effect.catch((note) => Effect.succeed({ missing: false, terminals: NONE, note })))
 
-export const DEFAULT_SESSION = "vibest"
-
-export const link = (pool: HerdrPool["Service"], ambientSocket: string | undefined) =>
+export const link = (pool: HerdrPool["Service"]) =>
   Effect.gen(function* () {
-    const session =
-      ambientSocket === undefined
-        ? DEFAULT_SESSION
-        : yield* pool.resolve({ socketPath: ambientSocket }).pipe(Effect.orElseSucceed(() => undefined))
-    if (session === undefined) return undefined
+    const session = REMOTE_SESSION
     const pong = yield* pool.client(session).pipe(
       Effect.flatMap((h) => h.call("ping", {})),
       Effect.orElseSucceed(() => undefined),

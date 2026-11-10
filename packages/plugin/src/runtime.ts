@@ -80,6 +80,7 @@ export interface RuntimeDefinition {
       readonly near?: Terminal
       readonly split?: boolean
       readonly focus?: boolean
+      readonly remote?: boolean
     },
   ) => Effect.Effect<Terminal, RuntimeError>
   readonly send: (

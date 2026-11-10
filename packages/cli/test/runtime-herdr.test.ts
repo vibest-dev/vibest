@@ -25,8 +25,9 @@ const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = St
       subscribe: () => pushed,
       call: resendingCall,
     }
+    const resolved: Array<unknown> = []
     const pool = HerdrPool.of({
-      resolve: () => Effect.succeed("s"),
+      resolve: (location) => Effect.sync(() => (resolved.push(location), "s")),
       client: () => Effect.succeed(client),
       events: Stream.empty,
       restarts: Stream.empty,
@@ -38,7 +39,7 @@ const scriptedRuntime = (answer: Scripted, pushed: Stream.Stream<PushFrame> = St
       fs: undefined,
       scope: yield* Effect.scope,
     })
-    return { runtime, calls }
+    return { runtime, calls, resolved }
   })
 
 const herdrError = (method: string, code: string) => Effect.fail(new HerdrError({ method, code, message: code }))
@@ -130,6 +131,34 @@ describe("open an agent", () => {
         timeout_ms: 120_000,
       })
       assert.strictEqual(terminal.id, `s/w1:p2/${TerminalRuntime.agentName(id)}`)
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("an agent another machine started opens in herdr's default session, never beside a pane", () =>
+    Effect.gen(function* () {
+      const { runtime, calls, resolved } = yield* scriptedRuntime((method) => {
+        if (method === "worktree.list") return Effect.succeed({ source: { source_workspace_id: "w1" } })
+        if (method === "tab.create") return Effect.succeed({ root_pane: { pane_id: "w1:p2" } })
+        if (method === "pane.get") return Effect.succeed({ pane: { tab_id: "w1:t2" } })
+        return Effect.succeed({})
+      })
+      yield* runtime.open(
+        { id: "local" },
+        {
+          project: "/p",
+          cwd: "/p",
+          argv: ["pi"],
+          env: { VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" },
+          label: "pi",
+          near: TerminalRuntime.terminalOf("work", "w9:p9"),
+          remote: true,
+        },
+      )
+      assert.deepStrictEqual(resolved, [{ session: "default" }])
+      assert.notInclude(
+        calls.map((c) => JSON.stringify(c.params)),
+        JSON.stringify({ pane_id: "w9:p9" }),
+      )
     }).pipe(Effect.provide(Platform.services)),
   )
 })

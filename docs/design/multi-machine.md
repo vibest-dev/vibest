@@ -228,8 +228,8 @@ ignored.
 
 The herdr plugin (`runtime-herdr/src/machines.ts`) uses herdr's saved SSH machines, which live on the client side
 (`$XDG_STATE_HOME/herdr/client/endpoints.json`, read and written only through `herdr machine …`). B's `link` is
-`{session, version}`: the session B opens agents in (the one `HERDR_SOCKET_PATH` names in vibestd's environment, else
-`vibest`) and the version its server answers to `ping` (none when that session is not running). A's `locate` reads
+`{session, version}`: herdr's default session `default`, where B opens every agent another machine starts (open's
+`remote`), and the version its server answers to `ping` (none when that session is not running). A's `locate` reads
 `herdr machine list --json` and takes the profile whose target (without `ssh://`) and session equal the event's target
 and the link's session, under any label: none is `missing`, a disabled one is a note with `herdr machine enable <id>`.
 Each session comes with the terminal id B reported for it (`<B session>/<pane>/<agent>`), so `locate` answers
