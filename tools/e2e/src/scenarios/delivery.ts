@@ -13,6 +13,7 @@ import {
   readDb,
   row,
   rows,
+  SESSIONS,
   Skip,
   until,
   type World,
@@ -74,6 +75,215 @@ const recordingModel = (answer: (messages: Array<Message>) => string | Promise<s
   })
   return { requests, url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
+
+const mainOf = (w: World) =>
+  row<{ id: string }>(w, "SELECT id FROM session WHERE role = 'main' AND ended_at IS NULL")!.id
+
+const sendsFrom = (w: World, sender: string, recipient: string) =>
+  rows<{ id: number; status: string; turn: number | null; content: string }>(
+    w,
+    "SELECT id, status, turn_id AS turn, content FROM inbox WHERE sender_session_id = ? AND recipient_session_id = ? AND kind = 'send'",
+    sender,
+    recipient,
+  )
+
+const countFacts = (w: World, sql: string, ...args: Array<string | number>) =>
+  row<{ n: number }>(w, `SELECT count(*) AS n FROM event WHERE ${sql}`, ...args)?.n ?? 0
+
+const sendingModel = (to: () => string, message: string) =>
+  recordingModel((messages) =>
+    messages.some((m) => m.role === "tool")
+      ? reply("done-send\nstatus: completed")
+      : toolCall("call1", "bash", { command: `${binary} send ${to()} -- ${message}` }),
+  )
+
+const seen = (model: ReturnType<typeof recordingModel>) => model.requests.flat().map(text).join("\n")
+
+const sendChecks: ReadonlyArray<Check> = [
+  {
+    id: "S45",
+    title:
+      "a Pi subagent's vibest send to the Pi main agent is one send row from the subagent to the main agent, delivered, with one inbox.queued and one inbox.moved to delivered, and the main agent's model request holds <agent-message> with the subagent's id",
+    run: async (w) => {
+      needs()
+      const main = recordingModel(() => reply("ok"))
+      let mainId = ""
+      const sub = sendingModel(() => mainId, "hello-main")
+      let session = ""
+      try {
+        const m = await piMain(w, "send-main", main.url)
+        session = m.session
+        mainId = mainOf(w)
+        const id = await runSub(w, m.repo, session, sub.url, "pi-send-main-sub", "send to the main agent")
+        await until("the send delivered", () => sendsFrom(w, id, mainId).some((r) => r.status === "delivered"), 60_000)
+        const sent = sendsFrom(w, id, mainId)
+        expect(sent.length === 1, `${sent.length} sends from ${id} to the main agent: ${JSON.stringify(sent)}`)
+        expect(
+          countFacts(w, "type = 'inbox.queued' AND seq = ?", sent[0]!.id) === 1 &&
+            countFacts(
+              w,
+              "type = 'inbox.moved' AND json_extract(data, '$.inbox') = ? AND json_extract(data, '$.to') = 'delivered'",
+              sent[0]!.id,
+            ) === 1,
+          `the send ${sent[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
+        )
+        await until("the main agent's model saw the send", () => seen(main).includes("hello-main"), 60_000)
+        expect(
+          seen(main).includes("<agent-message>") && seen(main).includes(id),
+          `the main agent's model saw ${seen(main)}`,
+        )
+      } finally {
+        main.stop()
+        sub.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "S46",
+    title:
+      "a Pi subagent's vibest send to a sibling is typed at the sibling's idle: the send row is delivered on the sibling's next turn, and the sibling's model sees the text and the sender's id",
+    run: async (w) => {
+      needs()
+      const main = recordingModel(() => reply("ok"))
+      const sibling = recordingModel(() => reply("done-sibling\nstatus: completed"))
+      let siblingId = ""
+      const sender = sendingModel(() => siblingId, "hello-sibling")
+      let session = ""
+      try {
+        const m = await piMain(w, "send-sibling", main.url)
+        session = m.session
+        siblingId = await runSub(w, m.repo, session, sibling.url, "pi-send-sibling-b", "wait for a message")
+        await until(
+          "the sibling's first turn",
+          () => turnStarts(w, siblingId) === 1 && sibling.requests.length > 0,
+          60_000,
+        )
+        const id = await runSub(w, m.repo, session, sender.url, "pi-send-sibling-a", "send to the sibling")
+        await until(
+          "the send delivered",
+          () => sendsFrom(w, id, siblingId).some((r) => r.status === "delivered"),
+          60_000,
+        )
+        const sent = sendsFrom(w, id, siblingId)[0]!
+        const last = row<{ id: number }>(w, "SELECT max(id) AS id FROM turn WHERE session_id = ?", siblingId)!.id
+        expect(
+          turnStarts(w, siblingId) === 2 && sent.turn === last,
+          `the send is on turn ${sent.turn}; the sibling's turns ${turnStarts(w, siblingId)}, last ${last}`,
+        )
+        await until("the sibling's model saw the send", () => seen(sibling).includes("hello-sibling"), 60_000)
+        expect(
+          seen(sibling).includes("<agent-id>" + id + "</agent-id>"),
+          `the sibling's model did not see the sender ${id}: ${seen(sibling)}`,
+        )
+      } finally {
+        main.stop()
+        sibling.stop()
+        sender.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "S47",
+    title:
+      "a Pi subagent's vibest send to a session of another project is Forbidden, and to an archived session NoSuchSession naming the project's main agent; neither appends an inbox.queued",
+    run: async (w) => {
+      needs()
+      const main = recordingModel(() => reply("ok"))
+      const other = recordingModel(() => reply("ok"))
+      const idle = recordingModel(() => reply("done-idle\nstatus: completed"))
+      let foreign = ""
+      let archived = ""
+      const refused = path.join(w.root, "s47-refused.txt")
+      const sender = recordingModel((messages) =>
+        messages.some((m) => m.role === "tool")
+          ? reply("done-s47\nstatus: completed")
+          : toolCall("call1", "bash", {
+              command: `${binary} send ${foreign} -- one > ${refused} 2>&1; ${binary} send ${archived} -- two >> ${refused} 2>&1`,
+            }),
+      )
+      const sessions: Array<string> = []
+      try {
+        const m = await piMain(w, "send-refused", main.url)
+        sessions.push(m.session)
+        const o = await piMain(w, "send-refused-other", other.url)
+        sessions.push(o.session)
+        foreign = await runSub(w, o.repo, o.session, other.url, "pi-send-refused-other-sub", "idle in another project")
+        archived = await runSub(w, m.repo, m.session, idle.url, "pi-send-refused-archived", "finish and be archived")
+        await until("the archived session's turn", () => turnStarts(w, archived) === 1, 60_000)
+        await w.ok(["archive", archived], { cwd: m.repo })
+        const id = await runSub(w, m.repo, m.session, sender.url, "pi-send-refused-sender", "send twice")
+        await until(
+          "both refusals written",
+          async () => (await fs.readFile(refused, "utf8").catch(() => "")).includes("NoSuchSession"),
+          60_000,
+        )
+        const written = await fs.readFile(refused, "utf8")
+        expect(
+          written.includes("Forbidden") && written.includes("belongs to another coordinator"),
+          `no Forbidden for the other project's session: ${written}`,
+        )
+        expect(written.includes(mainOf(w)), `the archived refusal does not name the main agent: ${written}`)
+        expect(
+          countFacts(w, "type = 'inbox.queued' AND json_extract(data, '$.sender') = ?", id) === 0,
+          `an inbox.queued names ${id} as sender`,
+        )
+      } finally {
+        main.stop()
+        other.stop()
+        idle.stop()
+        sender.stop()
+        for (const session of sessions) await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "S48",
+    title:
+      "when the sibling's pane is killed before a vibest send reaches it, the row ends failed and one notice row goes to the sender (recipient_session_id = the sender), which is typed into the sender and seen by its model",
+    run: async (w) => {
+      needs()
+      const main = recordingModel(() => reply("ok"))
+      const held = heldModel()
+      let siblingId = ""
+      const sender = sendingModel(() => siblingId, "never-delivered")
+      let session = ""
+      try {
+        const m = await piMain(w, "send-killed", main.url)
+        session = m.session
+        const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
+        siblingId = await runSub(w, m.repo, session, held.url, "pi-send-killed-b", ask("held"))
+        await until("the sibling's turn held", () => held.held() > 0, 60_000)
+        const id = await runSub(w, m.repo, session, sender.url, "pi-send-killed-a", "send to the sibling")
+        await until("the send pending", () => sendsFrom(w, id, siblingId).some((r) => r.status === "pending"), 60_000)
+        const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, siblingId)!.r
+        const pane = ((JSON.parse(runtime) as { id?: string }).id ?? "").split("/")[1] ?? ""
+        await herdr(socket, "pane.close", { pane_id: pane })
+        await until("the send failed", () => sendsFrom(w, id, siblingId).some((r) => r.status === "failed"), 60_000)
+        const notices = () =>
+          rows<{ status: string; sender: string | null }>(
+            w,
+            "SELECT status, sender_session_id AS sender FROM inbox WHERE recipient_session_id = ? AND kind = 'notice' AND instr(content, 'was not delivered') > 0",
+            id,
+          )
+        await until(
+          "one notice to the sender, typed into it",
+          () => notices().some((n) => n.status === "delivered"),
+          60_000,
+        )
+        expect(notices().length === 1, `${notices().length} notices to the sender: ${JSON.stringify(notices())}`)
+        await until("the sender's model saw the notice", () => seen(sender).includes("was not delivered"), 60_000)
+      } finally {
+        main.stop()
+        held.release()
+        held.stop()
+        sender.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+]
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -388,4 +598,4 @@ const checks: ReadonlyArray<Check> = [
   },
 ]
 
-export default checks
+export default [...checks, ...sendChecks]

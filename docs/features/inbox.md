@@ -60,3 +60,24 @@ A send repeated with the same request id gets the same answer and makes one mess
 ## S39. Reports from one session merge
 
 Two reports from the same session that are waiting together reach the main agent as one message.
+
+## S45. A session sends to the main agent
+
+`vibest send` from a session to the main agent of its project queues one message from that session; the main agent gets
+it as an `<agent-message>` naming the session, once, whichever way its harness takes messages (a Claude main agent polls for it, a Pi main agent is pushed it).
+
+## S46. A session sends to a sibling
+
+`vibest send` from a session to another session of the same project is typed into that session once it is idle, as
+the input of its next turn; it reads as an `<agent-message>` naming the sender, unless the sender gave the session its
+task.
+
+## S47. A send stays inside its project
+
+`vibest send` from a session to a session of another project is refused, and to an archived session is refused with the
+id of the project's main agent; neither queues anything.
+
+## S48. An undeliverable send goes back to its sender
+
+When the session a send was meant for ends before the message reaches it, the message is not delivered and its sender
+is told so in a notice that holds the message.
