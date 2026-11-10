@@ -1,0 +1,14 @@
+import { Db } from "@vibest/core/db"
+import { Effect, FileSystem } from "effect"
+
+export const projectOf = (directory: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db
+    return (yield* db.projectAt(directory))?.id ?? (yield* db.createProject(directory, []))
+  })
+
+export const tempDirectory = (prefix: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix }))
+  }).pipe(Effect.orDie)

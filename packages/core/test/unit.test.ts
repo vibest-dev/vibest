@@ -6,9 +6,8 @@ import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { ID, newId, shortId } from "@vibest/schema/id"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem } from "effect"
 
-import * as Platform from "#platform"
-
-import { tempDirectory } from "./fakes.ts"
+import { tempDirectory } from "./lib/directory.ts"
+import * as Platform from "./platform/bun.ts"
 
 describe("ids", () => {
   it.effect("a new id is a UUIDv4; one whose first 8 characters are taken is drawn again", () =>

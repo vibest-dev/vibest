@@ -305,6 +305,8 @@ export class Sessions extends Context.Service<
         )
         const adapter = yield* harnesses.get(session.harnessId)
         const pluginDir = yield* harness.plugin(adapter.id)
+        const id = session.harnessSessionId
+        const resumeThis = resume && id !== null && (yield* db.canResumeConversation(session.id, id))
         return [
           adapter.binary,
           ...adapter.launchArgs({
@@ -313,8 +315,8 @@ export class Sessions extends Context.Service<
             systemPromptFile: file,
             provider: session.provider,
             model: session.model,
-            sessionId: session.harnessSessionId,
-            resume,
+            sessionId: id,
+            resume: resumeThis,
             pluginDir,
             vibest,
             env: vibestEnv(session),
@@ -832,6 +834,7 @@ export class Sessions extends Context.Service<
           Effect.gen(function* () {
             yield* db.patchLive(main.id, { ready: null })
             const root = main.projectDirectory ?? (yield* db.projectDirectory(main.projectId)) ?? ""
+            const savedId = main.harnessSessionId
             const command = yield* coordinatorCommand({
               harness: main.harnessId,
               root,
@@ -839,7 +842,8 @@ export class Sessions extends Context.Service<
               model: main.model,
               session: Effect.succeed({
                 sessionId: main.id,
-                harnessSessionId: main.harnessSessionId,
+                harnessSessionId:
+                  savedId !== null && (yield* db.canResumeConversation(main.id, savedId)) ? savedId : null,
                 projectId: main.projectId,
                 ...(main.runtime && main.address ? { runtime: runtimeEnv(main.runtime, main.address) } : {}),
               }),
@@ -853,8 +857,6 @@ export class Sessions extends Context.Service<
             Effect.provideService(FileSystem.FileSystem, fs),
             Effect.provideService(Path.Path, path),
           ),
-        worktreeOf,
-        withPlatform: (effect) => effect.pipe(Effect.provideContext(platform)),
         awaitReady,
         prompt: (h, session, terminal, text) =>
           prompt(h, session, terminal, text).pipe(Effect.provideContext(platform)),

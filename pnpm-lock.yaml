@@ -319,6 +319,13 @@ importers:
       effect:
         specifier: 4.0.2
         version: 4.0.2
+    devDependencies:
+      '@effect/platform-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
+      '@effect/sql-sqlite-bun':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
 
   packages/effect-herdr-core-sdk:
     dependencies:

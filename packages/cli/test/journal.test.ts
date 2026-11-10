@@ -408,6 +408,34 @@ describe("journal projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
+  it.effect("a first placeholder that fails to launch stays the session's process when there is no other", () =>
+    Effect.gen(function* () {
+      const { journal, sql } = yield* ledger
+      const placeholder = yield* journal.commit(
+        Effect.gen(function* () {
+          yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
+          yield* journal.emit(Catalog["session.created"], {
+            projectId: P,
+            sessionId: SUB,
+            data: { role: "subagent", name: "s", directory: "", archiveOnCompletion: false },
+          })
+          const id = yield* journal.emit(Catalog["process.started"], {
+            sessionId: SUB,
+            data: { harness: "pi", runtime: "herdr" },
+          })
+          yield* journal.emit(Catalog["process.ended"], {
+            sessionId: SUB,
+            data: { process: id, reason: "launch_failed" },
+          })
+          return id
+        }),
+      )
+      assert.deepStrictEqual(yield* rowsOf(sql, `SELECT process_id FROM session WHERE id = '${SUB}'`), [
+        { processId: placeholder },
+      ])
+    }).pipe(Effect.provide(memory())),
+  )
+
   it.effect("a second live process for one session fails the transaction", () =>
     Effect.gen(function* () {
       const { sql, journal } = yield* story
