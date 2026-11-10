@@ -205,6 +205,17 @@ const checks: ReadonlyArray<Check> = [
           auto,
         )
         expect(waiting?.n === 0, `rows still waiting for the archived session: ${waiting?.n}`)
+        const ended = (type: string) =>
+          row<{ n: number }>(
+            w,
+            "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = ? AND data ->> '$.reason' = 'archived'",
+            auto,
+            type,
+          )?.n
+        expect(
+          ended("session.ended") === 1 && ended("process.ended") === 1,
+          `archived events: session ${ended("session.ended")}, process ${ended("process.ended")}`,
+        )
         const old = await w.vibest(["run", "pi", "--archive-on-completion", "--", "x"], { cwd: p.repo, env: p.env })
         expect(old.code !== 0, "--archive-on-completion was accepted")
         const ready = async (task: string) => {
