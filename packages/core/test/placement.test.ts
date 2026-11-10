@@ -62,7 +62,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
         },
       })
 
-      yield* PubSub.publish(herdr.events, { type: "reset", machine: "local" })
+      yield* PubSub.publish(herdr.events, { type: "reset" })
       yield* until(herdr.callsTo("present"), (calls) => calls.length > 1)
 
       yield* writeResult(id, "pi", { text: "status: completed" })

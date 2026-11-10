@@ -7,13 +7,6 @@ import { assert, describe, it } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
-import * as Server from "@vibest/server/server"
-import { Effect, FileSystem, Layer } from "effect"
-import { TestClock } from "effect/testing"
-
-import * as Platform from "#platform"
-
-import { ARCHIVE_ROOTS, copyHerdrPlugin } from "../scripts/archive-layout.ts"
 import {
   ACTIONS,
   formatUsage,
@@ -27,7 +20,14 @@ import {
   perform,
   projectDirectory,
   type Verb,
-} from "../src/herdr-plugin.ts"
+} from "@vibest/runtime-herdr/commands"
+import * as Server from "@vibest/server/server"
+import { Effect, FileSystem, Layer } from "effect"
+import { TestClock } from "effect/testing"
+
+import * as Platform from "#platform"
+
+import { ARCHIVE_ROOTS, copyHerdrPlugin } from "../scripts/archive-layout.ts"
 import { FakeRuntime, makeRepository, projectOf, runVibest, stopRecorded, tempDirectory, testLayer } from "./fakes.ts"
 
 const ctx = (patch: Partial<PluginContext> = {}): PluginContext => ({

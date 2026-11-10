@@ -44,11 +44,10 @@ export const runtimeContract = (
 ): Effect.Effect<void, ContractError, Scope.Scope> =>
   Effect.gen(function* () {
     const timeout = Duration.fromInputUnsafe(options.timeout ?? "15 seconds")
-    const local: Runtime.Machine = { id: "local" }
     const marker = `vbt-contract-${Math.random().toString(16).slice(2, 8)}`
     const ran = (word: string) => `printf 'vbt-%s-${word}\n' "$VBT_CONTRACT"`
 
-    const shown = yield* runtime.status(local)
+    const shown = yield* runtime.status()
     yield* that(
       "status",
       shown.status === "online" || shown.status === "offline" || shown.status === "blocked",
@@ -62,7 +61,7 @@ export const runtimeContract = (
       Effect.catchCause(() => Effect.void),
     )
 
-    const terminal = yield* runtime.open(local, {
+    const terminal = yield* runtime.open({
       project: options.cwd,
       cwd: options.cwd,
       argv: ["/bin/sh"],
@@ -115,17 +114,8 @@ export const runtimeContract = (
 
     if (runtime.present !== undefined) yield* runtime.present(terminal, { contract: marker })
 
-    if (runtime.exec !== undefined) {
-      const ran = yield* runtime.exec(local, ["printf", "contract-exec"], options.cwd)
-      yield* that(
-        "exec",
-        ran.code === 0 && ran.output.includes("contract-exec"),
-        `printf contract-exec gave code ${ran.code} and ${JSON.stringify(ran.output)}`,
-      )
-    }
-
     if (runtime.attach !== undefined) {
-      const argv = runtime.attach(local)
+      const argv = runtime.attach(undefined)
       yield* that(
         "attach",
         argv.every((part) => typeof part === "string" && part !== ""),
@@ -133,7 +123,7 @@ export const runtimeContract = (
       )
     }
 
-    const ended = yield* runtime.open(local, {
+    const ended = yield* runtime.open({
       project: options.cwd,
       cwd: options.cwd,
       argv: ["/bin/sh", "-c", "exit 3"],

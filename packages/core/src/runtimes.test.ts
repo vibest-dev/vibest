@@ -77,10 +77,10 @@ describe("runtime events", () => {
     Effect.gen(function* () {
       const runtimes = yield* Runtimes
       const exit = yield* Effect.exit(
-        runtimes.online(
-          { ...runtime(Stream.never), status: () => Effect.die("status exploded") } as Runtime.RuntimeDefinition,
-          { id: "local" },
-        ),
+        runtimes.online({
+          ...runtime(Stream.never),
+          status: () => Effect.die("status exploded"),
+        } as Runtime.RuntimeDefinition),
       )
       const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
       assert.ok(error instanceof NoRuntime)
@@ -95,9 +95,7 @@ describe("runtime events", () => {
     Effect.gen(function* () {
       const runtimes = yield* Runtimes
       const exit = yield* Effect.exit(
-        runtimes.online({ ...runtime(Stream.never), status: () => Effect.interrupt } as Runtime.RuntimeDefinition, {
-          id: "local",
-        }),
+        runtimes.online({ ...runtime(Stream.never), status: () => Effect.interrupt } as Runtime.RuntimeDefinition),
       )
       assert.strictEqual(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause), true)
     }).pipe(Effect.provide(Runtimes.layer), Effect.provide(Bus.layer), Effect.provide(hostEnv), Effect.scoped),

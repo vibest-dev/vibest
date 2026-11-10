@@ -2,6 +2,7 @@ import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
 
 import { Harnesses } from "./harness.ts"
 import { Layout, VibestCommand } from "./paths.ts"
+import { Runtimes } from "./runtimes.ts"
 
 export interface ToolCall {
   readonly tool: string
@@ -199,23 +200,28 @@ const vibestArgs = (vibest: ReadonlyArray<string>, argv: ReadonlyArray<string>) 
   return vibest.every((p, i) => argv[i] === p) ? argv.slice(vibest.length) : undefined
 }
 
-const HERDR_CONTROL = new Set(["agent", "pane", "tab", "workspace", "worktree", "server", "session"])
+const RUNTIME_CONTROL = new Set(["agent", "pane", "tab", "workspace", "worktree", "server", "session"])
 const USER_MACHINE_COMMANDS = new Set(["connect", "machine"])
 const GH_UNSAFE = new Set(["alias", "extension", "ext", "config", "auth"])
 const firstWord = (words: ReadonlyArray<string>) => words.find((w) => !w.startsWith("-")) ?? ""
+
+const loadedRuntimePrograms = Effect.flatMap(Runtimes, (runtimes) =>
+  Effect.map(runtimes.all, (all) => new Set(all.map((runtime) => runtime.id))),
+)
 
 export const shellBlock = (
   command: string,
   vibest: ReadonlyArray<string>,
   coordinator: boolean,
   harnessClis: ReadonlySet<string> = new Set(),
+  runtimePrograms: ReadonlySet<string> = new Set(),
 ): string | undefined => {
   for (const p of programsOf(command)) {
     const [program = "", ...rest] = p.argv
     const name = base(program)
-    if (name === "herdr" && HERDR_CONTROL.has(firstWord(rest)))
-      return "Agents must not control herdr agents, panes, tabs, workspaces or worktrees; vibest manages them."
-    if (name === "herdr" && !coordinator) return "Sessions do not run herdr; vibest manages it."
+    if (runtimePrograms.has(name) && RUNTIME_CONTROL.has(firstWord(rest)))
+      return "Agents must not control a terminal runtime's agents, panes, tabs, workspaces or worktrees; vibest manages them."
+    if (runtimePrograms.has(name) && !coordinator) return "Sessions do not run a terminal runtime; vibest manages it."
     if (coordinator && harnessClis.has(name))
       return `The coordinator does not start ${name} itself: it would inherit the coordinator's identity and report its turns as the coordinator's. Start agents with vibest run.`
     if (coordinator && name === "gh" && GH_UNSAFE.has(firstWord(rest)))
@@ -304,7 +310,11 @@ export const toolPath = (raw: string, base: string, home: string) =>
 
 export type Rules = (
   call: ToolCall,
-) => Effect.Effect<string | undefined, Config.ConfigError, Layout | Path.Path | FileSystem.FileSystem | Harnesses>
+) => Effect.Effect<
+  string | undefined,
+  Config.ConfigError,
+  Layout | Path.Path | FileSystem.FileSystem | Harnesses | Runtimes
+>
 
 const inside = (p: string, dir: string, sep: string) => p === dir || p.startsWith(dir + sep)
 
@@ -345,7 +355,7 @@ export const coordinator: Rules = (call) =>
       const command = shellCommand(call.input)
       if (command === undefined) return "The shell call has no command string; refused."
       const clis = new Set((yield* Harnesses).all.map((definition) => definition.binary))
-      return shellBlock(command, yield* VibestCommand, true, clis)
+      return shellBlock(command, yield* VibestCommand, true, clis, yield* loadedRuntimePrograms)
     }
     if (!fileWritingTool(call.tool)) return undefined
     const own = yield* projectDir
@@ -385,7 +395,7 @@ export const session: Rules = Effect.fn("Guard.session")(function* (call: ToolCa
   if (SHELL_TOOLS.has(tool)) {
     const command = shellCommand(call.input)
     if (command === undefined) return "The shell call has no command string; refused."
-    const reason = shellBlock(command, yield* VibestCommand, false)
+    const reason = shellBlock(command, yield* VibestCommand, false, new Set<string>(), yield* loadedRuntimePrograms)
     if (reason) return reason
     const search = SHELL_SEARCH.test(command)
     const cwd = yield* physical(call.cwd)

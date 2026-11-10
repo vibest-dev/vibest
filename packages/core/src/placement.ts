@@ -26,7 +26,7 @@ import {
   projectRoot,
 } from "./project-create.ts"
 import { isUsageLimitError } from "./results.ts"
-import { type Machine, type RuntimesShape, type Runtime, type Terminal } from "./runtimes.ts"
+import { addressOf, type RuntimesShape, type Runtime, type Terminal } from "./runtimes.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { removeSystemPrompt, type SystemPromptDirUnsafe } from "./system-prompt.ts"
 import {
@@ -140,7 +140,7 @@ export const sessionPlacement = (deps: {
 
   const openTerminal = Effect.fn("Sessions.openTerminal")(function* (
     h: Runtime,
-    machine: Machine,
+    target: string | undefined,
     session: SessionRow,
     input: {
       readonly project: string
@@ -161,8 +161,8 @@ export const sessionPlacement = (deps: {
       harnessSessionId: session.harnessSessionId,
     }
     yield* db.updateSession(session.id, { ...choice, address: { machine: session.address.machine, id: "" } })
-    const terminal = yield* h
-      .open(machine, {
+    const opened = yield* h
+      .open({
         project: input.project,
         cwd: input.cwd,
         argv: input.argv,
@@ -171,8 +171,10 @@ export const sessionPlacement = (deps: {
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),
         ...(remote ? { remote: true } : {}),
+        ...(target !== undefined ? { target } : {}),
       })
       .pipe(Effect.onError(() => (input.endedByCaller ? Effect.void : db.endProcess(session.id, "launch_failed"))))
+    const terminal = addressOf(opened)
     const at = yield* Clock.currentTimeMillis
     yield* db.updateSession(session.id, { ...choice, address: terminal, startedAt: at, exitedAt: null })
     return terminal
@@ -193,7 +195,7 @@ export const sessionPlacement = (deps: {
 
   const launchRaw = Effect.fn("Sessions.launch")(function* (
     h: Runtime,
-    machine: Machine,
+    target: string | undefined,
     session: SessionRow,
     root: string,
     firstPrompt: string,
@@ -245,7 +247,7 @@ export const sessionPlacement = (deps: {
     yield* undoOnFailure(Effect.void, () => removeSystemPrompt(session.id))
     const argv = yield* deps.launchArgv(session, false)
     const terminal = yield* openOrMove(
-      openTerminal(h, machine, session, {
+      openTerminal(h, target, session, {
         project: root,
         cwd: worktree,
         argv,
@@ -260,13 +262,13 @@ export const sessionPlacement = (deps: {
   }, Effect.scoped)
   const launch = (
     h: Runtime,
-    machine: Machine,
+    target: string | undefined,
     session: SessionRow,
     root: string,
     firstPrompt: string,
     options: LaunchOptions = {},
   ) =>
-    launchRaw(h, machine, session, root, firstPrompt, options).pipe(
+    launchRaw(h, target, session, root, firstPrompt, options).pipe(
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           const e = Cause.squash(cause)
@@ -324,12 +326,11 @@ export const sessionPlacement = (deps: {
     })
 
   const resume = Effect.fn("Sessions.resume")(function* (h: Runtime, session: SessionRow) {
-    const machine: Machine = { id: session.address.machine }
     const { root, cwd } = yield* locate(session)
     const terminal = yield* undoOnFailure(
       deps
         .launchArgv(session, true)
-        .pipe(Effect.flatMap((argv) => openTerminal(h, machine, session, { project: root, cwd, argv }))),
+        .pipe(Effect.flatMap((argv) => openTerminal(h, undefined, session, { project: root, cwd, argv }))),
       (terminal) => h.close(terminal).pipe(Effect.ignore),
     )
     yield* show(h, session, terminal, root)

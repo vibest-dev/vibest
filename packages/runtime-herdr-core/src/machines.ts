@@ -141,16 +141,16 @@ const NONE: ReadonlyMap<string, Terminal> = new Map()
 export const locate = (
   hc: Hc,
   socket: string,
-  machine: VibestPlugin.Runtime.Machine,
+  peer: VibestPlugin.Runtime.Peer,
   sessions: ReadonlyMap<string, string>,
 ): Effect.Effect<VibestPlugin.Runtime.Located> =>
   Effect.gen(function* () {
-    const core = machine.link?.core
-    if (core === undefined) return { missing: false, terminals: NONE, note: `${machine.id} gave no hc link` }
+    const core = peer.link.core
+    if (core === undefined) return { missing: false, terminals: NONE, note: `${peer.id} gave no hc link` }
     const row = (yield* hc.call("machine.list", {})).machines.find((r) => r.id === core)
     if (row === undefined) return { missing: true, terminals: NONE }
     if (row.state !== "connected") {
-      const note = stateNote(machine.id, row)
+      const note = stateNote(peer.id, row)
       return {
         missing: false,
         terminals: NONE,
@@ -164,7 +164,7 @@ export const locate = (
     for (const t of (yield* hc.call("terminal.list", { labels: { [LABEL.runtime]: KIND } })).terminals) {
       const session = t.labels[LABEL.session]
       if (t.address.startsWith(`${row.name}/`) && session !== undefined && wanted.has(session))
-        terminals.set(session, { machine: "local", id: terminalId(socket, t.address) })
+        terminals.set(session, { id: terminalId(socket, t.address) })
     }
     return {
       missing: false,

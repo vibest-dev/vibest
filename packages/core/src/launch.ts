@@ -3,7 +3,7 @@ import { Effect, FileSystem } from "effect"
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
 import { Layout, VibestCommand } from "./paths.ts"
-import { type Machine, type Runtime } from "./runtimes.ts"
+import { addressOf, type Runtime } from "./runtimes.ts"
 import { LaunchFailed } from "./sessions.ts"
 import {
   coordinatorSystemPrompt,
@@ -116,7 +116,7 @@ export const flagValue = (argv: ReadonlyArray<string>, name: string) => {
 
 export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(function* (
   h: Runtime,
-  machine: Machine,
+  target: string | undefined,
   input: {
     readonly root: string
     readonly label: string
@@ -126,14 +126,15 @@ export const openInParentWorkspace = Effect.fn("Launch.openInParentWorkspace")(f
   },
 ) {
   const terminal = yield* h
-    .open(machine, {
+    .open({
       project: input.root,
       cwd: input.root,
       argv: ["sh", "-c", '"$@"; exec "${SHELL:-/bin/sh}"', "sh"],
       env: { ...input.env, VIBEST_HOME: input.home },
       label: input.label,
       ...(input.focus === true ? { focus: true } : {}),
+      ...(target !== undefined ? { target } : {}),
     })
     .pipe(Effect.mapError((e) => new LaunchFailed({ message: e.message })))
-  return terminal
+  return addressOf(terminal)
 })

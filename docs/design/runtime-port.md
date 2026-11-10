@@ -1,7 +1,7 @@
 # Runtime plugins and machines
 
 The agent runtime is where Agents' terminals live: herdr, rex and tern today, other products later. vibest owns the
-flow (who runs, where, what came back); a runtime owns terminals and how to reach a machine. The API is
+flow (who runs, where, what came back); a runtime owns the terminals of its own machine. The API is
 [`packages/plugin/src/runtime.ts`](../../packages/plugin/src/runtime.ts); `packages/runtime-herdr` is a runtime plugin
 built on it. This replaces the herdr-shaped `RuntimeClient` (architecture §10) and answers open
 question 3 (§12, §17).
@@ -16,8 +16,9 @@ question 3 (§12, §17).
    (`context.runtime.transform((editor) => editor.add(definition))`, beside `context.agent.hook`); another plugin may
    `update` or `remove` it the same way, and removing the plugin restores what it changed. It is a provider core calls, not a hook listener. herdr, rex and tern ship as builtin
    runtime plugins; a new product is a new plugin, never a core change.
-3. **vibest saves machines, the runtime connects.** Core has no ssh, Tailscale or socket code. Connections are the
-   plugin's: it opens, reuses and re-opens them per machine in its own scope.
+3. **Machines are vibest's, terminals are the runtime's.** Every machine runs its own vibestd, and vibestds reach
+   each other over vibest's own ssh pipe (§6). A runtime manages only the terminals of its own machine; the
+   connection to its product (socket, server) is the plugin's, opened and re-opened in its own scope.
 4. **Connections go outward only.** vibestd calls runtimes; nothing on a machine calls back.
 5. **The truth about a turn comes from vibest's harness integration**, not from the runtime.
 
@@ -27,50 +28,47 @@ question 3 (§12, §17).
 | ----------------------------------------------------------- | ---------------- | ----------------------- | -------------- |
 | runtime on a machine                                        | session (socket) | server (`/api/control`) | session daemon |
 | Project's terminals kept together (the runtime decides how) | workspace        | session                 | session        |
-| **Terminal** `{ machine, id }`                              | pane             | block                   | block          |
+| **Terminal** `{ id }`                                       | pane             | block                   | block          |
 
-An Agent row stores `runtime { kind, address: Terminal }` (JSON, no DDL); equal terminals encode to equal JSON.
+A runtime manages only the terminals of the machine its vibestd runs on, so no member takes a machine. An Agent row
+stores `runtime { kind, address }` (JSON, no DDL), the address being the terminal id with machine `local`; equal
+terminals encode to equal JSON.
 
 ## 3. The interface
 
-Required: `id`, `status(machine)`, `events` (exited, state, reset, and seen from a runtime with `seen`: core reads a
+Required: `id`, `status()`, `events` (exited, state, reset, and seen from a runtime with `seen`: core reads a
 runtime only when one arrives, and once at start and on a reset), and on terminals `open`, `send`, `read`, `process`, `close`. `open`'s input
 beside the placement (`project`, `cwd`, `argv`, `env`, `label`) carries `near` (beside that terminal when possible),
 `split` (a split beside `near` instead of a tab of its own, `vibest run --peer`), `focus` (the user is waiting to
-see it) and `remote` (another machine's vibestd started the agent, `Peer.Spawn`; herdr then opens it in its default
+see it), `target` (where the caller sits in this runtime, the value its own `caller.target` gave; herdr: the
+caller's herdr session or socket) and `remote` (another machine's vibestd started the agent, `Peer.Spawn`; herdr then opens it in its default
 session `default` and ignores `near`); each is the runtime's to honor as it can.
 
 `name` is optional: the word a place uses for this runtime. A place reads `<name> <address>`, or `<name> (not placed)` when the address is empty, and a remote address keeps its `@machine`. With no `name`, the place uses `id`. herdr leaves `name` unset, so a place says `herdr`. herdr-core sets `herdr-core` and keeps id `hc` (`--runtime hc`, and the id stored on a row, do not change).
 
-| Optional                     | herdr                                                                                                            | rex                            | tern                                     | Core's fallback when absent                    |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------- | ---------------------------------------------- |
-| `state(terminal)`            | detected                                                                                                         | OSC 7501 the program wrote     | OSC 7501 (window side)                   | harness integration only                       |
-| `session(terminal)`          | the agent record's conversation id                                                                               | —                              | —                                        | the harness's reports only                     |
-| `events` (required)          | `events.subscribe`                                                                                               | `session.attach_all`           | `tern events`                            | none: required                                 |
-| `exec(machine, argv, cwd)`   | —                                                                                                                | detached block, `child_exited` | `new tab --keep-open`, `wait`, `capture` | hidden terminal: `open`, wait for exit, `read` |
-| `present(terminal, info)`    | `pane.report_metadata`                                                                                           | block/window labels            | `rename`                                 | the `label` given to `open`                    |
-| `seen`, `see`                | —                                                                                                                | —                              | —                                        | never `done` in Watch                          |
-| `prepare(machine)`           | `herdr machine add <target> --remote-session vibest`                                                             | `rex hosts add`                | `tern remote setup`                      | the user prepares the machine                  |
-| `attach(machine)`            | `herdr --session vibest`                                                                                         | — (Rex.app)                    | `tern`                                   | none                                           |
-| `link()`                     | `{session, version}`: `default`, where remote agents open; `ping` on its socket                                  | —                              | —                                        | other machines cannot show its terminals       |
-| `locate(machine, sessions)`  | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                    | —                              | —                                        | remote rows: "cannot be shown here"            |
-| `doctor(machine, harnesses)` | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs                 | what tern needs                          | `vibest doctor` shows `status` only            |
+| Optional                  | herdr                                                                                                            | rex                        | tern                   | Core's fallback when absent              |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------- | ---------------------------------------- |
+| `state(terminal)`         | detected                                                                                                         | OSC 7501 the program wrote | OSC 7501 (window side) | harness integration only                 |
+| `session(terminal)`       | the agent record's conversation id                                                                               | —                          | —                      | the harness's reports only               |
+| `events` (required)       | `events.subscribe`                                                                                               | `session.attach_all`       | `tern events`          | none: required                           |
+| `present(terminal, info)` | `pane.report_metadata`                                                                                           | block/window labels        | `rename`               | the `label` given to `open`              |
+| `seen`, `see`             | —                                                                                                                | —                          | —                      | never `done` in Watch                    |
+| `attach(target)`          | `herdr --session vibest`                                                                                         | — (Rex.app)                | `tern`                 | none                                     |
+| `link()`                  | `{session, version}`: `default`, where remote agents open; `ping` on its socket                                  | —                          | —                      | other machines cannot show its terminals |
+| `locate(peer, sessions)`  | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                    | —                          | —                      | remote rows: "cannot be shown here"      |
+| `doctor(harnesses)`       | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs             | what tern needs        | `vibest doctor` shows `status` only      |
 
 How the required members map: herdr `tab.create` (env) + `agent.start`, `pane.send_*`, `pane.read`,
 `pane.process_info`, `pane.close`; rex `session.new_split` (`command`, env via `/usr/bin/env K=V`), `block.event`,
 `terminal.format`, `terminal.process`, `block.close`; tern `split|new tab -- argv` (env via `/usr/bin/env`), `send`,
-`capture`, `process --json`, `close`. Remote: herdr `ssh <target> herdr --session vibest remote-api-bridge`
-(herdr ≥ 0.9.1 both sides), rex `-S <host>` over Tailscale, tern `tern ssh <target> tern …`.
+`capture`, `process --json`, `close`.
 
-`link()` and `locate(machine, sessions)` let one machine show another's terminals (hc implements both:
+`link()` and `locate(peer, sessions)` let one machine show another's terminals (hc implements both:
 [runtime-herdr-core.md](runtime-herdr-core.md), [multi-machine.md](multi-machine.md#terminals-on-other-machines)):
 `link` is what the same runtime elsewhere needs to reach this machine's terminals, sent in `Peer.Hello`; `locate`
-gets each session id with the terminal id that machine reported for it, and answers `missing` when the runtime has no
+gets the peer (`{ id: its name, target: its ssh target, link: what it reported }`) and each session id with the terminal id that machine reported for it, and answers `missing` when the runtime has no
 machine with the link's id, else the local terminal ids of those sessions,
 `as` (its name for the machine) and a `note` when it cannot show them. It is read-only and runs inside `vibest ls`.
-
-Core helpers over the interface, so no plugin writes them: `readFile(machine, path)` (local: the file system; remote:
-`exec` `cat`), and the hidden-terminal `exec`.
 
 herdr behaviour the in-memory fake (`packages/cli/test/fake-runtime.ts`) models: an agent's record outlives its
 process, so `session` still answers after the harness exited while `state` answers `not_found`; a pane id handed out
@@ -88,8 +86,8 @@ project's workspace; any other key is the caller's own, and a runtime shows only
 
 Every runtime plugin passes the shared contract suite (`@vibest/plugin/testing` `runtimeContract`) against a real
 local instance: the required members, then each optional one present. It is framework-free and fails with
-`ContractFailure` naming the member and why, so a test file or a CLI check can drive it. `prepare` and `attach` are
-checked as members only, never run. The suite types into the shell `open` started, so a read proves the program ran
+`ContractFailure` naming the member and why, so a test file or a CLI check can drive it. `attach` is
+checked as a member only, never run. The suite types into the shell `open` started, so a read proves the program ran
 rather than its own echoed command; it follows `events` from the start, so a program that ends on its own is seen
 without a `close`, and `process` on it reports `running: false`, then `not_found` once the terminal is gone.
 
@@ -186,45 +184,44 @@ claim that every provider 401 opens an auth dialog.
 
 ## 6. Machines
 
-```
-vibest machine add <id> <target> [--runtime <kind>] [--label <label>]   # again with another --runtime adds it
-vibest machine list [--json]     # id, runtime, target, status, platform, vibest version, harnesses there
-vibest machine check [<id>]
-vibest machine remove <id>       # forgets it; stops nothing on the machine
-```
+A runtime manages only the terminals of the machine its vibestd runs on. Machines belong to vibest, not to runtimes:
+every machine runs its own vibestd, and machine A reaches machine B's vibestd over vibest's own ssh pipe
+([multi-machine.md](multi-machine.md)). So no member takes a machine, a `Terminal` is only its id, `reset` names no
+machine, and vibest never installs, prepares or reaches another machine through a runtime.
 
-`add`, stopping at the first failure with its reason:
+- `vibest machine add <name> <ssh target>`, `vibest machine ls` and `vibest machine rm <name>` (user only) are core's:
+  `add` runs `Ping` and `Peer.Hello` over `ssh <target> … vibest connect` and stores the machine row. Which runtimes
+  and harnesses B has is B's own `vibest.json`; nothing is copied there.
+- `status()` is the runtime on this machine. `vibest machine ls` shows B's runtimes from B's last `Peer.Hello`, which
+  B's vibestd read from its own runtimes.
+- A runtime takes part in other machines only as an optional view of B's terminals from A: `link()` (what the same
+  runtime on A needs to reach B's terminals, sent in `Peer.Hello`), `locate(peer, sessions)` (§3), and the machine hooks
+  `connect` and `remove`, with which a runtime plugin keeps its own record of B (an hc machine, a saved herdr
+  machine) in step with vibest's machine list. Without them B's rows read "cannot be shown here", and
+  `vibest peek <name>/<id>` reads B's terminal through B's vibestd.
 
-1. The runtime's `prepare(machine)` when it has one (an interactive step it needs is passed through to the terminal).
-2. `status(machine)` is online.
-3. On the machine, through `exec`: `~/.vibest/runtime/<version>/` (the vibest binary for its platform and the harness
-   integrations, copied from this install, checksum, smoke test, atomic move); probe `command -v pi claude
-   cursor-agent git` in a login shell.
-4. Save `machines.<id> { label, runtimes: { <kind>: <target> } }` in the user configuration and print what the probe
-   found. A machine can have several runtimes; `add` with another `--runtime` adds one.
+## 7. Running an Agent on another machine
 
-`add` again refreshes 1–3.
+- `vibest run --machine <name>` (the user or the main agent) sends `Peer.Spawn` to B's vibestd with the project's
+  repository identity, its `HEAD`, and a runtime kind: `--runtime`, else the runtime of the caller's terminal, else
+  that of A's main agent. The caller's environment is not sent; it names a terminal on A. A stores nothing for the
+  session.
+- B starts the agent as a local start in its own runtime of that kind (`NoRuntime` when it has none), with its own
+  `agent.start.before` hooks. B finds its checkout of the project by repository identity, needs the `HEAD` commit
+  there ("push first"), and makes the worktree as for a local agent; work comes back by the agent pushing its branch.
+  herdr opens an agent another machine started in its default session `default` (`open`'s `remote`).
+- B reports the agent's results to A's main agent through B's outbox; `vibest result|send|interrupt|archive|peek
+  <name>/<id>` are forwarded to B. A call to a machine that is not connected fails at once; nothing is queued.
+- `agent.start.before` on A lists only this machine in `machines[]`, with its runtimes and their `status()`; a hook
+  that sets another `machine` does not move the start there. Core checks after the chain that the chosen runtime is
+  online here, else refuses with the runtime's reason.
 
-## 7. Running an Agent on a machine
+Out of scope now: Agents on another machine starting their own subagents there, load balancing.
 
-- `agent.start.before` gets `machines[]` (`{ machine, runtimes: [{ kind, status }], harnesses }`) and may set
-  `machine` and `runtime`; the builtin plugin keeps `local` and the parent's runtime, unless `--peer` already set the
-  peer's (§4). Core checks after the chain:
-  the runtime online on that machine, harness there; else refuses with the reason.
-- The Project must have a git remote, and the machine uses the same remote. The mirror is
-  `<remote VIBEST_HOME>/projects/<project id>`: cloned on first use, fetched after. The start commit must already be on the
-  remote, else refused ("push first"). The Workspace is `git worktree add --detach <commit>` there, plus the
-  `.worktreeinclude` files (size-capped). Work comes back by the Agent pushing its branch, as locally.
-- Offline (`status` not online, or `unreachable` errors): the machine's Agents show `offline`, not failed; their
-  rounds stay open; on `reset` or the next online check core re-reads `process` and `state`, and takes any reported turn end.
-
-Out of scope now: Agents on a remote machine starting their own subagents, load balancing, password ssh.
-
-Core has one machine today, `local` (`core/runtimes.ts`): a runtime that registers or comes back publishes one
-`live.reset` for it, `readFile` reads the local file system (another machine will read through the runtime's `exec`,
-else the hidden-terminal fallback), and `machines[]` lists only `local`. A runtime with several machines publishes one
-reset per machine. The runtime registry follows every committed change: a definition that appears starts its event
-merge and a reset, one that is removed (its transform disposed or its plugin unloaded) stops its merge.
+Core follows only its own runtimes (`core/runtimes.ts`): a runtime that registers or comes back publishes one
+`live.reset`, and a terminal a runtime hands back is stored with machine `local`. The runtime registry follows every
+committed change: a definition that appears starts its event merge and a reset, one that is removed (its transform
+disposed or its plugin unloaded) stops its merge.
 
 ## 8. Order of work
 

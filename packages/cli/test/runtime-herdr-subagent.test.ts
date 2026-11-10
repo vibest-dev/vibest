@@ -28,9 +28,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
           const env = ConfigProvider.layer(ConfigProvider.fromUnknown({ HERDR_SOCKET_PATH: socketPath }))
           const cwd = fs.realpathSync(os.tmpdir())
           const open = (argv: ReadonlyArray<string>, vars: Record<string, string> = {}) =>
-            runtime
-              .open({ id: "local" }, { project: cwd, cwd, argv, env: vars, label: "harness" })
-              .pipe(Effect.provide(env))
+            runtime.open({ project: cwd, cwd, argv, env: vars, label: "harness" }).pipe(Effect.provide(env))
           return Effect.gen(function* () {
             const shellsPastP9 = 10
             for (let i = 0; i < shellsPastP9; i++) yield* open(["/bin/sh"])

@@ -124,7 +124,7 @@ export class FakeRuntime extends Context.Service<
       const mark = (terminal: string, f: (now: R.Seen) => R.Seen) =>
         markOf(terminal).pipe(
           Effect.flatMap((now) => Ref.update(marks, (map) => HashMap.set(map, terminal, f(now)))),
-          Effect.andThen(PubSub.publish(events, { type: "seen", terminal: { machine: "local", id: terminal } })),
+          Effect.andThen(PubSub.publish(events, { type: "seen", terminal: { id: terminal } })),
           Effect.asVoid,
         )
       let counter = 0
@@ -154,7 +154,7 @@ export class FakeRuntime extends Context.Service<
                     const after = Option.getOrThrow(HashMap.get(yield* Ref.get(agents), id))
                     yield* PubSub.publish(events, {
                       type: "state",
-                      terminal: { machine: "local", id },
+                      terminal: { id },
                       state: after.status,
                     })
                   }
@@ -301,7 +301,7 @@ export class FakeRuntime extends Context.Service<
               ? { status: "online" as const }
               : { status: "offline" as const, reason: options.offline },
           ),
-        open: (machine, input) =>
+        open: (input) =>
           call(
             "open",
             {
@@ -314,7 +314,7 @@ export class FakeRuntime extends Context.Service<
               split: input.split,
               focus: input.focus,
               ...(input.remote === true ? { remote: true } : {}),
-              ...(machine.target !== undefined ? { target: machine.target } : {}),
+              ...(input.target !== undefined ? { target: input.target } : {}),
             },
             input.env.VIBEST_SESSION_ID,
             Effect.gen(function* () {
@@ -359,9 +359,8 @@ export class FakeRuntime extends Context.Service<
                     if (agent.vibestSession === session && id !== paneId) next = HashMap.remove(next, id)
                 return next
               })
-              void machine
               if (session !== undefined) yield* (yield* Ref.get(onStarted))(session)
-              const terminal: Terminal = { machine: "local", id: paneId }
+              const terminal: Terminal = { id: paneId }
               return terminal
             }),
           ),
@@ -463,8 +462,7 @@ export class FakeRuntime extends Context.Service<
                 for (const id of group) gone.push(...(yield* shutWorkspace(id)))
               }
               yield* kill(gone)
-              if (options.statusEvents)
-                yield* PubSub.publish(events, { type: "exited", terminal: { machine: "local", id: terminal.id } })
+              if (options.statusEvents) yield* PubSub.publish(events, { type: "exited", terminal: { id: terminal.id } })
             }),
           ),
         present: (terminal, info) =>

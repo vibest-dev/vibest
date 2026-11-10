@@ -2,7 +2,9 @@ import type { Plugin } from "@vibest/plugin"
 import { claudePlugin, cursorPlugin, piPlugin } from "@vibest/plugin-harnesses"
 import { plugin as runtimeHerdrCore } from "@vibest/runtime-herdr-core/plugin"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
+import { herdrCommands } from "@vibest/runtime-herdr/commands"
 import { plugin as runtimeHerdr } from "@vibest/runtime-herdr/plugin"
+import type { Effect } from "effect"
 
 export interface Builtin {
   readonly source: string
@@ -25,4 +27,8 @@ export const pre: ReadonlyArray<Builtin> = [
   builtin(runtimeHerdrCore),
   builtin(runtimeHerdr),
   builtin(choicePlugin()),
+]
+
+export const commands = <E, R>(refuseAgent: (command: string) => Effect.Effect<void, E, R>) => [
+  herdrCommands(refuseAgent),
 ]

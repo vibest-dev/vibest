@@ -274,14 +274,14 @@ describe("runtime-herdr machines: remove", () => {
 })
 
 describe("runtime-herdr machines: locate", () => {
-  const machine = { id: "racknerd", target: "b-host", link: { session: "vibest" } }
+  const peer = { id: "racknerd", target: "b-host", link: { session: "vibest" } }
   const there = `vibest/w1:p3/${agentName(SESSION)}`
 
   it.effect("missing with no profile; with one, its label, from herdr machine list alone", () =>
     Effect.gen(function* () {
-      assert.isTrue((yield* locate(fake().cli, machine, new Map([[SESSION, there]]))).missing)
+      assert.isTrue((yield* locate(fake().cli, peer, new Map([[SESSION, there]]))).missing)
       const herdr = fake({}, [profile({ label: "racknerd/vibest" })])
-      const found = yield* locate(herdr.cli, machine, new Map())
+      const found = yield* locate(herdr.cli, peer, new Map())
       assert.deepStrictEqual(
         { ...found, terminals: [...found.terminals] },
         {
@@ -302,13 +302,13 @@ describe("runtime-herdr machines: locate", () => {
         const other = "99999999-2222-4333-8444-555555555555"
         const found = yield* locate(
           herdr.cli,
-          machine,
+          peer,
           new Map([
             [SESSION, there],
             [other, `work/w2:p1/${agentName(other)}`],
           ]),
         )
-        assert.deepStrictEqual(found.terminals.get(SESSION), { machine: "local", id: `${there}@racknerd/vibest` })
+        assert.deepStrictEqual(found.terminals.get(SESSION), { id: `${there}@racknerd/vibest` })
         assert.isFalse(found.terminals.has(other))
         assert.include(found.note!, "no enabled saved machine for that agent's herdr session on racknerd")
         assert.deepStrictEqual(herdr.calls, [["machine", "list", "--json"]])
@@ -318,10 +318,10 @@ describe("runtime-herdr machines: locate", () => {
   it.effect("a disabled profile and a failing herdr give a note, not missing", () =>
     Effect.gen(function* () {
       const asked = new Map([[SESSION, there]])
-      const disabled = yield* locate(fake({}, [profile({ enabled: false })]).cli, machine, asked)
+      const disabled = yield* locate(fake({}, [profile({ enabled: false })]).cli, peer, asked)
       assert.isFalse(disabled.missing)
       assert.include(disabled.note!, "herdr machine enable p0")
-      const failing = yield* locate(fake({ listFails: true }).cli, machine, asked)
+      const failing = yield* locate(fake({ listFails: true }).cli, peer, asked)
       assert.isFalse(failing.missing)
       assert.include(failing.note!, "herdr machine list here: boom")
     }),
@@ -330,8 +330,8 @@ describe("runtime-herdr machines: locate", () => {
 
 describe("runtime-herdr machines: remote terminal ids", () => {
   it("an id with @ names a pane on another machine and never parses as a local one", () => {
-    assert.isUndefined(parseTerminal({ machine: "local", id: `vibest/w1:p3/${agentName(SESSION)}@racknerd/vibest` }))
-    assert.deepStrictEqual(parseTerminal({ machine: "local", id: "vibest/w1:p3" }), {
+    assert.isUndefined(parseTerminal({ id: `vibest/w1:p3/${agentName(SESSION)}@racknerd/vibest` }))
+    assert.deepStrictEqual(parseTerminal({ id: "vibest/w1:p3" }), {
       session: "vibest",
       paneId: "w1:p3",
       name: undefined,

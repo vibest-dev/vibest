@@ -117,7 +117,7 @@ describe("the runtime registry", () => {
           terminal: "t1",
         })
         assert.includeMembers(dropped, ["HC_ID", "HERDR_ID"])
-        const exited = (id: string): RuntimeEvent => ({ type: "exited", terminal: { machine: "local", id } })
+        const exited = (id: string): RuntimeEvent => ({ type: "exited", terminal: { id } })
         const until = (type: "live.exited" | "live.drain") =>
           Effect.gen(function* () {
             const passed: Array<string> = []

@@ -1,8 +1,9 @@
+import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
-import { expect, fail, readDb, row, Skip, until, type World } from "../world.ts"
+import { binary, expect, fail, herdr, readDb, row, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 const needs = () => {
@@ -238,6 +239,115 @@ const checks: ReadonlyArray<Check> = [
         expect(after === before, `${after - before} sessions were created`)
       } finally {
         main.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "S40",
+    title:
+      "a terminal opened by a server that inherited a finished subagent's environment is refused a user command with a hint naming the session and the env -u way out, which then works; the subagent itself is refused",
+    run: async (w) => {
+      needs()
+      const envFile = path.join(w.root, "s40-agent-env.json")
+      const asAgent = path.join(w.root, "s40-agent.txt")
+      const hinted = path.join(w.root, "s40-hinted.txt")
+      const asUser = path.join(w.root, "s40-user.txt")
+      const main = recordingModel(() => reply("ok"))
+      const sub = recordingModel((messages) =>
+        messages.some((m) => m.role === "tool")
+          ? reply("done-s40\nstatus: completed")
+          : toolCall("call1", "bash", {
+              command: `perl -MJSON::PP -e 'print encode_json(\\%ENV)' > ${envFile}; ${binary} daemon import-check > ${asAgent} 2>&1`,
+            }),
+      )
+      let session = ""
+      const stale = `${w.herdrSession}-stale`
+      let server: ReturnType<typeof Bun.spawn> | undefined
+      try {
+        const m = await piMain(w, "stale-env", main.url)
+        session = m.session
+        const id = await runSub(w, m.repo, session, sub.url, "pi-stale-env-sub", "dump the environment")
+        await until(
+          "the subagent's result",
+          async () => ((await resultOf(w, m.repo, id))?.message ?? "").includes("done-s40"),
+          60_000,
+        )
+        const refused = await fs
+          .readFile(asAgent, "utf8")
+          .catch(() => fail(`the subagent's command did not run: ${JSON.stringify(sub.requests.at(-1)?.map(text))}`))
+        expect(refused.includes("Forbidden"), `the subagent ran a user command: ${refused}`)
+        await w.ok(["archive", id], { cwd: m.repo })
+        const agentEnv = JSON.parse(await fs.readFile(envFile, "utf8")) as Record<string, string>
+        expect(agentEnv.VIBEST_SESSION_ID === id, `captured VIBEST_SESSION_ID ${agentEnv.VIBEST_SESSION_ID}, not ${id}`)
+        server = Bun.spawn(["herdr", "server", "--session", stale], {
+          env: agentEnv,
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "pipe",
+        })
+        const socket = path.join(w.home, ".config", "herdr", "sessions", stale, "herdr.sock")
+        await until(
+          "the inherited herdr server",
+          () =>
+            fs.stat(socket).then(
+              () => true,
+              () => false,
+            ),
+          20_000,
+        ).catch(async (e: Error) => {
+          server?.kill()
+          fail(`${e.message}: ${await new Response(server?.stderr as ReadableStream).text()}`)
+        })
+        const workspace = await herdr(socket, "workspace.create", { cwd: m.repo, focus: false, label: "stale" })
+        const created = await herdr(socket, "tab.create", {
+          cwd: m.repo,
+          focus: true,
+          workspace_id: (workspace.workspace as { workspace_id: string }).workspace_id,
+        })
+        const pane = (created.root_pane as { pane_id: string }).pane_id
+        await until(
+          "the new terminal's shell",
+          async () => {
+            const info = await herdr(socket, "pane.process_info", { pane_id: pane })
+            const fg =
+              (info.process_info as { foreground_processes?: Array<{ name: string }> } | undefined)
+                ?.foreground_processes ?? []
+            return fg.length > 0 && fg.every((p) => /^-?(zsh|bash|sh|fish)$/.test(path.basename(p.name)))
+          },
+          30_000,
+        )
+        const typed = async (line: string, file: string) => {
+          await herdr(socket, "pane.send_text", {
+            pane_id: pane,
+            text: `${line} > ${file} 2>&1; echo "exit=$? session=$VIBEST_SESSION_ID" >> ${file}`,
+          })
+          await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
+          await until(
+            `${line} in the new terminal`,
+            async () => (await fs.readFile(file, "utf8").catch(() => "")).includes("exit="),
+            60_000,
+          )
+          return fs.readFile(file, "utf8")
+        }
+        const refusedHere = await typed(`${binary} machine ls`, hinted)
+        expect(refusedHere.includes(`session=${id}`), `the new terminal did not inherit the identity: ${refusedHere}`)
+        const wayOut = "env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest machine ls"
+        expect(
+          refusedHere.includes("Forbidden") &&
+            refusedHere.includes(`This shell carries agent session ${id}`) &&
+            refusedHere.includes(wayOut) &&
+            refusedHere.includes("open a terminal that was not started from an agent"),
+          `no hint for the user: ${refusedHere}`,
+        )
+        const ran = await typed(wayOut.replace(/ vibest /, ` ${binary} `), asUser)
+        expect(ran.includes("exit=0") && !ran.includes("Forbidden"), `the hinted command failed: ${ran}`)
+      } finally {
+        server?.kill()
+        await server?.exited
+        main.stop()
+        sub.stop()
+        await dropHerdrSession(w, stale)
         await dropHerdrSession(w, session)
       }
     },

@@ -1,5 +1,12 @@
 import { newId } from "@vibest/schema/id"
-import { AllocationFailed, LimitReached, NoHarnessChosen, NoRuntime, NoSuchSession } from "@vibest/schema/session"
+import {
+  AllocationFailed,
+  LimitReached,
+  NoHarnessChosen,
+  NoRuntime,
+  NoSuchSession,
+  type RuntimeMachine,
+} from "@vibest/schema/session"
 import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Option, Path } from "effect"
 import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
@@ -20,7 +27,7 @@ import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, type Layout, safeRepositoryD
 import type { sessionPlacement } from "./placement.ts"
 import { describeSpawn, type Plugins, type Routing } from "./plugins.ts"
 import { listProjectRepositories } from "./project-create.ts"
-import { type Machine, machinesListing as machines, type Runtimes } from "./runtimes.ts"
+import { machinesListing as machines, type Runtimes } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
 import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 
@@ -30,7 +37,7 @@ export const allocationNameSource: { leaves: ReadonlyArray<string> | undefined }
 export const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
 
 export interface SpawnInput {
-  readonly machine: Machine
+  readonly machine: RuntimeMachine
   readonly root: string
   readonly projectId: string
   readonly name: string
@@ -115,7 +122,7 @@ export const sessionSpawn = (deps: {
         })
       }
       const rt = yield* runtimes.route(decision.runtime)
-      yield* runtimes.online(rt, { id: decision.machine.id })
+      yield* runtimes.online(rt)
       return rt
     })
 
@@ -189,12 +196,7 @@ export const sessionSpawn = (deps: {
     const { provider, model } = decision
     if (decision.harness === undefined) return yield* new NoHarnessChosen()
     const rt = yield* chosenRuntime(decision)
-    const machine: Machine = {
-      id: decision.machine.id,
-      ...(input.machine.id === decision.machine.id && input.machine.target !== undefined
-        ? { target: input.machine.target }
-        : {}),
-    }
+    const target = input.machine.id === decision.machine.id ? input.machine.target : undefined
     const runtimeKind = rt.id
     const routed = (e: HarnessUnavailable) =>
       Object.keys(decision.decidedBy).length === 0
@@ -272,7 +274,7 @@ export const sessionSpawn = (deps: {
           model: model ?? null,
           harnessSessionId: adapter.ownSessionId ? yield* newId() : null,
           runtime: runtimeKind,
-          address: { machine: machine.id, id: "" },
+          address: { machine: decision.machine.id, id: "" },
           status: "unknown",
           startedAt: null,
           exitedAt: null,
@@ -333,7 +335,7 @@ export const sessionSpawn = (deps: {
             .withLock(id)(
               Deferred.succeed(held, undefined).pipe(
                 Effect.andThen(
-                  launch(rt, machine, row, root, decision.prompt, {
+                  launch(rt, target, row, root, decision.prompt, {
                     splitFrom: input.peer,
                     env: input.env,
                     commit: input.commit,

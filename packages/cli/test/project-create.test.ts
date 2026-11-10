@@ -14,6 +14,7 @@ import {
 } from "@vibest/core/project-create"
 import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders } from "@vibest/protocol/protocol"
+import { liveDaemon } from "@vibest/runtime-herdr/commands"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
 import { Effect, Exit, FileSystem, Layer, Path, type Scope } from "effect"
@@ -21,7 +22,6 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { liveDaemon } from "../src/herdr-plugin.ts"
 import {
   authed,
   FakeGit,

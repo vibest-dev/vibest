@@ -1,5 +1,6 @@
 import type { Runtime } from "@vibest/plugin"
 import type { Fact } from "@vibest/schema/event"
+import type { RuntimeAddress } from "@vibest/schema/session"
 import { Context, type Duration, Effect, Layer, Option, PubSub, type Scope } from "effect"
 
 import { LayerNode } from "./effect/layer-node.ts"
@@ -8,11 +9,11 @@ export type LiveEvent =
   | {
       readonly type: "live.state"
       readonly runtime: string
-      readonly terminal: Runtime.Terminal
+      readonly terminal: RuntimeAddress
       readonly state: Runtime.AgentState
     }
-  | { readonly type: "live.exited"; readonly runtime: string; readonly terminal: Runtime.Terminal }
-  | { readonly type: "live.seen"; readonly runtime: string; readonly terminal: Runtime.Terminal }
+  | { readonly type: "live.exited"; readonly runtime: string; readonly terminal: RuntimeAddress }
+  | { readonly type: "live.seen"; readonly runtime: string; readonly terminal: RuntimeAddress }
   | { readonly type: "live.reset"; readonly runtime: string; readonly machine: string }
   | { readonly type: "live.turn_start"; readonly sessionId: string; readonly at: number }
   | { readonly type: "live.drain" }

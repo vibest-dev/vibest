@@ -184,29 +184,29 @@ describe("hc mirrors vibest's machines", () => {
 
   it.effect("locate: missing, found by core id under a renamed name, and unreachable with its why", () =>
     Effect.gen(function* () {
-      const machine = { id: "mb", target: "b-host", link: linked }
-      const none = yield* locate(fake([]).hc, "/a.sock", machine, asked(["s1"]))
+      const peer = { id: "mb", target: "b-host", link: linked }
+      const none = yield* locate(fake([]).hc, "/a.sock", peer, asked(["s1"]))
       assert.isTrue(none.missing)
-      const found = yield* locate(fake([row("mb", "core-new")]).hc, "/a.sock", machine, asked(["s1", "s2", "s9"]))
+      const found = yield* locate(fake([row("mb", "core-new")]).hc, "/a.sock", peer, asked(["s1", "s2", "s9"]))
       assert.isFalse(found.missing)
       assert.include(found.note ?? "", "no terminal of that session under mb/")
       assert.strictEqual(found.as, "mb")
       assert.deepStrictEqual(
         [...found.terminals.entries()],
         [
-          ["s1", { machine: "local", id: "mb/t7@/a.sock" }],
-          ["s2", { machine: "local", id: "mb/t8@/a.sock" }],
+          ["s1", { id: "mb/t7@/a.sock" }],
+          ["s2", { id: "mb/t8@/a.sock" }],
         ],
       )
       const down = yield* locate(
         fake([row("mb", "core-new", { state: "unreachable", why: "ssh refused" })]).hc,
         "/a.sock",
-        machine,
+        peer,
         asked(["s1"]),
       )
       assert.isFalse(down.missing)
       assert.strictEqual(down.note, "hc here reaches mb as mb: unreachable (ssh refused)")
-      const offline = yield* locate(fake([], { offline: true }).hc, "/a.sock", machine, asked(["s1"]))
+      const offline = yield* locate(fake([], { offline: true }).hc, "/a.sock", peer, asked(["s1"]))
       assert.isFalse(offline.missing)
       assert.include(offline.note ?? "", "fix: hc server start")
     }),

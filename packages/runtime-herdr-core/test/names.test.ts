@@ -38,7 +38,7 @@ const failedOpen = (kind: string) =>
       socket: hc.socketPath,
       scope: yield* Effect.scope,
     })
-    const error = yield* Effect.flip(runtime.open({ id: "local" }, input))
+    const error = yield* Effect.flip(runtime.open(input))
     return { names, error }
   }).pipe(Effect.scoped)
 

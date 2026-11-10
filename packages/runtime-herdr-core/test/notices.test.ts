@@ -134,7 +134,7 @@ const fakeCore = Effect.gen(function* () {
   const connector = yield* SocketConnector
   const connect = (at: string) => Hc.make(at).pipe(Effect.provideService(SocketConnector, connector))
   const runtime = yield* make({ connect, socket: socketPath, scope: yield* Effect.scope })
-  const terminal = { machine: "local", id: terminalId(socketPath, "t1") }
+  const terminal = { id: terminalId(socketPath, "t1") }
   const seen = yield* Queue.unbounded<VibestPlugin.Runtime.RuntimeEvent>()
   yield* runtime.events.pipe(
     Stream.runForEach((e) => Queue.offer(seen, e)),
@@ -144,7 +144,7 @@ const fakeCore = Effect.gen(function* () {
   const follow = Effect.gen(function* () {
     yield* runtime.process(terminal)
     const sub = yield* Queue.take(subscribers)
-    assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset", machine: "local" })
+    assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset" })
     return sub
   })
   return {
@@ -209,7 +209,7 @@ describe("runtime-herdr-core against a fake core", () => {
       const first = yield* core.follow
       yield* first.push(MISSED)
       yield* core.subscriber
-      assert.deepStrictEqual(yield* core.next, { type: "reset", machine: "local" })
+      assert.deepStrictEqual(yield* core.next, { type: "reset" })
     }),
   )
 
@@ -219,9 +219,9 @@ describe("runtime-herdr-core against a fake core", () => {
       const core = yield* fakeCore
       const first = yield* core.follow
       yield* first.close
-      assert.deepStrictEqual(yield* core.next, { type: "reset", machine: "local" })
+      assert.deepStrictEqual(yield* core.next, { type: "reset" })
       yield* core.subscriber
-      assert.deepStrictEqual(yield* core.next, { type: "reset", machine: "local" })
+      assert.deepStrictEqual(yield* core.next, { type: "reset" })
     }),
   )
 

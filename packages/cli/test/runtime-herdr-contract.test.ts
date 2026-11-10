@@ -37,16 +37,13 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             const cwd = fs.realpathSync(os.tmpdir())
             const env = { HERDR_SOCKET_PATH: socketPath }
             const opened = yield* runtime
-              .open(
-                { id: "local" },
-                {
-                  project: cwd,
-                  cwd,
-                  argv: ["printf", "VBT_%s\\n", "TYPED"],
-                  env: {},
-                  label: "vibest test",
-                },
-              )
+              .open({
+                project: cwd,
+                cwd,
+                argv: ["printf", "VBT_%s\\n", "TYPED"],
+                env: {},
+                label: "vibest test",
+              })
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
             const seen = TerminalRuntime.parseTerminal(opened)
             assert.isDefined(seen)
@@ -110,17 +107,14 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             }
             const before = (yield* herdr.call("workspace.list", {})).workspaces.map((item) => item.workspace_id)
             const beside = yield* runtime
-              .open(
-                { id: "local" },
-                {
-                  project: cwd,
-                  cwd,
-                  argv: ["/bin/sh"],
-                  env: { VBT_NEAR: "1" },
-                  label: "beside",
-                  near: opened,
-                },
-              )
+              .open({
+                project: cwd,
+                cwd,
+                argv: ["/bin/sh"],
+                env: { VBT_NEAR: "1" },
+                label: "beside",
+                near: opened,
+              })
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
             const besidePane = (yield* herdr.call("pane.get", {
               pane_id: TerminalRuntime.parseTerminal(beside)!.paneId,
@@ -137,16 +131,13 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
             assert.strictEqual(tab?.focused, false, "near opens an unfocused tab in that pane's workspace")
             yield* runtime.close(beside).pipe(Effect.ignore)
             const grouped = yield* runtime
-              .open(
-                { id: "local" },
-                {
-                  project: cwd,
-                  cwd,
-                  argv: ["/bin/sh"],
-                  env: {},
-                  label: "grouped",
-                },
-              )
+              .open({
+                project: cwd,
+                cwd,
+                argv: ["/bin/sh"],
+                env: {},
+                label: "grouped",
+              })
               .pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(env))))
             const groupedPane = (yield* herdr.call("pane.get", {
               pane_id: TerminalRuntime.parseTerminal(grouped)!.paneId,
