@@ -102,8 +102,10 @@ jobs:
             if [ -n "$(git ls-remote --tags origin "refs/tags/v$version")" ]; then
               echo "::error::tag v$version already exists"; exit 1
             fi
+            # This runner keeps its checkout between runs, and with it an earlier dry run's local tag.
+            git tag -d "v$version" 2>/dev/null || true
             git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit --quiet -am "chore: release v$version"
+              commit --quiet --no-verify -am "chore: release v$version"
             git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               tag --annotate --message "v$version" "v$version"
           fi
