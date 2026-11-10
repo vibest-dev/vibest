@@ -216,6 +216,56 @@ describe("restart in place", () => {
   )
 
   test(
+    "a main agent the runtime calls idle still continues when the update command is running in its process tree",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const sessions = yield* Sessions
+      const processes = yield* FakeProcesses
+      const herdr = yield* FakeRuntime
+      const projectId = yield* projectOf(yield* makeRepository)
+      yield* db.coordinatorLaunch(projectId, "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
+      yield* herdr.seedAgent("test/coord")
+      const id = (yield* db.coordinatorOf(projectId))!.id
+      yield* db.reportCoordinatorSession(id, "pi", "conversation-1")
+      yield* db.patchLive(id, { pid: 400 })
+      yield* processes.setTree(400, [400, 900])
+      const held = yield* herdr.hold("run")
+      yield* Effect.forkChild(sessions.restartLater([id], 900))
+      yield* held.reached
+      yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
+      yield* db.patchLive(id, { ready: 2, pid: 500 })
+      yield* held.release()
+      const notices = yield* untilVirtual(
+        db.coordinatorPending(projectId).pipe(Effect.map((rows) => rows.filter((row) => row.kind === "notice"))),
+        (rows) => rows.length > 0,
+      )
+      assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
+    }).pipe(Effect.provideService(VibestCommand, ["/own/bin/vibest"])),
+  )
+
+  test(
+    "a ready report records the integration it names, not whatever an older report left noted",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const projectId = yield* projectOf(yield* makeRepository)
+      yield* db.coordinatorLaunch(projectId, "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
+      const id = (yield* db.coordinatorOf(projectId))!.id
+      yield* db.reportCoordinatorSession(id, "pi", "conversation-1")
+      yield* db.noteIntegration(id, { version: "0.0.0-old", protocol: PROTOCOL })
+      yield* db.patchLive(id, { ready: 1, pid: 500, integration: { version: VERSION, protocol: PROTOCOL } })
+      const ready = (yield* eventsOf(id, "process.ready")).at(-1)
+      assert.deepStrictEqual(ready?.data.integration, { version: VERSION, protocol: PROTOCOL })
+      assert.strictEqual(ready?.data.pid, 500)
+    }),
+  )
+
+  test(
     "the old harness's report after the new process.start is not its result, even for a fresh Sessions",
     Effect.gen(function* () {
       const { db, sessions, id, pid } = yield* busyPiSubagent

@@ -48,8 +48,16 @@ const make = Effect.gen(function* () {
     yield* sessions.userPrompt(who.id, text, yield* Clock.currentTimeMillis)
   })
 
-  const ready = Effect.fn("Integration.ready")(function* (id: string, pid: number | undefined) {
-    yield* db.patchLive(id, { ready: yield* Clock.currentTimeMillis, ...(pid === undefined ? {} : { pid }) })
+  const ready = Effect.fn("Integration.ready")(function* (
+    id: string,
+    pid: number | undefined,
+    reported?: { readonly version: string; readonly protocol: number },
+  ) {
+    yield* db.patchLive(id, {
+      ready: yield* Clock.currentTimeMillis,
+      ...(pid === undefined ? {} : { pid }),
+      ...(reported === undefined ? {} : { integration: reported }),
+    })
   })
 
   const guard = (agent: string, raw: string, projectId: string | undefined) =>
