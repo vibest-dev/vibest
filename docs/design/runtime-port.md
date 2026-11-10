@@ -42,19 +42,17 @@ session `default` and ignores `near`); each is the runtime's to honor as it can.
 
 `name` is optional: the word a place uses for this runtime. A place reads `<name> <address>`, or `<name> (not placed)` when the address is empty, and a remote address keeps its `@machine`. With no `name`, the place uses `id`. herdr leaves `name` unset, so a place says `herdr`. herdr-core sets `herdr-core` and keeps id `hc` (`--runtime hc`, and the id stored on a row, do not change).
 
-| Optional                     | herdr                                                                                                            | rex                            | tern                                     | Core's fallback when absent                    |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------- | ---------------------------------------------- |
-| `state(terminal)`            | detected                                                                                                         | OSC 7501 the program wrote     | OSC 7501 (window side)                   | harness integration only                       |
-| `session(terminal)`          | the agent record's conversation id                                                                               | —                              | —                                        | the harness's reports only                     |
-| `events` (required)          | `events.subscribe`                                                                                               | `session.attach_all`           | `tern events`                            | none: required                                 |
-| `exec(machine, argv, cwd)`   | —                                                                                                                | detached block, `child_exited` | `new tab --keep-open`, `wait`, `capture` | hidden terminal: `open`, wait for exit, `read` |
-| `present(terminal, info)`    | `pane.report_metadata`                                                                                           | block/window labels            | `rename`                                 | the `label` given to `open`                    |
-| `seen`, `see`                | —                                                                                                                | —                              | —                                        | never `done` in Watch                          |
-| `prepare(machine)`           | `herdr machine add <target> --remote-session vibest`                                                             | `rex hosts add`                | `tern remote setup`                      | the user prepares the machine                  |
-| `attach(machine)`            | `herdr --session vibest`                                                                                         | — (Rex.app)                    | `tern`                                   | none                                           |
-| `link()`                     | `{session, version}`: `default`, where remote agents open; `ping` on its socket                                  | —                              | —                                        | other machines cannot show its terminals       |
-| `locate(machine, sessions)`  | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                    | —                              | —                                        | remote rows: "cannot be shown here"            |
-| `doctor(machine, harnesses)` | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs                 | what tern needs                          | `vibest doctor` shows `status` only            |
+| Optional                     | herdr                                                                                                            | rex                        | tern                   | Core's fallback when absent              |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------- | ---------------------- | ---------------------------------------- |
+| `state(terminal)`            | detected                                                                                                         | OSC 7501 the program wrote | OSC 7501 (window side) | harness integration only                 |
+| `session(terminal)`          | the agent record's conversation id                                                                               | —                          | —                      | the harness's reports only               |
+| `events` (required)          | `events.subscribe`                                                                                               | `session.attach_all`       | `tern events`          | none: required                           |
+| `present(terminal, info)`    | `pane.report_metadata`                                                                                           | block/window labels        | `rename`               | the `label` given to `open`              |
+| `seen`, `see`                | —                                                                                                                | —                          | —                      | never `done` in Watch                    |
+| `attach(machine)`            | `herdr --session vibest`                                                                                         | — (Rex.app)                | `tern`                 | none                                     |
+| `link()`                     | `{session, version}`: `default`, where remote agents open; `ping` on its socket                                  | —                          | —                      | other machines cannot show its terminals |
+| `locate(machine, sessions)`  | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                    | —                          | —                      | remote rows: "cannot be shown here"      |
+| `doctor(machine, harnesses)` | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs             | what tern needs        | `vibest doctor` shows `status` only      |
 
 How the required members map: herdr `tab.create` (env) + `agent.start`, `pane.send_*`, `pane.read`,
 `pane.process_info`, `pane.close`; rex `session.new_split` (`command`, env via `/usr/bin/env K=V`), `block.event`,
@@ -88,8 +86,8 @@ project's workspace; any other key is the caller's own, and a runtime shows only
 
 Every runtime plugin passes the shared contract suite (`@vibest/plugin/testing` `runtimeContract`) against a real
 local instance: the required members, then each optional one present. It is framework-free and fails with
-`ContractFailure` naming the member and why, so a test file or a CLI check can drive it. `prepare` and `attach` are
-checked as members only, never run. The suite types into the shell `open` started, so a read proves the program ran
+`ContractFailure` naming the member and why, so a test file or a CLI check can drive it. `attach` is
+checked as a member only, never run. The suite types into the shell `open` started, so a read proves the program ran
 rather than its own echoed command; it follows `events` from the start, so a program that ends on its own is seen
 without a `close`, and `process` on it reports `running: false`, then `not_found` once the terminal is gone.
 

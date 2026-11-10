@@ -101,13 +101,7 @@ export interface RuntimeDefinition {
   readonly see?: (terminal: Terminal, turn: number) => Effect.Effect<void, RuntimeError>
   readonly run?: (terminal: Terminal, argv: ReadonlyArray<string>) => Effect.Effect<void, RuntimeError>
   readonly focus?: (terminal: Terminal) => Effect.Effect<void, RuntimeError>
-  readonly exec?: (
-    machine: Machine,
-    argv: ReadonlyArray<string>,
-    cwd: string,
-  ) => Effect.Effect<{ readonly code: number; readonly output: string }, RuntimeError>
   readonly present?: (terminal: Terminal, info: Readonly<Record<string, string>>) => Effect.Effect<void, RuntimeError>
-  readonly prepare?: (machine: Machine) => Effect.Effect<void, RuntimeError>
   readonly doctor?: (machine: Machine, harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>
   readonly attach?: (machine: Machine) => ReadonlyArray<string>
   readonly link?: () => Effect.Effect<Readonly<Record<string, string>> | undefined>

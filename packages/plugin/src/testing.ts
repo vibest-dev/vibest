@@ -115,15 +115,6 @@ export const runtimeContract = (
 
     if (runtime.present !== undefined) yield* runtime.present(terminal, { contract: marker })
 
-    if (runtime.exec !== undefined) {
-      const ran = yield* runtime.exec(local, ["printf", "contract-exec"], options.cwd)
-      yield* that(
-        "exec",
-        ran.code === 0 && ran.output.includes("contract-exec"),
-        `printf contract-exec gave code ${ran.code} and ${JSON.stringify(ran.output)}`,
-      )
-    }
-
     if (runtime.attach !== undefined) {
       const argv = runtime.attach(local)
       yield* that(
