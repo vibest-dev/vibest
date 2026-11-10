@@ -73,7 +73,7 @@ const make = Effect.gen(function* () {
               .ensure(
                 name,
                 kind,
-                shown.filter((row) => row.runtime === kind).map((row) => row.id),
+                new Map(shown.filter((row) => row.runtime === kind).map((row) => [row.id, row.address.id])),
               )
               .pipe(Effect.map((found) => [kind, found] as const)),
           { concurrency: "unbounded" },
@@ -199,7 +199,7 @@ const make = Effect.gen(function* () {
         const ready =
           viewer?.locate === undefined || runtime === undefined
             ? undefined
-            : yield* machines.ensure(machine, runtime, [], true)
+            : yield* machines.ensure(machine, runtime, new Map(), true)
         const spawned = yield* call(machine, from.project, (client, headers) =>
           client["Peer.Spawn"](
             {

@@ -80,6 +80,7 @@ export interface RuntimeDefinition {
       readonly near?: Terminal
       readonly split?: boolean
       readonly focus?: boolean
+      readonly remote?: boolean
     },
   ) => Effect.Effect<Terminal, RuntimeError>
   readonly send: (
@@ -109,7 +110,7 @@ export interface RuntimeDefinition {
   readonly doctor?: (machine: Machine, harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>
   readonly attach?: (machine: Machine) => ReadonlyArray<string>
   readonly link?: () => Effect.Effect<Readonly<Record<string, string>> | undefined>
-  readonly locate?: (machine: Machine, sessions: ReadonlyArray<string>) => Effect.Effect<Located>
+  readonly locate?: (machine: Machine, sessions: ReadonlyMap<string, string>) => Effect.Effect<Located>
 }
 
 export interface RuntimeEditor {

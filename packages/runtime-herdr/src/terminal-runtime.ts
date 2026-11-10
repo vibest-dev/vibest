@@ -19,14 +19,19 @@ export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 
 export const KIND = "herdr"
 
+export const REMOTE_SESSION = "default"
+
 export const terminalOf = (session: string, paneId: string, name?: string): Terminal => ({
   machine: "local",
   id: name === undefined ? `${session}/${paneId}` : `${session}/${paneId}/${name}`,
 })
 
+const onAnotherMachine = (terminal: Terminal) => terminal.id.includes("@")
+
 export const parseTerminal = (
   terminal: Terminal,
 ): { readonly session: string; readonly paneId: string; readonly name: string | undefined } | undefined => {
+  if (onAnotherMachine(terminal)) return undefined
   const at = terminal.id.indexOf("/")
   if (at <= 0 || at === terminal.id.length - 1) return undefined
   const rest = terminal.id.slice(at + 1)
@@ -326,15 +331,17 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
 
     const open: Runtime["open"] = (machine, input) =>
       Effect.gen(function* () {
-        const near = input.near !== undefined ? parseTerminal(input.near) : undefined
+        const near = input.near !== undefined && input.remote !== true ? parseTerminal(input.near) : undefined
         const ambient = Option.getOrUndefined(
           yield* Config.option(Config.String("HERDR_SOCKET_PATH")).pipe(Effect.orDie),
         )
         const location: RuntimeLocation =
           near !== undefined
             ? { session: near.session }
-            : (decodeTarget(machine.target) ??
-              (ambient !== undefined ? { socketPath: ambient } : { session: "vibest" }))
+            : input.remote === true
+              ? { session: REMOTE_SESSION }
+              : (decodeTarget(machine.target) ??
+                (ambient !== undefined ? { socketPath: ambient } : { session: "vibest" }))
         const session = yield* pool
           .resolve(near !== undefined ? { session: near.session } : location)
           .pipe(Effect.mapError(failure))
@@ -406,7 +413,9 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         : Effect.fail(
             new RuntimeApi.RuntimeError({
               code: "not_found",
-              message: `terminal ${terminal.id} (${method}) names no herdr session`,
+              message: onAnotherMachine(terminal)
+                ? `terminal ${terminal.id} (${method}) is a pane on ${terminal.id.slice(terminal.id.indexOf("@") + 1)}; vibest peek and send reach it through vibest`
+                : `terminal ${terminal.id} (${method}) names no herdr session`,
             }),
           )
     }

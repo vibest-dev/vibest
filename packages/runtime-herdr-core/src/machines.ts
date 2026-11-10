@@ -142,7 +142,7 @@ export const locate = (
   hc: Hc,
   socket: string,
   machine: VibestPlugin.Runtime.Machine,
-  sessions: ReadonlyArray<string>,
+  sessions: ReadonlyMap<string, string>,
 ): Effect.Effect<VibestPlugin.Runtime.Located> =>
   Effect.gen(function* () {
     const core = machine.link?.core
@@ -158,8 +158,8 @@ export const locate = (
         note: `${note.message}${note.fix ? `; fix: ${note.fix}` : ""}`,
       }
     }
-    if (sessions.length === 0) return { missing: false, terminals: NONE, as: row.name }
-    const wanted = new Set(sessions)
+    if (sessions.size === 0) return { missing: false, terminals: NONE, as: row.name }
+    const wanted = new Set(sessions.keys())
     const terminals = new Map<string, Terminal>()
     for (const t of (yield* hc.call("terminal.list", { labels: { [LABEL.runtime]: KIND } })).terminals) {
       const session = t.labels[LABEL.session]

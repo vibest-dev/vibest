@@ -134,4 +134,23 @@ describe("placement: every session is a tab beside the project's main agent, in 
       assert.strictEqual((yield* herdr.agent(id))!.terminal.split(":")[0], "w1")
     }),
   )
+
+  test(
+    "an agent another machine started is opened as remote; one started here is not",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db
+      const sessions = yield* Sessions
+      const repo = yield* makeRepository
+      const here = yield* sessions.spawn(yield* spawnInput(repo))
+      const there = yield* sessions.spawn({ ...(yield* spawnInput(repo)), origin: { peer: "a", project: "aproj" } })
+      for (const id of [here.id, there.id])
+        yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+      const opened = yield* herdr.callsTo("open")
+      assert.deepStrictEqual(
+        opened.map((c) => c.remote),
+        [undefined, true],
+      )
+    }),
+  )
 })

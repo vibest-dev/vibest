@@ -8,6 +8,8 @@ import { SocketConnector } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 
 import { CALLER_ENV, readyFrom, targetFrom, terminalFrom } from "./caller.ts"
+import * as Machines from "./machines.ts"
+import * as Mirror from "./mirror.ts"
 import { HerdrPool } from "./pool.ts"
 import { KIND, fromPool } from "./terminal-runtime.ts"
 
@@ -35,12 +37,24 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
     Effect.gen(function* () {
       const scope = yield* Effect.scope
       const built = yield* Layer.build(layer)
+      const spawner = Context.get(built, ChildProcessSpawner.ChildProcessSpawner)
+      const cli = Machines.cliOf(spawner)
+      const pool = Context.get(built, HerdrPool)
       const runtime = yield* fromPool({
-        pool: Context.get(built, HerdrPool),
-        spawner: Context.get(built, ChildProcessSpawner.ChildProcessSpawner),
+        pool,
+        spawner,
         fs: Context.get(built, FileSystem.FileSystem),
         scope,
       })
-      yield* context.runtime.transform((editor) => editor.add({ ...runtime, id: KIND, caller }))
+      yield* context.runtime.transform((editor) =>
+        editor.add({
+          ...runtime,
+          id: KIND,
+          caller,
+          link: () => Machines.link(pool),
+          locate: (machine, sessions) => Machines.locate(cli, machine, sessions),
+        }),
+      )
+      yield* Mirror.mirror(context.machine, cli)
     }),
 })

@@ -164,6 +164,20 @@ remote-api-bridge` itself for subscriptions). vibest still needs:
    herdr never retries a failed request.
 5. **Minimum remote herdr**: one that supports API forwarding (0.9.5 does; the older one here does not).
 
+Proved by E2E M7 (isolated `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR` and sessions on both sides, a fake
+`ssh` that runs B's commands in B's environment): `herdr machine list --json` is an array of `{id, label, target,
+session, enabled, selected}` with the target as typed (`b-host`); a non-interactive `machine add` against a ready B
+exits 0 ("Saved SSH machine … Remote server is ready."), against a host without herdr exits non-zero and saves
+nothing, and against a session whose server is not its own session leader (`herdr server` started from a shell)
+exits 1 with "remote server is not ready for saved machines; machine was not saved" and stops nothing; a session that
+vibestd started with `herdr server --session default` spawned detached (`setsid`, for an agent `run --machine`
+opened there) reports `detached_server_daemon: true` in `herdr status server --json`, and the saved machine keeps
+reaching it after it is stopped and vibestd starts it again; `herdr --machine
+<label-or-id> agent get <name>` reaches B's agent. herdr's ssh calls are `ssh -C -F <its config> -S
+<control path> -o ControlMaster=auto -o ControlPersist=600 -T <target> …`, with options after the target too, and
+scripts on stdin through `/bin/sh -s`. vibest mirrors its machines into these saved machines:
+[multi-machine.md](multi-machine.md#terminals-on-other-machines).
+
 ## 4. Recommendations
 
 **runtime-herdr placement.** Subagents open as **tabs in the Project workspace** (the main Agent's workspace):
@@ -221,7 +235,11 @@ fragile.
 - **Agent names.** A vibest session's agent is `s-` and the first 30 hex digits of its id (herdr allows
   `[a-z][a-z0-9_-]{0,31}`), so `herdr agent list` shows which session runs where; any other agent `open` starts is
   `vbt-` and random hex. Never the pane id: it is reused and carries uppercase (`w1:pC`). herdr's `done` is `idle`.
-- **open.** The session is `near`'s, else the caller's location, else `HERDR_SOCKET_PATH`, else `vibest`. `near`
+- **open.** An agent another machine started (`remote`, from `Peer.Spawn`) opens in herdr's default session `default`
+  (`DEFAULT_SESSION_NAME`, also what `herdr machine add` uses without `--remote-session`), never beside a pane, so the
+  machine that started it can save that session as a herdr machine. Otherwise the session is `near`'s, else the
+  caller's location, else `HERDR_SOCKET_PATH`, else `vibest`. A missing session is started with `herdr server
+  --session <s>` spawned detached, so the server is its own session leader, as herdr saved machines require. `near`
   places the terminal only while its pane exists; a stale one (closed while vibestd was down, or herdr restarted)
   falls back to the Project's workspace: the checkout's worktree group, else a workspace with a pane at that path
   (symlinks resolved), else a new one. `tab.create` and `pane.split` are the only places env can be set. A command

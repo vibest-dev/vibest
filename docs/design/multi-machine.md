@@ -224,8 +224,53 @@ without hc, nothing. `locate` reads
 `machine.list` and then `terminal.list` with `vibest.runtime=hc`, keeping the addresses under that row's name whose
 `vibest.session` is one of the sessions, with a note when one of them has no terminal there. After its core's
 `Subscribed` it runs `connect` again for the machines it last heard of and still holds. Terminals of other machines in A's own event stream match no session and are
-ignored. Not covered yet: herdr (TUI) and Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote
-row (its own PR); replacing a mirror row when B's vibestd moved to another hc session on the same host.
+ignored.
+
+The herdr plugin (`runtime-herdr/src/machines.ts`) uses herdr's saved SSH machines, which live on the client side
+(`$XDG_STATE_HOME/herdr/client/endpoints.json`, read and written only through `herdr machine …`). B's `link` is
+`{session, version}`: herdr's default session `default`, where B opens every agent another machine starts (open's
+`remote`), and the version its server answers to `ping` (none when that session is not running). A's `locate` reads
+`herdr machine list --json` and takes the profile whose target (without `ssh://`) and session equal the event's target
+and the link's session, under any label: none is `missing`, a disabled one is a note with `herdr machine enable <id>`.
+Each session comes with the terminal id B reported for it (`<B session>/<pane>/<agent>`), so `locate` answers
+`<B terminal>@<label of the profile for that terminal's herdr session>` without reaching B; a terminal in a herdr
+session A has no enabled profile for gets a note. A's herdr server never holds B's panes, so
+such an id is only a place to look in the herdr sidebar: `parseTerminal` refuses an id with `@`, and every runtime
+member called with one fails `not_found` ("a pane on <label>; vibest peek and send reach it through vibest"). There
+is no `focus` onto a remote herdr pane; herdr has no way to switch a TUI to a machine from outside.
+The plugin asks a herdr server over its socket API wherever that API has the answer (`ping` for the version). It runs
+the herdr CLI only where the API has none: saved machines are a client-side catalog with no server method
+(`herdr machine list`), naming the session behind a socket path is a client-side directory listing (`herdr session
+list`, inside the pool), and a server that is not running has no socket to ask (`herdr server`, inside the pool).
+
+Its mirror (`runtime-herdr/src/mirror.ts`) keeps that profile: `connect` runs `herdr machine add <target> --label
+<name>/<session> --remote-session <session>` with stdin not a terminal, so herdr never installs, updates, restarts or
+stops anything on B (it refuses instead, and its words become the note, with no command as the fix: the same add run by
+hand in a terminal can offer to stop B's server and end B's agents). It adds nothing when the profile exists (a
+disabled one gets the `enable` note and stays disabled: the user disabled it), when another profile holds the label (a
+`rename` note), when B's herdr is older than 0.9.5 (no machine API forwarding; an `update` note), or when B has no
+herdr link (a note: B's herdr is offline, or online with no session named). A's own herdr is not version-checked: an
+old one fails `herdr machine list`, and that failure is the note. `connect` gives up with a note after 25 s, inside the
+machine hook's 30 s bound. `remove` runs `herdr machine remove <id>` for the profile of the link's session, or with no
+link the one with the event's target and session `default` (several: a note); removing a profile leaves B's sessions
+running. There is no re-check on a herdr server restart: the catalog is a client state file that a restart keeps, and
+`ensure` repairs at the next use.
+
+herdr saves only a B session whose server is its own session leader (`getsid(0) == getpid()`, reported as
+`detached_server_daemon` by `ping`). Agents of other machines open in B's session `default`; when it is not running,
+vibestd on B starts it with `herdr server --session default` spawned detached, which makes the server a session
+leader (`setsid`), so the profile A saved keeps reaching B's agents after that session restarts (E2E M7). The first
+`herdr machine add` may start that session itself through ssh, as herdr does for any saved machine. A session started some other way, such as `herdr server` typed in a shell, is refused; B's `link` then
+carries `detached: no` and the refusal note says to restart that session on B once no agent runs there.
+
+Limits: a profile is found by target string and session, so B saved by the user under another ssh alias gets a second
+profile; herdr has no server id, so a target that now reaches another herdr server goes unnoticed; `vibest ls` cannot
+say whether herdr's link to B is up; B's `link` is read when A connects, so its version and `detached` are as of then;
+and the catalog is global for the user on A, so the profile shows in every herdr session's TUI there. Agents started on B before agents of other machines opened in `default` live in B's session `vibest`, which the
+mirror does not save, so A shows them as having no saved machine until they end.
+
+Not covered yet: Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote row (its own PR);
+replacing a mirror row when B's vibestd moved to another hc session on the same host.
 
 ## Optional tables
 

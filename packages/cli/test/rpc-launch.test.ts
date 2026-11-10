@@ -271,4 +271,29 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
     }),
   )
+
+  test(
+    "ls, result and peek keep reading a session started in one runtime after agents start in another",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const herdr = yield* FakeRuntime
+      const c = asCli(yield* client, yield* makeRepository)
+      const before = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "in herdr", runtime: "herdr" })
+      const after = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "in hc", runtime: "hc" })
+      for (const id of [before.id, after.id]) yield* until(db.getSession(id), (s) => s?.turnState === "open")
+      const rows = (yield* c.List({})).sessions
+      assert.deepStrictEqual(
+        [before.id, after.id].map((id) => rows.find((row) => row.id === id)?.runtime),
+        ["herdr", "hc"],
+      )
+      for (const id of [before.id, after.id]) {
+        assert.strictEqual((yield* c.Get({ id })).id, id)
+        assert.deepStrictEqual(yield* c.Peek({ id }), { text: "pane tail" })
+      }
+      assert.strictEqual((yield* herdr.callsTo("read")).length, 2)
+    }),
+    {
+      plugins: [callerPlugin("hc", { env: ["HC_ID"], terminal: (env) => Effect.succeed(env.HC_ID) })],
+    },
+  )
 })

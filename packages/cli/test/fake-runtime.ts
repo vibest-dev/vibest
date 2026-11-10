@@ -38,6 +38,7 @@ export interface RuntimeCalls {
     readonly near: string | undefined
     readonly split: boolean | undefined
     readonly focus: boolean | undefined
+    readonly remote?: boolean
     readonly target?: string
   }
   readonly send: { readonly terminal: string; readonly text?: string; readonly keys?: ReadonlyArray<string> }
@@ -312,6 +313,7 @@ export class FakeRuntime extends Context.Service<
               near: input.near?.id,
               split: input.split,
               focus: input.focus,
+              ...(input.remote === true ? { remote: true } : {}),
               ...(machine.target !== undefined ? { target: machine.target } : {}),
             },
             input.env.VIBEST_SESSION_ID,

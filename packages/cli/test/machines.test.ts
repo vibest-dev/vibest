@@ -650,7 +650,7 @@ describe("vibest run --machine and remote sessions", () => {
           coordinator(a.raw.Spawn({ machine: "mc", prompt: "x", harness: "pi", callerEnv: { TERM_PANE: "p1" } })),
         )
         assert.strictEqual(failed._tag, "NoRuntime")
-        assert.include(failed.message, 'the runtime "term" is not loaded')
+        assert.include(failed.message, 'the runtime "term" is not loaded; loaded: herdr')
         assert.include(failed.message, (yield* c.run(VibestdIdentity)).name)
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )

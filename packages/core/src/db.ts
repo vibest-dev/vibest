@@ -172,6 +172,12 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
+    startedByPeer: (id: string) =>
+      sql<{ one: number }>`SELECT 1 AS one FROM event WHERE session_id = ${id} AND type = 'peer.start' LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
+
     hadTerminal: (id: string) =>
       sql<{ one: number }>`SELECT 1 AS one FROM event WHERE session_id = ${id} AND type = 'process.start'
         AND json_extract(data, '$.terminal') != '' LIMIT 1`.pipe(
