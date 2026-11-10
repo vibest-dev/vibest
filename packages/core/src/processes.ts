@@ -25,7 +25,7 @@ export interface ProcessPlatform {
 export const LSOF_TIMEOUT = Duration.seconds(10)
 export const LSOF_KILL_AFTER = Duration.seconds(1)
 
-export const lsofArgs = (uid: number) => ["+w", "-a", "-u", String(uid), "-d", "cwd", "-Fpfn0"]
+export const lsofArgs = (uid: number) => ["+w", "-a", "-u", String(uid), "-d", "cwd", "-FpRcfn0"]
 
 export interface LsofRun {
   readonly exitCode: number
@@ -98,7 +98,10 @@ export const cwdHolders = (
 ): ReadonlyArray<number> | undefined => {
   if (run === undefined || run.exitCode !== 0 || run.stderr.trim() !== "") return undefined
   const holders = new Set<number>()
+  const unreadable: Array<Unreadable> = []
   let pid: number | undefined
+  let parent: number | undefined
+  let command: string | undefined
   let file: "cwd" | undefined
   let canary = false
   let unnamed = false
@@ -112,23 +115,47 @@ export const cwdHolders = (
         if (file !== undefined || unnamed) return undefined
         unnamed = true
         pid = Number(value)
+        parent = undefined
+        command = undefined
         if (!validPid(pid) || String(pid) !== value) return undefined
+      } else if (field[0] === "R") {
+        if (!unnamed || file !== undefined || parent !== undefined) return undefined
+        parent = Number(value)
+        if (!Number.isInteger(parent) || parent < 0 || String(parent) !== value) return undefined
+      } else if (field[0] === "c") {
+        if (!unnamed || file !== undefined || command !== undefined) return undefined
+        command = value
       } else if (field[0] === "f") {
         if (pid === undefined || file !== undefined || value !== "cwd") return undefined
         file = "cwd"
       } else if (field[0] === "n") {
         if (pid === undefined || file === undefined) return undefined
-        if (DIAGNOSTIC.test(value)) return undefined
-        if (pid === self) canary = true
-        if (dirs.some((dir) => mayBeIn(value, dir))) holders.add(pid)
+        if (value.startsWith(`/proc/${pid}/cwd (readlink: `) && pid !== self)
+          unreadable.push({ pid, parent, command: command ?? "" })
+        else if (DIAGNOSTIC.test(value)) return undefined
+        else {
+          if (pid === self) canary = true
+          if (dirs.some((dir) => mayBeIn(value, dir))) holders.add(pid)
+        }
         file = undefined
         unnamed = false
       } else return undefined
     }
   }
   if (file !== undefined || unnamed || !canary) return undefined
+  if (!unreadable.every((p) => isUserManager(p, unreadable))) return undefined
   return [...holders]
 }
+
+type Unreadable = { readonly pid: number; readonly parent: number | undefined; readonly command: string }
+
+const SYSTEMD_USER_MANAGER = "systemd"
+const SYSTEMD_PAM_HELPER = "(sd-pam)"
+
+const isUserManager = (p: Unreadable, unreadable: ReadonlyArray<Unreadable>): boolean =>
+  (p.command === SYSTEMD_USER_MANAGER && p.parent === 1) ||
+  (p.command === SYSTEMD_PAM_HELPER &&
+    unreadable.some((m) => m.pid === p.parent && m.command === SYSTEMD_USER_MANAGER && m.parent === 1))
 
 const DIAGNOSTIC = / \((readlink|stat): /
 

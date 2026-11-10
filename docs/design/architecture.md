@@ -447,11 +447,16 @@ How `packages/core/src/remove.ts` and `processes.ts` keep this:
   contract; vibestd still proves it by cwd before the worktree goes), and a close that failed proves nothing. The
   only signal vibest sends is SIGTERM to one harness pid it was told (a restart, a usage-limit move, a main agent
   moving terminal), never its group. A reused pid reads as alive, which can only keep more.
-- The cwd check is one lsof run (`lsof +w -a -u <uid> -d cwd -Fpfn0`, no shell) in its own process group, cut off
+- The cwd check is one lsof run (`lsof +w -a -u <uid> -d cwd -FpRcfn0`, no shell) in its own process group, cut off
   after 10 s, then SIGTERM and SIGKILL 1 s later; a helper stuck in uninterruptible I/O holds the run until it
   returns. The listing is trusted only when lsof exited 0 with nothing on stderr (warnings mean a partial listing),
   every set is well formed, no name is lsof's `(readlink: …)` or `(stat: …)` diagnostic, and vibestd's own process
-  is in it with its cwd (a sanity check, not a proof of completeness). A name lsof printed with escapes, or a
+  is in it with its cwd (a sanity check, not a proof of completeness). One exception keeps Linux hosts with a systemd
+  user manager answerable: that manager (`systemd`, started by pid 1) and its `(sd-pam)` child run as the user but no
+  one can read their cwd, so their `/proc/<pid>/cwd (readlink: …)` names are skipped; any other unreadable cwd, a
+  `(stat: …)` name, or one of them without its command and parent still makes the listing unknown. Ceiling: a program
+  of the same user that names itself `systemd`, is reparented to pid 1 and turns itself non-dumpable could hold the
+  worktree unseen. A name lsof printed with escapes, or a
   `(deleted)` cwd, counts as a holder of anything in the worktree it could stand for.
 - A main agent stopped so it can start in another terminal (`Project.StopCoordinator`): its row leaves its place
   first, so the harness's exit drops nothing, and from there to the answer the stop is uninterruptible, so a Ctrl-C
