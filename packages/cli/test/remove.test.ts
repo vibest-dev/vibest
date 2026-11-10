@@ -521,8 +521,9 @@ describe.concurrent("Processes", () => {
         yield* Effect.addFinalizer(() => parent.kill().pipe(Effect.ignore))
         const zombie = Number((yield* parent.stdout.pipe(Stream.decodeText, Stream.take(1), Stream.mkString)).trim())
         assert.isTrue(zombie > 0)
-        yield* Effect.sleep("10 millis").pipe(
-          Effect.repeat({ until: () => Platform.liveness(zombie) === "exited", times: 200 }),
+        yield* until(
+          Effect.sync(() => Platform.liveness(zombie)),
+          (seen) => seen === "exited",
         )
         assert.doesNotThrow(() => process.kill(zombie, 0), "kill 0 alone reports the zombie as alive")
         assert.strictEqual(Platform.liveness(zombie), "exited")
