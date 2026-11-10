@@ -113,7 +113,10 @@ The run writes evidence to `tools/e2e/evidence/<run>/`: per check the commands, 
 `<id>.alone.json` for a rerun), files a check saves, and `report.json` with every check's tier, outcome, start time and
 duration, the wall time, the user files' hashes and the invariants. It signals and closes only the PIDs and panes it
 recorded. A skipped check is reported as skipped, never as passed. A failed check keeps its World for inspection; a
-passing one removes it.
+passing one removes it. A herdr server whose socket is inside the world is stopped before that remove, including one
+whose config directory is in the world rather than ~/.config/herdr/sessions. The next run removes a kept world older
+than a day, and that world's herdr sessions with it. The world's own vibestd is stopped first, only when its pid file
+names a vibest daemon whose socket is inside that world. A herdr session that is still running keeps its world.
 
 Checks that run a turn use a fake model (`tools/e2e/src/fake-model.ts`): a local Anthropic Messages server for Claude
 (the shadow `CLAUDE_CONFIG_DIR`, `ANTHROPIC_BASE_URL` and the fake `ANTHROPIC_API_KEY` passed as vibest's own `--env`)

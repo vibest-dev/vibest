@@ -4,6 +4,18 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import {
+  DAY_MS,
+  herdrConfigSessions,
+  isWorldDirectoryName,
+  pathsNamed,
+  removeStoppedSession,
+  sessionNamesForWorld,
+  socketListening,
+  sweepTargets,
+  worldOfHerdrSession,
+  worldTmpBase,
+} from "./runner/cleanup.ts"
 import { claudeShadow, cursorShadow, type Profile, userPrivateValues } from "./world/shadow.ts"
 import { loginEnv, secretName } from "./world/user-env.ts"
 
@@ -118,8 +130,7 @@ export class World {
   }
 
   static async create(profile: Profile = "user"): Promise<World> {
-    const tmpBase = process.platform === "darwin" ? "/tmp" : os.tmpdir()
-    const root = await fsPromises.mkdtemp(path.join(tmpBase, "vbe-"))
+    const root = await fsPromises.mkdtemp(path.join(worldTmpBase(), "vbe-"))
     await fsPromises.chmod(root, 0o700)
     const w = new World(root, profile)
     for (const dir of [w.vibestHome, path.join(root, "tmp")]) await fsPromises.mkdir(dir, { mode: 0o700 })
@@ -418,21 +429,45 @@ export class World {
     )
   }
 
-  async close() {
-    await this.stopDaemon()
-    const startedHerdrSession = await fsPromises
-      .stat(path.join(this.home, ".config", "herdr", "sessions", this.herdrSession))
-      .then(
-        () => true,
-        () => false,
-      )
-    if (startedHerdrSession) {
-      await this.run(this.root, ["herdr", "session", "stop", this.herdrSession])
-      await this.run(this.root, ["herdr", "session", "delete", this.herdrSession])
-    }
+  private async killStarted() {
     for (const p of this.started) if (p.exitCode === null) p.kill()
+    const deadline = Date.now() + 3_000
+    while (this.started.some((p) => p.exitCode === null) && Date.now() < deadline) await Bun.sleep(50)
+    for (const p of this.started) {
+      if (p.exitCode !== null || p.pid === undefined) continue
+      try {
+        process.kill(p.pid, "SIGKILL")
+      } catch (e) {
+        if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+      }
+    }
     await Promise.all(this.started.map((p) => p.exited))
-    this.releases.stop(true)
+  }
+
+  async close() {
+    try {
+      await this.stopDaemon()
+      const sessionsDir = herdrConfigSessions(this.home)
+      const run = (args: ReadonlyArray<string>, extra: Record<string, string | undefined> = {}) =>
+        this.run(this.root, ["herdr", ...args], { timeoutMs: 20_000, env: extra })
+      const names = sessionNamesForWorld(
+        await fsPromises.readdir(sessionsDir).catch(() => [] as Array<string>),
+        this.herdrSession,
+      )
+      for (const name of names) await run(["session", "stop", name]).catch(() => undefined)
+      await stopSocketsUnder(this.root, (args, extra) => run(args, extra))
+      for (const sock of await pathsNamed(this.root, "hc.sock"))
+        await this.run(this.root, ["hc", "server", "stop"], { timeoutMs: 15_000, env: { HC_SOCKET: sock } }).catch(
+          () => undefined,
+        )
+      await this.killStarted()
+      for (const name of names) {
+        await run(["session", "delete", name]).catch(() => undefined)
+        await removeStoppedSession(path.join(sessionsDir, name))
+      }
+    } finally {
+      this.releases.stop(true)
+    }
   }
 }
 
@@ -446,6 +481,210 @@ export const alive = (pid: number) => {
     .stdout.toString()
     .trim()
   return state !== "" && !state.startsWith("Z")
+}
+
+const datedDirs = async (dir: string, keep: (name: string) => boolean) => {
+  const found: Array<{ name: string; mtimeMs: number }> = []
+  for (const name of await fsPromises.readdir(dir).catch(() => [] as Array<string>)) {
+    if (!keep(name)) continue
+    const st = await fsPromises.lstat(path.join(dir, name)).catch(() => undefined)
+    if (st?.isDirectory()) found.push({ name, mtimeMs: st.mtimeMs })
+  }
+  return found
+}
+
+const sessionOfSocket = (sock: string) => {
+  const name = path.basename(path.dirname(sock))
+  const sessions = path.dirname(path.dirname(sock))
+  const herdrDir = path.dirname(sessions)
+  if (path.basename(sessions) !== "sessions" || path.basename(herdrDir) !== "herdr") return undefined
+  return { name, xdg: path.dirname(herdrDir) }
+}
+
+const stopSocketsUnder = async (
+  root: string,
+  run: (args: ReadonlyArray<string>, env: Record<string, string>) => Promise<unknown>,
+) => {
+  for (const sock of await pathsNamed(root, "herdr.sock")) {
+    const session = sessionOfSocket(sock)
+    if (session === undefined) continue
+    const env = { XDG_CONFIG_HOME: session.xdg }
+    const forget = async (args: ReadonlyArray<string>) => {
+      try {
+        await run(args, env)
+      } catch {
+        return
+      }
+    }
+    await forget(["session", "stop", session.name])
+    await forget(["session", "delete", session.name])
+    if (!(await socketListening(sock))) continue
+    const pids = Bun.spawnSync(["lsof", "-t", sock], { stdout: "pipe", stderr: "ignore" })
+      .stdout.toString()
+      .split(/\s+/)
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 1)
+    for (const pid of new Set(pids)) {
+      try {
+        process.kill(pid, "SIGTERM")
+      } catch (e) {
+        if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+      }
+    }
+    const deadline = Date.now() + 5_000
+    while ((await socketListening(sock)) && Date.now() < deadline) await Bun.sleep(50)
+    if (!(await socketListening(sock))) continue
+    for (const pid of new Set(pids)) {
+      try {
+        process.kill(pid, "SIGKILL")
+      } catch (e) {
+        if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+      }
+    }
+  }
+}
+
+const stopRecordedDaemon = async (root: string) => {
+  const text = await fsPromises.readFile(path.join(root, "vibest", "vibestd.pid"), "utf8").catch(() => "")
+  let pid: number | undefined
+  let socket = ""
+  try {
+    const parsed = JSON.parse(text) as { pid?: unknown; socket?: unknown }
+    if (typeof parsed.pid === "number") pid = parsed.pid
+    if (typeof parsed.socket === "string") socket = parsed.socket
+  } catch {
+    return
+  }
+  if (pid === undefined || socket === "" || !alive(pid)) return
+  const realRoot = await fsPromises.realpath(root).catch(() => root)
+  const realSocket = await fsPromises.realpath(socket).catch(() => socket)
+  const under = (dir: string, file: string) => file === dir || file.startsWith(dir + path.sep)
+  if (![root, realRoot].some((dir) => [socket, realSocket].some((file) => under(dir, file)))) return
+  const command = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]).stdout.toString()
+  if (!command.includes("vibest") || !command.includes("daemon")) return
+  try {
+    process.kill(pid, "SIGTERM")
+  } catch (e) {
+    if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+    return
+  }
+  const deadline = Date.now() + 5_000
+  while (alive(pid) && Date.now() < deadline) await Bun.sleep(50)
+  if (!alive(pid)) return
+  try {
+    process.kill(pid, "SIGKILL")
+  } catch (e) {
+    if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+  }
+}
+
+const herdrRun = async (args: ReadonlyArray<string>, extra: Record<string, string> = {}) => {
+  const env: Record<string, string> = { ...extra }
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !key.startsWith("HERDR_") && env[key] === undefined) env[key] = value
+  }
+  const child = Bun.spawn(["herdr", ...args], { env, stdin: "ignore", stdout: "ignore", stderr: "ignore" })
+  const timer = setTimeout(() => child.kill(), 20_000)
+  await child.exited
+  clearTimeout(timer)
+}
+
+const worldDirExists = (root: string) =>
+  fsPromises.stat(root).then(
+    () => true,
+    () => false,
+  )
+
+const stopOwners = async (root: string) => {
+  const listed = Bun.spawnSync(["lsof", "-t", "+D", root], { stdout: "pipe", stderr: "ignore" }).stdout.toString()
+  const pids = [
+    ...new Set(
+      listed
+        .split(/\s+/)
+        .map(Number)
+        .filter((pid) => Number.isInteger(pid) && pid > 1 && pid !== process.pid),
+    ),
+  ]
+  const doomed: Array<number> = []
+  for (const pid of pids) {
+    const command = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]).stdout.toString()
+    if (!/(herdr|hc|vibest)/.test(command) || command.includes("tools/e2e")) continue
+    doomed.push(pid)
+    try {
+      process.kill(pid, "SIGTERM")
+    } catch (e) {
+      if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+    }
+  }
+  const deadline = Date.now() + 2_000
+  while (doomed.some((pid) => alive(pid)) && Date.now() < deadline) await Bun.sleep(50)
+  for (const pid of doomed) {
+    if (!alive(pid)) continue
+    try {
+      process.kill(pid, "SIGKILL")
+    } catch (e) {
+      if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+    }
+  }
+}
+
+export const removeWorldDir = async (root: string) => {
+  const deadline = Date.now() + 20_000
+  let removed = false
+  while (Date.now() < deadline) {
+    if (await worldDirExists(root)) {
+      removed = true
+      await stopOwners(root)
+      await fsPromises.rm(root, { recursive: true, force: true }).catch(() => undefined)
+      await Bun.sleep(200)
+      continue
+    }
+    if (!removed) return
+    await Bun.sleep(1_000)
+    if (!(await worldDirExists(root))) return
+  }
+}
+
+export const removeExpiredWorlds = async (
+  options: {
+    tmpBase?: string
+    sessionsDir?: string
+    now?: number
+    maxAgeMs?: number
+    run?: (args: ReadonlyArray<string>, env?: Record<string, string>) => Promise<unknown>
+  } = {},
+) => {
+  const tmpBase = options.tmpBase ?? worldTmpBase()
+  const sessionsDir = options.sessionsDir ?? herdrConfigSessions()
+  const now = options.now ?? Date.now()
+  const maxAgeMs = options.maxAgeMs ?? DAY_MS
+  const run = options.run ?? herdrRun
+  const forget = async (task: () => Promise<unknown>) => {
+    try {
+      await task()
+    } catch {
+      return
+    }
+  }
+  const worlds = await datedDirs(tmpBase, isWorldDirectoryName)
+  const sessions = await datedDirs(sessionsDir, (name) => worldOfHerdrSession(name) !== undefined)
+  const targets = sweepTargets(worlds, sessions, now, maxAgeMs)
+  const stuck = new Set<string>()
+  for (const world of targets.worlds) {
+    const root = path.join(tmpBase, world)
+    await stopRecordedDaemon(root)
+    await stopSocketsUnder(root, run)
+  }
+  for (const name of targets.sessions) {
+    const world = worldOfHerdrSession(name)
+    await forget(() => run(["session", "stop", name]))
+    await forget(() => run(["session", "delete", name]))
+    if (!(await removeStoppedSession(path.join(sessionsDir, name))) && world !== undefined) stuck.add(world)
+  }
+  for (const world of targets.worlds) {
+    if (stuck.has(world)) continue
+    await removeWorldDir(path.join(tmpBase, world))
+  }
 }
 
 export const SESSIONS = `(SELECT s.id, s.project_id, s.role AS agent_type, s.directory, s.created_at, s.ended_at,
