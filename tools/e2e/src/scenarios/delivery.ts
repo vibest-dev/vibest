@@ -108,7 +108,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S3",
     title:
-      "a Pi subagent's two vibest reports reach the Pi main agent: two report rows to the main agent, both delivered, both seen by its model, before the subagent's result",
+      "a Pi subagent's two vibest reports reach the Pi main agent: two report rows to the main agent, both delivered, each seen once by its model, both before the subagent's result",
     run: async (w) => {
       needs()
       const main = recordingModel(() => reply("ok"))
@@ -138,17 +138,20 @@ const checks: ReadonlyArray<Check> = [
           reports().every((r) => r.r === mainId),
           `reports not addressed to the main agent ${mainId}: ${JSON.stringify(reports())}`,
         )
-        const seen = () => main.requests.flatMap((messages) => messages.map(text))
-        await until(
-          "the main agent's model saw both reports",
-          () => ["report-one", "report-two"].every((r) => seen().some((t) => t.includes(r))),
-          60_000,
-        )
         await until(
           "the subagent's result",
           async () => ((await resultOf(w, m.repo, id))?.message ?? "").includes("done-s3"),
           60_000,
         )
+        const conversation = () =>
+          (main.requests.findLast((r) => r.some((message) => text(message).includes("done-s3"))) ?? []).map(text)
+        await until("the main agent's model saw the result", () => conversation().length > 0, 60_000)
+        const seen = conversation().join("\n")
+        for (const r of ["report-one", "report-two"]) {
+          const holding = conversation().filter((t) => t.includes(r)).length
+          expect(holding === 1, `the main agent's model saw ${r} in ${holding} messages, not once: ${seen}`)
+          expect(seen.indexOf(r) < seen.indexOf("done-s3"), `${r} reached the main agent after the result: ${seen}`)
+        }
       } finally {
         main.stop()
         sub.stop()

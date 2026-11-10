@@ -243,14 +243,17 @@ a real model. No script can prove these, so the verifying agent does them by han
   real model cannot be held between hook events.
 - S39 depends on timing: the Claude plugin polls every second and the Pi stream claims each message as it is queued, so
   whether two reports share one delivery depends on when they are queued.
+- S13 has no assertion: S25 and S26 only record how long a status change takes to reach vibestd, so the verifying
+  agent checks by hand that the change arrives without waiting for the next poll.
 
 Notes on particular checks:
 
 - U3 has no release path that reaches it while releases share a schema; `rpc.test.ts` (Daemon.Handoff with a failing
   import check) proves it in `pnpm test`.
-- U2, U4 and U6 start from an old install that is a copy of this build whose version is patched to an older one, until
-  a published previous release shares this build's database schema; then they move to that release, downloaded once
-  into an E2E cache.
+- U2, U4, U6 and U11 start from an old install that is a copy of this build whose version is patched to an older one,
+  until a published previous release shares this build's database schema; then they move to that release, downloaded
+  once into an E2E cache. U11's old install also has its protocol patched one lower, since only an older binary that
+  hands the restart step on can pass it.
 - T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG directories; it never contacts the user's herdr-core or changes
   harness configuration outside that temporary root. Its fixture runtime plugin (`fixtures/status-runtime.ts`) also
   proves G7. Coordinator status coverage is the follow-up in
@@ -260,8 +263,8 @@ Notes on particular checks:
   inherited SSH session variables, which H4 checks in a spawned process.
 - The guard rules themselves are `guard.test.ts`; without a vibest agent, or when vibestd cannot check the call,
   `vibest integration guard` fails with no answer (`cli.test.ts`). Cursor's deny and allow answers through vibestd are
-  `guard.test.ts`; a refused restart naming its daemon operation (D7) is `stop.test.ts`; which installer U1 runs is
-  `update.test.ts`; a main agent restarting through `VIBEST_COMMAND` (I11) is `restart.test.ts`.
+  `guard.test.ts`; a stop refused with each unsettled daemon operation or delivery named (D7, and D8, whose handoff
+  drains the same way) is `stop.test.ts`; which installer U1 runs is `update.test.ts`; a main agent restarting through
+  `VIBEST_COMMAND` (I11) is `restart.test.ts`.
 - The machines checks run two vibest homes on one host: A's vibestd dials B through a fake `ssh` first on its PATH,
   which runs the line with B's environment; agents on both sides run in isolated hc cores on fake models.
-- S13 has no bound: S25 and S26 record how long a status change takes to reach vibestd.

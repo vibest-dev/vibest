@@ -315,7 +315,6 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "S25",
-    covers: ["S13"],
     title:
       "herdr hands over to a new server: the reset reconcile runs, a pane closed after it is seen exited (the time it took is recorded), and a send to another idle subagent is delivered",
     run: async (w, evidence) => {

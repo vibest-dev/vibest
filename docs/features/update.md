@@ -49,3 +49,9 @@ were. After the steps its message names, the update installs.
 
 `vibest daemon restart` onto a vibest that cannot open the database stops nothing and asks nothing: the same vibestd
 keeps answering. Once the database fits, a restart replaces it.
+
+## U11. An update from an older protocol restarts the agents
+
+One `vibest update` run by an older vibest on an older protocol ends with the agents on the old integration restarted
+by the vibest it installed: the old vibest exits 0, and the main agent and the subagent keep their session and
+conversation with a new harness process.

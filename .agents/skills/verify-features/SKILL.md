@@ -18,8 +18,12 @@ working" condition. That list is the report's skeleton; every id in scope ends u
 
 From the checkout, run `pnpm verify` to the end (about 10 to 15 minutes; run it in the background and wait for its exit,
 do not end your turn while it runs). Keep its output. Its E2E legs write `tools/e2e/evidence/<run>/report.json` (each
-check's id, outcome and detail) and the commands each check ran. A failed or skipped gate is a finding, not a reason to
-stop: record it and go on.
+check's id, outcome and detail) and the commands each check ran. Each leg prints `evidence in tools/e2e/evidence/<run>`
+at its end; the curl leg's folder name ends in `-curl`, the npm leg's in `-npm`. A failed or skipped gate is a finding,
+not a reason to stop: record it and go on. When `pnpm verify` stops before E2E (build, typecheck, test, pack or install
+failed), no evidence folder exists; create `tools/e2e/evidence/<ISO time>-features/` for the report (§5).
+
+For a release verification, run `pnpm verify --no-cache`, so every E2E check runs on this commit.
 
 ## 3. Map script results to capabilities
 
@@ -30,12 +34,15 @@ id starts its name (`S10-start` is about `S10`) and also about each id in its `c
   passing check is evidence only for what it asserts; where the text says more, the rest is still open.
 - Unit tests count only where docs/testing/e2e-plan.md §5 names one for that capability, and only when `pnpm test`
   passed in this run.
-- A capability is verified by scripts only when every part of its text is covered by passing checks of this run.
+- A capability is verified by scripts only when every part of its text is covered by passing checks of this run. A
+  `cached` outcome counts as a pass only when its inputs match this commit; its cache key hashes the built binary, the
+  harness plugins, the E2E runner and checks, and the tool versions, so a key that matches means they do. A release
+  verification runs `--no-cache` and has none.
 
 ## 4. Verify the rest by hand
 
-For each capability or part no script covered (docs/testing/e2e-plan.md §5 lists the known ones: D9, I5, I10, S39),
-follow its text in a real environment and record what you ran and saw.
+For each capability or part no script covered (docs/testing/e2e-plan.md §5 lists the known ones: D9, I5, I10, S13,
+S39), follow its text in a real environment and record what you ran and saw.
 
 - Isolation: the rules of AGENTS.md and docs/testing/e2e-plan.md §1 apply. Use a temp `VIBEST_HOME`, your own herdr
   session (always pass `--session`), shadow harness config; never the user's `~/.vibest`, herdr session or harness
@@ -47,7 +54,9 @@ follow its text in a real environment and record what you ran and saw.
 ## 5. Report
 
 Write one report per run to `tools/e2e/evidence/<run>/features.md`, where `<run>` is the evidence folder of this
-run's `pnpm verify` curl leg (the whole gate), next to its `report.json`:
+run's `pnpm verify` curl leg (the whole gate, the folder ending in `-curl`), next to its `report.json`. When verify
+stopped before E2E, write it to `tools/e2e/evidence/<ISO time>-features/features.md` instead, name the stage that
+failed, and mark every capability not verified unless you verify it by hand (§4):
 
 - the commit (`git rev-parse HEAD`), the date, and the `pnpm verify` exit status with its evidence folders;
 - one line per capability id in scope, in the order of `docs/features`: `<ID> verified|failed|not verified`, then the

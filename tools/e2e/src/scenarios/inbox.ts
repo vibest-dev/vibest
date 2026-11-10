@@ -635,7 +635,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "S26",
-    covers: ["S2", "S13"],
+    covers: ["S2"],
     title:
       "latency: 3 rounds of a busy Pi subagent, a queued send, then release, and 3 pane closes of idle subagents; every queued send goes out and every closed pane's process ends; the times (turn end to delivering, pane close to process.end) are recorded",
     run: async (w, evidence) => {
