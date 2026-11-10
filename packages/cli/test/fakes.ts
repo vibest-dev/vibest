@@ -13,7 +13,7 @@ import { MachineTransport } from "@vibest/core/machines"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout } from "@vibest/core/paths"
 import { type Candidate, makeHost, Plugins } from "@vibest/core/plugins"
-import { type Liveness, Processes } from "@vibest/core/processes"
+import { type Liveness, ProcessPlatform, Processes } from "@vibest/core/processes"
 import { SshHosts } from "@vibest/core/repository-url"
 import { turnEndFrom } from "@vibest/core/results"
 import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
@@ -473,6 +473,9 @@ export const harnessesFrom = (
   )
 
 export const noHostEnv = Layer.succeed(HostEnv, { drop: () => {} })
+
+export const processesOn = (platform: ProcessPlatform["Service"]) =>
+  Processes.layer.pipe(Layer.provide(Layer.succeed(ProcessPlatform, platform)))
 
 export const runtimesLayer = Runtimes.layer.pipe(Layer.provide(noHostEnv))
 

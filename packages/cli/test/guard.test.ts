@@ -593,7 +593,7 @@ describe("wizard entry", () => {
           },
         })
         const exit = yield* Command.runWith(
-          Cli.command(host, () => {
+          Cli.command(host, [], () => {
             touched.exec = true
           }),
           { version: "0.0.0-test" },
@@ -667,7 +667,7 @@ describe("vibest --session inside herdr", () => {
           },
         })
         const exit = yield* Command.runWith(
-          Cli.command(host, () => {
+          Cli.command(host, [], () => {
             touched.exec = true
           }),
           { version: "0.0.0-test" },
@@ -718,7 +718,7 @@ describe("vibest --session inside herdr", () => {
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })
       const exit = yield* Command.runWith(
-        Cli.command(host, () => {}),
+        Cli.command(host, [], () => {}),
         { version: "0.0.0-test" },
       )(["--harness", "pi", "--env", "MAIN_PROBE=" + secret]).pipe(
         Effect.provideService(SocketConnector, () => {

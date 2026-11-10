@@ -26,6 +26,7 @@ import {
   until,
   untilVirtual,
   projectOf,
+  processesOn,
 } from "./fakes.ts"
 
 const served = (options: TestOptions) =>
@@ -137,7 +138,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
           return yield* Processes
         }).pipe(
           Effect.provide(
-            Processes.layer({
+            processesOn({
               liveness: () => "exited",
               terminate: (pid) => {
                 asked.push(pid)

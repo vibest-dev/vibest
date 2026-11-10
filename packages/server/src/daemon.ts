@@ -2,25 +2,11 @@ import { accepts, DAEMON_START_TIMEOUT, probe, type SocketConnector, stopByHand 
 import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
-import { type HostFacts, loadIdentity, VibestdIdentity } from "@vibest/core/identity"
+import { HostFacts } from "@vibest/core/identity"
 import { Layout, VibestCommand } from "@vibest/core/paths"
-import { type DaemonIdentity, VERSION } from "@vibest/protocol/rpc"
+import { VERSION } from "@vibest/protocol/rpc"
 import { newId } from "@vibest/schema/id"
-import {
-  Clock,
-  type Context,
-  type Crypto,
-  Deferred,
-  Duration,
-  Effect,
-  FileSystem,
-  Layer,
-  type Path,
-  Schedule,
-  type Scope,
-  Schema,
-} from "effect"
-import type { ChildProcessSpawner } from "effect/process"
+import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
 import * as Server from "./server.ts"
@@ -48,12 +34,10 @@ export class LockFailed extends Schema.TaggedError<LockFailed>()("LockFailed", {
 }) {}
 
 export interface Host {
-  readonly replacements: LayerNode.Replacements
   readonly lock: (
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, LockFailed>) | undefined, LockFailed, Scope.Scope>
   readonly checkDatabase: (filename: string) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch>
-  readonly facts: HostFacts
 }
 
 export { HANDOFF_ENV } from "./server.ts"
@@ -73,32 +57,7 @@ export class DaemonSocketInUse extends Schema.TaggedError<DaemonSocketInUse>()("
   message: Schema.String,
 }) {}
 
-const replacements = (
-  host: Host,
-  ambient: Context.Context<
-    FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner | Layout
-  >,
-  given: {
-    readonly identity: DaemonIdentity
-    readonly shutdown: Deferred.Deferred<void>
-    readonly self: VibestdIdentity["Service"]
-  },
-): LayerNode.Replacements => {
-  const platform = LayerNode.make({ name: "vibest/HostPlatform", layer: Layer.succeedContext(ambient), deps: [] })
-  return [
-    PlatformNode.fileSystem.replace(platform),
-    PlatformNode.path.replace(platform),
-    PlatformNode.crypto.replace(platform),
-    PlatformNode.childProcessSpawner.replace(platform),
-    PlatformNode.layout.replace(platform),
-    ...host.replacements,
-    Server.Identity.node.replace(Layer.succeed(Server.Identity, given.identity)),
-    Server.Shutdown.node.replace(Layer.succeed(Server.Shutdown, given.shutdown)),
-    VibestdIdentity.node.replace(Layer.succeed(VibestdIdentity, given.self)),
-  ]
-}
-
-export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
+export const run = (host: Host, replacements: LayerNode.Replacements, options: { readonly handoff?: boolean } = {}) =>
   Effect.gen(function* () {
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
@@ -153,25 +112,22 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
           yield* fs.copyFile(`${layout.database}${suffix}`, `${backup}${suffix}`)
       yield* Effect.log(`vibestd took over from the previous one; its database is backed up at ${backup}`)
     }
-    const self = yield* loadIdentity(layout.identity, host.facts)
-    if (self.warning !== undefined) yield* Effect.logWarning(self.warning)
+    const facts = yield* HostFacts.pipe(Effect.provide(LayerNode.compile(HostFacts.node, { replacements })))
     const identity = {
-      pid: host.facts.pid,
+      pid: facts.pid,
       instance: yield* newId(),
       command: yield* VibestCommand,
       startedAt: yield* Clock.currentTimeMillis,
     }
     const shutdown = yield* Deferred.make<void>()
-    const ambient = yield* Effect.context<
-      FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner | Layout
-    >()
     yield* Layer.build(
       LayerNode.compile(daemon, {
-        replacements: replacements(host, ambient, {
-          identity,
-          shutdown,
-          self: { id: self.identity.id, name: self.identity.name },
-        }),
+        replacements: [
+          ...replacements,
+          PlatformNode.layout.replace(Layer.succeed(Layout, layout)),
+          Server.Identity.node.replace(Layer.succeed(Server.Identity, identity)),
+          Server.Shutdown.node.replace(Layer.succeed(Server.Shutdown, shutdown)),
+        ],
       }),
     )
     yield* fs.chmod(layout.socket, 0o600)
