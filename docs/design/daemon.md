@@ -50,7 +50,8 @@ the client, which watches Ping. Each daemon has its own plugin registry (a servi
 Db and Runtimes depend on, so a commit is visible to whoever subscribed first. The services form one graph
 (`packages/server/src/app.ts`, see [architecture §5](architecture.md#5-service-composition)): a service is built after
 every node in its `deps`, and the nodes the host supplies are replacements, so the daemon and the tests compile the
-same graph. The main Agents' `vibest --env` values live
+same graph. The RPC and HTTP servers list the whole services group (`packages/server/src/services.ts`) in their
+`deps`, so the socket and the HTTP port bind only after every service is built, whatever the order of the roots. The main Agents' `vibest --env` values live
 in vibestd's memory only (never stored, logged or sent); a handoff passes them to the next vibestd in its environment
 (`VIBEST_HANDOFF_ENV`), which `vibest daemon --import` reads and removes before anything starts, and a handoff first
 has the new binary check read-only that it can open the database (`vibest daemon import-check`). The pairs go on the
