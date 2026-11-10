@@ -8,6 +8,7 @@ import {
   startDaemon,
   withVibest,
 } from "@vibest/client/client"
+import type { LayerNode } from "@vibest/core/effect/layer-node"
 import { askLine, askYesNo, interactive, Layout, VibestCommand } from "@vibest/core/paths"
 import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
@@ -99,7 +100,7 @@ const sessionFlag = Flag.String("session").pipe(
   Flag.optional,
 )
 
-const daemon = (host: Daemon.Host) =>
+const daemon = (host: Daemon.Host, replacements: LayerNode.Replacements) =>
   Command.make(
     "daemon",
     {
@@ -115,7 +116,7 @@ const daemon = (host: Daemon.Host) =>
           Effect.gen(function* () {
             if (foreground) {
               delete process.env[Daemon.HANDOFF_ENV]
-              return yield* Daemon.run(host, { handoff })
+              return yield* Daemon.run(host, replacements, { handoff })
             }
             const layout = yield* Layout
             if (!(yield* probe(layout.socket))) yield* startDaemon
@@ -806,13 +807,13 @@ const integration = () =>
     Command.withSubcommands([guard, prompt, stop, ready]),
   )
 
-export const command = (host: Daemon.Host, exec: Exec) =>
+export const command = (host: Daemon.Host, replacements: LayerNode.Replacements, exec: Exec) =>
   Command.make("vibest", mainFlags, startMain(exec)).pipe(
     Command.withDescription(
       "vibest: in a project directory, open its main agent here (--new: a new conversation); the main agent runs subagents in herdr panes",
     ),
     Command.withSubcommands([
-      daemon(host),
+      daemon(host, replacements),
       run,
       send,
       status,

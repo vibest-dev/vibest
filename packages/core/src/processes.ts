@@ -2,6 +2,7 @@ import { Context, Duration, Effect, Layer, Option, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
 
 export type Liveness = "exited" | "alive" | "unknown"
 
@@ -17,11 +18,16 @@ export const livenessOf = (probe: () => void): Liveness => {
 
 export const validPid = (pid: unknown): pid is number => typeof pid === "number" && Number.isInteger(pid) && pid > 0
 
-export interface ProcessPlatform {
-  readonly liveness: (pid: number) => Liveness
-  readonly terminate: (pid: number) => void
-  readonly pid: number
-  readonly uid: number | undefined
+export class ProcessPlatform extends Context.Service<
+  ProcessPlatform,
+  {
+    readonly liveness: (pid: number) => Liveness
+    readonly terminate: (pid: number) => void
+    readonly pid: number
+    readonly uid: number | undefined
+  }
+>()("vibest/ProcessPlatform") {
+  static readonly node = LayerNode.unbound(ProcessPlatform)
 }
 
 export const LSOF_TIMEOUT = Duration.seconds(10)
@@ -43,36 +49,40 @@ export class Processes extends Context.Service<
     readonly cwdUsers: (dirs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<number> | undefined>
   }
 >()("vibest/Processes") {
-  static readonly layer = (platform: ProcessPlatform) =>
-    Layer.effect(
-      Processes,
-      Effect.gen(function* () {
-        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-        const lsof = (uid: number) =>
-          runFor("lsof", lsofArgs(uid), LSOF_TIMEOUT).pipe(
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          )
-        return Processes.of({
-          liveness: (pid) => Effect.sync(() => (validPid(pid) ? platform.liveness(pid) : "unknown")),
-          terminate: (pid) =>
-            Effect.sync(() => {
-              if (!validPid(pid) || pid === platform.pid) return "denied" as const
-              try {
-                platform.terminate(pid)
-                return "sent" as const
-              } catch (e) {
-                return (e as { readonly code?: unknown }).code === "ESRCH" ? ("sent" as const) : ("denied" as const)
-              }
-            }),
-          cwdUsers: (dirs) =>
-            platform.uid === undefined || !Number.isInteger(platform.uid) || platform.uid < 0
-              ? Effect.succeed(undefined)
-              : lsof(platform.uid).pipe(Effect.map((run) => cwdHolders(run, platform.pid, dirs))),
-        })
-      }),
-    )
+  static readonly layer = Layer.effect(
+    Processes,
+    Effect.gen(function* () {
+      const platform = yield* ProcessPlatform
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const lsof = (uid: number) =>
+        runFor("lsof", lsofArgs(uid), LSOF_TIMEOUT).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        )
+      return Processes.of({
+        liveness: (pid) => Effect.sync(() => (validPid(pid) ? platform.liveness(pid) : "unknown")),
+        terminate: (pid) =>
+          Effect.sync(() => {
+            if (!validPid(pid) || pid === platform.pid) return "denied" as const
+            try {
+              platform.terminate(pid)
+              return "sent" as const
+            } catch (e) {
+              return (e as { readonly code?: unknown }).code === "ESRCH" ? ("sent" as const) : ("denied" as const)
+            }
+          }),
+        cwdUsers: (dirs) =>
+          platform.uid === undefined || !Number.isInteger(platform.uid) || platform.uid < 0
+            ? Effect.succeed(undefined)
+            : lsof(platform.uid).pipe(Effect.map((run) => cwdHolders(run, platform.pid, dirs))),
+      })
+    }),
+  )
 
-  static readonly node = LayerNode.unbound(Processes)
+  static readonly node = LayerNode.make({
+    service: Processes,
+    layer: Processes.layer,
+    deps: [ProcessPlatform.node, PlatformNode.childProcessSpawner],
+  })
 }
 
 export const runFor = (command: string, args: ReadonlyArray<string>, timeout: Duration.Input) =>

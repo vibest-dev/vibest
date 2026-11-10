@@ -7,7 +7,7 @@ import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Builtins, builtinsNode } from "@vibest/core/plugins"
 import { HostEnv, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
 import { Plugin } from "@vibest/plugin"
-import { run as runDaemon, type Host } from "@vibest/server/daemon"
+import { run as runDaemon } from "@vibest/server/daemon"
 import { ConfigProvider, Effect, FileSystem, Layer, Path, PubSub, Queue, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
@@ -278,17 +278,14 @@ describe("caller runtimes", () => {
             )
             .pipe(Effect.asVoid),
       })
-      const host: Host = {
-        ...Platform.daemon,
-        replacements: [
-          ...Platform.daemon.replacements,
-          builtinsNode.replace(
-            Layer.succeed(Builtins, [{ source: "builtin:runtime-user", revision: "-", options: {}, plugin: user }]),
-          ),
-        ],
-      }
+      const replacements = [
+        ...Platform.replacements,
+        builtinsNode.replace(
+          Layer.succeed(Builtins, [{ source: "builtin:runtime-user", revision: "-", options: {}, plugin: user }]),
+        ),
+      ]
       const layout = yield* Layout.make(dir)
-      yield* runDaemon(host).pipe(
+      yield* runDaemon(Platform.daemon, replacements).pipe(
         Effect.provideService(Layout, layout),
         Effect.provideService(VibestCommand, ["/bin/vibest"]),
         Effect.provide(
