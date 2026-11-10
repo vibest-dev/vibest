@@ -167,17 +167,18 @@ export const handlers = VibestRpcs.toLayer(
       Effect.gen(function* () {
         const coord = yield* db.coordinatorOf(projectId)
         if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
+        const runtimeId = coord.runtime
         if (coord.address.id === terminal) return null
+        const found = runtimes.find(runtimeId)
         if (!restarting.has(coord.id)) {
-          const h = runtimes.find(coord.runtime)
-          if (h === undefined) return null
-          const presence = yield* coordinatorIdle(h, coord.address).pipe(Effect.option)
+          if (found === undefined) return null
+          const presence = yield* coordinatorIdle(found, coord.address).pipe(Effect.option)
           if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
         }
         return {
           harness: coord.harnessId,
-          place: placeOf(coord.runtime, coord.address),
-          runtime: coord.runtime,
+          place: placeOf(found ?? { id: runtimeId }, coord.address),
+          runtime: runtimeId,
           address: encodeAddress(coord.address),
         }
       })
@@ -441,7 +442,7 @@ export const handlers = VibestRpcs.toLayer(
           return {
             runtime: rt.id,
             terminal: pane.id,
-            place: placeOf(rt.id, pane),
+            place: placeOf(rt, pane),
             attach: rt.attach?.(at) ?? null,
             ...(routing === undefined ? {} : { routing }),
           }
@@ -652,7 +653,7 @@ export const handlers = VibestRpcs.toLayer(
             const spec = specs.find((item) => item.id === place.runtime)
             if (spec?.ready !== undefined && !(yield* spec.ready(env).pipe(Effect.orDie)))
               return yield* new LaunchFailed({
-                message: spec.missing ?? `this ${place.runtime} terminal could not be named`,
+                message: spec.missing ?? `this ${spec.name ?? place.runtime} place could not be named`,
               })
           }
           return { directory: project.directory, place }

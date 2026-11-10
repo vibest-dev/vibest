@@ -10,7 +10,7 @@ import type { FailInput, MachineEventInput, MachineHook, PluginNote, SpawnDecisi
 export type RuntimeDefinition = PluginRuntime.RuntimeDefinition
 export type HarnessDefinition = PluginHarness.HarnessDefinition
 
-export type Caller = PluginRuntime.RuntimeCaller & { readonly id: string }
+export type Caller = PluginRuntime.RuntimeCaller & { readonly id: string; readonly name?: string }
 
 export interface RuntimesShape extends PluginRuntime.RuntimeDomain {
   readonly all: Effect.Effect<ReadonlyArray<RuntimeDefinition>>

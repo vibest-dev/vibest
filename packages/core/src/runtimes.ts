@@ -129,9 +129,17 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
       ),
     added: Stream.fromPubSub(added),
     callers: Effect.sync(() =>
-      registry
-        .get()
-        .flatMap((runtime) => (runtime.caller === undefined ? [] : [{ ...runtime.caller, id: runtime.id }])),
+      registry.get().flatMap((runtime) =>
+        runtime.caller === undefined
+          ? []
+          : [
+              {
+                ...runtime.caller,
+                id: runtime.id,
+                ...(runtime.name === undefined ? {} : { name: runtime.name }),
+              },
+            ],
+      ),
     ),
   }
 })

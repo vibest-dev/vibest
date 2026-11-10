@@ -73,6 +73,15 @@ describe("where the main agent runs", () => {
       runtime: "hc",
     })
   })
+  it("a runtime name is what a refusal says, and the id remains the choice", () => {
+    const unnamed = mainPlace({ runtime: "hc", hits: [{ id: "hc", terminal: undefined }] })
+    assert.strictEqual(unnamed.in === "refused" ? unnamed.message : "", "this hc place could not be named")
+    const named = mainPlace({ runtime: undefined, hits: [{ id: "hc", name: "herdr-core", terminal: undefined }] })
+    assert.strictEqual(
+      named.in === "refused" ? named.message : "",
+      "herdr-core is detected in this environment, but its place could not be named; pass --runtime",
+    )
+  })
 })
 
 describe("the runtime registry", () => {

@@ -40,6 +40,8 @@ beside the placement (`project`, `cwd`, `argv`, `env`, `label`) carries `near` (
 see it) and `remote` (another machine's vibestd started the agent, `Peer.Spawn`; herdr then opens it in its default
 session `default` and ignores `near`); each is the runtime's to honor as it can.
 
+`name` is optional: the word a place uses for this runtime. A place reads `<name> <address>`, or `<name> (not placed)` when the address is empty, and a remote address keeps its `@machine`. With no `name`, the place uses `id`. herdr leaves `name` unset, so a place says `herdr`. herdr-core sets `herdr-core` and keeps id `hc` (`--runtime hc`, and the id stored on a row, do not change).
+
 | Optional                     | herdr                                                                                                            | rex                            | tern                                     | Core's fallback when absent                    |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------- | ---------------------------------------------- |
 | `state(terminal)`            | detected                                                                                                         | OSC 7501 the program wrote     | OSC 7501 (window side)                   | harness integration only                       |

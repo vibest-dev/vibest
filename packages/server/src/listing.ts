@@ -9,8 +9,10 @@ import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo }
 import { type AgentStatus } from "@vibest/schema/session"
 import { Effect, Option } from "effect"
 
-export const placeOf = (kind: string, address: RuntimeAddress) =>
-  address.id !== "" ? `${kind} terminal ${address.id}` : `${kind} (no terminal)`
+export const placeOf = (runtime: { readonly id: string; readonly name?: string }, address: RuntimeAddress) => {
+  const name = runtime.name ?? runtime.id
+  return address.id !== "" ? `${name} ${address.id}` : `${name} (not placed)`
+}
 
 export const sameCoordinator = (
   current: { readonly runtime: string | null; readonly address: RuntimeAddress | null } | undefined,

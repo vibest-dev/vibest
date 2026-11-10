@@ -205,7 +205,7 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
   runs before `Peer.Spawn` only when A's runtime of the forwarded kind has `locate`.
 - **The address.** A remote row's `address` becomes A's view: found, `{machine: "local", id: <the terminal id A's
   runtime takes>}` (hc: `mb/t7@<A's socket>`); not found, `{machine: <name>, id: ""}` and `view` says why (the
-  runtime's note, a failed repair, or `<name>'s <kind> terminals cannot be shown here; vibest peek <name>/<id> reads
+  runtime's note, a failed repair, or `<name>'s <kind> agents cannot be shown here; vibest peek <name>/<id> reads
   them` when A has no runtime of that kind with `locate`). `vibest peek` prints `terminal here: <address>` or `not
   shown here: <view>` on stderr. `Machine.Add` also answers that core note for each kind of B's that A cannot show.
 - **`machine ls`** gives per machine the runtimes of its last Hello (`runtimes`, `runtimesAt`), each with `here:
