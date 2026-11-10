@@ -144,6 +144,8 @@ describe("Shell denials", () => {
   it("refuse vibest with its identity variables changed or cleared, however it is wrapped or spelled", () => {
     for (const command of [
       "env -u VIBEST_AGENT vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd",
+      "env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest machine ls",
+      "env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest daemon restart",
       "env -uVIBEST_SESSION_ID vibest ls",
       "env --unset=VIBEST_AGENT vibest ls",
       "env -i PATH=/bin vibest interrupt abcd1234-abcd-4abc-8abc-abcd1234abcd",
@@ -663,6 +665,10 @@ describe("wizard entry", () => {
           Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "wizard returned success",
         )
         assert.match(error instanceof Forbidden ? error.message : "", /an agent may not run vibest daemon restart/)
+        assert.include(
+          error instanceof Forbidden ? error.message : "",
+          "This shell carries agent session abcd1234-abcd-4abc-8abc-abcd1234abcd. If you are the user, run it as env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest daemon restart",
+        )
         assert.deepStrictEqual(touched, { spawn: false, exec: false, host: false, socket: false })
       }),
     15_000,
