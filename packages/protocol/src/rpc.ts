@@ -447,11 +447,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     Rpc.make("List", {
       payload: { stopped: Schema.optional(Schema.Boolean), all: Schema.optional(Schema.Boolean) },
-      success: Schema.Struct({
-        sessions: Schema.Array(SessionInfo),
-        machines: Schema.Array(ListedMachine),
-        notice: Schema.optional(Schema.String),
-      }),
+      success: Schema.Struct({ sessions: Schema.Array(SessionInfo), machines: Schema.Array(ListedMachine) }),
       error: Schema.Union([Forbidden]),
     }),
   ),

@@ -3,7 +3,7 @@ import url from "node:url"
 
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { migrations } from "@vibest/core/database/migration"
+import { applyOnly, type Migration, migrations } from "@vibest/core/database/migration"
 import { APPLICATION_ID, Db, encodeAddress } from "@vibest/core/db"
 import { makeJournal } from "@vibest/core/journal"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -644,44 +644,45 @@ describe("Db", () => {
     }).pipe(Effect.provide(Platform.services)),
   )
 
+  it.effect("pending migrations run in order at open, each once and recorded; a failing one changes nothing", () =>
+    Effect.gen(function* () {
+      const file = yield* fileAt(yield* tempDirectory("vibest-migrations-"), "vibest.db")
+      yield* Effect.void.pipe(Effect.provide(database(file)))
+      const ran: Array<string> = []
+      const creating = (id: string, table: string, fails = false): Migration => ({
+        id,
+        up: (tx) =>
+          tx.unsafe(`CREATE TABLE ${table} (x INTEGER) STRICT`).pipe(
+            Effect.tap(() => Effect.sync(() => ran.push(id))),
+            Effect.andThen(fails ? Effect.die("injected migration failure") : Effect.void),
+          ),
+      })
+      const state = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return {
+          ids: (yield* sql<{ id: string }>`SELECT id FROM migration ORDER BY id`).map((row) => row.id),
+          tables: (yield* sql<{
+            name: string
+          }>`SELECT name FROM sqlite_schema WHERE name LIKE 'later_%' ORDER BY name`).map((row) => row.name),
+        }
+      })
+      const steps = [creating("20270101000000_a", "later_a"), creating("20270102000000_b", "later_b")]
+      yield* applyOnly(steps).pipe(Effect.provide(Platform.sqlite(file)))
+      yield* applyOnly(steps).pipe(Effect.provide(Platform.sqlite(file)))
+      assert.deepStrictEqual(ran, ["20270101000000_a", "20270102000000_b"])
+      const failing = applyOnly([...steps, creating("20270103000000_c", "later_c", true)])
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(failing.pipe(Effect.provide(Platform.sqlite(file))))))
+      assert.deepStrictEqual(yield* state.pipe(Effect.provide(Platform.sqlite(file))), {
+        ids: ["20270101000000_a", "20270102000000_b"],
+        tables: ["later_a", "later_b"],
+      })
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
   it.effect("an incomplete file is rejected and left byte-identical", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const dir = yield* tempDirectory("vibest-schema-partial-")
-      const pragma = [`PRAGMA application_id = ${APPLICATION_ID}`, "PRAGMA user_version = 1"]
-      const tables = [
-        "CREATE TABLE project (id TEXT PRIMARY KEY) STRICT",
-        "CREATE TABLE project_repository (project_id TEXT, path TEXT) STRICT",
-        "CREATE TABLE session (id TEXT PRIMARY KEY, project_id INTEGER, parent_session_id TEXT, machine TEXT, directory TEXT) STRICT",
-        "CREATE TABLE inbox (id INTEGER PRIMARY KEY) STRICT",
-        "CREATE TABLE event (id INTEGER PRIMARY KEY) STRICT",
-      ]
-      const cases = [
-        [
-          "missing-index.db",
-          [
-            ...pragma,
-            ...tables,
-            "CREATE INDEX project_repository_project ON project_repository (project_id)",
-            "CREATE INDEX session_project ON session (project_id)",
-            "CREATE INDEX session_parent ON session (parent_session_id)",
-            "CREATE INDEX session_live ON session (machine, directory)",
-          ],
-          "missing inbox_status",
-        ],
-      ] as const
-      for (const [name, statements, expected] of cases) {
-        const file = yield* fileAt(dir, name)
-        yield* writeSql(file, statements)
-        const before = yield* fs.readFile(file)
-        const pretty = yield* refusal(file)
-        assert.include(pretty, "SchemaMismatch")
-        assert.include(pretty, expected)
-        assert.deepStrictEqual(yield* fs.readFile(file), before)
-        assert.isFalse(yield* fs.exists(`${file}-wal`))
-        assert.include(yield* refusal(file), expected)
-        assert.deepStrictEqual(yield* fs.readFile(file), before)
-      }
       const dropped = yield* fileAt(dir, "missing-table.db")
       yield* Effect.void.pipe(Effect.provide(database(dropped)))
       yield* writeSql(dropped, ["DROP INDEX project_repository_project", "DROP TABLE project_repository"])

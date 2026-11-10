@@ -3,7 +3,6 @@ import { shellQuote } from "@vibest/schema/layout"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 
-import { V1_REQUIRED } from "./import/v1-schema.ts"
 import { PROJECTION_SCHEMA, PROJECTION_VERSION } from "./projectors.ts"
 
 export const APPLICATION_ID = 0x76696265
@@ -73,23 +72,17 @@ export const inspectSchema = Effect.gen(function* () {
   const userVersion = (yield* sql<{ userVersion: number }>`PRAGMA user_version`)[0]?.userVersion ?? 0
   const has = (type: string, name: string) => rows.some((row) => row.type === type && row.name === name)
   if (applicationId !== APPLICATION_ID) return yield* mismatch(userVersion, applicationId)
-  if (has("table", MIGRATION_TABLE)) {
-    const catalog = has("table", "meta") ? yield* metaOf(sql, "catalog") : undefined
-    if (catalog === undefined) return yield* mismatch(userVersion, applicationId, "no event catalog version")
-    if (catalog > CATALOG_VERSION) return yield* new SchemaMismatch({ version: userVersion, applicationId, catalog })
-    const rebuilt = (yield* metaOf(sql, "projection")) !== PROJECTION_VERSION
-    const absent = objectsOf(rebuilt ? LOG_SCHEMA : [...LOG_SCHEMA, ...PROJECTION_SCHEMA]).find(
-      (object) => !has(object.type, object.name),
-    )
-    if (absent !== undefined) return yield* mismatch(userVersion, applicationId, `missing ${absent.name}`)
-    return "ready" as const
-  }
-  if (userVersion === 1 && !has("table", "event"))
+  if (!has("table", MIGRATION_TABLE))
     return yield* new SchemaMismatch({ version: userVersion, applicationId, older: true })
-  const missing = V1_REQUIRED.find((object) => !has(object.type, object.name))
-  if (userVersion !== 1 || missing !== undefined)
-    return yield* mismatch(userVersion, applicationId, userVersion !== 1 ? undefined : `missing ${missing!.name}`)
-  return "v1" as const
+  const catalog = has("table", "meta") ? yield* metaOf(sql, "catalog") : undefined
+  if (catalog === undefined) return yield* mismatch(userVersion, applicationId, "no event catalog version")
+  if (catalog > CATALOG_VERSION) return yield* new SchemaMismatch({ version: userVersion, applicationId, catalog })
+  const rebuilt = (yield* metaOf(sql, "projection")) !== PROJECTION_VERSION
+  const absent = objectsOf(rebuilt ? LOG_SCHEMA : [...LOG_SCHEMA, ...PROJECTION_SCHEMA]).find(
+    (object) => !has(object.type, object.name),
+  )
+  if (absent !== undefined) return yield* mismatch(userVersion, applicationId, `missing ${absent.name}`)
+  return "ready" as const
 })
 
 export const objectCount = SqlClient.SqlClient.pipe(

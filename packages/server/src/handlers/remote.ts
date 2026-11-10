@@ -13,9 +13,6 @@ import { Effect, Stream } from "effect"
 import type { Listing } from "../listing.ts"
 import type { Agent, Checks } from "./caller.ts"
 
-const HISTORY_NOT_IMPORTED =
-  "the history from before this vibest was not imported; the old tables are kept as v1_<name> in vibest.db, and the reason is in the vibestd log"
-
 type Routed = "Send" | "Interrupt" | "Remove" | "Get" | "Peek"
 type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
@@ -117,8 +114,7 @@ export const remoteHandlers = (
             const scope = yield* listScope(all)
             const local = yield* deps.listed(scope, stopped === true)
             const away = yield* remote.list(scope, stopped)
-            const listed = { sessions: [...local, ...away.sessions], machines: away.machines }
-            return (yield* db.historyNotImported) ? { ...listed, notice: HISTORY_NOT_IMPORTED } : listed
+            return { sessions: [...local, ...away.sessions], machines: away.machines }
           }),
 
         "Peer.Hello": ({ id, name, callsMe }: PayloadOf<"Peer.Hello">) =>

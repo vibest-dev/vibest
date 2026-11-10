@@ -19,7 +19,6 @@ import { SqlClient } from "effect/sql"
 
 import { Bus } from "./bus.ts"
 import { apply } from "./database/migration.ts"
-import { NOT_IMPORTED_TABLE } from "./database/migration/20261110120000_ledger.ts"
 import { inboxMethods } from "./db-inbox.ts"
 import { remoteQueries, type PeerStart } from "./db-remote.ts"
 import {
@@ -608,10 +607,6 @@ const make = Effect.gen(function* () {
       tx(clearMainAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
     canResumeConversation,
-    historyNotImported: sql`SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ${NOT_IMPORTED_TABLE}`.pipe(
-      Effect.map((rows) => rows.length > 0),
-      Effect.orDie,
-    ),
     ...inboxMethods(store),
   }
 })

@@ -255,43 +255,14 @@ describe("v1 import", () => {
       Layer.provide(Bus.layer),
     )
 
-  it.effect("opening a v1 database applies the ledger migration once, with its history imported", () =>
+  it.effect("vibestd refuses to open a v1 database and leaves it as it was", () =>
     Effect.gen(function* () {
       const file = fixtureFile("sessions")
-      const listed = Effect.gen(function* () {
-        const db = yield* Db
-        assert.isFalse(yield* db.historyNotImported)
-        return (yield* db.listSessions({ stopped: true })).map((row) => row.id)
-      })
-      const sessions = yield* listed.pipe(Effect.provide(opened(file)))
-      assert.isAbove(sessions.length, 0)
-      assert.deepStrictEqual(yield* listed.pipe(Effect.provide(opened(file))), sessions)
-      const tables = shape(file).tables
-      assert.deepInclude(tables, ["migration", 1])
-      assert.isFalse(tables.some(([name]) => name.startsWith("v1_")))
-      assert.isUndefined(yield* equalToReplay(yield* client(file)).pipe(Effect.provide(memory)))
+      const before = shape(file)
+      const error = yield* Effect.flip(Effect.void.pipe(Effect.provide(opened(file))))
+      assert.include(String(error), "is from an older vibest")
+      assert.deepStrictEqual(shape(file), before)
     }),
-  )
-
-  it.effect(
-    "a v1 database the import refuses keeps its tables as v1_<name>, starts with an empty history, and is not imported again",
-    () =>
-      Effect.gen(function* () {
-        const file = fixtureFile("referee-fails")
-        const before = shape(file).tables
-        const opening = Effect.gen(function* () {
-          const db = yield* Db
-          assert.isTrue(yield* db.historyNotImported)
-          assert.deepStrictEqual(yield* db.listSessions({ stopped: true }), [])
-          assert.deepStrictEqual(yield* db.coordinators, [])
-        })
-        yield* opening.pipe(Effect.provide(opened(file)))
-        const after = shape(file).tables
-        for (const [name, rows] of before) assert.deepInclude(after, [`v1_${name}`, rows])
-        assert.deepInclude(after, ["migration", 1])
-        yield* opening.pipe(Effect.provide(opened(file)))
-        assert.deepStrictEqual(shape(file).tables, after)
-      }),
   )
 
   it.effect("import-check reads a read-only source and reports the referee result without writing", () =>

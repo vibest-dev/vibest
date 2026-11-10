@@ -8,16 +8,13 @@ release. Each release lists what broke, who is affected and how to migrate under
 ### Breaking changes
 
 - **The database** (users, and anyone reading `vibest.db`): vibestd stores an append-only log of facts and a read model
-  projected from it. The first vibestd of this version imports the existing database once, in place, when it opens it
-  (one transaction, no backup file); sessions, prompts, results and queued messages carry over. When the import fails,
-  vibestd still starts with an empty history, keeps the old tables as `v1_<name>` in the same file, prints a
-  `LedgerNotImported:` line with the reason (in the vibestd log and on the starting `vibest`), and `vibest ls` shows a
-  `notice`. An older vibest cannot open the file afterwards: going back means moving `vibest.db` aside. Tools that read
-  the tables directly must read the new ones (`docs/design/schema.md`): `process`, `turn` and the `event` log with the
-  new fact types replace the old `event` rows (`process.start`, `turn.end`, `inbox.status`, …), `inbox.result_turn_id`
-  replaces `result_event_id`, and sessions have no `machine` column. `vibest daemon import-check` now also replays the
-  log of an imported database and fails when the read model differs from the replay. `vibest ls` may carry a `notice`
-  field.
+  projected from it, and applies schema migrations recorded in a `migration` table when it opens the file. It refuses
+  a database from an earlier version (`SchemaMismatch`, the file unchanged): there is no automatic conversion; move it
+  aside with its `-wal` and `-shm` files while vibestd is stopped to start empty. An older vibest cannot open the new
+  file. Tools that read the tables directly must read the new ones (`docs/design/schema.md`): `process`, `turn` and the
+  `event` log with the new fact types replace the old `event` rows (`process.start`, `turn.end`, `inbox.status`, …),
+  `inbox.result_turn_id` replaces `result_event_id`, and sessions have no `machine` column. `vibest daemon
+  import-check` now replays the log and fails when the read model differs from the replay.
 - **Runtime plugins** (plugin authors): a plugin is only `{ id, effect }`. `caller` moves from the plugin into the
   runtime definition, the runtime's `kind` is renamed `id`, and `context.runtime.register(runtime)` is replaced by
   `context.runtime.transform((editor) => editor.add(definition))`. The `Runtime` type is now `RuntimeDefinition`, and

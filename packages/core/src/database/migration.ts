@@ -5,14 +5,13 @@ import { SqlClient, type SqlError } from "effect/sql"
 import { inspectSchema, MIGRATION_TABLE, objectCount } from "../db-schema.ts"
 import { installLedger, rebuild } from "../journal.ts"
 import { PROJECTION_VERSION } from "../projectors.ts"
-import ledger from "./migration/20261110120000_ledger.ts"
 
 export type Migration = {
   readonly id: string
   readonly up: (tx: SqlClient.SqlClient) => Effect.Effect<void, SqlError.SqlError>
 }
 
-export const migrations: ReadonlyArray<Migration> = [ledger]
+export const migrations: ReadonlyArray<Migration> = []
 
 const createTable = (sql: SqlClient.SqlClient) =>
   sql.unsafe(`CREATE TABLE IF NOT EXISTS ${MIGRATION_TABLE} (id TEXT PRIMARY KEY, time_completed INTEGER NOT NULL)
@@ -36,15 +35,18 @@ const bootstrap = (sql: SqlClient.SqlClient) =>
     }),
   )
 
-const applyPending = (sql: SqlClient.SqlClient, migration: Migration) =>
-  sql.withTransaction(
-    Effect.gen(function* () {
-      yield* createTable(sql)
-      if ((yield* appliedIds(sql)).has(migration.id)) return
-      yield* migration.up(sql)
-      yield* markApplied(sql, migration.id)
-    }),
-  )
+export const applyOnly = (input: ReadonlyArray<Migration>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    for (const migration of input)
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          if ((yield* appliedIds(sql)).has(migration.id)) return
+          yield* migration.up(sql)
+          yield* markApplied(sql, migration.id)
+        }),
+      )
+  })
 
 const projectionVersion = (sql: SqlClient.SqlClient) =>
   sql<{ value: string }>`SELECT value FROM meta WHERE key = 'projection'`.pipe(
@@ -64,7 +66,7 @@ const openLedger = (
 export const apply = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   if ((yield* inspectSchema) === "empty") yield* bootstrap(sql)
-  for (const migration of migrations) yield* applyPending(sql, migration)
+  yield* applyOnly(migrations)
   yield* inspectSchema
   yield* openLedger(sql)
 })

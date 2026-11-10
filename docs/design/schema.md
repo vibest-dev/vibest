@@ -313,16 +313,16 @@ rows that must keep decoding and re-encoding to the same bytes: add rows to it, 
 `packages/core/src/database/migration.ts` opens the file, as OpenCode does:
 
 1. `inspectSchema` reads the file on a read-only connection before it is opened writable. A wrong `application_id`, a
-   file of the shape from before the event table, or one missing objects it needs is refused (`SchemaMismatch`) without
-   changing its bytes; the message gives the way out, moving it aside with its `-wal` and `-shm` files while vibestd is
+   file that is not empty and has no `migration` table (any shape from before the ledger, v1 included), or one missing
+   objects it needs is refused (`SchemaMismatch`) without changing its bytes; the message gives the way out, moving it aside with its `-wal` and `-shm` files while vibestd is
    stopped. A file whose `meta.catalog` is newer than this vibest's catalog is refused with "was written by a newer
    vibest …: run vibest update"; this vibest never skips a fact type it does not know.
 2. An empty file gets the current schema in one write transaction that checks again under the write lock (so of two
    empty opens at once one installs and the other sees it), with every migration marked applied.
 3. Each migration in `migrations` that the `migration` table does not list runs in its own transaction, in order, and
-   its id is recorded. A migration is a module `packages/core/src/database/migration/<timestamp>_<name>.ts` with an `id`
-   and an `up(tx)`. Migrations stay in the code for good; there are no one-off scripts outside the repository.
-   `user_version` is not read.
+   its id is recorded (`applyOnly`). A migration is a module `packages/core/src/database/migration/<timestamp>_<name>.ts`
+   with an `id` and an `up(tx)`, added to `migrations`. The ledger as described here is the baseline, so the list
+   starts empty and every later change to the tables is a new migration. `user_version` is not read.
 4. In one transaction: when `meta.projection` differs from `PROJECTION_VERSION`, the read model is dropped and rebuilt
    by replaying the log; then `meta.catalog` is set to this vibest's catalog version.
 5. `journal_mode = WAL` writes the header, so it is set only after the file is accepted: a refused file keeps its
@@ -332,27 +332,24 @@ rows that must keep decoding and re-encoding to the same bytes: add rows to it, 
 `vibest update` and `vibest daemon restart` run the new binary's `vibest daemon import-check` (read-only, no lock) before
 they change anything. On a ledger it replays the log into a `:memory:` database and, when the projection versions
 match, compares every read-model table with the replay; a difference or a fact that does not decode fails it, naming
-the first differing row or the fact's `seq`. On a database from before the ledger it only checks that the file opens.
+the first differing row or the fact's `seq`. A database from before the ledger is refused, as vibestd refuses it.
 E2E runs it on every world's database at the end of each check.
 
-### The first migration: importing a v1 database
+### Converting a v1 database
 
-`20261110120000_ledger` turns a database of the earlier shape (`user_version` 1, the v1 `event` and `inbox` tables) into
-the ledger in place. `packages/core/src/import/translate.ts` is pure: it reads a snapshot of every v1 table and gives the
+The v1 to ledger conversion is not a migration: vibestd refuses a v1 database. The owner converts one by hand, with
+vibestd stopped, using a script kept outside the repository that runs `importInPlace` on the file and then adds the
+`migration` table with every id in `migrations` applied, so the file is what a new install would have.
+`packages/core/src/import/translate.ts` is pure: it reads a snapshot of every v1 table and gives the
 facts in v1 event order (an inbox row's `inbox.queued` is translated before the row's first other event, since an older
 migration backfilled some queued events with later ids), with `seq` starting above every v1 event id and inbox id, so an
 old inbox id never names a new row. It fails, naming the v1 row, on an event type it does not know, a reference to a
 missing process, turn or inbox row, an inbox row without its `inbox.queued` event, a turn end whose report is not an
 event id, and any `machine` other than `local`; four known oddities and every second end of an already ended turn are
-counted instead. All problems are collected and reported together. `importInPlace` runs inside the migration's
-transaction on the database file (no backup copy; `PRAGMA defer_foreign_keys` stays on until the outer transaction
-ends): read, translate, drop the v1 tables, install the ledger, append the facts, then the referee.
-
-When any of that fails, vibestd still starts: the import rolls back, then in the same migration transaction the v1
-tables are renamed `v1_<name>` (their indexes and triggers dropped), an empty ledger is installed, and the migration is
-recorded, so it is not tried again. The reason goes to stderr, which is the vibestd log (`LedgerNotImported: …`); the
-`vibest` that started vibestd prints that line, and `vibest ls` carries a `notice` that the old history was not
-imported. The `v1_` tables only let a later version try again.
+counted instead. All problems are collected and reported together. `importInPlace` runs in one transaction on the
+database file (no backup copy; `PRAGMA defer_foreign_keys` stays on until the outermost transaction ends): read,
+translate, drop the v1 tables, install the ledger, append the facts, then the referee. Any failure rolls the whole
+file back.
 
 The referee (`referee.ts`) reads both databases through the same set of reads and compares them field by field: session
 rows and columns, projects, coordinators, inbox rows (as the `Db` reads them, and the stored columns of every row
