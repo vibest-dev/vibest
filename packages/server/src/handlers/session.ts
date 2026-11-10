@@ -1,15 +1,13 @@
 import { raisesSeen } from "@vibest/core/activity"
 import { Bus, type EngineEvent } from "@vibest/core/bus"
-import { filterCallerEnv, sameTerminal } from "@vibest/core/caller"
 import { Db } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
 import { keyedLock } from "@vibest/core/keyed-lock"
-import { Plugins } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Sessions } from "@vibest/core/sessions"
 import { Forbidden, WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
 import { RuntimeUnreachable } from "@vibest/schema/session"
-import { Effect, Option, Queue, Stream } from "effect"
+import { Effect, Queue, Stream } from "effect"
 
 import { type Listing, toInfo } from "../listing.ts"
 import type { Checks, Handlers, MethodOf } from "./caller.ts"
@@ -26,7 +24,6 @@ export const make = (
     const sessions = yield* Sessions
     const db = yield* Db
     const runtimes = yield* Runtimes
-    const plugins = yield* Plugins
     const bus = yield* Bus
     const integration = yield* Integration
     const seenLocked = keyedLock<string>()
@@ -175,23 +172,6 @@ export const make = (
             )
           }),
         ),
-
-      "Session.Here": ({ id, callerEnv }) =>
-        Effect.gen(function* () {
-          yield* cliOnly("Session.Here")
-          const identity = yield* db.sessionIdentity(id)
-          if (identity === undefined) return true
-          const at =
-            identity.agent === "coordinator" ? yield* db.coordinatorOf(identity.projectId) : yield* db.getSession(id)
-          if (at?.id !== id) return false
-          if (!at.runtime || !at.address || at.address.id === "" || at.address.machine !== "local") return true
-          const spec = (yield* plugins.settled.pipe(Effect.andThen(runtimes.callers))).find(
-            (item) => item.id === at.runtime,
-          )
-          if (spec === undefined) return true
-          const terminal = yield* spec.terminal(filterCallerEnv([spec], callerEnv)).pipe(Effect.option)
-          return Option.isNone(terminal) || sameTerminal(at.address.id, terminal.value)
-        }),
 
       "Session.Seen": ({ id, turn }) =>
         Effect.gen(function* () {

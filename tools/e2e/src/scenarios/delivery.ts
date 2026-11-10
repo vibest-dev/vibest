@@ -246,11 +246,12 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S40",
     title:
-      "a terminal opened by a server that inherited a finished subagent's environment runs vibest as the user; the subagent itself is refused",
+      "a terminal opened by a server that inherited a finished subagent's environment is refused a user command with a hint naming the session and the env -u way out, which then works; the subagent itself is refused",
     run: async (w) => {
       needs()
       const envFile = path.join(w.root, "s40-agent-env.json")
       const asAgent = path.join(w.root, "s40-agent.txt")
+      const hinted = path.join(w.root, "s40-hinted.txt")
       const asUser = path.join(w.root, "s40-user.txt")
       const main = recordingModel(() => reply("ok"))
       const sub = recordingModel((messages) =>
@@ -316,19 +317,31 @@ const checks: ReadonlyArray<Check> = [
           },
           30_000,
         )
-        await herdr(socket, "pane.send_text", {
-          pane_id: pane,
-          text: `${binary} machine ls > ${asUser} 2>&1; echo "exit=$? session=$VIBEST_SESSION_ID" >> ${asUser}`,
-        })
-        await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
-        await until(
-          "vibest in the new terminal",
-          async () => (await fs.readFile(asUser, "utf8").catch(() => "")).includes("exit="),
-          60_000,
+        const typed = async (line: string, file: string) => {
+          await herdr(socket, "pane.send_text", {
+            pane_id: pane,
+            text: `${line} > ${file} 2>&1; echo "exit=$? session=$VIBEST_SESSION_ID" >> ${file}`,
+          })
+          await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
+          await until(
+            `${line} in the new terminal`,
+            async () => (await fs.readFile(file, "utf8").catch(() => "")).includes("exit="),
+            60_000,
+          )
+          return fs.readFile(file, "utf8")
+        }
+        const refusedHere = await typed(`${binary} machine ls`, hinted)
+        expect(refusedHere.includes(`session=${id}`), `the new terminal did not inherit the identity: ${refusedHere}`)
+        const wayOut = "env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest machine ls"
+        expect(
+          refusedHere.includes("Forbidden") &&
+            refusedHere.includes(`This shell carries agent session ${id}`) &&
+            refusedHere.includes(wayOut) &&
+            refusedHere.includes("open a terminal that was not started from an agent"),
+          `no hint for the user: ${refusedHere}`,
         )
-        const ran = await fs.readFile(asUser, "utf8")
-        expect(ran.includes(`session=${id}`), `the new terminal did not inherit the subagent's identity: ${ran}`)
-        expect(ran.includes("exit=0") && !ran.includes("Forbidden"), `the user was refused: ${ran}`)
+        const ran = await typed(wayOut.replace(/ vibest /, ` ${binary} `), asUser)
+        expect(ran.includes("exit=0") && !ran.includes("Forbidden"), `the hinted command failed: ${ran}`)
       } finally {
         server?.kill()
         await server?.exited

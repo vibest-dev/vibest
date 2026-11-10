@@ -37,7 +37,7 @@ import { Argument, CliError, Command, Flag } from "effect/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClientError as ClientError } from "effect/rpc"
 
-import { caller, callerEnvOf, json, userOnly, vibest } from "./caller.ts"
+import { caller, json, userOnly, vibest } from "./caller.ts"
 import { doctor } from "./doctor.ts"
 import { herdrCommands } from "./herdr-plugin.ts"
 import { connectCommand, machine, projectAdd } from "./machine-commands.ts"
@@ -331,6 +331,9 @@ const mainFlags = {
     Flag.optional,
   ),
 }
+
+const callerEnvOf = (): Record<string, string> =>
+  Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
 
 const startMain =
   (exec: Exec) =>
