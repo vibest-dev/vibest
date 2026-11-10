@@ -3,7 +3,7 @@ import type { Runtime } from "@vibest/plugin"
 import { Cause, Deferred, Effect, Exit, Layer, Logger, PubSub, Stream } from "effect"
 
 import { Bus } from "./bus.ts"
-import { HostEnv, Runtimes } from "./runtimes.ts"
+import { HostEnv, NoRuntime, Runtimes } from "./runtimes.ts"
 
 const hostEnv = Layer.succeed(HostEnv, { drop: () => {} })
 
@@ -73,7 +73,7 @@ describe("runtime events", () => {
     ),
   )
 
-  it.effect("online lets a defect in status through instead of reporting NoRuntime", () =>
+  it.effect("online turns a defect in status into NoRuntime", () =>
     Effect.gen(function* () {
       const runtimes = yield* Runtimes
       const exit = yield* Effect.exit(
@@ -82,8 +82,24 @@ describe("runtime events", () => {
           { id: "local" },
         ),
       )
-      assert.strictEqual(Exit.isFailure(exit), true)
-      if (Exit.isFailure(exit)) assert.strictEqual(Cause.squash(exit.cause), "status exploded")
+      const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+      assert.ok(error instanceof NoRuntime)
+      assert.include(error.message, "could not be read")
+      assert.include(error.message, "status exploded")
+      assert.include(error.message, "could not be read")
+      assert.include(error.message, "status exploded")
+    }).pipe(Effect.provide(Runtimes.layer), Effect.provide(Bus.layer), Effect.provide(hostEnv), Effect.scoped),
+  )
+
+  it.effect("online leaves an interrupt from status alone", () =>
+    Effect.gen(function* () {
+      const runtimes = yield* Runtimes
+      const exit = yield* Effect.exit(
+        runtimes.online({ ...runtime(Stream.never), status: () => Effect.interrupt } as Runtime.RuntimeDefinition, {
+          id: "local",
+        }),
+      )
+      assert.strictEqual(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause), true)
     }).pipe(Effect.provide(Runtimes.layer), Effect.provide(Bus.layer), Effect.provide(hostEnv), Effect.scoped),
   )
 })
