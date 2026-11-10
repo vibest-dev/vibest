@@ -59,20 +59,26 @@ if (!["gate", "slow", "agent", "all"].includes(tier)) {
   console.error("--tier is gate, slow, agent or all")
   process.exit(1)
 }
+const elsewhere = (valueOf("--elsewhere") ?? "").split(",").filter(Boolean)
 const only = args.filter((a) => a !== "--strict" && a !== "--no-cache")
 const groupOf = (a: string, c: (typeof checks)[number]) => c.id.startsWith(`${a}-`)
 const named = (a: string, c: (typeof checks)[number]) => c.id === a || (c.check.covers ?? []).includes(a)
-const unknown = only.filter((a) => !(a in areas) && !checks.some((c) => named(a, c) || groupOf(a, c)))
+const unknown = [...only, ...elsewhere].filter(
+  (a) => !(a in areas) && !checks.some((c) => named(a, c) || groupOf(a, c)),
+)
 if (unknown.length) {
   console.error(`unknown ${unknown.join(", ")}; areas: ${Object.keys(areas).join(", ")}`)
   process.exit(1)
 }
 const inTier = (c: (typeof checks)[number]) => tier === "all" || (c.check.tier ?? "gate") === tier
-const selected = checks.filter((c) =>
-  only.length
-    ? only.some((a) => named(a, c)) || ((only.includes(c.area) || only.some((a) => groupOf(a, c))) && inTier(c))
-    : inTier(c),
+const selected = checks.filter(
+  (c) =>
+    !elsewhere.includes(c.id) &&
+    (only.length
+      ? only.some((a) => named(a, c)) || ((only.includes(c.area) || only.some((a) => groupOf(a, c))) && inTier(c))
+      : inTier(c)),
 )
+for (const id of elsewhere) console.log(`ELSEWHERE ${id}: not run here; another machine's run proves it`)
 
 for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
   if (!(await Bun.file(built).exists())) {

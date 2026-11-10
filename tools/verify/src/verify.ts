@@ -6,7 +6,15 @@ import path from "node:path"
 
 const root = path.resolve(import.meta.dirname, "../../..")
 const noCache = process.argv.includes("--no-cache")
-const only = process.argv.slice(2).filter((a) => a !== "--no-cache")
+const elsewhereAt = process.argv.indexOf("--elsewhere")
+const elsewhere = elsewhereAt === -1 ? undefined : process.argv[elsewhereAt + 1]
+if (elsewhere === undefined && elsewhereAt !== -1) {
+  console.error("--elsewhere takes check ids, comma-separated")
+  process.exit(1)
+}
+const only = process.argv
+  .slice(2)
+  .filter((a, i) => a !== "--no-cache" && i + 2 !== elsewhereAt && i + 2 !== elsewhereAt + 1)
 const NPM_SMOKE = ["I1", "I2", "U1", "U9", "U10", "H1"]
 
 type Options = { cwd?: string; env?: NodeJS.ProcessEnv }
@@ -110,7 +118,14 @@ const npmChecks = only.length > 0 || noCache ? only : layoutKnown ? NPM_SMOKE : 
 const e2e = (method: string, install: string, ids: ReadonlyArray<string>) =>
   run(
     `e2e on the ${method} install${ids === NPM_SMOKE ? ` (smoke: ${ids.join(" ")})` : ""}`,
-    ["bun", "tools/e2e/src/main.ts", "--strict", ...(noCache ? ["--no-cache"] : []), ...ids],
+    [
+      "bun",
+      "tools/e2e/src/main.ts",
+      "--strict",
+      ...(noCache ? ["--no-cache"] : []),
+      ...(elsewhere ? ["--elsewhere", elsewhere] : []),
+      ...ids,
+    ],
     {
       env: { ...process.env, VIBEST_E2E_METHOD: method, VIBEST_E2E_INSTALL: install },
     },
@@ -127,7 +142,9 @@ if (failedLegs.length) {
   console.error(`\nverify: failed on the ${failedLegs.join(" and ")} install`)
   process.exit(1)
 }
-console.log("\nverify: passed.")
+console.log(
+  `\nverify: passed.${elsewhere ? ` Not run here, for another machine's verify to prove: ${elsewhere.split(",").join(" ")}.` : ""}`,
+)
 if (only.length === 0) {
   const manual: Array<string> = []
   let section = ""

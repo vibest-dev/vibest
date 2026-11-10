@@ -14,8 +14,8 @@ concurrency:
 
 jobs:
   check:
-    # Linux runs the workspace build, including the darwin-arm64
-    # cross-compile and the linux-x64 glibc package, and the suite. The host binary is an ELF.
+    # Linux runs the workspace build, including the darwin-arm64 cross-compile and the linux-x64 glibc package, and the
+    # suite. The host binary is an ELF.
     # This job does not execute the macOS binary or an installed linux package.
     if: >-
       github.event_name == 'push' ||
@@ -23,8 +23,8 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository &&
         contains(fromJSON(vars.TRUSTED_PR_AUTHORS || '[]'), github.event.pull_request.user.login)
       )
-    # Blacksmith (blacksmith.sh): a fresh VM each run. Its cache backs actions/cache, so the pnpm store cache is local.
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # GitHub-hosted: free for this public repository, and a fresh VM each run.
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +35,12 @@ jobs:
         with:
           node-version: 26.13.0
           cache: pnpm
+      # Turborepo's local cache, carried between runs (a run saves under its commit, restores the newest earlier one).
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-${{ runner.os }}-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4

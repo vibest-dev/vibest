@@ -4,12 +4,12 @@ name: Release
 #   gh workflow run release-beta.yml -R vibest-dev/vibest --ref main -f version=prerelease
 # version: prerelease, patch, minor or major (bumped from @vibest/cli's version), an exact version, or canary.
 # One version for every package: the workspace members.
-# build (self-hosted) bumps every package version and commits and tags v<version> in its own checkout only, then runs
-# the release gate on that commit, the whole of pnpm verify, and packs and checks the tarballs to publish. darwin checks
-# the same tarballs on an arm64 Mac. publish waits for the owner's approval (environment `release`), then pushes the
+# build (ubuntu-latest) bumps every package version and commits and tags v<version> in its own checkout only, then runs
+# the release gate on that commit, the whole of pnpm verify but the macOS-only H4, and packs and checks the tarballs to
+# publish. darwin (macos-latest) runs pnpm verify H4 on the same commit and checks the same tarballs. publish waits for the owner's approval (environment `release`), then pushes the
 # tested commit to main and the tag, publishes exactly the tarballs build checked to npm, and makes the GitHub Release
 # (install.sh and an archive per platform; notes from CHANGELOG.md when it has this version, else GitHub's).
-# canary publishes one canary version to npm under `canary`: no commit, no tag, no GitHub Release.
+# canary publishes one canary version to npm under `canary`: nothing pushed, no GitHub Release.
 # dry_run runs every gate and stops: nothing is pushed or published.
 # Only the owner starts it; anyone else's run is skipped. Every job checks it: the owner both started the run (actor)
 # and started this attempt (triggering_actor, which differs on a rerun), since rerunning one job reuses the others'
@@ -35,12 +35,24 @@ concurrency:
 permissions:
   contents: read
 
+# What pnpm verify's E2E checks drive, pinned. The runners are fresh, so build installs them each run (cached by these
+# versions). E2E answers every harness with a fake model: no login.
+env:
+  HERDR_VERSION: 0.9.5
+  HERDR_SHA256: 14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d # herdr-linux-x86_64
+  HC_VERSION: 0.1.19
+  HC_SHA256: 4adcfb423d52f24c5cc4a1e2cd2fcad1f62d28bb77876ac472c29082a3eaa424 # herdr-core-linux-x86_64.tar.gz
+  PI_VERSION: 1.5.0 # @earendil-works/pi-coding-agent
+  CLAUDE_VERSION: 2.1.322 # @anthropic-ai/claude-code
+  CURSOR_VERSION: 2026.11.05-86047df
+
 jobs:
   build:
     if: >-
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
       (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
-    runs-on: [self-hosted, Linux, X64, vibest, rn]
+    # GitHub-hosted (free for this public repository): a fresh VM each run.
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -54,23 +66,58 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      # Persistent caches beside _work, as in ci.yml.
-      - name: Prepare persistent CI caches
-        run: |
-          cache_root="${RUNNER_WORKSPACE}/../.vibest-ci-cache"
-          mkdir -p "${cache_root}/pnpm-store" "${cache_root}/turbo"
-          {
-            echo "PNPM_STORE_DIR=${cache_root}/pnpm-store"
-            echo "TURBO_CACHE_DIR=${cache_root}/turbo"
-          } >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 26.13.0
-      - uses: pnpm/action-setup@v4
+          cache: pnpm
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
-      - run: pnpm install --frozen-lockfile --prefer-offline --store-dir "$PNPM_STORE_DIR"
+      - run: pnpm install --frozen-lockfile --prefer-offline
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/vibest-e2e-tools
+          key: e2e-tools-${{ runner.os }}-${{ env.HERDR_VERSION }}-${{ env.HC_VERSION }}-${{ env.PI_VERSION }}-${{ env.CLAUDE_VERSION }}-${{ env.CURSOR_VERSION }}
+      # Into ~/.local/bin, which the login shell puts on PATH: E2E runs the harnesses with the login environment.
+      - name: Install herdr, hc, pi, claude and cursor-agent
+        run: |
+          tools="$HOME/.cache/vibest-e2e-tools"
+          bin="$HOME/.local/bin"
+          mkdir -p "$tools" "$bin"
+          if [ ! -x "$tools/herdr" ]; then
+            curl -fsSL -o "$tools/herdr.download" "https://github.com/herdrdev/herdr/releases/download/v$HERDR_VERSION/herdr-linux-x86_64"
+            echo "$HERDR_SHA256  $tools/herdr.download" | sha256sum -c -
+            chmod +x "$tools/herdr.download" && mv "$tools/herdr.download" "$tools/herdr"
+          fi
+          if [ ! -x "$tools/hc/herdr-core" ]; then
+            curl -fsSL -o "$tools/hc.tar.gz" "https://releases.herdr.dev/core/$HC_VERSION/herdr-core-linux-x86_64.tar.gz"
+            echo "$HC_SHA256  $tools/hc.tar.gz" | sha256sum -c -
+            mkdir -p "$tools/hc" && tar -xzf "$tools/hc.tar.gz" -C "$tools/hc" && rm "$tools/hc.tar.gz"
+          fi
+          if [ ! -x "$tools/cursor/cursor-agent" ]; then
+            mkdir -p "$tools/cursor"
+            curl -fsSL "https://downloads.cursor.com/lab/$CURSOR_VERSION/linux/x64/agent-cli-package.tar.gz" \
+              | tar --strip-components=1 -xzf - -C "$tools/cursor"
+          fi
+          if [ ! -x "$tools/npm/node_modules/.bin/claude" ]; then
+            npm install --prefix "$tools/npm" --no-audit --no-fund \
+              "@earendil-works/pi-coding-agent@$PI_VERSION" "@anthropic-ai/claude-code@$CLAUDE_VERSION"
+          fi
+          ln -sf "$tools/herdr" "$bin/herdr"
+          ln -sf "$tools/hc/herdr-core" "$bin/hc"
+          ln -sf "$tools/hc/herdr-core" "$bin/herdr-core"
+          ln -sf "$tools/cursor/cursor-agent" "$bin/cursor-agent"
+          ln -sf "$tools/npm/node_modules/.bin/pi" "$bin/pi"
+          ln -sf "$tools/npm/node_modules/.bin/claude" "$bin/claude"
+          ln -sf "$(command -v node)" "$bin/node"
+          echo "$bin" >> "$GITHUB_PATH"
+          if ! env -i HOME="$HOME" PATH=/usr/bin:/bin bash -l -i -c 'command -v herdr' >/dev/null 2>&1; then
+            echo 'PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
+          fi
+          env -i HOME="$HOME" PATH=/usr/bin:/bin bash -l -i -c \
+            'for b in herdr hc pi claude cursor-agent node; do printf "%s: " "$b"; "$b" --version 2>&1 | head -1; done'
 
       # The version every job checks and publishes, set once in this checkout. A release commits it and tags v<version>
       # here; publish pushes that commit and tag after the owner approves.
@@ -102,21 +149,20 @@ jobs:
             if [ -n "$(git ls-remote --tags origin "refs/tags/v$version")" ]; then
               echo "::error::tag v$version already exists"; exit 1
             fi
-            # This runner keeps its checkout between runs, and with it an earlier dry run's local tag.
-            git tag -d "v$version" 2>/dev/null || true
-            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit --quiet --no-verify -am "chore: release v$version"
-            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              tag --annotate --message "v$version" "v$version"
           fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit --quiet --no-verify -am "chore: release v$version"
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            tag --annotate --message "v$version" "v$version"
           same "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Release $version under the npm dist-tag $tag" >> "$GITHUB_STEP_SUMMARY"
 
       # The release gate: the whole of pnpm verify on the release commit (build, typecheck and lint, unit tests, the
-      # curl and npm installs, and every E2E check on each, --strict), --no-cache so every check runs.
-      - run: pnpm run verify --no-cache
+      # curl and npm installs, and every E2E check on each, --strict), --no-cache so every check runs. H4 is macOS-only:
+      # verify leaves it to the darwin job's verify of the same commit, and publish needs both.
+      - run: pnpm run verify --no-cache --elsewhere H4
       # Packs every package to publish (the darwin-arm64 binary is cross-compiled here), checks the tarballs, installs
       # @vibest/cli with the linux-x64 binary from them and runs it; keeps the tarballs and their publish order.
       - name: Pack and check
@@ -137,9 +183,8 @@ jobs:
           done
           cp packages/cli/install.sh "$out/install.sh"
           printf '%s\n' "$VERSION" > "$out/version"
-      # The release commit and its tag, for publish to push: the gates ran on exactly this tree.
+      # The release commit and its tag, for darwin to verify and publish to push: the gates ran on exactly this tree.
       - name: Release commit
-        if: inputs.version != 'canary'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -152,32 +197,40 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The same tarballs on a GitHub-hosted arm64 Mac: @vibest/cli installed with the darwin-arm64 binary and run.
-  # GitHub-hosted time is kept minimal: no install, build, typecheck or test here (the build job did them), only the
-  # check script (run by Node, which strips its types) on the downloaded tarballs.
+  # On a GitHub-hosted arm64 Mac: pnpm verify H4 (the macOS-only check build's verify leaves to it) on the release
+  # commit, and build's tarballs: @vibest/cli installed with the darwin-arm64 binary and run.
   darwin:
     needs: build
     if: >-
       (github.actor == github.repository_owner || github.actor == 'iamdin') &&
       (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
     runs-on: macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          sparse-checkout: tools/verify/src/release-artifacts.ts
-          sparse-checkout-cone-mode: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 26.13.0
       - uses: actions/download-artifact@v4
         with:
           name: release
           path: ${{ runner.temp }}/release
+      - name: Check out the release commit
+        run: |
+          git fetch --quiet "$RUNNER_TEMP/release/release.bundle" "refs/tags/v$VERSION:refs/tags/v$VERSION"
+          git checkout --quiet --detach "v$VERSION"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.13.0
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: pnpm install --frozen-lockfile --prefer-offline
+      - run: pnpm run verify --no-cache H4
       - name: Check the tarballs
-        env:
-          VERSION: ${{ needs.build.outputs.version }}
         run: node tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
 
   publish:

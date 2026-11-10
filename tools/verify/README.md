@@ -7,6 +7,8 @@ of every other gate.
 pnpm verify          # everything
 pnpm verify daemon integration   # install as a user, then only these areas of E2E checks
 pnpm verify --no-cache           # before a release: every check runs, the whole gate on both installs
+pnpm verify --elsewhere H4       # leave these checks to another machine's verify (the release's Linux job leaves the
+                                 # macOS-only H4 to its macOS job, which runs pnpm verify H4 on the same commit)
 ```
 
 A failed build, typecheck, test, pack or install stops the run; a failed E2E leg does not stop the other leg, and the
