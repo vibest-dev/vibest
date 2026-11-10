@@ -13,12 +13,17 @@
    `main`): every job builds, verifies, tags and publishes exactly that commit. `-f version=<x.y.z-beta.n>` names the
    version, which must be newer than the newest release; without it, the next beta after the highest
    `v<x.y.z>-beta.<n>` tag. It sets that version in every package.json of its own checkout only and fails when the
-   version is already tagged or on npm. It runs the release gate on that tree (the whole of `pnpm verify --no-cache`,
-   the single entry for all verification, on GitHub-hosted runners: `ubuntu-latest` runs it with `--elsewhere H4`, and
-   `macos-latest` runs `pnpm verify --no-cache H4`, the macOS-only check, on the same commit and version). It keeps what
-   verify installed and checked: each platform's curl archive (`--keep-archive`) and the npm tarballs, packed once on
-   Linux (`--packs`; the macOS verify installs those same tarballs), checks the tarballs on Linux and macOS without
-   repacking them, records the SHA-256 of every kept file, then waits for the owner's approval (environment
+   version is already tagged or on npm. It runs the release gate on that tree: the whole of `pnpm verify --no-cache`,
+   the single entry for all verification, whose stages run as parallel jobs on GitHub-hosted runners. `build` packs once
+   (`--stage build,archive,pack`): the linux-x64 curl archive and every npm tarball, checks the tarballs, records the
+   SHA-256 of every file and keeps them. `typecheck` and `test` are jobs of their own. `e2e` runs every E2E check on the
+   curl install of that archive and on the npm install of those tarballs (`--stage e2e --leg curl|npm --shard k/n`),
+   each leg split into shards balanced by the measured durations in `tools/e2e/src/runner/shard-weights.ts`
+   (`tools/e2e/test/shard.test.ts` proves the shards cover every check exactly once; refresh the weights when checks are
+   added or change a lot). `ubuntu-latest` runs them with `--elsewhere H4`, and `macos-latest` runs
+   `pnpm verify --no-cache H4`, the macOS-only check, on the same commit and version, installing build's tarballs.
+   Nothing is repacked, and `--no-cache` also forces turbo (`TURBO_FORCE`), so every check runs on every release. It
+   keeps what verify installed and checked, then waits for the owner's approval (environment
    `release`). Only after the approval does it check those hashes, tag that commit `v<version>` (with
    `GITHUB_TOKEN`), publish exactly those tarballs to npm, make the GitHub Release from exactly those archives, and check
    every package's dist-tag. Nothing is rebuilt or repacked after verify checked it. A CHANGELOG.md section for the
@@ -53,8 +58,9 @@
    run is skipped. A run that is not a dry run must be on `main`.
 8. The workflow's `VERSIONED` list names every workspace package.json that carries the version; a new package goes into
    it, and every file in it holds `0.0.1-dev` on `main`.
-9. The gate is `pnpm verify` as it is: the workflow does not replace any part of it with other commands. A part the
-   runner cannot run fails the run; fix the runner or verify, never narrow the gate.
+9. The gate is `pnpm verify` as it is: the workflow runs its stages (`--stage`, `--leg`, `--shard`) in parallel jobs and
+   replaces no part of it with other commands. Every stage, every leg and every shard must run: a new shard goes into
+   the matrix and `SHARDS`. A part the runner cannot run fails the run; fix the runner or verify, never narrow the gate.
 
 ## Owner checklist
 
