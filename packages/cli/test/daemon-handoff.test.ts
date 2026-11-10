@@ -26,7 +26,7 @@ describe("vibestd handoff wait", () => {
           }
         }).pipe(Effect.provide(Platform.services))
         const held: Host = { ...Platform.daemon, lock: () => Effect.succeed(undefined) }
-        const exit = yield* run(held, { handoff: true }).pipe(
+        const exit = yield* run(held, Platform.replacements, { handoff: true }).pipe(
           Effect.provideService(Layout, deps.layout),
           Effect.provideService(FileSystem.FileSystem, deps.fs),
           Effect.provideService(Path.Path, deps.path),

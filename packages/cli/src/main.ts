@@ -8,7 +8,7 @@ import * as Platform from "#platform"
 
 import * as Cli from "./cli.ts"
 
-Cli.command(Platform.daemon, Platform.exec).pipe(
+Cli.command(Platform.daemon, Platform.replacements, Platform.exec).pipe(
   Command.run({ version: VERSION }),
   Cli.printFailure,
   Effect.provide(Layout.layer),

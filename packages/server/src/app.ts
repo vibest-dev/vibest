@@ -4,6 +4,7 @@ import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
 import { Harness, Harnesses } from "@vibest/core/harness"
+import { VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
 import { Machines } from "@vibest/core/machines"
 import { Peers } from "@vibest/core/peer"
@@ -39,4 +40,4 @@ export const services = LayerNode.group([
   Remote.node,
 ])
 
-export const daemon = LayerNode.group([services, Server.node, Http.node])
+export const daemon = LayerNode.group([VibestdIdentity.node, services, Server.node, Http.node])

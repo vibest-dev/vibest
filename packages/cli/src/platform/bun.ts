@@ -11,12 +11,12 @@ import { SocketConnector } from "@vibest/client/socket-connector"
 import { DatabaseOpenFailed, inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
-import { MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
+import { HostFacts, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { MachineTransport } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
 import { messageOf } from "@vibest/core/plugin-sources"
 import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugins"
-import { type Liveness, livenessOf, type ProcessPlatform, Processes, validPid } from "@vibest/core/processes"
+import { type Liveness, livenessOf, ProcessPlatform, validPid } from "@vibest/core/processes"
 import { HostEnv } from "@vibest/core/runtimes"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
@@ -154,7 +154,7 @@ const terminate = (pid: number) => {
   process.kill(pid, "SIGTERM")
 }
 
-const processes: ProcessPlatform = { liveness, terminate, pid: process.pid, uid: process.getuid?.() }
+const processes: ProcessPlatform["Service"] = { liveness, terminate, pid: process.pid, uid: process.getuid?.() }
 
 const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
@@ -247,45 +247,43 @@ export const services = platform
 
 export const socketServer = (path: string) => BunSocketServer.layer({ path })
 
-export const daemon: Host = {
-  replacements: [
-    PlatformNode.sqlClient.replace(
-      LayerNode.make({
-        name: "vibest/Sqlite",
-        layer: Layer.unwrap(Effect.map(Layout, (layout) => sqlite(layout.database))),
-        deps: [PlatformNode.layout],
-      }),
-    ),
-    MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
-    PluginLoader.node.replace(Layer.succeed(PluginLoader, plugins)),
-    builtinsNode.replace(Layer.succeed(Builtins, pre)),
-    HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
-    Processes.node.replace(
-      LayerNode.make({
-        service: Processes,
-        layer: Processes.layer(processes),
-        deps: [PlatformNode.childProcessSpawner],
-      }),
-    ),
-    Server.socketServer.replace(
-      LayerNode.make({
-        name: "vibest/SocketServer",
-        layer: Layer.unwrap(Effect.map(Layout, (layout) => socketServer(layout.socket))),
-        deps: [PlatformNode.layout],
-      }),
-    ),
-    Http.httpServer.replace(
-      LayerNode.make({
-        name: "vibest/HttpServer/unix",
-        layer: Layer.unwrap(Effect.map(Layout, (layout) => BunHttpServer.layerServer({ unix: layout.httpSocket }))),
-        deps: [PlatformNode.layout],
-      }),
-    ),
-  ],
-  lock,
-  checkDatabase,
-  facts: { name: os.hostname(), id: hostId, pid: process.pid },
-}
+const platformNode = LayerNode.make({ name: "vibest/Platform", layer: platform, deps: [] })
+
+export const replacements: LayerNode.Replacements = [
+  PlatformNode.fileSystem.replace(platformNode),
+  PlatformNode.path.replace(platformNode),
+  PlatformNode.crypto.replace(platformNode),
+  PlatformNode.childProcessSpawner.replace(platformNode),
+  PlatformNode.sqlClient.replace(
+    LayerNode.make({
+      name: "vibest/Sqlite",
+      layer: Layer.unwrap(Effect.map(Layout, (layout) => sqlite(layout.database))),
+      deps: [PlatformNode.layout],
+    }),
+  ),
+  MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
+  PluginLoader.node.replace(Layer.succeed(PluginLoader, plugins)),
+  builtinsNode.replace(Layer.succeed(Builtins, pre)),
+  HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
+  ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),
+  Server.socketServer.replace(
+    LayerNode.make({
+      name: "vibest/SocketServer",
+      layer: Layer.unwrap(Effect.map(Layout, (layout) => socketServer(layout.socket))),
+      deps: [PlatformNode.layout],
+    }),
+  ),
+  Http.httpServer.replace(
+    LayerNode.make({
+      name: "vibest/HttpServer/unix",
+      layer: Layer.unwrap(Effect.map(Layout, (layout) => BunHttpServer.layerServer({ unix: layout.httpSocket }))),
+      deps: [PlatformNode.layout],
+    }),
+  ),
+  HostFacts.node.replace(Layer.succeed(HostFacts, { name: os.hostname(), id: hostId, pid: process.pid })),
+]
+
+export const daemon: Host = { lock, checkDatabase }
 
 export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")
