@@ -257,6 +257,7 @@ jobs:
       - uses: ./.github/actions/set-version
         with:
           version: ${{ needs.plan.outputs.version }}
+      - uses: ./.github/actions/e2e-tools
       - run: pnpm run verify --no-cache --stage build,test
       - uses: ./.github/actions/tree-unchanged
 
@@ -291,62 +292,7 @@ jobs:
           name: release
           path: ${{ runner.temp }}/release
 
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/vibest-e2e-tools
-          key: e2e-tools-2-${{ runner.os }}-${{ env.HERDR_VERSION }}-${{ env.HC_VERSION }}-${{ env.PI_VERSION }}-${{ env.CLAUDE_VERSION }}-${{ env.CURSOR_VERSION }}
-      # Into ~/.local/bin, which the login shell puts on PATH: E2E runs the harnesses with the login environment.
-      - name: Install herdr, hc, pi, claude and cursor-agent
-        run: |
-          tools="$HOME/.cache/vibest-e2e-tools"
-          bin="$HOME/.local/bin"
-          mkdir -p "$tools" "$bin"
-          if [ ! -x "$tools/herdr" ]; then
-            curl -fsSL -o "$tools/herdr.download" "https://github.com/herdrdev/herdr/releases/download/v$HERDR_VERSION/herdr-linux-x86_64"
-            echo "$HERDR_SHA256  $tools/herdr.download" | sha256sum -c -
-            chmod +x "$tools/herdr.download" && mv "$tools/herdr.download" "$tools/herdr"
-          fi
-          if [ ! -x "$tools/hc/herdr-core" ]; then
-            curl -fsSL -o "$tools/hc.tar.gz" "https://releases.herdr.dev/core/$HC_VERSION/herdr-core-linux-x86_64.tar.gz"
-            echo "$HC_SHA256  $tools/hc.tar.gz" | sha256sum -c -
-            mkdir -p "$tools/hc" && tar -xzf "$tools/hc.tar.gz" -C "$tools/hc" && rm "$tools/hc.tar.gz"
-          fi
-          if [ ! -x "$tools/cursor/cursor-agent" ]; then
-            mkdir -p "$tools/cursor"
-            curl -fsSL "https://downloads.cursor.com/lab/$CURSOR_VERSION/linux/x64/agent-cli-package.tar.gz" \
-              | tar --strip-components=1 -xzf - -C "$tools/cursor"
-          fi
-          # Claude's platform package holds the native binary itself (the wrapper package needs its install script).
-          claude="$tools/npm/node_modules/@anthropic-ai/claude-code-linux-x64/claude"
-          if [ ! -x "$claude" ]; then
-            npm install --prefix "$tools/npm" --no-audit --no-fund \
-              "@earendil-works/pi-coding-agent@$PI_VERSION" "@anthropic-ai/claude-code-linux-x64@$CLAUDE_VERSION"
-            chmod +x "$claude"
-          fi
-          ln -sf "$tools/herdr" "$bin/herdr"
-          ln -sf "$tools/hc/herdr-core" "$bin/hc"
-          ln -sf "$tools/hc/herdr-core" "$bin/herdr-core"
-          ln -sf "$tools/cursor/cursor-agent" "$bin/cursor-agent"
-          ln -sf "$tools/npm/node_modules/.bin/pi" "$bin/pi"
-          ln -sf "$claude" "$bin/claude"
-          ln -sf "$(command -v node)" "$bin/node"
-          echo "$bin" >> "$GITHUB_PATH"
-          # vibest lists the processes working in a worktree with lsof, which the image lacks.
-          command -v lsof >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq lsof; }
-          # A machine Claude Code has already run on: a first run writes its onboarding state into ~/.claude.json, which
-          # E2E counts as a change to the user's files.
-          [ -e "$HOME/.claude.json" ] || cat > "$HOME/.claude.json" <<'JSON'
-          {"hasCompletedOnboarding": true, "lastOnboardingVersion": "2.1.322", "hasSeenAutoModeEntryWarning": true,
-           "hasResetAutoModeOptInForDefaultOffer": true, "hasSeenAutoModeOutsideReadPrompt": true}
-          JSON
-          # bash -l reads the first of these that exists.
-          profile="$HOME/.bash_profile"
-          for f in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
-            if [ -e "$f" ]; then profile=$f; break; fi
-          done
-          echo 'PATH="$HOME/.local/bin:$PATH"' >> "$profile"
-          env -i HOME="$HOME" PATH=/usr/bin:/bin bash -l -i -c \
-            'for b in herdr hc pi claude cursor-agent node; do printf "%s: " "$b"; "$b" --version 2>&1 | head -1 || exit 1; command -v "$b" >/dev/null || exit 1; done'
+      - uses: ./.github/actions/e2e-tools
       - run: >-
           pnpm run verify --no-cache --elsewhere H4 --stage e2e
           --leg ${{ matrix.leg }} --shard ${{ matrix.shard }}/${{ env.SHARDS }}

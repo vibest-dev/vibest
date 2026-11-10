@@ -17,3 +17,12 @@ describe("shards", () => {
       expect(ran.flat().sort()).toEqual(gateIds.map((c) => c.id).sort())
     })
 })
+
+describe("the release workflow", () => {
+  test("its shard matrix has exactly SHARDS entries, 1 to SHARDS", async () => {
+    const text = await Bun.file(path.join(import.meta.dirname, "../../../.github/workflows/release.yml")).text()
+    const count = Number(/^\s+SHARDS: (\d+)$/m.exec(text)?.[1])
+    const listed = /^\s+shard: \[([\d, ]+)\]$/m.exec(text)?.[1]?.split(",").map(Number)
+    expect(listed).toEqual(Array.from({ length: count }, (_, i) => i + 1))
+  })
+})
