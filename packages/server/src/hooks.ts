@@ -6,7 +6,7 @@ import { Clock, Effect } from "effect"
 
 export type HookCaller = { readonly id: string; readonly agent: string }
 
-const noteConversation = (db: Db["Service"], definition: HarnessDefinition, who: HookCaller, raw: string) =>
+const noteEventConversation = (db: Db["Service"], definition: HarnessDefinition, who: HookCaller, raw: string) =>
   Effect.gen(function* () {
     const event = definition.conversationOf === undefined ? undefined : jsonObject(raw)
     const conversation = event && definition.conversationOf?.(event)
@@ -16,7 +16,7 @@ const noteConversation = (db: Db["Service"], definition: HarnessDefinition, who:
 
 export const turnEnd = (db: Db["Service"], definition: HarnessDefinition, who: HookCaller, raw: string) =>
   Effect.gen(function* () {
-    yield* noteConversation(db, definition, who, raw)
+    yield* noteEventConversation(db, definition, who, raw)
     const end = turnEndOf(definition, who.agent, raw, yield* Clock.currentTimeMillis)
     if (!end) return
     yield* db.reportTurn(who.id, end)
@@ -32,7 +32,7 @@ export const prompt = (
   raw: string,
 ) =>
   Effect.gen(function* () {
-    yield* noteConversation(db, definition, who, raw)
+    yield* noteEventConversation(db, definition, who, raw)
     const text = promptOf(definition, who.agent, raw)
     if (text === undefined) return
     yield* sessions.userPrompt(who.id, text, yield* Clock.currentTimeMillis)
