@@ -20,7 +20,7 @@ interface Limit { window: string; percent: number /* 0–100 */; status: "availa
 
 - A Subscription is per `(harness, provider, machine)`. `provider` is empty for a single-login harness (Claude
   Code, Cursor) and set for Pi (one login per provider).
-- The adapter reads the source; the pure parsers (`claudeAccount`, `claudeUsage`, …) turn it into this shape.
+- The adapter reads the source; the pure parsers (`claudeAccount`, `cursorAccount`, …) turn it into this shape.
   A failed read never fails the Effect: it keeps the last Subscription and the core records its age in
   `time.update`. Plugins decide what a stale reading is worth.
 - Usage limits come only from official or CLI-provided sources. `limits: []` means unknown, not unlimited, and
@@ -33,72 +33,38 @@ interface Limit { window: string; percent: number /* 0–100 */; status: "availa
   reader waits at most the CLI timeout for it before it gets the stored rows. Nothing polls while nobody reads. A CLI
   read runs with stdin closed and stderr discarded, for at most 10 s. A defect in a poll is not a failed read either:
   the row stays, and its message carries no token.
-- vibest never refreshes or rotates a CLI's token and never writes its credential store: a refresh rotates the
-  refresh token and can sign the CLI out. An expired or unreadable token skips that poll; the limits stay as last
-  known (or unknown).
-- Never log a request's headers or body sent with a token; responses carry no secrets but do carry account
-  identifiers, which stay out of events.
+- vibest does not read a harness credential file or keychain item, and it does not call a usage API. Claude and
+  Cursor report a login and no usage limits. A plugin may report limits; the next poll of those two replaces them
+  with `[]`.
 
 ## Claude Code
 
-|             | Source                                                                                                                                                  | Fields                                                                                                                                                                                                                                                                                                        | Freshness                       | Status                                                  |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------- |
-| Login       | `claude auth status --json` (`--json` is the default)                                                                                                   | `loggedIn`, `authMethod` (`claude.ai`), `apiProvider` (`firstParty`), `subscriptionType` (`max`); also `email`, `orgId`, `orgName` (not kept)                                                                                                                                                                 | live, local, no network, ~0.5 s | verified                                                |
-| Usage, poll | `GET https://api.anthropic.com/api/oauth/usage`, `Authorization: Bearer <OAuth access token>`, `anthropic-beta: oauth-2025-04-20` (what `/usage` shows) | `five_hour` and `seven_day`: `{ utilization` 0–100, `resets_at` ISO 8601 `}`; `seven_day_opus`, `seven_day_sonnet`: same or null. Also a newer `limits[] { kind` (`session`, `weekly_all`, `weekly_scoped`), `percent`, `severity` (`normal`), `resets_at`, `scope`, `is_active }` and `extra_usage`, `spend` | live, server side, free         | verified (200)                                          |
-| Usage, push | the running session: stream-json `rate_limit_event` (in `-p`), or the statusline JSON's `rate_limits`                                                   | `rate_limit_info.unifiedWindows.{five_hour,seven_day}`: `utilization` **0–1**, `resetsAt` epoch **seconds**, `status` (`allowed`, `allowed_warning`, `rejected`); statusline: `rate_limits.{five_hour,seven_day}.{used_percentage` 0–100, `resets_at` epoch s`}`                                              | after each API response         | event verified (one Haiku prompt); statusline from docs |
+|             | Source                                                                                                                                              | Fields                                                                                                                                        | Freshness                       | Status   |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | -------- |
+| Login       | `claude auth status --json` (`--json` is the default)                                                                                               | `loggedIn`, `authMethod` (`claude.ai`), `apiProvider` (`firstParty`), `subscriptionType` (`max`); also `email`, `orgId`, `orgName` (not kept) | live, local, no network, ~0.5 s | verified |
+| Usage, poll | none. vibest does not read Claude's OAuth token, `~/.claude/.credentials.json`, or the Anthropic usage API. `limits` stays `[]` (unknown, not full) | —                                                                                                                                             | —                               | —        |
+| Usage, push | none from the adapter. A plugin may still report limits; the next poll replaces them with `[]`                                                      | —                                                                                                                                             | —                               | —        |
 
-Token: macOS keychain item `Claude Code-credentials` (JSON `claudeAiOauth.{accessToken, expiresAt,
-subscriptionType, rateLimitTier}`); on Linux `~/.claude/.credentials.json`, same shape. On this Mac the file
-also exists but was **stale** (expired 10 minutes before, while the keychain token was valid for 7 hours): read
-the keychain first on macOS. vibestd reads a keychain item with `security -w` (at most 10 s); an empty answer,
-a non-zero exit or a timeout is unreadable, and the value is never logged.
-
-Push in practice: vibest's Claude sessions are interactive, so stream-json is not available. Hook payloads do not
-carry rate limits (assumed: none of the documented hook inputs has them). The statusline is the only in-session
-source, and it is the user's setting; a `--settings '{"statusLine":…}'` at launch would replace the user's
-statusline in vibest's sessions. Recommended: poll only for Claude, push later if the poll proves too coarse.
-
-Failure modes: not signed in (`loggedIn: false`); API key, `apiKeyHelper`, Bedrock or Vertex (no windows;
-assumed values of `authMethod`/`apiProvider`); keychain locked or access prompt (a background daemon may be
-denied: unverified); token expired (skip the poll); endpoint is undocumented and can change or answer 429 when
-polled often (assumed: poll no more than once a minute, and on `agent.fail`); `resets_at` null for a window not yet
-started; Claude drops a statusline window once its `resets_at` passes.
-
-`limited` from the poll: `utilization >= 100` (assumed: the `limits[].severity` values past `normal` were not
-seen). From push: `status: rejected`.
+Failure modes: not signed in (`loggedIn: false`); API key, `apiKeyHelper`, Bedrock or Vertex (`authMethod` other
+than `claude.ai` is an API-key login, with no windows). A failed `claude auth status` keeps the last row.
 
 ## Cursor (`cursor-agent`)
 
-|             | Source                                                                                                                                                                                                                                          | Fields                                                                                                                                                                                                                                                                                                                                               | Freshness                 | Status                   |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------ |
-| Login       | `cursor-agent status --format json`                                                                                                                                                                                                             | `isAuthenticated`, `status` (`authenticated`), `hasAccessToken`, `userInfo` (not kept)                                                                                                                                                                                                                                                               | live, network check, ~1 s | verified                 |
-| Plan        | `cursor-agent about --format json`                                                                                                                                                                                                              | `subscriptionTier` (`Ultra`)                                                                                                                                                                                                                                                                                                                         | live                      | verified                 |
-| Usage, poll | Connect RPC the CLI's `/usage` calls: `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`, body `{}`, `Content-Type: application/json`, `Authorization: Bearer <access token>`; also `GetHardLimit`, `GetPlanInfo` | `billingCycleStart`, `billingCycleEnd` (epoch ms as strings); `planUsage { totalSpend, includedSpend, bonusSpend, limit` (cents), `totalPercentUsed, autoPercentUsed, apiPercentUsed }`; `spendLimitUsage.limitType`; `GetHardLimit { noUsageBasedAllowed?, hardLimit? }`; `GetPlanInfo.planInfo { planName, billingCycleEnd, includedUsagePeriod }` | live, server side, free   | verified (all three 200) |
-| Usage, push | none: Cursor hooks carry no usage (assumed)                                                                                                                                                                                                     | —                                                                                                                                                                                                                                                                                                                                                    | —                         | —                        |
-
-Token: macOS keychain items `cursor-access-token`, `cursor-refresh-token` (`~/.cursor/cli-config.json` holds
-only `authInfo` without tokens). Linux location unverified.
+|             | Source                                                                                                                      | Fields                                                                                 | Freshness                 | Status   |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------- | -------- |
+| Login       | `cursor-agent status --format json`                                                                                         | `isAuthenticated`, `status` (`authenticated`), `hasAccessToken`, `userInfo` (not kept) | live, network check, ~1 s | verified |
+| Plan        | `cursor-agent about --format json`                                                                                          | `subscriptionTier` (`Ultra`)                                                           | live                      | verified |
+| Usage, poll | none. vibest does not read Cursor's keychain access token or call `api2.cursor.sh`. `limits` stays `[]` (unknown, not full) | —                                                                                      | —                         | —        |
+| Usage, push | none from the adapter. A plugin may still report limits; the next poll replaces them with `[]`                              | —                                                                                      | —                         | —        |
 
 On macOS, both Cursor model discovery and subscription probes require a regular file at
 `HOME/Library/Keychains/login.keychain-db` before starting its CLI. An empty Keychains directory is not enough.
 A missing login keychain reports Cursor unavailable rather than starting its default-keychain
 write probe, which can open a system dialog even for `--version`. Child commands keep the inherited environment
 and use the checked HOME. This does not create, unlock or change a keychain, and does not detect a locked
-keychain or a process outside the login security session.
+keychain or a process outside the login security session. The check only looks for that file; it does not read a keychain item.
 
-Windows: one monthly window per bucket the CLI shows: `monthly` (`totalPercentUsed`), `monthly-auto`
-(Auto-bucket models, `autoPercentUsed`), `monthly-api` (named models, `apiPercentUsed`). Which bucket a
-definition draws on depends on its model, which the scheduling plugin knows (`autoBucketModels` in the
-response lists the Auto models; not parsed).
-
-`limited`: percent >= 100 and on-demand usage cannot take over (`noUsageBasedAllowed`, or no `hardLimit`). This
-is **assumed**: on this account `totalSpend` (111 262) is far past `limit` (40 000), covered by bonus usage,
-while `totalPercentUsed` is 36, and `displayMessage` reads "You've hit your usage limit" at the same time. The
-percent fields match what `/usage` prints and are the only ones used.
-
-Failure modes: not signed in (`isAuthenticated: false`; RPCs answer `Unauthenticated`); enterprise or team spend
-accounts have no `planUsage` (the CLI then aggregates spend events; prototype returns no windows); a
-`CURSOR_API_KEY` login (not told apart; unverified); private RPC that can change.
+Failure modes: not signed in (`isAuthenticated: false`). A failed `cursor-agent status` keeps the last row.
 
 ## Pi
 
@@ -122,22 +88,17 @@ does not load (an extension's provider).
 
 ## Summary
 
-| Harness     | Login                                                                                                                                   | Usage                                                                              |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Claude Code | `claude auth status --json`: verified                                                                                                   | poll OAuth usage endpoint: verified; stream-json event: verified; statusline: docs |
-| Cursor      | `status` + `about --format json`: verified                                                                                              | poll `DashboardService` RPCs: verified; `limited` rule assumed                     |
-| Pi          | `pi --list-models`, then `pi auth check --json --no-refresh` per provider: verified (API-key providers), OAuth `authType` value assumed | none from the adapter (`[]` unknown); a plugin may report limits                   |
+| Harness     | Login                                                                                                                                   | Usage                                                            |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Claude Code | `claude auth status --json`: verified                                                                                                   | none from the adapter (`[]` unknown, not full)                   |
+| Cursor      | `status` + `about --format json`: verified                                                                                              | none from the adapter (`[]` unknown, not full)                   |
+| Pi          | `pi --list-models`, then `pi auth check --json --no-refresh` per provider: verified (API-key providers), OAuth `authType` value assumed | none from the adapter (`[]` unknown); a plugin may report limits |
 
 Limits come only from official or CLI-provided sources; a harness with none keeps `limits: []` (unknown). One
 Subscription per `(harness, provider, machine)`: `provider` empty for Claude Code and Cursor, set for Pi. vibest
-never refreshes or rotates a CLI's token; an expired or unreadable token skips that poll and the limits stay last
-known or unknown.
+does not read a harness token. Claude and Cursor keep `limits: []`.
 
 Blockers before wiring in:
 
-1. Reading another CLI's keychain item from vibestd: macOS may prompt or deny for a non-owning binary; check
-   `security find-generic-password` from the compiled daemon, and the Linux paths.
-2. Two private endpoints (Anthropic `oauth/usage`, Cursor `DashboardService`) can change without notice; the
-   parsers return no windows on any unknown shape, so the failure is "unknown", never a wrong `limited`.
-3. Unverified values: Pi OAuth `authType`, Claude non-`claude.ai` `authMethod` values, Cursor `limited`
-   semantics. Each needs one signed-in account to confirm.
+1. Unverified values: Pi OAuth `authType`, Claude non-`claude.ai` `authMethod` values. Each needs one
+   signed-in account to confirm.
