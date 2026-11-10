@@ -338,6 +338,7 @@ export class World {
     readonly env?: Record<string, string>
     readonly cwd?: string
     readonly session?: string
+    readonly socket?: string
     readonly runtime?: string
     readonly extra?: ReadonlyArray<string>
     readonly bin?: string
@@ -372,7 +373,7 @@ export class World {
       expect(typed.code === 0, `hc send: ${typed.stderr}${typed.stdout}`)
     } else {
       const session = input.session ?? this.herdrSession
-      const socket = await this.ensureHerdr(session)
+      const socket = input.socket ?? (await this.ensureHerdr(session))
       const workspace = await herdr(socket, "workspace.create", { cwd, focus: false, label: "project" })
       const workspaceId = (workspace.workspace as { workspace_id: string }).workspace_id
       const created = await herdr(socket, "tab.create", {

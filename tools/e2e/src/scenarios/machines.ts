@@ -12,9 +12,9 @@ type MachineView = {
   runtimes?: Array<{ kind: string; status: string; here: { visible: boolean; as?: string; note?: string } }>
 }
 
-const sh = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
+export const sh = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`
 
-const subModel = () => {
+export const subModel = () => {
   const held = new Map<string, () => void>()
   const asked: Array<string> = []
   const reply = (content: string) =>
@@ -47,7 +47,7 @@ const subModel = () => {
   }
 }
 
-const stopVibestd = async (home: string) => {
+export const stopVibestd = async (home: string) => {
   const text = await fs.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "{}")
   const pid = (JSON.parse(text) as { pid?: number }).pid
   if (pid === undefined || !alive(pid)) return

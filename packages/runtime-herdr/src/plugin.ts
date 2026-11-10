@@ -9,6 +9,7 @@ import { ChildProcessSpawner } from "effect/process"
 
 import { CALLER_ENV, readyFrom, targetFrom, terminalFrom } from "./caller.ts"
 import * as Machines from "./machines.ts"
+import * as Mirror from "./mirror.ts"
 import { HerdrPool } from "./pool.ts"
 import { KIND, fromPool } from "./terminal-runtime.ts"
 
@@ -58,5 +59,6 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
           locate: (machine, sessions) => Machines.locate(cli, machine, sessions),
         }),
       )
+      yield* Mirror.mirror(context.machine, cli)
     }),
 })

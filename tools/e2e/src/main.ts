@@ -11,6 +11,7 @@ import harness from "./scenarios/harness.ts"
 import hc from "./scenarios/hc.ts"
 import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
+import machinesHerdr from "./scenarios/machines-herdr.ts"
 import machines from "./scenarios/machines.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
@@ -32,7 +33,7 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   exits,
   restart,
   hc,
-  machines,
+  machines: [...machines, ...machinesHerdr],
   "terminal-status": terminalStatus,
 }
 const checks = Object.entries(areas).flatMap(([area, list]) => list.map((check) => ({ area, check, id: check.id })))

@@ -238,6 +238,22 @@ such an id is only a place to look in the herdr sidebar: `parseTerminal` refuses
 member called with one fails `not_found` ("a pane on <label>; vibest peek and send reach it through vibest"). There
 is no `focus` onto a remote herdr pane; herdr has no way to switch a TUI to a machine from outside.
 
+Its mirror (`runtime-herdr/src/mirror.ts`) keeps that profile: `connect` runs `herdr machine add <target> --label
+<name>/<session> --remote-session <session>` with stdin not a terminal, so herdr never installs, updates or restarts
+anything on B (it refuses instead, and its words become the note with the same command as the fix, which run by hand
+can ask). It adds nothing when the profile exists (a disabled one gets the `enable` note and stays disabled: the user
+disabled it), when another profile holds the label (a `rename` note), when B's or A's herdr is older than 0.9.5 (no
+machine API forwarding; an `update` note), or when B has no herdr link. `remove` runs `herdr machine remove <id>` for
+the profile of the link's session, or with no link the one with the event's target and session `vibest` (several: a
+note); removing a profile leaves B's sessions running. There is no re-check on a herdr server restart: the catalog is
+a client state file that a restart keeps, and `ensure` repairs at the next use. Limits: a profile is found by target
+string and session, so B saved by the user under another ssh alias gets a second profile; herdr has no server id, so
+a target that now reaches another herdr server goes unnoticed; `vibest ls` cannot say whether herdr's link to B is up;
+the catalog is global for the user on A, so the profile shows in every herdr session's TUI there; and herdr adds only a
+B session whose server herdr itself started as a detached daemon (by a TUI or its own `remote-client-bridge`), so a
+session that vibestd on B started with `herdr server --session` is refused ("remote server is not ready for saved
+machines") until it restarts.
+
 Not covered yet: Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote row (its own PR);
 replacing a mirror row when B's vibestd moved to another hc session on the same host.
 

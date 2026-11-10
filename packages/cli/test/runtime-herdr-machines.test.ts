@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
+import type { MachineEvent } from "@vibest/plugin"
 import { type Cli, link, locate, type Profile } from "@vibest/runtime-herdr/machines"
+import { connect, remove } from "@vibest/runtime-herdr/mirror"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import { agentName, fromPool, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { Effect, Stream } from "effect"
@@ -59,6 +61,18 @@ const profile = (extra: Partial<Profile> = {}): Profile => ({
   ...extra,
 })
 
+const event = (link?: Record<string, string>, extra: Partial<MachineEvent> = {}): MachineEvent => ({
+  name: "racknerd",
+  target: "b-host",
+  vibestd: "v",
+  runtimes: [{ kind: "herdr", status: "online", ...(link === undefined ? {} : { link }) }],
+  notes: [],
+  ...extra,
+})
+
+const ADD = ["machine", "add", "b-host", "--label", "racknerd/vibest", "--remote-session", "vibest"]
+const adds = (calls: ReadonlyArray<ReadonlyArray<string>>) => calls.filter((c) => c[0] === "machine" && c[1] === "add")
+
 describe("runtime-herdr machines: link", () => {
   it.effect("names the default session with B's herdr version; an ambient socket names its session or nothing", () =>
     Effect.gen(function* () {
@@ -66,6 +80,135 @@ describe("runtime-herdr machines: link", () => {
       assert.deepStrictEqual(yield* link(herdr.cli, undefined), { session: "vibest", version: "0.9.6" })
       assert.deepStrictEqual(yield* link(herdr.cli, "/s/work.sock"), { session: "work", version: "0.9.6" })
       assert.isUndefined(yield* link(herdr.cli, "/s/other.sock"))
+    }),
+  )
+})
+
+describe("runtime-herdr machines: connect", () => {
+  it.effect("adds B's session once, labelled <name>/<session>, through herdr machine add", () =>
+    Effect.gen(function* () {
+      const herdr = fake()
+      const first = event({ session: "vibest", version: "0.9.5" })
+      yield* connect(herdr.cli, first)
+      assert.deepStrictEqual(adds(herdr.calls), [ADD])
+      assert.include(first.notes[0]!.message, "herdr: added racknerd/vibest here")
+      const second = event({ session: "vibest" })
+      yield* connect(herdr.cli, second)
+      assert.strictEqual(adds(herdr.calls).length, 1)
+      assert.deepStrictEqual(second.notes, [])
+    }),
+  )
+
+  it.effect("a profile for the same target and session counts under any label, ssh:// or not", () =>
+    Effect.gen(function* () {
+      const herdr = fake({}, [profile({ target: "ssh://b-host" })])
+      const e = event({ session: "vibest" })
+      yield* connect(herdr.cli, e)
+      assert.strictEqual(adds(herdr.calls).length, 0)
+      assert.deepStrictEqual(e.notes, [])
+    }),
+  )
+
+  it.effect("a disabled profile gets the enable note and is never enabled by vibest", () =>
+    Effect.gen(function* () {
+      const herdr = fake({}, [profile({ enabled: false })])
+      const e = event({ session: "vibest" })
+      yield* connect(herdr.cli, e)
+      assert.strictEqual(adds(herdr.calls).length, 0)
+      assert.deepStrictEqual(e.notes, [{ message: "herdr here has mine disabled", fix: "herdr machine enable p0" }])
+    }),
+  )
+
+  it.effect("a label held by another machine gets the rename note", () =>
+    Effect.gen(function* () {
+      const herdr = fake({}, [profile({ id: "p9", label: "racknerd/vibest", target: "elsewhere" })])
+      const e = event({ session: "vibest" })
+      yield* connect(herdr.cli, e)
+      assert.strictEqual(adds(herdr.calls).length, 0)
+      assert.include(e.notes[0]!.message, "a machine racknerd/vibest that is another one")
+      assert.include(e.notes[0]!.fix!, "herdr machine rename p9 --label")
+    }),
+  )
+
+  it.effect("herdr's refusal becomes the note, with the add command as the fix", () =>
+    Effect.gen(function* () {
+      const herdr = fake({
+        addFails: "remote herdr server is still running v0.9.5\nerror: remote server is not ready for saved machines\n",
+      })
+      const e = event({ session: "vibest" })
+      yield* connect(herdr.cli, e)
+      assert.include(e.notes[0]!.message, "error: remote server is not ready for saved machines")
+      assert.strictEqual(e.notes[0]!.fix, `herdr ${ADD.join(" ")}`)
+    }),
+  )
+
+  it.effect("no herdr link, an old herdr on either side, or no herdr on B: a note or nothing, never an add", () =>
+    Effect.gen(function* () {
+      const herdr = fake()
+      const offline = event(undefined, { runtimes: [{ kind: "herdr", status: "offline", reason: "no server" }] })
+      yield* connect(herdr.cli, offline)
+      assert.deepStrictEqual(offline.notes, [{ message: "racknerd's herdr is offline: no server" }])
+      const theirs = event({ session: "vibest", version: "0.9.4" })
+      yield* connect(herdr.cli, theirs)
+      assert.include(theirs.notes[0]!.message, "racknerd's herdr 0.9.4 cannot be viewed from here")
+      const none = event(undefined, { runtimes: [{ kind: "hc", status: "online" }] })
+      yield* connect(herdr.cli, none)
+      assert.deepStrictEqual(none.notes, [])
+      const old = fake({ version: "0.9.1" })
+      const ours = event({ session: "vibest" })
+      yield* connect(old.cli, ours)
+      assert.deepStrictEqual(ours.notes, [
+        {
+          message: "herdr 0.9.1 here cannot show other machines (herdr 0.9.5 or newer is needed)",
+          fix: "herdr update",
+        },
+      ])
+      assert.strictEqual(adds([...herdr.calls, ...old.calls]).length, 0)
+    }),
+  )
+})
+
+describe("runtime-herdr machines: remove", () => {
+  it.effect("removes the profile of the link's session under any label, and only that one", () =>
+    Effect.gen(function* () {
+      const herdr = fake({}, [
+        profile({ id: "p1", session: "work" }),
+        profile({ id: "p2", label: "x", session: "vibest" }),
+      ])
+      yield* remove(herdr.cli, event({ session: "work" }))
+      assert.deepStrictEqual(
+        herdr.catalog.map((p) => p.id),
+        ["p2"],
+      )
+    }),
+  )
+
+  it.effect("with no link the session vibest; several matches leave all with a note; nothing found is done", () =>
+    Effect.gen(function* () {
+      const herdr = fake({}, [profile({ id: "p1" })])
+      yield* remove(herdr.cli, event(undefined, { runtimes: [] }))
+      assert.deepStrictEqual(herdr.catalog, [])
+      const twice = fake({}, [profile({ id: "p1" }), profile({ id: "p2", target: "ssh://b-host" })])
+      const e = event({ session: "vibest" })
+      yield* remove(twice.cli, e)
+      assert.strictEqual(twice.catalog.length, 2)
+      assert.include(e.notes[0]!.message, "2 machines for b-host")
+      const gone = event({ session: "vibest" })
+      yield* remove(fake().cli, gone)
+      assert.deepStrictEqual(gone.notes, [])
+      const hcOnly = fake({}, [profile()])
+      yield* remove(hcOnly.cli, event(undefined, { runtimes: [{ kind: "hc", status: "online" }] }))
+      assert.strictEqual(hcOnly.catalog.length, 1)
+    }),
+  )
+
+  it.effect("a failed remove is a note with the command", () =>
+    Effect.gen(function* () {
+      const e = event({ session: "vibest" })
+      yield* remove(fake({ removeFails: true }, [profile()]).cli, e)
+      assert.deepStrictEqual(e.notes, [
+        { message: "herdr here could not remove mine: cannot", fix: "herdr machine remove p0" },
+      ])
     }),
   )
 })
