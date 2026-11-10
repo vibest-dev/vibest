@@ -4,9 +4,7 @@ Status: vibestd keeps an append-only log of facts (the `event` table) and a read
 file, `vibest.db`. The facts are the catalog in `packages/schema/src/event.ts`; `packages/core/src/journal.ts` appends
 them and `packages/core/src/projectors.ts` turns each into its read-model rows. The `Db` service
 (`packages/core/src/db.ts` and its `db-*.ts` modules) answers its callers from the read model and changes nothing but by
-appending facts. Not built yet: rows for the user (nothing writes a null `recipient_session_id`), the `replyTo(turn)`
-routing below (a result or report still goes to `report_to_session_id` while it has not ended, else to the entry
-session).
+appending facts. Not built yet: rows for the user (nothing writes a null `recipient_session_id`).
 
 - `event`: the log. Each row is one fact: `seq` (its order and id), `at`, `type`, the project or session it is about
   (its envelope), and `data`, the fact's fields as JSON, written once.
@@ -14,7 +12,7 @@ session).
 - `migration`: the ids of the migrations applied to this file.
 - The read model, one purpose per table: `project`, `project_repository`, `session`, `process` (one harness run of a
   session), `turn`, `inbox` (text for a session or for the user, and whether it was delivered), `machine` and `peer`
-  (other vibestds), `outbox` (results and notices waiting for another vibestd).
+  (other vibestds), `outbox` (messages and notices waiting for another vibestd).
 
 ## Rules
 
@@ -37,13 +35,11 @@ session).
   session records its directory. A directory under the vibest worktrees root is one vibest made; a name is reserved by
   an atomic `mkdir`. It can be removed when no other live session uses the same directory, then after the lsof and git
   checks.
-- Branch and pushed state are rendered into the result text when the result inbox row is created; no table holds
-  them.
-- Results and reports reach the database through vibestd, never through files: there is no `results/` or `reports/`.
+- Replies and messages reach the database through vibestd, never through files: there is no `results/` or `reports/`.
 - Engine telemetry (lock waits, retries, hook timings) goes to logs and OpenTelemetry, not the event log.
 - Leases, the restarting mark, running work and per-session locks are memory only (see Memory).
 - Agent capabilities (spawn, message, tools) come from the agent definition in configuration, not from the
-  database. A routing decision is not recorded separately: it is the recipient of the result row.
+  database. A routing decision is not recorded separately: it is the recipient of the notice or send row.
 - Times are epoch milliseconds.
 - Project and session ids are UUIDv4 strings from one generator (`newId`, packages/schema/src/id.ts), which draws
   again when the first 8 characters are already taken. People see the first 8 (`shortId`); every command that takes
@@ -110,7 +106,7 @@ CREATE TABLE session (
   id                    TEXT PRIMARY KEY,             -- UUIDv4
   project_id            TEXT NOT NULL,
   parent_session_id     TEXT,                         -- who spawned it; null: the user. Rights and placement, never routing
-  report_to_session_id  TEXT,                         -- where its results go; written at spawn, never changed; null: the user
+  report_to_session_id  TEXT,                         -- where its notices go; written at spawn, never changed; null: the user
   role                  TEXT NOT NULL,                -- agent definition name (open set)
   name                  TEXT NOT NULL,
   directory             TEXT NOT NULL,
@@ -164,6 +160,7 @@ CREATE TABLE turn (                                   -- id: the seq of its turn
   started_at INTEGER NOT NULL,
   status     TEXT CHECK (status IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),  -- null: open
   report_seq INTEGER,                                 -- the turn.reported it consumed
+  answer     TEXT,                                    -- that report's text; null: no report (interrupted, lost, an exit)
   failure    TEXT,
   ended_at   INTEGER
 ) STRICT;
@@ -175,21 +172,18 @@ CREATE TABLE inbox (                                  -- id: the seq of its inbo
   id                   INTEGER PRIMARY KEY,
   recipient_session_id TEXT,                          -- null: the user
   sender_session_id    TEXT,                          -- null: the user; notice: the session it is about
-  kind                 TEXT NOT NULL CHECK (kind IN ('task', 'send', 'report', 'result', 'notice')),
-  content              TEXT NOT NULL,                 -- result: the rendered result text with branch and pushed
-  result_turn_id       INTEGER,                       -- result: the turn it reports
+  kind                 TEXT NOT NULL CHECK (kind IN ('task', 'send', 'report', 'result', 'notice')),   -- report and result: imported history only
+  content              TEXT NOT NULL,
   request              TEXT,                          -- the request id of the `vibest send` or `vibest run` that queued it
   peer_item            TEXT,                          -- a notice from another vibestd: its outbox item id
   status               TEXT NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
   turn_id              INTEGER,                       -- delivered: the turn that took it
   queued_at            INTEGER NOT NULL,
   seq                  INTEGER NOT NULL,
-  CHECK ((kind = 'result') = (result_turn_id IS NOT NULL)),
   CHECK (recipient_session_id IS NOT NULL OR sender_session_id IS NOT NULL)
 ) STRICT;
 CREATE INDEX inbox_status    ON inbox (status, recipient_session_id);   -- full index on purpose: a partial IN (...) index is not used for status = 'pending'
 CREATE INDEX inbox_recipient ON inbox (recipient_session_id, kind, id);
-CREATE INDEX inbox_result    ON inbox (result_turn_id) WHERE result_turn_id IS NOT NULL;
 CREATE INDEX inbox_turn      ON inbox (turn_id) WHERE turn_id IS NOT NULL;
 CREATE INDEX inbox_request   ON inbox (request) WHERE request IS NOT NULL;
 CREATE UNIQUE INDEX inbox_peer_item ON inbox (peer_item) WHERE peer_item IS NOT NULL;
@@ -203,23 +197,17 @@ indexes, so a fact that would break them fails its transaction.
 
 An inbox row is text for one recipient: a session, or the user (`recipient_session_id` null).
 
-| `kind`   | What it is                                                                                                              |
-| -------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `task`   | the first input of a session, from whoever spawned it                                                                   |
-| `send`   | a message from the user or a session                                                                                    |
-| `report` | a session's `vibest report` to its reply target: it expects no reply                                                    |
-| `result` | a turn's result, rendered once from its `turn.ended` (`result_turn_id`), for the reply target                           |
-| `notice` | something vibest tells the recipient about a session (`sender_session_id`): blocked, not started, undelivered, archived |
+| `kind`   | What it is                                                                                                                                         |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task`   | the first input of a session, from whoever spawned it                                                                                              |
+| `send`   | a message from the user or a session to any unfinished session of its project, the main agent included                                             |
+| `notice` | something vibest tells the recipient about a session (`sender_session_id`): blocked, not started, undelivered, archived, exited, ended in an error |
 
 - Delivery scans rows with `recipient_session_id IS NOT NULL`. A row for the user is marked delivered once
   `vibest inbox` has shown it.
-- The recipient of a result row is the routing decision of `replyTo(turn)` (architecture.md §1): (1) the sessions
-  that sent the `task` and `send` rows the turn consumed; else (2) `report_to_session_id`; else (3) the user, when a
-  row from the user opened the turn. (4) A turn woken by a `result` or `notice`, or opened by text typed in the pane,
-  goes to `report_to_session_id` when it is set and makes no result row when it is not. An ended recipient falls
-  back to the entry session (if live and not the session itself), then to the user; the `agent.result` hook may
-  rewrite the recipients. A `notice` goes to `report_to_session_id`, then the entry session, then the user, and the
-  `agent.notice` hook may rewrite them.
+- A turn end writes no inbox row. The recipient of a `notice` is `report_to_session_id`, then the entry session, then
+  `origin_report_to` through the outbox; an undeliverable `send` notifies its sender. The kinds `report` and `result`
+  stay in the check because the log is append-only: rows imported from it keep them, and nothing writes them.
 
 ## Facts
 
@@ -265,8 +253,7 @@ is there; it stays one process. Any other start while the session still has a li
 `superseded`. One whose terminal never opened ends `launch_failed`, and the session's current process is then the one
 before it, if any. Superseded processes are not exits: no reader counts them as one.
 
-A `turn.ended` points at the `turn.reported` it consumed (`report`). That row's `text` is the harness's answer, not the
-rendered result (the result row's content). An end the harness never reported (`lost`, `not_started`, an exit, an
+A `turn.ended` points at the `turn.reported` it consumed (`report`). That row's `text` is the harness's answer; the projector copies it into the turn's `answer`. An end the harness never reported (`lost`, `not_started`, an exit, an
 interrupt) has no `report`.
 
 A `turn.reported`'s `process` is the session's current process when vibestd received the hook, not the harness that
@@ -348,7 +335,7 @@ E2E runs it on every world's database at the end of each check.
   Order: restarting mark in memory, SIGTERM, then `turn.ended` (interrupted) and `process.ended` (restart), then the new
   `process.started`. A refused SIGTERM writes nothing.
 - `ls`: sessions by project, the first `task` row, the latest turn and live process as above, and the unread rows for
-  the user. `result`: the latest ended turn with its result row.
+  the user. `result`: the latest ended turn with its `answer`.
 
 ## Memory
 

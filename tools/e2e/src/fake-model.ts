@@ -1,6 +1,6 @@
 import path from "node:path"
 
-import type { World } from "./world.ts"
+import { binary, type World } from "./world.ts"
 import { claudeShadow, FAKE_ANTHROPIC_KEY, piShadow } from "./world/shadow.ts"
 
 export type Message = { role: string; content: unknown }
@@ -41,6 +41,25 @@ export const toolCall = (id: string, name: string, input: object) =>
     ],
   }) + done("tool_calls")
 
+export const creatorIn = (system: string) => /started by ([0-9a-f-]{36})/.exec(system)?.[1]
+
+export const sendOrReply = (messages: ReadonlyArray<Message>, done: string) => {
+  const creator = creatorIn(text(messages.find((m) => m.role === "system" || m.role === "developer")))
+  return creator && messages.at(-1)?.role !== "tool"
+    ? toolCall("call-send", "bash", { command: `${binary} send ${creator} -- '${done}'` })
+    : reply(done)
+}
+
+export const claudeSendOrReply = (r: AnthropicRequest, done: string): Step => {
+  const creator = creatorIn(r.system)
+  return creator && !text(lastUser(r)).includes('"tool_result"')
+    ? { tool: "Bash", input: { command: `${binary} send ${creator} -- '${done}'` } }
+    : done
+}
+
+export const taskIn = (r: AnthropicRequest) =>
+  /done-(\w+)/.exec(text(r.messages.findLast((m) => m.role === "user" && !text(m).includes('"tool_result"'))))?.[1]
+
 export const piDir = (w: World, name: string, url: string) =>
   piShadow(path.join(w.root, name), w.profile, { fake: { baseUrl: url } })
 
@@ -50,8 +69,14 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
   let sessionId = ""
   let calls = 0
   const bash = (command: string) => toolCall(`call${++calls}`, "bash", { command })
-  const answer = (last: Message | undefined) => {
+  const answer = (messages: Array<Message>) => {
+    const last = messages.at(-1)
     const body = text(last)
+    const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
+    if (creatorIn(system) !== undefined) {
+      const done = /done-(\w+)/.exec(text(messages.findLast((m) => m.role === "user")))
+      return done ? sendOrReply(messages, `done-${done[1]}`) : reply("ok")
+    }
     if (last?.role === "tool") {
       const id = /"id":\s*\\?"([\w-]+)\\?"/.exec(body)?.[1]
       if (id && !sessionId) sessionId = id
@@ -62,8 +87,7 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
       if (body.includes("done-one")) return bash(`vibest send ${sessionId} -- '${ask("two")}'`)
       return reply("ok")
     }
-    const task = /done-(\w+)/.exec(body)
-    return task ? reply(`done-${task[1]}\nstatus: completed`) : reply("ok")
+    return reply("ok")
   }
   const server = Bun.serve({
     port: 0,
@@ -78,7 +102,7 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
         await Bun.sleep(options.heldMs)
         if (marker !== undefined && !text(last).includes("<agent-")) answered.push({ marker, from, to: Date.now() })
       }
-      return new Response(answer(last), { headers: sseHeaders })
+      return new Response(answer(messages), { headers: sseHeaders })
     },
   })
   return {
@@ -163,8 +187,11 @@ export const holdsSlowResultModel = () => {
           }),
           { headers: sseHeaders },
         )
-      const task = last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
-      return new Response(reply(task ? `done-${task[1]}\nstatus: completed` : "ok"), { headers: sseHeaders })
+      if (creatorIn(text(messages.find((m) => m.role === "system" || m.role === "developer"))) !== undefined) {
+        const done = /done-(\w+)/.exec(text(messages.findLast((m) => m.role === "user")))
+        return new Response(done ? sendOrReply(messages, `done-${done[1]}`) : reply("ok"), { headers: sseHeaders })
+      }
+      return new Response(reply("ok"), { headers: sseHeaders })
     },
   })
   return {
@@ -202,7 +229,7 @@ export const usageLimitedModel = (limited: (path: string) => boolean) => {
 }
 
 export const fakeOpenAI = (
-  step: (who: string, dir: string, done: number, last: string | undefined) => Step,
+  step: (who: string, dir: string, done: number, last: string | undefined, creator?: string) => Step,
   dirs: Record<string, string>,
 ) => {
   let calls = 0
@@ -224,7 +251,9 @@ export const fakeOpenAI = (
       if (tools.length > 3) return new Response(answer("ok"), { headers: sseHeaders })
       dirs[who] = (main ?? sub)![1]!
       const result = last?.role === "tool" ? text(last) : undefined
-      return new Response(answer(step(who, dirs[who]!, tools.length, result)), { headers: sseHeaders })
+      return new Response(answer(step(who, dirs[who]!, tools.length, result, creatorIn(system))), {
+        headers: sseHeaders,
+      })
     },
   })
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }

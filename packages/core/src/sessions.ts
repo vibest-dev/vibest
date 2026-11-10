@@ -468,6 +468,8 @@ export class Sessions extends Context.Service<
                 `the session exited (its terminal is gone or its process with it); vibest send ${id} resumes it`,
               )
             if (session.exitedAt === null) {
+              if (!open && !cutOff)
+                yield* notice(session, `${id} (${session.harnessId}) exited; vibest send ${id} resumes it`)
               yield* db.updateSession(id, {
                 status: "unknown",
                 exitedAt: yield* Clock.currentTimeMillis,

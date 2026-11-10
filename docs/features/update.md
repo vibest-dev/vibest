@@ -13,7 +13,7 @@ nothing. A build from source says it cannot update and installs nothing.
 
 `vibest update` hands vibestd over to the new version and restarts an old Pi main agent that is mid-turn, in its own
 terminal: the same session, conversation and terminal, a new harness process, the interrupted turn continues, and
-results still arrive.
+messages still arrive.
 
 ## U3. A refused handoff leaves the old daemon serving
 
@@ -38,7 +38,7 @@ in place: the same pane and conversation, a new harness process, and the new int
 ## U8. Each login at most once per round
 
 A usage-limit move tries each login at most once per round, whatever its usage reading says. When none is left, the
-round ends with one failed result saying no harness is left, and nothing starts a third time in the pane.
+round ends with one notice saying no harness is left, and nothing starts a third time in the pane.
 
 ## U9. Update to a version that cannot open the database
 

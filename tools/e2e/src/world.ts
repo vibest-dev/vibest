@@ -733,7 +733,7 @@ export const expectFacts = (w: World, sessionId: string, expected: ReadonlyArray
   )
 }
 
-export const expectAnswered = async (w: World, sub: string, creator: string) => {
+export const expectAnswered = async (w: World, sub: string) => {
   expectFacts(w, sub, [
     "session.created",
     "process.started",
@@ -756,17 +756,8 @@ export const expectAnswered = async (w: World, sub: string, creator: string) => 
     task!.turn!,
   )
   expect(turn?.status === "completed" && turn.report !== null, `${sub}'s task turn: ${JSON.stringify(turn)}`)
-  const result = () =>
-    row<{ status: string }>(
-      w,
-      "SELECT status FROM inbox WHERE kind = 'result' AND sender_session_id = ? AND recipient_session_id = ? AND result_turn_id = ?",
-      sub,
-      creator,
-      task!.turn!,
-    )
-  await until(`${sub}'s result row to ${creator} delivered`, () => result()?.status === "delivered").catch(() =>
-    fail(`${sub}'s result row to ${creator}: ${JSON.stringify(result())}`),
-  )
+  const answer = row<{ answer: string | null }>(w, "SELECT answer FROM turn WHERE id = ?", task!.turn!)
+  expect(typeof answer?.answer === "string", `${sub}'s task turn has no answer`)
 }
 
 const READ_MODEL = ["session", "process", "turn", "inbox"] as const
@@ -894,6 +885,10 @@ export const vibestd = async (w: World, repo: string, method: string, params: un
   ]
   return firstAnswer(w, { jsonrpc: "2.0", id: 1, method, params, headers })
 }
+
+export const answerOf = async (w: World, sub: string, cwd?: string) =>
+  (await w.json<{ answer?: { text?: string | null } | null }>(["result", sub], cwd === undefined ? {} : { cwd })).answer
+    ?.text ?? ""
 
 export const transcript = async (w: World, cwd: string, claudeConfig = path.join(w.home, ".claude")) => {
   const dir = path.join(claudeConfig, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"))

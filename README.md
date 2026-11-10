@@ -18,9 +18,9 @@ npm i -g @vibest/cli@beta
 
 ## Cursor shell approval
 
-In a vibest Cursor session, the agent runs `vibest report` to send progress. With `approvalMode: "allowlist"` (Cursor’s default), Cursor asks you to approve that shell command, and the session shows `blocked` until you answer. Choose **Add to allowlist** in the prompt to save the permission in your own Cursor config so it does not ask again.
+In a vibest Cursor session, the agent runs `vibest send` to message another agent. With `approvalMode: "allowlist"` (Cursor’s default), Cursor asks you to approve that shell command, and the session shows `blocked` until you answer. Choose **Add to allowlist** in the prompt to save the permission in your own Cursor config so it does not ask again.
 
-You can also add `"Shell(vibest report)"` to `permissions.allow` in `~/.cursor/cli-config.json` ahead of time, keeping your existing entries. Cursor matches a command that starts with the pattern followed by a space, so the rule covers `vibest report` with its message argument. With `approvalMode: "unrestricted"`, there is no approval prompt.
+You can also add `"Shell(vibest send)"` to `permissions.allow` in `~/.cursor/cli-config.json` ahead of time, keeping your existing entries. Cursor matches a command that starts with the pattern followed by a space, so the rule covers `vibest send` with its message argument. With `approvalMode: "unrestricted"`, there is no approval prompt.
 
 Only progress reports wait for this approval. The final result is reported through the `afterAgentResponse` hook and does not depend on it. vibest does not write your Cursor config or pass `--force`; shell approval stays under your control.
 

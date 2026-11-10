@@ -152,7 +152,7 @@ So: **herdr reaches a remote runtime, but not a remote vibest.** A local daemon 
 watch agents on a saved machine through `herdr --machine` (or by spawning `ssh <target> herdr --session <s>
 remote-api-bridge` itself for subscriptions). vibest still needs:
 
-1. **A way back from the remote machine.** Harness integrations (hooks, `vibest report`, the guard) run on the
+1. **A way back from the remote machine.** Harness integrations (hooks, `vibest send`, the guard) run on the
    remote host and must reach vibestd: a remote `vibest` with a reverse SSH tunnel to the daemon socket, or a
    small machine agent. herdr gives nothing here.
 2. **Workspace types on the remote filesystem**: `worktree.create` is forwarded, but repository copies
@@ -210,7 +210,7 @@ Keybindings are a documented snippet the user adds (or vibest adds under the use
 **Machines.** Use herdr saved machines as the **runtime** transport (`MachineTransport` for the Runtime port:
 one `remote-api-bridge` SSH process per request and per subscription, the same JSON as the local socket), and
 decide separately the **vibest-side** transport for hooks and Workspace types. Smallest option: install `vibest`
-on the remote host and give it `VIBEST_DAEMON` over an SSH reverse-forwarded socket, so hooks and `vibest report`
+on the remote host and give it `VIBEST_DAEMON` over an SSH reverse-forwarded socket, so hooks and `vibest send`
 work unchanged, and run Workspace type steps as SSH commands. A machine agent is only needed if that proves too
 fragile.
 

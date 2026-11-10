@@ -64,7 +64,7 @@ supervised one (add dials once); a failure records nothing. It is refused when B
 own id ("<name> is this vibestd") or an id another row already has (`AlreadyAdded`: "this is the vibestd already
 added as <name> (<id8>); use that name"), decided from the result of the `INSERT … ON CONFLICT DO NOTHING`.
 `vibest machine ls` shows each row with its connection state, `vibest
-machine rm` stops the connection and deletes the row (`UnknownMachine` when there is none), with no checks: agents and undelivered results stay on B.
+machine rm` stops the connection and deletes the row (`UnknownMachine` when there is none), with no checks: agents and undelivered messages stay on B.
 
 The ssh command is `ssh -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 [-p <port>] <target>
 <line>` (`sshArgv`, `packages/core/src/machines.ts`), found on vibestd's `PATH`; ssh resolves the target, so
@@ -95,9 +95,9 @@ and fetch it there"), and runs `Sessions.spawn` with the worktree detached at th
 started it is the `origin` of its `session.created` fact (peer, project, parent?, reportTo?), kept in the session's
 `origin_*` columns; it has no `reportTo` when A's project had no main agent. The forwarded `request` finds the session
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
-results go to B's own inbox delivery and no outbox row is written for it.
+notices go to B's own inbox delivery and no outbox row is written for it.
 
-Every result and notice of a peer session with a `reportTo` goes to B's `outbox` (`outbox.queued`) in the transaction that writes it. B still writes the
+Every notice of a peer session with a `reportTo`, and every `vibest send` it makes to that creator, goes to B's `outbox` as a `notice`; a turn end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. B still writes the
 inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
 B's own delivery never sees it. With no `peer` row nothing is queued. `Peer.Outbox` streams
 the peer's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
@@ -134,7 +134,7 @@ their case; either gives `NoProject`.
 `vibest run --machine <name>` (the user or the main agent) sends `Peer.Spawn` over the machine's connection with
 the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`), the caller as `parent` and the
 main agent as `reportTo`; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. With no main agent there is no `report_to`, as in `hc run --on`
-with no parent: nothing is sent back, the result stays on B and `vibest result <name>/<id>` reads it there.
+with no parent: nothing is sent back, the answer stays on B and `vibest result <name>/<id>` reads it there.
 `--env`, `--peer`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
@@ -210,7 +210,7 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
 - **`machine ls`** gives per machine the runtimes of its last Hello (`runtimes`, `runtimesAt`), each with `here:
   {visible, as?, note?}` from `ensure`, and the last hook notes per plugin with their time (`notes`).
 - **Stepping in.** Keys typed into the terminal on A go through the runtime's own link (A's hc core, B's hc core) to
-  the harness on B. B records the typed turn as any local one, and its result reaches A's main agent once as the
+  the harness on B. B records the typed turn as any local one, and what the session sends to A's main agent reaches it once as the
   `<name>/<id8>: …` notice through B's outbox.
 
 The hc plugin (`runtime-herdr-core/src/machines.ts`) finds its mirror row by the link's core id under any name:

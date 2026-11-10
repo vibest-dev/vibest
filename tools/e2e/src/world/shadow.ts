@@ -180,7 +180,7 @@ export const cursorShadow = async (dir: string, profile: Profile, vibest: string
     path.join(dir, "cli-config.json"),
     Object.keys(own).length > 0
       ? own
-      : { version: 1, permissions: { allow: [`Shell(${vibest} report)`, "Shell(vibest report)"], deny: [] } },
+      : { version: 1, permissions: { allow: [`Shell(${vibest} send)`, "Shell(vibest send)"], deny: [] } },
   )
   return dir
 }

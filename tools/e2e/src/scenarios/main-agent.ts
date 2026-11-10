@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
-import { expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { answerOf, expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type Proc = { name: string; argv?: Array<string> | null }
@@ -237,7 +237,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S14",
     title:
-      "several repositories: each is its own Project (also from a subdirectory or a linked worktree); a nested repository and another clone of the same origin are other Projects; Pi runs in two repositories at once get worktrees of their own repository and their own results",
+      "several repositories: each is its own Project (also from a subdirectory or a linked worktree); a nested repository and another clone of the same origin are other Projects; Pi runs in two repositories at once get worktrees of their own repository and their own answers",
     run: async (w) => {
       needs("pi", "herdr", "git")
       const git = async (cwd: string, ...args: Array<string>) => {
@@ -289,14 +289,7 @@ const checks: ReadonlyArray<Check> = [
           [inShop!, shop, "shop", shop],
           [inAdmin!, admin, "admin", admin],
         ] as const) {
-          await until(
-            `the ${task} result`,
-            async () =>
-              (
-                (await w.json<{ result?: { message?: string } | null }>(["result", id], { cwd })).result?.message ?? ""
-              ).includes(`done-${task}`),
-            90_000,
-          )
+          await until(`the ${task} answer`, async () => (await answerOf(w, id, cwd)).includes(`done-${task}`), 90_000)
           const dir = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", id)!.d
           expect(dir !== repo, `${task}'s run works in the checkout itself`)
           const common = await git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")

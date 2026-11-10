@@ -6,11 +6,11 @@ import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall 
 import {
   binary,
   expect,
+  answerOf,
   expectAnswered,
   expectFacts,
   fail,
   herdr,
-  readDb,
   row,
   rows,
   SESSIONS,
@@ -43,20 +43,8 @@ const runSub = async (w: World, repo: string, session: string, url: string, name
     ) as { id: string }
   ).id
 
-const resultOf = async (w: World, repo: string, sub: string) =>
-  (await w.json<{ result?: { message?: string; status?: string } | null }>(["result", sub], { cwd: repo })).result
-
 const inboxRows = (w: World, sql: string, ...args: Array<string>) =>
   row<{ n: number }>(w, `SELECT count(*) AS n FROM inbox WHERE ${sql}`, ...args)?.n ?? 0
-
-const readRows = (w: World, sql: string, ...args: Array<string>) => {
-  const db = readDb(path.join(w.vibestHome, "vibest.db"))
-  try {
-    return db.query(sql).all(...args)
-  } finally {
-    db.close()
-  }
-}
 
 const turnStarts = (w: World, sub: string) =>
   row<{ n: number }>(w, "SELECT count(*) AS n FROM turn WHERE session_id = ?", sub)?.n ?? 0
@@ -75,6 +63,13 @@ const recordingModel = (answer: (messages: Array<Message>) => string | Promise<s
   })
   return { requests, url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
+
+const lastTurn = (w: World, sub: string) =>
+  row<{ status: string; failure: string | null }>(
+    w,
+    "SELECT status, failure FROM turn WHERE session_id = ? AND status IS NOT NULL ORDER BY id DESC LIMIT 1",
+    sub,
+  )
 
 const mainOf = (w: World) =>
   row<{ id: string }>(w, "SELECT id FROM session WHERE role = 'main' AND ended_at IS NULL")!.id
@@ -98,6 +93,50 @@ const sendingModel = (to: () => string, message: string) =>
   )
 
 const seen = (model: ReturnType<typeof recordingModel>) => model.requests.flat().map(text).join("\n")
+
+const turnErrorChecks: ReadonlyArray<Check> = [
+  {
+    id: "S50",
+    title:
+      "a turn that ends in an error fails with its failure and sends the creator one notice carrying it, typed into the main agent once",
+    run: async (w) => {
+      needs()
+      const main = recordingModel(() => reply("ok"))
+      const broken = recordingModel(() => `data: ${JSON.stringify({ error: { message: "model exploded" } })}\n\n`)
+      let session = ""
+      try {
+        const m = await piMain(w, "turn-error", main.url)
+        session = m.session
+        const id = await runSub(w, m.repo, session, broken.url, "pi-turn-error-sub", "fail")
+        const notices = () =>
+          rows<{ status: string; recipient: string | null; content: string }>(
+            w,
+            "SELECT status, recipient_session_id AS recipient, content FROM inbox WHERE sender_session_id = ? AND kind = 'notice'",
+            id,
+          )
+        await until("the turn failed", () => lastTurn(w, id)?.status === "failed", 120_000)
+        await until(
+          "the notice typed into the main agent",
+          () => notices().some((n) => n.status === "delivered"),
+          60_000,
+        )
+        const failed = lastTurn(w, id)!
+        expect(failed.failure?.includes("model exploded") === true, `the turn's failure: ${JSON.stringify(failed)}`)
+        expect(
+          notices().length === 1 &&
+            notices()[0]!.recipient === mainOf(w) &&
+            notices()[0]!.content.includes("model exploded"),
+          `notices from ${id}: ${JSON.stringify(notices())}`,
+        )
+        await until("the main agent's model saw it", () => seen(main).includes("model exploded"), 60_000)
+      } finally {
+        main.stop()
+        broken.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+]
 
 const sendChecks: ReadonlyArray<Check> = [
   {
@@ -317,8 +356,8 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         await until(
-          "the merged turn's result",
-          async () => ((await resultOf(w, m.repo, sub))?.message ?? "").includes("done-first"),
+          "the merged turn's answer",
+          async () => (await answerOf(w, sub, m.repo)).includes("done-first"),
           60_000,
         )
         expect(turnStarts(w, sub) === 2, `${turnStarts(w, sub)} turns, not the first and one merged turn`)
@@ -350,51 +389,29 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S3",
     title:
-      "a Pi subagent's two vibest reports reach the Pi main agent: two report rows to the main agent, both delivered, each seen once by its model, both before the subagent's result",
+      "a turn end sends nothing: a Pi subagent ends its turn without sending; the turn completes with its answer, no inbox row has the subagent as sender, no inbox.queued names it as sender, and the main agent's model gets no request after the subagent went idle",
     run: async (w) => {
       needs()
       const main = recordingModel(() => reply("ok"))
-      const sub = recordingModel((messages) =>
-        messages.some((m) => m.role === "tool")
-          ? reply("done-s3\nstatus: completed")
-          : toolCall("call1", "bash", { command: "vibest report -- report-one && vibest report -- report-two" }),
-      )
+      const sub = recordingModel(() => reply("done-s3\nstatus: completed"))
       let session = ""
       try {
-        const m = await piMain(w, "report", main.url)
+        const m = await piMain(w, "quiet", main.url)
         session = m.session
-        const mainId = row<{ id: string }>(w, "SELECT id FROM session WHERE role = 'main' AND ended_at IS NULL")!.id
-        const id = await runSub(w, m.repo, session, sub.url, "pi-report-sub", "report twice")
-        const reports = () =>
-          readRows(
-            w,
-            "SELECT recipient_session_id AS r, content, status FROM inbox WHERE sender_session_id = ? AND kind = 'report'",
-            id,
-          ) as Array<{ r: string; content: string; status: string }>
-        await until(
-          "both reports delivered",
-          () => reports().filter((r) => r.status === "delivered").length === 2,
-          60_000,
-        ).catch((e: Error) => fail(`${e.message}: ${JSON.stringify(reports())}`))
+        const id = await runSub(w, m.repo, session, sub.url, "pi-quiet-sub", "end the turn without sending")
+        await until("the subagent's answer", async () => (await answerOf(w, id, m.repo)).includes("done-s3"), 60_000)
+        await expectAnswered(w, id)
+        const asked = main.requests.length
+        await Bun.sleep(5_000)
         expect(
-          reports().every((r) => r.r === mainId),
-          `reports not addressed to the main agent ${mainId}: ${JSON.stringify(reports())}`,
+          main.requests.length === asked,
+          `the main agent's model got ${main.requests.length - asked} more requests`,
         )
-        await until(
-          "the subagent's result",
-          async () => ((await resultOf(w, m.repo, id))?.message ?? "").includes("done-s3"),
-          60_000,
+        expect(inboxRows(w, "sender_session_id = ?", id) === 0, `rows sent by ${id}`)
+        expect(
+          countFacts(w, "type = 'inbox.queued' AND json_extract(data, '$.sender') = ?", id) === 0,
+          `an inbox.queued names ${id} as sender`,
         )
-        await expectAnswered(w, id, mainId)
-        const conversation = () =>
-          (main.requests.findLast((r) => r.some((message) => text(message).includes("done-s3"))) ?? []).map(text)
-        await until("the main agent's model saw the result", () => conversation().length > 0, 60_000)
-        const seen = conversation().join("\n")
-        for (const r of ["report-one", "report-two"]) {
-          const holding = conversation().filter((t) => t.includes(r)).length
-          expect(holding === 1, `the main agent's model saw ${r} in ${holding} messages, not once: ${seen}`)
-          expect(seen.indexOf(r) < seen.indexOf("done-s3"), `${r} reached the main agent after the result: ${seen}`)
-        }
       } finally {
         main.stop()
         sub.stop()
@@ -405,7 +422,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S4",
     title:
-      "after vibest interrupt stops a Pi subagent's held turn, the next vibest send starts a turn whose result arrives",
+      "after vibest interrupt stops a Pi subagent's held turn, which sends and notifies nothing, the next vibest send starts a turn whose answer arrives",
     run: async (w) => {
       needs()
       const main = heldModel()
@@ -422,22 +439,15 @@ const checks: ReadonlyArray<Check> = [
         model.release()
         await w.ok(["send", sub, "--", ask("next")], { cwd: m.repo })
         await until(
-          "the next turn's result",
-          async () => {
-            const r = await resultOf(w, m.repo, sub)
-            return (r?.message ?? "").includes("done-next")
-          },
+          "the next turn's answer",
+          async () => (await answerOf(w, sub, m.repo)).includes("done-next"),
           60_000,
         )
         expect(
           inboxRows(w, "recipient_session_id = ? AND kind = 'send' AND status = 'delivered'", sub) === 1,
           "the send after the interrupt is not delivered",
         )
-        const results = readRows(w, "SELECT content FROM inbox WHERE sender_session_id = ? AND kind = 'result'", sub)
-        expect(
-          results.length === 1 && JSON.stringify(results).includes("done-next"),
-          `results other than the next turn's: ${JSON.stringify(results)}`,
-        )
+        expect(inboxRows(w, "sender_session_id = ?", sub) === 0, "the subagent sent or notified something")
         const turns = rows<{ status: string }>(w, "SELECT status FROM turn WHERE session_id = ? ORDER BY id", sub)
         expect(
           JSON.stringify(turns.map((t) => t.status)) === '["interrupted","completed"]',
@@ -516,11 +526,7 @@ const checks: ReadonlyArray<Check> = [
         const m = await piMain(w, "stale-env", main.url)
         session = m.session
         const id = await runSub(w, m.repo, session, sub.url, "pi-stale-env-sub", "dump the environment")
-        await until(
-          "the subagent's result",
-          async () => ((await resultOf(w, m.repo, id))?.message ?? "").includes("done-s40"),
-          60_000,
-        )
+        await until("the subagent's answer", async () => (await answerOf(w, id, m.repo)).includes("done-s40"), 60_000)
         const refused = await fs
           .readFile(asAgent, "utf8")
           .catch(() => fail(`the subagent's command did not run: ${JSON.stringify(sub.requests.at(-1)?.map(text))}`))
@@ -602,4 +608,4 @@ const checks: ReadonlyArray<Check> = [
   },
 ]
 
-export default [...checks, ...sendChecks]
+export default [...checks, ...sendChecks, ...turnErrorChecks]

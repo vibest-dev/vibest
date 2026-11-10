@@ -5,6 +5,7 @@ import type { Check } from "../check.ts"
 import {
   ask,
   claudeEnv,
+  creatorIn,
   envArgs,
   fakeAnthropic,
   fakeOpenAI,
@@ -13,21 +14,27 @@ import {
   subagentFolder,
   type Step,
 } from "../fake-model.ts"
-import { expect, herdr, row, Skip, until } from "../world.ts"
+import { answerOf, binary, expect, herdr, row, Skip, until } from "../world.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 type Info = { directory: string; preferences: string; docs: string; memories: string; artifacts: string }
 
 const filesTurn =
-  (results: Record<string, Array<string>>, other: string, names: { write: string; read: string; path: string }) =>
-  (who: string, dir: string, done: number, last: string | undefined): Step => {
+  (
+    results: Record<string, Array<string>>,
+    other: string,
+    names: { write: string; read: string; path: string; bash: string },
+  ) =>
+  (who: string, dir: string, done: number, last: string | undefined, creator?: string): Step => {
     if (last !== undefined) (results[who] ??= []).push(last)
     const file = path.join(dir, "artifacts", `${who}.md`)
     if (done === 0) return { tool: names.write, input: { [names.path]: file, content: `${who}-wrote\n` } }
     if (done === 1) return { tool: names.read, input: { [names.path]: file } }
     if (done === 2)
       return { tool: names.write, input: { [names.path]: path.join(other, "artifacts", `${who}.md`), content: "x\n" } }
-    return `done-${who}\nstatus: completed`
+    if (creator !== undefined)
+      return { tool: names.bash, input: { command: `${binary} send ${creator} -- 'done-${who}'` } }
+    return `done-${who}`
   }
 
 const checks: ReadonlyArray<Check> = [
@@ -81,8 +88,11 @@ const checks: ReadonlyArray<Check> = [
       await fs.mkdir(path.join(other, "artifacts"), { recursive: true })
       const results: Record<string, Array<string>> = {}
       const dirs: Record<string, string> = {}
-      const pi = fakeOpenAI(filesTurn(results, other, { write: "write", read: "read", path: "path" }), dirs)
-      const claudeTurn = filesTurn(results, other, { write: "Write", read: "Read", path: "file_path" })
+      const pi = fakeOpenAI(
+        filesTurn(results, other, { write: "write", read: "read", path: "path", bash: "bash" }),
+        dirs,
+      )
+      const claudeTurn = filesTurn(results, other, { write: "Write", read: "Read", path: "file_path", bash: "Bash" })
       const claude = fakeAnthropic((r) => {
         const dir = subagentFolder(r.system)
         if (r.tools.length === 0 || dir === undefined || r.results.length > 3) return "ok"
@@ -93,6 +103,7 @@ const checks: ReadonlyArray<Check> = [
           dir,
           r.results.length,
           last === undefined ? undefined : JSON.stringify(last.content),
+          creatorIn(r.system),
         )
       })
       const session = `${w.herdrSession}-files`
@@ -196,15 +207,7 @@ const checks: ReadonlyArray<Check> = [
             timeoutMs: 90_000,
           }),
         ) as { id: string }
-        await until(
-          "the subagent's result",
-          async () =>
-            (
-              (await w.json<{ result?: { message?: string } | null }>(["result", id], { cwd: old })).result?.message ??
-              ""
-            ).includes("done-p7"),
-          90_000,
-        )
+        await until("the subagent's answer", async () => (await answerOf(w, id, old)).includes("done-p7"), 90_000)
         vibestOwnWorktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", id)?.d ?? ""
         expect(vibestOwnWorktree.startsWith(w.vibestHome), `vibest run made no worktree: ${vibestOwnWorktree}`)
         await w.ok(["archive", id, "--keep-worktree"], { cwd: old, timeoutMs: 60_000 })

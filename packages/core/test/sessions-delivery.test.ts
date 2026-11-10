@@ -574,7 +574,10 @@ describe.concurrent("Sessions", () => {
       yield* held.reached
       yield* sessions.send(id, "second")
       yield* held.release()
-      const notices = yield* until(sqlNotices(id), (rows) => rows.length === 2)
+      const undeliveredNotices = Effect.map(sqlNotices(id), (rows) =>
+        rows.filter((message) => message.includes("was not delivered")),
+      )
+      const notices = yield* until(undeliveredNotices, (rows) => rows.length === 2)
       assert.deepStrictEqual(
         notices.map((message) => message.split("\n\n").at(-1)),
         ["first", "second"],
