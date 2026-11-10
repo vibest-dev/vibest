@@ -11,7 +11,7 @@ import {
 import { Clock, Context, Effect, Schema } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import { LOG_SCHEMA } from "./db-schema.ts"
+import { LOG_SCHEMA, MIGRATION_TABLE } from "./db-schema.ts"
 import { project, PROJECTION_SCHEMA, PROJECTION_TABLES, PROJECTION_VERSION } from "./projectors.ts"
 
 type Definition = (typeof Catalog)[FactType]
@@ -69,7 +69,7 @@ const replayFrom = (sql: SqlClient.SqlClient, after: number): Effect.Effect<void
 const dropProjection = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const objects = yield* sql<{ type: string; name: string }>`SELECT type, name FROM sqlite_schema
-      WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' AND name NOT IN ('event', 'meta')
+      WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' AND name NOT IN ('event', 'meta', ${MIGRATION_TABLE})
       ORDER BY type = 'index'`
     for (const object of objects)
       yield* sql.unsafe(`DROP ${object.type === "table" ? "TABLE" : "INDEX"} IF EXISTS "${object.name}"`)

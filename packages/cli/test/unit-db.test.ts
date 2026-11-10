@@ -6,6 +6,7 @@ import { Bus } from "@vibest/core/bus"
 import { applyOnly, type Migration, migrations } from "@vibest/core/database/migration"
 import { APPLICATION_ID, Db, encodeAddress } from "@vibest/core/db"
 import { makeJournal } from "@vibest/core/journal"
+import { PROJECTION_VERSION } from "@vibest/core/projectors"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Catalog, CATALOG_VERSION, type FactType } from "@vibest/schema/event"
 import { ID } from "@vibest/schema/id"
@@ -642,6 +643,36 @@ describe("Db", () => {
         )
       }
     }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "a database with another read-model version is rebuilt at open and keeps its migration rows; it opens again",
+    () =>
+      Effect.gen(function* () {
+        const file = yield* fileAt(yield* tempDirectory("vibest-projection-"), "vibest.db")
+        const sessions = Effect.flatMap(Db, (db) => db.listSessions({ stopped: true })).pipe(
+          Effect.map((rows) => rows.map((row) => row.id)),
+          Effect.provide(database(file)),
+        )
+        yield* Effect.gen(function* () {
+          const db = yield* Db
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
+        }).pipe(Effect.provide(database(file)))
+        yield* writeSql(file, [
+          "INSERT INTO migration (id, time_completed) VALUES ('20270101000000_kept', 1)",
+          "UPDATE meta SET value = '0' WHERE key = 'projection'",
+        ])
+        assert.deepStrictEqual(yield* sessions, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"])
+        assert.deepStrictEqual(yield* sessions, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"])
+        const kept = yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return {
+            ids: (yield* sql<{ id: string }>`SELECT id FROM migration`).map((row) => row.id),
+            projection: (yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'projection'`)[0]?.value,
+          }
+        }).pipe(Effect.provide(Platform.sqlite(file)))
+        assert.deepStrictEqual(kept, { ids: ["20270101000000_kept"], projection: String(PROJECTION_VERSION) })
+      }).pipe(Effect.provide(Platform.services)),
   )
 
   it.effect("pending migrations run in order at open, each once and recorded; a failing one changes nothing", () =>
