@@ -1,26 +1,29 @@
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
+import { Harness } from "@vibest/core/harness"
 import { HOOK_GRACE, Sessions } from "@vibest/core/sessions"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Duration, Effect, type Scope } from "effect"
+import { Duration, Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import {
-  FakeRuntime,
-  makeRepository,
-  projectOf,
-  settled,
-  testLayer,
-  type TestServices,
-  until,
-  writeResult,
-} from "./fakes.ts"
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
+import { testEffect } from "./lib/effect.ts"
+import { FakeRuntime, type FakeRuntimeOptions } from "./lib/fake-runtime.ts"
+import { harnessLayer } from "./lib/harnesses.ts"
+import { settled, until, writeResult } from "./lib/observe.ts"
+import { makeRepository, runtimeNode, sessionLayer } from "./lib/session.ts"
 
 const OFF_THE_POLL_BEAT = "1 second"
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
-  it.effect(name, () => program.pipe(Effect.provide(testLayer({ hooked: ["pi"], statusEvents: true }))))
+const withPi = (runtime: FakeRuntimeOptions) =>
+  sessionLayer([
+    runtimeNode.replace(FakeRuntime.layer(runtime)),
+    Harness.node.replace(harnessLayer({ hooked: ["pi"] })),
+  ])
+
+const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) =>
+  testEffect(withPi({ statusEvents: true }))(name, () => program)
 
 const working = Effect.gen(function* () {
   const sessions = yield* Sessions
@@ -115,7 +118,7 @@ describe("session handlers", () => {
     }),
   )
 
-  it.effect(
+  testEffect(withPi({ promptsIgnored: true }))(
     "a turn start reported while the text is still being handed over confirms the launch, with no clock advance",
     () =>
       Effect.gen(function* () {
@@ -147,6 +150,6 @@ describe("session handlers", () => {
           (yield* herdr.callsTo("send")).some((call) => call.keys !== undefined),
           "no Enter resent",
         )
-      }).pipe(Effect.provide(testLayer({ hooked: ["pi"], promptsIgnored: true }))),
+      }),
   )
 })

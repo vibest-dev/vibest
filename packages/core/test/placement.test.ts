@@ -1,23 +1,18 @@
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Sessions } from "@vibest/core/sessions"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Effect, FileSystem, HashMap, PubSub, type Scope } from "effect"
+import { Effect, FileSystem, HashMap, PubSub } from "effect"
 
-import {
-  FakeGit,
-  FakeRuntime,
-  makeRepository,
-  testLayer,
-  type TestServices,
-  until,
-  writeResult,
-  projectOf,
-} from "./fakes.ts"
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
+import { testEffect } from "./lib/effect.ts"
+import { FakeGit } from "./lib/fake-git.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { until, writeResult } from "./lib/observe.ts"
+import { makeRepository, sessionLayer } from "./lib/session.ts"
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
-  it.effect(name, () => program.pipe(Effect.provide(testLayer())))
+const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) => testEffect(sessionLayer())(name, () => program)
 
 const spawnInput = (repo: string) =>
   Effect.map(projectOf(repo), (projectId) => ({

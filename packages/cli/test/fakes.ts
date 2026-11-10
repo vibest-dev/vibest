@@ -9,7 +9,6 @@ import { MachineTransport } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
 import { ProcessPlatform, Processes } from "@vibest/core/processes"
 import { SshHosts } from "@vibest/core/repository-url"
-import { turnEndFrom } from "@vibest/core/results"
 import { Sessions } from "@vibest/core/sessions"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
 import { projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
@@ -24,6 +23,7 @@ import {
   runtimesLayer,
   subscriptionsLayer,
 } from "@vibest/core/test/lib/harnesses"
+import { eventsOf as readEvents } from "@vibest/core/test/lib/observe"
 import {
   dbReplacement,
   pluginsHost,
@@ -37,22 +37,9 @@ import * as VibestPlugin from "@vibest/plugin"
 import type { DaemonIdentity } from "@vibest/protocol/rpc"
 import { readDaemonInfo } from "@vibest/server/daemon"
 import * as Server from "@vibest/server/server"
-import {
-  Clock,
-  type Duration,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  type Predicate,
-  PubSub,
-  Schema,
-  Stream,
-} from "effect"
+import { type Duration, Effect, FileSystem, Layer, Option, Path, PubSub, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { SqlClient } from "effect/sql"
-import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -102,13 +89,6 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
     },
   })
 
-export const writeResult = (id: string, harness: string, payload: object, offsetMs = 1000) =>
-  Effect.gen(function* () {
-    const adapter = yield* (yield* Harnesses).get(harness)
-    const at = (yield* Clock.currentTimeMillis) + offsetMs
-    yield* (yield* Db).reportTurn(id, turnEndFrom(adapter, payload as Record<string, unknown>, at))
-  })
-
 export const resultText = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -143,16 +123,8 @@ export const savedSession = (sessionId: string) =>
     return main?.id === sessionId ? main.harnessSessionId : null
   })
 
-export const eventsOf = (sessionId: string, type?: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ id: number; type: string; at: number; data: string }>`SELECT id, type, at, data FROM event
-      WHERE session_id = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY id`
-    return rows.map((r) => ({ id: r.id, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
-  }).pipe(Effect.orDie)
-
 export const processEnds = (sessionId: string) =>
-  eventsOf(sessionId, "process.end").pipe(Effect.map((rows) => rows.map((r) => r.data.reason)))
+  readEvents(sessionId, "process.end").pipe(Effect.map((rows) => rows.map((r) => r.data.reason)))
 
 export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS ended_at, te.id AS end_id,
     (SELECT max(e.inbox_id) FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
@@ -233,6 +205,7 @@ export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCal
   })
 
 export { makeRepository, PluginHost, type PluginEntry } from "@vibest/core/test/lib/session"
+export { GaveUp, eventsOf, settled, until, untilVirtual, writeResult, yieldToIo } from "@vibest/core/test/lib/observe"
 
 export const testLayer = (options: TestOptions = {}) =>
   sessionLayer(
@@ -269,47 +242,6 @@ export const systemPromptFile = (id: string) =>
   })
 
 export type TestServices = Layer.Success<ReturnType<typeof testLayer>> | FakeRuntime
-
-export class GaveUp extends Schema.TaggedError<GaveUp>()("GaveUp", { helper: Schema.String }) {}
-
-const isTestClock = (clock: Clock.Clock): clock is TestClock.TestClock => "withLive" in clock
-
-const ioPause = Effect.sleep("10 millis")
-
-export const yieldToIo = Clock.clockWith((clock) => (isTestClock(clock) ? clock.withLive(ioPause) : ioPause))
-
-const UNTIL_ATTEMPTS = 2000
-
-const poll = <A, E, R, R2>(
-  f: Effect.Effect<A, E, R>,
-  done: Predicate.Predicate<A>,
-  step: Effect.Effect<void, never, R2>,
-  attempts: number,
-  helper: string,
-) =>
-  f.pipe(
-    Effect.tap((a) => (done(a) ? Effect.void : step)),
-    Effect.repeat({ until: done, times: attempts }),
-    Effect.filterOrFail(done, () => new GaveUp({ helper })),
-  )
-
-export function until<A, B extends A, E, R>(
-  f: Effect.Effect<A, E, R>,
-  done: Predicate.Refinement<A, B>,
-): Effect.Effect<B, E | GaveUp, R>
-export function until<A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>): Effect.Effect<A, E | GaveUp, R>
-export function until<A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) {
-  return poll(f, done, yieldToIo, UNTIL_ATTEMPTS, "until")
-}
-
-export const settled = Effect.gen(function* () {
-  const sessions = yield* Sessions
-  yield* yieldToIo
-  yield* until(sessions.inMemory, (m) => m.locks === 0)
-})
-
-export const untilVirtual = <A, E, R>(f: Effect.Effect<A, E, R>, done: Predicate.Predicate<A>) =>
-  poll(f, done, yieldToIo.pipe(Effect.andThen(TestClock.adjust("100 millis"))), 1000, "untilVirtual")
 
 export const pingOf = (socket: string) =>
   Effect.gen(function* () {
