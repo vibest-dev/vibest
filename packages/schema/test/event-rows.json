@@ -1,0 +1,450 @@
+[
+  {
+    "seq": 1,
+    "at": 1793000001000,
+    "type": "project.created",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": null,
+    "data": "{\"directory\":\"/work/app\",\"repositories\":[{\"path\":\"/work/app\",\"remote\":\"git@github.com:acme/app.git\"},{\"path\":\"/work/app/lib\"}]}"
+  },
+  {
+    "seq": 2,
+    "at": 1793000002000,
+    "type": "project.created",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": null,
+    "data": "{\"repositories\":[]}"
+  },
+  {
+    "seq": 3,
+    "at": 1793000003000,
+    "type": "project.moved",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": null,
+    "data": "{\"from\":\"/work/app\",\"to\":\"/src/app\",\"repositories\":[{\"path\":\"/src/app\",\"remote\":\"git@github.com:acme/app.git\"}]}"
+  },
+  {
+    "seq": 4,
+    "at": 1793000004000,
+    "type": "project.repositories_changed",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": null,
+    "data": "{\"repositories\":[{\"path\":\"/src/app/lib\",\"remote\":\"git@github.com:acme/lib.git\"}]}"
+  },
+  {
+    "seq": 5,
+    "at": 1793000005000,
+    "type": "project.entry_changed",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": null,
+    "data": "{\"session\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\"}"
+  },
+  {
+    "seq": 6,
+    "at": 1793000006000,
+    "type": "project.entry_changed",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": null,
+    "data": "{}"
+  },
+  {
+    "seq": 7,
+    "at": 1793000007000,
+    "type": "session.created",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"role\":\"main\",\"name\":\"main\",\"directory\":\"\",\"archiveOnCompletion\":false}"
+  },
+  {
+    "seq": 8,
+    "at": 1793000008000,
+    "type": "session.created",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"role\":\"subagent\",\"name\":\"fix-tests\",\"directory\":\"/src/app\",\"parent\":\"9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\",\"reportTo\":\"9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\",\"archiveOnCompletion\":true}"
+  },
+  {
+    "seq": 9,
+    "at": 1793000009000,
+    "type": "session.created",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"role\":\"subagent\",\"name\":\"remote-task\",\"directory\":\"/srv/app\",\"archiveOnCompletion\":false,\"origin\":{\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"project\":\"0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b\",\"parent\":\"9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\",\"reportTo\":\"9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\"}}"
+  },
+  {
+    "seq": 10,
+    "at": 1793000010000,
+    "type": "session.created",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"role\":\"subagent\",\"name\":\"remote-quiet\",\"directory\":\"/srv/app\",\"archiveOnCompletion\":false,\"origin\":{\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"project\":\"0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b\"}}"
+  },
+  {
+    "seq": 11,
+    "at": 1793000011000,
+    "type": "session.renamed",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"name\":\"fix-flaky-tests\"}"
+  },
+  {
+    "seq": 12,
+    "at": 1793000012000,
+    "type": "session.directory_changed",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"directory\":\"/src/app\"}"
+  },
+  {
+    "seq": 13,
+    "at": 1793000013000,
+    "type": "session.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"reason\":\"archived\"}"
+  },
+  {
+    "seq": 14,
+    "at": 1793000014000,
+    "type": "session.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"reason\":\"replaced\"}"
+  },
+  {
+    "seq": 15,
+    "at": 1793000015000,
+    "type": "process.started",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"harness\":\"claude\",\"provider\":\"anthropic\",\"model\":\"opus\",\"routing\":{\"decidedBy\":{\"harness\":\"harness-choice\"},\"trace\":[{\"plugin\":\"harness-choice\",\"hook\":\"harness.choose\",\"outcome\":\"ok\",\"ms\":3,\"changes\":[{\"field\":\"harness\",\"from\":\"claude\",\"to\":\"pi\"}]}]},\"resume\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"runtime\":\"herdr\",\"terminal\":\"w1:p2\",\"pid\":4242}"
+  },
+  {
+    "seq": 16,
+    "at": 1793000016000,
+    "type": "process.started",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"harness\":\"pi\",\"runtime\":\"hc\"}"
+  },
+  {
+    "seq": 17,
+    "at": 1793000017000,
+    "type": "process.placed",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"terminal\":\"t3\",\"pid\":777}"
+  },
+  {
+    "seq": 18,
+    "at": 1793000018000,
+    "type": "process.placed",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":16,\"terminal\":\"t4\"}"
+  },
+  {
+    "seq": 19,
+    "at": 1793000019000,
+    "type": "process.ready",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"pid\":4243,\"integration\":{\"version\":\"0.0.1-beta.18\",\"protocol\":8}}"
+  },
+  {
+    "seq": 20,
+    "at": 1793000020000,
+    "type": "process.ready",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":16}"
+  },
+  {
+    "seq": 21,
+    "at": 1793000021000,
+    "type": "process.pid",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"pid\":4244}"
+  },
+  {
+    "seq": 22,
+    "at": 1793000022000,
+    "type": "process.conversation",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"conversation\":\"b3c4d5e6-f7a8-4b9c-8d0e-1f2a3b4c5d6e\"}"
+  },
+  {
+    "seq": 23,
+    "at": 1793000023000,
+    "type": "process.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"reason\":\"exited\"}"
+  },
+  {
+    "seq": 24,
+    "at": 1793000024000,
+    "type": "process.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"reason\":\"limited\"}"
+  },
+  {
+    "seq": 25,
+    "at": 1793000025000,
+    "type": "process.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"reason\":\"restart\"}"
+  },
+  {
+    "seq": 26,
+    "at": 1793000026000,
+    "type": "process.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"reason\":\"move\"}"
+  },
+  {
+    "seq": 27,
+    "at": 1793000027000,
+    "type": "process.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"reason\":\"archived\"}"
+  },
+  {
+    "seq": 28,
+    "at": 1793000028000,
+    "type": "process.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":16,\"reason\":\"launch_failed\"}"
+  },
+  {
+    "seq": 29,
+    "at": 1793000029000,
+    "type": "process.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":16,\"reason\":\"superseded\"}"
+  },
+  {
+    "seq": 30,
+    "at": 1793000030000,
+    "type": "turn.started",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"typed\":\"run the tests again\"}"
+  },
+  {
+    "seq": 31,
+    "at": 1793000031000,
+    "type": "turn.started",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{}"
+  },
+  {
+    "seq": 32,
+    "at": 1793000032000,
+    "type": "turn.reported",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"process\":15,\"harness\":\"claude\",\"text\":\"All 42 tests pass.\\nsummary: fixed the flaky test\",\"conversation\":\"b3c4d5e6-f7a8-4b9c-8d0e-1f2a3b4c5d6e\"}"
+  },
+  {
+    "seq": 33,
+    "at": 1793000033000,
+    "type": "turn.reported",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"harness\":\"pi\",\"text\":\"\",\"error\":\"model overloaded\",\"interrupted\":true}"
+  },
+  {
+    "seq": 34,
+    "at": 1793000034000,
+    "type": "turn.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"turn\":30,\"status\":\"completed\",\"report\":32}"
+  },
+  {
+    "seq": 35,
+    "at": 1793000035000,
+    "type": "turn.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"turn\":31,\"status\":\"failed\",\"report\":33,\"failure\":{\"message\":\"model overloaded\"}}"
+  },
+  {
+    "seq": 36,
+    "at": 1793000036000,
+    "type": "turn.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"turn\":31,\"status\":\"interrupted\"}"
+  },
+  {
+    "seq": 37,
+    "at": 1793000037000,
+    "type": "turn.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"turn\":31,\"status\":\"lost\"}"
+  },
+  {
+    "seq": 38,
+    "at": 1793000038000,
+    "type": "turn.ended",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"turn\":31,\"status\":\"not_started\",\"failure\":{\"message\":\"the task never reached the agent\"}}"
+  },
+  {
+    "seq": 39,
+    "at": 1793000039000,
+    "type": "inbox.queued",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"kind\":\"task\",\"recipient\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"sender\":\"9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\",\"content\":\"fix the flaky test\",\"status\":\"delivered\",\"request\":\"req-1\"}"
+  },
+  {
+    "seq": 40,
+    "at": 1793000040000,
+    "type": "inbox.queued",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"kind\":\"send\",\"sender\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"content\":\"hello\",\"status\":\"pending\"}"
+  },
+  {
+    "seq": 41,
+    "at": 1793000041000,
+    "type": "inbox.queued",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"kind\":\"report\",\"recipient\":\"9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\",\"sender\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"content\":\"halfway there\",\"status\":\"pending\"}"
+  },
+  {
+    "seq": 42,
+    "at": 1793000042000,
+    "type": "inbox.queued",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"kind\":\"result\",\"recipient\":\"9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\",\"sender\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"content\":\"\",\"status\":\"dropped\",\"turn\":34}"
+  },
+  {
+    "seq": 43,
+    "at": 1793000043000,
+    "type": "inbox.queued",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"kind\":\"notice\",\"recipient\":\"9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\",\"content\":\"remote-task finished\",\"status\":\"pending\",\"peerItem\":\"7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f\"}"
+  },
+  {
+    "seq": 44,
+    "at": 1793000044000,
+    "type": "inbox.moved",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"inbox\":39,\"to\":\"delivering\"}"
+  },
+  {
+    "seq": 45,
+    "at": 1793000045000,
+    "type": "inbox.moved",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"inbox\":39,\"to\":\"delivered\",\"turn\":30}"
+  },
+  {
+    "seq": 46,
+    "at": 1793000046000,
+    "type": "inbox.moved",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"inbox\":40,\"to\":\"pending\"}"
+  },
+  {
+    "seq": 47,
+    "at": 1793000047000,
+    "type": "inbox.moved",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"inbox\":40,\"to\":\"failed\"}"
+  },
+  {
+    "seq": 48,
+    "at": 1793000048000,
+    "type": "inbox.moved",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"inbox\":40,\"to\":\"dropped\"}"
+  },
+  {
+    "seq": 49,
+    "at": 1793000049000,
+    "type": "machine.added",
+    "project_id": null,
+    "session_id": null,
+    "data": "{\"name\":\"mb\",\"target\":\"root@mb.example\",\"vibestd\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\"}"
+  },
+  {
+    "seq": 50,
+    "at": 1793000050000,
+    "type": "machine.connected",
+    "project_id": null,
+    "session_id": null,
+    "data": "{\"name\":\"mb\"}"
+  },
+  {
+    "seq": 51,
+    "at": 1793000051000,
+    "type": "machine.removed",
+    "project_id": null,
+    "session_id": null,
+    "data": "{\"name\":\"mb\"}"
+  },
+  {
+    "seq": 52,
+    "at": 1793000052000,
+    "type": "peer.seen",
+    "project_id": null,
+    "session_id": null,
+    "data": "{\"id\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"name\":\"mac\",\"callsMe\":\"mb\"}"
+  },
+  {
+    "seq": 53,
+    "at": 1793000053000,
+    "type": "outbox.queued",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"id\":\"7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f\",\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"kind\":\"result\",\"content\":\"All 42 tests pass.\"}"
+  },
+  {
+    "seq": 54,
+    "at": 1793000054000,
+    "type": "outbox.queued",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"id\":\"2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e\",\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"kind\":\"notice\",\"content\":\"remote-task was archived\"}"
+  },
+  {
+    "seq": 55,
+    "at": 1793000055000,
+    "type": "outbox.acked",
+    "project_id": null,
+    "session_id": null,
+    "data": "{\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"ids\":[\"7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f\",\"2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e\"]}"
+  },
+  {
+    "seq": 56,
+    "at": 1793000056000,
+    "type": "process.started",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"harness\":\"claude\",\"routing\":{\"decidedBy\":{\"harness\":\"harness-choice\",\"model\":\"quota\"},\"trace\":[{\"plugin\":\"harness-choice\",\"hook\":\"harness.choose\",\"outcome\":\"ok\",\"ms\":2,\"changes\":[{\"field\":\"harness\",\"from\":\"cursor\",\"to\":\"claude\",\"overwrote\":\"user\"}]},{\"plugin\":\"quota\",\"hook\":\"model.choose\",\"outcome\":\"refused\",\"ms\":1,\"changes\":[],\"reason\":\"quota full\"},{\"plugin\":\"broken\",\"hook\":\"model.choose\",\"outcome\":\"crashed\",\"ms\":0.5,\"changes\":[],\"error\":\"TypeError: x is undefined\"}]},\"runtime\":\"herdr\"}"
+  }
+]
