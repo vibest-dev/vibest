@@ -88,6 +88,7 @@ const make = Effect.gen(function* () {
     startProcess,
     updateSession,
     dropWaiting,
+    sessionAt,
     mainsAt,
     clearMainAt,
     unusedId,
@@ -432,6 +433,8 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows[0]?.project),
         Effect.orDie,
       ),
+
+    sessionAt: (runtime: string, address: RuntimeAddress) => sessionAt(runtime, address).pipe(Effect.orDie),
 
     coordinatorLaunch: (
       project: string,
