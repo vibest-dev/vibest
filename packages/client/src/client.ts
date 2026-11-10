@@ -12,6 +12,7 @@ import { Layout, VibestCommand, shellQuote } from "@vibest/schema/layout"
 import {
   Cause,
   Config,
+  Console,
   Duration,
   Effect,
   Exit,
@@ -323,14 +324,18 @@ export const startDaemon = Effect.gen(function* () {
     Effect.orElseSucceed(() => 0),
   )
   yield* spawnDaemon(yield* VibestCommand)
-  if (yield* awaitDaemon(layout.socket)) return
+  const up = yield* awaitDaemon(layout.socket)
   const bytes = yield* fs.readFile(log).pipe(Effect.orElseSucceed(() => new Uint8Array()))
-  const text = Array.from(bytes.subarray(logAt), (b) => String.fromCharCode(b)).join("")
-  const tagged = text
+  const tags = Array.from(bytes.subarray(logAt), (b) => String.fromCharCode(b))
+    .join("")
     .split("\n")
     .map((line) => /^([A-Z][A-Za-z0-9]*): (.+)$/.exec(line.trim()))
     .filter((m) => m !== null)
-    .at(-1)
+  if (up) {
+    for (const line of tags.filter((m) => m[1] === "LedgerNotImported")) yield* Console.error(line[0])
+    return
+  }
+  const tagged = tags.at(-1)
   return yield* new DaemonUnavailable({
     socket: layout.socket,
     message: tagged ? `${tagged[1]}: ${tagged[2]}` : `vibestd did not come up; see ${log}`,

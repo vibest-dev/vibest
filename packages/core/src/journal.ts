@@ -8,7 +8,7 @@ import {
   type Row,
   UnknownFact,
 } from "@vibest/schema/event"
-import { Clock, Context, Effect } from "effect"
+import { Clock, Context, Effect, Schema } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
 import { LOG_SCHEMA } from "./db-schema.ts"
@@ -120,18 +120,21 @@ const firstDifference = (
   return undefined
 }
 
+const copyWholeLog = (stored: SqlClient.SqlClient, scratch: SqlClient.SqlClient) =>
+  scratch.withTransaction(
+    Effect.gen(function* () {
+      for (const statement of LOG_SCHEMA) yield* scratch.unsafe(statement)
+      yield* copyLog(stored, scratch, 0)
+    }),
+  )
+
 export const equalToReplay = (stored: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const scratch = yield* SqlClient.SqlClient
     const tables = Object.keys(PROJECTION_TABLES) as Array<keyof typeof PROJECTION_TABLES>
     const storedTables = yield* stored.withTransaction(
       Effect.gen(function* () {
-        yield* scratch.withTransaction(
-          Effect.gen(function* () {
-            for (const statement of LOG_SCHEMA) yield* scratch.unsafe(statement)
-            yield* copyLog(stored, scratch, 0)
-          }),
-        )
+        yield* copyWholeLog(stored, scratch)
         return yield* Effect.forEach(tables, (table) => dump(stored, table))
       }),
     )
@@ -141,6 +144,22 @@ export const equalToReplay = (stored: SqlClient.SqlClient) =>
       if (difference !== undefined) return difference
     }
     return undefined
+  })
+
+export class ReplayDiffers extends Schema.TaggedError<ReplayDiffers>()("ReplayDiffers", {
+  message: Schema.String,
+}) {}
+
+export const checkReplay = (stored: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    const [projection] = yield* stored<{ value: string }>`SELECT value FROM meta WHERE key = 'projection'`
+    if (Number(projection?.value) !== PROJECTION_VERSION) {
+      yield* copyWholeLog(stored, yield* SqlClient.SqlClient)
+      return yield* rebuild
+    }
+    const difference = yield* equalToReplay(stored)
+    if (difference !== undefined)
+      return yield* new ReplayDiffers({ message: `the read model differs from a replay of its log: ${difference}` })
   })
 
 type Envelope = {

@@ -4,8 +4,10 @@ import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts } from "@vibest/core/identity"
 import { type ImportFailed, refereeFailed, type Report } from "@vibest/core/import/import"
+import type { ReplayDiffers } from "@vibest/core/journal"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { VERSION } from "@vibest/protocol/rpc"
+import type { UnknownFact } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { Clock, Console, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 
@@ -38,7 +40,9 @@ export interface Host {
   readonly lock: (
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, LockFailed>) | undefined, LockFailed, Scope.Scope>
-  readonly checkDatabase: (filename: string) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch>
+  readonly checkDatabase: (
+    filename: string,
+  ) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch | UnknownFact | ReplayDiffers>
   readonly checkLedgerImport: (
     filename: string,
   ) => Effect.Effect<Report, DatabaseOpenFailed | SchemaMismatch | ImportFailed>
@@ -72,9 +76,11 @@ const checkLedgerImport = (host: Host, database: string) =>
   })
 
 export const checkImport = (host: Host, ledger: boolean) =>
-  Effect.flatMap(Layout, (layout) =>
-    ledger ? checkLedgerImport(host, layout.database) : host.checkDatabase(layout.database),
-  )
+  Effect.gen(function* () {
+    const layout = yield* Layout
+    if (ledger) yield* checkLedgerImport(host, layout.database)
+    else yield* host.checkDatabase(layout.database)
+  })
 
 export class DaemonLockUnavailable extends Schema.TaggedError<DaemonLockUnavailable>()("DaemonLockUnavailable", {
   message: Schema.String,

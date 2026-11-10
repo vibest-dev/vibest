@@ -3869,6 +3869,16 @@
               ],
               "additionalProperties": true
             }
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

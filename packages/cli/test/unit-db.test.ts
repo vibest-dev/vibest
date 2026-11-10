@@ -714,6 +714,25 @@ describe("Db", () => {
   )
 
   it.effect(
+    "import-check replays the log: it passes on a ledger, names the first row a changed read model differs in, and only replays an older read model",
+    () =>
+      Effect.gen(function* () {
+        const file = yield* fileAt(yield* tempDirectory("vibest-import-check-"), "vibest.db")
+        yield* Effect.gen(function* () {
+          const db = yield* Db
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
+        }).pipe(Effect.provide(database(file)))
+        yield* Platform.daemon.checkDatabase(file)
+        yield* writeSql(file, ["UPDATE session SET name = 'changed'"])
+        const differs = yield* Effect.flip(Platform.daemon.checkDatabase(file))
+        assert.strictEqual(differs._tag, "ReplayDiffers")
+        assert.match(differs.message, /^the read model differs from a replay of its log: session row 1/)
+        yield* writeSql(file, ["UPDATE meta SET value = '0' WHERE key = 'projection'"])
+        yield* Platform.daemon.checkDatabase(file)
+      }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect(
     "a foreign database with user_version 1, or ours written by a newer event catalog, is refused without changing its bytes",
     () =>
       Effect.gen(function* () {
