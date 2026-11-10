@@ -4,12 +4,14 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Harnesses } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
-import { Builtins, type Candidate, makeHost, PluginLoader, Plugins } from "@vibest/core/plugins"
+import { Builtins, type Candidate, DEBOUNCE, makeHost, PluginLoader, Plugins, RECHECK } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Plugin, type AgentStartBefore, type Harness, type Runtime } from "@vibest/plugin"
 import {
+  Clock,
   Context,
   type Crypto,
+  Duration,
   Deferred,
   Effect,
   Exit,
@@ -398,6 +400,35 @@ describe("plugins: activation", () => {
       }),
     ),
   )
+
+  it.effect(
+    "a reload does not cut short a machine hook in flight either: agent and machine hooks share one scope rule",
+    () =>
+      host((h) =>
+        Effect.gen(function* () {
+          const entered = yield* Deferred.make<void>()
+          const gate = yield* Deferred.make<void>()
+          const slow = Plugin.define({
+            id: "slow",
+            effect: (ctx) =>
+              ctx.machine.hook("connect", (e) =>
+                Deferred.succeed(entered, undefined).pipe(
+                  Effect.andThen(Deferred.await(gate)),
+                  Effect.andThen(Effect.sync(() => void e.notes.push({ message: "finished" }))),
+                ),
+              ),
+          })
+          yield* h.activate([candidate("slow", "1", slow)])
+          const connecting = yield* Effect.forkChild(
+            h.service.machine("connect", { name: "mb", target: "b-host", vibestd: "b-id", runtimes: [] }),
+          )
+          yield* Deferred.await(entered)
+          yield* h.activate([])
+          yield* Deferred.succeed(gate, undefined)
+          assert.deepStrictEqual((yield* Fiber.join(connecting)).notes, [{ plugin: "slow", message: "finished" }])
+        }),
+      ),
+  )
 })
 
 const counters = ((globalThis as { __vibestReload?: Record<string, number> }).__vibestReload ??= {})
@@ -414,6 +445,22 @@ export default Plugin.define({
 })
 `
 
+const waiters = new Set<() => void>()
+const wake = () => {
+  for (const waiter of waiters) waiter()
+}
+const untilSignal = (ready: () => boolean, what: string) =>
+  Effect.callback<void>((resume) => {
+    const check = () => {
+      if (!ready()) return
+      waiters.delete(check)
+      resume(Effect.void)
+    }
+    waiters.add(check)
+    check()
+    return Effect.sync(() => waiters.delete(check))
+  }).pipe(Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => Effect.die(`gave up waiting for ${what}`) }))
+
 const watchers = { open: 0 }
 const watchGate: { hold: boolean; pending: Array<{ name: string; deliver: () => void }> } = { hold: false, pending: [] }
 const vibestJsonReads = { count: 0 }
@@ -427,6 +474,7 @@ const loader: PluginLoader["Service"] = {
   prepare: Effect.void,
   parseJsonc: (text) => {
     vibestJsonReads.count++
+    wake()
     return Platform.plugins.parseJsonc(text)
   },
   load: freshRequire,
@@ -434,6 +482,7 @@ const loader: PluginLoader["Service"] = {
     const stop = Platform.plugins.watch(directory, (name) => {
       if (watchGate.hold) watchGate.pending.push({ name, deliver: () => changed(name) })
       else changed(name)
+      wake()
     })
     watchers.open++
     return () => {
@@ -471,33 +520,28 @@ const eventually = <A, E, R>(f: Effect.Effect<A, E, R>, done: (a: A) => boolean,
     Effect.repeat({ until: done, schedule: Schedule.spaced("20 millis"), times: 250 }),
     Effect.filterOrElse(done, (a) => Effect.die(`gave up waiting for ${what}: ${JSON.stringify(a)}`)),
   )
-const waitLive = (ready: () => boolean, what: string) =>
-  Effect.gen(function* () {
-    for (let i = 0; i < 250 && !ready(); i++) yield* TestClock.withLive(Effect.sleep("20 millis"))
-    if (!ready())
-      yield* Effect.die(`gave up waiting for ${what}: ${JSON.stringify(watchGate.pending.map((e) => e.name))}`)
-  })
-const virtualStep = TestClock.withLive(Effect.sleep("20 millis")).pipe(Effect.andThen(TestClock.adjust("100 millis")))
-const stepping = (ready: () => boolean, what: string) =>
-  Effect.gen(function* () {
-    for (let i = 0; i < 500 && !ready(); i++) yield* virtualStep
-    if (!ready()) yield* Effect.die(`gave up waiting for ${what}`)
-  })
-const steppingEffect = <A, E>(f: Effect.Effect<A, E>, done: (a: A) => boolean, what: string) =>
-  Effect.gen(function* () {
-    for (let i = 0; i < 500; i++) {
-      const fiber = yield* Effect.forkChild(f)
-      while (fiber.pollUnsafe() === undefined) yield* virtualStep
-      const a = yield* Fiber.join(fiber)
-      if (done(a)) return a
-      yield* virtualStep
-    }
-    return yield* Effect.die(`gave up waiting for ${what}`)
-  })
+const timers = Effect.gen(function* () {
+  const clock = yield* TestClock.testClockWith(Effect.succeed)
+  const armed: Array<number> = []
+  const sleep = (duration: Duration.Duration) =>
+    Effect.suspend(() => {
+      const ms = Duration.toMillis(duration)
+      armed.push(ms)
+      wake()
+      return clock.sleep(duration).pipe(Effect.ensuring(Effect.sync(() => armed.splice(armed.indexOf(ms), 1))))
+    })
+  const fire = (duration: Duration.Input) => {
+    const ms = Duration.toMillis(Duration.fromInputUnsafe(duration))
+    return untilSignal(() => armed.includes(ms), `a ${ms} ms timer`).pipe(Effect.andThen(clock.adjust(ms)))
+  }
+  const clocked = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.provideService(effect, Clock.Clock, Object.assign(Object.create(clock) as TestClock.TestClock, { sleep }))
+  return { fire, clocked }
+})
 const pastDebounce = Effect.sleep("150 millis")
-const pastRescan = Effect.gen(function* () {
+const pastRescan = Effect.suspend(() => {
   const start = vibestJsonReads.count
-  for (let i = 0; i < 75 && vibestJsonReads.count === start; i++) yield* Effect.sleep("20 millis")
+  return untilSignal(() => vibestJsonReads.count > start, "a rescan")
 })
 
 const live = <E>(
@@ -797,27 +841,35 @@ describe("plugins: supervisor", () => {
         yield* fs.writeFileString(path.join(plugins, "d", "index.ts"), pluginFile("d", "drop-d", "e.model"))
         watchGate.hold = true
         watchGate.pending = []
-        const service = yield* supervise(dir)
+        const { fire, clocked } = yield* timers
+        const service = yield* clocked(supervise(dir))
         assert.strictEqual((yield* service.list).length, 2)
         const startReads = vibestJsonReads.count
-        yield* stepping(() => vibestJsonReads.count > startReads, "the rescan after the first watch")
+        yield* fire(RECHECK)
+        yield* fire(DEBOUNCE)
+        yield* service.settled
+        assert.isAbove(vibestJsonReads.count, startReads, "the rescan after the first watch")
         const deliver = () => {
           for (const change of watchGate.pending.splice(0)) change.deliver()
         }
         yield* fs.remove(path.join(plugins, "d"), { recursive: true })
-        yield* waitLive(() => watchGate.pending.length > 0, "the watcher to see d go")
+        yield* untilSignal(() => watchGate.pending.length > 0, "the watcher to see d go")
         deliver()
-        const removed = yield* steppingEffect(service.list, (l) => l.length === 1, "d removed")
+        yield* fire(DEBOUNCE)
+        yield* service.settled
+        const removed = yield* service.list
         assert.deepStrictEqual(
           removed.map((p) => p.id),
           ["a"],
         )
         const afterRemoval = vibestJsonReads.count
         yield* fs.writeFileString(path.join(plugins, "a.ts"), pluginFile("a", "drop-a", `"a2"`))
-        yield* waitLive(() => watchGate.pending.some((c) => c.name === "a.ts"), "the watcher to see the save")
+        yield* untilSignal(() => watchGate.pending.some((c) => c.name === "a.ts"), "the watcher to see the save")
         watchGate.pending.splice(0)
         assert.strictEqual((yield* service.start(event)).model, "a1", "the dropped save is not seen yet")
-        yield* steppingEffect(service.start(event), (s) => s.model === "a2", "the rescan to find the save")
+        yield* fire(RECHECK)
+        yield* fire(DEBOUNCE)
+        assert.strictEqual((yield* service.start(event)).model, "a2", "the rescan finds the save")
         assert.isAbove(vibestJsonReads.count, afterRemoval)
         const settled = vibestJsonReads.count
         yield* TestClock.adjust("1 minute")
@@ -843,16 +895,19 @@ describe("plugins: supervisor", () => {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const dir = yield* packageHome
-        const entered = ((globalThis as { __vibestStuck?: { value: boolean } }).__vibestStuck = { value: false })
+        const entered = ((globalThis as { __vibestStuck?: { value: boolean; wake: () => void } }).__vibestStuck = {
+          value: false,
+          wake,
+        })
         watchGate.hold = true
         watchGate.pending = []
-        const stuckA = `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: () => Effect.sync(() => { globalThis.__vibestStuck.value = true }).pipe(Effect.andThen(Effect.uninterruptible(Effect.sleep("6 seconds")))) })\n`
+        const stuckA = `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "a", effect: () => Effect.sync(() => { globalThis.__vibestStuck.value = true; globalThis.__vibestStuck.wake() }).pipe(Effect.andThen(Effect.uninterruptible(Effect.sleep("6 seconds")))) })\n`
         yield* fs.writeFileString(path.join(dir, "plugins", "a.ts"), stuckA)
         yield* fs.writeFileString(path.join(dir, "plugins", "z.ts"), pluginFile("z", "pending-z", `"z1"`))
         const plugins = yield* supervise(dir)
-        while (!entered.value) yield* TestClock.withLive(Effect.sleep("5 millis"))
+        yield* untilSignal(() => entered.value, "a's setup to start")
         yield* fs.writeFileString(path.join(dir, "plugins", "z.ts"), pluginFile("z", "pending-z", `"z2"`))
-        yield* waitLive(
+        yield* untilSignal(
           () => watchGate.pending.some((change) => change.name === "z.ts"),
           "the watcher to observe z.ts (a fixed sleep moves the frozen clock too soon or past the 10s budget)",
         )

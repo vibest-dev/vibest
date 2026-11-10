@@ -45,6 +45,16 @@ fires for each of them on every connected machine, so a runtime plugin loaded la
 [multi-machine.md](multi-machine.md#terminals-on-other-machines). `@vibest/plugin/testing` `machineHooks(plugin)`
 fires a plugin's machine hooks in its own tests.
 
+## Running hooks
+
+`hooks.ts` registers and runs both `agent.*` and `machine.*` hooks: each plugin keeps its registrations, and
+`Hooks.run` bounds one call and counts it in the plugin's stats. Every hook runs in the host's scope, not its plugin's,
+so a reload or a disabled plugin never cuts short a call in flight: it finishes on the plugin snapshot it started with
+and is only interrupted by its own timeout or by vibestd shutting down. Setups, teardowns and hook calls are bounded by
+`timeoutWithoutWaiting` (`bounded.ts`), not `Effect.timeout`: `Effect.timeout` interrupts the late effect and waits for
+it to stop, which never happens for plugin code that is uninterruptible or ignores interruption, so the helper returns
+at the deadline and leaves the interrupt to a detached fiber (effect 4.0.2 has no `Effect.disconnect`).
+
 ## Loading on Bun
 
 In `platform/bun.ts` and `platform/plugin-source.ts` (after OpenCode V2's `source.bun.ts`): inside the
