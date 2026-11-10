@@ -68,7 +68,13 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
         fresh.push(runtime.id)
         const fiber = yield* runtime.events.pipe(
           Stream.runForEach((event) => bus.observe(live(runtime.id, event))),
-          Effect.catchCause(() => Effect.void),
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.void
+              : Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`).pipe(
+                  Effect.andThen(bus.observe({ type: "live.reset", runtime: runtime.id, machine: "local" })),
+                ),
+          ),
           Effect.forkIn(own),
         )
         merging.set(runtime.id, { runtime, fiber })
@@ -106,13 +112,6 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
                 }),
               ),
         ),
-        Effect.catchCause((cause) =>
-          Effect.fail(
-            new NoRuntime({
-              message: `the runtime ${runtime.id}'s status on ${machine.id} could not be read: ${messageOf(cause)}`,
-            }),
-          ),
-        ),
       ),
     added: Stream.fromPubSub(added),
     callers: Effect.sync(() =>
@@ -122,11 +121,6 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
     ),
   }
 })
-
-const messageOf = (cause: Cause.Cause<unknown>) => {
-  const error = Cause.squash(cause)
-  return error instanceof Error ? error.message : String(error)
-}
 
 export class Runtimes extends Context.Service<Runtimes, RuntimesShape>()("vibest/Runtimes") {
   static readonly layer = Layer.effect(Runtimes, make)

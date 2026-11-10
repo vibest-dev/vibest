@@ -1,6 +1,6 @@
 import type { Polled } from "@vibest/protocol/protocol"
 import { shortId } from "@vibest/schema/id"
-import { Cause, Context, Duration, Effect, Layer, Option, Queue, Stream } from "effect"
+import { Context, Duration, Effect, Layer, Option, Queue, Stream } from "effect"
 
 import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
 import { Drain } from "./drain.ts"
@@ -126,9 +126,7 @@ export class Inbox extends Context.Service<
             if (Option.isNone(h)) return
             const presence = yield* coordinatorIdle(h.value, coord.address)
             if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
-          }).pipe(
-            Effect.catchCause((cause) => Effect.logWarning(`deliver to project ${projectId}: ${Cause.pretty(cause)}`)),
-          ),
+          }).pipe(Engine.logFailure(`deliver to project ${projectId}`)),
         )
 
       const mainOf = (id: string) =>

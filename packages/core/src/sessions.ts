@@ -195,20 +195,7 @@ export class Sessions extends Context.Service<
         (id: string, settlement = false) =>
         <A, E, R>(effect: Effect.Effect<A, E, R>) =>
           drain.work(`session ${id}`, locks.withLock(id)(effect), settlement)
-      const logged =
-        (what: string) =>
-        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-          effect.pipe(Effect.catchCause((cause) => Effect.logWarning(`${what}: ${Cause.pretty(cause)}`)))
-
-      const sessionAt = (terminal: Terminal) =>
-        db
-          .listSessions()
-          .pipe(
-            Effect.map(
-              (rows) =>
-                rows.find((row) => row.address.machine === terminal.machine && row.address.id === terminal.id)?.id,
-            ),
-          )
+      const logged = Engine.logFailure
 
       const notice = (session: SessionRow, message: string) =>
         inbox.enqueue({ sessionId: session.id, kind: "notice", message, details: {} })
@@ -447,7 +434,7 @@ export class Sessions extends Context.Service<
             return
           }
           if (!(yield* Ref.getAndSet(r.launchRechecked, true)))
-            yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkLocked(id))
+            yield* engine.arm(`launch:${id}`, START_TIMEOUT, checkSession(id))
         } else yield* Ref.set(r.launchRechecked, false)
         if (!(yield* harnesses.get(session.harnessId)).ownSessionId && h.session !== undefined) {
           const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
@@ -489,11 +476,11 @@ export class Sessions extends Context.Service<
           )
           return yield* deliverQueued(h, { ...session, turnState: "not_started" }, terminal)
         }
-        if (idle && !ended) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkLocked(id))
+        if (idle && !ended) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
         const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
-        if (grace > 0) return yield* engine.arm(`grace:${id}`, Duration.millis(grace), checkLocked(id))
+        if (grace > 0) return yield* engine.arm(`grace:${id}`, Duration.millis(grace), checkSession(id))
         yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
         yield* finish(
           session,
@@ -503,8 +490,10 @@ export class Sessions extends Context.Service<
         )
       })
 
-      const checkLocked = (id: string): Effect.Effect<void> =>
-        locked(id)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform))
+      const checkSession = (id: string): Effect.Effect<unknown, unknown> =>
+        locked(id)(check(id)).pipe(Effect.provideContext(platform))
+
+      const checkLocked = (id: string): Effect.Effect<void> => logged(`check ${id}`)(checkSession(id))
 
       const unreachable = (session: SessionRow) => (e: { readonly message: string }) =>
         Effect.fail(new RuntimeUnreachable({ session: session.runtime, message: e.message }))
@@ -603,12 +592,12 @@ export class Sessions extends Context.Service<
               if (session !== undefined) yield* undelivered(session, [row], errorMessage(cause))
             })
           yield* locked(id)(deliver(id).pipe(Effect.catchCause(failed)))
-        }).pipe(logged(`send ${id}`), Effect.provideContext(platform))
+        }).pipe(Effect.provideContext(platform))
 
       const deliverNext = (id: string) =>
         locked(id)(
           db.pendingInbox(id).pipe(Effect.flatMap((pending) => (pending.length === 0 ? Effect.void : deliver(id)))),
-        ).pipe(logged(`deliver ${id}`), Effect.provideContext(platform))
+        ).pipe(Effect.provideContext(platform))
 
       const interrupt = (id: string) =>
         getRow(id).pipe(
@@ -703,12 +692,12 @@ export class Sessions extends Context.Service<
           Effect.provideContext(platform),
         )
 
-      const onTerminal = (terminal: Terminal, working: boolean) =>
+      const onTerminal = (runtime: string, terminal: Terminal, working: boolean) =>
         Effect.gen(function* () {
-          const id = yield* sessionAt(terminal)
+          const id = yield* db.sessionAt(runtime, terminal)
           if (id === undefined) return
           if (working) yield* Ref.set((yield* track(id)).sawWorking, true)
-          yield* checkLocked(id)
+          yield* checkSession(id)
         })
 
       const turnStarted = (id: string, at: number) =>
@@ -717,7 +706,7 @@ export class Sessions extends Context.Service<
           if (session?.turnState === "open" && at >= session.turnPromptedAt) yield* sawTurnStart(id)
         })
 
-      const handle = (event: EngineEvent): Effect.Effect<void> => {
+      const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
         switch (event.type) {
           case "turn.reported":
             return resultReady(event.sessionId)
@@ -726,9 +715,9 @@ export class Sessions extends Context.Service<
           case "inbox.queued":
             return queued(event.sessionId, event.inboxId)
           case "live.state":
-            return onTerminal(event.terminal, event.state === "working")
+            return onTerminal(event.runtime, event.terminal, event.state === "working")
           case "live.exited":
-            return onTerminal(event.terminal, false)
+            return onTerminal(event.runtime, event.terminal, false)
           case "process.end":
             return forget(event.sessionId)
           case "live.reset":
