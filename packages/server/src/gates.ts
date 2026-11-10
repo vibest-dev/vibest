@@ -36,55 +36,93 @@ import * as Headers from "effect/http/Headers"
 
 const SETTLEMENTS: ReadonlySet<string> = new Set(["TurnEnd", "Prompt"])
 
+export type Read = (name: string) => string | undefined
+
+export const reader =
+  (headers: Headers.Headers): Read =>
+  (name) =>
+    Option.getOrUndefined(Headers.get(headers, name))
+
+export const admit = <A, E, R, A2, E2>(
+  drain: Drain["Service"],
+  label: string,
+  settlement: boolean,
+  effect: Effect.Effect<A, E, R>,
+  stopping: Effect.Effect<A2, E2>,
+) =>
+  Effect.acquireUseRelease(
+    drain.admit(label, settlement),
+    (leave): Effect.Effect<A | A2, E | E2, R> => (leave ? effect : stopping),
+    (leave) => leave ?? Effect.void,
+  )
+
 export const AdmissionLive = Layer.effect(
   Admission,
   Effect.gen(function* () {
     const drain = yield* Drain
     return Admission.of((effect, { rpc }) =>
-      Effect.acquireUseRelease(
-        drain.admit(rpc._tag, SETTLEMENTS.has(rpc._tag)),
-        (leave) => (leave ? effect : Effect.fail(new DaemonStopping({ method: rpc._tag }))),
-        (leave) => leave ?? Effect.void,
-      ),
+      admit(drain, rpc._tag, SETTLEMENTS.has(rpc._tag), effect, Effect.fail(new DaemonStopping({ method: rpc._tag }))),
     )
   }),
 )
 
-export const header = (headers: Headers.Headers, name: string) => Headers.get(headers, name)
-
-export const noteConversation = (db: Db["Service"], headers: Headers.Headers, row: { id: string; harness: string }) =>
+const noteConversation = (db: Db["Service"], read: Read, row: { id: string; harness: string }) =>
   Effect.gen(function* () {
-    const conversation = Option.getOrUndefined(header(headers, HARNESS_SESSION_HEADER))
-    if (!conversation || Option.getOrUndefined(header(headers, HARNESS_HEADER)) !== row.harness) return
+    const conversation = read(HARNESS_SESSION_HEADER)
+    if (!conversation || read(HARNESS_HEADER) !== row.harness) return
     if (yield* db.noteHarnessSession(row.id, conversation))
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
   })
 
-export const noteOpen = (db: Db["Service"], headers: Headers.Headers, sessionId: string) =>
+export const identify = (db: Db["Service"], read: Read) =>
   Effect.gen(function* () {
-    if (Option.getOrUndefined(header(headers, SESSION_HEADER)) !== sessionId) return
-    const row = yield* db.sessionIdentity(sessionId)
-    if (row && Option.getOrUndefined(header(headers, PROJECT_HEADER)) === row.projectId)
-      yield* noteConversation(db, headers, row)
+    const id = read(SESSION_HEADER)
+    const row = id ? yield* db.sessionIdentity(id) : undefined
+    if (!row) return { _tag: "NoSession", id } as const
+    const project = read(PROJECT_HEADER)
+    if (project === undefined) return { _tag: "NoProject", row } as const
+    if (project !== row.projectId) return { _tag: "WrongProject", row, project } as const
+    yield* noteConversation(db, read, row)
+    return { _tag: "Known", row } as const
+  })
+
+export const noteOpen = (db: Db["Service"], read: Read, sessionId: string) =>
+  read(SESSION_HEADER) === sessionId ? Effect.asVoid(identify(db, read)) : Effect.void
+
+export const checkProtocol = (db: Db["Service"], read: Read) =>
+  Effect.gen(function* () {
+    yield* noteIntegration(db, read)
+    const sent = read(PROTOCOL_HEADER)
+    if (sent === String(PROTOCOL)) return undefined
+    return {
+      sent: sent ?? null,
+      mismatch: protocolMismatch(
+        sent === undefined ? undefined : Number(sent),
+        PROTOCOL,
+        VERSION,
+        read(PLUGIN_VERSION_HEADER),
+      ),
+    }
   })
 
 export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, method: string) =>
   Effect.gen(function* () {
-    const kind = header(headers, CALLER_HEADER)
-    const sessionId = header(headers, SESSION_HEADER)
-    const repository = header(headers, REPOSITORY_HEADER)
+    const read = reader(headers)
+    const kind = Headers.get(headers, CALLER_HEADER)
+    const sessionId = Headers.get(headers, SESSION_HEADER)
+    const repository = Headers.get(headers, REPOSITORY_HEADER)
     const bad = (message: string) => new InvalidCaller({ method, message })
     if (kind._tag === "None")
       return yield* bad(`${method} needs an ${CALLER_HEADER} header (cli or session); it does not default to cli`)
     if (kind.value === "peer") {
-      const peer = Option.getOrUndefined(header(headers, PEER_HEADER))
+      const peer = read(PEER_HEADER)
       if (peer === undefined || !ID.test(peer))
         return yield* bad(`${method} claims peer without a valid ${PEER_HEADER}`)
       if (sessionId._tag === "Some") return yield* bad(`${method} claims peer and a session id`)
       if (!PEER_CALLS.has(method)) return yield* bad(`a peer vibestd may not call ${method}`)
       if (method !== "Peer.Hello" && !(yield* db.peerKnown(peer)))
         return yield* bad(`peer ${peer} has not said Peer.Hello; call it first`)
-      const project = Option.getOrUndefined(header(headers, PEER_PROJECT_HEADER))
+      const project = read(PEER_PROJECT_HEADER)
       return {
         _tag: "Peer",
         peerId: peer,
@@ -102,14 +140,16 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
         return yield* bad(`${method} claims session without a session id`)
       if (repository._tag === "Some" && repository.value.trim() === "")
         return yield* bad(`${method} has an empty repository`)
-      const row = yield* db.sessionIdentity(sessionId.value)
-      if (!row) return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
-      const project = header(headers, PROJECT_HEADER)
-      if (project._tag === "None")
-        return yield* bad(`${method} claims session ${row.id} without ${PROJECT_HEADER} (VIBEST_PROJECT_ID)`)
-      if (project.value !== row.projectId)
-        return yield* bad(`${method} claims project ${project.value}; session ${row.id} is in project ${row.projectId}`)
-      yield* noteConversation(db, headers, row)
+      const who = yield* identify(db, read)
+      if (who._tag === "NoSession")
+        return yield* new NoSuchSession({ id: sessionId.value, message: `no session ${sessionId.value}` })
+      if (who._tag === "NoProject")
+        return yield* bad(`${method} claims session ${who.row.id} without ${PROJECT_HEADER} (VIBEST_PROJECT_ID)`)
+      if (who._tag === "WrongProject")
+        return yield* bad(
+          `${method} claims project ${who.project}; session ${who.row.id} is in project ${who.row.projectId}`,
+        )
+      const row = who.row
       if (row.agent === "coordinator") {
         return {
           _tag: "Coordinator",
@@ -124,7 +164,7 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
     return yield* bad(`${method} has caller ${kind.value}; expected cli or session`)
   })
 
-export const noteIntegration = (db: Db["Service"], read: (name: string) => string | undefined): Effect.Effect<void> =>
+const noteIntegration = (db: Db["Service"], read: (name: string) => string | undefined): Effect.Effect<void> =>
   Effect.gen(function* () {
     const sessionId = read(SESSION_HEADER)
     const version = read(PLUGIN_VERSION_HEADER)
@@ -147,21 +187,9 @@ export const ProtocolGateLive = Layer.effect(
     const db = yield* Db
     return ProtocolGate.of((effect, { headers, rpc }) =>
       Effect.gen(function* () {
-        yield* noteIntegration(db, (name) => Option.getOrUndefined(header(headers, name)))
-        const protocol = header(headers, PROTOCOL_HEADER)
-        if (protocol._tag === "None" || protocol.value !== String(PROTOCOL)) {
-          const sent = protocol._tag === "None" ? null : protocol.value
-          return yield* new ProtocolRejected({
-            method: rpc._tag,
-            protocol: sent,
-            mismatch: protocolMismatch(
-              sent === null ? undefined : Number(sent),
-              PROTOCOL,
-              VERSION,
-              Option.getOrUndefined(header(headers, PLUGIN_VERSION_HEADER)),
-            ),
-          })
-        }
+        const rejected = yield* checkProtocol(db, reader(headers))
+        if (rejected)
+          return yield* new ProtocolRejected({ method: rpc._tag, protocol: rejected.sent, mismatch: rejected.mismatch })
         return yield* effect
       }),
     )

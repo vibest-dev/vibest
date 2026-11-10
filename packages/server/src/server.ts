@@ -59,7 +59,7 @@ import * as Headers from "effect/http/Headers"
 import { ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
 
-import { AdmissionLive, CallerGateLive, noteOpen, ProtocolGateLive } from "./gates.ts"
+import { AdmissionLive, CallerGateLive, noteOpen, ProtocolGateLive, reader } from "./gates.ts"
 import * as Hooks from "./hooks.ts"
 import { integrationHandlers } from "./integration.ts"
 import { placeOf, sameCoordinator, sessionListing, toInfo } from "./listing.ts"
@@ -111,7 +111,7 @@ export const handlers = VibestRpcs.toLayer(
       ) => Effect.Effect<void, E, FileSystem.FileSystem | Path.Path | Layout>,
     ) =>
       Effect.gen(function* () {
-        yield* noteOpen(db, headers, sessionId)
+        yield* noteOpen(db, reader(headers), sessionId)
         const row = yield* db.sessionIdentity(sessionId)
         const definition = harnesses.find(harness)
         if (!row || row.harness !== harness || definition === undefined) return
@@ -239,7 +239,7 @@ export const handlers = VibestRpcs.toLayer(
     const cliOnly = (method: MethodOf<"cli">) =>
       Effect.flatMap(Caller, (c) =>
         c._tag === "Cli"
-          ? Effect.void
+          ? Effect.succeed(c)
           : Effect.fail(new Forbidden({ method, message: `only the user runs ${method}` })),
       )
 
@@ -672,10 +672,7 @@ export const handlers = VibestRpcs.toLayer(
 
       "Project.Open": ({ move }) =>
         Effect.gen(function* () {
-          yield* cliOnly("Project.Open")
-          const c = yield* Caller
-          if (c._tag !== "Cli")
-            return yield* new Forbidden({ method: "Project.Open", message: "only the user runs Project.Open" })
+          const c = yield* cliOnly("Project.Open")
           const project = yield* resolveProject(db, yield* atProject(c.repositoryRoot), move)
           return {
             projectId: project.id,
@@ -687,13 +684,7 @@ export const handlers = VibestRpcs.toLayer(
 
       "Project.MainPlace": ({ callerEnv, runtime }) =>
         Effect.gen(function* () {
-          yield* cliOnly("Project.MainPlace")
-          const c = yield* Caller
-          if (c._tag !== "Cli")
-            return yield* new Forbidden({
-              method: "Project.MainPlace",
-              message: "only the user runs Project.MainPlace",
-            })
+          const c = yield* cliOnly("Project.MainPlace")
           const project = yield* resolveAt(c.repositoryRoot)
           const specs = yield* plugins.settled.pipe(Effect.andThen(runtimes.callers))
           const env = filterCallerEnv(specs, callerEnv)
@@ -776,13 +767,7 @@ export const handlers = VibestRpcs.toLayer(
 
       "Project.FocusCoordinator": () =>
         Effect.gen(function* () {
-          yield* cliOnly("Project.FocusCoordinator")
-          const c = yield* Caller
-          if (c._tag !== "Cli" || c.repositoryRoot === undefined)
-            return yield* new Forbidden({
-              method: "Project.FocusCoordinator",
-              message: "only the user runs Project.FocusCoordinator",
-            })
+          const c = yield* cliOnly("Project.FocusCoordinator")
           const project = yield* resolveAt(c.repositoryRoot)
           const running = yield* runningCoordinator(project.id, "")
           if (running === null) return null
@@ -840,13 +825,7 @@ export const handlers = VibestRpcs.toLayer(
         db.reportCoordinatorSession(sessionId, harness, harnessSessionId),
       "Project.Create": ({ directory, from }) =>
         Effect.gen(function* () {
-          yield* cliOnly("Project.Create")
-          const c = yield* Caller
-          if (c._tag !== "Cli" || c.repositoryRoot === undefined)
-            return yield* new Forbidden({
-              method: "Project.Create",
-              message: "only the user runs Project.Create",
-            })
+          const c = yield* cliOnly("Project.Create")
           const created = yield* createProject(directory, from, c.repositoryRoot)
           return {
             directory: created.directory,
