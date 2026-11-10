@@ -76,7 +76,6 @@ export type Snapshot = {
 }
 
 const REMOTE = ["machine", "peer", "outbox"] as const
-const TO_SESSION = `('task', 'send')`
 
 export const readSnapshot = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
@@ -278,10 +277,10 @@ type InboxSql = {
 
 const toInbox = (row: InboxSql) => {
   const kind = row.kind
-  const sessionId = kind === "send" ? row.recipientSessionId! : (row.senderSessionId ?? row.recipientSessionId ?? "")
   return {
     id: row.id,
-    sessionId,
+    sender: row.senderSessionId,
+    recipient: row.recipientSessionId,
     kind,
     message: row.content,
     details:
@@ -551,7 +550,7 @@ export const v1Reader = (sql: SqlClient.SqlClient, snapshot: Snapshot, seqOf: Se
       const [linked] = yield* sql<{ id: number | null }>`SELECT max(e.inbox_id) AS id FROM event e
         WHERE e.session_id = ${id} AND e.type = 'inbox.status' AND e.turn_id IS NOT NULL`
       const rows = yield* sql<{ content: string; sender: string | null }>`SELECT content, sender_session_id AS sender
-        FROM inbox WHERE recipient_session_id = ${id} AND status = 'delivered' AND kind IN ${sql.literal(TO_SESSION)}
+        FROM inbox WHERE recipient_session_id = ${id} AND status = 'delivered'
           AND id > ${linked?.id ?? 0}
         ORDER BY id`
       return {

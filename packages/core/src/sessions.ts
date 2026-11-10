@@ -135,7 +135,12 @@ export class Sessions extends Context.Service<
       Spawned,
       AllocationFailed | LimitReached | HarnessUnavailable | NoHarnessChosen | NoRuntime | AgentRefused | NoSuchSession
     >
-    readonly send: (id: string, message: string, request?: string) => Effect.Effect<void, NoSuchSession>
+    readonly send: (
+      id: string,
+      message: string,
+      request?: string,
+      sender?: string,
+    ) => Effect.Effect<void, NoSuchSession>
     readonly interrupt: (
       id: string,
     ) => Effect.Effect<{ message: string }, NoRuntime | NoSuchSession | SessionBusy | RuntimeUnreachable>
@@ -241,7 +246,7 @@ export class Sessions extends Context.Service<
 
       const undelivered = (
         session: SessionRow,
-        rows: ReadonlyArray<{ readonly id: number; readonly message: string }>,
+        rows: ReadonlyArray<{ readonly id: number; readonly message: string; readonly sender?: string | null }>,
         reason: string,
       ) =>
         db
@@ -251,9 +256,15 @@ export class Sessions extends Context.Service<
           )
           .pipe(
             Effect.andThen(
-              notice(
-                session,
-                `A message to ${session.id} was not delivered: ${reason}\n\n${rows.map((r) => r.message).join("\n\n")}`,
+              Effect.forEach(
+                [...Map.groupBy(rows, (r) => r.sender ?? null)],
+                ([sender, group]) => {
+                  const message = `A message to ${session.id} was not delivered: ${reason}\n\n${group.map((r) => r.message).join("\n\n")}`
+                  return (sender === null ? Effect.succeed(false) : db.insertNoticeTo(sender, message)).pipe(
+                    Effect.flatMap((sent) => (sent ? Effect.void : notice(session, message))),
+                  )
+                },
+                { discard: true },
               ),
             ),
           )
@@ -585,14 +596,14 @@ export class Sessions extends Context.Service<
         yield* deliverQueued(h, fresh, fresh.address)
       })
 
-      const send = (id: string, message: string, request?: string) =>
+      const send = (id: string, message: string, request?: string, sender?: string) =>
         Effect.gen(function* () {
           const session = yield* getRow(id)
           if (request !== undefined && (yield* db.queuedBy(id, request))) return
           const worktree = yield* worktreeOf(session)
           if (session.metadata.archived || session.metadata.removed || !(yield* fs.exists(worktree).pipe(Effect.orDie)))
             return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
-          const row = yield* db.insertSend(id, message, request)
+          const row = yield* db.insertSend(id, message, request, sender)
           if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
         })
 
@@ -803,7 +814,7 @@ export class Sessions extends Context.Service<
             archives,
             archiveDelivered(row).pipe(
               Effect.ensuring(done),
-              logged(`archive ${row.sessionId}`),
+              logged(`archive ${row.sender}`),
               Effect.provideContext(platform),
             ),
           ),

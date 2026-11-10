@@ -142,8 +142,8 @@ export const sessionArchive = (deps: {
 
   const archiveDelivered = (row: InboxRow) =>
     Effect.gen(function* () {
-      if (row.kind !== "result") return
-      const id = row.sessionId
+      if (row.kind !== "result" || row.sender === null) return
+      const id = row.sender
       const owner = yield* db.getSession(id)
       if (!owner?.metadata.archive || owner.metadata.archived || owner.metadata.removed) return
       if (row.details.status !== "completed") return

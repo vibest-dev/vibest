@@ -3,7 +3,7 @@ import { InboxKind, InboxRow, InboxStatus, TurnState } from "@vibest/schema/sess
 import { Effect } from "effect"
 
 import { encodeAddress, storedStatus, type SessionPatch, type NewInboxRow, type TurnEnd } from "./db-rows.ts"
-import { type Store, TO_SESSION } from "./db-store.ts"
+import type { Store } from "./db-store.ts"
 import type { TurnEnded } from "./results.ts"
 
 export const inboxMethods = (store: Store) => {
@@ -14,6 +14,9 @@ export const inboxMethods = (store: Store) => {
     emit,
     tx,
     findSession,
+    liveRecipient,
+    queueSend,
+    noticeTo,
     currentProcessId,
     findCoordinators,
     inbox,
@@ -32,16 +35,17 @@ export const inboxMethods = (store: Store) => {
   return {
     insertInbox: (row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie),
 
-    insertSend: (sessionId: string, message: string, request?: string) =>
+    insertSend: (recipient: string, message: string, request?: string, sender?: string) =>
       tx(
         Effect.gen(function* () {
-          const before = request === undefined ? undefined : yield* queuedBy(sessionId, request)
+          const before = request === undefined ? undefined : yield* queuedBy(recipient, request)
           if (before !== undefined) return (yield* inboxIn([before]))[0]
-          const s = yield* findSession(sessionId)
-          if (s === undefined || s.metadata.archived || s.metadata.removed) return undefined
-          return yield* insertInboxRow({ sessionId, kind: "send", message, details: {} }, undefined, undefined, request)
+          if (!(yield* liveRecipient(recipient))) return undefined
+          return yield* queueSend(recipient, sender, message, request)
         }),
       ).pipe(Effect.orDie),
+
+    insertNoticeTo: (recipient: string, message: string) => tx(noticeTo(recipient, message)).pipe(Effect.orDie),
 
     queuedBy: (sessionId: string, request: string) =>
       queuedBy(sessionId, request).pipe(
@@ -157,7 +161,7 @@ export const inboxMethods = (store: Store) => {
 
     coordinatorPending: (projectIdValue: string) =>
       inbox(
-        sql`m.kind NOT IN ${sql.literal(TO_SESSION)} AND m.status = 'pending' AND m.recipient_session_id = ${entryOf(projectIdValue)}`,
+        sql`m.kind != 'task' AND m.status = 'pending' AND m.recipient_session_id = ${entryOf(projectIdValue)}`,
       ).pipe(Effect.orDie),
 
     releaseLeased: (projectIdValue: string, ids: ReadonlyArray<number>) =>
@@ -179,8 +183,7 @@ export const inboxMethods = (store: Store) => {
             )
           if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
           const done = yield* moveInbox(
-            sql`${sql.in("id", ids)} AND status IN ('delivering', 'pending') AND kind NOT IN ${sql.literal(TO_SESSION)}
-                AND recipient_session_id = ${main}`,
+            sql`${sql.in("id", ids)} AND status IN ('delivering', 'pending') AND recipient_session_id = ${main}`,
             "delivered",
           )
           return done.length === 0 ? [] : yield* inboxIn(done)
@@ -197,15 +200,24 @@ export const inboxMethods = (store: Store) => {
               JOIN project q ON q.entry_session_id = s.id
               JOIN process p ON p.id = s.process_id
               WHERE ${pollHarnesses.length === 0 ? sql`0` : sql`p.harness IN ${sql.in(pollHarnesses)}`})`
-          const claimed = sql`status = 'delivering' AND kind NOT IN ${sql.literal(TO_SESSION)}`
+          const toEntry = sql`recipient_session_id IN (SELECT entry_session_id FROM project)`
+          const claimed = sql`status = 'delivering' AND ${toEntry}`
           yield* moveInbox(sql`${claimed} AND ${polling}`, "pending")
           yield* moveInbox(claimed, "failed")
-          const cut = yield* sql<{ id: number; recipient: string; content: string }>`SELECT id,
-              recipient_session_id AS recipient, content FROM inbox
-            WHERE status = 'delivering' AND kind IN ${sql.literal(TO_SESSION)} ORDER BY id`
-          const bySession = new Map<string, Array<{ id: number; content: string }>>()
-          for (const row of cut) bySession.set(row.recipient, [...(bySession.get(row.recipient) ?? []), row])
-          for (const [sessionId, rows] of bySession) {
+          const cut = yield* sql<{
+            id: number
+            recipient: string
+            sender: string | null
+            content: string
+          }>`SELECT id, recipient_session_id AS recipient, sender_session_id AS sender, content FROM inbox
+            WHERE status = 'delivering' AND NOT ${toEntry} ORDER BY id`
+          const bySenderAndSession = new Map<string, Array<(typeof cut)[number]>>()
+          for (const row of cut) {
+            const key = `${row.sender ?? ""}\n${row.recipient}`
+            bySenderAndSession.set(key, [...(bySenderAndSession.get(key) ?? []), row])
+          }
+          for (const rows of bySenderAndSession.values()) {
+            const { sender, recipient } = rows[0]!
             yield* moveInbox(
               sql.in(
                 "id",
@@ -213,28 +225,26 @@ export const inboxMethods = (store: Store) => {
               ),
               "failed",
             )
-            yield* insertInboxRow({
-              sessionId,
-              kind: "notice",
-              message: notice(
-                sessionId,
-                rows.map((r) => r.content),
-              ),
-              details: {},
-            })
+            const message = notice(
+              recipient,
+              rows.map((r) => r.content),
+            )
+            if (sender !== null && (yield* noticeTo(sender, message))) continue
+            yield* insertInboxRow({ sessionId: recipient, kind: "notice", message, details: {} })
           }
         }),
       ).pipe(Effect.orDie),
 
     sendingInbox: inbox(sql`m.status = 'delivering'`).pipe(
-      Effect.map((rows) => rows.map((r) => ({ id: r.id, sessionId: r.sessionId, kind: r.kind }))),
+      Effect.map((rows) => rows.map((r) => ({ id: r.id, sessionId: r.recipient ?? r.sender ?? "", kind: r.kind }))),
       Effect.orDie,
     ),
 
     pendingProjects: sql<{
       project: string
     }>`SELECT DISTINCT s.project_id AS project FROM inbox m JOIN session s ON s.id = m.recipient_session_id
-      WHERE m.status = 'pending' AND m.kind NOT IN ${sql.literal(TO_SESSION)}`.pipe(
+      WHERE m.status = 'pending' AND m.kind != 'task'
+        AND m.recipient_session_id = (SELECT entry_session_id FROM project WHERE id = s.project_id)`.pipe(
       Effect.map((rows) => rows.map((r) => r.project)),
       Effect.orDie,
     ),

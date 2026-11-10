@@ -428,7 +428,9 @@ describe("vibest.sock", () => {
       for (const [method, call] of protectedCalls(bare))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected", method)
       const w = yield* asSession(yield* client, id)
-      for (const [method, call] of protectedCalls(w).filter(([m]) => m !== "Report" && m !== "Integration.Guard"))
+      for (const [method, call] of protectedCalls(w).filter(
+        ([m]) => m !== "Report" && m !== "Send" && m !== "Integration.Guard",
+      ))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
 
       yield* a["Session.Ready"]({ id: (yield* db.coordinatorOf((yield* db.getSession(id))!.projectId))!.id })

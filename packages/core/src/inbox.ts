@@ -25,7 +25,7 @@ export const coordinatorIdle = (h: Runtime, terminal: RuntimeAddress): Effect.Ef
     return seen === "idle" ? "idle" : "busy"
   })
 
-export const senderKey = (row: InboxRow) => (row.kind === "notice" ? "vibestd" : row.sessionId)
+export const senderKey = (row: InboxRow) => (row.kind === "notice" ? "vibestd" : (row.sender ?? ""))
 export const nextBatch = (pending: ReadonlyArray<InboxRow>) => {
   const first = pending[0] ? senderKey(pending[0]) : undefined
   const other = pending.findIndex((r) => senderKey(r) !== first)
@@ -59,10 +59,11 @@ export const line = (
   const fit = (prefix: string, middle: string, suffix: string) =>
     `${prefix}${clip(middle, LINE_MAX - codePoints(prefix) - codePoints(suffix))}${suffix}`
   if (last.kind === "notice") return fit("Notice: ", last.message.trim().split("\n")[0] ?? "", more)
-  const session = who(last.sessionId)
+  const sender = last.sender ?? ""
+  const session = who(sender)
   const agent = session?.agent || "general"
   const type = `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`
-  return fit(`${type} Agent "`, session?.title ?? "", `" ${statusOf(last)} (${shortId(last.sessionId)})${more}`)
+  return fit(`${type} Agent "`, session?.title ?? "", `" ${statusOf(last)} (${shortId(sender)})${more}`)
 }
 
 export class Inbox extends Context.Service<
@@ -263,7 +264,7 @@ export class Inbox extends Context.Service<
           )
           if (rows === undefined) return empty
           const last = rows.at(-1)!
-          const session = last.kind === "notice" ? undefined : yield* db.getSession(last.sessionId)
+          const session = last.kind === "notice" || last.sender === null ? undefined : yield* db.getSession(last.sender)
           return {
             ids: rows.map((r) => r.id),
             line: line(rows, () => session && { agent: session.agent, title: session.name }),

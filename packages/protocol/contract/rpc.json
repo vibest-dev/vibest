@@ -1614,8 +1614,25 @@
                       }
                     ]
                   },
-                  "sessionId": {
-                    "type": "string"
+                  "sender": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "recipient": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "kind": {
                     "type": "string",
@@ -1660,7 +1677,8 @@
                 },
                 "required": [
                   "id",
-                  "sessionId",
+                  "sender",
+                  "recipient",
                   "kind",
                   "message",
                   "details",
@@ -11864,6 +11882,7 @@
     "Send": {
       "access": [
         "owner",
+        "session",
         "peer"
       ],
       "stream": false,

@@ -255,12 +255,7 @@ layer(Platform.services)(
               },
               yield* projectOf("seeded-project"),
             )
-            return yield* db.insertInbox({
-              sessionId: "b0050001-b005-4b00-8b00-b0050001b005",
-              kind: "send",
-              message: "queued",
-              details: {},
-            })
+            return (yield* db.insertSend("b0050001-b005-4b00-8b00-b0050001b005", "queued"))!
           }).pipe(
             Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)), Layer.provide(Bus.layer))),
           )

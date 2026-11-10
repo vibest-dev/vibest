@@ -30,7 +30,8 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 
 const row = (over: Partial<InboxRow>): InboxRow => ({
   id: 1,
-  sessionId: "349f65b2-349f-4349-8349-349f65b2349f",
+  sender: "349f65b2-349f-4349-8349-349f65b2349f",
+  recipient: null,
   kind: "result",
   message: "full text",
   details: {},
@@ -48,7 +49,7 @@ describe("the line a delivery shows", () => {
     )
     const reviewer = () => ({ agent: "reviewer", title: "Review the guard fix" })
     assert.strictEqual(
-      line([row({ sessionId: "95603b88-9560-4956-8956-95603b889560", details: { status: "failed" } })], reviewer),
+      line([row({ sender: "95603b88-9560-4956-8956-95603b889560", details: { status: "failed" } })], reviewer),
       'Reviewer Agent "Review the guard fix" failed (95603b88)',
     )
     assert.strictEqual(

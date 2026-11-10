@@ -9,8 +9,9 @@ import { Effect } from "effect"
 import type { RpcGroup } from "effect/rpc"
 
 type Access = typeof ACCESS
+type Allowed<K extends keyof Access> = Access[K] extends readonly unknown[] ? Access[K][number] : Access[K]
 export type MethodOf<A> = {
-  [K in keyof Access]: Access[K] extends A | readonly [A, "peer"] ? K : never
+  [K in keyof Access]: [Extract<Allowed<K>, A>] extends [never] ? never : K
 }[keyof Access]
 
 export type Handlers = Partial<RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof VibestRpcs>>>

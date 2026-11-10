@@ -5,7 +5,7 @@ import { Integration } from "@vibest/core/integration"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import { Runtimes } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, Sessions } from "@vibest/core/sessions"
-import { Forbidden, WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
+import { Caller, type CallerShape, Forbidden, type PayloadOf, WatchLagged, type WatchEvent } from "@vibest/protocol/rpc"
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Queue, Stream } from "effect"
 
@@ -57,6 +57,40 @@ export const make = (
         return id
       })
 
+    const sendWithinProject = (
+      caller: Extract<CallerShape, { readonly _tag: "Session" | "Coordinator" }>,
+      input: string,
+      p: PayloadOf<"Send">,
+    ) =>
+      Effect.gen(function* () {
+        const id = yield* db.resolveSession(input)
+        const target = yield* db.sessionIdentity(id)
+        if (target?.projectId !== caller.projectId)
+          return yield* new Forbidden({
+            method: "Send",
+            message: `${id} belongs to another coordinator's project; a message goes only to an agent of your own project`,
+          })
+        if (target.agent === "coordinator") {
+          const row = yield* db.insertSend(id, p.message, p.request, caller.sessionId)
+          if (!row)
+            return yield* new NoSuchSession({
+              id,
+              message: `${id} is the main agent of this project and is not running`,
+            })
+          return { id }
+        }
+        const session = yield* db.getSession(id)
+        if (!session || session.metadata.archived || session.metadata.removed) {
+          const entry = (yield* db.coordinatorOf(caller.projectId))?.id
+          return yield* new NoSuchSession({
+            id,
+            message: `${id} was archived${entry === undefined ? "" : `; the main agent of this project is ${entry}`}`,
+          })
+        }
+        yield* sessions.send(id, p.message, p.request, caller.sessionId)
+        return { id }
+      })
+
     return {
       Spawn: (input) =>
         Effect.gen(function* () {
@@ -90,10 +124,15 @@ export const make = (
       Republish: () => sessions.republish,
 
       Send: (p) =>
-        routed.Send(p, (id) =>
-          managed("Send", id).pipe(
-            Effect.flatMap((id) => sessions.send(id, p.message, p.request).pipe(Effect.as({ id }))),
-          ),
+        routed.Send(p, (input) =>
+          Effect.gen(function* () {
+            const caller = yield* Caller
+            if (caller._tag === "Session" || caller._tag === "Coordinator")
+              return yield* sendWithinProject(caller, input, p)
+            const id = yield* managed("Send", input)
+            yield* sessions.send(id, p.message, p.request)
+            return { id }
+          }),
         ),
 
       Interrupt: (p) =>

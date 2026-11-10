@@ -34,8 +34,7 @@ import {
 import { makeJournal } from "./journal.ts"
 import { coordinatorOf, decodeCoordinators, decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
 import { Routing } from "./plugins.ts"
-
-export const TO_SESSION = `('task', 'send')`
+import { envelope } from "./results.ts"
 
 export type Current = {
   readonly id: number
@@ -180,7 +179,7 @@ export const makeStore = Effect.gen(function* () {
   const inbox = reads.inboxWhere
   const inboxIn = (ids: ReadonlyArray<number>) => inbox(sql.in("m.id", ids))
   const findSend = (sessionId: string, status: InboxStatus) =>
-    inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind = 'send' AND m.status = ${storedStatus(status)}`)
+    inbox(sql`m.recipient_session_id = ${sessionId} AND m.kind != 'task' AND m.status = ${storedStatus(status)}`)
   const entryOf = (projectIdValue: string) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
 
   const openTurn = (sessionId: string) =>
@@ -361,19 +360,57 @@ export const makeStore = Effect.gen(function* () {
       yield* notify({ type: "live.outbox", peerId: peer })
     })
 
-  const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number, request?: string) =>
+  const liveRecipient = (id: string) =>
     Effect.gen(function* () {
-      if (row.kind === "send") {
-        const id = yield* queueInbox({
-          recipient: row.sessionId,
-          kind: "send",
-          sender: null,
-          content: row.message,
-          status: "pending",
-          request,
-        })
-        return (yield* inboxIn([id]))[0]!
-      }
+      const [route] = yield* sql<{
+        project: string
+        entry: string | null
+      }>`SELECT s.project_id AS project, p.entry_session_id AS entry
+        FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${id}`
+      if (route === undefined) return false
+      if (route.entry === id) return placed(route.project, yield* currentProcess(id))
+      const session = yield* findSession(id)
+      return session !== undefined && !session.metadata.archived && !session.metadata.removed
+    })
+
+  const renderedSend = (recipient: string, sender: string | undefined, message: string) =>
+    Effect.gen(function* () {
+      if (sender === undefined) return message
+      const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sender}`
+      const [to] = yield* sql<{ creator: string | null; entry: string | null }>`SELECT
+          s.report_to_session_id AS creator, p.entry_session_id AS entry
+        FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${recipient}`
+      const toEntry = to?.entry === recipient
+      if (!toEntry && (sender === to?.creator || sender === to?.entry)) return message
+      return envelope(
+        "agent-message",
+        [["agent-id", sender], ...(toEntry ? ([["title", from?.name ?? ""]] as const) : [])],
+        ["message", message],
+      )
+    })
+
+  const queueSend = (recipient: string, sender: string | undefined, message: string, request?: string) =>
+    Effect.gen(function* () {
+      const id = yield* queueInbox({
+        recipient,
+        kind: "send",
+        sender: sender ?? null,
+        content: yield* renderedSend(recipient, sender, message),
+        status: "pending",
+        request,
+      })
+      return (yield* inboxIn([id]))[0]!
+    })
+
+  const noticeTo = (recipient: string, content: string) =>
+    Effect.gen(function* () {
+      if (!(yield* liveRecipient(recipient))) return false
+      yield* queueInbox({ recipient, kind: "notice", sender: null, content, status: "pending" })
+      return true
+    })
+
+  const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number) =>
+    Effect.gen(function* () {
       const [route] = yield* sql<{
         recipient: string | null
         project: string
@@ -517,10 +554,7 @@ export const makeStore = Effect.gen(function* () {
         )
           return
       }
-      yield* moveInbox(
-        sql`status = 'pending' AND kind NOT IN ${sql.literal(TO_SESSION)} AND recipient_session_id = ${entryOf(projectIdValue)}`,
-        "dropped",
-      )
+      yield* moveInbox(sql`status = 'pending' AND recipient_session_id = ${entryOf(projectIdValue)}`, "dropped")
     })
 
   const sessionAt = (runtime: string, address: RuntimeAddress) =>
@@ -592,6 +626,9 @@ export const makeStore = Effect.gen(function* () {
     startTurn,
     moveInbox,
     queueInbox,
+    queueSend,
+    noticeTo,
+    liveRecipient,
     queueForPeer,
     linkTask,
     endProcess,
