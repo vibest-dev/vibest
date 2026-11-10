@@ -1,13 +1,21 @@
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
+import type { LayerNode } from "@vibest/core/effect/layer-node"
 import { Sessions } from "@vibest/core/sessions"
 import { Plugin } from "@vibest/plugin"
-import { Effect, type Scope } from "effect"
+import { Effect } from "effect"
 
-import { makeRepository, projectOf, testLayer, type TestOptions, type TestServices } from "./fakes.ts"
+import { projectOf } from "./lib/directory.ts"
+import { testEffect } from "./lib/effect.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { makeRepository, pluginsHost, runtimeNode, sessionLayer } from "./lib/session.ts"
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
-  it.effect(name, () => program.pipe(Effect.provide(testLayer(options))))
+const test = <E, R>(
+  name: string,
+  program: Effect.Effect<void, E, R>,
+  replacements: LayerNode.Replacements = [],
+  plugins?: ReturnType<typeof pluginsHost>,
+) => testEffect(sessionLayer(replacements, plugins))(name, () => program)
 
 const input = (
   repo: string,
@@ -72,7 +80,7 @@ describe("subagent runtime", () => {
       assert.strictEqual(error._tag, "NoRuntime")
       assert.match("message" in error ? error.message : "", /herdr is offline on local \(not running\)/)
     }),
-    { offline: "not running" },
+    [runtimeNode.replace(FakeRuntime.layer({ offline: "not running" }))],
   )
 
   test(
@@ -83,18 +91,17 @@ describe("subagent runtime", () => {
       assert.strictEqual(spawned.runtime, "herdr")
       assert.strictEqual(spawned.decidedBy.runtime, "pick")
     }),
-    {
-      plugins: [
-        Plugin.define({
-          id: "pick",
-          effect: (ctx) =>
-            ctx.agent.hook("start.before", (event) =>
-              Effect.sync(() => {
-                event.runtime = "herdr"
-              }),
-            ),
-        }),
-      ],
-    },
+    [],
+    pluginsHost([
+      Plugin.define({
+        id: "pick",
+        effect: (ctx) =>
+          ctx.agent.hook("start.before", (event) =>
+            Effect.sync(() => {
+              event.runtime = "herdr"
+            }),
+          ),
+      }),
+    ]),
   )
 })
