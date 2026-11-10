@@ -43,7 +43,7 @@ const make = Effect.gen(function* () {
       return true
     }),
     reopen: Effect.gen(function* () {
-      if (phase !== "draining") return
+      if (phase === "open") return
       const next = yield* Deferred.make<void>()
       const waiting = reopened
       reopened = next
