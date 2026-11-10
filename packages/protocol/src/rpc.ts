@@ -261,7 +261,7 @@ export const SessionAnswer = Schema.Struct({
 export const SessionStatusInfo = Schema.Struct({
   ...SessionInfo.fields,
   result: Schema.NullOr(InboxMessage),
-  answer: Schema.NullOr(SessionAnswer),
+  answer: Schema.optional(Schema.NullOr(SessionAnswer)),
 })
 
 export const HarnessModel = Schema.Struct({

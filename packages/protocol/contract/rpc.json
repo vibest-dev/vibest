@@ -1677,70 +1677,77 @@
           "answer": {
             "anyOf": [
               {
-                "type": "object",
-                "properties": {
-                  "turn": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "turn": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "Infinity",
+                              "-Infinity",
+                              "NaN"
+                            ]
+                          }
                         ]
-                      }
-                    ]
-                  },
-                  "status": {
-                    "type": "string"
-                  },
-                  "text": {
-                    "anyOf": [
-                      {
+                      },
+                      "status": {
                         "type": "string"
                       },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "failure": {
-                    "anyOf": [
-                      {
-                        "type": "string"
+                      "text": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "endedAt": {
-                    "anyOf": [
-                      {
-                        "type": "number"
+                      "failure": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
+                      "endedAt": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "Infinity",
+                              "-Infinity",
+                              "NaN"
+                            ]
+                          }
                         ]
                       }
-                    ]
+                    },
+                    "required": [
+                      "turn",
+                      "status",
+                      "text",
+                      "failure",
+                      "endedAt"
+                    ],
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "null"
                   }
-                },
-                "required": [
-                  "turn",
-                  "status",
-                  "text",
-                  "failure",
-                  "endedAt"
-                ],
-                "additionalProperties": true
+                ]
               },
               {
                 "type": "null"
@@ -1769,8 +1776,7 @@
           "lastActive",
           "task",
           "latest",
-          "result",
-          "answer"
+          "result"
         ],
         "additionalProperties": true
       },
