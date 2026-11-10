@@ -119,6 +119,88 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
       }),
     )
 
+    it.effect("model discovery for a run overlays that run's env, and a different env is not cached", () =>
+      Effect.gen(function* () {
+        const piLines = [
+          JSON.stringify({
+            id: "vibest-state",
+            type: "response",
+            data: { model: { provider: "openai", id: "gpt" } },
+          }),
+          JSON.stringify({
+            id: "vibest-models",
+            type: "response",
+            data: {
+              models: [{ provider: "openai", id: "gpt", name: "GPT", contextWindow: 1, maxTokens: 1 }],
+            },
+          }),
+        ].join("\n")
+        const seen: Array<{ readonly dir?: string | undefined; readonly home?: string | undefined }> = []
+        const harness = yield* Harness.make().pipe(
+          Effect.provideService(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make((command) => {
+              if (command._tag === "StandardCommand") {
+                assert.strictEqual(command.options.extendEnv, true)
+                seen.push({ dir: command.options.env?.PI_CODING_AGENT_DIR, home: command.options.env?.HOME })
+              }
+              return Effect.succeed(
+                ChildProcessSpawner.makeHandle({
+                  pid: ChildProcessSpawner.ProcessId(1),
+                  exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+                  isRunning: Effect.succeed(false),
+                  kill: () => Effect.void,
+                  unref: Effect.succeed(Effect.void),
+                  stdin: Sink.drain,
+                  stdout: Stream.empty,
+                  stderr: Stream.empty,
+                  all: Stream.make(new TextEncoder().encode(piLines)),
+                  getInputFd: () => Sink.drain,
+                  getOutputFd: () => Stream.empty,
+                }),
+              )
+            }),
+          ),
+        )
+        const daemon = yield* harness.models("pi", null)
+        const run = { PI_CODING_AGENT_DIR: "/run/pi", HOME: "/run/home" }
+        const overlaid = yield* harness.models("pi", null, run)
+        assert.deepStrictEqual(
+          yield* harness.models("pi", null, { HOME: "/run/home", PI_CODING_AGENT_DIR: "/run/pi" }),
+          overlaid,
+        )
+        yield* harness.models("pi", null, { PI_CODING_AGENT_DIR: "/other" })
+        assert.strictEqual(daemon[0]?.model, "gpt")
+        assert.deepStrictEqual(seen, [
+          { dir: undefined, home: seen[0]?.home },
+          { dir: "/run/pi", home: "/run/home" },
+          { dir: "/other", home: seen[0]?.home },
+        ])
+      }),
+    )
+
+    it.effect("preflight discovers models with the run's env", () =>
+      Effect.gen(function* () {
+        let seen: Readonly<Record<string, string>> | undefined
+        const models = yield* preflight("pi", null, "gpt", { PI_CODING_AGENT_DIR: "/run/pi" }).pipe(
+          Effect.provide(
+            Layer.succeed(Harness, {
+              available: () => Effect.succeed(true),
+              plugin: () => Effect.succeed("/plugin/pi"),
+              models: (_id, _provider, env) => {
+                seen = env
+                return Effect.succeed([
+                  { harness: "pi", provider: "openai", model: "gpt", name: "GPT", description: "", default: true },
+                ])
+              },
+            }),
+          ),
+        )
+        assert.strictEqual(models[0]?.model, "gpt")
+        assert.deepStrictEqual(seen, { PI_CODING_AGENT_DIR: "/run/pi" })
+      }),
+    )
+
     it.effect("Cursor discovery refuses missing and empty Keychains directories on macOS", () =>
       Effect.gen(function* () {
         if (process.platform !== "darwin") return

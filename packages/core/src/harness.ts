@@ -51,12 +51,23 @@ export const hasNewline = (args: ReadonlyArray<string>) => args.some((a) => /[\r
 export const MODELS_TTL = Duration.minutes(5)
 const MODEL_CACHE_CAPACITY = 32
 
+const modelCacheKey = (id: string, provider: string | null, env?: Readonly<Record<string, string>>) =>
+  JSON.stringify([
+    id,
+    provider ?? "",
+    Object.entries(env ?? {}).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+  ])
+
 export class Harness extends Context.Service<
   Harness,
   {
     readonly available: (id: string) => Effect.Effect<boolean>
     readonly plugin: (id: string) => Effect.Effect<string, HarnessUnavailable>
-    readonly models: (id: string, provider: string | null) => Effect.Effect<ReadonlyArray<Model>, HarnessUnavailable>
+    readonly models: (
+      id: string,
+      provider: string | null,
+      env?: Readonly<Record<string, string>>,
+    ) => Effect.Effect<ReadonlyArray<Model>, HarnessUnavailable>
   }
 >()("vibest/Harness") {
   static readonly make = () =>
@@ -86,13 +97,17 @@ export class Harness extends Context.Service<
       const searchPath = (yield* Config.String("PATH").pipe(Config.withDefault(""))).split(":").filter(Boolean)
       const cached = yield* Cache.makeWith(
         (key: string) => {
-          const split = key.indexOf("/")
-          const id = key.slice(0, split)
-          const provider = key.slice(split + 1)
+          const [id, providerName, entries] = JSON.parse(key) as [
+            string,
+            string,
+            ReadonlyArray<readonly [string, string]>,
+          ]
           const definition = harnesses.find(id)
           return definition === undefined
             ? Effect.fail(unprovided(id, harnesses.all))
-            : listModels(definition, provider === "" ? null : provider).pipe(Effect.provide(pinned))
+            : listModels(definition, providerName === "" ? null : providerName, Object.fromEntries(entries)).pipe(
+                Effect.provide(pinned),
+              )
         },
         {
           capacity: MODEL_CACHE_CAPACITY,
@@ -125,7 +140,7 @@ export class Harness extends Context.Service<
               return yield* unavailable(`vibest's ${id} plugin is missing: ${dir}`)
             return dir
           }),
-        models: (id, provider) => Cache.get(cached, `${id}/${provider ?? ""}`),
+        models: (id, provider, env) => Cache.get(cached, modelCacheKey(id, provider, env)),
       })
     })
 
@@ -138,7 +153,12 @@ export class Harness extends Context.Service<
   })
 }
 
-export const preflight = Effect.fn("preflight")(function* (id: string, provider: string | null, model: string | null) {
+export const preflight = Effect.fn("preflight")(function* (
+  id: string,
+  provider: string | null,
+  model: string | null,
+  env?: Readonly<Record<string, string>>,
+) {
   const harness = yield* Harness
   const harnesses = yield* Harnesses
   const adapter = harnesses.find(id)
@@ -149,7 +169,7 @@ export const preflight = Effect.fn("preflight")(function* (id: string, provider:
   if (!(yield* harness.available(id))) return yield* unavailable(`${adapter.binary} is not on PATH`)
   yield* harness.plugin(id)
   const models = yield* harness
-    .models(id, provider)
+    .models(id, provider, env)
     .pipe(Effect.mapError((e) => unavailable(`${id} model discovery failed: ${e.message}`)))
   if (model !== null && !models.some((m) => m.model === model)) {
     const choices = models.map((m) => (m.provider ? `${m.provider}/${m.model}` : m.model)).join(", ")
