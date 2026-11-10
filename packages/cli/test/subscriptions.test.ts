@@ -8,7 +8,6 @@ import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { Plugin } from "@vibest/plugin"
 import { claude, cursor, pi } from "@vibest/plugin-harnesses"
 import { keychainProblem } from "@vibest/plugin-harnesses/cursor"
-import { CLAUDE_CREDENTIALS, CURSOR_ACCESS_TOKEN, Secrets } from "@vibest/plugin-harnesses/keychain"
 import { claudeSubscription } from "@vibest/plugin-harnesses/subscriptions/claude"
 import { cursorSubscription } from "@vibest/plugin-harnesses/subscriptions/cursor"
 import { piSubscription } from "@vibest/plugin-harnesses/subscriptions/pi"
@@ -24,7 +23,6 @@ import * as Platform from "#platform"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer, makeRepository, runVibest, testLayer } from "./fakes.ts"
 
 const CLAUDE_SECRET = "claude-token-do-not-log"
-const CURSOR_SECRET = "cursor-token-do-not-log"
 const PI_SECRET = "pi-key-do-not-log"
 
 const claudeStatus = JSON.stringify({
@@ -75,7 +73,6 @@ const fakeMachine = (options: {
   readonly installed: ReadonlyArray<string>
   readonly commands: Readonly<Record<string, string>>
   readonly commandsThatNeverExit?: ReadonlyArray<string>
-  readonly passwords?: Readonly<Record<string, string>>
   readonly http?: Readonly<Record<string, { readonly status: number; readonly body: unknown }>>
   readonly httpHang?: ReadonlyArray<string>
   readonly home: string
@@ -105,7 +102,6 @@ const fakeMachine = (options: {
     )
   })
   const machine = Layer.mergeAll(
-    Layer.succeed(Secrets, { password: (service) => Effect.succeed(options.passwords?.[service]) }),
     Layer.succeed(HttpClient.HttpClient, http),
     Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
     options.fileSystem === undefined ? Layer.empty : Layer.succeed(FileSystem.FileSystem, options.fileSystem),
@@ -185,10 +181,6 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         installed: ["claude", "cursor", "pi"],
         commands,
         home: dir,
-        passwords: {
-          [CLAUDE_CREDENTIALS]: JSON.stringify({ claudeAiOauth: { accessToken: CLAUDE_SECRET, expiresAt: 0 } }),
-          [CURSOR_ACCESS_TOKEN]: "",
-        },
         http: { "https://api.anthropic.com/api/oauth/usage": { status: 200, body: claudeBody } },
       })
       const listed = yield* fake.provide(
@@ -256,10 +248,6 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
           "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
         },
-        passwords: {
-          [CLAUDE_CREDENTIALS]: JSON.stringify({ claudeAiOauth: { accessToken: CLAUDE_SECRET, expiresAt: 9e12 } }),
-          [CURSOR_ACCESS_TOKEN]: CURSOR_SECRET,
-        },
         http: {
           "https://api.anthropic.com/api/oauth/usage": { status: 200, body: claudeBody },
           "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage": {
@@ -291,15 +279,11 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
       assert.strictEqual(cursorRow?.account.plan, "Ultra")
       assert.deepStrictEqual(fresh.requests, [])
       assert.notInclude(JSON.stringify({ logs: fresh.logs, listed }), CLAUDE_SECRET)
-      assert.notInclude(JSON.stringify(listed), CURSOR_SECRET)
 
       const denied = fakeMachine({
         installed: ["claude"],
         home: dir,
         commands: { "claude auth status --json": claudeStatus },
-        passwords: {
-          [CLAUDE_CREDENTIALS]: JSON.stringify({ claudeAiOauth: { accessToken: CLAUDE_SECRET, expiresAt: 9e12 } }),
-        },
         http: { "https://api.anthropic.com/api/oauth/usage": { status: 401, body: { error: CLAUDE_SECRET } } },
       })
       const kept = yield* denied.provide(
