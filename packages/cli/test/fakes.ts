@@ -206,6 +206,7 @@ export class FakeProcesses extends Context.Service<
   {
     readonly set: (pid: number, liveness: Liveness) => Effect.Effect<void>
     readonly setCwdUsers: (users: ReadonlyArray<number> | undefined) => Effect.Effect<void>
+    readonly setTree: (root: number, pids: ReadonlyArray<number>) => Effect.Effect<void>
     readonly probed: Effect.Effect<ReadonlyArray<number>>
     readonly signaled: Effect.Effect<ReadonlyArray<number>>
     readonly setSignalDenied: (denied: boolean) => Effect.Effect<void>
@@ -228,6 +229,7 @@ export class FakeProcesses extends Context.Service<
     Effect.gen(function* () {
       const states = yield* Ref.make(HashMap.empty<number, Liveness>())
       const users = yield* Ref.make<ReadonlyArray<number> | undefined>([])
+      const trees = yield* Ref.make(HashMap.empty<number, ReadonlyArray<number>>())
       const cwdDelay = yield* Ref.make<Duration.Input>(0)
       const listings = yield* Ref.make(0)
       const probed = yield* Ref.make<ReadonlyArray<number>>([])
@@ -253,6 +255,7 @@ export class FakeProcesses extends Context.Service<
       return FakeProcesses.of({
         set: (pid, liveness) => Ref.update(states, HashMap.set(pid, liveness)),
         setCwdUsers: (u) => Ref.set(users, u),
+        setTree: (root, pids) => Ref.update(trees, HashMap.set(root, pids)),
         cwdListings: Ref.get(listings),
         probed: Ref.get(probed),
         signaled: Ref.get(signaled),
@@ -311,6 +314,7 @@ export class FakeProcesses extends Context.Service<
               yield* Effect.sleep(yield* Ref.get(cwdDelay))
               return yield* Ref.get(users)
             }),
+          tree: (root) => Ref.get(trees).pipe(Effect.map((m) => Option.getOrElse(HashMap.get(m, root), () => [root]))),
         }),
       })
     }),

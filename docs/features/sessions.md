@@ -18,9 +18,11 @@ running and which process it is; `vibest ls` lists the main agent and each sessi
 
 ## S6. Archiving
 
-`vibest archive` of a clean session closes its pane, ends its harness process and removes its worktree. Uncommitted
-changes, or commits on no branch, keep the worktree and say why; commits on a branch let the worktree go and the
-branch keeps them. `--keep-worktree` keeps a clean worktree and says it was asked to.
+`vibest archive` of a clean session closes its pane, ends its harness process and removes its worktree. The
+session's own processes — the harness it recorded, that process's children, and the shell that started it — get up to
+10s to exit after the pane closes before the worktree is judged, so a process that is only still exiting does not
+keep it. Uncommitted changes, or commits on no branch, keep the worktree and say why; commits on a branch let the
+worktree go and the branch keeps them. `--keep-worktree` keeps a clean worktree and says it was asked to.
 
 ## S7. Archive on completion
 

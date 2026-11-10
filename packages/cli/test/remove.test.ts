@@ -1,6 +1,6 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { cwdHolders, livenessOf, Processes, runFor } from "@vibest/core/processes"
+import { cwdHolders, livenessOf, parseProcessTable, Processes, runFor, sessionTree } from "@vibest/core/processes"
 import { Sessions } from "@vibest/core/sessions"
 import { Clock, Effect, Fiber, FileSystem, HashMap, Stream, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -87,13 +87,15 @@ const removeTimingCwd = (sessions: Sessions["Service"], id: string) =>
 
 describe.concurrent("vibest rm: process proof", () => {
   test(
-    "an archive ends its process once, and no PID is ever asked about",
+    "an archive ends its process once, and asks only whether its own process, already exited, is gone",
     Effect.gen(function* () {
       const fake = yield* FakeProcesses
-      const { id, sessions } = yield* idleSession
+      const { id, sessions, db } = yield* idleSession
+      const pid = (yield* db.getSession(id))!.metadata.pid
+      if (pid === undefined) return yield* Effect.die("the session recorded no pid")
       assert.deepInclude(yield* sessions.remove(id), { processes: "exited", pane: "closed", worktree: "removed" })
       assert.deepStrictEqual(yield* processEnds(id), ["archived"])
-      assert.deepStrictEqual(yield* fake.probed, [])
+      assert.deepStrictEqual(yield* fake.probed, [pid])
     }),
   )
 
@@ -230,7 +232,7 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.strictEqual(
         (yield* fake.cwdListings) - before,
         1,
-        "one listing, no waiting for the process to leave (elapsed virtual time grows with git under load)",
+        "one listing, no waiting for a process that is not the session's (elapsed virtual time grows with git under load)",
       )
       const unclearListing = undefined
       yield* fake.setCwdUsers(unclearListing)
@@ -242,6 +244,40 @@ describe.concurrent("vibest rm: process proof", () => {
       })
       yield* fake.setCwdUsers([])
       assert.deepInclude(yield* b.sessions.remove(b.id), { processes: "exited", worktree: "removed" })
+    }),
+  )
+
+  test(
+    "the session's own processes still exiting after the pane closes are waited out, then the worktree goes; one that is still there after the wait keeps it",
+    Effect.gen(function* () {
+      const leaving = yield* idleSession
+      const fake = yield* FakeProcesses
+      const root = (yield* leaving.db.getSession(leaving.id))!.metadata.pid!
+      const child = root + 1
+      yield* fake.setTree(root, [root, child])
+      yield* fake.set(root, "alive")
+      yield* fake.set(child, "alive")
+      yield* fake.setCwdUsers([child])
+      const fiber = yield* Effect.forkChild(leaving.sessions.remove(leaving.id))
+      yield* untilVirtual(fake.probed, (probed) => probed.includes(root) && probed.includes(child))
+      yield* fake.set(root, "exited")
+      yield* fake.set(child, "exited")
+      yield* fake.setCwdUsers([])
+      yield* untilVirtual(
+        Effect.sync(() => fiber.pollUnsafe()),
+        (exit) => exit !== undefined,
+      )
+      assert.deepInclude(yield* Fiber.join(fiber), { processes: "exited", pane: "closed", worktree: "removed" })
+      assert.strictEqual(yield* fake.cwdListings, 1)
+
+      const staying = yield* idleSession
+      const stuck = (yield* staying.db.getSession(staying.id))!.metadata.pid!
+      yield* fake.setTree(stuck, [stuck])
+      yield* fake.set(stuck, "alive")
+      yield* fake.setCwdUsers([stuck])
+      const kept = (yield* removeAdvancingClock(staying.sessions, staying.id))!
+      assert.deepInclude(kept, { processes: "alive", pane: "closed", worktree: "kept" })
+      assert.include(kept.reasons.join("\n"), `process ${stuck} has its working directory in it`)
     }),
   )
 
@@ -420,7 +456,73 @@ describe.concurrent("Processes", () => {
     )
   })
 
+  it("the session tree is the recorded process, its children and the shell that started it, not that shell's other children or a process outside it", () => {
+    const rows = parseProcessTable(
+      [
+        "  10  1 herdr",
+        "  20  10 -zsh",
+        "  21  20 gitstatusd",
+        "  30  20 node",
+        "  31  30 node",
+        "  40  10 sleep",
+      ].join("\n"),
+    )
+    assert.deepStrictEqual(
+      sessionTree(30, rows).toSorted((a, b) => a - b),
+      [20, 30, 31],
+    )
+    assert.deepStrictEqual(
+      sessionTree(30, [
+        { pid: 30, ppid: 1, command: "node" },
+        { pid: 99, ppid: 1, command: "other" },
+      ]),
+      [30],
+    )
+    assert.deepStrictEqual(
+      sessionTree(30, [
+        { pid: 8, ppid: 1, command: "herdr" },
+        { pid: 30, ppid: 8, command: "node" },
+        { pid: 31, ppid: 30, command: "sleep" },
+      ]).toSorted((a, b) => a - b),
+      [30, 31],
+    )
+    assert.deepStrictEqual(sessionTree(30, []), [30])
+    assert.deepStrictEqual(parseProcessTable("not a process table\n  1 0\n"), [])
+  })
+
   layer(Platform.services)((it) => {
+    it.effect(
+      "ps names the recorded process, the shell that parents it and that process's child, and not the shell's other child",
+      () =>
+        Effect.gen(function* () {
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const shell = yield* spawner.spawn(ChildProcess.make("sh", ["-c", "sleep 30 & echo $!; wait"]))
+          yield* Effect.addFinalizer(() => shell.kill().pipe(Effect.ignore))
+          const sleepPid = Number((yield* shell.stdout.pipe(Stream.decodeText, Stream.take(1), Stream.mkString)).trim())
+          const shellPid = Number(shell.pid)
+          const processes = yield* Effect.gen(function* () {
+            return yield* Processes
+          }).pipe(
+            Effect.provide(
+              processesOn({
+                liveness: Platform.liveness,
+                terminate: () => {
+                  throw new Error("this test must not signal a process")
+                },
+                pid: 1,
+                uid: undefined,
+              }),
+            ),
+          )
+          const tree = yield* processes.tree(sleepPid)
+          assert.deepStrictEqual(
+            tree?.toSorted((a, b) => a - b),
+            [shellPid, sleepPid].toSorted((a, b) => a - b),
+          )
+          assert.isFalse(tree!.includes(process.pid))
+        }).pipe(Effect.scoped),
+    )
+
     it.effect("signal 0 is only ever asked about a positive integer PID; no user id, no listing", () =>
       Effect.gen(function* () {
         const asked: Array<number> = []

@@ -18,6 +18,10 @@ export const CWD_WAIT = Duration.seconds(10)
 
 export const HARNESS_EXIT_WAIT = Duration.seconds(10)
 
+export const TREE_EXIT_WAIT = Duration.seconds(10)
+
+const TREE_EXIT_POLL = Duration.millis(100)
+
 export const stopAgent = (
   h: Runtime,
   terminal: Terminal,
@@ -146,7 +150,19 @@ export const make = Effect.gen(function* () {
         return { state: "exited" as const, why: "" }
       })
 
+      const harnessPid = session.metadata.pid
+      const owned =
+        session.address.machine === "local" && validPid(harnessPid) ? yield* processes.tree(harnessPid) : undefined
       const pane = yield* closeTerminal()
+      if (pane !== "kept" && owned !== undefined) {
+        const deadline = (yield* Clock.currentTimeMillis) + Duration.toMillis(TREE_EXIT_WAIT)
+        for (;;) {
+          const alive: Array<number> = []
+          for (const pid of owned) if ((yield* processes.liveness(pid)) !== "exited") alive.push(pid)
+          if (alive.length === 0 || (yield* Clock.currentTimeMillis) >= deadline) break
+          yield* Effect.sleep(TREE_EXIT_POLL)
+        }
+      }
       const confirmed =
         pane === "kept"
           ? { state: "unknown" as const, why: "its terminal was not closed, so nothing is proven" }
