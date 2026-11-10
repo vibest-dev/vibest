@@ -158,6 +158,12 @@ const once = async ({ area, check }: (typeof checks)[number], evidenceName: stri
   const foreign = world.foreignTerminals()
   if (foreign.length > 0) problem(`terminals outside this check's herdr sessions: ${foreign.join(", ")}`)
   await world.close().catch((e: unknown) => problem(`closing the world: ${String(e)}`))
+  const ledger = await world.vibest(["daemon", "import-check"]).catch((e: unknown) => ({
+    code: 1,
+    stdout: "",
+    stderr: String(e),
+  }))
+  if (ledger.code !== 0) problem(`import-check of the world's database: ${ledger.stderr}${ledger.stdout}`)
   const left = await herdrSessionsLeft(world.herdrSession)
   if (left.length > 0) problem(`herdr sessions left after the check: ${left.join(", ")}`)
   await fs.writeFile(path.join(evidence, `${evidenceName}.json`), redact(JSON.stringify(world.log, null, 2)))

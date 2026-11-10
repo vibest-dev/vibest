@@ -44,7 +44,7 @@ const readRows = (w: World, sql: string, ...args: Array<string>) => {
 }
 
 const turnStarts = (w: World, sub: string) =>
-  row<{ n: number }>(w, "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'turn.start'", sub)?.n ?? 0
+  row<{ n: number }>(w, "SELECT count(*) AS n FROM turn WHERE session_id = ?", sub)?.n ?? 0
 
 const recordingModel = (answer: (messages: Array<Message>) => string | Promise<string>) => {
   const requests: Array<Array<Message>> = []

@@ -491,7 +491,7 @@ const checks: ReadonlyArray<Check> = [
           "B recorded a typed turn",
           () =>
             (s!.bDb<{ n: number }>(
-              "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'turn.start' AND json_extract(data, '$.typed') IS NOT NULL",
+              "SELECT count(*) AS n FROM turn WHERE session_id = ? AND typed IS NOT NULL",
               bRow!.id!,
             )?.n ?? 0) === 1,
           60_000,

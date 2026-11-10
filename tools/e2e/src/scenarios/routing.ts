@@ -211,29 +211,28 @@ const checks: ReadonlyArray<Check> = [
         )
         await w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
         const main = await mainSession(w)
-        const events = (type: string) => {
+        const processes = () => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
             return db
-              .query<{ id: number; data: string }, [string, string]>(
-                "SELECT id, data FROM event WHERE session_id = ? AND type = ? ORDER BY id",
+              .query<{ harness: string; readyAt: number | null; endedAt: number | null }, [string]>(
+                "SELECT harness, ready_at AS readyAt, ended_at AS endedAt FROM process WHERE session_id = ? ORDER BY id",
               )
-              .all(main.id, type)
+              .all(main.id)
           } finally {
             db.close()
           }
         }
-        await until("the main agent ready", () => events("process.ready").length > 0, 60_000)
+        await until("the main agent ready", () => processes().some((p) => p.readyAt !== null), 60_000)
         const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
         await herdr(socket, "pane.close", { pane_id: main.address.id.split("/").pop() })
-        await until("the main agent's exit recorded", () => events("process.end").length > 0, 30_000)
+        await until("the main agent's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
         const again = await w.vibest(["--headless"], { env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 60_000 })
         expect(again.code === 0, `restart without --harness: ${again.code} ${again.stderr}${again.stdout}`)
-        await until("a second start", () => events("process.start").length === 2, 30_000)
-        const started = JSON.parse(events("process.start")[1]!.data) as { harness?: string }
+        await until("a second start", () => processes().length === 2, 30_000)
+        const started = processes()[1]!
         expect(started.harness === "pi", `restarted with ${JSON.stringify(started)}`)
-        const startedAt = events("process.start")[1]!.id
-        await until("the restarted Pi ready", () => events("process.ready").some((e) => e.id > startedAt), 60_000)
+        await until("the restarted Pi ready", () => processes()[1]?.readyAt != null, 60_000)
       } finally {
         model.stop()
       }

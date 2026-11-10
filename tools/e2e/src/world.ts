@@ -688,22 +688,13 @@ export const removeExpiredWorlds = async (
 }
 
 export const SESSIONS = `(SELECT s.id, s.project_id, s.role AS agent_type, s.directory, s.created_at, s.ended_at,
-    json_extract(p.data, '$.harness') AS harness, json_extract(p.data, '$.provider') AS provider,
-    CASE WHEN p.id IS NULL THEN NULL ELSE json_object('kind', json_extract(p.data, '$.runtime'),
-      'machine', json_extract(p.data, '$.machine'), 'id', json_extract(p.data, '$.terminal')) END AS runtime,
-    coalesce((SELECT json_extract(e.data, '$.conversation') FROM event e WHERE e.process_id = p.id
-      AND e.type IN ('process.ready', 'process.conversation') AND json_extract(e.data, '$.conversation') IS NOT NULL
-      ORDER BY e.id DESC LIMIT 1), json_extract(p.data, '$.resume')) AS harness_session_id,
-    coalesce((SELECT json_extract(e.data, '$.pid') FROM event e WHERE e.process_id = p.id AND e.type = 'process.ready'
-      AND json_extract(e.data, '$.pid') IS NOT NULL ORDER BY e.id DESC LIMIT 1), json_extract(p.data, '$.pid')) AS pid,
-    (SELECT json_extract(e.data, '$.integration.version') FROM event e WHERE e.process_id = p.id
-      AND e.type = 'process.ready' AND json_extract(e.data, '$.integration') IS NOT NULL
-      ORDER BY e.id DESC LIMIT 1) AS version,
-    (SELECT e.at FROM event e WHERE e.process_id = p.id AND e.type = 'process.end') AS exited_at
-  FROM session s LEFT JOIN event p ON p.id = (SELECT max(id) FROM event WHERE session_id = s.id AND type = 'process.start'))`
+    p.harness, p.provider,
+    CASE WHEN p.id IS NULL THEN NULL ELSE json_object('kind', p.runtime, 'id', coalesce(p.terminal, '')) END AS runtime,
+    coalesce(p.conversation, p.resume) AS harness_session_id, p.pid, p.integration_version AS version,
+    p.ended_at AS exited_at
+  FROM session s LEFT JOIN process p ON p.id = (SELECT max(id) FROM process WHERE session_id = s.id))`
 
-export const TURNS = `(SELECT t.id, t.session_id, coalesce(json_extract(te.data, '$.status'), 'working') AS status
-  FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
+export const TURNS = `(SELECT id, session_id, coalesce(status, 'working') AS status FROM turn)`
 
 export const readDb = (file: string) => {
   const db = new Database(file, { readonly: true })
@@ -764,35 +755,6 @@ export const copyEvidence = async (from: string, to: string, words: ReadonlyArra
       redactWith(await fsPromises.readFile(source, "latin1"), secrets(), words),
       "latin1",
     )
-  }
-}
-
-export const knownSessions = async (
-  w: World,
-  sessions: Record<string, string>,
-  directory = w.repository,
-  harness = "claude",
-) => {
-  await w.ok(["ls"])
-  const db = new Database(path.join(w.vibestHome, "vibest.db"))
-  try {
-    const project = crypto.randomUUID()
-    db.run("INSERT INTO project (id) VALUES (?)", [project])
-    for (const [id, agent] of Object.entries(sessions)) {
-      const at = Date.now()
-      db.run(
-        "INSERT INTO session (id, project_id, role, name, machine, directory, created_at) VALUES (?, ?, ?, '', 'local', ?, ?)",
-        [id, project, agent, directory, at],
-      )
-      db.run("INSERT INTO event (at, session_id, type, data) VALUES (?, ?, 'process.start', ?)", [
-        at,
-        id,
-        JSON.stringify({ harness, runtime: "", machine: "local", terminal: "" }),
-      ])
-    }
-    return project
-  } finally {
-    db.close()
   }
 }
 

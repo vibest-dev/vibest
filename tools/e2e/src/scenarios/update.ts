@@ -20,11 +20,11 @@ import {
 } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
-const userVersion = (w: World, v?: number) => {
+const applicationId = (w: World, v?: number) => {
   const db = new Database(path.join(w.vibestHome, "vibest.db"))
   try {
-    if (v !== undefined) db.run(`PRAGMA user_version = ${v}`)
-    return db.query<{ user_version: number }, []>("PRAGMA user_version").get()!.user_version
+    if (v !== undefined) db.run(`PRAGMA application_id = ${v}`)
+    return db.query<{ application_id: number }, []>("PRAGMA application_id").get()!.application_id
   } finally {
     db.close()
   }
@@ -246,8 +246,8 @@ const checks: ReadonlyArray<Check> = [
         expect(started.code === 0, `old vibest daemon exited ${started.code}: ${out(started)}`)
         const before = await w.daemonPid()
         expect(before !== undefined, "no vibestd pid")
-        schema = userVersion(w)
-        userVersion(w, schema + 1)
+        schema = applicationId(w)
+        applicationId(w, schema + 1)
 
         const refused = await vibest(["update"])
         const said = out(refused)
@@ -322,7 +322,7 @@ const checks: ReadonlyArray<Check> = [
         await server.stop(true)
         await w.stopDaemon()
         await putMovedDatabaseBack(w)
-        if (schema !== undefined) userVersion(w, schema)
+        if (schema !== undefined) applicationId(w, schema)
       }
     },
   },
@@ -340,8 +340,8 @@ const checks: ReadonlyArray<Check> = [
       expect(started.code === 0, `old vibest daemon exited ${started.code}: ${out(started)}`)
       const before = await w.daemonPid()
       expect(before !== undefined, "no vibestd pid")
-      const schema = userVersion(w)
-      userVersion(w, schema + 1)
+      const schema = applicationId(w)
+      applicationId(w, schema + 1)
       try {
         const refused = await w.tty(["daemon", "restart"], "y\n", { timeoutMs: 120_000 })
         const said = out(refused)
@@ -356,7 +356,7 @@ const checks: ReadonlyArray<Check> = [
         expect(!/Replace vibestd/.test(said), `it asked to replace vibestd: ${said}`)
         expect((await w.daemonPid()) === before && alive(before!), `vibestd ${before} -> ${await w.daemonPid()}`)
         await w.ok(["ls"])
-        userVersion(w, schema)
+        applicationId(w, schema)
         const replaced = await w.tty(["daemon", "restart"], "y\n", { timeoutMs: 120_000 })
         expect(replaced.code === 0, `daemon restart once the database fits exited ${replaced.code}: ${out(replaced)}`)
         await until("a new vibestd", async () => {
@@ -366,7 +366,7 @@ const checks: ReadonlyArray<Check> = [
         expect(!alive(before!), `old vibestd ${before} still alive`)
         await w.ok(["ls"])
       } finally {
-        if (userVersion(w) !== schema) userVersion(w, schema)
+        if (applicationId(w) !== schema) applicationId(w, schema)
         await w.stopDaemon()
       }
     },

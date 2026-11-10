@@ -55,17 +55,15 @@ export const piProject = async (w: World, name: string) => {
   }
   const pid = (id: string) => q<{ pid: number | null }>(`SELECT pid FROM ${SESSIONS} s WHERE id = ?`, id)?.pid ?? null
   const turnEnds = (id: string) =>
-    q<{ n: number }>("SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'turn.end'", id)?.n ?? 0
+    q<{ n: number }>("SELECT count(*) AS n FROM turn WHERE session_id = ? AND status IS NOT NULL", id)?.n ?? 0
   const results = (id: string) =>
     q<{ n: number }>("SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'result'", id)?.n ?? 0
   const lastEnd = (id: string) => {
-    const end = q<{ data: string }>(
-      "SELECT data FROM event WHERE session_id = ? AND type = 'turn.end' ORDER BY id DESC LIMIT 1",
+    return q<{ status: string; report: number | null }>(
+      `SELECT status, report_seq AS report FROM turn WHERE session_id = ? AND status IS NOT NULL
+        ORDER BY ended_at DESC, id DESC LIMIT 1`,
       id,
     )
-    return end === undefined
-      ? undefined
-      : (JSON.parse(end.data) as { status?: string; report?: number; output?: string })
   }
   const exited = (id: string) =>
     q<{ n: number }>(`SELECT count(*) AS n FROM ${SESSIONS} s WHERE id = ? AND exited_at IS NOT NULL`, id)?.n === 1
@@ -82,11 +80,8 @@ export const piProject = async (w: World, name: string) => {
       text,
     )?.n ?? 0
   const idle = (id: string) =>
-    q<{ id: number }>(
-      `SELECT t.id AS id FROM event t WHERE t.session_id = ? AND t.type = 'turn.start'
-        AND NOT EXISTS (SELECT 1 FROM event e WHERE e.turn_id = t.id AND e.type = 'turn.end')`,
-      id,
-    ) === undefined && turnEnds(id) > 0
+    q<{ id: number }>("SELECT id FROM turn WHERE session_id = ? AND status IS NULL", id) === undefined &&
+    turnEnds(id) > 0
   const vibestSend = (id: string, message: string) => w.ok(["send", id, "--", message], { cwd: repo, env })
   const log = () => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
   const close = async () => {
@@ -171,8 +166,7 @@ const rpc = (socket: string, method: string, params: object, headers: ReadonlyAr
 const untaken = (w: World, id: string) =>
   row<{ n: number }>(
     w,
-    `SELECT count(*) AS n FROM inbox i WHERE i.recipient_session_id = ? AND i.kind = 'task'
-      AND NOT EXISTS (SELECT 1 FROM event e WHERE e.inbox_id = i.id AND e.type = 'inbox.status')`,
+    "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND kind = 'task' AND status = 'pending'",
     id,
   )?.n === 1
 
@@ -232,7 +226,7 @@ const checks: ReadonlyArray<Check> = [
           await nothingMoreComesWithin(3_000)
           expect(p.results(sub) === 1, `${what}: ${p.results(sub)} results`)
           const end = p.lastEnd(sub)!
-          expect(typeof end.report === "number" && end.output === undefined, `${what}: turn.end ${JSON.stringify(end)}`)
+          expect(typeof end.report === "number", `${what}: turn ${JSON.stringify(end)}`)
         }
         const a = await p.runSub("a")
         await until("(a) held", () => p.model.held() > 0, 60_000)
@@ -350,9 +344,8 @@ const checks: ReadonlyArray<Check> = [
         const startTerminal = (id: string) =>
           row<{ t: string; ended: number }>(
             w,
-            `SELECT json_extract(e.data, '$.terminal') AS t,
-              EXISTS (SELECT 1 FROM event x WHERE x.process_id = e.id AND x.type = 'process.end') AS ended
-            FROM event e WHERE e.session_id = ? AND e.type = 'process.start' ORDER BY e.id DESC LIMIT 1`,
+            `SELECT coalesce(terminal, '') AS t, ended_at IS NOT NULL AS ended
+            FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1`,
             id,
           )
         let sub = ""
@@ -372,7 +365,7 @@ const checks: ReadonlyArray<Check> = [
         await until("the cut-off start's notice", () => p.notices(sub, "never finished starting") === 1, 30_000)
         const end = row<{ reason: string }>(
           w,
-          "SELECT json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ? AND type = 'process.end'",
+          "SELECT end_reason AS reason FROM process WHERE session_id = ? AND end_reason != 'superseded'",
           sub,
         )
         expect(end?.reason === "launch_failed", `its process ended ${end?.reason}`)
@@ -406,9 +399,7 @@ const checks: ReadonlyArray<Check> = [
         for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
           const id = await p.runSub(`t${attempt}`)
-          const opened = () =>
-            row<{ n: number }>(w, "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'turn.start'", id)
-              ?.n === 1
+          const opened = () => row<{ n: number }>(w, "SELECT count(*) AS n FROM turn WHERE session_id = ?", id)?.n === 1
           for (const deadline = Date.now() + 60_000; !opened(); await Bun.sleep(1))
             expect(Date.now() < deadline, `${id}: its first turn never opened`)
           await w.killDaemon(daemon)
@@ -435,8 +426,8 @@ const checks: ReadonlyArray<Check> = [
         expect(p.results(sub) === 1, `${p.results(sub)} results`)
         const input = row<{ n: number }>(
           w,
-          `SELECT count(*) AS n FROM event e JOIN inbox i ON i.id = e.inbox_id
-            WHERE e.session_id = ? AND e.type = 'inbox.status' AND i.kind = 'task' AND e.turn_id IS NOT NULL`,
+          `SELECT count(*) AS n FROM event e JOIN inbox i ON i.id = e.data ->> '$.inbox'
+            WHERE e.session_id = ? AND e.type = 'inbox.moved' AND i.kind = 'task' AND e.data ->> '$.turn' IS NOT NULL`,
           sub,
         )?.n
         expect(input === 1, `the task is the input of ${input} turns`)
@@ -456,8 +447,11 @@ const checks: ReadonlyArray<Check> = [
         const marked = (id: string) =>
           row<{ e: number | null }>(w, "SELECT ended_at AS e FROM session WHERE id = ?", id)?.e != null
         const processEnded = (id: string) =>
-          row<{ n: number }>(w, "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'process.end'", id)
-            ?.n === 1
+          row<{ n: number }>(
+            w,
+            "SELECT count(*) AS n FROM process WHERE session_id = ? AND ended_at IS NOT NULL AND end_reason != 'superseded'",
+            id,
+          )?.n === 1
         let sub = ""
         let pane = ""
         let worktree = ""
@@ -480,7 +474,7 @@ const checks: ReadonlyArray<Check> = [
         const ended = () =>
           row<{ reason: string }>(
             w,
-            "SELECT json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ? AND type = 'process.end'",
+            "SELECT end_reason AS reason FROM process WHERE session_id = ? AND end_reason != 'superseded'",
             sub,
           )?.reason
         await until("its process ended", () => ended() !== undefined, 30_000)
@@ -533,7 +527,7 @@ const checks: ReadonlyArray<Check> = [
         const ends = () =>
           row<{ n: number; reason: string }>(
             w,
-            "SELECT count(*) AS n, json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ? AND type = 'process.end'",
+            "SELECT count(*) AS n, end_reason AS reason FROM process WHERE session_id = ? AND ended_at IS NOT NULL AND end_reason != 'superseded'",
             sub,
           )
         await until("its process ended", () => ends()?.n === 1, 30_000)

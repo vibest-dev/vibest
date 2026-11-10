@@ -243,7 +243,7 @@ const statusCore = async (
       () => {
         const saved = row<{ terminal: string }>(
           w,
-          "SELECT json_extract(data, '$.terminal') AS terminal FROM event WHERE session_id = ? AND type = 'process.start' AND json_extract(data, '$.terminal') != '' ORDER BY at DESC LIMIT 1",
+          "SELECT terminal FROM process WHERE session_id = ? AND coalesce(terminal, '') != '' ORDER BY id DESC LIMIT 1",
           sessionId,
         )
         terminal = saved?.terminal.split("/").at(-1) ?? ""
@@ -336,7 +336,7 @@ const checks: ReadonlyArray<Check> = [
           const completed = () =>
             row<{ n: number }>(
               w,
-              "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = 'turn.end'",
+              "SELECT count(*) AS n FROM turn WHERE session_id = ? AND status IS NOT NULL",
               launched.id,
             )!.n
           expect(completed() === 0, "blocked published a completed result")
@@ -380,7 +380,7 @@ const checks: ReadonlyArray<Check> = [
           )
           const conversation = row<{ conversation: string }>(
             w,
-            "SELECT json_extract(data, '$.resume') AS conversation FROM event WHERE session_id = ? AND type = 'process.start' ORDER BY at DESC LIMIT 1",
+            "SELECT resume AS conversation FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1",
             launched.id,
           )!.conversation
           await visible("native-status-completed")
