@@ -148,6 +148,22 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a harness that exits while idle notifies its creator once and leaves the completed turn as it was",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* idleSession(yield* makeRepository)
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      yield* sessions.check(id)
+      const notices = yield* sqlNotices(id)
+      assert.lengthOf(notices, 1)
+      assert.include(notices[0], `vibest peek ${id} shows its terminal; vibest send ${id} resumes it`)
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
     "launch failure rolls back the worktree and notifies the owner",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

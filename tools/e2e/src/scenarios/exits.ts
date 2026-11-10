@@ -134,13 +134,14 @@ const killedMidTurn = async (
         p.lastEnd(sub)?.status === "failed" &&
         p.lastEnd(sub)?.failure != null &&
         p.sendRow(sub, message)?.status === "failed" &&
-        p.notices(sub, "turn ended with an error") === 1 &&
-        p.notices(sub, "exited before it was delivered") === 1 &&
+        p.notices(sub, "exited during a turn") === 1 &&
+        p.notices(sub, "Not delivered") === 1 &&
+        p.notices(sub, "") === 1 &&
         p.exited(sub),
       30_000,
     )
     await recordMs(evidence, name.toUpperCase(), "exitSeenMs", Date.now() - t0)
-    expect(p.sent(sub) === 2, `${p.sent(sub)} rows sent by the killed session, not its two notices`)
+    expect(p.sent(sub) === 1, `${p.sent(sub)} rows sent by the killed session, not its one notice`)
     return { p, sub }
   } catch (e) {
     await p.close()
@@ -182,7 +183,7 @@ const checks: ReadonlyArray<Check> = [
     id: "S21",
     covers: ["S8"],
     title:
-      "pane killed mid-turn: the turn is failed (the session exited), the queued message failed with its notice, the session exited, and the creator gets one notice carrying the failure and nothing else; the time it took is recorded",
+      "pane killed mid-turn: the turn is failed (the session exited), the queued message failed, the session exited, and the creator gets one notice carrying the exit and the undelivered message, and nothing else; the time it took is recorded",
     run: async (w, evidence) => {
       const { p } = await killedMidTurn(w, evidence, "s21", async (p, id) => {
         await herdr(p.socket, "pane.close", { pane_id: p.pane(id) })

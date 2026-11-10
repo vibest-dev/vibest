@@ -279,6 +279,22 @@ export class Sessions extends Context.Service<
 
       const live = (session: SessionRow) => runtimes.route(session.runtime)
 
+      const announceExit = (session: SessionRow, duringTurn: boolean) =>
+        Effect.gen(function* () {
+          const queued = yield* db.pendingInbox(session.id)
+          const signed = queued.filter((r) => r.kind === "send" && r.sender)
+          const unsigned = queued.filter((r) => !signed.includes(r))
+          if (signed.length > 0) yield* undelivered(session, signed, `${session.id} exited before it was delivered`)
+          yield* db.setInboxStatus(
+            unsigned.map((r) => r.id),
+            "failed",
+          )
+          const lost = unsigned.map((r) => r.message).join("\n\n")
+          const text = `${session.id} (${session.harnessId}) exited${duringTurn ? " during a turn" : ""}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
+          if (duringTurn) yield* finish(session, "failed", "the harness exited", undefined, undefined, text)
+          else yield* notice(session, text)
+        })
+
       const { awaitReady, sawTurnStart, busy, busyOf, settleAfterInterrupt, interruptAgent, prompt } = sessionPrompting(
         {
           db,
@@ -461,15 +477,9 @@ export class Sessions extends Context.Service<
             terminalRunning && typeof reportedPid === "number" && (yield* processes.liveness(reportedPid)) === "exited"
           if (harnessGone || !terminalRunning) {
             const cutOff = session.startedAt === null
-            if (open && !cutOff)
-              yield* finish(
-                session,
-                "failed",
-                `the session exited (its terminal is gone or its process with it); vibest send ${id} resumes it`,
-              )
+            const announce = !cutOff && (open || session.exitedAt === null)
+            if (announce) yield* announceExit(session, open)
             if (session.exitedAt === null) {
-              if (!open && !cutOff)
-                yield* notice(session, `${id} (${session.harnessId}) exited; vibest send ${id} resumes it`)
               yield* db.updateSession(id, {
                 status: "unknown",
                 exitedAt: yield* Clock.currentTimeMillis,
@@ -478,7 +488,8 @@ export class Sessions extends Context.Service<
               yield* recount(session.runtime, session.projectId).pipe(Effect.ignore)
             }
             if (cutOff) yield* undoCutOffStart(h, session)
-            yield* dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
+            if (!announce)
+              yield* dropQueue(session, `${id} exited before it was delivered; send it again to resume the session`)
             return
           }
           if (!(yield* Ref.getAndSet(r.launchRechecked, true)))

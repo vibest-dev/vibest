@@ -77,6 +77,7 @@ export const sessionRounds = (deps: {
     error: string | undefined,
     at?: number,
     reported?: number,
+    notice?: string,
   ) {
     const failure = failureOf(error)
     yield* db.endTurn(
@@ -87,7 +88,7 @@ export const sessionRounds = (deps: {
         ...(failure === undefined ? {} : { failure }),
       },
       { turnState: end, lastActive: yield* Clock.currentTimeMillis },
-      end === "completed" && !error ? undefined : `${session.id}'s turn ended with an error: ${error}`,
+      end === "completed" && !error ? undefined : (notice ?? `${session.id}'s turn ended with an error: ${error}`),
       at,
     )
   })

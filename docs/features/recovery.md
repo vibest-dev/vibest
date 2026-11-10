@@ -10,8 +10,8 @@ does not list is refused before any pane opens, naming the model, and no session
 
 ## S21. Pane killed mid-turn
 
-When a session's pane is killed mid-turn, the turn fails with its failure, a send queued for it fails with a notice, the session ends,
-and its creator is told in a notice carrying the failure; the time it took is recorded.
+When a session's pane is killed mid-turn, the turn fails with its failure, the session ends, and its creator gets one notice that carries the failure, how to
+peek and resume it, and the text of every send that was queued for it and not delivered; the time it took is recorded.
 
 ## S22. Harness killed
 
@@ -55,4 +55,4 @@ archives the session once, with no extra notice.
 ## S51. Pane killed while idle
 
 When a session's pane is killed while it is idle, the session ends, its completed turn stays completed, and its creator
-gets exactly one notice that it exited.
+gets exactly one notice that it exited, saying how to peek and resume it.

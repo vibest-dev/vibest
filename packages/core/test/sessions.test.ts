@@ -389,7 +389,10 @@ describe.concurrent("Sessions", () => {
       assert.lengthOf(yield* db.pendingInbox(id), 0)
       assert.lengthOf(yield* db.inboxWithStatus(id, "failed"), 1)
       assert.strictEqual(yield* opens(), before)
-      assert.isTrue((yield* sqlNotices(id)).some((text) => text.includes("exited before it was delivered")))
+      const notices = yield* sqlNotices(id)
+      assert.lengthOf(notices, 1)
+      assert.include(notices[0], "exited during a turn")
+      assert.include(notices[0], "Not delivered:\n\nqueued")
     }),
   )
 
