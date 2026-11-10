@@ -438,5 +438,13 @@
     "project_id": null,
     "session_id": null,
     "data": "{\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"ids\":[\"7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f\",\"2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e\"]}"
+  },
+  {
+    "seq": 56,
+    "at": 1793000056000,
+    "type": "process.started",
+    "project_id": "0f8e2d4c-5b6a-4e3f-9a1b-2c3d4e5f6a7b",
+    "session_id": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "data": "{\"harness\":\"claude\",\"routing\":{\"decidedBy\":{\"harness\":\"harness-choice\",\"model\":\"quota\"},\"trace\":[{\"plugin\":\"harness-choice\",\"hook\":\"harness.choose\",\"outcome\":\"ok\",\"ms\":2,\"changes\":[{\"field\":\"harness\",\"from\":\"cursor\",\"to\":\"claude\",\"overwrote\":\"user\"}]},{\"plugin\":\"quota\",\"hook\":\"model.choose\",\"outcome\":\"refused\",\"ms\":1,\"changes\":[],\"reason\":\"quota full\"},{\"plugin\":\"broken\",\"hook\":\"model.choose\",\"outcome\":\"crashed\",\"ms\":0.5,\"changes\":[],\"error\":\"TypeError: x is undefined\"}]},\"runtime\":\"herdr\"}"
   }
 ]

@@ -203,7 +203,10 @@ export const encodeData = <D extends Defined>(
   definition: D,
   data: D["data"]["Type"],
 ): Effect.Effect<string, Schema.SchemaError> =>
-  Schema.encodeUnknownEffect(definition.data)(data, strict).pipe(Effect.map((encoded) => JSON.stringify(encoded)))
+  Schema.encodeUnknownEffect(definition.data)(data, strict).pipe(
+    Effect.map((encoded) => JSON.stringify(encoded)),
+    Effect.tap((json) => Schema.decodeUnknownEffect(definition.data)(JSON.parse(json), strict)),
+  )
 
 export const decodeRow = (row: Row): Effect.Effect<Fact, UnknownFact> => {
   const refuse = (message: string) => new UnknownFact({ seq: row.seq, type: row.type, message })
