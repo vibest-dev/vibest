@@ -35,6 +35,25 @@ describe("event catalog", () => {
     }
   })
 
+  it("the samples cover every optional key of a routing trace entry and change", () => {
+    const traces = rows
+      .filter((row) => row.type === "process.started")
+      .flatMap(
+        (row) => (JSON.parse(row.data) as { routing?: { trace: Array<Record<string, unknown>> } }).routing?.trace ?? [],
+      )
+    const changes = traces.flatMap((entry) => entry["changes"] as Array<Record<string, unknown>>)
+    for (const key of ["reason", "error"])
+      assert.isTrue(
+        traces.some((entry) => Object.hasOwn(entry, key)),
+        key,
+      )
+    for (const key of ["from", "to", "overwrote"])
+      assert.isTrue(
+        changes.some((change) => Object.hasOwn(change, key)),
+        key,
+      )
+  })
+
   it("catalog keys are the type names of their definitions", () => {
     for (const [type, definition] of Object.entries(Catalog)) assert.strictEqual(definition.type, type)
   })
@@ -45,6 +64,18 @@ describe("event catalog", () => {
       assert.isTrue(Exit.isFailure(exit))
     }),
   )
+
+  for (const ms of [Number.NaN, Number.POSITIVE_INFINITY])
+    it.effect(`encoding refuses data whose JSON does not read back (trace ms ${ms})`, () =>
+      Effect.gen(function* () {
+        const exit = yield* encodeData(Catalog["process.started"], {
+          harness: "pi",
+          runtime: "herdr",
+          routing: { decidedBy: {}, trace: [{ plugin: "p", hook: "h", outcome: "ok", ms, changes: [] }] },
+        }).pipe(Effect.exit)
+        assert.isTrue(Exit.isFailure(exit))
+      }),
+    )
 
   it.effect("encoding refuses an empty string where a key must be absent or non-empty", () =>
     Effect.gen(function* () {

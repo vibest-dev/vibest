@@ -324,7 +324,9 @@ None for now. Later: delete whole sessions that ended more than N days ago, with
 `packages/schema/src/event.ts` defines the facts of the next storage shape: 25 types, each with its envelope (`project`,
 `session` or `none`) and a Schema for its data. Nothing reads or writes them yet; the live database is still the shape
 above. A key marked optional is absent, never null, and a string key that is present is never empty. Encoding and
-decoding refuse keys a definition does not have.
+decoding refuse keys a definition does not have, and encoding fails when its JSON does not decode back (a number that is
+NaN or infinite becomes null in JSON). `Routing` and `TraceEntry` (with `Change`) from `packages/schema/src/plugin.ts`
+are part of the catalog contract through `process.started.routing`: change them by the same rules as a fact.
 
 Changing the catalog: add an optional key directly; a change of meaning or structure gets a new type name and the old
 definition stays in the catalog. Both raise `CATALOG_VERSION` by one. `packages/schema/test/event-rows.json` holds fixed
