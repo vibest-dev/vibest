@@ -335,3 +335,28 @@ definition stays in the catalog. Both raise `CATALOG_VERSION` by one. Changing t
 projector rule) raises `PROJECTION_VERSION` instead; a database with another projection version is rebuilt by replaying
 its log, so the read model needs no migration. `packages/schema/test/event-rows.json` holds fixed sample rows that must
 keep decoding and re-encoding to the same bytes: add rows to it, never change or remove one.
+
+### Importing a v1 database (not used yet)
+
+`packages/core/src/import/` turns the v1 tables into catalog facts. `translate.ts` is pure: it reads a snapshot of every
+v1 table and gives the facts in v1 event order (an inbox row's `inbox.queued` is translated before the row's first other event, since an older migration backfilled some queued events with later ids), with `seq` starting above every v1 event id and inbox id, so an old
+inbox id never names a new row. It fails, naming the v1 row, on an event type it does not know, a reference to a missing
+process, turn or inbox row, an inbox row without its `inbox.queued` event, a turn end whose report is not an event id, and any
+`machine` other than `local`; four known oddities and every second end of an already ended turn are counted instead and
+printed by the report. All problems are collected and reported together. `importInPlace` runs in one transaction on the database
+file (no backup copy, foreign key checks deferred so it also works inside an outer transaction): read, translate, drop the v1 tables, install the ledger, append the facts, then the referee.
+`importCheck` does the same from a read-only source into a `:memory:` database; `vibest daemon import-check --v2` prints
+its report and exits non-zero when the referee finds a difference. Without `--v2` the command only checks that the
+database opens, as before.
+
+The referee (`referee.ts`) reads both databases through the same set of reads and compares them field by field: session
+rows and columns, projects, coordinators, inbox rows (as the `Db` reads them, and the stored columns of every row including tasks), briefs, both latest-report fences, `hadTerminal`,
+`untakenTask`, `rescheduleSource`, `queuedBy`, `spawnedBy`, machines, peers, each peer's outbox, and each `peer:` key.
+`v1-read.ts` holds frozen copies of the v1 `Db` reads and must not change after the import ships; `ledger-read.ts` holds
+the same reads over the read model, and the `Db` that moves onto the ledger reads through them so the referee keeps
+judging what users see. A v1 subagent whose harness changed before it first opened and whose next placeholder then
+failed to launch reads as still alive in v1 and ended in v2; the referee fails such a database rather than guess.
+
+`packages/cli/test/fixtures/v1/*.sql` are v1 databases made by `generate.ts` through the v1 `Db` (run it with
+`bun packages/cli/test/fixtures/v1/generate.ts` while the v1 `Db` still exists); `referee-fails.sql` is the case above.
+`tools/bench/src/import-check.ts` seeds 100 000 v1 events and times `import-check --v2`; it must stay under 30 s.

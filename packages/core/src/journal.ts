@@ -1,12 +1,12 @@
 import {
+  Catalog,
   CATALOG_VERSION,
-  type Catalog,
   decodeRow,
   encodeData,
   type Fact,
   type FactType,
   type Row,
-  type UnknownFact,
+  UnknownFact,
 } from "@vibest/schema/event"
 import { Clock, Context, Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
@@ -141,23 +141,65 @@ const firstDifference = (
 export const equalToReplay = (stored: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const scratch = yield* SqlClient.SqlClient
-    yield* scratch.withTransaction(
+    const tables = Object.keys(PROJECTION_TABLES) as Array<keyof typeof PROJECTION_TABLES>
+    const storedTables = yield* stored.withTransaction(
       Effect.gen(function* () {
-        for (const statement of LOG_SCHEMA) yield* scratch.unsafe(statement)
-        yield* copyLog(stored, scratch, 0)
+        yield* scratch.withTransaction(
+          Effect.gen(function* () {
+            for (const statement of LOG_SCHEMA) yield* scratch.unsafe(statement)
+            yield* copyLog(stored, scratch, 0)
+          }),
+        )
+        return yield* Effect.forEach(tables, (table) => dump(stored, table))
       }),
     )
     yield* rebuild
-    for (const table of Object.keys(PROJECTION_TABLES) as Array<keyof typeof PROJECTION_TABLES>) {
-      const difference = firstDifference(
-        table,
-        PROJECTION_TABLES[table],
-        yield* dump(stored, table),
-        yield* dump(scratch, table),
-      )
+    for (const [i, table] of tables.entries()) {
+      const difference = firstDifference(table, PROJECTION_TABLES[table], storedTables[i]!, yield* dump(scratch, table))
       if (difference !== undefined) return difference
     }
     return undefined
+  })
+
+type Envelope = {
+  readonly seq?: number
+  readonly at: number
+  readonly type: FactType
+  readonly projectId?: string | undefined
+  readonly sessionId?: string | undefined
+}
+
+const write = (sql: SqlClient.SqlClient, envelope: Envelope, data: string) =>
+  Effect.gen(function* () {
+    const [row] = yield* sql<{ seq: number }>`INSERT INTO event (seq, at, type, project_id, session_id, data)
+      VALUES (${envelope.seq ?? null}, ${envelope.at}, ${envelope.type}, ${envelope.projectId ?? null},
+        ${envelope.sessionId ?? null}, ${data}) RETURNING seq`
+    const fact = yield* decodeRow({
+      seq: row!.seq,
+      at: envelope.at,
+      type: envelope.type,
+      project_id: envelope.projectId ?? null,
+      session_id: envelope.sessionId ?? null,
+      data,
+    })
+    yield* project(fact, sql)
+    return fact
+  })
+
+export const append = (fact: Fact) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const data = yield* encodeData(Catalog[fact.type], fact.data as never).pipe(
+      Effect.mapError(
+        (cause) =>
+          new UnknownFact({
+            seq: fact.seq,
+            type: fact.type,
+            message: `event ${fact.seq}: ${fact.type} does not encode: ${cause.message}`,
+          }),
+      ),
+    )
+    return yield* write(sql, fact, data)
   })
 
 export const makeJournal = (published: (facts: ReadonlyArray<Fact>) => Effect.Effect<void>) =>
@@ -208,17 +250,9 @@ export const makeJournal = (published: (facts: ReadonlyArray<Fact>) => Effect.Ef
         const projectId = yield* projectOf(definition, input)
         const at = input.at ?? (yield* Clock.currentTimeMillis)
         const data = yield* encodeData(definition, input.data as never).pipe(Effect.orDie)
-        const [row] = yield* sql<{ seq: number }>`INSERT INTO event (at, type, project_id, session_id, data)
-          VALUES (${at}, ${definition.type}, ${projectId ?? null}, ${input.sessionId ?? null}, ${data}) RETURNING seq`
-        const fact = yield* decodeRow({
-          seq: row!.seq,
-          at,
-          type: definition.type,
-          project_id: projectId ?? null,
-          session_id: input.sessionId ?? null,
-          data,
-        }).pipe(Effect.orDie)
-        yield* project(fact, sql)
+        const fact = yield* write(sql, { at, type: definition.type, projectId, sessionId: input.sessionId }, data).pipe(
+          Effect.orDie,
+        )
         buffer.facts.push(fact)
         return fact.seq
       })

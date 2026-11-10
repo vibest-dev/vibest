@@ -12,6 +12,7 @@ import { DatabaseOpenFailed, inspectSchema, SchemaMismatch, SQL_NAMES } from "@v
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
+import { importCheck } from "@vibest/core/import/import"
 import { MachineTransport } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
 import { messageOf } from "@vibest/core/plugin-sources"
@@ -27,6 +28,7 @@ import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
 import { FetchHttpClient } from "effect/http"
+import { SqlClient } from "effect/sql"
 
 import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
 
@@ -115,6 +117,21 @@ export const checkDatabase: Host["checkDatabase"] = (filename) =>
     if (!(yield* Effect.promise(() => Bun.file(filename).exists()))) return
     yield* inspectFile(filename)
   })
+
+const checkLedgerImport: Host["checkLedgerImport"] = (filename) =>
+  Effect.gen(function* () {
+    if (!(yield* Effect.promise(() => Bun.file(filename).exists())))
+      return yield* new DatabaseOpenFailed({ file: filename, message: "there is no database file" })
+    yield* inspectFile(filename)
+    const source = yield* Layer.build(sqliteLayer(filename, true)).pipe(
+      Effect.flatMap((context) => SqlClient.SqlClient.pipe(Effect.provide(context))),
+      Effect.mapError((e) => new DatabaseOpenFailed({ file: filename, message: e.message })),
+    )
+    return yield* importCheck(source).pipe(
+      Effect.provide(sqliteLayer(":memory:", false)),
+      Effect.catchTag("SqlError", (e) => new DatabaseOpenFailed({ file: ":memory:", message: e.message })),
+    )
+  }).pipe(Effect.scoped)
 
 export const runMain = BunRuntime.runMain
 
@@ -329,7 +346,7 @@ export const replacements: LayerNode.Replacements = [
   HostFacts.node.replace(Layer.succeed(HostFacts, { name: os.hostname(), id: hostId, pid: process.pid })),
 ]
 
-export const daemon: Host = { lock, checkDatabase }
+export const daemon: Host = { lock, checkDatabase, checkLedgerImport }
 
 export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")

@@ -76,7 +76,7 @@ same graph. The RPC and HTTP servers list the whole services group (`packages/se
 `deps`, so the socket and the HTTP port bind only after every service is built, whatever the order of the roots. The main Agents' `vibest --env` values live
 in vibestd's memory only (never stored, logged or sent); a handoff passes them to the next vibestd in its environment
 (`VIBEST_HANDOFF_ENV`), which `vibest daemon --import` reads and removes before anything starts, and a handoff first
-has the new binary check read-only that it can open the database (`vibest daemon import-check`). The pairs go on the
+has the new binary check read-only that it can open the database (`vibest daemon import-check`, waited on for up to 120 s). The pairs go on the
 pane's environment, not into the typed command, so they stay out of the shell history; the pane gets them in one
 variable a shell rc does not set, since an rc that exports the names themselves would win.
 
