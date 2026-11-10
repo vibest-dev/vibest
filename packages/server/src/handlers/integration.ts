@@ -1,12 +1,32 @@
+import { Db } from "@vibest/core/db"
 import { harnessCatalog, Harnesses, unprovided } from "@vibest/core/harness"
-import { Integration } from "@vibest/core/integration"
+import { type HookCaller, Integration } from "@vibest/core/integration"
 import { forProvider } from "@vibest/core/models"
 import { Caller, InvalidCaller } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
+import type * as Headers from "effect/http/Headers"
 
-export const integrationHandlers = Effect.gen(function* () {
+import { noteOpen, reader } from "../gates.ts"
+import type { Handlers } from "./caller.ts"
+
+export const make = Effect.gen(function* () {
+  const db = yield* Db
   const harnesses = yield* Harnesses
   const integration = yield* Integration
+
+  const hook = (
+    sessionId: string,
+    harness: string,
+    headers: Headers.Headers,
+    run: (who: HookCaller) => Effect.Effect<void>,
+  ) =>
+    Effect.gen(function* () {
+      yield* noteOpen(db, reader(headers), sessionId)
+      const row = yield* db.sessionIdentity(sessionId)
+      if (!row || row.harness !== harness) return
+      yield* run({ id: row.id, agent: row.agent, harness })
+    }).pipe(Effect.orDie)
+
   return {
     "Harnesses.List": ({ provider }: { readonly provider?: string | undefined }) =>
       Effect.map(harnessCatalog, (choices) =>
@@ -32,5 +52,11 @@ export const integrationHandlers = Effect.gen(function* () {
         const answer = definition.guardAnswer === undefined ? reason : definition.guardAnswer(reason)
         return answer === undefined ? {} : { answer }
       }),
-  }
+
+    TurnEnd: ({ sessionId, harness, event }, { headers }) =>
+      hook(sessionId, harness, headers, (who) => integration.turnEnd(who, event)),
+
+    Prompt: ({ sessionId, harness, event }, { headers }) =>
+      hook(sessionId, harness, headers, (who) => integration.prompt(who, event)),
+  } satisfies Handlers
 })
