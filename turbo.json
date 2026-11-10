@@ -41,7 +41,7 @@
     },
     "//#e2e": {
       "dependsOn": ["@vibest/cli#build"],
-      "inputs": ["tools/e2e/src/**", "docs/testing/feature-map.md"],
+      "inputs": ["tools/e2e/src/**", "docs/features/**"],
       "outputs": [],
       "cache": true
     }

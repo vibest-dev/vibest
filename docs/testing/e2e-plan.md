@@ -220,3 +220,45 @@ layers. Concurrent tests of one file share a worker, and Vitest's 5 s default is
 overlap, so the timeout is 30 s. `vitest.setup.ts` drops `PI_PACKAGE_DIR`: a Pi install directory the parent exported
 may be gone when a child starts, and a test that starts `pi` would then read version 0.0.0 and exit before herdr sees
 it; the install beside `pi` is the one to use.
+
+## 5. Capabilities and their proof
+
+The capabilities are specified in [docs/features](../features/), one file per area, in plain language: each has an id
+and says when it counts as working. That text is the authority; a check must match it. Which check proves an id lives
+here, on the proof side: an E2E check proves its own id (`S10-start` and `S10-pi` prove `S10`) and the ids in its
+`covers`. `pnpm verify` reads every id in docs/features and fails when one has no gate check and is not in its list of
+ids proven by hand (`tools/verify/src/feature-ids.ts`), or when a check names an id no feature file has; the ids
+proven by hand are printed as skipped, never as passed. I6 is the runner's own check after every run.
+
+Every check that runs a turn runs it on a fake model server (`tools/e2e/src/fake-model.ts`: Anthropic Messages for
+Claude, OpenAI-compatible for Pi) with shadow harness config, so its prompts and answers are scripted; no gate check runs
+a real model. Proven by hand, with evidence:
+
+- D9 needs a newer release published to npm.
+- I5 and I10 need the user's own Cursor login (`pnpm e2e --tier agent I5`). Cursor cannot run on a fake model:
+  `cursor-agent --endpoint` speaks Cursor's own backend protocol, not a model API a fake can answer, and a real model
+  cannot be held between hook events.
+- S39 depends on timing: the Claude plugin polls every second and the Pi stream claims each message as it is queued, so
+  whether two reports share one delivery depends on when they are queued.
+- U3 has no release path that reaches it while releases share a schema; `rpc.test.ts` (Daemon.Handoff with a failing
+  import check) proves it in `pnpm test`.
+
+Notes on particular checks:
+
+- U2, U4 and U6 start from an old install that is a copy of this build whose version is patched to an older one, until
+  a published previous release shares this build's database schema; then they move to that release, downloaded once
+  into an E2E cache.
+- T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG directories; it never contacts the user's herdr-core or changes
+  harness configuration outside that temporary root. Its fixture runtime plugin (`fixtures/status-runtime.ts`) also
+  proves G7. Coordinator status coverage is the follow-up in
+  [runtime-port.md](../design/runtime-port.md#terminal-status-ownership).
+- On macOS, Cursor model discovery and subscription probes need `Library/Keychains/login.keychain-db` as a regular file
+  under HOME. H4 puts a sentinel Cursor CLI on PATH and fails if it runs; when a World changes HOME it removes the
+  inherited SSH session variables, which H4 checks in a spawned process.
+- The guard rules themselves are `guard.test.ts`; without a vibest agent, or when vibestd cannot check the call,
+  `vibest integration guard` fails with no answer (`cli.test.ts`). Cursor's deny and allow answers through vibestd are
+  `guard.test.ts`; a refused restart naming its daemon operation (D7) is `stop.test.ts`; which installer U1 runs is
+  `update.test.ts`; a main agent restarting through `VIBEST_COMMAND` (I11) is `restart.test.ts`.
+- The machines checks run two vibest homes on one host: A's vibestd dials B through a fake `ssh` first on its PATH,
+  which runs the line with B's environment; agents on both sides run in isolated hc cores on fake models.
+- S13 has no bound: S25 and S26 record how long a status change takes to reach vibestd.

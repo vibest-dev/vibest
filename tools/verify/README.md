@@ -9,11 +9,12 @@ pnpm verify daemon integration   # install as a user, then only these areas of E
 pnpm verify --no-cache           # before a release: every check runs, the whole gate on both installs
 ```
 
-Before anything else, verify reads `docs/testing/feature-map.md` and the E2E checks (`bun tools/e2e/src/main.ts --list`)
-and stops when they disagree on ids: a row whose method cell is not one of `script`, `unit`, `agent`, `slow`, or
-whose id is malformed; a `script` row that no gate check names (its id, `<id>-<case>`, or in `covers`); a
-check id or covered id that is not a row; a gate check that proves a row whose method is not `script`. It compares ids,
-never the text: the row's Pass when is the authority, and the check must match it.
+Before anything else, verify reads the capability ids in `docs/features/*.md` (each `## <ID>. <name>` heading) and the
+E2E checks (`bun tools/e2e/src/main.ts --list`), and stops when they disagree: a `##` heading that is not a capability
+heading or repeats an id; a capability that no gate check proves (its id, `<id>-<case>`, or in `covers`) and that is not
+in `tools/verify/src/feature-ids.ts` as proven by hand or by a unit test; an id in those lists that no feature file has,
+or that a gate check proves; a check id or covered id that no feature file has. It compares ids, never the text: the
+feature file says when a capability counts as working, and the check must match it.
 
 A failed build, typecheck, test, pack or install stops the run; a failed E2E leg does not stop the other leg, and the
 run fails at the end naming each failed leg:
@@ -29,8 +30,8 @@ run fails at the end naming each failed leg:
    binary bytes, so it runs the smoke set (I1, I2, U1, U9, U10, H1) while its file layout (paths and links) matches the
    last one that passed the whole gate, and the whole gate when it changed. Checks whose key is unchanged are cache hits
    (docs/testing/e2e-plan.md §3).
-3. Prints how many feature-map rows the gate proved (`script` by E2E, `unit` by the tests), then one `SKIP` line per row
-   marked `agent` or `slow`: no gate script proves them, so they are reported as skipped, never as passed.
+3. Prints how many capabilities E2E checks and unit tests proved, then one `SKIP` line for each capability proven by
+   hand (D9, I5, I10, S39): no gate check proves them, so they are reported as skipped, never as passed.
 
 Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `update`, `start`, `inbox`, `exits`, `restart`, `hc`,
 `sessions`, `delivery`, `routing`, `main-agent`, `machines`, `terminal-status`; or check ids.

@@ -22,7 +22,10 @@ layer against real git with its own `HOME` and identity, and the live herdr test
 which are skipped without herdr (the last two start a real Pi when it is on `PATH`).
 
 `pnpm verify` is what says vibest works as a user gets it: run it before calling a change done, then prove the
-`agent` and `runtime` checks it lists (docs/testing/feature-map.md) with evidence. E2E gives every run a temp
+capabilities it prints as skipped (proven by hand) with evidence. What vibest can do, and when each capability counts as
+working, is specified in plain language in [docs/features/](docs/features/), one file per area, each capability under
+its id; a new or changed capability goes there, and the E2E check that proves it names that id
+(docs/testing/e2e-plan.md §5). E2E gives every run a temp
 `VIBEST_HOME` and the user's real `HOME` (the harness logins live there), reads the user's harness config without
 writing it, and leaves evidence in `tools/e2e/evidence/<run>/`. Do not run a bare `vibest` against the user's own
 `~/.vibest` or herdr session to try a change; add or run an E2E check instead.

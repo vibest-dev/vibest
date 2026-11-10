@@ -1,0 +1,47 @@
+# Daemon and protocol
+
+vibestd is the one daemon behind every vibest command in a vibest home. Each capability below says what it is and when
+it counts as working.
+
+## D1. Status without a daemon
+
+`vibest status` when no vibestd runs prints this client and says vibestd is not running. It starts nothing.
+
+## D2. Starting the daemon
+
+`vibest daemon` starts vibestd in the background. A second `vibest daemon` exits 0 and starts no second one: the vibest
+home holds one daemon's pid, and both commands exit 0.
+
+## D3. One daemon per home
+
+`vibest daemon --foreground` while one already runs does not take over: it says vibestd is already running, exits 0, and
+the running daemon is untouched.
+
+## D4. Restart when idle
+
+`vibest daemon restart` with no agent working replaces vibestd: a new process answers on the same socket.
+
+## D5. Protocol version
+
+A request without the vibest protocol header, or with an old value, is refused as a protocol mismatch, and the daemon
+keeps answering.
+
+## D6. Caller roles
+
+A caller claiming an agent or a session that vibestd does not know is refused (an invalid caller, or forbidden).
+
+## D7. Restart while agents work
+
+`vibest daemon restart` while agents work replaces vibestd. The agents keep running, queued messages are kept, and
+results and sends still arrive after the restart; agents on an old integration can be restarted in place. A daemon
+operation that has not finished refuses the restart and names itself.
+
+## D8. Update with work in flight
+
+`vibest update` while an agent is mid-turn hands vibestd over without cutting the turn off: the replacement waits for it,
+or names what blocks it.
+
+## D9. Update from the registry
+
+`vibest update` from npm's registry finds a newer published release, asks before installing it, and after the
+confirmation the running vibestd is replaced by the new version.
