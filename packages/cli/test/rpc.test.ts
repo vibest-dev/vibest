@@ -568,6 +568,11 @@ describe("vibest.sock", () => {
         incompatibleDaemon(newer.layout.socket, { protocol: PROTOCOL, version: "9.9.9", runtimes: [] }, ["vibest"]),
         undefined,
       )
+      assert.include(
+        incompatibleDaemon(newer.layout.socket, { protocol: PROTOCOL + 1, version: "9.9.9", runtimes: [] }, ["vibest"])
+          ?.message,
+        `older than vibestd 9.9.9 (pid unknown, command unknown) on ${newer.layout.socket}, which speaks protocol ${PROTOCOL + 1}. Run vibest update (again, if this was vibest update)`,
+      )
       const needs = { capability: "harnesses", method: "Harnesses.List" }
       const lacking = yield* serve({ protocol: PROTOCOL, version: "0.9.0", runtimes: [], capabilities: {} })
       const lackRefused = yield* Effect.exit(

@@ -190,7 +190,12 @@ const handoffDaemon = (old: Ping, target: { readonly version: string; readonly c
     return `vibestd ${after.version} (instance ${after.instance ?? "unknown"}) answers, not the new ${target.version}. Next: vibest update`
   })
 
-export const restartAgents = (version: string, yes: boolean, command: "vibest update" | "vibest daemon restart") =>
+export const restartAgents = (
+  version: string,
+  yes: boolean,
+  command: "vibest update" | "vibest daemon restart",
+  after = process.pid,
+) =>
   Effect.gen(function* () {
     const cwd = (yield* Path.Path).resolve(".")
     const ask = <A, E>(f: (client: VibestClient) => Effect.Effect<A, E>) =>
@@ -221,7 +226,7 @@ export const restartAgents = (version: string, yes: boolean, command: "vibest up
       )
         return yield* Console.log(`They keep the old integration; ${refused}.`)
     }
-    yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after: process.pid }))
+    yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after }))
     yield* Console.log(
       `${command} has finished. vibestd restarts ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command has exited, main agents last; one that was working continues its turn (outcomes in ${(yield* Layout).home}/vibestd.log).`,
     )
@@ -236,12 +241,15 @@ export const update = Command.make(
       ),
       Flag.withDefault(false),
     ),
+    restartAgentsAfter: Flag.Int("restart-agents-after").pipe(Flag.withHidden, Flag.optional),
   },
-  ({ yes }) =>
+  ({ yes, restartAgentsAfter }) =>
     Effect.gen(function* () {
       const isMainAgent =
         Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT"))) === Guard.COORDINATOR
       if (!isMainAgent) yield* userOnly("update")
+      if (Option.isSome(restartAgentsAfter))
+        return yield* restartAgents(VERSION, yes, "vibest update", restartAgentsAfter.value)
       const self = yield* VibestCommand
       const method = installMethod(self, Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_HARNESSES"))))
       const layout = yield* Layout
@@ -325,6 +333,21 @@ export const update = Command.make(
         return yield* new UpdateError({
           message: `vibest ${target.version}: ${failed}${back === undefined ? "" : `. To go back to vibest ${VERSION} instead: ${back}`}`,
         })
+      if (target.version !== VERSION)
+        return yield* runInherit([
+          ...target.command,
+          "update",
+          "--restart-agents-after",
+          String(process.pid),
+          ...(yes ? ["--yes"] : []),
+        ]).pipe(
+          Effect.mapError(
+            (e) =>
+              new UpdateError({
+                message: `${e.message}. vibest ${target.version} is installed and vibestd runs it; to restart the agents still on the old integration, run vibest update again`,
+              }),
+          ),
+        )
       const agents = yield* restartAgents(target.version, yes, "vibest update")
       if (agents !== undefined) return yield* new UpdateError({ message: agents })
     }),
