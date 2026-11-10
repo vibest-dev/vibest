@@ -1,21 +1,16 @@
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import type { HarnessId } from "@vibest/core/harness"
+import { Harness, type HarnessId } from "@vibest/core/harness"
 import { Sessions } from "@vibest/core/sessions"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
-import { Clock, Effect, type Scope } from "effect"
+import { Clock, Effect } from "effect"
 
-import {
-  eventsOf,
-  FakeRuntime,
-  makeRepository,
-  projectOf,
-  testLayer,
-  type TestOptions,
-  type TestServices,
-  until,
-  writeResult,
-} from "./fakes.ts"
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
+import { testEffect } from "./lib/effect.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { harnessLayer } from "./lib/harnesses.ts"
+import { eventsOf, until, writeResult } from "./lib/observe.ts"
+import { makeRepository, sessionLayer } from "./lib/session.ts"
 
 const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
   Effect.gen(function* () {
@@ -40,8 +35,9 @@ const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
     return { id, sessions, db }
   })
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
-  it.effect(name, () => program.pipe(Effect.provide(testLayer({ hooked: ["pi", "claude"], ...options }))))
+const reported = sessionLayer([Harness.node.replace(harnessLayer({ hooked: ["pi", "claude"] }))])
+
+const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) => testEffect(reported)(name, () => program)
 
 const resultCount = (id: string) => eventsOf(id, "turn.end").pipe(Effect.map((rows) => rows.length))
 
