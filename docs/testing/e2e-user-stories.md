@@ -21,11 +21,11 @@ Every prompt asks for a nonce in the final reply, so a result can be matched to 
 
 _As a developer, I start one agent on a task from my terminal and read its result when it is done._
 
-| Step                                                                                | Expect                                                                                      |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `vibest run claude "add a --verbose flag to the CLI; reply DONE-<nonce>"` in `shop` | a pane in herdr, a new worktree off `HEAD`, row `working`                                   |
-| wait                                                                                | row `idle`, turn `completed`; `vibest result <id>` holds `DONE-<nonce>` in `<agent-result>` |
-| `vibest archive <id>` after the worker pushed its branch                            | pane closed with PID proof, worktree removed, branch kept on `origin`                       |
+| Step                                                                                | Expect                                                                                |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `vibest run claude "add a --verbose flag to the CLI; reply DONE-<nonce>"` in `shop` | a pane in herdr, a new worktree off `HEAD`, row `working`                             |
+| wait                                                                                | row `idle`, turn `completed`; `vibest result <id>` holds `DONE-<nonce>` as its answer |
+| `vibest archive <id>` after the worker pushed its branch                            | pane closed with PID proof, worktree removed, branch kept on `origin`                 |
 
 Status: now. Run once per harness (Claude, Pi, Cursor).
 
@@ -38,7 +38,7 @@ the same conversation without my polling._
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `vibest` in `shop`; ask: "add CSV export and fix the login bug, in parallel" | the main Agent (coordinator) runs two workers on different harnesses; it edits no files itself                                        |
 | workers finish at different times                                            | each result arrives in the main conversation as new input, once, in arrival order; nothing is pasted while the main Agent is mid-turn |
-| a worker calls `vibest report "blocked on X"`                                | the report reaches the main conversation; the main Agent answers with `vibest send`                                                   |
+| a worker calls `vibest send <main id> "blocked on X"`                        | the message reaches the main conversation; the main Agent answers with `vibest send`                                                  |
 | main Agent merges                                                            | it summarises both branches; `pnpm test` is green on each                                                                             |
 
 Status: now (Claude main Agent uses the inbox bridge; Pi main Agent uses its extension).

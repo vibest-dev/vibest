@@ -7,13 +7,21 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Agent messaging** (users, plugin authors, anyone calling the RPC): a turn that ends normally or is interrupted
+  sends nothing. Agents send what they decide to with `vibest send <id> -- '<message>'` (to their creator, or any agent
+  of the project), and the main agent reads `vibest ls` (state) and `vibest result <id>` (the last reply, in `answer`).
+  vibest notifies the creator only of what an agent cannot say: its harness exited, its turn ended in an error, it
+  never started, it waits on a permission, or a message to it was not delivered. `vibest report`, the RPC `Report`,
+  `SessionStatusInfo.result` and the `<agent-result>` message are removed, `PROTOCOL` is 9 (run `vibest update`), and
+  the read model has no `inbox.result_turn_id`. Migrate: replace `vibest report` with `vibest send`, and read an
+  agent's answer from `answer` instead of `result`.
 - **The database** (users, and anyone reading `vibest.db`): vibestd stores an append-only log of facts and a read model
   projected from it, and applies schema migrations recorded in a `migration` table when it opens the file. It refuses
   a database from an earlier version (`SchemaMismatch`, the file unchanged): there is no automatic conversion; move it
   aside with its `-wal` and `-shm` files while vibestd is stopped to start empty. An older vibest cannot open the new
   file. Tools that read the tables directly must read the new ones (`docs/design/schema.md`): `process`, `turn` and the
   `event` log with the new fact types replace the old `event` rows (`process.start`, `turn.end`, `inbox.status`, …),
-  `inbox.result_turn_id` replaces `result_event_id`, and sessions have no `machine` column. `vibest daemon
+  and sessions have no `machine` column. `vibest daemon
   import-check` now replays the log and fails when the read model differs from the replay.
 - **Runtime plugins** (plugin authors): a plugin is only `{ id, effect }`. `caller` moves from the plugin into the
   runtime definition, the runtime's `kind` is renamed `id`, and `context.runtime.register(runtime)` is replaced by

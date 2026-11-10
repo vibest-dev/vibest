@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, heldModel } from "../fake-model.ts"
-import { expect, herdr, readDb, Skip, until, type World } from "../world.ts"
+import { answerOf, expect, herdr, readDb, Skip, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 
 type Entry = {
@@ -68,14 +68,7 @@ const runId = async (w: World, args: ReadonlyArray<string>, env: Record<string, 
 }
 
 const resultOf = (w: World, id: string, marker: string) =>
-  until(
-    `the result of ${marker}`,
-    async () =>
-      ((await w.json<{ result?: { message?: string } | null }>(["result", id])).result?.message ?? "").includes(
-        `done-${marker}`,
-      ),
-    90_000,
-  )
+  until(`the answer of ${marker}`, async () => (await answerOf(w, id)).includes(`done-${marker}`), 90_000)
 
 const mainSession = async (w: World) => {
   let main: Entry | undefined
@@ -94,7 +87,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G5",
     title:
-      "a routing plugin's agent.start.before picks the harness: without it `vibest run -- <task>` with nothing to inherit fails; with it the run starts Pi, ls names the plugin as the harness's decider, and the result arrives",
+      "a routing plugin's agent.start.before picks the harness: without it `vibest run -- <task>` with nothing to inherit fails; with it the run starts Pi, ls names the plugin as the harness's decider, and its answer arrives",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "route")

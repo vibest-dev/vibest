@@ -2,7 +2,7 @@ import type { Fact, FactOf, FactType } from "@vibest/schema/event"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 
-export const PROJECTION_VERSION = 2
+export const PROJECTION_VERSION = 3
 
 export const PROJECTION_SCHEMA = [
   `CREATE INDEX event_session ON event (session_id, seq) WHERE session_id IS NOT NULL`,
@@ -87,19 +87,16 @@ export const PROJECTION_SCHEMA = [
     sender_session_id    TEXT,
     kind                 TEXT NOT NULL CHECK (kind IN ('task', 'send', 'report', 'result', 'notice')),
     content              TEXT NOT NULL,
-    result_turn_id       INTEGER,
     request              TEXT,
     peer_item            TEXT,
     status               TEXT NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
     turn_id              INTEGER,
     queued_at            INTEGER NOT NULL,
     seq                  INTEGER NOT NULL,
-    CHECK ((kind = 'result') = (result_turn_id IS NOT NULL)),
     CHECK (recipient_session_id IS NOT NULL OR sender_session_id IS NOT NULL)
   ) STRICT`,
   `CREATE INDEX inbox_status ON inbox (status, recipient_session_id)`,
   `CREATE INDEX inbox_recipient ON inbox (recipient_session_id, kind, id)`,
-  `CREATE INDEX inbox_result ON inbox (result_turn_id) WHERE result_turn_id IS NOT NULL`,
   `CREATE INDEX inbox_turn ON inbox (turn_id) WHERE turn_id IS NOT NULL`,
   `CREATE INDEX inbox_request ON inbox (request) WHERE request IS NOT NULL`,
   `CREATE UNIQUE INDEX inbox_peer_item ON inbox (peer_item) WHERE peer_item IS NOT NULL`,
@@ -254,11 +251,9 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
 
   "inbox.queued": (fact, sql) => {
     const { data } = fact
-    return sql`INSERT INTO inbox (id, recipient_session_id, sender_session_id, kind, content, result_turn_id, request,
-        peer_item, status, queued_at, seq)
+    return sql`INSERT INTO inbox (id, recipient_session_id, sender_session_id, kind, content, request, peer_item, status, queued_at, seq)
       VALUES (${fact.seq}, ${data.recipient ?? null}, ${data.sender ?? null}, ${data.kind}, ${data.content},
-        ${data.turn ?? null}, ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${fact.at},
-        ${fact.seq})`
+        ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${fact.at}, ${fact.seq})`
   },
   "inbox.moved": (fact, sql) =>
     sql`UPDATE inbox SET status = ${fact.data.to}, seq = ${fact.seq},

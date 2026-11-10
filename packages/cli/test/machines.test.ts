@@ -297,7 +297,7 @@ const outboxRows = Effect.flatMap(
 )
 
 const finish = (db: Db["Service"], session: string, message: string) =>
-  db.insertInbox({ sessionId: session, kind: "result", message, details: { status: "completed" } })
+  db.insertInbox({ sessionId: session, kind: "notice", message, details: {} })
 
 describe("another machine's vibestd runs agents here", () => {
   it.effect("Peer.Spawn records peer.start and no parent; a retry finds it; no project or commit fails clearly", () =>
@@ -382,11 +382,11 @@ describe("another machine's vibestd runs agents here", () => {
       )
       const result = yield* finish(b.db, session, "General Agent completed")
       assert.strictEqual(result.status, "dropped", "B's own delivery never sees it")
-      assert.strictEqual((yield* b.db.latestInbox(session, "result"))?.message, "General Agent completed")
+      assert.strictEqual((yield* b.db.latestInbox(session, "notice"))?.message, "General Agent completed")
       const item = yield* Queue.take(items)
       assert.deepStrictEqual(
         { session: item.session, recipient: item.recipient, kind: item.kind, content: item.content, cut: item.cut },
-        { session, recipient: "a-main", kind: "result", content: "General Agent completed", cut: undefined },
+        { session, recipient: "a-main", kind: "notice", content: "General Agent completed", cut: undefined },
       )
       assert.lengthOf(yield* b.run(outboxRows), 1)
       yield* call(b.raw["Peer.Ack"]({ ids: [item.id] }))
@@ -410,7 +410,7 @@ describe("another machine's vibestd runs agents here", () => {
       assert.deepStrictEqual(
         first.map((i) => [i.kind, i.content]),
         [
-          ["result", "one"],
+          ["notice", "one"],
           ["notice", "two"],
         ],
       )
@@ -454,7 +454,7 @@ describe("another machine's vibestd runs agents here", () => {
         failureTag(yield* Effect.exit(sameProjectOtherPeer(b.raw.Get({ id: session })))),
         "NoSuchSession",
       )
-      assert.strictEqual((yield* a1(b.raw.Get({ id: session.slice(0, 8) }))).result?.message, "for a1")
+      assert.strictEqual((yield* a1(b.raw.Get({ id: session.slice(0, 8) }))).id, session)
       yield* a1(b.raw.Send({ id: session, message: "again" }))
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
@@ -535,7 +535,6 @@ describe("vibest run --machine and remote sessions", () => {
       assert.deepStrictEqual(yield* b.run(outboxRows), [], "nothing to send back")
       const got = yield* here(a.raw.Get({ id: spawned.id.slice(0, 11) }))
       assert.strictEqual(got.id, spawned.id)
-      assert.strictEqual(got.result?.message, "kept on B")
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
@@ -616,7 +615,6 @@ describe("vibest run --machine and remote sessions", () => {
         const got = yield* coordinator(a.raw.Get({ id: address }))
         assert.strictEqual(got.id, spawned.id)
         assert.strictEqual(got.machine, "mb")
-        assert.strictEqual(got.result?.message, "General Agent completed")
         assert.deepStrictEqual(yield* coordinator(a.raw.Send({ id: address, message: "more" })), {
           id: spawned.id,
         })

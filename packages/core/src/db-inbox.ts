@@ -31,6 +31,7 @@ export const inboxMethods = (store: Store) => {
     moveInbox,
     linkTask,
     insertInboxRow,
+    endTurn,
     updateSession,
     dropWaiting,
   } = store
@@ -198,14 +199,15 @@ export const inboxMethods = (store: Store) => {
 
     latestReport: (id: string, fence: "ready" | "start") => reads.latestReport(id, fence).pipe(Effect.orDie),
 
-    finishTurn: (id: string, end: TurnEnd, patch: SessionPatch, row: NewInboxRow, at?: number) =>
+    endTurn: (id: string, end: TurnEnd, patch: SessionPatch, notice: string | undefined, at?: number) =>
       tx(
         Effect.gen(function* () {
           const stamp = at === undefined ? undefined : Math.max(at, yield* now)
-          const inserted = yield* insertInboxRow(row, row.kind === "result" ? end : undefined, stamp)
+          yield* endTurn(id, end, stamp)
           const { turnState: _, ...rest } = patch
-          yield* updateSession(id, row.kind === "result" ? rest : patch)
-          return inserted
+          yield* updateSession(id, rest)
+          if (notice !== undefined)
+            yield* insertInboxRow({ sessionId: id, kind: "notice", message: notice, details: {} }, stamp)
         }),
       ).pipe(Effect.orDie),
 

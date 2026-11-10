@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout, shellQuote } from "@vibest/core/paths"
-import { envelope, isUsageLimitError, outcome, parseReport } from "@vibest/core/results"
+import { envelope, isUsageLimitError } from "@vibest/core/results"
 import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { ID, newId, shortId } from "@vibest/schema/id"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem } from "effect"
@@ -69,17 +69,16 @@ describe("envelope", () => {
   it("one element per field, empty ones left out, field text escaped and the agent's text kept as is", () => {
     assert.strictEqual(
       envelope(
-        "agent-result",
+        "agent-message",
         [
           ["agent-id", "a1b2c3d4-a1b2-4a1b-8a1b-a1b2c3d4a1b2"],
-          ["summary", outcome('fix "x" <y>', undefined)],
+          ["title", 'fix "x" <y>'],
           ["branch", ""],
         ],
-        ["result", "a <b> & c"],
+        ["message", "a <b> & c"],
       ),
-      '<agent-result>\n<agent-id>a1b2c3d4-a1b2-4a1b-8a1b-a1b2c3d4a1b2</agent-id>\n<summary>Agent "fix "x" &lt;y&gt;" finished</summary>\n<result>\na <b> & c\n</result>\n</agent-result>',
+      '<agent-message>\n<agent-id>a1b2c3d4-a1b2-4a1b-8a1b-a1b2c3d4a1b2</agent-id>\n<title>fix "x" &lt;y&gt;</title>\n<message>\na <b> & c\n</message>\n</agent-message>',
     )
-    assert.strictEqual(outcome("t", "rate_limit"), 'Agent "t" failed: rate_limit')
     assert.isTrue(isUsageLimitError("rate_limit"))
     assert.isTrue(isUsageLimitError("rate_limit: hit the 5 hour limit"))
     assert.isTrue(isUsageLimitError("You've hit your usage limit"))
@@ -90,8 +89,6 @@ describe("envelope", () => {
     assert.isFalse(isUsageLimitError("server_error: the assistant said rate limit"))
     assert.isFalse(isUsageLimitError("aborted"))
     assert.isFalse(isUsageLimitError(undefined))
-    assert.strictEqual(outcome("t", undefined), 'Agent "t" finished')
-    assert.strictEqual(outcome("t", "boom"), 'Agent "t" failed: boom')
   })
 })
 
@@ -116,16 +113,6 @@ describe("pure", () => {
       assert.strictEqual((yield* layout({ HOME: "/h", VIBEST_HOME: "/x" })).home, "/x")
     }),
   )
-
-  it("summary is the first non-empty line cut to about 120 characters; the Remember section is still picked up", () => {
-    const r = parseReport("\n  \nFixed it. Tests pass.\nmore\n\n## Remember\nuse bun\n\n## Other\nx")
-    assert.deepStrictEqual(r, { summary: "Fixed it. Tests pass.", remember: "use bun" })
-    assert.deepStrictEqual(parseReport(""), { summary: undefined, remember: undefined })
-    const long = parseReport("x".repeat(200)).summary!
-    assert.strictEqual(long.length, 120)
-    assert.isTrue(long.endsWith("…"))
-    assert.strictEqual(parseReport("status: needs_input\nwhich one?").summary, "status: needs_input")
-  })
 
   it("normalizeModels: one Model shape, requested provider filled in, other providers dropped", () => {
     assert.deepStrictEqual(

@@ -8,7 +8,7 @@ import { TestClock } from "effect/testing"
 
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until, untilVirtual, writeResult, systemPromptFile } from "./lib/observe.ts"
+import { answerOf, sentBy, until, untilVirtual, writeResult, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import {
   spawnInput,
@@ -49,7 +49,7 @@ describe.concurrent("Sessions", () => {
       yield* untilVirtual(herdr.callsTo("send"), (calls) => calls.some((call) => call.text === "next"))
       assert.isTrue(yield* fs.exists(cursorMcp))
       const prompt = yield* fs.readFileString(yield* systemPromptFile(id))
-      assert.include(prompt, "report -- '<message>'")
+      assert.include(prompt, "send ")
       assert.notInclude(prompt, "send_message")
       assert.include(prompt, "learned between starts")
     }),
@@ -143,6 +143,39 @@ describe.concurrent("Sessions", () => {
       )
       yield* held.release()
       yield* until(db.inboxWithStatus(id, "delivered"), (rows) => rows.length === 1)
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "a harness that exits while idle notifies its creator once and leaves the completed turn as it was",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* idleSession(yield* makeRepository)
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      yield* sessions.check(id)
+      const notices = yield* sqlNotices(id)
+      assert.lengthOf(notices, 1)
+      assert.include(notices[0], `vibest peek ${id} shows its terminal; vibest send ${id} resumes it`)
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "a turn that reported an error and whose harness is gone gives one notice carrying both",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      yield* writeResult(id, "pi", { text: "", error: "model_error" })
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      yield* sessions.check(id)
+      const notices = yield* sqlNotices(id)
+      assert.lengthOf(notices, 1)
+      assert.include(notices[0], "exited after its turn ended with an error: model_error")
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
     }),
     { hooked: ["pi"] },
   )
@@ -496,7 +529,7 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       const row = (yield* db.getSession(id))!
       assert.strictEqual(row.turnState, "interrupted")
-      assert.isUndefined(yield* db.latestInbox(id, "result"))
+      assert.deepStrictEqual(yield* sentBy(id), [])
       assert.deepStrictEqual(yield* db.coordinatorPending(row.projectId), [])
       assert.deepStrictEqual(yield* roundAndResultCounts(id), before)
       assert.strictEqual(before.results, 0)
@@ -535,7 +568,7 @@ describe.concurrent("Sessions", () => {
     )
 
   test(
-    "interrupt delivers a result that is already in instead of discarding it",
+    "interrupt keeps the answer that is already in instead of discarding it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
@@ -543,7 +576,8 @@ describe.concurrent("Sessions", () => {
       assert.include((yield* sessions.interrupt(id)).message, "already finished")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
       assert.deepStrictEqual((yield* herdr.callsTo("send")).slice(1), [])
-      assert.strictEqual((yield* db.coordinatorPending((yield* db.getSession(id))!.projectId))[0]!.kind, "result")
+      assert.strictEqual(yield* answerOf(id), "status: completed")
+      assert.deepStrictEqual(yield* db.coordinatorPending((yield* db.getSession(id))!.projectId), [])
     }),
     { hooked: ["pi"] },
   )
@@ -592,7 +626,7 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
       assert.include(
-        (yield* db.latestInbox(id, "result"))!.message,
+        (yield* db.latestInbox(id, "notice"))!.message,
         "interrupted: the turn was stopped in its terminal (Esc) before it ended",
       )
     }),
@@ -616,7 +650,7 @@ describe.concurrent("Sessions", () => {
       assert.include((yield* Fiber.join(interrupting)).message, "interrupted")
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted")
-      assert.isUndefined(yield* db.latestInbox(id, "result"))
+      assert.deepStrictEqual(yield* sentBy(id), [])
     }),
     { interruptIgnored: true },
   )

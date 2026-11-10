@@ -496,7 +496,7 @@ describe("journal projectors", () => {
       assert.deepStrictEqual(
         yield* rowsOf(
           sql,
-          `SELECT id, recipient_session_id, sender_session_id, kind, content, result_turn_id, request, peer_item,
+          `SELECT id, recipient_session_id, sender_session_id, kind, content, request, peer_item,
             status, turn_id, queued_at, seq FROM inbox ORDER BY id`,
         ),
         [
@@ -506,7 +506,6 @@ describe("journal projectors", () => {
             senderSessionId: MAIN,
             kind: "task",
             content: "fix it",
-            resultTurnId: null,
             request: "r-1",
             peerItem: null,
             status: "delivered",
@@ -520,7 +519,6 @@ describe("journal projectors", () => {
             senderSessionId: SUB,
             kind: "result",
             content: "",
-            resultTurnId: turn,
             request: null,
             peerItem: null,
             status: "delivered",
@@ -534,7 +532,6 @@ describe("journal projectors", () => {
             senderSessionId: null,
             kind: "notice",
             content: "remote done",
-            resultTurnId: null,
             request: null,
             peerItem: ITEM,
             status: "pending",

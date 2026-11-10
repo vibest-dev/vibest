@@ -58,20 +58,20 @@ differs from the last one that passed it. A skip fails the run (tools/verify/REA
 login smoke (I5). Prompts are deterministic:
 "create `out-<nonce>.txt` containing `<nonce>`, then reply `DONE-<nonce>`".
 
-| #   | Scenario                                                                          | Pass when                                                                                                                 |
-| --- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 1   | `run` in a new worktree                                                           | pane exists, row `working` → `idle`, file in the worktree, `result` holds `DONE-<nonce>` in the `<agent-result>` envelope |
-| 2   | `send` a follow-up                                                                | delivered once (confirm-after-send), turn `completed`                                                                     |
-| 3   | `report` from the worker                                                          | the coordinator inbox gets it; same-sender messages merge                                                                 |
-| 4   | `interrupt` mid-turn                                                              | turn `interrupted`, pane alive, next `send` works                                                                         |
-| 5   | `--peer`, `--in-parent`, `--name`, `--model`, `--provider`, `--headless`, `--env` | each flag visible in the row and the pane                                                                                 |
-| 6   | `archive` clean                                                                   | pane closed with PID proof, worktree removed, branch kept                                                                 |
-| 7   | `archive` dirty / unpushed / `--keep-worktree`                                    | worktree kept, `reasons` names why                                                                                        |
-| 8   | `run --archive-on-idle`                                                           | archived right after the completed result reaches the coordinator                                                         |
-| 9   | Self-heal                                                                         | kill the daemon mid-turn, restart: turn ends `lost` or resumes; no blind replay                                           |
-| 10  | Startup failure                                                                   | bad model: a failed result with the error, no screen text; `vibest peek <id>` shows the pane                              |
-| 11  | Limits                                                                            | `VIBEST_MAX_SESSIONS=1`: the second `run` gets `LimitReached`                                                             |
-| 12  | Coordinator                                                                       | `vibest` in the parent workspace, resume after its pane closes, system prompt file written                                |
+| #   | Scenario                                                                          | Pass when                                                                                              |
+| --- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 1   | `run` in a new worktree                                                           | pane exists, row `working` → `idle`, file in the worktree, `result` holds `DONE-<nonce>` as its answer |
+| 2   | `send` a follow-up                                                                | delivered once (confirm-after-send), turn `completed`                                                  |
+| 3   | `report` from the worker                                                          | the coordinator inbox gets it; same-sender messages merge                                              |
+| 4   | `interrupt` mid-turn                                                              | turn `interrupted`, pane alive, next `send` works                                                      |
+| 5   | `--peer`, `--in-parent`, `--name`, `--model`, `--provider`, `--headless`, `--env` | each flag visible in the row and the pane                                                              |
+| 6   | `archive` clean                                                                   | pane closed with PID proof, worktree removed, branch kept                                              |
+| 7   | `archive` dirty / unpushed / `--keep-worktree`                                    | worktree kept, `reasons` names why                                                                     |
+| 8   | `run --archive-on-idle`                                                           | archived right after the completed result reaches the coordinator                                      |
+| 9   | Self-heal                                                                         | kill the daemon mid-turn, restart: turn ends `lost` or resumes; no blind replay                        |
+| 10  | Startup failure                                                                   | bad model: a failed result with the error, no screen text; `vibest peek <id>` shows the pane           |
+| 11  | Limits                                                                            | `VIBEST_MAX_SESSIONS=1`: the second `run` gets `LimitReached`                                          |
+| 12  | Coordinator                                                                       | `vibest` in the parent workspace, resume after its pane closes, system prompt file written             |
 
 The pattern-level stories that combine these rows are in [e2e-user-stories.md](e2e-user-stories.md).
 

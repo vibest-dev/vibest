@@ -13,10 +13,10 @@ The daily experience, which every part of this document serves:
    first use); `vibest --new` starts a new conversation in the same Project, with the same knowledge.
 2. You say what you want. The main Agent decides how to split it, runs subagents with `vibest run`, and does not
    block: you keep talking while they work in panes beside it, grouped under the Project.
-3. Each subagent's result comes back into the main conversation by itself; the main Agent checks it and reports.
+3. A subagent tells the main Agent what it found by sending a message when it decides to; the main Agent checks it and reports. A turn end sends nothing.
 4. You can step into any subagent's pane, also after it finished, and keep talking to it. That exchange goes
    back to the main Agent as information, so it knows what you did.
-5. The main Agent always knows every subagent's task, status, and latest result (`vibest ls`), also after
+5. The main Agent always knows every subagent's task, status, and latest reply (`vibest ls`), also after
    compaction or a restart.
 6. When a job needs a fixed flow (plan → implement → review until both sides agree → pull request), the main
    Agent runs it with a skill, driving several subagents, with you able to step in at every point.
@@ -55,7 +55,7 @@ Reference implementations:
 | D8  | In scope now: delegation (main Agent and subagents); the `pipeline` skill (plan → implement → review → pull request); multi-machine scheduling. Other multi-agent flows (committee, racing, advisor, …) are added later as skills, by us or by the user, without core changes. Out of scope: DynamicWorkflow and any workflow engine, work-item intake, several accounts per CLI (each CLI's own login is its one Subscription for now).                                                                                                                                                                                                                                                                  |
 | D9  | Names are spelled out (`repository`, never `repo`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | D10 | vibest keeps a **Subscription** for every supported harness on every machine, with its usage limits, and hands the current set to plugins in each Run's context. Choosing a harness, waiting, or switching is plugin scheduling. Usage limits come only from official or CLI-provided sources, so a harness that offers none keeps an empty limits list and that is fine; a Subscription is per (harness, provider, machine), provider empty for a single-login harness (Claude Code, Cursor) and set for Pi; vibest does not read a harness token or call a usage API, so a harness that offers no limits keeps an empty list (unknown, not full). Any vibest plugin may report a Subscription's limits. |
-| D11 | Information comes through the best channel each CLI offers: hooks forward events and results where a CLI has them; an agent's own `vibest report` is for explicit or structured results; reading the screen is last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| D11 | Information comes through the best channel each CLI offers: hooks forward events and results where a CLI has them; an agent's own `vibest send` carries what it decides to say; reading the screen is last.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | D12 | Where omac's implementation is good, vibest copies its code and tests and refactors them (session → Agent and Run, inbox row → Message, plugin hooks → §7 kinds) instead of designing again. §15 lists every part.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | D13 | The engine knows one kind of session, described by an agent definition. Routing, permissions and whether a session may spawn are data and plugin policy, never branches in the code. The coordinator mode (one main Agent and its subagents) is the configuration of the default plugin (§1.1). Status: decided; today the code still has the coordinator and its subagents as two cases, and the planned parts of §1 replace them.                                                                                                                                                                                                                                                                       |
 | D14 | vibest is not bound to herdr. `schema`, `core`, `server`, `protocol`, `client`, the harness adapters, and the integrations never import herdr or name its types; they use the Runtime port (§10) and vibest's own types (Agent `status`, `runtime { kind, address }`). Everything herdr-specific (`effect-herdr-sdk`, `runtime-herdr`, the herdr plugin, the presenter) lives in herdr packages and the herdr product. Runtimes are plugins registering the `Runtime` API (`runtime-port.md`, `plugin/src/runtime.ts`): herdr, rex and tern are builtin; another product is a new plugin, not a core change.                                                                                              |
@@ -95,25 +95,16 @@ subagents. Everything else in this list is planned; each item says what runs tod
   is kept and read with `vibest inbox`. Today a main agent is never typed into: only a harness that polls (Claude)
   or subscribes (Pi) can be one, and a subagent-only harness (Cursor) has no inbox mode. Subagents are typed into,
   and a row with no session to go to is dropped.
-- **Reply routing is data** (planned), in one function, `replyTo(turn)`, evaluated when a turn ends:
-  1. The `task` and `send` rows the turn consumed whose sender is a session: the result goes to those senders,
-     each once.
-  2. Otherwise the session's `report_to`, written at spawn and never changed.
-  3. Otherwise, when a `task` or `send` row from the user opened the turn: the user (a row, not dropped).
-  4. A turn woken by a result or a notice, or opened by text the user typed into its terminal, goes to the
-     session's `report_to` when it has one, and produces no result row when it has none. So a main agent (no
-     `report_to`) behaves as today, peers the user started (no `report_to`) cannot answer results with results,
-     and a nested lead (`report_to` its main agent) still hands its gathered answer up.
-
-  A recipient that has ended falls back to the project's entry session (while it runs and is not the session
-  itself), then to the user. Last, the `agent.result` hook (`{ sessionId, turnId, status, output, recipients }`)
-  may rewrite the recipients: forward, merge, or clear them. Notices go through `agent.notice` (`{ about, kind:
-  blocked | not_started | undelivered | archived, text, recipients }`); by default to `report_to`, then the
-  entry session, then the user. Today a result goes to the parent, else to the project's main agent.
+- **Delivery is by recipient.** `vibest send <id>` from the user, the main agent or any session reaches any unfinished
+  session of the same project, the main agent included. A turn end writes only `turn.ended`; the reply text stays in
+  `turn.reported` and is read as `turn.answer` with `vibest result`. vibest's own notices say only what an agent could
+  not say itself, and go to its creator (`report_to`, else the entry session, else `origin_report_to` through the
+  outbox): its harness exited, its turn ended in an error, it never started, it waits on a permission. An
+  undeliverable message goes back to its sender. Completed and interrupted turns send nothing, and nothing says an
+  agent went idle.
 
 - **Provenance by parent.** `parent_session_id` records who spawned whom. It decides management rights (ancestors)
-  and where a new terminal opens (beside its spawner), never routing. Today the parent also decides routing: a
-  result goes to the parent, else to the main agent.
+  and where a new terminal opens (beside its spawner), never routing. It never decides routing.
 - **An optional entry session** (`project.entry_session_id`, `main_session_id` before the schema baseline): the session a
   bare `vibest` reopens, and the fallback when a recipient has ended. It is not identity. "One main agent per
   project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.
@@ -283,40 +274,35 @@ or change values.
 is `kept`). An Agent is reused by its id; one that may be needed again should be `kept` from the start:
 
 - `once`: the Agent ends `completed` when its turn ended normally (`completed`), it is idle, and no Message it sent or was
-  sent is pending (omac `--archive-on-idle`; a result that ended dropped or failed no longer waits); a `failed` turn
+  sent is pending (`--archive-on-idle`; a message that ended dropped or failed no longer waits); a `failed` turn
   (the harness or turn reported an error) keeps it. Ending closes the pane and releases its Workspace (§3.3).
 - `kept`: when the Agent answers, it stays `idle` with its pane open. `vibest send` continues the conversation,
-  and every new answer returns to the main Agent. `vibest stop <agent>` ends it, closes the pane, and releases
+  and every new answer is readable with `vibest result`. `vibest stop <agent>` ends it, closes the pane, and releases
   its Workspace.
 
 **Idle:** vibest does not model the CLI agent's internal loop. herdr's `idle` is the status. A piece of work ends
 when its integration reports the end of its work (Claude `Stop`, Pi `agent_settled`, …) and its inbox is empty;
-that is when its result goes to its parent and the next Message is delivered. For a harness with an integration, herdr reporting idle with no hook result for
+that is when the turn ends and the next Message is delivered. For a harness with an integration, herdr reporting idle with no hook result for
 10 s makes the Message `lost` (a reason and the `vibest peek <id>` command, never screen text; the last 30 lines go to vibestd.log); only a harness without an integration treats
 herdr's idle as the end.
 
 **Outcome of a task or message** (omac's turn states, copied): a Message vibest delivered is `completed` or
-`failed` by its result, `lost` as above, `not_started` when delivery could not be confirmed (§3.2), `interrupted`
+`failed` by its turn, `lost` as above, `not_started` when delivery could not be confirmed (§3.2), `interrupted`
 by `vibest interrupt`. Text the user types into a subagent's pane is recorded as its own round and
 opens no such Message; when that turn ends, the user's text and the subagent's answer go to the main Agent as one
 `notice` (information, delivered with its next input, never a task it must act on).
 
-**Results** come through the best channel (D11): the integration sends its turn-end event to the daemon, which keeps the agent's last answer in memory
-(Claude `last_assistant_message`, Cursor and Pi `text`) and writes it as the turn's `turn.end` and result row; a turn end counts only if newer than the delivered Message. `vibest report "…"` sends progress, or with
-`--json` a structured result validated against the requested schema; `herdr agent read` is last.
+**Answers** come through the best channel (D11): the integration sends its turn-end event to the daemon, which writes the agent's last reply (Claude `last_assistant_message`, Cursor and Pi `text`) as `turn.reported` and the turn's `turn.ended`; the projection keeps it as `turn.answer`, read with `vibest result` and shown as the summary in `vibest ls`. A turn end counts only if newer than the delivered Message. Nothing is sent to anyone: an agent that has something to say runs `vibest send <id>`; `herdr agent read` is last.
 
-The subagent's rules ask for a final reply whose first line is a one-sentence summary, then the body, and an
-optional `## Remember` (omac `results.ts`). The status is what vibest observed of the turn, never parsed from the reply. The main Agent receives (omac `results.ts`, `sessions.ts`):
+The subagent's rules ask for a message whose first line is one sentence the recipient can relay, then the details, and an
+optional `## Remember`. The recipient gets it as:
 
 ```
-<agent-result>
-<agent-id>agt_…</agent-id> <run-id>run_…</run-id> <status>completed</status> <summary>…</summary>
-<harness>claude</harness> <branch>fix/x</branch> <pushed>true</pushed> <workspace>…</workspace>
-<result>full text of the last answer</result>
-</agent-result>
+<agent-message>
+<agent-id>agt_…</agent-id> <title>…</title>
+<message>what the agent sent</message>
+</agent-message>
 ```
-
-`branch` and `pushed` come from git, never from the agent; a progress report arrives as `<agent-message>`.
 
 ### 3.2 Execution
 
@@ -975,7 +961,7 @@ vibest stop <run|agent>                 end it (§3.3)
 vibest wait | resume <run>
 vibest ls [--run …] [--all]             Runs and their Agents
 vibest read <agent> · attach <agent> · result <run|agent> · events [--run …]
-vibest report [--json] -- <text|->      from inside a subagent
+vibest send <agent> -- <text|->             from the user, the main agent or any subagent
 vibest project info | search                                                     the project folder's paths, text search
 vibest daemon [--foreground] · daemon restart · status · update · doctor · plugins · models [<harness>]
 vibest harness list | models <harness>

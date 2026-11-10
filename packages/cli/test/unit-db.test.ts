@@ -326,16 +326,11 @@ describe("Db", () => {
           turnState: "open",
           turnPromptedAt: 5,
         })
-        yield* db.finishTurn(
+        yield* db.endTurn(
           "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           { status: "completed", failure: { message: "late" } },
           { turnState: "completed" },
-          {
-            sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-            kind: "result",
-            message: "<summary>done</summary>",
-            details: { summary: "done" },
-          },
+          undefined,
         )
         assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.turnState, "completed")
         yield* db.closeTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "interrupted", {})
@@ -347,46 +342,43 @@ describe("Db", () => {
       }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
 
-  it.effect("a result goes to the parent while it has not ended, then to the project's current main session", () =>
-    Effect.gen(function* () {
-      const db = yield* Db
-      const sql = yield* SqlClient.SqlClient
-      yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
-      yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), yield* projectOf("r"))
-      yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
-        parentSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-      })
-      yield* fact("project.entry_changed", {
-        projectId: yield* projectOf("r"),
-        data: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
-      })
-      const recipient = Effect.flatMap(
-        sql<{
-          recipient: string
-        }>`SELECT recipient_session_id AS recipient FROM inbox WHERE kind = 'result' ORDER BY id DESC LIMIT 1`,
-        (rows) => Effect.succeed(rows[0]?.recipient),
-      )
-      const round = (summary: string) =>
-        Effect.gen(function* () {
-          yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
-          yield* db.finishTurn(
-            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-            { status: "completed" },
-            { turnState: "completed" },
-            {
-              sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-              kind: "result",
-              message: summary,
-              details: { summary },
-            },
-          )
+  it.effect(
+    "a turn-error notice goes to the parent while it has not ended, then to the project's current main session",
+    () =>
+      Effect.gen(function* () {
+        const db = yield* Db
+        const sql = yield* SqlClient.SqlClient
+        yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
+        yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), yield* projectOf("r"))
+        yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
+          parentSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         })
-      yield* round("one")
-      assert.strictEqual(yield* recipient, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
-      yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { metadata: { archived: true, removed: true } })
-      yield* round("two")
-      assert.strictEqual(yield* recipient, "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
-    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
+        yield* fact("project.entry_changed", {
+          projectId: yield* projectOf("r"),
+          data: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+        })
+        const recipient = Effect.flatMap(
+          sql<{
+            recipient: string
+          }>`SELECT recipient_session_id AS recipient FROM inbox WHERE kind = 'notice' ORDER BY id DESC LIMIT 1`,
+          (rows) => Effect.succeed(rows[0]?.recipient),
+        )
+        const round = (summary: string) =>
+          Effect.gen(function* () {
+            yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open", turnPromptedAt: 1 })
+            yield* db.endTurn(
+              "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              { status: "failed", failure: { message: summary } },
+              { turnState: "failed" },
+              summary,
+            )
+          })
+        yield* round("one")
+        assert.strictEqual(yield* recipient, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+        yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { metadata: { archived: true, removed: true } })
+        yield* round("two")
+        assert.strictEqual(yield* recipient, "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
 
   it.effect("a peer item received again after the project's entry changed is a duplicate, not a second notice", () =>
@@ -516,7 +508,7 @@ describe("Db", () => {
       assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
     }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
-  it.effect("a result with no coordinator is dropped; a claim takes a pending row once", () =>
+  it.effect("a notice with no coordinator is dropped; a claim takes a pending row once", () =>
     fresh(
       Effect.gen(function* () {
         const db = yield* Db
@@ -524,23 +516,17 @@ describe("Db", () => {
           session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "open" }),
           yield* projectOf("r"),
         )
-        const dropped = yield* db.finishTurn(
+        yield* db.endTurn(
           "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          { status: "completed" },
-          { turnState: "completed", status: "idle" },
-          {
-            sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-            kind: "result",
-            message: "m",
-            details: { status: "completed" },
-          },
+          { status: "failed", failure: { message: "m" } },
+          { turnState: "failed", status: "idle" },
+          "m",
         )
-        assert.strictEqual(dropped.status, "dropped")
-        assert.strictEqual((yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"))!.status, "dropped")
+        assert.strictEqual((yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "notice"))!.status, "dropped")
         yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
         const row = yield* db.insertInbox({
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          kind: "report",
+          kind: "notice",
           message: "hi",
           details: {},
         })
@@ -554,7 +540,7 @@ describe("Db", () => {
         assert.deepStrictEqual(yield* db.claim([row.id], guard), [])
         yield* db.setInboxStatus([row.id], "delivered", "sending")
         assert.strictEqual(
-          (yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "report"))!.status,
+          (yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "notice"))!.status,
           "delivered",
         )
         yield* db.insertInbox({

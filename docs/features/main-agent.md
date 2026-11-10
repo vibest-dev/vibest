@@ -1,6 +1,6 @@
 # The main agent
 
-`vibest` in a project opens its main agent, the coordinator that starts sessions and gets their results. Each
+`vibest` in a project opens its main agent, the coordinator that starts sessions and gets the messages they send. Each
 capability below says what it is and when it counts as working.
 
 ## S10. Starting, resuming and moving the main agent

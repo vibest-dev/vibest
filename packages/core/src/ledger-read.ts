@@ -169,22 +169,9 @@ type InboxColumns = {
   readonly kind: string
   readonly content: string
   readonly status: string
-  readonly resultTurnId: number | null
-  readonly turnStatus: string | null
-  readonly failure: string | null
 }
 
-const inboxOf = (row: InboxColumns) =>
-  toInbox({
-    ...row,
-    turnEnd:
-      row.turnStatus === null
-        ? null
-        : JSON.stringify({
-            status: row.turnStatus,
-            ...(row.failure === null ? {} : { failure: { message: row.failure } }),
-          }),
-  })
+const inboxOf = toInbox
 
 export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
@@ -215,23 +202,19 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
   )
 
   const inboxWhere = (where: Statement.Fragment, order: Statement.Fragment = sql`m.id`) =>
-    sql<InboxColumns>`SELECT m.id, m.recipient_session_id, m.sender_session_id, m.kind, m.content, m.status,
-        m.result_turn_id, t.status AS turn_status, t.failure
-      FROM inbox m LEFT JOIN turn t ON t.id = m.result_turn_id WHERE ${where} ORDER BY ${order}`.pipe(
-      Effect.flatMap((rows) => decodeInbox(rows.map(inboxOf))),
-    )
+    sql<InboxColumns>`SELECT m.id, m.recipient_session_id, m.sender_session_id, m.kind, m.content, m.status
+      FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(inboxOf))))
 
   const inbox = Effect.gen(function* () {
     const rows = yield* sql<InboxColumns>`SELECT m.id, m.recipient_session_id, m.sender_session_id, m.kind,
-        m.content, m.status, m.result_turn_id, t.status AS turn_status, t.failure
-      FROM inbox m LEFT JOIN turn t ON t.id = m.result_turn_id WHERE m.kind != 'task' ORDER BY m.id`
+        m.content, m.status
+      FROM inbox m WHERE m.kind != 'task' ORDER BY m.id`
     const decoded = yield* decodeInbox(rows.map(inboxOf))
     return rows.map((row, i) => ({
       row: decoded[i]!,
       id: row.id,
       recipient: row.recipientSessionId,
       sender: row.senderSessionId,
-      resultTurn: row.resultTurnId,
     }))
   })
 

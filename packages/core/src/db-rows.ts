@@ -77,7 +77,7 @@ export type CoordinatorRow = typeof CoordinatorRow.Type
 
 export type NewInboxRow = {
   readonly sessionId: string
-  readonly kind: InboxKind
+  readonly kind: "notice"
   readonly message: string
   readonly details: Record<string, unknown>
 }
@@ -125,14 +125,6 @@ export type InboxSql = {
   readonly senderSessionId: string | null
   readonly content: string
   readonly status: string
-  readonly turnEnd: string | null
-}
-
-export const summaryIn = (content: string) => {
-  const found = /<summary>([\s\S]*?)<\/summary>/.exec(content)
-  return found === null
-    ? undefined
-    : found[1]!.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&amp;", "&")
 }
 
 export const ROUND_STATUS = ["completed", "failed", "interrupted", "lost", "not_started"] as const
@@ -148,16 +140,6 @@ export type TurnReport = TurnEnded & { readonly id: number }
 export const failureOf = (error: string | undefined): TurnEnd["failure"] =>
   error === undefined || error === "" ? undefined : { message: error }
 
-export const resultDetails = (content: string, end: TurnEnd | undefined) => {
-  const error = end?.failure?.message
-  const summary = summaryIn(content)
-  return {
-    status: end?.status === "completed" && error === undefined ? "completed" : "failed",
-    ...(summary === undefined ? {} : { summary }),
-    ...(error === undefined ? {} : { error }),
-  }
-}
-
 export const toInbox = (row: InboxSql) => {
   const kind = row.kind as InboxKind
   return {
@@ -166,12 +148,7 @@ export const toInbox = (row: InboxSql) => {
     recipient: row.recipientSessionId,
     kind,
     message: row.content,
-    details:
-      kind === "result"
-        ? JSON.stringify(
-            resultDetails(row.content, row.turnEnd === null ? undefined : (JSON.parse(row.turnEnd) as TurnEnd)),
-          )
-        : "{}",
+    details: "{}",
     status: row.status === "delivering" ? "sending" : row.status,
     createdAt: 0,
   }

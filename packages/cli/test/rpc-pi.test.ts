@@ -6,6 +6,7 @@ import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { Deferred, Effect, Fiber, Stream } from "effect"
+import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { FakeRuntime, settled, until, projectOf } from "./fakes.ts"
@@ -16,7 +17,6 @@ describe("vibest.sock", () => {
     "a Pi pane never gets agent.prompt; its subscription takes pending rows first, then new ones as they arrive",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const inbox = yield* Inbox
       const db = yield* Db
       const general = {
         agent: "general",
@@ -29,7 +29,7 @@ describe("vibest.sock", () => {
         address: { machine: "local", id: "test/p0" },
         status: "idle" as const,
         startedAt: 1,
-        exitedAt: null,
+        exitedAt: 1,
         turnState: "none" as const,
         turnPromptedAt: 0,
         metadata: {},
@@ -46,10 +46,10 @@ describe("vibest.sock", () => {
         address: { machine: "local", id: "w1:p8" },
       })
       const project = (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.projectId
-      const row = (sessionId: string, message: string) => ({ sessionId, kind: "result" as const, message, details: {} })
-      yield* inbox.enqueue(row("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "one"))
-      yield* inbox.enqueue(row("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "two"))
-      yield* inbox.enqueue(row("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "three"))
+      const send = (sender: string, message: string) => db.insertSend(coord.sessionId, message, undefined, sender)
+      yield* send("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "one")
+      yield* send("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "two")
+      yield* send("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "three")
       assert.deepStrictEqual(
         (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p8"),
         [],
@@ -59,8 +59,15 @@ describe("vibest.sock", () => {
       const c = yield* asSession(yield* client, coord.sessionId)
       const received = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.take(3), Stream.runCollect, Effect.forkChild)
       yield* until(db.coordinatorPending(project), (rows) => rows.length === 0)
-      yield* inbox.enqueue(row("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "four"))
-      assert.deepStrictEqual(Array.from(yield* Fiber.join(received)), ["one\n\ntwo", "three", "four"])
+      yield* send("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "four")
+      const said = (sender: string, message: string) =>
+        `<agent-message>\n<agent-id>${sender}</agent-id>\n<title>n</title>\n<message>\n${message}\n</message>\n</agent-message>`
+      const a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+      assert.deepStrictEqual(Array.from(yield* Fiber.join(received)), [
+        `${said(a, "one")}\n\n${said(a, "two")}`,
+        said("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "three"),
+        said("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "four"),
+      ])
       assert.deepStrictEqual(yield* db.coordinatorPending(project), [])
       assert.deepStrictEqual(
         (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p8"),
@@ -88,7 +95,7 @@ describe("vibest.sock", () => {
           address: { machine: "local", id: "test/p0" },
           status: "idle",
           startedAt: 1,
-          exitedAt: null,
+          exitedAt: 1,
           turnState: "none",
           turnPromptedAt: 0,
           metadata: {},
@@ -105,7 +112,7 @@ describe("vibest.sock", () => {
       const project = yield* projectOf("r")
       const row = yield* inbox.enqueue({
         sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        kind: "result",
+        kind: "notice",
         message: "back",
         details: {},
       })
@@ -124,8 +131,12 @@ describe("vibest.sock", () => {
     "a withheld Pi chunk with no Ack stays sending, then failed; a later batch is not confirmed",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const inbox = yield* Inbox
       const db = yield* Db
+      const sql = yield* SqlClient.SqlClient
+      const statusFrom = (sender: string) =>
+        sql<{ status: string }>`SELECT status FROM inbox WHERE sender_session_id = ${sender}`.pipe(
+          Effect.map((rows) => rows[0]?.status),
+        )
       const layout = yield* Layout
       const general = {
         agent: "general",
@@ -138,7 +149,7 @@ describe("vibest.sock", () => {
         address: { machine: "local", id: "test/p0" },
         status: "idle" as const,
         startedAt: 1,
-        exitedAt: null,
+        exitedAt: 1,
         turnState: "none" as const,
         turnPromptedAt: 0,
         metadata: {},
@@ -153,18 +164,8 @@ describe("vibest.sock", () => {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
-      yield* inbox.enqueue({
-        sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        kind: "result",
-        message: "one",
-        details: {},
-      })
-      yield* inbox.enqueue({
-        sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        kind: "result",
-        message: "two",
-        details: {},
-      })
+      yield* db.insertSend(coord.sessionId, "one", undefined, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+      yield* db.insertSend(coord.sessionId, "two", undefined, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
       const sock = yield* Effect.promise(
         () =>
           new Promise<net.Socket>((resolve, reject) => {
@@ -188,19 +189,16 @@ describe("vibest.sock", () => {
           ["vibest-project-id", String(coord.projectId)],
         ]),
       )
-      const claimed = yield* until(
-        db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"),
-        (row) => row?.status !== "pending",
-      )
-      assert.strictEqual(claimed?.status, "sending")
-      assert.strictEqual((yield* db.latestInbox("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "result"))?.status, "pending")
+      const claimed = yield* until(statusFrom("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), (status) => status !== "pending")
+      assert.strictEqual(claimed, "delivering")
+      assert.strictEqual(yield* statusFrom("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), "pending")
       sock.destroy()
       const closed = yield* until(
-        db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"),
-        (row) => row?.status === "failed" || row?.status === "delivered",
+        statusFrom("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+        (status) => status === "failed" || status === "delivered",
       )
-      assert.strictEqual(closed?.status, "failed")
-      assert.strictEqual((yield* db.latestInbox("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "result"))?.status, "pending")
+      assert.strictEqual(closed, "failed")
+      assert.strictEqual(yield* statusFrom("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), "pending")
     }),
     undefined,
     15_000,
@@ -223,7 +221,7 @@ describe("vibest.sock", () => {
         address: { machine: "local", id: "test/p0" },
         status: "idle" as const,
         startedAt: 1,
-        exitedAt: null,
+        exitedAt: 1,
         turnState: "none" as const,
         turnPromptedAt: 0,
         metadata: {},
@@ -239,7 +237,7 @@ describe("vibest.sock", () => {
       })
       yield* inbox.enqueue({
         sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        kind: "result",
+        kind: "notice",
         message: "one",
         details: {},
       })
@@ -251,12 +249,12 @@ describe("vibest.sock", () => {
       )
       assert.strictEqual(yield* Deferred.await(got), "one")
       yield* until(
-        db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"),
+        db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "notice"),
         (row) => row?.status === "delivered",
       )
       yield* Fiber.interrupt(fiber)
       yield* TestClock.withLive(Effect.sleep("50 millis"))
-      assert.strictEqual((yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "result"))?.status, "delivered")
+      assert.strictEqual((yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "notice"))?.status, "delivered")
     }),
     undefined,
     15_000,

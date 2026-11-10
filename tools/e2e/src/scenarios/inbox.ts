@@ -8,6 +8,8 @@ import {
   ask,
   claudeConfigOf,
   claudeEnv,
+  claudeSendOrReply,
+  taskIn,
   envArgs,
   delegatingModel,
   fakeAnthropic,
@@ -23,6 +25,7 @@ import {
 import {
   agentName,
   alive,
+  answerOf,
   expect,
   expectAnswered,
   fail,
@@ -149,7 +152,7 @@ const claudeMain = async (
   const result = async (sub: string, title: string, marker: string, before: number) => {
     await until(`the ${marker} result delivered`, () => delivered(sub) > before, 180_000)
     const shortId = sub.slice(0, 8)
-    return shown(`General Agent "${title}" completed (${shortId})`, marker)
+    return shown(`General Agent "${title}" sent a message (${shortId})`, marker)
   }
   const enter = () => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: ["enter"] })
   const typeText = (text: string) => herdr(socket, "pane.send_text", { pane_id: pane(), text })
@@ -281,14 +284,7 @@ const heldSubagent = async (w: World, pastWindow: boolean) => {
     const peek = await w.vibest(["peek", sub], { cwd: repo })
     expect(peek.code === 0, `vibest peek ${sub} exited ${peek.code}: ${peek.stderr}${peek.stdout}`)
     model.release()
-    await until(
-      "the held turn's result",
-      async () =>
-        (
-          (await w.json<{ result?: { message?: string } | null }>(["result", sub], { cwd: repo })).result?.message ?? ""
-        ).includes("done-held"),
-      60_000,
-    )
+    await until("the held turn's answer", async () => (await answerOf(w, sub, repo)).includes("done-held"), 60_000)
   } finally {
     model.stop()
     await dropHerdrSession(w, session)
@@ -331,7 +327,7 @@ const checks: ReadonlyArray<Check> = [
           [a, "Answer probe alpha"],
           [b, "Answer probe beta"],
         ] as const) {
-          const line = `General Agent "${title}" completed (${sub.slice(0, 8)})`
+          const line = `General Agent "${title}" sent a message (${sub.slice(0, 8)})`
           const n = entries.filter((e) => e.type === "user" && e.text.includes(line)).length
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
@@ -470,8 +466,8 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const claude = fakeAnthropic((r) => {
-        const task = r.tools.length > 0 ? /done-(\w+)/.exec(text(lastUser(r))) : null
-        return task ? `done-${task[1]}\nstatus: completed` : "ok"
+        const task = r.tools.length > 0 ? taskIn(r) : undefined
+        return task ? claudeSendOrReply(r, `done-${task}`) : "ok"
       })
       const model = delegatingModel(`claude ${envArgs(await claudeEnv(w, "inbox", claude.url)).join(" ")}`)
       const session = `${w.herdrSession}-inbox`
@@ -506,17 +502,17 @@ const checks: ReadonlyArray<Check> = [
         await w.ok(["send", model.sessionId(), ask("three")], { cwd: repo })
         await reached("the main agent's turn on a result after vibestd restarted", "done-three")
         const main = (await mains())[0]!.id
-        await expectAnswered(w, model.sessionId(), main)
+        await expectAnswered(w, model.sessionId())
         const toMain = () =>
           rows<{ status: string }>(
             w,
-            "SELECT status FROM inbox WHERE recipient_session_id = ? AND kind = 'result'",
+            "SELECT status FROM inbox WHERE recipient_session_id = ? AND kind = 'send'",
             main,
           ).map((r) => r.status)
         await until(
-          "the main agent's four results delivered",
+          "the main agent's four sends delivered",
           () => JSON.stringify(toMain()) === JSON.stringify(Array(4).fill("delivered")),
-        ).catch(() => fail(`the main agent's result rows: ${JSON.stringify(toMain())}`))
+        ).catch(() => fail(`the main agent's send rows: ${JSON.stringify(toMain())}`))
       } finally {
         model.stop()
         claude.stop()
@@ -651,12 +647,8 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         await until(
-          "the result by its first 8 characters",
-          async () =>
-            (
-              (await w.json<{ result?: { message?: string } | null }>(["result", sub.slice(0, 8)], { cwd: repo }))
-                .result?.message ?? ""
-            ).includes("done-ids"),
+          "the answer by its first 8 characters",
+          async () => (await answerOf(w, sub.slice(0, 8), repo)).includes("done-ids"),
           60_000,
         )
         const peek = await w.vibest(["peek", sub.slice(0, 12)], { cwd: repo })
@@ -791,11 +783,6 @@ const checks: ReadonlyArray<Check> = [
               "SELECT id FROM turn WHERE session_id = ? AND status IS NOT NULL ORDER BY id DESC LIMIT 1",
               sub,
             )?.id ?? 0
-          const beforeResult =
-            q<{ id: number }>(
-              "SELECT id FROM inbox WHERE sender_session_id = ? AND kind = 'result' ORDER BY id DESC LIMIT 1",
-              sub,
-            )?.id ?? 0
           const message = ask(`r${i}`)
           await w.ok(["send", sub, "--", message], { cwd: repo, env })
           await until(
@@ -837,24 +824,13 @@ const checks: ReadonlyArray<Check> = [
                 sub,
                 beforeEnd,
               )
-              const result = q<{ at: number }>(
-                "SELECT queued_at AS at FROM inbox WHERE sender_session_id = ? AND kind = 'result' AND id > ? ORDER BY id LIMIT 1",
-                sub,
-                beforeResult,
-              )
               const delivered = q<{ at: number }>(
                 "SELECT at FROM event WHERE type = 'inbox.moved' AND data ->> '$.inbox' = ? AND data ->> '$.to' = 'delivering' ORDER BY seq LIMIT 1",
                 sent!.id,
               )
-              if (
-                !Number.isFinite(receipt) ||
-                receipt === 0 ||
-                end === undefined ||
-                result === undefined ||
-                delivered === undefined
-              )
+              if (!Number.isFinite(receipt) || receipt === 0 || end === undefined || delivered === undefined)
                 return false
-              hookMs = result.at - receipt
+              hookMs = end.at - receipt
               deliveryMs = delivered.at - end.at
               return true
             },
@@ -905,7 +881,7 @@ const checks: ReadonlyArray<Check> = [
           closes.push(at - t0)
         }
         const out = {
-          hookReceiptToResultMs: stats(hook),
+          hookReceiptToTurnEndMs: stats(hook),
           turnEndToDeliveringMs: stats(delivery),
           paneCloseToProcessEndMs: stats(closes),
         }

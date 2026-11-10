@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, delegatingModel, piDir } from "../fake-model.ts"
+import { ask, delegatingModel, type Message, piDir, sendOrReply, text } from "../fake-model.ts"
 import { alive, binary, expect, fail, readDb, row, Skip, until, type World } from "../world.ts"
 
 type Machine = { name: string; id: string; state: string; reason?: string }
@@ -52,15 +52,16 @@ export const subModel = () => {
     hostname: "127.0.0.1",
     idleTimeout: 0,
     fetch: async (req) => {
-      const { messages = [] } = (await req.json()) as { messages?: Array<{ content: unknown }> }
-      const last = messages.at(-1)
-      const body = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "")
-      const task = /done-(\w+)/.exec(body)?.[1]
-      if (task === undefined) return new Response(reply("ok"), { headers: { "content-type": "text/event-stream" } })
-      asked.push(task)
-      if (task.startsWith("held")) await new Promise<void>((resolve) => held.set(task, resolve))
-      return new Response(reply(`done-${task}\nstatus: completed`), {
-        headers: { "content-type": "text/event-stream" },
+      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const task = /done-(\w+)/.exec(text(messages.findLast((m) => m.role === "user")))?.[1]
+      const headers = { "content-type": "text/event-stream" }
+      if (task === undefined) return new Response(reply("ok"), { headers })
+      if (messages.at(-1)?.role !== "tool") {
+        asked.push(task)
+        if (task.startsWith("held")) await new Promise<void>((resolve) => held.set(task, resolve))
+      }
+      return new Response(task.startsWith("quiet") ? reply(`done-${task}`) : sendOrReply(messages, `done-${task}`), {
+        headers,
       })
     },
   })
@@ -208,7 +209,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M1",
     title:
-      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's main agent and none on A, A's main agent gets one notice with B's text, B's outbox empties; send, result, peek and archive forward to B",
+      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's main agent and none on A, A's main agent gets one notice with B's message, which the session sent itself, B's outbox empties; send, result, peek and archive forward to B",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -294,9 +295,40 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
+    id: "M8",
+    title:
+      "a turn that ends on B without a send queues nothing in B's outbox and gives A's main agent no notice; vibest result on A returns the turn's answer",
+    run: async (w) => {
+      let s: Setup | undefined
+      try {
+        s = await setup(w)
+        await s.okA(["machine", "add", "mb", "b-host"])
+        const address = await s.run("quietone")
+        const id8 = address.slice(3)
+        await until(
+          "B's turn completed",
+          () =>
+            s!.bDb<{ n: number }>(
+              "SELECT count(*) AS n FROM turn WHERE session_id LIKE ? AND status = 'completed'",
+              `${id8}%`,
+            )?.n === 1,
+          120_000,
+        )
+        await Bun.sleep(3_000)
+        const queued = s.bDb<{ n: number }>("SELECT count(*) AS n FROM event WHERE type = 'outbox.queued'")?.n
+        expect(queued === 0, `${queued} outbox.queued facts on B`)
+        expect(s.notices(address, "quietone") === 0, "A got a notice for a turn end")
+        const got = JSON.parse(await s.okA(["result", address])) as { answer?: { text?: string | null } | null }
+        expect(got.answer?.text?.includes("done-quietone") === true, `result on A: ${JSON.stringify(got)}`)
+      } finally {
+        await s?.stop()
+      }
+    },
+  },
+  {
     id: "M2",
     title:
-      "recovery: a result written while A's vibestd is stopped, and one written while the ssh child is killed, each arrive once; A's ls shows mb not connected meanwhile",
+      "recovery: a message sent while A's vibestd is stopped, and one sent while the ssh child is killed, each arrive once; A's ls shows mb not connected meanwhile",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -366,7 +398,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M4",
     title:
-      "forget: machine rm with a task held open; its result waits in B's outbox; machine add under another name delivers it once",
+      "forget: machine rm with a task held open; its message waits in B's outbox; machine add under another name delivers it once",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -443,7 +475,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M6",
     title:
-      "terminals on another machine: machine add mirrors B's hc core into A's hc; a run --machine row's address is A's hc terminal; typing into it on A starts a typed turn on B whose result arrives once; a rename in hc is followed; a mirror removed in hc is added back by the next ls and result; machine rm removes it from hc whatever its name",
+      "terminals on another machine: machine add mirrors B's hc core into A's hc; a run --machine row's address is A's hc terminal; typing into it on A starts a typed turn on B whose message arrives once; a rename in hc is followed; a mirror removed in hc is added back by the next ls and result; machine rm removes it from hc whatever its name",
     run: async (w) => {
       let s: Setup | undefined
       try {

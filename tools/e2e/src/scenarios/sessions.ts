@@ -37,7 +37,6 @@ const resultOf = (w: World, p: Project, id: string) =>
   w.json<{
     id: string
     status: string
-    result: { kind: string; message: string } | null
     answer: { turn: number; status: string; text: string | null } | null
   }>(["result", id], {
     cwd: p.repo,
@@ -46,8 +45,8 @@ const resultOf = (w: World, p: Project, id: string) =>
 
 const answered = async (w: World, p: Project, id: string, task: string) =>
   until(
-    `the result of ${task}`,
-    async () => ((await resultOf(w, p, id)).result?.message ?? "").includes(`done-${task}`),
+    `the answer of ${task}`,
+    async () => ((await resultOf(w, p, id)).answer?.text ?? "").includes(`done-${task}`),
     90_000,
   )
 
@@ -140,18 +139,17 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S5",
     title:
-      "vibest result is null before a subagent's first turn ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the main agent and the subagent with its latest result; after archive only vibest ls --all lists it, exited",
+      "vibest result has no answer before a subagent's first turn ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the main agent and the subagent with its latest reply; after archive only vibest ls --all lists it, exited",
     run: async (w) => {
       const p = await piProject(w, "s5")
       try {
         const a = await p.runSub("s5")
         await until("the subagent's turn at the model", () => p.model.held() > 0, 60_000)
         const before = await resultOf(w, p, a)
-        expect(before.id === a && before.result === null, `result before the turn ended: ${JSON.stringify(before)}`)
+        expect(before.id === a && before.answer === null, `result before the turn ended: ${JSON.stringify(before)}`)
         p.model.release()
         await answered(w, p, a, "s5")
         const after = await resultOf(w, p, a)
-        expect(after.result?.kind === "result", `result: ${JSON.stringify(after)}`)
         const projected = row<{ answer: string | null; reported: string | null }>(
           w,
           `SELECT t.answer, e.data ->> '$.text' AS reported FROM turn t
@@ -190,6 +188,14 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         await p.close()
       }
+    },
+  },
+  {
+    id: "S52",
+    title: "vibest report is a usage error: sessions message with vibest send",
+    run: async (w) => {
+      const r = await w.vibest(["report", "--", "x"])
+      expect(r.code !== 0 && /report/.test(r.stderr), `vibest report exited ${r.code}: ${r.stderr}${r.stdout}`)
     },
   },
   {
@@ -341,8 +347,7 @@ const checks: ReadonlyArray<Check> = [
         )
         const three = await p.runSub("three")
         await answered(w, p, three, "three")
-        const main = row<{ id: string }>(w, "SELECT id FROM session WHERE role = 'main'")!.id
-        await expectAnswered(w, three, main)
+        await expectAnswered(w, three)
       } finally {
         await p.close()
       }

@@ -249,7 +249,7 @@ describe("multi-repository isolated workspace", () => {
   )
 
   sessionTest(
-    "vibest run from the project directory: a writing subagent gets one detached worktree per repository; archive removes each that is safe; the result names branch and pushed per repository",
+    "vibest run from the project directory: a writing subagent gets one detached worktree per repository; archive removes each that is safe; the session view names branch and pushed per repository",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -300,9 +300,7 @@ describe("multi-repository isolated workspace", () => {
       yield* writeResult(id, "pi", { text: "status: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      const message = (yield* db.latestInbox(id, "result"))!.message
-      assert.include(message, "<branch>app=\nsdk=</branch>")
-      assert.include(message, "<pushed>app=false\nsdk=false</pushed>")
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
 
       yield* fakeGit.checkout(sdkWt, { state: { branch: "feat/sdk", pushed: false, saved: true, why: "" } })
       yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: false, why: "uncommitted changes" } })

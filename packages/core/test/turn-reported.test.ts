@@ -9,7 +9,7 @@ import { projectOf } from "./lib/directory.ts"
 import { testEffect } from "./lib/effect.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { harnessLayer } from "./lib/harnesses.ts"
-import { eventsOf, until, writeResult } from "./lib/observe.ts"
+import { answerOf, eventsOf, until, writeResult } from "./lib/observe.ts"
 import { makeRepository, sessionLayer } from "./lib/session.ts"
 
 const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
@@ -46,16 +46,16 @@ describe("turn.reported", () => {
     "two reports give one result, the later one, and a second check writes nothing",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const { id, sessions } = yield* spawnWorking(yield* makeRepository)
       yield* writeResult(id, "pi", { text: "status: completed\nsummary: first" }, 1_000)
       yield* writeResult(id, "pi", { text: "status: completed\nsummary: second" }, 2_000)
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       const [end] = yield* eventsOf(id, "turn.ended")
       assert.strictEqual(typeof end?.data.report, "number")
-      const message = (yield* db.latestInbox(id, "result"))!.message
-      assert.include(message, "summary: second")
-      assert.notInclude(message, "summary: first")
+      const answer = yield* answerOf(id)
+      assert.include(answer, "summary: second")
+      assert.notInclude(answer, "summary: first")
       yield* sessions.check(id)
       assert.strictEqual(yield* resultCount(id), 1)
     }),
@@ -71,7 +71,7 @@ describe("turn.reported", () => {
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
-      assert.include((yield* db.latestInbox(id, "result"))!.message, "summary: before the reload")
+      assert.include(yield* answerOf(id), "summary: before the reload")
     }),
   )
 
@@ -86,7 +86,7 @@ describe("turn.reported", () => {
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
-      assert.isUndefined(yield* db.latestInbox(id, "result"))
+      assert.isUndefined(yield* answerOf(id))
     }),
   )
 

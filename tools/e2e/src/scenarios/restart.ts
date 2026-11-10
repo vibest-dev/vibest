@@ -161,7 +161,7 @@ const checks: ReadonlyArray<Check> = [
     id: "U2",
     covers: ["D8"],
     title:
-      "vibest update: vibestd hands over; No keeps an old Pi main agent mid-turn (its old protocol is told to run vibest update), Yes restarts its Pi subagent (herdr lists it as s-<id> before and after) and then it in its pane on the same session and conversation, its inbox continues the turn, and results still arrive",
+      "vibest update: vibestd hands over; No keeps an old Pi main agent mid-turn (its old protocol is told to run vibest update), Yes restarts its Pi subagent (herdr lists it as s-<id> before and after) and then it in its pane on the same session and conversation, its inbox continues the turn, and messages still arrive",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = holdsSlowResultModel()
@@ -223,7 +223,7 @@ const checks: ReadonlyArray<Check> = [
         const zero = (
           JSON.parse(await ok(["run", "pi", "--session", session, "--env", piEnv, ask("zero")])) as { id: string }
         ).id
-        await reached("the main agent's turn on the first result", result("done-zero"))
+        await reached("the main agent's turn on the first message", result("done-zero"))
         await until("herdr lists the subagent as s-<id>", async () => (await listed(zero))?.agent === "pi", 60_000)
         const subPane = (await listed(zero))!.pane_id
         const subBefore = subRow(zero)!
@@ -335,7 +335,7 @@ const checks: ReadonlyArray<Check> = [
             m.some((x) => x.includes("done-slow")),
         )
         await ok(["run", "pi", "--session", session, "--env", piEnv, ask("after")])
-        await reached("the main agent's turn on a result after the update", result("done-after"))
+        await reached("the main agent's turn on a message after the update", result("done-after"))
         for (const id of [before.id, zero]) {
           expectFacts(w, id, ["process.started", "process.ended", "process.started", "process.ready"])
           const ends = rows<{ reason: string | null }>(
@@ -690,12 +690,12 @@ export default Plugin.define({
 `,
         },
         async ({ id, seen, row, status, log }) => {
-          const results = () => {
+          const notices = () => {
             const db = readDb(path.join(w.vibestHome, "vibest.db"))
             try {
               return db
                 .query<{ content: string }, [string]>(
-                  `SELECT content FROM inbox WHERE sender_session_id = ? AND kind = 'result' ORDER BY id`,
+                  `SELECT content FROM inbox WHERE sender_session_id = ? AND kind = 'notice' ORDER BY id`,
                 )
                 .all(id)
                 .map((r) => r.content)
@@ -705,19 +705,19 @@ export default Plugin.define({
           }
           const fail = async (e: Error) => {
             throw new Error(
-              `${e.message}; row ${JSON.stringify(row())}; rounds ${JSON.stringify(status())}; results ${JSON.stringify(results())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
+              `${e.message}; row ${JSON.stringify(row())}; rounds ${JSON.stringify(status())}; notices ${JSON.stringify(notices())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
             )
           }
           await until("the move to the second login", () => row().provider === "second", 120_000).catch(fail)
           await until("the round fails", () => status().some((m) => m.status === "failed"), 120_000).catch(fail)
           const moved = row()
-          await until("the round's no-harness-left result", () =>
-            results().some((r) => r.includes("no harness left")),
+          await until("the round's no-harness-left notice", () =>
+            notices().some((r) => r.includes("no harness left")),
           ).catch(fail)
           expect(status().length === 1, `one round: ${JSON.stringify(status())}`)
           expect(status()[0]!.status === "failed", `the round: ${JSON.stringify(status())}`)
-          const said = results()
-          expect(said.length === 1 && said[0]!.includes("no harness left"), `results: ${JSON.stringify(said)}`)
+          const said = notices()
+          expect(said.length === 1 && said[0]!.includes("no harness left"), `notices: ${JSON.stringify(said)}`)
           expect(
             row().provider === "second" && row().pid === moved.pid,
             `a third start: ${JSON.stringify(moved)} -> ${JSON.stringify(row())}`,

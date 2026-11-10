@@ -12,9 +12,9 @@ in another pane. `vibest ls` shows the title, harness, provider, model and where
 
 ## S5. Reading sessions
 
-`vibest result` is empty before a session's first turn ends and then holds its reply, also as `answer` (the latest ended
+`vibest result` has no `answer` before a session's first turn ends and then holds its reply as `answer` (the latest ended
 turn's status and reply text, kept in the turn row; an interrupted turn has no text); `vibest status` says vibestd is
-running and which process it is; `vibest ls` lists the main agent and each session with its latest result; after
+running and which process it is; `vibest ls` lists the main agent and each session with its latest reply; after
 `vibest archive`, only `vibest ls --all` lists the session, as exited.
 
 ## S6. Archiving

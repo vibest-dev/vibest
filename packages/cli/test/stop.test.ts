@@ -252,14 +252,14 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
           ),
         ),
       )
-      yield* until(db.latestInbox(worker, "result"), (r) => r?.status === "delivered")
+      yield* until(db.getSession(worker), (w) => w?.turnState === "completed")
       const leave = drain.track("held short operation")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       yield* sessions.send(worker, "after reopen")
       yield* (yield* Inbox).enqueue({
         sessionId: worker,
-        kind: "report",
+        kind: "notice",
         message: "arrival while draining",
         details: {},
       })
@@ -327,16 +327,16 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
         [PROJECT_HEADER, String(projectId)],
       ]
       socket.write(JSON.stringify({ jsonrpc: "2.0", id: "s", method: "Inbox.Subscribe", params: null, headers }) + "\n")
-      yield* (yield* Inbox).enqueue({ sessionId: worker, kind: "report", message: "held", details: {} })
-      yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "sending")
+      yield* (yield* Inbox).enqueue({ sessionId: worker, kind: "notice", message: "held", details: {} })
+      yield* until(db.latestInbox(worker, "notice"), (r) => r?.status === "sending")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       assert.isFalse(yield* shutdownDone)
       socket.write(JSON.stringify({ jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: "s" } }) + "\n")
-      yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "delivered")
+      yield* until(db.latestInbox(worker, "notice"), (r) => r?.status === "delivered")
       assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
       socket.destroy()
-      assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, "delivered")
+      assert.strictEqual((yield* db.latestInbox(worker, "notice"))?.status, "delivered")
     }),
   )
 
@@ -346,13 +346,13 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const repo = yield* makeRepository
       const { db, worker, projectId } = yield* idleMainWithWorker(repo, "claude")
       const inbox = yield* Inbox
-      yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "ack", details: {} })
+      yield* inbox.enqueue({ sessionId: worker, kind: "notice", message: "ack", details: {} })
       const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [], "a poll while draining hands out nothing new")
       assert.deepStrictEqual(yield* inbox.ack(projectId, polled.ids), polled.ids)
-      assert.strictEqual((yield* db.latestInbox(worker, "report"))?.status, "delivered")
+      assert.strictEqual((yield* db.latestInbox(worker, "notice"))?.status, "delivered")
       assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
     }),
   )

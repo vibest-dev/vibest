@@ -5,12 +5,12 @@ description: Plan, implement, review, then open a pull request, with the user ap
 
 # Pipeline
 
-Plan → the user agrees → implement → review until the reviewer approves → pull request. Follow delegate: do not poll; each result arrives by itself; check it yourself. The user stays in the loop and may step into any pane. What they say overrides the next step.
+Plan → the user agrees → implement → review until the reviewer approves → pull request. Follow delegate: do not poll; each agent sends its message when it decides to; check it yourself. The user stays in the loop and may step into any pane. What they say overrides the next step.
 
 ## 1. Plan
 
 ```
-vibest run [<harness>] --title 'Plan <topic>' -- 'Write an implementation plan for: <goal, paths, constraints>. Read the code. Report the approach, the files to change, the steps, how to verify, and open questions. Do not modify files.'
+vibest run [<harness>] --title 'Plan <topic>' -- 'Write an implementation plan for: <goal, paths, constraints>. Read the code. Send me the approach, the files to change, the steps, how to verify, and open questions. Do not modify files.'
 ```
 
 Its id is <planner id>. Tell the user the plan is being written and end your turn. Do not pass `--archive-on-idle`: the user has not agreed yet, and a completed turn would archive the session before they can answer.
@@ -24,10 +24,10 @@ Show the plan in full, including open questions. Do not implement until the user
 Save the agreed plan, verbatim, with your file tool as `$VIBEST_PROJECT_DIR/artifacts/pipeline-<topic>-plan.md` (a new file name if that one exists). Then:
 
 ```
-vibest run [<harness>] --title 'Implement <topic>' -- 'Implement the plan at <absolute plan path> exactly. Run the tests and typecheck, commit on a branch, push, and report the branch and hash. Do not open a pull request.'
+vibest run [<harness>] --title 'Implement <topic>' -- 'Implement the plan at <absolute plan path> exactly. Run the tests and typecheck, commit on a branch, push, and send me the branch and hash. Do not open a pull request.'
 ```
 
-Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name. Do not pass `--archive-on-idle`: this session stays for review and the pull request. When it reports, check the diff and the tests yourself before review.
+Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJECT_DIR (`echo $VIBEST_PROJECT_DIR`, or `directory` from `vibest project info`) plus `/artifacts/` and the file name. Do not pass `--archive-on-idle`: this session stays for review and the pull request. When it sends its message, check the diff and the tests yourself before review.
 
 ## 4. Review
 
@@ -35,14 +35,14 @@ Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJEC
 Read-only here is the prompt you pass, plus the peer git rule the session already has: no commit, and nothing that moves HEAD, a branch, or the index.
 
 ```
-vibest run [<harness>] --title 'Review <topic>' --peer <implementer id> -- 'Review the change on this branch against the plan at <absolute plan path>. Run git diff main...HEAD. Do not modify files, commit, or move HEAD. Look for bugs, missing tests, and departures from the plan; run the tests. Start with "verdict: approve" or "verdict: changes requested", then each comment with file and line.'
+vibest run [<harness>] --title 'Review <topic>' --peer <implementer id> -- 'Review the change on this branch against the plan at <absolute plan path>. Run git diff main...HEAD. Do not modify files, commit, or move HEAD. Look for bugs, missing tests, and departures from the plan; run the tests. Send me a message that starts with "verdict: approve" or "verdict: changes requested", then each comment with file and line.'
 ```
 
 Its id is <reviewer id>. Do not pass `--archive-on-idle`: later rounds go to this reviewer with `vibest send`.
 
 ## 5. Until approval
 
-- `changes requested` → `vibest send <implementer id> -- '<the comments, verbatim. Fix them, run the tests, commit, push, and report the hash.>'` When it reports, `vibest send <reviewer id> -- 'The implementer pushed <hash>. Review again. Same report format.'`
+- `changes requested` → `vibest send <implementer id> -- '<the comments, verbatim. Fix them, run the tests, commit, push, and send me the hash.>'` When it sends its message, `vibest send <reviewer id> -- 'The implementer pushed <hash>. Review again. Same message format.'`
 - `approve` → open the pull request.
 - After 3 rounds without approval, or a judgment call, stop and show the open comments. The user decides: another round, accept, or change the plan.
 
@@ -51,7 +51,7 @@ One line to the user per round: the number, the verdict, what is being fixed.
 ## 6. Pull request
 
 ```
-vibest send <implementer id> -- 'The review approved the change. Open a pull request against main with gh pr create. Title: <title>. Body: the plan, the change, and how it was verified. Report the URL.'
+vibest send <implementer id> -- 'The review approved the change. Open a pull request against main with gh pr create. Title: <title>. Body: the plan, the change, and how it was verified. Send me the URL.'
 ```
 
 Give the user the URL. Then `vibest archive <reviewer id>`. Keep the implementer until the user is done; follow-ups are `vibest send <implementer id> -- '<message>'`.

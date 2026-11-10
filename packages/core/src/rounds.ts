@@ -5,7 +5,6 @@ import type { FileSystem } from "effect"
 import {
   type InboxRow,
   type InboxStatus,
-  type NewInboxRow,
   type SessionPatch,
   type SessionRow,
   type TurnEnd,
@@ -16,20 +15,18 @@ import {
 import type { HarnessDefinition } from "./host.ts"
 import { nextBatch } from "./inbox.ts"
 import type { LimitMove } from "./move.ts"
-import { workspaceGit } from "./project-create.ts"
-import { envelope, isUsageLimitError, outcome, parseReport, type ResultStatus } from "./results.ts"
+import { isUsageLimitError } from "./results.ts"
 import { type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
-import { gitState } from "./worktree.ts"
 
 export const sessionRounds = (deps: {
   readonly db: {
-    readonly finishTurn: (
+    readonly endTurn: (
       id: string,
       end: TurnEnd,
       patch: SessionPatch,
-      row: NewInboxRow,
+      notice: string | undefined,
       at?: number,
-    ) => Effect.Effect<InboxRow>
+    ) => Effect.Effect<void>
     readonly pendingInbox: (sessionId: string) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly claim: (ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<number>>
     readonly setInboxStatus: (
@@ -77,44 +74,13 @@ export const sessionRounds = (deps: {
   const finish = Effect.fn("Sessions.finish")(function* (
     session: SessionRow,
     end: Extract<TurnState, "completed" | "failed" | "lost">,
-    text: string,
     error: string | undefined,
     at?: number,
     reported?: number,
+    notice?: string | null,
   ) {
-    const report = parseReport(text)
-    const status: ResultStatus = end === "completed" && !error ? "completed" : "failed"
-    const summary =
-      status === "failed" ? outcome(session.name, error) : (report.summary ?? outcome(session.name, error))
-    const worktree = yield* deps.worktreeOf(session)
-    const repos = yield* workspaceGit(worktree)
-    const g = repos ? undefined : yield* gitState(worktree)
-    const info = {
-      id: session.id,
-      agent: session.agent,
-      harness: session.harnessId,
-      name: session.name,
-      status,
-      branch: repos ? repos.map((r) => `${r.name}=${r.branch}`).join("\n") : (g?.branch ?? ""),
-      pushed: repos ? repos.map((r) => `${r.name}=${r.pushed}`).join("\n") : String(g?.pushed ?? false),
-      worktree,
-    }
-    const body = [text, error ? `error: ${error}` : ""].filter(Boolean).join("\n\n")
-    const message = envelope(
-      "agent-result",
-      [
-        ["agent-id", session.id],
-        ["status", info.status],
-        ["summary", summary],
-        ["harness", session.harnessId],
-        ["branch", info.branch],
-        ["pushed", repos ? info.pushed : info.branch ? info.pushed : ""],
-        ["worktree", worktree],
-      ],
-      ["result", body],
-    )
     const failure = failureOf(error)
-    yield* db.finishTurn(
+    yield* db.endTurn(
       session.id,
       {
         status: end,
@@ -122,12 +88,9 @@ export const sessionRounds = (deps: {
         ...(failure === undefined ? {} : { failure }),
       },
       { turnState: end, lastActive: yield* Clock.currentTimeMillis },
-      {
-        sessionId: session.id,
-        kind: "result",
-        message,
-        details: { ...info, summary, remember: report.remember, error },
-      },
+      (end === "completed" && !error) || notice === null
+        ? undefined
+        : (notice ?? `${session.id}'s turn ended with an error: ${error}`),
       at,
     )
   })
@@ -195,7 +158,11 @@ export const sessionRounds = (deps: {
       )
   })
 
-  const collectResult = Effect.fn("Sessions.collectResult")(function* (h: Runtime | undefined, session: SessionRow) {
+  const collectResult = Effect.fn("Sessions.collectResult")(function* (
+    h: Runtime | undefined,
+    session: SessionRow,
+    exiting = false,
+  ) {
     const terminal = session.address
     const adapter = harnesses.find(session.harnessId)
     if (adapter === undefined) return "none" as const
@@ -216,8 +183,15 @@ export const sessionRounds = (deps: {
     }
     if (!adapter.ownSessionId && !session.harnessSessionId && found.conversationId)
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
-    yield* finish(session, found.error ? "failed" : "completed", found.text, found.error, found.at, found.id)
-    return "delivered" as const
+    yield* finish(
+      session,
+      found.error ? "failed" : "completed",
+      found.error,
+      found.at,
+      found.id,
+      exiting ? null : undefined,
+    )
+    return exiting && found.error ? ("none" as const) : ("delivered" as const)
   })
 
   const userPrompt = (id: string, text: string, at?: number) =>

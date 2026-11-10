@@ -1,6 +1,6 @@
 # Recovery
 
-What happens when a pane, a harness, herdr or vibestd dies mid-work: no result is lost and nothing is sent twice. Each
+What happens when a pane, a harness, herdr or vibestd dies mid-work: no answer is lost and nothing is sent twice. Each
 capability below says what it is and when it counts as working.
 
 ## S8. Self-healing and a bad model
@@ -10,8 +10,8 @@ does not list is refused before any pane opens, naming the model, and no session
 
 ## S21. Pane killed mid-turn
 
-When a session's pane is killed mid-turn, the turn fails, a send queued for it fails with a notice, the session ends,
-and exactly one result says so; the time it took is recorded.
+When a session's pane is killed mid-turn, the turn fails with its failure, the session ends, and its creator gets one notice that carries the failure, how to
+peek and resume it, and the text of every send that was queued for it and not delivered; the time it took is recorded.
 
 ## S22. Harness killed
 
@@ -19,8 +19,8 @@ When a session's harness process is killed and its pane stays, the same happens 
 
 ## S23. vibestd restarted or killed around a turn end
 
-When vibestd restarts mid-turn, or is killed right after a turn ends, exactly one completed result arrives, pointing at
-the turn's report.
+When vibestd restarts mid-turn, or is killed right after a turn ends, exactly one completed turn results, pointing at
+the turn's report, and it sends nothing.
 
 ## S24. vibestd killed mid-delivery
 
@@ -39,8 +39,8 @@ launch, with one notice, and removes its worktree, or keeps it and says why.
 
 ## S29. vibestd killed before the first task was handed over
 
-When vibestd is killed before a session's first task reached it, the next vibestd types the task once, and one result
-arrives.
+When vibestd is killed before a session's first task reached it, the next vibestd types the task once, and the one
+turn it runs sends nothing.
 
 ## S30. Archive cut off
 
@@ -49,5 +49,10 @@ archived and keeps its worktree.
 
 ## S31. vibestd killed before an archive on completion
 
-When vibestd is killed after a completed result was delivered and before its archive on completion, the next vibestd
+When vibestd is killed after a session's completed turn and before its archive on idle, the next vibestd
 archives the session once, with no extra notice.
+
+## S51. Pane killed while idle
+
+When a session's pane is killed while it is idle, the session ends, its completed turn stays completed, and its creator
+gets exactly one notice that it exited, saying how to peek and resume it.
