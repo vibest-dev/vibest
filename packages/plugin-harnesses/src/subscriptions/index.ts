@@ -1,6 +1,6 @@
 import { capture } from "@vibest/plugin"
 import type { SubscriptionLimit } from "@vibest/schema/subscription"
-import { Effect, FileSystem, Option, Redacted } from "effect"
+import { Effect, Option, Redacted } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
 
 export const record = (u: unknown): Record<string, unknown> | undefined =>
@@ -55,11 +55,6 @@ export const endpoint = (request: HttpClientRequest.HttpClientRequest) =>
 
 export const authed = (request: HttpClientRequest.HttpClientRequest, token: string) =>
   HttpClientRequest.bearerToken(request, Redacted.make(token))
-
-export const readJsonFile = (file: string) =>
-  Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""))).pipe(
-    Effect.map(parseJson),
-  )
 
 export const usageOf = (
   result: Option.Option<{ readonly status: number; readonly body: unknown }>,

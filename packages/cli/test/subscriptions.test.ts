@@ -193,21 +193,11 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
         path.join(dir, "Library", "Keychains", "login.keychain-db"),
         "fake keychain; no real CLI",
       )
-      const agent = path.join(dir, ".pi", "agent")
-      yield* fs.makeDirectory(agent, { recursive: true })
-      yield* fs.writeFileString(
-        path.join(agent, "auth.json"),
-        JSON.stringify({ "example-proxy": { type: "api_key", key: PI_SECRET } }),
-      )
-      yield* fs.writeFileString(
-        path.join(agent, "models.json"),
-        JSON.stringify({ providers: { "custom-proxy": { models: [] } } }),
-      )
-      yield* fs.writeFileString(path.join(agent, "settings.json"), JSON.stringify({ defaultProvider: "anthropic" }))
       const commands: Record<string, string> = {
         "claude auth status --json": claudeStatus,
         "cursor-agent status --format json": JSON.stringify({ isAuthenticated: true }),
         "cursor-agent about --format json": JSON.stringify({ subscriptionTier: "Ultra" }),
+        "pi --list-models": ["provider model", "example-proxy m", "custom-proxy c", "anthropic a"].join("\n"),
         "pi auth check --provider example-proxy --json --no-refresh": JSON.stringify({
           status: "ready",
           provider: "example-proxy",

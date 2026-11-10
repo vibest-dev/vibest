@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 
 import { claudeAccount, claudeUsage, cursorAccount, cursorUsage, piAccount } from "../src/subscriptions/index.ts"
+import { providersFromList } from "../src/subscriptions/pi.ts"
 
 describe("claude", () => {
   it("reads a claude.ai login from `claude auth status --json`", () => {
@@ -127,5 +128,18 @@ describe("pi", () => {
       kind: "subscription",
       provider: "anthropic",
     })
+  })
+
+  it("reads providers from `pi --list-models`, and nothing else", () => {
+    const table = [
+      "provider  model  context",
+      "fake      m      1K",
+      "second    m2     1K",
+      "fake      other  1K",
+    ].join("\n")
+    assert.deepStrictEqual(providersFromList(table), ["fake", "second"])
+    assert.deepStrictEqual(providersFromList("No models available. Use /login\n  docs"), [])
+    assert.strictEqual(providersFromList(""), undefined)
+    assert.strictEqual(providersFromList("not a model list"), undefined)
   })
 })
