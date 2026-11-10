@@ -7,7 +7,9 @@ import { Effect, Fiber, FileSystem, HashMap } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import { FakeRuntime, makeRepository, TURNS, writeResult, resultText, systemPromptFile } from "./fakes.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { TURNS, writeResult, resultText, systemPromptFile } from "./lib/observe.ts"
+import { makeRepository } from "./lib/session.ts"
 import {
   harnessOf,
   spawnWorking,
@@ -17,7 +19,7 @@ import {
   limited,
   chooseNext,
   type FailSeen,
-} from "./sessions-helpers.ts"
+} from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
   test(

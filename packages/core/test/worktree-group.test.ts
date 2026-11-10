@@ -4,11 +4,15 @@ import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { allocationNameSource, Sessions } from "@vibest/core/sessions"
 import { repositoryDirectoryName } from "@vibest/core/worktree"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { ID } from "@vibest/schema/id"
 import { Effect, FileSystem, Path, type Scope } from "effect"
 
-import { FakeGit, FakeRuntime, makeRepository, testLayer, type TestServices, until, projectOf } from "./fakes.ts"
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
+import { FakeGit } from "./lib/fake-git.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { until } from "./lib/observe.ts"
+import { makeRepository, testLayer, type TestServices } from "./lib/session.ts"
 
 const spawnInput = (repo: string, harness: HarnessId = "pi") =>
   Effect.map(

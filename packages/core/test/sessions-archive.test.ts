@@ -2,23 +2,17 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
 import { Sessions } from "@vibest/core/sessions"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Deferred, Effect, Fiber, FileSystem, Stream } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import {
-  FakeRuntime,
-  FakeProcesses,
-  makeRepository,
-  settled,
-  type TestOptions,
-  until,
-  untilVirtual,
-  writeResult,
-  projectOf,
-} from "./fakes.ts"
-import { spawnInput, idleSession, sessionWorktree, test, slowTest, sqlNotices } from "./sessions-helpers.ts"
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
+import { FakeProcesses } from "./lib/fake-processes.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { settled, until, untilVirtual, writeResult } from "./lib/observe.ts"
+import { makeRepository, type TestOptions } from "./lib/session.ts"
+import { spawnInput, idleSession, sessionWorktree, test, slowTest, sqlNotices } from "./lib/sessions-helpers.ts"
 
 let pauseAfterResultRead:
   | { readonly reached: Deferred.Deferred<void>; readonly release: Deferred.Deferred<void> }

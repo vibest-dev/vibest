@@ -3,22 +3,15 @@ import { Db } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { Sessions } from "@vibest/core/sessions"
 import { isLimited, Plugin, stillLimited } from "@vibest/plugin"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Effect, type Scope } from "effect"
 import { SqlClient } from "effect/sql"
 
-import {
-  CLAUDE,
-  FakeRuntime,
-  settled,
-  testLayer,
-  TURNS,
-  type TestOptions,
-  type TestServices,
-  until,
-  writeResult,
-  projectOf,
-} from "./fakes.ts"
+import { KIND as RUNTIME } from "../../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./directory.ts"
+import { FakeRuntime } from "./fake-runtime.ts"
+import { CLAUDE } from "./harnesses.ts"
+import { settled, TURNS, until, writeResult } from "./observe.ts"
+import { sessionFrom, type TestOptions, type TestServices } from "./session.ts"
 
 export const harnessOf = (argv: ReadonlyArray<string>) => (argv[0] === "cursor-agent" ? "cursor" : argv[0])
 
@@ -90,7 +83,7 @@ export const test = <E>(
 ) =>
   it.effect(
     name,
-    () => program.pipe(Effect.provide(testLayer(options))),
+    () => program.pipe(Effect.provide(sessionFrom(options))),
     touchesProcessWideSeam ? { concurrent: false } : undefined,
   )
 
@@ -100,7 +93,7 @@ export const slowTest = <E>(
   name: string,
   program: Effect.Effect<void, E, TestServices | Scope.Scope>,
   options?: TestOptions,
-) => it.effect(name, () => program.pipe(Effect.provide(testLayer(options))), { timeout: SPAWN_HEAVY_TEST_TIMEOUT })
+) => it.effect(name, () => program.pipe(Effect.provide(sessionFrom(options))), { timeout: SPAWN_HEAVY_TEST_TIMEOUT })
 
 export const pick = (w: { readonly status: string; readonly turnState: string } | undefined) => ({
   status: w?.status,

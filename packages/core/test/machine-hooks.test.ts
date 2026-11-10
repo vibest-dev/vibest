@@ -7,7 +7,8 @@ import { machineHooks } from "@vibest/plugin/testing"
 import { Duration, Effect, Fiber, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import { PluginHost, testLayer, type TestOptions, type TestServices, yieldToIo } from "./fakes.ts"
+import { yieldToIo } from "./lib/observe.ts"
+import { PluginHost, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
 
 const event = { name: "mb", target: "b-host", vibestd: "b-id", runtimes: [] }
 

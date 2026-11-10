@@ -3,12 +3,15 @@ import { Db } from "@vibest/core/db"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { AgentRefused as PluginRefused, isLimited, Plugin } from "@vibest/plugin"
-import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Effect, Fiber, HashMap, Ref } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import { FakeRuntime, makeRepository, TURNS, until, untilVirtual, writeResult, projectOf } from "./fakes.ts"
+import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
+import { projectOf } from "./lib/directory.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { TURNS, until, untilVirtual, writeResult } from "./lib/observe.ts"
+import { makeRepository } from "./lib/session.ts"
 import {
   harnessOf,
   spawnInput,
@@ -18,7 +21,7 @@ import {
   limited,
   chooseNext,
   type FailSeen,
-} from "./sessions-helpers.ts"
+} from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
   test(

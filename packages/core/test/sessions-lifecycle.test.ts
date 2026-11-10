@@ -6,7 +6,10 @@ import { Effect, Fiber, FileSystem, HashMap, Path, PlatformError } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import { FakeGit, FakeRuntime, makeRepository, until, untilVirtual, writeResult, systemPromptFile } from "./fakes.ts"
+import { FakeGit } from "./lib/fake-git.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { until, untilVirtual, writeResult, systemPromptFile } from "./lib/observe.ts"
+import { makeRepository } from "./lib/session.ts"
 import {
   spawnInput,
   claudeEnd,
@@ -16,7 +19,7 @@ import {
   test,
   roundAndResultCounts,
   sqlNotices,
-} from "./sessions-helpers.ts"
+} from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
   test(
