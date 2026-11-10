@@ -232,8 +232,8 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
         WHERE id = ${process} AND ended_at IS NULL`
       if (reason !== "launch_failed") return
       const session = sessionIdOf(fact)
-      yield* sql`UPDATE session SET process_id = (SELECT max(id) FROM process WHERE session_id = ${session}
-          AND NOT (terminal IS NULL AND end_reason = 'launch_failed'))
+      yield* sql`UPDATE session SET process_id = coalesce((SELECT max(id) FROM process WHERE session_id = ${session}
+          AND NOT (terminal IS NULL AND end_reason = 'launch_failed')), process_id)
         WHERE id = ${session} AND EXISTS (SELECT 1 FROM process WHERE id = ${process} AND terminal IS NULL)`
     }),
 
