@@ -733,6 +733,42 @@ describe("Db", () => {
       }).pipe(Effect.provide(Platform.services)),
   )
 
+  it.effect("sessionAt finds the one live session at that runtime, machine and terminal", () =>
+    fresh(
+      Effect.gen(function* () {
+        const db = yield* Db
+        const project = yield* projectOf("r")
+        const here = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        const terminal = { machine: "local", id: "pane-a" }
+        yield* db.insertSession(
+          session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", {
+            address: { machine: "local", id: "pane-b" },
+            createdAt: 0,
+          }),
+          project,
+        )
+        yield* db.insertSession(
+          session("cccccccc-cccc-4ccc-8ccc-cccccccccccc", { runtime: "other", address: terminal, createdAt: 0 }),
+          project,
+        )
+        yield* db.insertSession(
+          session("dddddddd-dddd-4ddd-8ddd-dddddddddddd", {
+            address: { machine: "remote", id: "pane-a" },
+            createdAt: 0,
+          }),
+          project,
+        )
+        yield* db.insertSession(
+          session("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", { address: terminal, exitedAt: 5, createdAt: 0 }),
+          project,
+        )
+        yield* db.insertSession(session(here, { address: terminal, createdAt: 1 }), project)
+        assert.strictEqual(yield* db.sessionAt(RUNTIME, terminal), here)
+        assert.isUndefined(yield* db.sessionAt(RUNTIME, { machine: "local", id: "missing" }))
+      }),
+    ),
+  )
+
   it.effect("two empty opens both initialize", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

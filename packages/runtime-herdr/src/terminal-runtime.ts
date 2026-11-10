@@ -3,7 +3,7 @@ import { Runtime as RuntimeApi } from "@vibest/plugin"
 import { ID, randomId } from "@vibest/schema/id"
 import { shellQuote } from "@vibest/schema/layout"
 import type { RuntimeLocation } from "@vibest/schema/session"
-import { Config, Duration, Effect, Option, PubSub, Schedule, type Scope, Stream } from "effect"
+import { Cause, Config, Duration, Effect, Option, PubSub, Schedule, type Scope, Stream } from "effect"
 import type { FileSystem } from "effect"
 import type { HerdrFailure, HerdrShape, PushFrame, results } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -132,6 +132,14 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
   Effect.gen(function* () {
     const { pool, spawner, fs, scope } = deps
     const events = yield* PubSub.unbounded<RuntimeEvent>()
+    const logStreamEnd = (what: string) =>
+      Effect.catchCause((cause: Cause.Cause<unknown>) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.logError(`${what}: ${Cause.pretty(cause)}`).pipe(
+              Effect.andThen(PubSub.publish(events, { type: "reset", machine: "local" })),
+            ),
+      )
     const subscribedPanes = new Set<string>()
     const agentNameByPane = new Map<string, string>()
     let lastSeq = 0
@@ -206,12 +214,12 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             })
           : Effect.void
       }),
-      Effect.catchCause(() => Effect.void),
+      logStreamEnd("herdr pane events"),
       Effect.forkIn(scope),
     )
     yield* pool.restarts.pipe(
       Stream.runForEach((_session) => PubSub.publish(events, { type: "reset", machine: "local" })),
-      Effect.catchCause(() => Effect.void),
+      logStreamEnd("herdr restarts"),
       Effect.forkIn(scope),
     )
 

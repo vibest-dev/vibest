@@ -33,7 +33,11 @@ const failedOpen = (kind: string) =>
         )
       },
     }
-    const runtime = yield* make({ connect: () => hc, socket: hc.socketPath, scope: yield* Effect.scope })
+    const runtime = yield* make({
+      connect: () => Effect.succeed(hc),
+      socket: hc.socketPath,
+      scope: yield* Effect.scope,
+    })
     const error = yield* Effect.flip(runtime.open({ id: "local" }, input))
     return { names, error }
   }).pipe(Effect.scoped)

@@ -1,4 +1,5 @@
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
+import { reconnectSchedule } from "@vibest/plugin"
 import { peerHeaders, PROTOCOL } from "@vibest/protocol/protocol"
 import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
@@ -14,7 +15,21 @@ import {
   type RuntimeView,
   UnknownMachine,
 } from "@vibest/schema/machine"
-import { Clock, Context, Duration, Effect, Exit, Fiber, Layer, Option, Predicate, Schema, Scope, Stream } from "effect"
+import {
+  Clock,
+  Context,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Predicate,
+  Schedule,
+  Schema,
+  Scope,
+  Stream,
+} from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
 import type * as Socket from "effect/socket/Socket"
 
@@ -43,6 +58,7 @@ export const ADD_TIMEOUT = Duration.seconds(30)
 export const RETRY_FIRST = Duration.millis(500)
 export const RETRY_MAX = Duration.seconds(120)
 export const RETRY_RESET = Duration.seconds(60)
+const RETRY = reconnectSchedule({ first: RETRY_FIRST, max: RETRY_MAX })
 const EXIT_WAIT = Duration.seconds(1)
 export const REPAIR_PAUSE = Duration.seconds(30)
 
@@ -373,7 +389,7 @@ const make = Effect.gen(function* () {
 
   const supervise = (name: string, first: First | undefined): Effect.Effect<void> =>
     Effect.gen(function* () {
-      let delay = RETRY_FIRST
+      let step = yield* Schedule.toStep(RETRY)
       let given = first
       while (true) {
         const row = given?.row ?? (yield* db.machineNamed(name))
@@ -390,11 +406,12 @@ const make = Effect.gen(function* () {
         }
         const was = entries.get(name)
         const now = yield* Clock.currentTimeMillis
-        const wait =
-          was?.state === "connected" && now - was.since >= Duration.toMillis(RETRY_RESET) ? RETRY_FIRST : delay
+        if (was?.state === "connected" && now - was.since >= Duration.toMillis(RETRY_RESET)) {
+          step = yield* Schedule.toStep(RETRY)
+        }
         yield* set(name, { state: "unreachable", reason: down.message })
-        yield* Effect.sleep(wait)
-        delay = Duration.min(Duration.times(wait, 2), RETRY_MAX)
+        const [, delay] = yield* Effect.orDie(step(now, undefined))
+        yield* Effect.sleep(delay)
       }
     })
 

@@ -111,7 +111,7 @@ describe.concurrent("vibestd.pid lock", () => {
           assert.strictEqual(run.code, 1)
           assert.include(run.stderr, "DaemonSocketInUse")
           assert.include(run.stderr, answer ? "answers Ping" : "does not answer Ping")
-          assert.strictEqual(yield* probe(layout.socket), answer)
+          assert.strictEqual(yield* probe(layout.socket).pipe(Effect.repeat({ until: (up) => up, times: 2 })), answer)
           assert.isFalse(yield* (yield* FileSystem.FileSystem).exists(layout.database))
         }
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),

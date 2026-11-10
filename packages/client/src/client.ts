@@ -105,7 +105,10 @@ const fromEnv = Effect.gen(function* () {
     runtime: yield* read("VIBEST_RUNTIME"),
     cwd: (yield* Path.Path).resolve("."),
   }
-}).pipe(Effect.orElseSucceed(() => ({})))
+}).pipe(
+  Effect.tapCause((cause) => Effect.logDebug(`session claim headers fell back to the request: ${Cause.pretty(cause)}`)),
+  Effect.orElseSucceed(() => ({})),
+)
 
 export const claimHeaders = (claim: Claim) =>
   claim._tag === "cli"
@@ -120,18 +123,25 @@ export const claimHeaders = (claim: Claim) =>
         }),
       )
 
-export const connect = (socket: string) =>
+export const clientOver = <E, R>(
+  socket: Layer.Layer<Socket.Socket, E, R>,
+  options?: Parameters<typeof RpcClient.layerProtocolSocket>[0],
+) =>
   Layer.build(
-    RpcClient.layerProtocolSocket({ pingInterval: "1 minute", pingTimeout: "1 day" }).pipe(
-      Layer.provide(
-        Layer.effect(
-          Socket.Socket,
-          Effect.flatMap(SocketConnector, (dial) => dial(socket)),
-        ),
-      ),
+    RpcClient.layerProtocolSocket(options).pipe(
+      Layer.provide(socket),
       Layer.provide(RpcSerialization.layerNdJsonRpc()),
     ),
   ).pipe(Effect.flatMap((protocol) => RpcClient.make(VibestRpcs).pipe(Effect.provide(protocol))))
+
+export const connect = (socket: string) =>
+  clientOver(
+    Layer.effect(
+      Socket.Socket,
+      Effect.flatMap(SocketConnector, (dial) => dial(socket)),
+    ),
+    { pingInterval: "1 minute", pingTimeout: "1 day" },
+  )
 
 export const HOOK_TIMEOUT = Duration.seconds(2)
 export const HOOK_RETRY_DELAY = Duration.millis(300)

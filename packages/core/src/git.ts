@@ -1,6 +1,7 @@
+import { capture } from "@vibest/plugin"
 import { NotInRepository } from "@vibest/schema/session"
 import { Context, Effect, FileSystem, Layer, Path, type PlatformError, Schema, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { ChildProcessSpawner } from "effect/process"
 
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
@@ -57,23 +58,18 @@ export class Git extends Context.Service<
       const path = yield* Path.Path
 
       const gitRaw = (cwd: string, args: ReadonlyArray<string>, input?: string, ok: ReadonlyArray<number> = [0]) =>
-        Effect.gen(function* () {
-          const stdin = input === undefined ? {} : { stdin: Stream.make(new TextEncoder().encode(input)) }
-          const handle = yield* spawner.spawn(
-            ChildProcess.make("git", ["--no-optional-locks", ...args], { cwd, ...stdin }),
-          )
-          const [stdout, stderr, exitCode] = yield* Effect.all(
-            [
-              Stream.mkString(Stream.decodeText(handle.stdout)),
-              Stream.mkString(Stream.decodeText(handle.stderr)),
-              handle.exitCode,
-            ],
-            { concurrency: "unbounded" },
-          )
-          if (!ok.includes(exitCode)) return yield* new GitError({ args, message: stderr.trim() || `exit ${exitCode}` })
-          return stdout
+        capture("git", ["--no-optional-locks", ...args], {
+          cwd,
+          ...(input === undefined ? {} : { stdin: Stream.make(new TextEncoder().encode(input)) }),
         }).pipe(
-          Effect.scoped,
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.flatMap((run) =>
+            run === undefined
+              ? Effect.die("capture without a timeout returned undefined")
+              : ok.includes(run.exitCode)
+                ? Effect.succeed(run.stdout)
+                : Effect.fail(new GitError({ args, message: run.stderr.trim() || `exit ${run.exitCode}` })),
+          ),
           Effect.catchTag("PlatformError", (e) => Effect.fail(new GitError({ args, message: e.message }))),
         )
 

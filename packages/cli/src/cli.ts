@@ -10,6 +10,7 @@ import {
 } from "@vibest/client/client"
 import type { LayerNode } from "@vibest/core/effect/layer-node"
 import { askLine, askYesNo, interactive, Layout, VibestCommand } from "@vibest/core/paths"
+import { messageOf } from "@vibest/core/plugin-sources"
 import { describeSpawn } from "@vibest/core/plugins"
 import { ProjectKind } from "@vibest/core/project"
 import { LaunchFailed } from "@vibest/core/sessions"
@@ -717,7 +718,7 @@ const notify = <A>(
     const at = new Date(yield* Clock.currentTimeMillis).toISOString()
     const cause = Cause.squash(exit.cause)
     return yield* Effect.fail(
-      `${at} vibest: ${harness} ${what} of session ${sessionId} did not reach vibestd: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `${at} vibest: ${harness} ${what} of session ${sessionId} did not reach vibestd: ${messageOf(cause)}`,
     )
   })
 

@@ -55,8 +55,8 @@ const withRuntime = <A, E>(
 ) =>
   Effect.gen(function* () {
     const connector = yield* SocketConnector
-    const connect = (at: string) => Effect.runSync(Hc.make(at).pipe(Effect.provideService(SocketConnector, connector)))
-    const hc = connect(socketPath)
+    const connect = (at: string) => Hc.make(at).pipe(Effect.provideService(SocketConnector, connector))
+    const hc = yield* connect(socketPath)
     const runtime = yield* make({
       connect,
       socket: socketPath,
