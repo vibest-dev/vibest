@@ -122,7 +122,7 @@ describe("vibest CLI", () => {
         task: string
         latest: { status: string; summary: string; endedAt: number | null }
       }
-      assert.deepInclude(done.result, { kind: "result", sessionId: id })
+      assert.deepInclude(done.result, { kind: "result", sender: id })
       assert.strictEqual(done.task, task)
       assert.strictEqual(done.latest.status, "completed")
       assert.strictEqual(done.latest.summary, "kept finding")
@@ -210,7 +210,7 @@ describe("vibest CLI", () => {
         reported.map((r) => /<message>\n([\s\S]*)\n<\/message>/.exec(r.message)?.[1]),
         ["- fix the bug\n- then test", "--help", "--model x"],
       )
-      for (const args of [["ls"], ["interrupt", id], ["send", id, "x"], ["run", "pi", "x"], ["project", "info"]]) {
+      for (const args of [["ls"], ["interrupt", id], ["run", "pi", "x"], ["project", "info"]]) {
         const r = yield* asSession(id, args)
         assert.deepStrictEqual([r.code, r.stdout], [1, ""], args.join(" "))
         assert.match(r.stderr, /^Forbidden: /, args.join(" "))

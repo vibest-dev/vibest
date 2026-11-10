@@ -29,7 +29,8 @@ export type RuntimeMachine = typeof RuntimeMachine.Type
 
 export const InboxRow = Schema.Struct({
   id: Schema.Number,
-  sessionId: Schema.String,
+  sender: Schema.NullOr(Schema.String),
+  recipient: Schema.NullOr(Schema.String),
   kind: InboxKind,
   message: Schema.String,
   details: Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),

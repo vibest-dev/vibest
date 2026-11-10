@@ -1,5 +1,5 @@
 import { MessageStatus } from "@vibest/schema/model"
-import { AgentStatus, InboxKind, InboxRow, InboxStatus, RuntimeAddress, TurnState } from "@vibest/schema/session"
+import { AgentStatus, InboxKind, InboxStatus, RuntimeAddress, TurnState } from "@vibest/schema/session"
 import { Schema } from "effect"
 
 import { Routing } from "./plugins.ts"
@@ -75,7 +75,12 @@ export const CoordinatorRow = Schema.Struct({
 })
 export type CoordinatorRow = typeof CoordinatorRow.Type
 
-export type NewInboxRow = Omit<InboxRow, "id" | "status" | "createdAt">
+export type NewInboxRow = {
+  readonly sessionId: string
+  readonly kind: InboxKind
+  readonly message: string
+  readonly details: Record<string, unknown>
+}
 
 export type SpawnedBefore = {
   readonly id: string
@@ -155,10 +160,10 @@ export const resultDetails = (content: string, end: TurnEnd | undefined) => {
 
 export const toInbox = (row: InboxSql) => {
   const kind = row.kind as InboxKind
-  const sessionId = kind === "send" ? row.recipientSessionId! : (row.senderSessionId ?? row.recipientSessionId ?? "")
   return {
     id: row.id,
-    sessionId,
+    sender: row.senderSessionId,
+    recipient: row.recipientSessionId,
     kind,
     message: row.content,
     details:

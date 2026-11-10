@@ -14,6 +14,9 @@ import {
   heldModel,
   lastUser,
   piDir,
+  reply,
+  sseHeaders,
+  toolCall,
   type Step,
   text,
 } from "../fake-model.ts"
@@ -518,6 +521,88 @@ const checks: ReadonlyArray<Check> = [
         model.stop()
         claude.stop()
         await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "S49",
+    covers: ["S45"],
+    title:
+      "a Pi subagent's vibest send to a Claude main agent (which polls) is one send row from the subagent to the main agent, delivered, with one inbox.queued and one inbox.moved to delivered; the main agent's conversation holds a line naming the subagent and an <agent-message> with its id and text",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const model = delegatingModel("pi")
+      let c: Awaited<ReturnType<typeof claudeMain>> | undefined
+      let sender: ReturnType<typeof Bun.serve> | undefined
+      try {
+        c = await claudeMain(w, "cmsend", model)
+        const mainId = c.main
+        sender = Bun.serve({
+          port: 0,
+          hostname: "127.0.0.1",
+          idleTimeout: 0,
+          fetch: async (req) => {
+            const { messages = [] } = (await req.json()) as { messages?: Array<{ role: string }> }
+            return new Response(
+              messages.some((m) => m.role === "tool")
+                ? reply("done-cmsend\nstatus: completed")
+                : toolCall("call1", "bash", { command: `${binary} send ${mainId} -- hello-claude` }),
+              { headers: sseHeaders },
+            )
+          },
+        })
+        const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-cmsend-sender", `http://127.0.0.1:${sender.port}/v1`)}`
+        const sub = (
+          JSON.parse(
+            await w.ok(["run", "pi", "--env", env, "--title", "Send probe", "--", "send to the main agent"], {
+              cwd: c.repo,
+              timeoutMs: 60_000,
+            }),
+          ) as { id: string }
+        ).id
+        const sent = () =>
+          rows<{ id: number; status: string }>(
+            w,
+            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND recipient_session_id = ? AND kind = 'send'",
+            sub,
+            mainId,
+          )
+        await until("the send delivered", () => sent().some((r) => r.status === "delivered"), 180_000)
+        expect(sent().length === 1, `${sent().length} sends from ${sub}: ${JSON.stringify(sent())}`)
+        const fact = (sql: string) =>
+          row<{ n: number }>(w, `SELECT count(*) AS n FROM event WHERE ${sql}`, sent()[0]!.id)?.n
+        expect(
+          fact("type = 'inbox.queued' AND seq = ?") === 1 &&
+            fact(
+              "type = 'inbox.moved' AND json_extract(data, '$.inbox') = ? AND json_extract(data, '$.to') = 'delivered'",
+            ) === 1,
+          `the send ${sent()[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
+        )
+        const line = `General Agent "Send probe"`
+        await until(
+          "the line and the <agent-message> in the main agent's conversation",
+          async () => {
+            const entries = await transcript(w, c!.repo, c!.config)
+            return (
+              entries.some((e) => e.type === "user" && e.text.includes(line)) &&
+              entries.some(
+                (e) =>
+                  e.type === "attachment" &&
+                  e.raw.includes("hook_additional_context") &&
+                  e.raw.includes("<agent-message>") &&
+                  e.raw.includes(sub) &&
+                  e.raw.includes("hello-claude"),
+              )
+            )
+          },
+          90_000,
+        ).catch(async (e: Error) => {
+          throw new Error(`${e.message}; its screen:\n${await c!.screen()}`)
+        })
+      } finally {
+        sender?.stop(true)
+        model.stop()
+        await c?.close()
       }
     },
   },

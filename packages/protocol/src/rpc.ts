@@ -850,7 +850,7 @@ export const ACCESS = {
   "Project.Create": "cli",
   "Project.Info": "agent",
   "Project.Search": "agent",
-  Send: ["owner", "peer"],
+  Send: ["owner", "session", "peer"],
   Interrupt: ["owner", "peer"],
   Peek: ["owner", "peer"],
   Remove: ["owner", "peer"],
@@ -866,7 +866,7 @@ export const ACCESS = {
   "Machine.Add": "cli",
   "Machine.List": "cli",
   "Machine.Remove": "cli",
-} as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly [Access, "peer"]>
+} as const satisfies Record<RpcGroup.Rpcs<typeof VibestRpcs>["_tag"], Access | readonly Access[]>
 
 export type PayloadOf<Tag extends RpcGroup.Rpcs<typeof VibestRpcs>["_tag"]> = Rpc.Payload<
   Rpc.ExtractTag<RpcGroup.Rpcs<typeof VibestRpcs>, Tag>

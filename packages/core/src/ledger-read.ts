@@ -366,7 +366,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       const [linked] = yield* sql<{ id: number | null }>`SELECT max(id) AS id FROM inbox
         WHERE recipient_session_id = ${id} AND turn_id IS NOT NULL`
       const rows = yield* sql<{ content: string; sender: string | null }>`SELECT content, sender_session_id AS sender
-        FROM inbox WHERE recipient_session_id = ${id} AND status = 'delivered' AND kind IN ('task', 'send')
+        FROM inbox WHERE recipient_session_id = ${id} AND status = 'delivered'
           AND id > ${linked?.id ?? 0}
         ORDER BY id`
       return {

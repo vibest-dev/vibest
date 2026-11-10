@@ -116,7 +116,7 @@ describe("Db", () => {
           yield* inbox("send", null, "still pending", "pending")
           assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
             working: "typed",
-            delivered: "later send",
+            delivered: "a notice",
             parentSessionId: parent.sessionId,
           })
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
@@ -125,7 +125,7 @@ describe("Db", () => {
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
           assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
             working: "",
-            delivered: "later send",
+            delivered: "a notice",
             parentSessionId: parent.sessionId,
           })
           assert.deepStrictEqual(yield* db.rescheduleSource("00000000-0000-4000-8000-000000000000"), {
@@ -167,7 +167,7 @@ describe("Db", () => {
             parentSessionId: parent.sessionId,
           })
           yield* row("send", null, "still pending", "pending")
-          yield* row("notice", parent.sessionId, "a notice")
+          yield* row("notice", parent.sessionId, "a notice", "pending")
           assert.strictEqual(
             (yield* db.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).delivered,
             "and docs\n\nalso types",
