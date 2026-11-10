@@ -71,6 +71,7 @@ export interface HarnessDefinition {
   readonly coordinatorArgs?: (input: CoordinatorInput) => ReadonlyArray<string>
   readonly models: ModelLister
   readonly checkEnvironment?: (home: string) => Effect.Effect<string | undefined>
+  readonly canResume?: (root: string, sessionId: string) => Effect.Effect<boolean>
   readonly subscription?: (home: string) => Effect.Effect<ReadonlyArray<SubscriptionRead>>
   readonly guardAnswer?: (reason: string | undefined) => unknown
   readonly turnEnd?: (

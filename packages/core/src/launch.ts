@@ -2,7 +2,7 @@ import { Effect, FileSystem } from "effect"
 
 import { COORDINATOR } from "./guard.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable, type HarnessId } from "./harness.ts"
-import { Layout, shellQuote, VibestCommand } from "./paths.ts"
+import { Layout, VibestCommand } from "./paths.ts"
 import { type Machine, type Runtime } from "./runtimes.ts"
 import { LaunchFailed } from "./sessions.ts"
 import {
@@ -63,6 +63,9 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   yield* (yield* FileSystem.FileSystem)
     .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
     .pipe(Effect.ignore)
+  let harnessSessionId = saved.harnessSessionId
+  if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
+    harnessSessionId = null
   const commandEnv: Record<string, string> = {
     ...env,
     VIBEST_SESSION_ID: saved.sessionId,
@@ -78,7 +81,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
       systemPromptFile,
       provider: input.provider,
       model: input.model,
-      sessionId: saved.harnessSessionId,
+      sessionId: harnessSessionId,
       pluginDir,
       env: commandEnv,
     }),
@@ -103,35 +106,11 @@ export const identityPairs = (env: Readonly<Record<string, string>>) =>
     return value === undefined ? [] : [`${key}=${value}`]
   })
 
-const RESUME_FAIL_WINDOW_SECONDS = 3
-
-const resumeFlagAt = (argv: ReadonlyArray<string>) => {
-  const at = argv.indexOf("--resume")
-  const id = argv[at + 1]
-  return typeof id === "string" && !id.startsWith("-") ? at : -1
-}
-
-export const withoutResume = (argv: ReadonlyArray<string>) => {
-  const at = resumeFlagAt(argv)
-  return at < 0 ? argv : [...argv.slice(0, at), ...argv.slice(at + 2)]
-}
-
-const quoted = (argv: ReadonlyArray<string>) => argv.map(shellQuote).join(" ")
-
-export const resumeOrFresh = (argv: ReadonlyArray<string>, fresh: ReadonlyArray<string>) => {
-  if (resumeFlagAt(argv) < 0) return argv
-  const script = `start=$(date +%s); ${quoted(argv)}; status=$?; now=$(date +%s); if [ "$status" -ne 0 ] && [ $((now - start)) -le ${RESUME_FAIL_WINDOW_SECONDS} ]; then exec ${quoted(fresh)}; fi; exit $status`
-  return ["sh", "-c", script]
-}
-
 export const restartArgv = (command: {
   readonly file: string
   readonly args: ReadonlyArray<string>
   readonly env: Readonly<Record<string, string>>
-}) => {
-  const argv = ["env", ...identityPairs(command.env), command.file, ...command.args]
-  return resumeOrFresh(argv, withoutResume(argv))
-}
+}) => ["env", ...identityPairs(command.env), command.file, ...command.args]
 
 export const flagValue = (argv: ReadonlyArray<string>, name: string) => {
   const value = argv[argv.indexOf(name) + 1]
