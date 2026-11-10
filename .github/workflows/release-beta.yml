@@ -5,10 +5,10 @@ name: Release
 # version: prerelease, patch, minor or major (bumped from @vibest/cli's version), an exact version, or canary.
 # One version for every package: the workspace members.
 # build (self-hosted) bumps every package version and commits and tags v<version> in its own checkout only, then runs
-# every gate on that commit: build, typecheck and lint, format, unit tests, the packed tarballs, and the E2E checks on
-# the curl and npm installs of tools/verify. darwin checks the same tarballs on an arm64 Mac. publish waits for the
-# owner's approval (environment `release`), then pushes the tested commit to main and the tag, publishes exactly the
-# tarballs build checked to npm, and makes the GitHub Release (install.sh and an archive per platform).
+# the release gate on that commit, the whole of pnpm verify, and packs and checks the tarballs to publish. darwin checks
+# the same tarballs on an arm64 Mac. publish waits for the owner's approval (environment `release`), then pushes the
+# tested commit to main and the tag, publishes exactly the tarballs build checked to npm, and makes the GitHub Release
+# (install.sh and an archive per platform; notes from CHANGELOG.md when it has this version, else GitHub's).
 # canary publishes one canary version to npm under `canary`: no commit, no tag, no GitHub Release.
 # dry_run runs every gate and stops: nothing is pushed or published.
 # Only the owner starts it; anyone else's run is skipped. Every job checks it: the owner both started the run (actor)
@@ -114,24 +114,15 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Release $version under the npm dist-tag $tag" >> "$GITHUB_STEP_SUMMARY"
 
-      - run: pnpm run build
-      # typecheck also runs check:runtime and lint (oxlint).
-      - run: pnpm run typecheck
-      - run: pnpm run format:check
-      # Leave room for the other job sharing this host.
-      - run: pnpm run test --maxWorkers=2
+      # The release gate: the whole of pnpm verify on the release commit (build, typecheck and lint, unit tests, the
+      # curl and npm installs, and every E2E check on each, --strict), --no-cache so every check runs.
+      - run: pnpm run verify --no-cache
       # Packs every package to publish (the darwin-arm64 binary is cross-compiled here), checks the tarballs, installs
       # @vibest/cli with the linux-x64 binary from them and runs it; keeps the tarballs and their publish order.
       - name: Pack and check
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: bun tools/verify/src/release-artifacts.ts "$VERSION" --out "$RUNNER_TEMP/release/npm"
-      # tools/verify: this version installed as a user gets it (curl | sh from the release archive, and npm install of
-      # the packed tarballs), then the E2E checks on each install, --strict (a skip fails) and --no-cache (every check
-      # runs). Only the checks this runner can run: it has no herdr, hc, pi, claude or cursor-agent, so every check that
-      # starts an agent or a runtime (and H1, I2, which need a harness CLI on PATH) runs only in a local pnpm verify.
-      - name: Install checks and E2E
-        run: pnpm run verify --no-cache daemon plugins update P1 P2 P9 I1
       # What install.sh downloads (releases/latest/download/...): an archive per platform, install.sh itself, and
       # `version`, which `vibest update` reads. Not for a canary.
       - name: GitHub Release files
@@ -263,5 +254,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The notes: the CHANGELOG.md section headed with this version when there is one, otherwise GitHub's generated
+          # notes. No section is required.
+          awk -v v="$VERSION" '/^## /{ h = $2; sub(/^v/, "", h); on = (h == v); next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then notes=(--notes-file "$RUNNER_TEMP/notes.md"); else notes=(--generate-notes); fi
           gh release create "v$VERSION" "$RUNNER_TEMP"/release/github/* -R "$GITHUB_REPOSITORY" \
-            --title "vibest $VERSION" --latest --verify-tag
+            --title "vibest $VERSION" --latest --verify-tag "${notes[@]}"
