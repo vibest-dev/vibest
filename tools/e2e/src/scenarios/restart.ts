@@ -19,9 +19,13 @@ import {
   binary,
   compiled,
   expect,
+  expectFacts,
+  fail,
   harnesses,
   herdr,
   readDb,
+  row,
+  rows,
   SESSIONS,
   Skip,
   TURNS,
@@ -332,6 +336,27 @@ const checks: ReadonlyArray<Check> = [
         )
         await ok(["run", "pi", "--session", session, "--env", piEnv, ask("after")])
         await reached("the main agent's turn on a result after the update", result("done-after"))
+        for (const id of [before.id, zero]) {
+          expectFacts(w, id, ["process.started", "process.ended", "process.started", "process.ready"])
+          const ends = rows<{ reason: string | null }>(
+            w,
+            "SELECT end_reason AS reason FROM process WHERE session_id = ? ORDER BY id",
+            id,
+          )
+          expect(
+            JSON.stringify(ends.map((e) => e.reason)) === '["restart",null]',
+            `${id}'s processes: ${JSON.stringify(ends)}`,
+          )
+        }
+        const notice = () =>
+          row<{ status: string }>(
+            w,
+            "SELECT status FROM inbox WHERE recipient_session_id = ? AND kind = 'notice'",
+            before.id,
+          )?.status
+        await until("the continue notice delivered", () => notice() === "delivered").catch(() =>
+          fail(`the main agent's continue notice: ${notice()}`),
+        )
       } finally {
         model.stop()
         await dropHerdrSession(w, session)

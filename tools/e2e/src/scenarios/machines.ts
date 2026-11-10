@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
-import { alive, binary, expect, readDb, row, Skip, until, type World } from "../world.ts"
+import { alive, binary, expect, fail, readDb, row, Skip, until, type World } from "../world.ts"
 
 type Machine = { name: string; id: string; state: string; reason?: string }
 type Listed = { id: string; machine?: string; runtime?: string; address?: { machine: string; id: string } }
@@ -268,6 +268,26 @@ const checks: ReadonlyArray<Check> = [
           `A's ls: ${JSON.stringify(listed)}`,
         )
         await s.okA(["archive", address])
+        const started = s.bDb<{ peer: string | null; facts: string }>(
+          `SELECT origin_peer AS peer, (SELECT group_concat(type, ' ') FROM
+            (SELECT type FROM event WHERE session_id = session.id ORDER BY seq)) AS facts
+          FROM session WHERE id LIKE ?`,
+          `${id8}%`,
+        )
+        expect(
+          started?.peer === a.id &&
+            /session\.created .*process\.started .*turn\.started .*turn\.ended .*session\.ended/.test(started.facts),
+          `B's session started for A: ${JSON.stringify(started)}`,
+        )
+        const outbox = () =>
+          s!.bDb<{ queued: number; acked: number }>(
+            `SELECT count(*) FILTER (WHERE type = 'outbox.queued') AS queued,
+              count(*) FILTER (WHERE type = 'outbox.acked') AS acked FROM event`,
+          )
+        await until("B's outbox items all acked", () => {
+          const o = outbox()
+          return o !== null && o.queued >= 2 && o.queued === o.acked
+        }).catch(() => fail(`B's outbox facts: ${JSON.stringify(outbox())}`))
       } finally {
         await s?.stop()
       }

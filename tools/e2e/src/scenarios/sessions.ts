@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, heldModel } from "../fake-model.ts"
-import { alive, expect, until, type World } from "../world.ts"
+import { alive, expect, expectAnswered, expectFacts, row, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 import { piProject } from "./exits.ts"
 
@@ -290,7 +290,20 @@ const checks: ReadonlyArray<Check> = [
           `third run exited ${third.code}: ${said}`,
         )
         await archive(w, p, first)
-        await answered(w, p, await p.runSub("three"), "three")
+        expectFacts(w, first, ["session.created", "session.ended", "process.ended"])
+        const archived = row<{ ended: number | null; reason: string | null }>(
+          w,
+          "SELECT s.ended_at AS ended, p.end_reason AS reason FROM session s JOIN process p ON p.session_id = s.id WHERE s.id = ?",
+          first,
+        )
+        expect(
+          archived?.ended != null && archived.reason === "archived",
+          `the archived session: ${JSON.stringify(archived)}`,
+        )
+        const three = await p.runSub("three")
+        await answered(w, p, three, "three")
+        const main = row<{ id: string }>(w, "SELECT id FROM session WHERE role = 'main'")!.id
+        await expectAnswered(w, three, main)
       } finally {
         await p.close()
       }

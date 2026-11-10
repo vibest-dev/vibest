@@ -3,7 +3,20 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
-import { binary, expect, fail, herdr, readDb, row, Skip, until, type World } from "../world.ts"
+import {
+  binary,
+  expect,
+  expectAnswered,
+  expectFacts,
+  fail,
+  herdr,
+  readDb,
+  row,
+  rows,
+  Skip,
+  until,
+  type World,
+} from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 const needs = () => {
@@ -95,6 +108,20 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         expect(turnStarts(w, sub) === 2, `${turnStarts(w, sub)} turns, not the first and one merged turn`)
+        const merged = row<{ id: number; status: string }>(
+          w,
+          "SELECT id, status FROM turn WHERE session_id = ? ORDER BY id DESC",
+          sub,
+        )
+        const sends = rows<{ turn: number | null }>(
+          w,
+          "SELECT turn_id AS turn FROM inbox WHERE recipient_session_id = ? AND kind = 'send'",
+          sub,
+        )
+        expect(
+          merged?.status === "completed" && sends.length === 2 && sends.every((s) => s.turn === merged.id),
+          `the sends ${JSON.stringify(sends)} are not both on the merged turn ${JSON.stringify(merged)}`,
+        )
         expect(
           model.asked("first") === 1 && model.asked("second") === 0,
           `the model was asked "first" ${model.asked("first")} and "second" ${model.asked("second")} times on its own`,
@@ -144,6 +171,7 @@ const checks: ReadonlyArray<Check> = [
           async () => ((await resultOf(w, m.repo, id))?.message ?? "").includes("done-s3"),
           60_000,
         )
+        await expectAnswered(w, id, mainId)
         const conversation = () =>
           (main.requests.findLast((r) => r.some((message) => text(message).includes("done-s3"))) ?? []).map(text)
         await until("the main agent's model saw the result", () => conversation().length > 0, 60_000)
@@ -196,6 +224,12 @@ const checks: ReadonlyArray<Check> = [
           results.length === 1 && JSON.stringify(results).includes("done-next"),
           `results other than the next turn's: ${JSON.stringify(results)}`,
         )
+        const turns = rows<{ status: string }>(w, "SELECT status FROM turn WHERE session_id = ? ORDER BY id", sub)
+        expect(
+          JSON.stringify(turns.map((t) => t.status)) === '["interrupted","completed"]',
+          `the subagent's turns: ${JSON.stringify(turns)}`,
+        )
+        expectFacts(w, sub, ["turn.started", "turn.ended", "inbox.queued", "turn.started", "inbox.moved", "turn.ended"])
       } finally {
         main.stop()
         model.stop()

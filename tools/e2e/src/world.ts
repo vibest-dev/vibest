@@ -711,6 +711,87 @@ export const row = <A>(w: World, sql: string, ...args: Array<string | number>) =
   }
 }
 
+export const rows = <A>(w: World, sql: string, ...args: Array<string | number>) => {
+  const db = readDb(path.join(w.vibestHome, "vibest.db"))
+  try {
+    return db.query(sql).all(...args) as Array<A>
+  } finally {
+    db.close()
+  }
+}
+
+export const factsOf = (w: World, sessionId: string) =>
+  rows<{ type: string }>(w, "SELECT type FROM event WHERE session_id = ? ORDER BY seq", sessionId).map((r) => r.type)
+
+export const expectFacts = (w: World, sessionId: string, expected: ReadonlyArray<string>) => {
+  const recorded = factsOf(w, sessionId)
+  let next = 0
+  for (const type of recorded) if (type === expected[next]) next++
+  expect(
+    next === expected.length,
+    `session ${sessionId} recorded ${recorded.join(", ")}, not ${expected.join(", ")} in that order`,
+  )
+}
+
+export const expectAnswered = async (w: World, sub: string, creator: string) => {
+  expectFacts(w, sub, [
+    "session.created",
+    "process.started",
+    "inbox.queued",
+    "process.placed",
+    "turn.started",
+    "inbox.moved",
+    "turn.reported",
+    "turn.ended",
+  ])
+  const task = row<{ status: string; turn: number | null }>(
+    w,
+    "SELECT status, turn_id AS turn FROM inbox WHERE recipient_session_id = ? AND kind = 'task'",
+    sub,
+  )
+  expect(task?.status === "delivered" && task.turn !== null, `${sub}'s task row: ${JSON.stringify(task)}`)
+  const turn = row<{ status: string; report: number | null }>(
+    w,
+    "SELECT status, report_seq AS report FROM turn WHERE id = ?",
+    task!.turn!,
+  )
+  expect(turn?.status === "completed" && turn.report !== null, `${sub}'s task turn: ${JSON.stringify(turn)}`)
+  const result = () =>
+    row<{ status: string }>(
+      w,
+      "SELECT status FROM inbox WHERE kind = 'result' AND sender_session_id = ? AND recipient_session_id = ? AND result_turn_id = ?",
+      sub,
+      creator,
+      task!.turn!,
+    )
+  await until(`${sub}'s result row to ${creator} delivered`, () => result()?.status === "delivered").catch(() =>
+    fail(`${sub}'s result row to ${creator}: ${JSON.stringify(result())}`),
+  )
+}
+
+const READ_MODEL = ["session", "process", "turn", "inbox"] as const
+
+export const ledgerSnapshot = (home: string) => {
+  const file = path.join(home, "vibest.db")
+  if (!fs.existsSync(file)) return undefined
+  const db = readDb(file)
+  try {
+    const facts = (
+      db.query("SELECT seq, at, type, project_id, session_id, data FROM event ORDER BY seq").all() as Array<{
+        data: string
+      }>
+    ).map((fact) => ({ ...fact, data: JSON.parse(fact.data) as unknown }))
+    return {
+      facts,
+      ...Object.fromEntries(
+        READ_MODEL.map((table) => [table, db.query(`SELECT * FROM ${table} ORDER BY rowid`).all()]),
+      ),
+    }
+  } finally {
+    db.close()
+  }
+}
+
 export const until = async (what: string, ok: () => Promise<boolean> | boolean, timeoutMs = 10_000) => {
   for (const deadline = Date.now() + timeoutMs; !(await ok()); await Bun.sleep(100))
     if (Date.now() > deadline) fail(`timed out waiting for ${what}`)

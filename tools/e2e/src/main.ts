@@ -28,6 +28,7 @@ import {
   checkout,
   compiled,
   harnesses,
+  ledgerSnapshot,
   method,
   privateIn,
   redact,
@@ -35,6 +36,7 @@ import {
   removeWorldDir,
   Skip,
   World,
+  writeEvidence,
 } from "./world.ts"
 
 const areas: Record<string, ReadonlyArray<Check>> = {
@@ -164,6 +166,9 @@ const once = async ({ area, check }: (typeof checks)[number], evidenceName: stri
     stderr: String(e),
   }))
   if (ledger.code !== 0) problem(`import-check of the world's database: ${ledger.stderr}${ledger.stdout}`)
+  const snapshot = ledgerSnapshot(world.vibestHome)
+  if (snapshot !== undefined)
+    await writeEvidence(path.join(evidence, `${evidenceName}.ledger.json`), JSON.stringify(snapshot, null, 2))
   const left = await herdrSessionsLeft(world.herdrSession)
   if (left.length > 0) problem(`herdr sessions left after the check: ${left.join(", ")}`)
   await fs.writeFile(path.join(evidence, `${evidenceName}.json`), redact(JSON.stringify(world.log, null, 2)))

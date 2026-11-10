@@ -21,8 +21,11 @@ import {
   agentName,
   alive,
   expect,
+  expectAnswered,
+  fail,
   herdr,
   row,
+  rows,
   SESSIONS,
   Skip,
   binary,
@@ -499,6 +502,18 @@ const checks: ReadonlyArray<Check> = [
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
         await w.ok(["send", model.sessionId(), ask("three")], { cwd: repo })
         await reached("the main agent's turn on a result after vibestd restarted", "done-three")
+        const main = (await mains())[0]!.id
+        await expectAnswered(w, model.sessionId(), main)
+        const toMain = () =>
+          rows<{ status: string }>(
+            w,
+            "SELECT status FROM inbox WHERE recipient_session_id = ? AND kind = 'result'",
+            main,
+          ).map((r) => r.status)
+        await until(
+          "the main agent's four results delivered",
+          () => JSON.stringify(toMain()) === JSON.stringify(Array(4).fill("delivered")),
+        ).catch(() => fail(`the main agent's result rows: ${JSON.stringify(toMain())}`))
       } finally {
         model.stop()
         claude.stop()
