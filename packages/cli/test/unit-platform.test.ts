@@ -14,7 +14,7 @@ import { claude, cursor, pi } from "@vibest/plugin-harnesses"
 import { noProvider } from "@vibest/plugin-harnesses/models"
 import type { HarnessChoice } from "@vibest/protocol/rpc"
 import { ID } from "@vibest/schema/id"
-import { ConfigProvider, Effect, FileSystem, Layer, Path, PlatformError } from "effect"
+import { ConfigProvider, Effect, FileSystem, Layer, Path, PlatformError, Sink, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
@@ -55,6 +55,67 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
         )
         assert.notStrictEqual(process.cwd(), home)
         assert.deepStrictEqual(cwds, [home, home, home])
+      }),
+    )
+
+    it.effect("a model list is reused, and a failed lookup is not", () =>
+      Effect.gen(function* () {
+        const piLines = [
+          JSON.stringify({
+            id: "vibest-state",
+            type: "response",
+            data: { model: { provider: "openai", id: "gpt" } },
+          }),
+          JSON.stringify({
+            id: "vibest-models",
+            type: "response",
+            data: {
+              models: [{ provider: "openai", id: "gpt", name: "GPT", contextWindow: 1, maxTokens: 1 }],
+            },
+          }),
+        ].join("\n")
+        const handle = () =>
+          ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(1),
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            unref: Effect.succeed(Effect.void),
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            stderr: Stream.empty,
+            all: Stream.make(new TextEncoder().encode(piLines)),
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+          })
+        let calls = 0
+        const harness = yield* Harness.make().pipe(
+          Effect.provideService(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() => {
+              calls++
+              return Effect.succeed(handle())
+            }),
+          ),
+        )
+        const first = yield* harness.models("pi", null)
+        assert.deepStrictEqual(yield* harness.models("pi", null), first)
+        assert.strictEqual(calls, 1)
+        assert.strictEqual(first[0]?.model, "gpt")
+
+        let failed = 0
+        const again = yield* Harness.make().pipe(
+          Effect.provideService(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() => {
+              failed++
+              return Effect.fail(PlatformError.badArgument({ module: "test", method: "spawn" }))
+            }),
+          ),
+        )
+        yield* Effect.flip(again.models("pi", null))
+        yield* Effect.flip(again.models("pi", null))
+        assert.strictEqual(failed, 2)
       }),
     )
 

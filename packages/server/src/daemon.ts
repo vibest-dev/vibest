@@ -1,4 +1,4 @@
-import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
+import { accepts, DAEMON_START_TIMEOUT, probe, SocketConnector, stopByHand } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
 import { Db, type SchemaMismatch } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
@@ -77,6 +77,7 @@ export interface Host {
 export { HANDOFF_ENV } from "./server.ts"
 
 export const HANDOFF_TIMEOUT = Duration.seconds(30)
+const STOP_REPLY_GRACE = Duration.millis(200)
 
 export const checkImport = (host: Host) => Effect.flatMap(Layout, (layout) => host.checkDatabase(layout.database))
 
@@ -119,37 +120,38 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
     yield* fs.makeDirectory(layout.home, { recursive: true })
-    let write: ((text: string) => Effect.Effect<void, LockFailed>) | undefined
-    const held = yield* host.lock(layout.daemonInfo).pipe(
+    const startTimeout = options.handoff ? HANDOFF_TIMEOUT : DAEMON_START_TIMEOUT
+    type LockWait =
+      | { readonly held: true; readonly write: (text: string) => Effect.Effect<void, LockFailed> }
+      | { readonly held: false }
+    const acquired = yield* host.lock(layout.daemonInfo).pipe(
       Effect.mapError(
         (e) =>
           new DaemonLockUnavailable({
             message: `cannot take vibestd's start lock ${layout.daemonInfo}: ${e.message}. Nothing was changed; check that file.`,
           }),
       ),
-      Effect.flatMap((writer) => {
-        if (writer) {
-          write = writer
-          return Effect.succeed(true)
-        }
+      Effect.flatMap((writer): Effect.Effect<LockWait | undefined, never, SocketConnector> => {
+        if (writer) return Effect.succeed({ held: true, write: writer })
         if (options.handoff) return Effect.succeed(undefined)
-        return probe(layout.socket).pipe(Effect.map((up) => (up ? false : undefined)))
+        return probe(layout.socket).pipe(Effect.map((up) => (up ? { held: false } : undefined)))
       }),
       Effect.repeat({
         until: (done) => done !== undefined,
         schedule: Schedule.jittered(Schedule.spaced("100 millis")),
       }),
       Effect.timeoutOrElse({
-        duration: options.handoff ? HANDOFF_TIMEOUT : DAEMON_START_TIMEOUT,
+        duration: startTimeout,
         orElse: () =>
           Effect.fail(
             new DaemonNotAnswering({
-              message: `another vibestd held ${layout.daemonInfo} for ${Duration.format(DAEMON_START_TIMEOUT)} without answering on ${layout.socket}. Nothing was changed; see vibestd.log and \`vibest status\`.`,
+              message: `another vibestd held ${layout.daemonInfo} for ${Duration.format(startTimeout)} without answering on ${layout.socket}. Nothing was changed; see vibestd.log and \`vibest status\`.`,
             }),
           ),
       }),
     )
-    if (!held) return yield* Effect.log(`vibestd is already running on ${layout.socket}`)
+    if (acquired === undefined || !acquired.held)
+      return yield* Effect.log(`vibestd is already running on ${layout.socket}`)
     const inUse = (yield* probe(layout.socket).pipe(Effect.repeat({ until: (up) => up, times: 2 })))
       ? "answers Ping (an vibestd that takes no start lock, from an older vibest)"
       : (yield* accepts(layout.socket))
@@ -192,9 +194,9 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
     yield* fs.chmod(layout.socket, 0o600)
     yield* fs.chmod(layout.httpSocket, 0o600)
     const info: DaemonInfo = { ...identity, version: VERSION, socket: layout.socket }
-    yield* write!(Schema.encodeSync(DaemonInfoJson)(info)).pipe(Effect.orDie)
+    yield* acquired.write(Schema.encodeSync(DaemonInfoJson)(info)).pipe(Effect.orDie)
     yield* fs.remove(`${layout.home}/vibestd.lock`, { force: true }).pipe(Effect.ignore)
     yield* Effect.log(`vibestd listening on ${layout.socket}`)
     yield* Deferred.await(shutdown)
-    yield* Effect.sleep("200 millis")
+    yield* Effect.sleep(STOP_REPLY_GRACE)
   }).pipe(Effect.scoped)

@@ -17,6 +17,7 @@ import {
   Crypto,
   Duration,
   Effect,
+  FiberSet,
   FileSystem,
   HashMap,
   Layer,
@@ -25,6 +26,7 @@ import {
   PlatformError,
   Predicate,
   Ref,
+  Stream,
   SynchronizedRef,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
@@ -766,21 +768,19 @@ export class Sessions extends Context.Service<
           for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
         })
 
-      yield* Effect.forkIn(
-        inbox.delivered.pipe(
-          Effect.flatMap(({ row, done }) =>
-            Effect.forkIn(
-              archiveDelivered(row).pipe(
-                Effect.ensuring(done),
-                logged(`archive ${row.sessionId}`),
-                Effect.provideContext(platform),
-              ),
-              scope,
+      const archives = yield* FiberSet.make()
+      yield* Stream.fromQueue(inbox.delivered).pipe(
+        Stream.runForEach(({ row, done }) =>
+          FiberSet.run(
+            archives,
+            archiveDelivered(row).pipe(
+              Effect.ensuring(done),
+              logged(`archive ${row.sessionId}`),
+              Effect.provideContext(platform),
             ),
           ),
-          Effect.forever,
         ),
-        scope,
+        Effect.forkIn(scope),
       )
 
       const resultReady = (id: string) =>

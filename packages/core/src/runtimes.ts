@@ -4,6 +4,7 @@ import { Cause, Context, Effect, Fiber, FileSystem, Layer, PubSub, type Scope, S
 
 import { Bus, type LiveEvent } from "./bus.ts"
 import type { HostEnv as HostEnvShape, RuntimesShape } from "./host.ts"
+import { messageOf } from "./plugin-sources.ts"
 import * as Registry from "./registry.ts"
 
 export { NoRuntime }
@@ -89,6 +90,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
     transform: registry.transform,
     reload: registry.reload,
     all,
+    find: (id) => (id ? registry.get().find((runtime) => runtime.id === id) : undefined),
     route: (id) =>
       Effect.suspend(() => {
         const loaded = registry.get()
@@ -108,7 +110,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
             ? Effect.failCause(cause)
             : Effect.fail(
                 new NoRuntime({
-                  message: `the runtime ${runtime.id}'s status on ${machine.id} could not be read: ${messageOf(cause)}`,
+                  message: `the runtime ${runtime.id}'s status on ${machine.id} could not be read: ${messageOf(Cause.squash(cause))}`,
                 }),
               ),
         ),
@@ -130,11 +132,6 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
     ),
   }
 })
-
-const messageOf = (cause: Cause.Cause<unknown>) => {
-  const error = Cause.squash(cause)
-  return error instanceof Error ? error.message : String(error)
-}
 
 export class Runtimes extends Context.Service<Runtimes, RuntimesShape>()("vibest/Runtimes") {
   static readonly layer = Layer.effect(Runtimes, make)

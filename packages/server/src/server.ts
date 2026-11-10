@@ -155,9 +155,9 @@ export const handlers = VibestRpcs.toLayer(
         if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
         if (coord.address.id === terminal) return null
         if (!restarting.has(coord.id)) {
-          const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
-          if (Option.isNone(h)) return null
-          const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
+          const h = runtimes.find(coord.runtime)
+          if (h === undefined) return null
+          const presence = yield* coordinatorIdle(h, coord.address).pipe(Effect.option)
           if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
         }
         return {
@@ -588,12 +588,12 @@ export const handlers = VibestRpcs.toLayer(
             identity.agent === "coordinator" ? yield* db.coordinatorOf(identity.projectId) : yield* db.getSession(id)
           if (at?.id !== id || !at.runtime || !at.address || at.address.id === "") return
           const address = at.address
-          const rt = yield* runtimes.route(at.runtime).pipe(Effect.option)
-          if (Option.isNone(rt) || rt.value.seen === undefined || rt.value.see === undefined) return
-          const see = rt.value.see
+          const rt = runtimes.find(at.runtime)
+          if (rt === undefined || rt.seen === undefined || rt.see === undefined) return
+          const see = rt.see
           const unreachable = (e: { readonly message: string }) =>
             new RuntimeUnreachable({ session: id, message: e.message })
-          const seen = rt.value.seen
+          const seen = rt.seen
           yield* Effect.gen(function* () {
             const now = yield* seen(address).pipe(Effect.mapError(unreachable))
             if (raisesSeen(now, turn)) yield* see(address, turn).pipe(Effect.mapError(unreachable))
@@ -730,7 +730,7 @@ export const handlers = VibestRpcs.toLayer(
                 ),
               )
               if (claimed === undefined) return yield* Effect.die("coordinator command returned without a session")
-              const rt = Option.getOrUndefined(yield* runtimes.route(kind).pipe(Effect.option))
+              const rt = runtimes.find(kind)
               if (rt?.present !== undefined)
                 yield* rt
                   .present(address, { mainSession: claimed.sessionId, projectId })
@@ -752,7 +752,7 @@ export const handlers = VibestRpcs.toLayer(
           const project = yield* resolveAt(c.repositoryRoot)
           const running = yield* runningCoordinator(project.id, "")
           if (running === null) return null
-          const runtime = Option.getOrUndefined(yield* runtimes.route(running.runtime).pipe(Effect.option))
+          const runtime = runtimes.find(running.runtime)
           if (runtime?.focus === undefined) return { place: running.place, focused: false }
           const address = yield* Schema.decodeUnknownEffect(AddressJson)(running.address).pipe(Effect.orDie)
           const focused = yield* runtime.focus(address).pipe(Effect.exit)

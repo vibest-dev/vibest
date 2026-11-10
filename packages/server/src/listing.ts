@@ -98,8 +98,8 @@ export const sessionListing = (deps: {
   const listedMain = (m: CoordinatorRow | undefined) =>
     Effect.gen(function* () {
       if (!m?.runtime || !m.address || m.address.id === "") return undefined
-      const h = yield* runtimes.route(m.runtime).pipe(Effect.option)
-      const status = Option.isNone(h) ? "unknown" : yield* mainStatus(h.value, m.address)
+      const h = runtimes.find(m.runtime)
+      const status = h === undefined ? "unknown" : yield* mainStatus(h, m.address)
       return mainInfo(m, status)
     })
 
