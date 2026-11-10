@@ -560,6 +560,19 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "interrupt of a turn vibest saw start stops it while the runtime still shows the agent idle",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      yield* herdr.updateAgent(id, (a) => ({ ...a, status: "idle" }))
+      assert.include((yield* sessions.interrupt(id)).message, "interrupted")
+      assert.deepStrictEqual((yield* herdr.callsTo("send")).at(-1)!.keys, ["esc"])
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted")
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
     "interrupt that does not take: SessionBusy, the round stays open, so the late aborted turn.complete is delivered as an interrupted result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

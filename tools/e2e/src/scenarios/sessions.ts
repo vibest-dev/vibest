@@ -77,13 +77,6 @@ const checks: ReadonlyArray<Check> = [
           fake: { baseUrl: p.model.url },
           second: { baseUrl: second.url, models: ["m2"] },
         })
-        const discoveryOnly = await piShadow(path.join(w.root, "pi-s1-vibestd"), w.profile, {
-          fake: { baseUrl: "http://127.0.0.1:9/v1" },
-          second: { baseUrl: "http://127.0.0.1:9/v1", models: ["m2"] },
-        })
-        Object.assign(p.env, { PI_CODING_AGENT_DIR: discoveryOnly })
-        await w.stopDaemon()
-        await p.startDaemon()
         const env = `PI_CODING_AGENT_DIR=${subDir}`
         const run = async (task: string, ...flags: Array<string>) =>
           (

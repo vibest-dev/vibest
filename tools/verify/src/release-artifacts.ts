@@ -5,8 +5,8 @@ import path from "node:path"
 
 const root = path.resolve(import.meta.dirname, "../../..")
 const [version, flag, flagDir] = process.argv.slice(2)
-if (!version || (flag !== undefined && !((flag === "--out" || flag === "--from") && flagDir))) {
-  console.error("usage: bun tools/verify/src/release-artifacts.ts <version> [--out <dir> | --from <dir>]")
+if (!version || flag !== "--from" || !flagDir) {
+  console.error("usage: bun tools/verify/src/release-artifacts.ts <version> --from <dir>")
   process.exit(1)
 }
 
@@ -27,22 +27,10 @@ const run = (argv: ReadonlyArray<string>, cwd: string, env: NodeJS.ProcessEnv = 
 }
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-release-"))
-const packs = flagDir ? path.resolve(flagDir) : path.join(dir, "packs")
-fs.mkdirSync(packs, { recursive: true })
-
-if (flag !== "--from") {
-  if (fs.readdirSync(packs).length) {
-    console.error(`release-artifacts: ${packs} is not empty`)
-    process.exit(1)
-  }
-  const published: Array<string> = JSON.parse(run(["pnpm", "-r", "ls", "--json", "--depth", "-1"], root))
-    .filter((p: { private?: boolean }) => !p.private)
-    .map((p: { path: string }) => p.path)
-  for (const pkg of published) {
-    console.log(`== pack ${path.relative(root, pkg)}`)
-    run(["pnpm", "pack", "--pack-destination", packs], pkg)
-  }
-}
+const packs = path.resolve(flagDir)
+const published: Array<string> = JSON.parse(run(["pnpm", "-r", "ls", "--json", "--depth", "-1"], root))
+  .filter((p: { private?: boolean }) => !p.private)
+  .map((p: { name: string }) => p.name)
 
 type Manifest = Record<string, any>
 const tarballs = new Map<string, string>()
@@ -81,16 +69,12 @@ for (const tgz of fs.readdirSync(packs).filter((f) => f.endsWith(".tgz"))) {
       has(f, "harness plugin file")
   }
 }
-if (flag === "--from") {
-  const listed = fs
-    .readFileSync(path.join(packs, "publish-order"), "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => line.split(" ")[1])
-  const found = [...tarballs.values()].map((f) => path.basename(f))
-  if (listed.sort().join() !== found.sort().join())
-    errors.push(`publish-order lists ${listed.join(", ")}; ${packs} holds ${found.join(", ")}`)
-}
+const missing = published.filter((name) => !tarballs.has(name))
+if (missing.length) errors.push(`${packs} holds no tarball of ${missing.join(", ")}`)
+const unpublished = [...tarballs.keys()].filter((name) => !published.includes(name))
+if (unpublished.length) errors.push(`${packs} holds tarballs of ${unpublished.join(", ")}, which are not published`)
+if (tarballs.size !== fs.readdirSync(packs).filter((f) => f.endsWith(".tgz")).length)
+  errors.push(`${packs} holds more than one tarball of a package`)
 
 const target = `${process.platform}-${process.arch}`
 const platform = tarballs.get(`@vibest/cli-${target}`)
@@ -113,7 +97,7 @@ else {
   if (out !== `vibest v${version}`) errors.push(`installed vibest --version printed "${out}", not "vibest v${version}"`)
 }
 
-if (flag === "--out") {
+{
   const order: Array<string> = []
   const visit = (name: string, chain: ReadonlyArray<string>) => {
     if (order.includes(name)) return
@@ -124,10 +108,11 @@ if (flag === "--out") {
     order.push(name)
   }
   for (const name of [...manifests.keys()].sort()) visit(name, [])
-  fs.writeFileSync(
-    path.join(packs, "publish-order"),
-    order.map((name) => `${name} ${path.basename(tarballs.get(name)!)}\n`).join(""),
-  )
+  const publishOrder = order.map((name) => `${name} ${path.basename(tarballs.get(name)!)}\n`).join("")
+  const orderFile = path.join(packs, "publish-order")
+  if (!fs.existsSync(orderFile)) fs.writeFileSync(orderFile, publishOrder)
+  else if (fs.readFileSync(orderFile, "utf8") !== publishOrder)
+    errors.push(`${orderFile} is not the publish order of the tarballs ${packs} holds`)
 }
 
 fs.rmSync(dir, { recursive: true, force: true })

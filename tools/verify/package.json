@@ -1,6 +1,6 @@
 {
   "name": "@vibest/verify",
-  "version": "0.0.1-beta.18",
+  "version": "0.0.1-dev",
   "private": true,
   "description": "Proves vibest works as a user gets it: gates, an npm install of the packed CLI, and every E2E check on it. Not published.",
   "type": "module",

@@ -35,7 +35,11 @@ export const normalizeModels = (
     }))
     .filter((m) => !provider || m.provider === provider)
 
-export const listModels = Effect.fn("listModels")(function* (adapter: HarnessDefinition, provider: string | null) {
+export const listModels = Effect.fn("listModels")(function* (
+  adapter: HarnessDefinition,
+  provider: string | null,
+  env?: Readonly<Record<string, string>>,
+) {
   const { id, binary, checkProvider, models: lister } = adapter
   const unavailable = (message: string) => new HarnessUnavailable({ harness: id, message })
   const providerError = checkProvider?.(provider)
@@ -50,7 +54,12 @@ export const listModels = Effect.fn("listModels")(function* (adapter: HarnessDef
       : Stream.concat(Stream.make(new TextEncoder().encode(lister.request)), Stream.never)
   const lines = yield* spawner
     .streamLines(
-      ChildProcess.make(binary, lister.args(provider), { stdin, cwd, env: { HOME: cwd }, extendEnv: true }),
+      ChildProcess.make(binary, lister.args(provider), {
+        stdin,
+        cwd,
+        env: { HOME: cwd, ...env },
+        extendEnv: true,
+      }),
       {
         includeStderr: true,
       },

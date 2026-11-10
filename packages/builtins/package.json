@@ -1,6 +1,6 @@
 {
   "name": "@vibest/builtins",
-  "version": "0.0.1-beta.18",
+  "version": "0.0.1-dev",
   "private": true,
   "license": "MIT",
   "type": "module",

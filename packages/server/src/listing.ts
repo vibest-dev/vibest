@@ -1,6 +1,6 @@
 import { projectActivity, unseenDone } from "@vibest/core/activity"
 import { type EngineEvent } from "@vibest/core/bus"
-import { type CoordinatorRow, Db, encodeAddress, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
+import { type CoordinatorRow, Db, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
 import { coordinatorIdle } from "@vibest/core/inbox"
 import type { ListScope } from "@vibest/core/remote"
 import { agentState, Runtimes, type Runtime, type Terminal } from "@vibest/core/runtimes"
@@ -8,26 +8,6 @@ import { type SessionView, Sessions } from "@vibest/core/sessions"
 import { type WatchEvent, type WatchSession, type ProjectRow, type SessionInfo } from "@vibest/protocol/rpc"
 import { type AgentStatus } from "@vibest/schema/session"
 import { Effect, Option } from "effect"
-
-export const placeOf = (runtime: { readonly id: string; readonly name?: string }, address: RuntimeAddress) => {
-  const name = runtime.name ?? runtime.id
-  return address.id !== "" ? `${name} ${address.id}` : `${name} (not placed)`
-}
-
-export const sameCoordinator = (
-  current: { readonly runtime: string | null; readonly address: RuntimeAddress | null } | undefined,
-  runtime: string,
-  address: string,
-) => {
-  const place = current?.address
-  return (
-    current?.runtime === runtime &&
-    place !== null &&
-    place !== undefined &&
-    place.id !== "" &&
-    encodeAddress(place) === address
-  )
-}
 
 const LS_TASK = 500
 const taskForLs = (task: string | null) =>
@@ -251,3 +231,5 @@ export const sessionListing = (deps: {
 
   return { listed, watched, snapshotProjects, watchDeltas }
 }
+
+export type Listing = ReturnType<typeof sessionListing>

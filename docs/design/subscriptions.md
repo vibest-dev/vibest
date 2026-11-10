@@ -102,8 +102,9 @@ accounts have no `planUsage` (the CLI then aggregates spend events; prototype re
 
 ## Pi
 
-vibest's Pi adapter reports only login readiness (`pi auth check --provider <p> --json --no-refresh`). Pi has no
-usage command. Usage limits come from plugins: any vibest plugin may report a Subscription's limits (for example
+vibest's Pi adapter asks `pi --list-models` for providers (the first column; `No models available` is an empty
+list), then login readiness with `pi auth check --provider <p> --json --no-refresh` for each. It does not read Pi's
+files. If the list command does not answer, the read is an error. Pi has no usage command. Usage limits come from plugins: any vibest plugin may report a Subscription's limits (for example
 a user's plugin that reads a provider's usage). vibest does not parse Pi provider response headers. With no such
 report, limits stay unknown (`[]`). Login is per provider, so `provider` is set. Pi refuses `--provider` without
 `--model`: a move to a Pi login with no model records the login on the session and starts Pi on its default.
@@ -116,16 +117,16 @@ report, limits stay unknown (`[]`). Login is per provider, so `provider` is set.
 `--no-refresh` keeps `pi auth check` from refreshing OAuth tokens (it refreshes and writes `auth.json` by
 default). Exit status is 0 for `not_ready` too: read the JSON.
 
-Failure modes: `provider_not_found` for providers an extension registers (`cpa`, Pi's `defaultProvider` here;
-`pi auth check` does not load the user's extensions).
+Failure modes: `pi --list-models` not answering; `provider_not_found` when the list names a provider `pi auth check`
+does not load (an extension's provider).
 
 ## Summary
 
-| Harness     | Login                                                                                                          | Usage                                                                              |
-| ----------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Claude Code | `claude auth status --json`: verified                                                                          | poll OAuth usage endpoint: verified; stream-json event: verified; statusline: docs |
-| Cursor      | `status` + `about --format json`: verified                                                                     | poll `DashboardService` RPCs: verified; `limited` rule assumed                     |
-| Pi          | `pi auth check --json --no-refresh` per provider: verified (API-key providers), OAuth `authType` value assumed | none from the adapter (`[]` unknown); a plugin may report limits                   |
+| Harness     | Login                                                                                                                                   | Usage                                                                              |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Claude Code | `claude auth status --json`: verified                                                                                                   | poll OAuth usage endpoint: verified; stream-json event: verified; statusline: docs |
+| Cursor      | `status` + `about --format json`: verified                                                                                              | poll `DashboardService` RPCs: verified; `limited` rule assumed                     |
+| Pi          | `pi --list-models`, then `pi auth check --json --no-refresh` per provider: verified (API-key providers), OAuth `authType` value assumed | none from the adapter (`[]` unknown); a plugin may report limits                   |
 
 Limits come only from official or CLI-provided sources; a harness with none keeps `limits: []` (unknown). One
 Subscription per `(harness, provider, machine)`: `provider` empty for Claude Code and Cursor, set for Pi. vibest

@@ -6,13 +6,14 @@ import { address, type At, type ListScope, type PeerScope, Remote } from "@vibes
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import type { NotInRepository } from "@vibest/core/worktree"
 import { PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
-import { Caller, type CallerShape, Forbidden, type PayloadOf, type SessionInfo, VERSION } from "@vibest/protocol/rpc"
+import { Caller, Forbidden, type PayloadOf, VERSION } from "@vibest/protocol/rpc"
 import type { ProjectMoved } from "@vibest/schema/session"
 import { Effect, Stream } from "effect"
 
+import type { Listing } from "../listing.ts"
+import type { Agent, Checks } from "./caller.ts"
+
 type Routed = "Send" | "Interrupt" | "Remove" | "Get" | "Peek"
-type CliOnly = "Machine.Add" | "Machine.List" | "Machine.Remove"
-type Agent = Extract<CallerShape, { _tag: "Cli" | "Coordinator" }>
 type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
 const notPeer = (method: string) => new Forbidden({ method, message: `${method} is for another vibestd` })
@@ -30,16 +31,9 @@ const peerScope = (method: string) =>
     return Effect.succeed({ peer: c.peerId, project: c.projectId })
   })
 
-export const remoteHandlers = <R>(deps: {
-  readonly agent: (method: Routed | "List") => Effect.Effect<Agent, Forbidden, Caller>
-  readonly projectOf: (
-    c: Agent,
-    method: Routed,
-  ) => Effect.Effect<{ readonly id: string }, Forbidden | NotInRepository | ProjectMoved, R>
-  readonly findAt: (directory: string) => Effect.Effect<{ readonly id: string } | undefined, NotInRepository, R>
-  readonly listed: (scope: ListScope, stopped: boolean) => Effect.Effect<ReadonlyArray<SessionInfo>, never, R>
-  readonly cliOnly: (method: CliOnly) => Effect.Effect<void, Forbidden, Caller>
-}) =>
+export const remoteHandlers = (
+  deps: Pick<Checks, "agent" | "projectOf" | "findAt" | "cliOnly"> & { readonly listed: Listing["listed"] },
+) =>
   Effect.gen(function* () {
     const db = yield* Db
     const self = yield* VibestdIdentity
@@ -156,3 +150,5 @@ export const remoteHandlers = <R>(deps: {
       },
     }
   })
+
+export type RemoteHandlers = Effect.Success<ReturnType<typeof remoteHandlers>>

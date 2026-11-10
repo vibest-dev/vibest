@@ -1,6 +1,6 @@
 {
   "name": "@vibest/cli-darwin-arm64",
-  "version": "0.0.1-beta.18",
+  "version": "0.0.1-dev",
   "description": "The vibest binary for macOS on Apple silicon; installed by @vibest/cli.",
   "license": "MIT",
   "repository": {
