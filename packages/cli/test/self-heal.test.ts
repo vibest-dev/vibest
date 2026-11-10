@@ -34,6 +34,13 @@ const typed = (text: string, terminal = true) =>
     stdin: Stream.make(new TextEncoder().encode(text)),
   })
 
+const parentOf = (pid: number) =>
+  Number(
+    Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(pid)])
+      .stdout.toString()
+      .trim(),
+  )
+
 const main = path.join(path.dirname(import.meta.dirname), "src", "main.ts")
 const sourceArgv = [process.execPath, main]
 
@@ -161,6 +168,7 @@ layer(Platform.services)(
             )
             assert.match(old.instance!, /^[0-9a-f-]{36}$/)
             assert.deepStrictEqual(old.command, sourceArgv)
+            assert.notStrictEqual(parentOf(old.pid!), process.pid, "the started vibestd is no child of this process")
 
             assert.match(yield* replace(typed("y\n", false)), /needs a yes on a terminal; nothing was stopped/)
             assert.match(yield* replace(typed("n\n")), /not confirmed; nothing was stopped/)
@@ -174,6 +182,7 @@ layer(Platform.services)(
             const next = yield* ping
             assert.notStrictEqual(next.instance, old.instance)
             assert.deepInclude(next, { version: VERSION, command: sourceArgv })
+            assert.notStrictEqual(parentOf(next.pid!), process.pid, "the restarted vibestd is no child of this process")
             yield* Effect.sleep("50 millis").pipe(
               Effect.repeat({ until: () => Platform.liveness(old.pid!) === "exited", times: 100 }),
             )

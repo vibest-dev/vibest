@@ -143,6 +143,15 @@ const olderAgents = async (
   const restartedOnBuild = async () => {
     const daemonAfter = await w.daemonPid()
     expect(daemonAfter !== undefined && daemonAfter !== daemonBefore, `vibestd ${daemonBefore} -> ${daemonAfter}`)
+    const ps = (field: string, pid: number) =>
+      Bun.spawnSync(["ps", "-o", `${field}=`, "-p", String(pid)])
+        .stdout.toString()
+        .trim()
+    const parent = Number(ps("ppid", daemonAfter!))
+    expect(
+      parent === 1 || !ps("command", parent).includes("vibest"),
+      `vibestd ${daemonAfter} is a child of ${parent} (${ps("command", parent)}), which may never reap it`,
+    )
     for (const [name, row, now] of [
       ["subagent", before.sub, () => read("s.id = ?", sub)],
       ["main agent", before.main, main],

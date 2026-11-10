@@ -141,7 +141,48 @@ export const plugins: PluginLoader["Service"] = {
   watch,
 }
 
-export const liveness = (pid: number): Liveness => livenessOf(() => process.kill(pid, 0))
+const darwinLibc =
+  process.platform === "darwin"
+    ? dlopen("libc.dylib", {
+        sysctl: {
+          args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u64],
+          returns: FFIType.i32,
+        },
+      }).symbols
+    : undefined
+const CTL_KERN = 1
+const KERN_PROC = 14
+const KERN_PROC_PID = 1
+const KINFO_PROC_BYTES = 648
+const KINFO_PROC_P_STAT_AT = 36
+const SZOMB = 5
+
+const darwinZombie = (sysctl: NonNullable<typeof darwinLibc>["sysctl"], pid: number) => {
+  const info = new Uint8Array(KINFO_PROC_BYTES)
+  const size = new BigUint64Array([BigInt(KINFO_PROC_BYTES)])
+  const query = new Int32Array([CTL_KERN, KERN_PROC, KERN_PROC_PID, pid])
+  return (
+    sysctl(query, query.length, info, size, null, 0) === 0 &&
+    size[0] === BigInt(KINFO_PROC_BYTES) &&
+    info[KINFO_PROC_P_STAT_AT] === SZOMB
+  )
+}
+
+const linuxZombie = (pid: number) => {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8")
+    return stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z")
+  } catch {
+    return false
+  }
+}
+
+const isZombie = (pid: number) => (darwinLibc ? darwinZombie(darwinLibc.sysctl, pid) : linuxZombie(pid))
+
+export const liveness = (pid: number): Liveness => {
+  const seen = livenessOf(() => process.kill(pid, 0))
+  return seen === "alive" && isZombie(pid) ? "exited" : seen
+}
 
 const terminate = (pid: number) => {
   if (!validPid(pid)) return

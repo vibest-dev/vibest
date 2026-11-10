@@ -33,6 +33,13 @@ queued message is active. The client waits 55 s for the reply (above an older vi
 proof it exited, so the new vibestd waits for the lock, boundedly. With `--version` (15 s) and the new start, a
 replacement ends in about two minutes whatever the other side does, not counting the wait for the yes.
 
+Every start of vibestd (`vibest daemon`, the auto-start of a CLI or a harness plugin, the new vibestd of a handoff)
+goes through `spawnDaemon`: a shell that starts vibestd in the background and exits, and that the caller waits for.
+vibestd is then nobody's child but init's (launchd on macOS), so a long-lived caller such as a Pi process or an old
+vibestd never leaves it a zombie. A process is exited for vibest (`liveness`) when `kill(pid, 0)` fails or it is a
+zombie (`sysctl` `KERN_PROC_PID` on macOS, `/proc/<pid>/stat` on Linux); every wait for an old vibestd or harness to
+exit uses it.
+
 `vibest update` sends `Daemon.Handoff` the same way, in the running vibestd's protocol, so a newer vibest hands over
 a vibestd of any older protocol that has the `handoff` capability.
 

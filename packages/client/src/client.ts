@@ -272,7 +272,7 @@ export const spawnDaemon = (
           "sh",
           [
             "-c",
-            `mkdir -p "$1" && shift && exec "$@" >>"${log}" 2>&1`,
+            `mkdir -p "$1" && shift && { "$@" >>"${log}" 2>&1 & }`,
             "sh",
             layout.home,
             ...command,
@@ -291,6 +291,8 @@ export const spawnDaemon = (
         ),
       )
       yield* handle.unref
+      const code = yield* handle.exitCode
+      if (code !== 0) return yield* Effect.fail(new Error(`sh exited with ${code} before starting vibestd`))
     }).pipe(
       Effect.scoped,
       Effect.mapError((e) => new DaemonUnavailable({ socket: layout.socket, message: e.message })),
