@@ -4,8 +4,6 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { consistency, type ListedCheck, PROVEN_BY_HAND, PROVEN_BY_UNIT_TEST, readFeatures } from "./feature-ids.ts"
-
 const root = path.resolve(import.meta.dirname, "../../..")
 const noCache = process.argv.includes("--no-cache")
 const only = process.argv.slice(2).filter((a) => a !== "--no-cache")
@@ -41,21 +39,6 @@ const steps = async (list: ReadonlyArray<readonly [string, ReadonlyArray<string>
 
 const all = async (legs: ReadonlyArray<Promise<boolean>>) => {
   if (!(await Promise.all(legs)).every(Boolean)) process.exit(1)
-}
-
-const featuresDir = path.join(root, "docs/features")
-const featureFiles = fs
-  .readdirSync(featuresDir)
-  .filter((f) => f.endsWith(".md"))
-  .map((f) => ({ file: `docs/features/${f}`, text: fs.readFileSync(path.join(featuresDir, f), "utf8") }))
-const { features, problems: featureProblems } = readFeatures(featureFiles)
-const listed = JSON.parse(
-  childProcess.execFileSync("bun", ["tools/e2e/src/main.ts", "--list"], { cwd: root, encoding: "utf8" }),
-) as ReadonlyArray<ListedCheck>
-const idProblems = [...featureProblems, ...consistency(features, listed)]
-if (idProblems.length) {
-  console.error(`verify: docs/features and the E2E checks disagree:\n  ${idProblems.join("\n  ")}`)
-  process.exit(1)
 }
 
 const target = `${process.platform}-${process.arch}`
@@ -144,13 +127,4 @@ if (failedLegs.length) {
   console.error(`\nverify: failed on the ${failedLegs.join(" and ")} install`)
   process.exit(1)
 }
-if (only.length) {
-  console.log(`\nverify: passed (only ${only.join(" ")}).`)
-  process.exit(0)
-}
-const byHand = features.filter((f) => f.id in PROVEN_BY_HAND)
-const byUnitTest = features.filter((f) => f.id in PROVEN_BY_UNIT_TEST)
-console.log(
-  `\nverify: passed: ${features.length - byHand.length - byUnitTest.length} capabilities proven by E2E checks, ${byUnitTest.length} by unit tests (${byUnitTest.map((f) => `${f.id}: ${PROVEN_BY_UNIT_TEST[f.id]}`).join(", ")}), ${byHand.length} skipped.`,
-)
-for (const f of byHand) console.log(`SKIP ${f.id} ${f.title} (${f.file}): proven by hand, ${PROVEN_BY_HAND[f.id]}`)
+console.log("\nverify: passed.")

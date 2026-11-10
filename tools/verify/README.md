@@ -9,12 +9,9 @@ pnpm verify daemon integration   # install as a user, then only these areas of E
 pnpm verify --no-cache           # before a release: every check runs, the whole gate on both installs
 ```
 
-Before anything else, verify reads the capability ids in `docs/features/*.md` (each `## <ID>. <name>` heading) and the
-E2E checks (`bun tools/e2e/src/main.ts --list`), and stops when they disagree: a `##` heading that is not a capability
-heading or repeats an id; a capability that no gate check proves (its id, `<id>-<case>`, or in `covers`) and that is not
-in `tools/verify/src/feature-ids.ts` as proven by hand or by a unit test; an id in those lists that no feature file has,
-or that a gate check proves; a check id or covered id that no feature file has. It compares ids, never the text: the
-feature file says when a capability counts as working, and the check must match it.
+verify is a deterministic program: CI runs it and it passes or fails. It does not read the capability docs in
+`docs/features/`; an agent does, with the `verify-features` skill (`.agents/skills/verify-features/SKILL.md`), and uses
+verify's results as evidence.
 
 A failed build, typecheck, test, pack or install stops the run; a failed E2E leg does not stop the other leg, and the
 run fails at the end naming each failed leg:
@@ -30,8 +27,7 @@ run fails at the end naming each failed leg:
    binary bytes, so it runs the smoke set (I1, I2, U1, U9, U10, H1) while its file layout (paths and links) matches the
    last one that passed the whole gate, and the whole gate when it changed. Checks whose key is unchanged are cache hits
    (docs/testing/e2e-plan.md §3).
-3. Prints how many capabilities E2E checks and unit tests proved, then one `SKIP` line for each capability proven by
-   hand (D9, I5, I10, S39): no gate check proves them, so they are reported as skipped, never as passed.
+3. Prints `verify: passed.` when every leg passed.
 
 Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `update`, `start`, `inbox`, `exits`, `restart`, `hc`,
 `sessions`, `delivery`, `routing`, `main-agent`, `machines`, `terminal-status`; or check ids.

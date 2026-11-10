@@ -224,27 +224,27 @@ it; the install beside `pi` is the one to use.
 ## 5. Capabilities and their proof
 
 The capabilities are specified in [docs/features](../features/), one file per area, in plain language: each has an id
-and says when it counts as working. That text is the authority; a check must match it. Which check proves an id lives
-here, on the proof side: an E2E check proves its own id (`S10-start` and `S10-pi` prove `S10`) and the ids in its
-`covers`. `pnpm verify` reads every id in docs/features and fails when one has no gate check and is not in its list of
-ids proven by hand (`tools/verify/src/feature-ids.ts`), or when a check names an id no feature file has; the ids
-proven by hand are printed as skipped, never as passed. I6 is the runner's own check after every run.
+and says when it counts as working. Those files are for the agent that leads a verification (the `verify-features`
+skill, `.agents/skills/verify-features/SKILL.md`); no script reads them. Each E2E check carries the id of the capability
+it is about in its name (`S10-start` and `S10-pi` are about `S10`) and lists in `covers` the other ids it also proves;
+`bun tools/e2e/src/main.ts --list` prints every check's id, tier and covers as JSON. I6 is the runner's own check after
+every run.
 
 Every check that runs a turn runs it on a fake model server (`tools/e2e/src/fake-model.ts`: Anthropic Messages for
 Claude, OpenAI-compatible for Pi) with shadow harness config, so its prompts and answers are scripted; no gate check runs
-a real model. Proven by hand, with evidence:
+a real model. No script can prove these, so the verifying agent does them by hand:
 
 - D9 needs a newer release published to npm.
-- I5 and I10 need the user's own Cursor login (`pnpm e2e --tier agent I5`). Cursor cannot run on a fake model:
-  `cursor-agent --endpoint` speaks Cursor's own backend protocol, not a model API a fake can answer, and a real model
-  cannot be held between hook events.
+- I5 and I10 need the user's own Cursor login (`pnpm e2e --tier agent I5` runs I5's steps on it). Cursor cannot run on a
+  fake model: `cursor-agent --endpoint` speaks Cursor's own backend protocol, not a model API a fake can answer, and a
+  real model cannot be held between hook events.
 - S39 depends on timing: the Claude plugin polls every second and the Pi stream claims each message as it is queued, so
   whether two reports share one delivery depends on when they are queued.
-- U3 has no release path that reaches it while releases share a schema; `rpc.test.ts` (Daemon.Handoff with a failing
-  import check) proves it in `pnpm test`.
 
 Notes on particular checks:
 
+- U3 has no release path that reaches it while releases share a schema; `rpc.test.ts` (Daemon.Handoff with a failing
+  import check) proves it in `pnpm test`.
 - U2, U4 and U6 start from an old install that is a copy of this build whose version is patched to an older one, until
   a published previous release shares this build's database schema; then they move to that release, downloaded once
   into an E2E cache.
