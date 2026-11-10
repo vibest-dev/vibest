@@ -205,7 +205,7 @@ export const sessionSpawn = (deps: {
           })
     const harnessId = decision.harness
     if (harnesses.find(harnessId) === undefined) return yield* routed(unprovided(harnessId, harnesses.all))
-    yield* preflight(harnessId, provider ?? null, model ?? null).pipe(
+    yield* preflight(harnessId, provider ?? null, model ?? null, input.env).pipe(
       Effect.provideService(Harness, harness),
       Effect.provideService(Harnesses, harnesses),
       Effect.mapError(routed),
