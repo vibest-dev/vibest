@@ -116,6 +116,14 @@ jobs:
           ln -sf "$claude" "$bin/claude"
           ln -sf "$(command -v node)" "$bin/node"
           echo "$bin" >> "$GITHUB_PATH"
+          # vibest lists the processes working in a worktree with lsof, which the image lacks.
+          command -v lsof >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq lsof; }
+          # A machine Claude Code has already run on: a first run writes its onboarding state into ~/.claude.json, which
+          # E2E counts as a change to the user's files.
+          [ -e "$HOME/.claude.json" ] || cat > "$HOME/.claude.json" <<'JSON'
+          {"hasCompletedOnboarding": true, "lastOnboardingVersion": "2.1.322", "hasSeenAutoModeEntryWarning": true,
+           "hasResetAutoModeOptInForDefaultOffer": true, "hasSeenAutoModeOutsideReadPrompt": true}
+          JSON
           # bash -l reads the first of these that exists.
           profile="$HOME/.bash_profile"
           for f in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
@@ -169,6 +177,16 @@ jobs:
       # curl and npm installs, and every E2E check on each, --strict), --no-cache so every check runs. H4 is macOS-only:
       # verify leaves it to the darwin job's verify of the same commit, and publish needs both.
       - run: pnpm run verify --no-cache --elsewhere H4
+      # On a failure: each check's evidence (redacted) and the vibestd log of every world E2E kept.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-evidence-linux
+          path: |
+            tools/e2e/evidence
+            /tmp/vbe-*/vibest/vibestd.log
+          if-no-files-found: ignore
+          retention-days: 7
       # Packs every package to publish (the darwin-arm64 binary is cross-compiled here), checks the tarballs, installs
       # @vibest/cli with the linux-x64 binary from them and runs it; keeps the tarballs and their publish order.
       - name: Pack and check
