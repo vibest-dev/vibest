@@ -1,5 +1,5 @@
 import type { Harness } from "@vibest/plugin"
-import { Config, Effect, FileSystem, Path, Ref, Schema } from "effect"
+import { Effect, Ref, Schema } from "effect"
 
 import { findMessage, jsonLines, noProvider, opt, withConfigured } from "./models.ts"
 import { platform } from "./platform.ts"
@@ -49,14 +49,6 @@ const turnComplete = (event: Readonly<Record<string, unknown>>) => {
   }
   return { ...event, error: "error", error_details: "the turn ended on an API error" }
 }
-
-const transcript = Effect.fn("claudeTranscript")(function* (root: string, id: string) {
-  const path = yield* Path.Path
-  const dir = yield* Config.String("CLAUDE_CONFIG_DIR").pipe(
-    Config.orElse(() => Config.String("HOME").pipe(Config.map((h) => path.join(h, ".claude")))),
-  )
-  return path.join(dir, "projects", root.replace(/[^a-zA-Z0-9]/g, "-"), `${id}.jsonl`)
-})
 
 const optionalModel = Schema.optional(Schema.NullOr(Schema.String))
 
@@ -171,9 +163,5 @@ export const claude: Harness.HarnessDefinition = {
   },
   turnEnd: (event, coordinator) =>
     coordinator || event.hook_event_name !== "TurnComplete" ? undefined : { result: turnComplete(event) },
-  canResume: (root, sessionId) =>
-    Effect.flatMap(transcript(root, sessionId), (file) =>
-      Effect.flatMap(FileSystem.FileSystem, (fs) => fs.exists(file)),
-    ).pipe(Effect.provide(platform), Effect.orDie),
   subscription: (home) => claudeSubscription(home).pipe(Effect.provide(platform)),
 }

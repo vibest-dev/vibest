@@ -546,12 +546,6 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
           )
           assert.strictEqual(placed.env.VIBEST_PROJECT_ID, "07e40000-07e4-407e-807e-07e4000007e4")
           assert.strictEqual(placed.env.VIBEST_RUNTIME, '{"runtime":"herdr"}')
-          const unwritten = yield* run("claude", "s1", "abcd1234-abcd-4abc-8abc-abcd1234abcd")
-          assert.notInclude(unwritten.args, "--resume")
-          assert.notInclude(unwritten.args, "--session-id")
-          const transcript = path.join(claudeDir, "projects", repo.replace(/[^a-zA-Z0-9]/g, "-"), "s1.jsonl")
-          yield* fs.makeDirectory(path.dirname(transcript), { recursive: true })
-          yield* fs.writeFileString(transcript, "{}\n")
           assert.deepStrictEqual(
             (yield* run("claude", "s1", "abcd1234-abcd-4abc-8abc-abcd1234abcd")).args.slice(0, 2),
             ["--resume", "s1"],

@@ -95,6 +95,31 @@ const make = Effect.gen(function* () {
     conversationOf,
     remote,
   } = store
+  const canResumeConversation = (sessionId: string, harnessSessionId: string) =>
+    sql<{ ok: number }>`SELECT (
+      EXISTS (
+        SELECT 1 FROM event te
+        WHERE te.session_id = ${sessionId} AND te.type = 'turn.end'
+          AND EXISTS (
+            SELECT 1 FROM event c
+            WHERE (c.id = te.process_id AND c.type = 'process.start'
+                AND json_extract(c.data, '$.resume') = ${harnessSessionId})
+              OR (c.process_id = te.process_id AND c.type = 'process.conversation'
+                AND json_extract(c.data, '$.conversation') = ${harnessSessionId})
+          )
+      )
+      OR (
+        EXISTS (SELECT 1 FROM project WHERE entry_session_id = ${sessionId})
+        AND EXISTS (
+          SELECT 1 FROM event c
+          WHERE c.session_id = ${sessionId} AND c.type = 'process.conversation'
+            AND json_extract(c.data, '$.conversation') = ${harnessSessionId}
+        )
+      )
+    ) AS ok`.pipe(
+      Effect.map((rows) => rows[0]?.ok === 1),
+      Effect.orDie,
+    )
   return {
     ...remote.queries,
     projectAt: (root: string) =>
@@ -483,7 +508,13 @@ const make = Effect.gen(function* () {
             const { current, conversation } = yield* conversationOf(mainId)
             if (current !== undefined && current.ended === null)
               yield* endProcess(mainId, movingHere ? "move" : "exited", at)
-            const resume = !fresh && current?.start.harness === harness ? (conversation ?? undefined) : undefined
+            const resume =
+              !fresh &&
+              current?.start.harness === harness &&
+              conversation !== null &&
+              (yield* canResumeConversation(mainId, conversation))
+                ? conversation
+                : undefined
             yield* startProcess(
               mainId,
               {
@@ -615,6 +646,7 @@ const make = Effect.gen(function* () {
     clearCoordinator: (runtime: string, address: RuntimeAddress) =>
       tx(clearMainAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
+    canResumeConversation,
     ...inboxMethods(store),
   }
 })

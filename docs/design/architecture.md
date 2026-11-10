@@ -839,8 +839,10 @@ permission rules are `Read(//<dir>/**)` and `Edit(//<dir>/**)`: Claude matches f
 rules (an Edit rule covers Write), and `//` starts an absolute path. A user prompt is a `prompt.submit` from origin
 `composer` or `bridge` (Remote Control); a task notification, a scheduled trigger, a peer or a plugin's prompt is not
 the person. An aborted `turn.complete` is a result only while vibest's round is open, so `vibest interrupt`'s own Esc
-is none. `--resume` of a session Claude never wrote fails, so a resume first checks its transcript,
-`<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<root with every non-alphanumeric as ->/<id>.jsonl`. Its models come from
+is none. vibest does not read Claude's session files. A subagent is resumed with `--resume` only after vibest recorded a
+turn end for that conversation; otherwise it starts with `--session-id`. The main agent is resumed when the harness
+reported that conversation (`process.conversation`), because its own turns are not stored; a missing transcript then
+fails the resume, which is rare. Its models come from
 the stream-json `initialize` control request (the Agent SDK's `supportedModels()`; the list's `default` entry is
 Anthropic's recommendation, not the user's setting, and is dropped) and `get_settings` (`applied.model`, what it
 runs), under `--safe-mode` so no hooks or plugins run (`--bare` would skip OAuth and return a short list).

@@ -1,6 +1,6 @@
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-import { Duration, Effect, Exit, FileSystem, Option, Path, Schedule, type Scope } from "effect"
+import { Duration, Effect, Exit, Option, Schedule, type Scope } from "effect"
 
 import { awaitEvent, Bus } from "./bus.ts"
 import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
@@ -121,8 +121,6 @@ export const sessionRestart = (deps: {
   readonly checkLater: (id: string) => Effect.Effect<void>
   readonly launchArgv: (session: SessionRow, resume: boolean) => Effect.Effect<ReadonlyArray<string>, unknown>
   readonly mainArgv: (main: CoordinatorRow) => Effect.Effect<ReadonlyArray<string>, unknown>
-  readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, unknown>
-  readonly withPlatform: <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) => Effect.Effect<A, E>
   readonly awaitReady: (
     h: Runtime,
     terminal: Terminal,
@@ -197,15 +195,7 @@ export const sessionRestart = (deps: {
     )
   }
 
-  const againArgv = (session: SessionRow) =>
-    Effect.gen(function* () {
-      const adapter = yield* harnesses.get(session.harnessId)
-      const resume =
-        session.harnessSessionId !== null &&
-        (adapter.canResume === undefined ||
-          (yield* adapter.canResume(yield* deps.worktreeOf(session), session.harnessSessionId)))
-      return yield* deps.launchArgv(session, resume)
-    }).pipe(deps.withPlatform)
+  const againArgv = (session: SessionRow) => deps.launchArgv(session, session.harnessSessionId !== null)
 
   const restartAgent = (id: string): Effect.Effect<Restarted> =>
     Effect.gen(function* () {

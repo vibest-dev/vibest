@@ -63,9 +63,6 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   yield* (yield* FileSystem.FileSystem)
     .makeDirectory(layout.artifacts(saved.projectId), { recursive: true })
     .pipe(Effect.ignore)
-  let harnessSessionId = saved.harnessSessionId
-  if (harnessSessionId !== null && adapter.canResume && !(yield* adapter.canResume(input.root, harnessSessionId)))
-    harnessSessionId = null
   const commandEnv: Record<string, string> = {
     ...env,
     VIBEST_SESSION_ID: saved.sessionId,
@@ -81,7 +78,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
       systemPromptFile,
       provider: input.provider,
       model: input.model,
-      sessionId: harnessSessionId,
+      sessionId: saved.harnessSessionId,
       pluginDir,
       env: commandEnv,
     }),

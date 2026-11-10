@@ -798,4 +798,28 @@ describe("Db", () => {
       assert.strictEqual((yield* header(file)).applicationId, APPLICATION_ID)
     }).pipe(Effect.provide(Platform.services)),
   )
+
+  it.effect(
+    "a subagent resumes only after its turn ends; the main agent resumes a conversation the harness reported",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const db = yield* Db
+          const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+          yield* db.insertSession(session(id, { harnessId: "claude", harnessSessionId: "pre" }), yield* projectOf("r"))
+          assert.isFalse(yield* db.canResumeConversation(id, "pre"))
+          yield* db.updateSession(id, { turnState: "open", turnPromptedAt: 1 })
+          yield* db.updateSession(id, { turnState: "completed" })
+          assert.isTrue(yield* db.canResumeConversation(id, "pre"))
+          const main = yield* db.coordinatorLaunch(yield* projectOf("r"), "claude", false, place)
+          assert.isFalse(yield* db.canResumeConversation(main.sessionId, "c1"))
+          yield* db.reportCoordinatorSession(main.sessionId, "claude", "c1")
+          assert.isTrue(yield* db.canResumeConversation(main.sessionId, "c1"))
+          assert.strictEqual(
+            (yield* db.coordinatorLaunch(yield* projectOf("r"), "claude", false, place)).harnessSessionId,
+            "c1",
+          )
+        }),
+      ),
+  )
 })
