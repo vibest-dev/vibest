@@ -23,6 +23,7 @@ import {
 } from "effect"
 import { SocketConnector } from "effect-herdr-sdk"
 import { Command } from "effect/cli"
+import { FetchHttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
@@ -624,6 +625,7 @@ describe("wizard entry", () => {
           Effect.provide(Stdio.layerTest({})),
           Effect.provideServiceEffect(Layout, Layout.make("/nonexistent/.vibest")),
           Effect.provide(Path.layer),
+          Effect.provide(FetchHttpClient.layer),
           Effect.provide(
             ConfigProvider.layer(
               ConfigProvider.fromUnknown({

@@ -128,7 +128,7 @@ type Core = {
 }
 
 export const make = (deps: {
-  readonly connect: (socketPath: string) => HcShape
+  readonly connect: (socketPath: string) => Effect.Effect<HcShape>
   readonly socket: string
   readonly scope: Scope.Scope
   readonly typedLaunch?: Duration.Input
@@ -138,7 +138,7 @@ export const make = (deps: {
     const typedLaunchMs = Duration.toMillis(deps.typedLaunch ?? Duration.millis(TYPED_LAUNCH_MS))
     const events = yield* PubSub.unbounded<RuntimeEvent>()
     const cores = new Map<string, Core>()
-    const home = connect(deps.socket)
+    const home = yield* connect(deps.socket)
 
     const wake = (core: Core, address: string) =>
       Effect.forEach(core.waiting.get(address) ?? [], (waiter) => Deferred.succeed(waiter, undefined), {
@@ -229,7 +229,7 @@ export const make = (deps: {
         const known = cores.get(socket)
         if (known !== undefined) return known
         const core: Core = {
-          hc: socket === deps.socket ? home : connect(socket),
+          hc: socket === deps.socket ? home : yield* connect(socket),
           busy: new Set(),
           waiting: new Map(),
         }

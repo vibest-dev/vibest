@@ -1,8 +1,9 @@
 import { type UpdateStatus, VERSION } from "@vibest/protocol/rpc"
 import { Clock, Config, Context, Duration, Effect, Exit, Layer, Option, Ref, Schedule, Schema } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
+import { HttpClient, HttpClientResponse } from "effect/http"
 
 import { VibestCommand } from "./paths.ts"
+import { messageOf } from "./plugin-sources.ts"
 
 export class UpdateError extends Schema.TaggedError<UpdateError>()("UpdateError", { message: Schema.String }) {}
 
@@ -36,10 +37,7 @@ const latestVersion = (
     Effect.map((v) => v.trim()),
     Effect.filterOrFail(isSemver, (v) => new Error(`not a semver version: ${JSON.stringify(v)}`)),
     Effect.timeoutOrElse({ duration: "15 seconds", orElse: () => Effect.fail(new Error("no answer")) }),
-    Effect.mapError(
-      (e) => new UpdateError({ message: `could not read ${url}: ${e instanceof Error ? e.message : String(e)}` }),
-    ),
-    Effect.provide(FetchHttpClient.layer),
+    Effect.mapError((e) => new UpdateError({ message: `could not read ${url}: ${messageOf(e)}` })),
   )
 
 const npmLatest = Effect.gen(function* () {
@@ -62,7 +60,7 @@ export const UpdateCheck = Context.Reference<Effect.Effect<UpdateStatus>>("vibes
   defaultValue: () => Effect.succeed(NOT_CHECKED),
 })
 
-export const checkEveryHour = (lookup: Effect.Effect<string, unknown>) =>
+export const checkEveryHour = <R>(lookup: Effect.Effect<string, unknown, R>) =>
   Effect.gen(function* () {
     const status = yield* Ref.make(NOT_CHECKED)
     const check = Effect.gen(function* () {

@@ -132,7 +132,7 @@ const fakeCore = Effect.gen(function* () {
   const server = yield* BunSocketServer.make({ path: socketPath })
   yield* Effect.forkScoped(server.run(serve))
   const connector = yield* SocketConnector
-  const connect = (at: string) => Effect.runSync(Hc.make(at).pipe(Effect.provideService(SocketConnector, connector)))
+  const connect = (at: string) => Hc.make(at).pipe(Effect.provideService(SocketConnector, connector))
   const runtime = yield* make({ connect, socket: socketPath, scope: yield* Effect.scope })
   const terminal = { machine: "local", id: terminalId(socketPath, "t1") }
   const seen = yield* Queue.unbounded<VibestPlugin.Runtime.RuntimeEvent>()
