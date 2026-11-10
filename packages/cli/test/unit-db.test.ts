@@ -17,7 +17,10 @@ import * as Platform from "#platform"
 import { tempDirectory, TURNS, projectOf } from "./fakes.ts"
 import { database, session, place } from "./unit-helpers.ts"
 
-const fact = (type: FactType, input: { readonly sessionId: string; readonly at?: number; readonly data: object }) =>
+const fact = (
+  type: FactType,
+  input: { readonly sessionId?: string; readonly projectId?: string; readonly at?: number; readonly data: object },
+) =>
   Effect.gen(function* () {
     const journal = yield* makeJournal(() => Effect.void)
     return yield* journal.commit(journal.emit(Catalog[type] as never, input as never))
@@ -352,15 +355,10 @@ describe("Db", () => {
       yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
         parentSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       })
-      yield* Effect.gen(function* () {
-        const journal = yield* makeJournal(() => Effect.void)
-        yield* journal.commit(
-          journal.emit(Catalog["project.entry_changed"], {
-            projectId: yield* projectOf("r"),
-            data: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
-          }),
-        )
-      }).pipe(Effect.orDie)
+      yield* fact("project.entry_changed", {
+        projectId: yield* projectOf("r"),
+        data: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+      })
       const recipient = Effect.flatMap(
         sql<{
           recipient: string
@@ -387,6 +385,36 @@ describe("Db", () => {
       yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { metadata: { archived: true, removed: true } })
       yield* round("two")
       assert.strictEqual(yield* recipient, "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
+  )
+
+  it.effect("a peer item received again after the project's entry changed is a duplicate, not a second notice", () =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projectOf("r")
+      const ended = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+      yield* db.insertSession(session(ended), project)
+      yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), project)
+      yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), project)
+      yield* db.updateSession(ended, { metadata: { archived: true, removed: true } })
+      const item = { id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f", recipient: ended, content: "done on mb" }
+      yield* fact("project.entry_changed", {
+        projectId: project,
+        data: { session: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+      })
+      assert.strictEqual(yield* db.receivePeerItem(item), "queued")
+      yield* fact("project.entry_changed", {
+        projectId: project,
+        data: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+      })
+      assert.strictEqual(yield* db.receivePeerItem(item), "duplicate")
+      assert.deepStrictEqual(
+        yield* sql<{
+          recipient: string
+        }>`SELECT recipient_session_id AS recipient FROM inbox WHERE peer_item = ${item.id}`,
+        [{ recipient: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }],
+      )
     }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
 
