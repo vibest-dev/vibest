@@ -117,10 +117,13 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   terminal is not that runtime's, opens one there. None detected and no `--runtime`: refused, saying to pass
   `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over
   another runtime's variables the shell inherited.
-- A subagent (`vibest run`) takes `--runtime <id>` on `Spawn`. Without it, it runs in its parent's runtime. The
-  parent lookup includes the coordinator, because `getSession` leaves the live main row out. If that runtime is not
-  online, the start fails with the runtime's reason. No other fallback. A user plugin on `agent.start.before` may
-  still set `event.runtime`. A runtime already set stands.
+- A subagent (`vibest run`) takes `--runtime <id>` on `Spawn`. Without it, it runs in its parent's runtime. With
+  `--peer` and no `--runtime`, it runs in the peer's runtime on the peer's machine instead: it shares that session's
+  worktree and splits a pane off it, so the default choice must not replace the peer. An explicit `--runtime` is kept,
+  and a peer on another runtime or machine is still refused. The parent lookup includes the coordinator, because
+  `getSession` leaves the live main row out. If the runtime that was chosen is not online, the start fails with the
+  runtime's reason. No other fallback. A user plugin on `agent.start.before` may still set `event.runtime`. A runtime
+  already set stands.
 - vibest.json's `runtime` key is not a choice. The first time vibestd reads a file that still has it, it warns once
   and ignores the key.
 - Core checks after the chain: the chosen runtime online on that machine, else refuses with the reason. vibest never
@@ -205,7 +208,8 @@ vibest machine remove <id>       # forgets it; stops nothing on the machine
 ## 7. Running an Agent on a machine
 
 - `agent.start.before` gets `machines[]` (`{ machine, runtimes: [{ kind, status }], harnesses }`) and may set
-  `machine` and `runtime`; the builtin plugin keeps `local` and the parent's runtime (§4). Core checks after the chain:
+  `machine` and `runtime`; the builtin plugin keeps `local` and the parent's runtime, unless `--peer` already set the
+  peer's (§4). Core checks after the chain:
   the runtime online on that machine, harness there; else refuses with the reason.
 - The Project must have a git remote, and the machine uses the same remote. The mirror is
   `<remote VIBEST_HOME>/projects/<project id>`: cloned on first use, fetched after. The start commit must already be on the
