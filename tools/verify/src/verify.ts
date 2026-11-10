@@ -145,7 +145,7 @@ console.log(
 )
 if (skipped.length) {
   const how: Record<string, string> = {
-    agent: "an agent checks it: pnpm e2e --tier agent",
+    agent: "an agent checks it, with evidence",
     slow: "pnpm e2e --tier slow",
   }
   console.log(`Not proven by a script, skipped (docs/testing/feature-map.md):`)
