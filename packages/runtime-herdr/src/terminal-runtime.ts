@@ -24,9 +24,12 @@ export const terminalOf = (session: string, paneId: string, name?: string): Term
   id: name === undefined ? `${session}/${paneId}` : `${session}/${paneId}/${name}`,
 })
 
+const onAnotherMachine = (terminal: Terminal) => terminal.id.includes("@")
+
 export const parseTerminal = (
   terminal: Terminal,
 ): { readonly session: string; readonly paneId: string; readonly name: string | undefined } | undefined => {
+  if (onAnotherMachine(terminal)) return undefined
   const at = terminal.id.indexOf("/")
   if (at <= 0 || at === terminal.id.length - 1) return undefined
   const rest = terminal.id.slice(at + 1)
@@ -406,7 +409,9 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         : Effect.fail(
             new RuntimeApi.RuntimeError({
               code: "not_found",
-              message: `terminal ${terminal.id} (${method}) names no herdr session`,
+              message: onAnotherMachine(terminal)
+                ? `terminal ${terminal.id} (${method}) is a pane on ${terminal.id.slice(terminal.id.indexOf("@") + 1)}; vibest peek and send reach it through vibest`
+                : `terminal ${terminal.id} (${method}) names no herdr session`,
             }),
           )
     }

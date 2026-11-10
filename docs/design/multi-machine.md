@@ -224,8 +224,22 @@ without hc, nothing. `locate` reads
 `machine.list` and then `terminal.list` with `vibest.runtime=hc`, keeping the addresses under that row's name whose
 `vibest.session` is one of the sessions, with a note when one of them has no terminal there. After its core's
 `Subscribed` it runs `connect` again for the machines it last heard of and still holds. Terminals of other machines in A's own event stream match no session and are
-ignored. Not covered yet: herdr (TUI) and Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote
-row (its own PR); replacing a mirror row when B's vibestd moved to another hc session on the same host.
+ignored.
+
+The herdr plugin (`runtime-herdr/src/machines.ts`) uses herdr's saved SSH machines, which live on the client side
+(`$XDG_STATE_HOME/herdr/client/endpoints.json`, read and written only through `herdr machine …`). B's `link` is
+`{session, version}`: the session B opens agents in (the one `HERDR_SOCKET_PATH` names in vibestd's environment, else
+`vibest`) and B's `herdr --version`. A's `locate` reads `herdr machine list --json` and takes the profile whose target
+(without `ssh://`) and session equal the event's target and the link's session, under any label: none is `missing`, a
+disabled one is a note with `herdr machine enable <id>`. With sessions asked, it runs `herdr --machine <profile id>
+agent list` once (one ssh round trip, kept short by herdr's ControlPersist), finds each session's agent by its name
+`s-<30 hex of the id>`, and answers `<B session>/<pane>/<agent>@<label>`. A's herdr server never holds B's panes, so
+such an id is only a place to look in the herdr sidebar: `parseTerminal` refuses an id with `@`, and every runtime
+member called with one fails `not_found` ("a pane on <label>; vibest peek and send reach it through vibest"). There
+is no `focus` onto a remote herdr pane; herdr has no way to switch a TUI to a machine from outside.
+
+Not covered yet: Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote row (its own PR);
+replacing a mirror row when B's vibestd moved to another hc session on the same host.
 
 ## Optional tables
 
