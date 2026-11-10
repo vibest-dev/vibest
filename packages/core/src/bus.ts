@@ -1,6 +1,8 @@
 import type { Runtime } from "@vibest/plugin"
 import { Context, type Duration, Effect, Layer, Option, PubSub, type Scope } from "effect"
 
+import { LayerNode } from "./effect/layer-node.ts"
+
 export interface StoredEvent<T extends StoredType = StoredType> {
   readonly id: number
   readonly at: number
@@ -54,6 +56,8 @@ const make = Effect.gen(function* () {
 
 export class Bus extends Context.Service<Bus, Effect.Success<typeof make>>()("vibest/Bus") {
   static readonly layer = Layer.effect(Bus, make)
+
+  static readonly node = LayerNode.make({ service: Bus, layer: Bus.layer, deps: [] })
 }
 
 export const awaitOn = <A, E, R>(

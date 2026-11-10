@@ -3,6 +3,9 @@ import { AgentRefused, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibe
 import { Cause, Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
 
 import { timeoutWithoutWaiting } from "./bounded.ts"
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
+import { logFailure } from "./engine.ts"
 import { Harnesses } from "./harness.ts"
 import * as Hooks from "./hooks.ts"
 import { errorMessage } from "./hooks.ts"
@@ -61,6 +64,7 @@ type Loaded = Candidate & { readonly plugin: VibestPlugin.Plugin.Plugin }
 export const Builtins = Context.Reference<ReadonlyArray<Candidate>>("vibest/Plugins/Builtins", {
   defaultValue: () => [],
 })
+export const builtinsNode = LayerNode.make({ service: Builtins, layer: Layer.succeed(Builtins, []), deps: [] })
 type Running = {
   readonly candidate: Loaded
   readonly scope: Scope.Closeable
@@ -142,7 +146,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         Effect.logWarning(`plugin ${running.candidate.plugin.id} disabled: ${running.broken}`).pipe(
           Effect.andThen(close(running.scope, running.candidate.plugin.id)),
           Effect.andThen(refresh),
-          Effect.catchCause((cause) => Effect.logError("plugins: disabling a plugin failed", cause)),
+          logFailure("plugins: disabling a plugin failed"),
         ),
       ),
       Effect.forkIn(root),
@@ -457,7 +461,7 @@ export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Pl
         yield* host.activate([...builtins, ...read.candidates])
         if (rewatched)
           yield* Effect.sleep(RECHECK).pipe(Effect.andThen(Effect.sync(() => notify())), Effect.forkIn(scope))
-      }).pipe(Effect.catchCause((cause) => Effect.logError("plugins: reload failed", cause)))
+      }).pipe(logFailure("plugins: reload failed"))
       yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
         Stream.runForEach(() =>
           Effect.gen(function* () {
@@ -471,4 +475,20 @@ export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Pl
       return host.service
     }),
   )
+
+  static readonly node = LayerNode.make({
+    service: Plugins,
+    layer: Plugins.layer,
+    deps: [
+      builtinsNode,
+      Harnesses.node,
+      PluginLoader.node,
+      Runtimes.node,
+      Subscriptions.node,
+      PlatformNode.crypto,
+      PlatformNode.fileSystem,
+      PlatformNode.layout,
+      PlatformNode.path,
+    ],
+  })
 }

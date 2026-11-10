@@ -3,7 +3,9 @@ import { NoRuntime } from "@vibest/schema/session"
 import { Cause, Context, Effect, Fiber, FileSystem, Layer, PubSub, type Scope, Stream } from "effect"
 
 import { Bus, type LiveEvent } from "./bus.ts"
+import { LayerNode } from "./effect/layer-node.ts"
 import type { HostEnv as HostEnvShape, RuntimesShape } from "./host.ts"
+import { messageOf } from "./plugin-sources.ts"
 import * as Registry from "./registry.ts"
 
 export { NoRuntime }
@@ -32,7 +34,9 @@ const live = (runtime: string, event: RuntimeEvent): LiveEvent => {
   }
 }
 
-export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {}
+export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {
+  static readonly node = LayerNode.unbound(HostEnv)
+}
 
 const notLoaded = (id: string, loaded: ReadonlyArray<Runtime>) =>
   new NoRuntime({
@@ -68,7 +72,13 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
         fresh.push(runtime.id)
         const fiber = yield* runtime.events.pipe(
           Stream.runForEach((event) => bus.observe(live(runtime.id, event))),
-          Effect.catchCause(() => Effect.void),
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.void
+              : Effect.logError(`runtime ${runtime.id} events ended: ${Cause.pretty(cause)}`).pipe(
+                  Effect.andThen(bus.observe({ type: "live.reset", runtime: runtime.id, machine: "local" })),
+                ),
+          ),
           Effect.forkIn(own),
         )
         merging.set(runtime.id, { runtime, fiber })
@@ -83,6 +93,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
     transform: registry.transform,
     reload: registry.reload,
     all,
+    find: (id) => (id ? registry.get().find((runtime) => runtime.id === id) : undefined),
     route: (id) =>
       Effect.suspend(() => {
         const loaded = registry.get()
@@ -97,6 +108,15 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
       ),
     online: (runtime, machine) =>
       runtime.status(machine).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.fail(
+                new NoRuntime({
+                  message: `the runtime ${runtime.id}'s status on ${machine.id} could not be read: ${messageOf(Cause.squash(cause))}`,
+                }),
+              ),
+        ),
         Effect.flatMap((status) =>
           status.status === "online"
             ? Effect.void
@@ -105,13 +125,6 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
                   message: `the runtime ${runtime.id} is ${status.status} on ${machine.id}${"reason" in status ? ` (${status.reason})` : ""}`,
                 }),
               ),
-        ),
-        Effect.catchCause((cause) =>
-          Effect.fail(
-            new NoRuntime({
-              message: `the runtime ${runtime.id}'s status on ${machine.id} could not be read: ${messageOf(cause)}`,
-            }),
-          ),
         ),
       ),
     added: Stream.fromPubSub(added),
@@ -131,13 +144,10 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
   }
 })
 
-const messageOf = (cause: Cause.Cause<unknown>) => {
-  const error = Cause.squash(cause)
-  return error instanceof Error ? error.message : String(error)
-}
-
 export class Runtimes extends Context.Service<Runtimes, RuntimesShape>()("vibest/Runtimes") {
   static readonly layer = Layer.effect(Runtimes, make)
+
+  static readonly node = LayerNode.make({ service: Runtimes, layer: Runtimes.layer, deps: [Bus.node, HostEnv.node] })
 }
 
 export const readFile = (machine: Machine, file: string): Effect.Effect<string, Error, FileSystem.FileSystem> =>

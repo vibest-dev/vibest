@@ -15,6 +15,7 @@ export type Caller = PluginRuntime.RuntimeCaller & { readonly id: string; readon
 export interface RuntimesShape extends PluginRuntime.RuntimeDomain {
   readonly all: Effect.Effect<ReadonlyArray<RuntimeDefinition>>
   readonly route: (id: string) => Effect.Effect<RuntimeDefinition, NoRuntime>
+  readonly find: (id: string | null | undefined) => RuntimeDefinition | undefined
   readonly statuses: (
     machine: PluginRuntime.Machine,
   ) => Effect.Effect<

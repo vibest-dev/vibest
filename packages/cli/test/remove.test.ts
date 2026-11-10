@@ -23,6 +23,7 @@ import {
   writeResult,
   systemPromptFile,
   projectOf,
+  processesOn,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
@@ -361,7 +362,7 @@ describe.concurrent("Processes", () => {
 
   it("a record it does not expect, or a cwd lsof could not read (wherever it points, whatever the localized reason), makes the whole listing unknown", () => {
     for (const odd of [
-      lsofSet("p101", "cbash") + lsofSet("fcwd", "n/x"),
+      lsofSet("p101", "Lbash") + lsofSet("fcwd", "n/x"),
       lsofSet("p101") + lsofSet("ftxt", "n/x"),
       lsofSet("p101"),
       lsofSet("p0") + lsofSet("fcwd", "n/x"),
@@ -381,6 +382,26 @@ describe.concurrent("Processes", () => {
         odd,
       )
     assert.isUndefined(cwdHolders(ok(record(self, "/home (stat: x)")), self, dirs), "the canary's own cwd unreadable")
+  })
+
+  it("the user's own systemd manager and its (sd-pam), whose cwd no one can read, leave the listing complete; any other unreadable cwd still makes it unknown", () => {
+    const unreadable = (pid: number, parent: number, command: string) =>
+      lsofSet(`p${pid}`, `R${parent}`, `c${command}`) +
+      lsofSet("fcwd", `n/proc/${pid}/cwd (readlink: Permission denied)`)
+    const manager = unreadable(1162, 1, "systemd") + unreadable(1181, 1162, "(sd-pam)")
+    assert.deepStrictEqual(cwdHolders(ok(record(self, "/home") + manager + record(101, "/w/abcd")), self, dirs), [101])
+    for (const [odd, why] of [
+      [unreadable(1181, 1162, "(sd-pam)"), "an (sd-pam) with no user manager above it"],
+      [unreadable(1162, 900, "systemd") + unreadable(1181, 1162, "(sd-pam)"), "a systemd that pid 1 did not start"],
+      [manager + unreadable(1200, 1162, "(sd-pam)") + unreadable(1300, 1, "sleep"), "another program"],
+      [manager + unreadable(1201, 1, "systemd").replace("/proc/1201/", "/proc/1/"), "another process's /proc entry"],
+      [
+        lsofSet("p1162", "R1", "csystemd") + lsofSet("fcwd", "n/w/abcd (stat: Permission denied)"),
+        "a stat diagnostic, which names a real path",
+      ],
+      [lsofSet("p1162") + lsofSet("fcwd", "n/proc/1162/cwd (readlink: Permission denied)"), "no command or parent"],
+    ])
+      assert.isUndefined(cwdHolders(ok(record(self, "/home") + odd + record(101, "/w/abcd")), self, dirs), why)
   })
 
   it("an escaped or deleted cwd counts when it could be the target", () => {
@@ -413,7 +434,7 @@ describe.concurrent("Processes", () => {
         }
         const p = yield* Effect.gen(function* () {
           return yield* Processes
-        }).pipe(Effect.provide(Processes.layer(platform)))
+        }).pipe(Effect.provide(processesOn(platform)))
         for (const pid of [0, -1, 1.5, Number.NaN]) assert.strictEqual(yield* p.liveness(pid), "unknown")
         assert.strictEqual(yield* p.liveness(7), "alive")
         assert.deepStrictEqual(asked, [7])
@@ -436,7 +457,7 @@ describe.concurrent("Processes", () => {
             return yield* Processes
           }).pipe(
             Effect.provide(
-              Processes.layer({
+              processesOn({
                 liveness: Platform.liveness,
                 terminate: () => {
                   throw new Error("this test must not signal a process")

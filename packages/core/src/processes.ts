@@ -1,5 +1,9 @@
-import { Context, Duration, Effect, Layer, Option, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { type Captured, capture } from "@vibest/plugin"
+import { Context, Duration, Effect, Layer } from "effect"
+import { ChildProcessSpawner } from "effect/process"
+
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
 
 export type Liveness = "exited" | "alive" | "unknown"
 
@@ -15,23 +19,24 @@ export const livenessOf = (probe: () => void): Liveness => {
 
 export const validPid = (pid: unknown): pid is number => typeof pid === "number" && Number.isInteger(pid) && pid > 0
 
-export interface ProcessPlatform {
-  readonly liveness: (pid: number) => Liveness
-  readonly terminate: (pid: number) => void
-  readonly pid: number
-  readonly uid: number | undefined
+export class ProcessPlatform extends Context.Service<
+  ProcessPlatform,
+  {
+    readonly liveness: (pid: number) => Liveness
+    readonly terminate: (pid: number) => void
+    readonly pid: number
+    readonly uid: number | undefined
+  }
+>()("vibest/ProcessPlatform") {
+  static readonly node = LayerNode.unbound(ProcessPlatform)
 }
 
 export const LSOF_TIMEOUT = Duration.seconds(10)
 export const LSOF_KILL_AFTER = Duration.seconds(1)
 
-export const lsofArgs = (uid: number) => ["+w", "-a", "-u", String(uid), "-d", "cwd", "-Fpfn0"]
+export const lsofArgs = (uid: number) => ["+w", "-a", "-u", String(uid), "-d", "cwd", "-FpRcfn0"]
 
-export interface LsofRun {
-  readonly exitCode: number
-  readonly stdout: string
-  readonly stderr: string
-}
+export type ProcessRun = Captured
 
 export class Processes extends Context.Service<
   Processes,
@@ -41,64 +46,56 @@ export class Processes extends Context.Service<
     readonly cwdUsers: (dirs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<number> | undefined>
   }
 >()("vibest/Processes") {
-  static readonly layer = (platform: ProcessPlatform) =>
-    Layer.effect(
-      Processes,
-      Effect.gen(function* () {
-        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-        const lsof = (uid: number) =>
-          runFor("lsof", lsofArgs(uid), LSOF_TIMEOUT).pipe(
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          )
-        return Processes.of({
-          liveness: (pid) => Effect.sync(() => (validPid(pid) ? platform.liveness(pid) : "unknown")),
-          terminate: (pid) =>
-            Effect.sync(() => {
-              if (!validPid(pid) || pid === platform.pid) return "denied" as const
-              try {
-                platform.terminate(pid)
-                return "sent" as const
-              } catch (e) {
-                return (e as { readonly code?: unknown }).code === "ESRCH" ? ("sent" as const) : ("denied" as const)
-              }
-            }),
-          cwdUsers: (dirs) =>
-            platform.uid === undefined || !Number.isInteger(platform.uid) || platform.uid < 0
-              ? Effect.succeed(undefined)
-              : lsof(platform.uid).pipe(Effect.map((run) => cwdHolders(run, platform.pid, dirs))),
-        })
-      }),
-    )
+  static readonly layer = Layer.effect(
+    Processes,
+    Effect.gen(function* () {
+      const platform = yield* ProcessPlatform
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const lsof = (uid: number) =>
+        runFor("lsof", lsofArgs(uid), LSOF_TIMEOUT).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        )
+      return Processes.of({
+        liveness: (pid) => Effect.sync(() => (validPid(pid) ? platform.liveness(pid) : "unknown")),
+        terminate: (pid) =>
+          Effect.sync(() => {
+            if (!validPid(pid) || pid === platform.pid) return "denied" as const
+            try {
+              platform.terminate(pid)
+              return "sent" as const
+            } catch (e) {
+              return (e as { readonly code?: unknown }).code === "ESRCH" ? ("sent" as const) : ("denied" as const)
+            }
+          }),
+        cwdUsers: (dirs) =>
+          platform.uid === undefined || !Number.isInteger(platform.uid) || platform.uid < 0
+            ? Effect.succeed(undefined)
+            : lsof(platform.uid).pipe(Effect.map((run) => cwdHolders(run, platform.pid, dirs))),
+      })
+    }),
+  )
+
+  static readonly node = LayerNode.make({
+    service: Processes,
+    layer: Processes.layer,
+    deps: [ProcessPlatform.node, PlatformNode.childProcessSpawner],
+  })
 }
 
 export const runFor = (command: string, args: ReadonlyArray<string>, timeout: Duration.Input) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const handle = yield* spawner.spawn(ChildProcess.make(command, args, { forceKillAfter: LSOF_KILL_AFTER }))
-    const [stdout, stderr, exitCode] = yield* Effect.all(
-      [
-        Stream.mkString(Stream.decodeText(handle.stdout)),
-        Stream.mkString(Stream.decodeText(handle.stderr)),
-        handle.exitCode,
-      ],
-      { concurrency: "unbounded" },
-    )
-    return { exitCode, stdout, stderr } satisfies LsofRun
-  }).pipe(
-    Effect.scoped,
-    Effect.timeoutOption(timeout),
-    Effect.map(Option.getOrUndefined),
-    Effect.orElseSucceed(() => undefined),
-  )
+  capture(command, args, { timeout, forceKillAfter: LSOF_KILL_AFTER }).pipe(Effect.orElseSucceed(() => undefined))
 
 export const cwdHolders = (
-  run: LsofRun | undefined,
+  run: ProcessRun | undefined,
   self: number,
   dirs: ReadonlyArray<string>,
 ): ReadonlyArray<number> | undefined => {
   if (run === undefined || run.exitCode !== 0 || run.stderr.trim() !== "") return undefined
   const holders = new Set<number>()
+  const unreadable: Array<Unreadable> = []
   let pid: number | undefined
+  let parent: number | undefined
+  let command: string | undefined
   let file: "cwd" | undefined
   let canary = false
   let unnamed = false
@@ -112,23 +109,47 @@ export const cwdHolders = (
         if (file !== undefined || unnamed) return undefined
         unnamed = true
         pid = Number(value)
+        parent = undefined
+        command = undefined
         if (!validPid(pid) || String(pid) !== value) return undefined
+      } else if (field[0] === "R") {
+        if (!unnamed || file !== undefined || parent !== undefined) return undefined
+        parent = Number(value)
+        if (!Number.isInteger(parent) || parent < 0 || String(parent) !== value) return undefined
+      } else if (field[0] === "c") {
+        if (!unnamed || file !== undefined || command !== undefined) return undefined
+        command = value
       } else if (field[0] === "f") {
         if (pid === undefined || file !== undefined || value !== "cwd") return undefined
         file = "cwd"
       } else if (field[0] === "n") {
         if (pid === undefined || file === undefined) return undefined
-        if (DIAGNOSTIC.test(value)) return undefined
-        if (pid === self) canary = true
-        if (dirs.some((dir) => mayBeIn(value, dir))) holders.add(pid)
+        if (value.startsWith(`/proc/${pid}/cwd (readlink: `) && pid !== self)
+          unreadable.push({ pid, parent, command: command ?? "" })
+        else if (DIAGNOSTIC.test(value)) return undefined
+        else {
+          if (pid === self) canary = true
+          if (dirs.some((dir) => mayBeIn(value, dir))) holders.add(pid)
+        }
         file = undefined
         unnamed = false
       } else return undefined
     }
   }
   if (file !== undefined || unnamed || !canary) return undefined
+  if (!unreadable.every((p) => isUserManager(p, unreadable))) return undefined
   return [...holders]
 }
+
+type Unreadable = { readonly pid: number; readonly parent: number | undefined; readonly command: string }
+
+const SYSTEMD_USER_MANAGER = "systemd"
+const SYSTEMD_PAM_HELPER = "(sd-pam)"
+
+const isUserManager = (p: Unreadable, unreadable: ReadonlyArray<Unreadable>): boolean =>
+  (p.command === SYSTEMD_USER_MANAGER && p.parent === 1) ||
+  (p.command === SYSTEMD_PAM_HELPER &&
+    unreadable.some((m) => m.pid === p.parent && m.command === SYSTEMD_USER_MANAGER && m.parent === 1))
 
 const DIAGNOSTIC = / \((readlink|stat): /
 
