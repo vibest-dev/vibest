@@ -22,23 +22,6 @@ export const isUsageLimitError = (error: string | undefined) => {
   return head !== undefined && head !== "" && /rate[_ -]?limits?\b|usage limits?\b|too many requests/i.test(head)
 }
 
-export type ResultStatus = "completed" | "failed"
-
-export interface Report {
-  readonly summary: string | undefined
-  readonly remember: string | undefined
-}
-
-export function parseReport(text: string): Report {
-  const first = text
-    .split("\n")
-    .find((l) => l.trim() !== "")
-    ?.trim()
-  const summary = first && first.length > 120 ? `${first.slice(0, 119)}…` : first
-  const remember = /^##\s*Remember\s*$([\s\S]*?)(?=^##\s|(?![\s\S]))/im.exec(text)?.[1]!.trim()
-  return { summary, remember: remember || undefined }
-}
-
 const escapeText = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 export const envelope = (
@@ -54,9 +37,6 @@ export const envelope = (
     `</${text[0]}>`,
     `</${tag}>`,
   ].join("\n")
-
-export const outcome = (name: string, error: string | undefined) =>
-  error ? `Agent "${name}" failed: ${error}` : `Agent "${name}" finished`
 
 export type TurnEnded = {
   readonly harness: HarnessId

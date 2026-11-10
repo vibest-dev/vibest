@@ -12,7 +12,6 @@ import { HANDOFF_ENV } from "@vibest/server/daemon"
 import * as Server from "@vibest/server/server"
 import { ConfigProvider, Effect, Exit, FileSystem, Fiber, Layer, Option, Path, type Scope, Schema } from "effect"
 import { Command } from "effect/cli"
-import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -113,16 +112,17 @@ describe("vibest CLI", () => {
         latest: { status: "working", summary: "", endedAt: null },
       })
       assert.include(live, listed[0]!.status)
-      assert.deepInclude(decodeJson((yield* run(["result", id])).stdout), { id, turnState: "open", task, result: null })
+      assert.deepInclude(decodeJson((yield* run(["result", id])).stdout), { id, turnState: "open", task, answer: null })
       yield* writeResult(id, "pi", { text: "kept finding\nstatus: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       const done = decodeJson((yield* run(["result", id])).stdout) as {
-        result: object
+        answer: { status: string; text: string }
         task: string
         latest: { status: string; summary: string; endedAt: number | null }
       }
-      assert.deepInclude(done.result, { kind: "result", sender: id })
+      assert.deepInclude(done.answer, { status: "completed" })
+      assert.include(done.answer.text, "kept finding")
       assert.strictEqual(done.task, task)
       assert.strictEqual(done.latest.status, "completed")
       assert.strictEqual(done.latest.summary, "kept finding")
@@ -170,7 +170,7 @@ describe("vibest CLI", () => {
   )
 
   test(
-    "a session's vibest only reports, as itself; anything else is Forbidden, and an unknown session is refused at Hello",
+    "a session's vibest runs only what a session may; anything else is Forbidden, an unknown session is refused at Hello, and report is gone",
     Effect.gen(function* () {
       const db = yield* Db
       const layout = yield* Layout
@@ -196,30 +196,16 @@ describe("vibest CLI", () => {
           ),
         )
 
-      for (const message of ["- fix the bug\n- then test", "--help", "--model x"])
-        assert.deepStrictEqual(
-          decodeJson((yield* asSession(id, ["report", "--", message])).stdout),
-          { sent: true },
-          message,
-        )
-      const sql = yield* SqlClient.SqlClient
-      const reported = yield* sql<{
-        message: string
-      }>`SELECT content AS message FROM inbox WHERE sender_session_id = ${id} AND kind = 'report' ORDER BY id`
-      assert.deepStrictEqual(
-        reported.map((r) => /<message>\n([\s\S]*)\n<\/message>/.exec(r.message)?.[1]),
-        ["- fix the bug\n- then test", "--help", "--model x"],
-      )
       for (const args of [["ls"], ["interrupt", id], ["run", "pi", "x"], ["project", "info"]]) {
         const r = yield* asSession(id, args)
         assert.deepStrictEqual([r.code, r.stdout], [1, ""], args.join(" "))
         assert.match(r.stderr, /^Forbidden: /, args.join(" "))
       }
       assert.match(
-        (yield* asSession("0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", ["report", "x"])).stderr,
+        (yield* asSession("0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", ["send", id, "x"])).stderr,
         /^NoSuchSession: /,
       )
-      assert.match((yield* vibest(repo, cli, ["report", "x"])).stderr, /^Forbidden: /)
+      assert.notStrictEqual((yield* vibest(repo, cli, ["report", "x"])).code, 0)
     }),
   )
 
@@ -326,38 +312,24 @@ describe("vibest CLI", () => {
   )
 
   test(
-    "archive keeps the stored result and earlier inbox rows after the rules file is removed",
+    "archive keeps the stored answer after the rules file is removed",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const db = yield* Db
       const layout = yield* Layout
-      const sql = yield* SqlClient.SqlClient
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
       const run = (args: ReadonlyArray<string>) => vibest(repo, cli, args)
       const { id } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "do it"])).stdout) as { id: string }
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
-      const reported = yield* vibest(
-        repo,
-        {
-          ...cli,
-          VIBEST_AGENT: "general",
-          VIBEST_SESSION_ID: id,
-          VIBEST_PROJECT_ID: String((yield* db.sessionIdentity(id))!.projectId),
-        },
-        ["report", "--", "prior note"],
-      )
-      assert.strictEqual(reported.code, 0, reported.stderr)
-
       const finding = "status: completed\nsummary: kept finding"
       yield* writeResult(id, "pi", { text: finding })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      const before = decodeJson((yield* run(["result", id])).stdout) as { result: { kind: string; message: string } }
-      assert.strictEqual(before.result.kind, "result")
-      assert.include(before.result.message, "kept finding")
+      const before = decodeJson((yield* run(["result", id])).stdout) as { answer: { text: string } }
+      assert.include(before.answer.text, "kept finding")
       assert.strictEqual(yield* resultText(id), "")
       assert.isTrue(yield* fs.exists(yield* systemPromptFile(id)))
 
@@ -365,15 +337,9 @@ describe("vibest CLI", () => {
       assert.strictEqual(archived.code, 0, archived.stderr)
       assert.isFalse(yield* fs.exists(yield* systemPromptFile(id)))
 
-      const after = decodeJson((yield* run(["result", id])).stdout) as { id: string; result: object }
+      const after = decodeJson((yield* run(["result", id])).stdout) as { id: string; answer: object }
       assert.strictEqual(after.id, id)
-      assert.deepStrictEqual(after.result, before.result)
-      const history = yield* sql<{
-        kind: string
-        message: string
-      }>`SELECT kind, content AS message FROM inbox WHERE sender_session_id = ${id} AND kind IN ('report', 'result') ORDER BY id`
-      assert.isTrue(history.some((row) => row.kind === "report" && row.message.includes("prior note")))
-      assert.isTrue(history.some((row) => row.kind === "result" && row.message.includes("kept finding")))
+      assert.deepStrictEqual(after.answer, before.answer)
     }),
   )
 })
@@ -391,7 +357,6 @@ describe("vibest CLI without vibestd", () => {
           ["ls"],
           ["send", "abcd1234-abcd-4abc-8abc-abcd1234abcd", "--", "x"],
           ["run", "pi", "--", "x"],
-          ["report", "--", "x"],
           ["project", "info"],
           ["plugins"],
           ["daemon"],

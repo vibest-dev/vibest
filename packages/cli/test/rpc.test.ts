@@ -245,7 +245,7 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "a session reports only as itself; an unknown session is refused; a coordinator cannot report",
+    "a session sends only as itself; an unknown session is refused",
     Effect.gen(function* () {
       const db = yield* Db
       const repo = yield* makeRepository
@@ -278,12 +278,18 @@ describe("vibest.sock", () => {
 
       assert.strictEqual(
         failureTag(
-          yield* Effect.exit(bare.Report({ message: "x" }, { headers: sessionHeaders({ sessionId: "nope" }) })),
+          yield* Effect.exit(
+            bare.Send({ id: launch.sessionId, message: "x" }, { headers: sessionHeaders({ sessionId: "nope" }) }),
+          ),
         ),
         "NoSuchSession",
       )
       assert.strictEqual(
-        failureTag(yield* Effect.exit(bare.Report({ message: "x" }, { headers: sessionHeaders({ sessionId: id }) }))),
+        failureTag(
+          yield* Effect.exit(
+            bare.Send({ id: launch.sessionId, message: "x" }, { headers: sessionHeaders({ sessionId: id }) }),
+          ),
+        ),
         "InvalidCaller",
         "a known session without its project id is refused, as over HTTP",
       )
@@ -291,9 +297,9 @@ describe("vibest.sock", () => {
       const projectId = String((yield* db.sessionIdentity(id))!.projectId)
       const as = (harness: string, harnessSessionId: string) =>
         authed(raw, sessionHeaders({ sessionId: id, projectId, harness, harnessSessionId }))
-      yield* as("pi", "pi-1").Report({ message: "one" })
+      yield* as("pi", "pi-1").Send({ id: launch.sessionId, message: "one" })
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
-      yield* as("claude", "other").Report({ message: "two" })
+      yield* as("claude", "other").Send({ id: launch.sessionId, message: "two" })
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-1")
       yield* raw.TurnEnd(
         { sessionId: id, harness: "pi", event: "{}" },
@@ -301,11 +307,11 @@ describe("vibest.sock", () => {
       )
       assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "pi-2")
       const w = yield* asSession(yield* client, id)
-      yield* w.Report({ message: "half way" })
-      const reported = yield* db.latestInbox(id, "report")
+      yield* w.Send({ id: launch.sessionId, message: "half way" })
+      const sent = yield* db.latestInbox(launch.sessionId, "send")
       assert.match(
-        reported!.message,
-        /^<agent-message>\n<agent-id>[a-f0-9-]{36}<\/agent-id>\n<summary>Agent "do it" sent a message before finishing<\/summary>\n<message>\nhalf way\n<\/message>\n<\/agent-message>$/,
+        sent!.message,
+        /^<agent-message>\n<agent-id>[a-f0-9-]{36}<\/agent-id>\n<title>[^<]*<\/title>\n<message>\nhalf way\n<\/message>\n<\/agent-message>$/,
       )
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
       yield* raw.CoordinatorSessionReady(
@@ -321,10 +327,6 @@ describe("vibest.sock", () => {
           .harnessSessionId,
         "s2",
       )
-
-      assert.strictEqual(failureTag(yield* Effect.exit(c.Report({ message: "x" }))), "Forbidden")
-      const coord = yield* asSession(raw, launch.sessionId, repo)
-      assert.strictEqual(failureTag(yield* Effect.exit(coord.Report({ message: "x" }))), "Forbidden")
     }),
   )
 
@@ -435,7 +437,6 @@ describe("vibest.sock", () => {
         ["Interrupt", c.Interrupt({ id })],
         ["Peek", c.Peek({ id })],
         ["Remove", c.Remove({ id })],
-        ["Report", c.Report({ message: "x" })],
         ["Daemon.Stop", c["Daemon.Stop"]({ instance: "x" })],
         ["Daemon.Handoff", c["Daemon.Handoff"]({ instance: "x", command: ["vibest"] })],
         ["Session.Ready", c["Session.Ready"]({ id: "07e40000-07e4-407e-807e-07e4000007e4" })],
@@ -457,9 +458,7 @@ describe("vibest.sock", () => {
       for (const [method, call] of protectedCalls(bare))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected", method)
       const w = yield* asSession(yield* client, id)
-      for (const [method, call] of protectedCalls(w).filter(
-        ([m]) => m !== "Report" && m !== "Send" && m !== "Integration.Guard",
-      ))
+      for (const [method, call] of protectedCalls(w).filter(([m]) => m !== "Send" && m !== "Integration.Guard"))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
 
       yield* a["Session.Ready"]({ id: (yield* db.coordinatorOf((yield* db.getSession(id))!.projectId))!.id })
@@ -511,25 +510,27 @@ describe("vibest.sock", () => {
       const { id } = yield* cli.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.turnState === "open")
       const session = yield* asSession(raw, id)
-      yield* session.Report({ message: "first" })
-      assert.match((yield* db.latestInbox(id, "report"))!.message, /first/)
+      const entry = (yield* cli["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" }))
+        .sessionId
+      yield* session.Send({ id: entry, message: "first" })
+      assert.match((yield* db.latestInbox(entry, "send"))!.message, /first/)
       const listed = (yield* cli.List({})).sessions
-      assert.deepStrictEqual(
+      assert.include(
         listed.map((w) => w.id),
-        [id],
+        id,
       )
-      const [report, got, stranger] = yield* Effect.all(
+      const [sent, got, stranger] = yield* Effect.all(
         [
-          session.Report({ message: "second" }),
+          session.Send({ id: entry, message: "second" }),
           cli.Get({ id }),
-          Effect.exit(Effect.flatMap(asSession(raw, "nope"), (s) => s.Report({ message: "x" }))),
+          Effect.exit(Effect.flatMap(asSession(raw, "nope"), (s) => s.Send({ id: entry, message: "x" }))),
         ],
         { concurrency: "unbounded" },
       )
-      assert.strictEqual(report, undefined)
+      assert.deepStrictEqual(sent, { id: entry })
       assert.strictEqual(got.id, id)
       assert.strictEqual(failureTag(stranger), "NoSuchSession")
-      assert.match((yield* db.latestInbox(id, "report"))!.message, /second/)
+      assert.match((yield* db.latestInbox(entry, "send"))!.message, /second/)
     }),
   )
 

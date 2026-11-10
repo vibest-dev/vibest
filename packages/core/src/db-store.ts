@@ -20,9 +20,7 @@ import { Bus, type EngineEvent, type LiveEvent } from "./bus.ts"
 import {
   encodeAddress,
   SessionRow,
-  failureOf,
   storedStatus,
-  roundStatus,
   type EndReason,
   type SessionPatch,
   type NewInboxRow,
@@ -228,7 +226,7 @@ export const makeStore = Effect.gen(function* () {
 
   const queueInbox = (row: {
     readonly recipient: string | null
-    readonly kind: "task" | "send" | "report" | "result" | "notice"
+    readonly kind: "task" | "send" | "notice"
     readonly sender: string | null
     readonly content: string
     readonly turn?: number | undefined
@@ -356,7 +354,7 @@ export const makeStore = Effect.gen(function* () {
       yield* emit(OutboxQueued, {
         sessionId: row.sessionId,
         ...(row.at === undefined ? {} : { at: row.at }),
-        data: { id: randomId(), peer, kind: row.kind === "result" ? "result" : "notice", content: row.content },
+        data: { id: randomId(), peer, kind: "notice", content: row.content },
       })
       yield* notify({ type: "live.outbox", peerId: peer })
       return true
@@ -411,7 +409,7 @@ export const makeStore = Effect.gen(function* () {
       return true
     })
 
-  const insertInboxRow = (row: NewInboxRow, end?: TurnEnd, at?: number) =>
+  const insertInboxRow = (row: NewInboxRow, at?: number) =>
     Effect.gen(function* () {
       const [route] = yield* sql<{
         recipient: string | null
@@ -421,26 +419,12 @@ export const makeStore = Effect.gen(function* () {
           p.id AS project
         FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session r ON r.id = s.report_to_session_id
         WHERE s.id = ${row.sessionId}`
-      const turn =
-        row.kind === "result"
-          ? yield* endTurn(
-              row.sessionId,
-              end ?? {
-                status: roundStatus(row.details.status),
-                ...(typeof row.details.error === "string" && row.details.error !== ""
-                  ? { failure: failureOf(row.details.error)! }
-                  : {}),
-              },
-              at,
-            )
-          : undefined
       const insert = (recipient: string, status: "pending" | "dropped") =>
         queueInbox({
           recipient,
           kind: row.kind,
           sender: row.sessionId,
           content: row.message,
-          turn,
           status,
           at,
         }).pipe(Effect.flatMap((id) => inboxIn([id])))

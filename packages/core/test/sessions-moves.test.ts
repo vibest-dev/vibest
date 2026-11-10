@@ -324,7 +324,7 @@ describe.concurrent("Sessions", () => {
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi"],
       )
-      assert.include((yield* db.latestInbox(id, "result"))!.message, "no harness left")
+      assert.include((yield* db.latestInbox(id, "notice"))!.message, "no harness left")
     }),
     {
       plugins: [
@@ -377,7 +377,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { harnessId: "claude", turnState: "failed" })
-      assert.include((yield* db.latestInbox(id, "result"))!.message, "no harness left")
+      assert.include((yield* db.latestInbox(id, "notice"))!.message, "no harness left")
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude"],
@@ -430,7 +430,7 @@ describe.concurrent("Sessions", () => {
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi"],
       )
-      assert.include((yield* db.latestInbox(id, "result"))!.message, "no harness left")
+      assert.include((yield* db.latestInbox(id, "notice"))!.message, "no harness left")
     }),
     {
       unusable: ["cursor"],
@@ -553,12 +553,12 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(row.harnessId, "claude")
       assert.strictEqual(row.turnState, "failed")
       assert.isNotNull(row.exitedAt)
-      assert.include((yield* db.latestInbox(id, "result"))!.message, "placing the next pane failed")
+      assert.include((yield* db.latestInbox(id, "notice"))!.message, "placing the next pane failed")
       const results = yield* sql<{
         n: number
-      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'result'`.pipe(Effect.orDie)
+      }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
       assert.strictEqual(results[0]!.n, 1)
-      assert.deepStrictEqual(yield* sqlNotices(id), [])
+      assert.lengthOf(yield* sqlNotices(id), 1)
     }),
     { noRun: true, plugins: [chooseNext] },
   )

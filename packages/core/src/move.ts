@@ -98,7 +98,6 @@ export const sessionMove = (deps: {
   readonly finish: (
     session: SessionRow,
     end: "failed",
-    text: string,
     error: string | undefined,
   ) => Effect.Effect<unknown, unknown, MovePlatform>
   readonly systemPromptOf: (session: SessionRow) => Effect.Effect<string, unknown, MovePlatform>
@@ -170,7 +169,7 @@ export const sessionMove = (deps: {
         const fresh = (yield* db.getSession(row.id)) ?? row
         if (inPlace) {
           if (running === "mine") yield* endRunning
-          yield* deps.finish(fresh, "failed", "", why)
+          yield* deps.finish(fresh, "failed", why)
           if (running === "none") {
             const t = yield* Clock.currentTimeMillis
             yield* db.updateSession(fresh.id, {
@@ -183,7 +182,7 @@ export const sessionMove = (deps: {
           return false
         }
         if (!(owns && terminal)) {
-          yield* deps.finish(fresh, "failed", "", why)
+          yield* deps.finish(fresh, "failed", why)
           return false
         }
         const closed = yield* h.close(terminal).pipe(Effect.exit)
@@ -191,12 +190,11 @@ export const sessionMove = (deps: {
           yield* deps.finish(
             fresh,
             "failed",
-            "",
             `${fresh.id} stopped after a usage limit, but closing its terminal failed (${errorMessage(closed.cause)})`,
           )
           return false
         }
-        yield* deps.finish(fresh, "failed", "", why)
+        yield* deps.finish(fresh, "failed", why)
         const t = yield* Clock.currentTimeMillis
         yield* db.updateSession(fresh.id, {
           status: "unknown",
@@ -294,12 +292,7 @@ export const sessionMove = (deps: {
       }
       if (inPlace) {
         if ((yield* endRunning) === "denied") {
-          yield* deps.finish(
-            row,
-            "failed",
-            "",
-            `${row.id} stayed on ${row.harnessId}: SIGTERM to its harness was refused`,
-          )
+          yield* deps.finish(row, "failed", `${row.id} stayed on ${row.harnessId}: SIGTERM to its harness was refused`)
           return false
         }
       } else if (terminal !== undefined) {
@@ -308,7 +301,6 @@ export const sessionMove = (deps: {
           yield* deps.finish(
             row,
             "failed",
-            "",
             `${row.id} stayed on ${row.harnessId}: closing its terminal failed (${errorMessage(closed.cause)})`,
           )
           return false
@@ -344,7 +336,6 @@ export const sessionMove = (deps: {
           yield* deps.finish(
             row,
             "failed",
-            "",
             `${row.id} stopped after a usage limit, but placing the next pane failed (${errorMessage(placed.cause)})`,
           )
           if (gone || inPlace) {

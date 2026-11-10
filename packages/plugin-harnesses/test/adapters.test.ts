@@ -176,7 +176,7 @@ describe("HarnessAdapter", () => {
       if (ADAPTERS[id].coordinatorArgs) assert.isFalse(hasNewline(ADAPTERS[id].coordinatorArgs!(input)))
   })
 
-  it("Sessions get no vibest MCP server: claude may run vibest report, and read and edit in the project folder", () => {
+  it("Sessions get no vibest MCP server: claude may run vibest send, and read and edit in the project folder", () => {
     for (const id of IDS)
       assert.isEmpty(
         ADAPTERS[id].launchArgs(input).filter((a) => /mcp/i.test(a)),
@@ -185,7 +185,7 @@ describe("HarnessAdapter", () => {
     const claude = ADAPTERS.claude.launchArgs(input)
     assert.strictEqual(
       claude[claude.indexOf("--allowedTools") + 1],
-      `Bash(vibest report:*),Bash(/usr/bin/bun /src/main.ts report:*),Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
+      `Bash(vibest send:*),Bash(/usr/bin/bun /src/main.ts send:*),Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
     )
     assert.strictEqual(claude[claude.indexOf("--add-dir") + 1], input.projectDir)
   })

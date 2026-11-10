@@ -42,13 +42,6 @@ const clip = (s: string, max: number) => {
   return cps.length <= max ? s : `${cps.slice(0, Math.max(0, max - 1)).join("")}…`
 }
 
-const statusOf = (row: InboxRow) => {
-  if (row.kind !== "result") return "sent a message"
-  const { error, status } = row.details
-  if (error === "interrupted") return "was interrupted"
-  return status === "failed" || (typeof error === "string" && error !== "") ? "failed" : "completed"
-}
-
 export const line = (
   batch: ReadonlyArray<InboxRow>,
   who: (sessionId: string) => { readonly agent: string; readonly title: string } | undefined,
@@ -63,7 +56,7 @@ export const line = (
   const session = who(sender)
   const agent = session?.agent || "general"
   const type = `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`
-  return fit(`${type} Agent "`, session?.title ?? "", `" ${statusOf(last)} (${shortId(sender)})${more}`)
+  return fit(`${type} Agent "`, session?.title ?? "", `" sent a message (${shortId(sender)})${more}`)
 }
 
 export class Inbox extends Context.Service<

@@ -260,7 +260,6 @@ export const SessionAnswer = Schema.Struct({
 
 export const SessionStatusInfo = Schema.Struct({
   ...SessionInfo.fields,
-  result: Schema.NullOr(InboxMessage),
   answer: Schema.optional(Schema.NullOr(SessionAnswer)),
 })
 
@@ -480,11 +479,6 @@ export class VibestRpcs extends RpcGroup.make(
       }),
       error: Schema.Union([Forbidden, NoSuchSession, AmbiguousSession, NoRuntime, RuntimeUnreachable, ...LINE_ERRORS]),
     }),
-  ),
-  scoped(
-    admitted(
-      Rpc.make("Report", { payload: { message: Schema.String }, error: Schema.Union([Forbidden, NoSuchSession]) }),
-    ),
   ),
   scoped(Rpc.make("Inbox.Subscribe", { success: Schema.String, error: Schema.Union([Forbidden]), stream: true })),
   scoped(Rpc.make("Watch", { success: WatchEvent, error: Schema.Union([Forbidden, WatchLagged]), stream: true })),
@@ -832,7 +826,6 @@ export const ACCESS = {
   TurnEnd: "open",
   Prompt: "open",
   CoordinatorSessionReady: "open",
-  Report: "session",
   Spawn: "agent",
   Launch: "agent",
   List: ["agent", "peer"],

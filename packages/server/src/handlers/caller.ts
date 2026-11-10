@@ -29,7 +29,7 @@ export const make = Effect.gen(function* () {
       if (c._tag === "Cli" || c._tag === "Coordinator") return c
       return yield* new Forbidden({
         method,
-        message: `only the user or a main agent calls ${method}; sessions only report to their coordinator (vibest report)`,
+        message: `only the user or a main agent calls ${method}; sessions only message other agents (vibest send)`,
       })
     })
 

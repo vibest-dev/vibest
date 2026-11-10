@@ -306,6 +306,7 @@ export class Sessions extends Context.Service<
           return sessionSystemPrompt({
             id: session.id,
             peer: yield* db.earlierSharer(session.id),
+            creator: yield* db.creatorOf(session.id),
             projectDir: layout.project(session.projectId),
             vibest,
             ...(yield* projectText(layout.project(session.projectId))),
@@ -461,7 +462,11 @@ export class Sessions extends Context.Service<
           if (harnessGone || !terminalRunning) {
             const cutOff = session.startedAt === null
             if (open && !cutOff)
-              yield* finish(session, "failed", "", "the session exited (its terminal is gone or its process with it)")
+              yield* finish(
+                session,
+                "failed",
+                `the session exited (its terminal is gone or its process with it); vibest send ${id} resumes it`,
+              )
             if (session.exitedAt === null) {
               yield* db.updateSession(id, {
                 status: "unknown",
@@ -526,7 +531,6 @@ export class Sessions extends Context.Service<
         yield* finish(
           session,
           "lost",
-          "",
           `the turn ended without a report: the harness stopped without firing its turn-end hook (an error it has no hook for, such as a usage limit?); ${peekHint(id)}`,
         )
       })

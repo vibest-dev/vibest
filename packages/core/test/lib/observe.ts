@@ -74,12 +74,37 @@ export const resultText = (id: string) =>
     return row === undefined || row.consumed ? "" : String((JSON.parse(row.data) as { text?: unknown }).text ?? "")
   })
 
+export const answerOf = (id: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ answer: string | null }>`SELECT answer FROM turn
+      WHERE session_id = ${id} AND status IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
+    return row?.answer ?? undefined
+  })
+
+export const sentBy = (id: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    return yield* sql<{ id: number }>`SELECT id FROM inbox WHERE sender_session_id = ${id} ORDER BY id`.pipe(
+      Effect.map((rows) => rows.map((r) => r.id)),
+      Effect.orDie,
+    )
+  })
+
+export const lastSentBy = (id: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ id: number; kind: string; status: string; content: string }>`SELECT id, kind, status,
+        content FROM inbox WHERE sender_session_id = ${id} ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
+    return row
+  })
+
 export const TURNS = `(SELECT t.id, t.session_id, t.started_at, t.ended_at,
     (SELECT max(i.id) FROM inbox i WHERE i.turn_id = t.id) AS inbox_id,
     coalesce(t.typed, (SELECT group_concat(c, char(10) || char(10)) FROM (SELECT i.content AS c
       FROM inbox i WHERE i.turn_id = t.id ORDER BY i.id)), '') AS input,
     coalesce(t.status, 'working') AS status,
-    (SELECT r.content FROM inbox r WHERE r.result_turn_id = t.id) AS output
+    t.answer AS output
   FROM turn t)`
 
 export const processEnds = (sessionId: string) =>

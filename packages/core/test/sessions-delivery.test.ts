@@ -11,7 +11,7 @@ import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { CURSOR } from "./lib/harnesses.ts"
-import { settled, TURNS, until, untilVirtual, writeResult } from "./lib/observe.ts"
+import { answerOf, settled, TURNS, until, untilVirtual, writeResult } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
@@ -45,7 +45,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a result newer than the last round, with none open, is delivered once",
+    "a report newer than the last round, with none open, ends one more turn once",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -57,7 +57,7 @@ describe.concurrent("Sessions", () => {
       const results = () =>
         sql<{
           input: string
-        }>`SELECT m.input FROM inbox i JOIN ${sql.literal(TURNS)} m ON m.id = i.result_turn_id WHERE i.sender_session_id = ${id} ORDER BY i.id`.pipe(
+        }>`SELECT m.input FROM ${sql.literal(TURNS)} m WHERE m.session_id = ${id} AND m.status != 'working' ORDER BY m.id`.pipe(
           Effect.orDie,
         )
       assert.deepStrictEqual(
@@ -282,7 +282,7 @@ describe.concurrent("Sessions", () => {
         ),
         [{ status: "delivered" }],
       )
-      assert.include((yield* db.latestInbox(id, "result"))!.message, "landed")
+      assert.include(yield* answerOf(id), "landed")
       assert.strictEqual((yield* sqlNotices(id)).filter((message) => message.includes("task_not_started")).length, 1)
     }),
     { promptsIgnored: true, hooked: ["pi"] },
@@ -309,7 +309,7 @@ describe.concurrent("Sessions", () => {
         ),
         [{ status: "delivered" }],
       )
-      assert.include((yield* db.latestInbox(id, "result"))!.message, "landed")
+      assert.include(yield* answerOf(id), "landed")
       assert.isUndefined(
         (yield* sqlNotices(id)).find(
           (message) => message.includes("task_not_started") || message.includes("send: busy"),

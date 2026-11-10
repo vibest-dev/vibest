@@ -10,7 +10,7 @@ import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { settled, until, untilVirtual, writeResult } from "./lib/observe.ts"
+import { answerOf, lastSentBy, settled, until, untilVirtual, writeResult } from "./lib/observe.ts"
 import { makeRepository, type TestOptions } from "./lib/session.ts"
 import { spawnInput, idleSession, sessionWorktree, test, slowTest, sqlNotices } from "./lib/sessions-helpers.ts"
 
@@ -40,7 +40,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.coordinatorLaunch(yield* projectOf(repo), coordinator, false, {
+      const coord = yield* db.coordinatorLaunch(yield* projectOf(repo), coordinator, false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -49,8 +49,11 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
       yield* settled
-      return { id, sessions, db, herdr, projectId: (yield* db.getSession(id))!.projectId }
+      return { id, sessions, db, herdr, main: coord.sessionId, projectId: (yield* db.getSession(id))!.projectId }
     })
+
+  const askMain = (w: { readonly id: string; readonly main: string; readonly db: Db["Service"] }) =>
+    w.db.insertSend(w.main, "a question", undefined, w.id)
 
   const finishTurn = (
     w: { readonly id: string; readonly sessions: Sessions["Service"]; readonly herdr: FakeRuntime["Service"] },
@@ -75,12 +78,13 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   const latestNotice = (id: string) => sqlNotices(id).pipe(Effect.map((n) => n.at(-1) ?? ""))
 
   test(
-    "a completed result the main agent acked archives the session; a clean archive sends no notice (nothing to do); vibest result still works",
+    "a message to the main agent that it acked, after a completed turn, archives the session; a clean archive sends no notice (nothing to do); the answer stays",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const sql = yield* SqlClient.SqlClient
       const w = yield* archiveSession(yield* makeRepository)
       assert.isTrue((yield* w.db.getSession(w.id))!.metadata.archive)
+      yield* askMain(w)
       yield* finishTurn(w, "status: completed\nsummary: found it")
       yield* ackResult(w)
       yield* until(archived(w.db, w.id), (a) => a)
@@ -90,24 +94,25 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const rows = yield* sql<{
         kind: string
         status: string
-      }>`SELECT CASE WHEN m.kind = 'result' THEN 'result' WHEN m.kind = 'notice' THEN 'notice' WHEN m.kind IN ('report', 'result') THEN 'report' ELSE 'send' END AS kind, m.status AS status FROM inbox m WHERE m.sender_session_id = ${w.id} ORDER BY m.id`.pipe(
+      }>`SELECT m.kind AS kind, m.status AS status FROM inbox m WHERE m.sender_session_id = ${w.id} ORDER BY m.id`.pipe(
         Effect.orDie,
       )
       assert.deepStrictEqual(
         rows.map((r) => r.kind),
-        ["result"],
+        ["send"],
       )
       assert.strictEqual(rows[0]!.status, "delivered")
-      assert.include((yield* w.db.latestInbox(w.id, "result"))!.message, "found it")
+      assert.include(yield* answerOf(w.id), "found it")
       assert.isNotNull((yield* w.db.getSession(w.id))!.exitedAt)
     }),
   )
 
   test(
-    "a Pi coordinator: archived once the extension acked the result (its next pull), and a clean archive sends it no batch",
+    "a Pi coordinator: archived once the extension acked the message (its next pull), and a clean archive sends it no batch",
     Effect.gen(function* () {
       const inbox = yield* Inbox
       const w = yield* archiveSession(yield* makeRepository, "pi")
+      yield* askMain(w)
       yield* finishTurn(w, "status: completed")
       assert.isFalse(yield* archived(w.db, w.id))
       const batches: Array<string> = []
@@ -121,7 +126,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* letForkedArchiveRun
       yield* Fiber.interrupt(pulling)
       assert.lengthOf(batches, 1)
-      assert.include(batches[0]!, "<agent-result")
+      assert.include(batches[0]!, "<agent-message")
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       assert.strictEqual(yield* inbox.locks, 0)
       yield* untilVirtual((yield* Sessions).inMemory, (m) => m.tracked === 0 && m.locks === 0)
@@ -129,7 +134,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   )
 
   test(
-    "a Claude coordinator polling its inbox: archived once it acked the batch holding the result",
+    "a Claude coordinator polling its inbox: archived once it acked the batch holding the message",
     Effect.gen(function* () {
       const inbox = yield* Inbox
       const db = yield* Db
@@ -146,6 +151,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), archive: true })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
+      yield* db.insertSend(coord.sessionId, "a question", undefined, id)
       yield* finishTurn({ id, sessions, herdr }, "status: completed")
       const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
       yield* letForkedArchiveRun
@@ -156,64 +162,61 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   )
 
   slowTest(
-    "not archived while the result is only queued or its poll lease is released; archived once the result is dropped or failed, since nothing is waiting",
+    "not archived while its message is only queued or its poll lease is released; archived once nothing is waiting",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const inbox = yield* Inbox
       const a = yield* archiveSession(repo)
+      yield* askMain(a)
       yield* finishTurn(a, "status: completed")
       yield* letForkedArchiveRun
-      assert.strictEqual((yield* a.db.latestInbox(a.id, "result"))!.status, "pending")
+      assert.strictEqual((yield* lastSentBy(a.id))!.status, "pending")
       assert.isFalse(yield* archived(a.db, a.id))
       const polled = yield* inbox.poll(a.projectId)
       assert.lengthOf(polled.ids, 1)
       assert.deepStrictEqual(yield* inbox.ack(a.projectId, [], polled.ids), [])
       yield* letForkedArchiveRun
-      assert.strictEqual((yield* a.db.latestInbox(a.id, "result"))!.status, "pending")
+      assert.strictEqual((yield* lastSentBy(a.id))!.status, "pending")
       assert.isFalse(yield* archived(a.db, a.id))
       const b = yield* archiveSession(repo)
       yield* b.herdr.updateAgent("test/coord", (c) => ({ ...c, alive: false }))
       yield* finishTurn(b, "status: completed")
-      yield* until(b.db.latestInbox(b.id, "result"), (r) => r?.status === "dropped")
       yield* until(archived(b.db, b.id), (a) => a)
       const c = yield* archiveSession(repo, "pi")
+      yield* askMain(c)
       yield* finishTurn(c, "status: completed")
       yield* inbox.stream(c.projectId).pipe(Stream.take(1), Stream.runDrain)
       yield* letForkedArchiveRun
-      assert.strictEqual((yield* c.db.latestInbox(c.id, "result"))!.status, "failed")
-      yield* until(archived(c.db, c.id), (a) => a)
+      assert.strictEqual((yield* lastSentBy(c.id))!.status, "failed")
     }),
   )
 
   test(
-    "never after a failed turn, whose summary is the error; the flag stays, so the next completed result archives it",
+    "never after a failed turn, whose notice carries the error; the flag stays, so the next completed turn archives it",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const b = yield* archiveSession(repo)
       yield* finishTurn(b, "status: failed\nsummary: tests fail", "model_error")
       yield* ackResult(b)
-      const row = yield* b.db.latestInbox(b.id, "result")
+      const row = yield* b.db.latestInbox(b.id, "notice")
       assert.strictEqual(row!.status, "delivered")
-      assert.match(String(row!.details.summary), /^Agent ".*" failed: model_error$/)
-      assert.include(row!.message, "<result>\nstatus: failed\nsummary: tests fail")
+      assert.include(row!.message, "turn ended with an error: model_error")
       yield* letForkedArchiveRun
       assert.isFalse(yield* archived(b.db, b.id))
       yield* b.sessions.send(b.id, "the first one")
       yield* until(b.db.getSession(b.id), (w) => w?.turnState === "open")
       yield* finishTurn(b, "status: completed")
-      yield* ackResult(b)
       yield* until(archived(b.db, b.id), (x) => x)
     }),
     { hooked: ["pi"] },
   )
 
   test(
-    "a message queued when the result is delivered: not archived, no notice (nothing to do), and the message is delivered",
+    "a message queued when the turn ends: not archived, no notice (nothing to do), and the message is delivered",
     Effect.gen(function* () {
       const w = yield* archiveSession(yield* makeRepository)
       yield* w.sessions.send(w.id, "one more thing")
       yield* finishTurn(w, "status: completed")
-      yield* ackResult(w)
       yield* letForkedArchiveRun
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
       assert.isFalse(yield* archived(w.db, w.id))
@@ -226,6 +229,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     "a message accepted while the archive runs wins: not archived, not failed, delivered",
     Effect.gen(function* () {
       const w = yield* archiveSession(yield* makeRepository)
+      yield* askMain(w)
       yield* finishTurn(w, "status: completed")
       const held = yield* w.herdr.hold("state", w.id)
       yield* ackResult(w)
@@ -244,6 +248,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     "the session turns busy after it went idle (the user typed in its pane): refused before the tombstone, still unarchived and usable",
     Effect.gen(function* () {
       const w = yield* archiveSession(yield* makeRepository)
+      yield* askMain(w)
       yield* finishTurn(w, "status: completed")
       yield* settled
       const get = yield* w.herdr.hold("state", w.id, 2)
@@ -273,6 +278,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const fake = yield* FakeProcesses
       const w = yield* archiveSession(yield* makeRepository)
       const held = yield* fake.holdCwd()
+      yield* askMain(w)
       yield* finishTurn(w, "status: completed")
       yield* ackResult(w)
       yield* held.reached
@@ -297,6 +303,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       assert.isFalse(yield* a.db.archiveIfNoPending(a.id))
       assert.isFalse(yield* archived(a.db, a.id))
       const sender = yield* archiveSession(repo)
+      yield* askMain(sender)
       yield* finishTurn(sender, "status: completed")
       assert.isFalse(yield* sender.db.archiveIfNoPending(sender.id))
       const b = yield* archiveSession(repo)
@@ -310,27 +317,19 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     "its harness already exited: not archived, and the notice says to archive it by hand",
     Effect.gen(function* () {
       const w = yield* archiveSession(yield* makeRepository)
+      yield* askMain(w)
       yield* writeResult(w.id, "pi", { text: "status: completed" })
       yield* w.herdr.updateAgent(w.id, (a) => ({ ...a, alive: false }))
       yield* w.sessions.check(w.id)
-      yield* ackResult(w)
       yield* until(latestNotice(w.id), (m) => m.includes("not archived"))
       assert.include(yield* latestNotice(w.id), "its harness already exited")
       assert.isFalse(yield* archived(w.db, w.id))
-      yield* ackResult(w)
-      yield* letForkedArchiveRun
-      yield* w.sessions.check(w.id)
-      yield* letForkedArchiveRun
-      const skips = (yield* sqlNotices(w.id)).filter((m) => m.includes("not archived"))
-      assert.lengthOf(skips, 1)
     }),
   )
 
-  const firstArchiveWaiting = (
-    w: Effect.Success<ReturnType<typeof archiveSession>>,
-    details: Record<string, unknown>,
-  ) =>
+  const firstArchiveWaiting = (w: Effect.Success<ReturnType<typeof archiveSession>>) =>
     Effect.gen(function* () {
+      yield* askMain(w)
       yield* finishTurn(w, "status: completed\nsummary: first")
       yield* settled
       const check = yield* w.herdr.hold("state", w.id)
@@ -338,14 +337,9 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* check.reached
       const looked = yield* awaitArchiveStart(w.id)
       yield* ackResult(w)
-      assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
+      assert.strictEqual((yield* lastSentBy(w.id))!.status, "delivered")
       yield* looked
-      yield* w.db.finishTurn(
-        w.id,
-        { status: "completed" },
-        { turnState: "completed", status: "idle" },
-        { sessionId: w.id, kind: "result", message: "second", details },
-      )
+      yield* w.db.endTurn(w.id, { status: "completed" }, { turnState: "completed", status: "idle" }, undefined)
       return { release: check.release().pipe(Effect.andThen(Fiber.join(checking))) }
     })
 
@@ -365,14 +359,10 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     })
 
   test(
-    "a newer completed result delivered while the first one's archive waits for the lock: archived once, no notice",
+    "a newer completed turn while the first one's archive waits for the lock: archived once, no notice",
     Effect.gen(function* () {
       const w = yield* archiveSession(yield* makeRepository)
-      const first = yield* firstArchiveWaiting(w, { status: "completed", summary: "second" })
-      const looked = yield* awaitArchiveStart(w.id)
-      yield* ackResult(w)
-      assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
-      yield* looked
+      const first = yield* firstArchiveWaiting(w)
       yield* first.release
       yield* until(archived(w.db, w.id), (a) => a)
       yield* assertArchivesDone(w)
@@ -391,6 +381,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const owner = yield* archiveSession(repo)
       const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
       yield* until(owner.db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
+      yield* askMain(owner)
       yield* finishTurn(owner, "status: completed")
       yield* ackResult(owner)
       const notice = yield* until(latestNotice(owner.id), (m) => m.includes("archived ("))

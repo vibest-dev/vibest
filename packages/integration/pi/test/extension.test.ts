@@ -197,7 +197,7 @@ describe("pi-vibest", () => {
         })
         yield* (yield* Inbox).enqueue({
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          kind: "report",
+          kind: "notice",
           message: "survives the gap",
           details: {},
         })
@@ -332,7 +332,7 @@ describe("pi-vibest", () => {
           { ...tuiStart, ui: { notify: (message: string) => notes.push(message) } },
         )
         const report = (message: string) =>
-          inbox.enqueue({ sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", kind: "report", message, details: {} })
+          inbox.enqueue({ sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", kind: "notice", message, details: {} })
         const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
         yield* report("first")
         yield* until(contents, (c) => c.length === 1)
@@ -465,7 +465,7 @@ describe("pi-vibest", () => {
       })
       yield* inbox.enqueue({
         sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        kind: "result",
+        kind: "notice",
         message: "<agent-result>one</agent-result>",
         details: {},
       })
@@ -515,7 +515,7 @@ describe("pi-vibest", () => {
       )
       yield* inbox.enqueue({
         sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        kind: "report",
+        kind: "notice",
         message: "<agent-message>two</agent-message>",
         details: {},
       })

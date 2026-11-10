@@ -554,18 +554,6 @@ const ls = Command.make(
   ),
 )
 
-const report = Command.make("report", { message: text("message") }, (o) =>
-  Effect.gen(function* () {
-    const message = yield* input(o.message, "message")
-    yield* vibest((client) => client.Report({ message }))
-    yield* json({ sent: true })
-  }),
-).pipe(
-  Command.withDescription(
-    "Sessions only: send a progress report or question to the coordinator that gave you your task",
-  ),
-)
-
 const providerFlag = Flag.String("provider").pipe(
   Flag.withDescription("Only this provider's models; a harness with no provider option refuses it"),
   Flag.optional,
@@ -825,7 +813,6 @@ export const command = (host: Daemon.Host, replacements: LayerNode.Replacements,
       peek,
       archive,
       ls,
-      report,
       models,
       harness,
       project,

@@ -30,8 +30,8 @@ const CLAUDE_INSPECT_TOOLS = ["Bash", "Read", "Grep", "Glob", "Skill"]
 
 const projectDirRules = (dir: string) => [`Read(/${dir}/**)`, `Edit(/${dir}/**)`]
 
-const vibestReport = (vibest: ReadonlyArray<string>) =>
-  [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd} report:*)`).join(",")
+const vibestSend = (vibest: ReadonlyArray<string>) =>
+  [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd} send:*)`).join(",")
 
 const turnComplete = (event: Readonly<Record<string, unknown>>) => {
   if (event.reason === "answer") return event
@@ -119,7 +119,7 @@ export const claude: Harness.HarnessDefinition = {
     "--add-dir",
     i.projectDir,
     "--allowedTools",
-    [vibestReport(i.vibest), ...projectDirRules(i.projectDir)].join(","),
+    [vibestSend(i.vibest), ...projectDirRules(i.projectDir)].join(","),
     "--plugin-dir",
     i.pluginDir,
     ...opt("--model", i.model),

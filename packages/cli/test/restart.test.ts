@@ -66,7 +66,7 @@ const busyPiSubagent = Effect.gen(function* () {
 
 describe("restart in place", () => {
   test(
-    "a restart mid-turn: SIGTERM to the harness pid only, its exit and aborted turn end not recorded while it is down, the same terminal runs it again on the same conversation, then one continue and one result (pending for an idle Pi main agent, which takes its rows itself)",
+    "a restart mid-turn: SIGTERM to the harness pid only, its exit and aborted turn end not recorded while it is down, the same terminal runs it again on the same conversation, then one continue and a turn end that sends nothing",
     Effect.gen(function* () {
       const { db, sessions, id, pid } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
@@ -107,9 +107,8 @@ describe("restart in place", () => {
       yield* writeResult(id, "pi", { text: "done\nstatus: completed" })
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      const results = (yield* db.coordinatorPending(row.projectId)).filter((r) => r.kind === "result")
-      assert.lengthOf(results, 1)
-      assert.include(results[0]!.message, "done")
+      assert.deepStrictEqual(yield* db.coordinatorPending(row.projectId), [])
+      assert.include((yield* db.latestAnswer(id))!.text, "done")
     }),
   )
 
@@ -266,7 +265,7 @@ describe("restart in place", () => {
   )
 
   test(
-    "the old harness's report after the new process.start is not its result, even for a fresh Sessions",
+    "the old harness's report after the new process.start is not its answer, even for a fresh Sessions",
     Effect.gen(function* () {
       const { db, sessions, id, pid } = yield* busyPiSubagent
       const herdr = yield* FakeRuntime
@@ -287,7 +286,7 @@ describe("restart in place", () => {
       const freshSessions = yield* Sessions.make({ maxSessions: undefined })
       yield* freshSessions.check(id)
       assert.strictEqual((yield* eventsOf(id, "turn.ended")).length, 0)
-      assert.isUndefined(yield* db.latestInbox(id, "result"))
+      assert.isUndefined(yield* db.latestAnswer(id))
     }),
   )
 })
