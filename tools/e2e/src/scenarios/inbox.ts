@@ -21,8 +21,11 @@ import {
   agentName,
   alive,
   expect,
+  expectAnswered,
+  fail,
   herdr,
   row,
+  rows,
   SESSIONS,
   Skip,
   binary,
@@ -499,6 +502,18 @@ const checks: ReadonlyArray<Check> = [
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
         await w.ok(["send", model.sessionId(), ask("three")], { cwd: repo })
         await reached("the main agent's turn on a result after vibestd restarted", "done-three")
+        const main = (await mains())[0]!.id
+        await expectAnswered(w, model.sessionId(), main)
+        const toMain = () =>
+          rows<{ status: string }>(
+            w,
+            "SELECT status FROM inbox WHERE recipient_session_id = ? AND kind = 'result'",
+            main,
+          ).map((r) => r.status)
+        await until(
+          "the main agent's four results delivered",
+          () => JSON.stringify(toMain()) === JSON.stringify(Array(4).fill("delivered")),
+        ).catch(() => fail(`the main agent's result rows: ${JSON.stringify(toMain())}`))
       } finally {
         model.stop()
         claude.stop()
@@ -688,14 +703,12 @@ const checks: ReadonlyArray<Check> = [
         for (let i = 0; i < 3; i++) {
           const beforeEnd =
             q<{ id: number }>(
-              "SELECT id FROM event WHERE session_id = ? AND type = 'turn.end' ORDER BY id DESC LIMIT 1",
+              "SELECT id FROM turn WHERE session_id = ? AND status IS NOT NULL ORDER BY id DESC LIMIT 1",
               sub,
             )?.id ?? 0
           const beforeResult =
             q<{ id: number }>(
-              `SELECT e.id AS id FROM event e JOIN inbox i ON i.id = e.inbox_id
-                WHERE i.sender_session_id = ? AND i.kind = 'result' AND e.type = 'inbox.queued'
-                ORDER BY e.id DESC LIMIT 1`,
+              "SELECT id FROM inbox WHERE sender_session_id = ? AND kind = 'result' ORDER BY id DESC LIMIT 1",
               sub,
             )?.id ?? 0
           const message = ask(`r${i}`)
@@ -735,19 +748,17 @@ const checks: ReadonlyArray<Check> = [
                 else if (line !== undefined) receipt = Date.now()
               }
               const end = q<{ at: number }>(
-                "SELECT at FROM event WHERE session_id = ? AND type = 'turn.end' AND id > ? ORDER BY id LIMIT 1",
+                "SELECT ended_at AS at FROM turn WHERE session_id = ? AND status IS NOT NULL AND id > ? ORDER BY id LIMIT 1",
                 sub,
                 beforeEnd,
               )
               const result = q<{ at: number }>(
-                `SELECT e.at AS at FROM event e JOIN inbox i ON i.id = e.inbox_id
-                WHERE i.sender_session_id = ? AND i.kind = 'result' AND e.type = 'inbox.queued' AND e.id > ?
-                ORDER BY e.id LIMIT 1`,
+                "SELECT queued_at AS at FROM inbox WHERE sender_session_id = ? AND kind = 'result' AND id > ? ORDER BY id LIMIT 1",
                 sub,
                 beforeResult,
               )
               const delivered = q<{ at: number }>(
-                "SELECT at FROM event WHERE inbox_id = ? AND type = 'inbox.status' AND json_extract(data, '$.to') = 'delivering' ORDER BY id LIMIT 1",
+                "SELECT at FROM event WHERE type = 'inbox.moved' AND data ->> '$.inbox' = ? AND data ->> '$.to' = 'delivering' ORDER BY seq LIMIT 1",
                 sent!.id,
               )
               if (
@@ -775,13 +786,9 @@ const checks: ReadonlyArray<Check> = [
           await until(
             `subagent ${i} idle`,
             () => {
-              const open = q<{ id: number }>(
-                `SELECT t.id AS id FROM event t WHERE t.session_id = ? AND t.type = 'turn.start'
-                  AND NOT EXISTS (SELECT 1 FROM event e WHERE e.turn_id = t.id AND e.type = 'turn.end')`,
-                id,
-              )
+              const open = q<{ id: number }>("SELECT id FROM turn WHERE session_id = ? AND status IS NULL", id)
               const ended = q<{ id: number }>(
-                "SELECT id FROM event WHERE session_id = ? AND type = 'turn.end' LIMIT 1",
+                "SELECT id FROM turn WHERE session_id = ? AND status IS NOT NULL LIMIT 1",
                 id,
               )
               return open === undefined && ended !== undefined
@@ -801,7 +808,7 @@ const checks: ReadonlyArray<Check> = [
             `process.end ${i}`,
             () => {
               const ended = q<{ at: number }>(
-                "SELECT at FROM event WHERE session_id = ? AND type = 'process.end' ORDER BY id DESC LIMIT 1",
+                "SELECT ended_at AS at FROM process WHERE session_id = ? AND end_reason != 'superseded' ORDER BY id DESC LIMIT 1",
                 id,
               )
               if (ended === undefined) return false

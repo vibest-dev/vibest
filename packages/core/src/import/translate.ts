@@ -106,12 +106,12 @@ export const translate = (snapshot: Snapshot, importedAt: number): Translation =
     if (machine !== LOCAL_MACHINE) fail(`${source}: machine ${JSON.stringify(machine)} is not ${LOCAL_MACHINE}`)
   }
 
-  const origins = new Map<string, Json>()
+  const origins = new Map<string, Json | undefined>()
   for (const event of snapshot.events) {
     if (event.type !== "peer.start" || origins.has(event.sessionId)) continue
     const origin = peerStartOf(event.data)
     if (origin === undefined) counts.undecodablePeerStarts++
-    else origins.set(event.sessionId, origin)
+    origins.set(event.sessionId, origin)
   }
 
   const createSession = (session: V1Session) => {

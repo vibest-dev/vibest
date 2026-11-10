@@ -186,9 +186,7 @@ describe.concurrent("after a vibestd stop", () => {
   )
 
   const deliveredNotArchived = Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const w = yield* idleSession(yield* makeRepository)
-    yield* sql`UPDATE session SET archive_on_completion = 1 WHERE id = ${w.id}`.pipe(Effect.orDie)
+    const w = yield* idleSession(yield* makeRepository, { archive: true })
     const result = (yield* w.db.latestInbox(w.id, "result"))!
     assert.strictEqual(result.details.status, "completed")
     yield* w.db.setInboxStatus([result.id], "delivered")

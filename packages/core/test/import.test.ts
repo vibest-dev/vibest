@@ -5,12 +5,13 @@ import path from "node:path"
 
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { assert, describe, it } from "@effect/vitest"
-import { SQL_NAMES } from "@vibest/core/db"
+import { Bus } from "@vibest/core/bus"
+import { Db, SQL_NAMES } from "@vibest/core/db"
 import { importCheck, ImportFailed, importInPlace, v2Reader } from "@vibest/core/import/import"
 import { compare, viewOf } from "@vibest/core/import/referee"
 import { highestId, translate } from "@vibest/core/import/translate"
 import { probesOf, readSnapshot, v1Reader } from "@vibest/core/import/v1-read"
-import { append, equalToReplay, installLedger, LEDGER_VERSION } from "@vibest/core/journal"
+import { append, equalToReplay, installLedger } from "@vibest/core/journal"
 import type { Fact } from "@vibest/schema/event"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -201,7 +202,10 @@ describe("v1 import", () => {
         const { file, sql, report } = yield* imported(name)
         assert.deepStrictEqual(report.differences, [])
         assert.isUndefined(yield* equalToReplay(sql).pipe(Effect.provide(memory)))
-        assert.strictEqual(shape(file).userVersion, LEDGER_VERSION)
+        assert.includeDeepMembers(
+          shape(file).tables.map(([name]) => name),
+          ["event", "meta"],
+        )
       }),
     )
 
@@ -242,6 +246,22 @@ describe("v1 import", () => {
       assert.instanceOf(error, ImportFailed)
       assert.deepStrictEqual(shape(file), before)
       assert.strictEqual(before.userVersion, 1)
+    }),
+  )
+
+  const opened = (file: string) =>
+    Db.layer.pipe(
+      Layer.provideMerge(Layer.fresh(SqliteClient.layer({ filename: file, disableWAL: true, ...SQL_NAMES }))),
+      Layer.provide(Bus.layer),
+    )
+
+  it.effect("vibestd refuses to open a v1 database and leaves it as it was", () =>
+    Effect.gen(function* () {
+      const file = fixtureFile("sessions")
+      const before = shape(file)
+      const error = yield* Effect.flip(Effect.void.pipe(Effect.provide(opened(file))))
+      assert.include(String(error), "is from an older vibest")
+      assert.deepStrictEqual(shape(file), before)
     }),
   )
 
@@ -288,6 +308,19 @@ describe("v1 import", () => {
       const report = yield* importInPlace.pipe(Effect.provideService(SqlClient.SqlClient, sql))
       assert.deepStrictEqual(report.differences, [])
       assert.isUndefined(yield* equalToReplay(sql).pipe(Effect.provide(memory)))
+    }),
+  )
+
+  it.effect("a session whose first peer.start does not decode imports as a local session, as v1 read it", () =>
+    Effect.gen(function* () {
+      const file = edited("machines", [
+        `INSERT INTO event (id, at, session_id, type, data)
+          SELECT 0, at, session_id, 'peer.start', '{"peer":1}' FROM event WHERE type = 'peer.start' LIMIT 1`,
+      ])
+      const sql = yield* client(file)
+      const report = yield* importInPlace.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      assert.deepStrictEqual(report.differences, [])
+      assert.strictEqual(report.counts.undecodablePeerStarts, 1)
     }),
   )
 

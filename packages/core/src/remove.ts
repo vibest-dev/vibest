@@ -36,8 +36,6 @@ export const stopAgent = (
     const processes = yield* Processes
     const pid = input.pid
     const unsupported = (reason: string) => ({ result: "unsupported" as const, reason })
-    if (terminal.machine !== "local")
-      return unsupported("it runs on another machine, and vibest stops a main agent only on its own machine")
     if (pid === undefined || !validPid(pid))
       return unsupported("it was started by an older vibest, which recorded no process to stop")
     const detached = Effect.map(input.detach, (ok) => ({ result: ok ? ("stopped" as const) : ("moved" as const) }))

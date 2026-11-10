@@ -8,29 +8,11 @@ import {
   type Row,
   UnknownFact,
 } from "@vibest/schema/event"
-import { Clock, Context, Effect } from "effect"
+import { Clock, Context, Effect, Schema } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import { APPLICATION_ID } from "./db-schema.ts"
+import { LOG_SCHEMA, MIGRATION_TABLE } from "./db-schema.ts"
 import { project, PROJECTION_SCHEMA, PROJECTION_TABLES, PROJECTION_VERSION } from "./projectors.ts"
-
-export const LEDGER_VERSION = 2
-
-export const LOG_SCHEMA = [
-  `PRAGMA application_id = ${APPLICATION_ID}`,
-  `PRAGMA user_version = ${LEDGER_VERSION}`,
-  `CREATE TABLE event (
-    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-    at         INTEGER NOT NULL,
-    type       TEXT    NOT NULL,
-    project_id TEXT,
-    session_id TEXT,
-    data       TEXT    NOT NULL
-  ) STRICT`,
-  `CREATE TRIGGER event_no_update BEFORE UPDATE ON event
-    BEGIN SELECT RAISE(ABORT, 'event is append-only'); END`,
-  `CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT`,
-]
 
 type Definition = (typeof Catalog)[FactType]
 
@@ -42,7 +24,7 @@ export interface Emit<D extends Definition> {
 }
 
 const Buffer = Context.Reference<
-  { readonly facts: Array<Fact>; readonly fiberId: number; closed: boolean } | undefined
+  { readonly events: Array<unknown>; readonly fiberId: number; closed: boolean } | undefined
 >("vibest/JournalBuffer", { defaultValue: () => undefined })
 
 const setMeta = (sql: SqlClient.SqlClient, key: "catalog" | "projection", value: number) =>
@@ -87,7 +69,7 @@ const replayFrom = (sql: SqlClient.SqlClient, after: number): Effect.Effect<void
 const dropProjection = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const objects = yield* sql<{ type: string; name: string }>`SELECT type, name FROM sqlite_schema
-      WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' AND name NOT IN ('event', 'meta')
+      WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' AND name NOT IN ('event', 'meta', ${MIGRATION_TABLE})
       ORDER BY type = 'index'`
     for (const object of objects)
       yield* sql.unsafe(`DROP ${object.type === "table" ? "TABLE" : "INDEX"} IF EXISTS "${object.name}"`)
@@ -138,18 +120,21 @@ const firstDifference = (
   return undefined
 }
 
+const copyWholeLog = (stored: SqlClient.SqlClient, scratch: SqlClient.SqlClient) =>
+  scratch.withTransaction(
+    Effect.gen(function* () {
+      for (const statement of LOG_SCHEMA) yield* scratch.unsafe(statement)
+      yield* copyLog(stored, scratch, 0)
+    }),
+  )
+
 export const equalToReplay = (stored: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const scratch = yield* SqlClient.SqlClient
     const tables = Object.keys(PROJECTION_TABLES) as Array<keyof typeof PROJECTION_TABLES>
     const storedTables = yield* stored.withTransaction(
       Effect.gen(function* () {
-        yield* scratch.withTransaction(
-          Effect.gen(function* () {
-            for (const statement of LOG_SCHEMA) yield* scratch.unsafe(statement)
-            yield* copyLog(stored, scratch, 0)
-          }),
-        )
+        yield* copyWholeLog(stored, scratch)
         return yield* Effect.forEach(tables, (table) => dump(stored, table))
       }),
     )
@@ -159,6 +144,22 @@ export const equalToReplay = (stored: SqlClient.SqlClient) =>
       if (difference !== undefined) return difference
     }
     return undefined
+  })
+
+export class ReplayDiffers extends Schema.TaggedError<ReplayDiffers>()("ReplayDiffers", {
+  message: Schema.String,
+}) {}
+
+export const checkReplay = (stored: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    const [projection] = yield* stored<{ value: string }>`SELECT value FROM meta WHERE key = 'projection'`
+    if (Number(projection?.value) !== PROJECTION_VERSION) {
+      yield* copyWholeLog(stored, yield* SqlClient.SqlClient)
+      return yield* rebuild
+    }
+    const difference = yield* equalToReplay(stored)
+    if (difference !== undefined)
+      return yield* new ReplayDiffers({ message: `the read model differs from a replay of its log: ${difference}` })
   })
 
 type Envelope = {
@@ -202,7 +203,7 @@ export const append = (fact: Fact) =>
     return yield* write(sql, fact, data)
   })
 
-export const makeJournal = (published: (facts: ReadonlyArray<Fact>) => Effect.Effect<void>) =>
+export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fact | Signal>) => Effect.Effect<void>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
 
@@ -211,11 +212,11 @@ export const makeJournal = (published: (facts: ReadonlyArray<Fact>) => Effect.Ef
         if ((yield* Buffer) !== undefined) return yield* body
         return yield* Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
-            const buffer = { facts: [] as Array<Fact>, fiberId: yield* Effect.fiberId, closed: false }
+            const buffer = { events: [] as Array<Fact | Signal>, fiberId: yield* Effect.fiberId, closed: false }
             const result = yield* sql
               .withTransaction(restore(Effect.provideService(body, Buffer, buffer)))
               .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
-            if (buffer.facts.length > 0) yield* published(buffer.facts)
+            if (buffer.events.length > 0) yield* published(buffer.events)
             return result
           }),
         )
@@ -253,9 +254,16 @@ export const makeJournal = (published: (facts: ReadonlyArray<Fact>) => Effect.Ef
         const fact = yield* write(sql, { at, type: definition.type, projectId, sessionId: input.sessionId }, data).pipe(
           Effect.orDie,
         )
-        buffer.facts.push(fact)
+        buffer.events.push(fact)
         return fact.seq
       })
 
-    return { commit, emit, rebuild }
+    const notify = (signal: Signal) =>
+      Effect.gen(function* () {
+        const buffer = yield* Buffer
+        if (buffer !== undefined && !buffer.closed) buffer.events.push(signal)
+        else yield* published([signal])
+      })
+
+    return { commit, emit, notify, rebuild }
   })

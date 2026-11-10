@@ -62,7 +62,7 @@ const liveMain = (w: World) =>
 const processStarts = (w: World) =>
   row<{ n: number }>(
     w,
-    "SELECT count(*) AS n FROM event e JOIN session s ON s.id = e.session_id WHERE s.role = 'main' AND e.type = 'process.start'",
+    "SELECT count(*) AS n FROM process p JOIN session s ON s.id = p.session_id WHERE s.role = 'main'",
   )?.n ?? 0
 
 const piReady = async (socket: string, what: string) => {

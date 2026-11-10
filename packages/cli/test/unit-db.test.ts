@@ -3,8 +3,12 @@ import url from "node:url"
 
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { APPLICATION_ID, Db, encodeAddress, SCHEMA_VERSION } from "@vibest/core/db"
+import { applyOnly, type Migration, migrations } from "@vibest/core/database/migration"
+import { APPLICATION_ID, Db, encodeAddress } from "@vibest/core/db"
+import { makeJournal } from "@vibest/core/journal"
+import { PROJECTION_VERSION } from "@vibest/core/projectors"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
+import { Catalog, CATALOG_VERSION, type FactType } from "@vibest/schema/event"
 import { ID } from "@vibest/schema/id"
 import { Cause, Effect, Exit, FileSystem, Layer, Path } from "effect"
 import { SqlClient } from "effect/sql"
@@ -13,6 +17,15 @@ import * as Platform from "#platform"
 
 import { tempDirectory, TURNS, projectOf } from "./fakes.ts"
 import { database, session, place } from "./unit-helpers.ts"
+
+const fact = (
+  type: FactType,
+  input: { readonly sessionId?: string; readonly projectId?: string; readonly at?: number; readonly data: object },
+) =>
+  Effect.gen(function* () {
+    const journal = yield* makeJournal(() => Effect.void)
+    return yield* journal.commit(journal.emit(Catalog[type] as never, input as never))
+  }).pipe(Effect.orDie)
 
 describe("Db", () => {
   const fresh = <A, E>(program: Effect.Effect<A, E, Db>) => program.pipe(Effect.provide(database(":memory:")))
@@ -58,7 +71,8 @@ describe("Db", () => {
         assert.isNotNull(old!.endedAt)
         const ends = yield* sql<{
           reason: string
-        }>`SELECT json_extract(data, '$.reason') AS reason FROM event WHERE session_id = ${first.sessionId} AND type = 'process.end'`
+        }>`SELECT end_reason AS reason FROM process WHERE session_id = ${first.sessionId} AND ended_at IS NOT NULL
+          ORDER BY ended_at, id`
         assert.strictEqual(ends.at(-1)?.reason, "archived")
         const [project] = yield* sql<{
           main: string
@@ -78,7 +92,6 @@ describe("Db", () => {
       memory(
         Effect.gen(function* () {
           const db = yield* Db
-          const sql = yield* SqlClient.SqlClient
           const parent = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
           yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
             cwd: "/w",
@@ -87,8 +100,16 @@ describe("Db", () => {
           })
           yield* db.beginUserTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "typed", { turnPromptedAt: 1 })
           const inbox = (kind: string, senderId: string | null, content: string, status: string) =>
-            sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, status)
-          VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ${kind}, ${senderId}, ${content}, ${status})`
+            fact("inbox.queued", {
+              sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              data: {
+                kind,
+                recipient: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                ...(senderId === null ? {} : { sender: senderId }),
+                content,
+                status,
+              },
+            })
           yield* inbox("send", parent.sessionId, "from parent", "delivered")
           yield* inbox("send", null, "later send", "delivered")
           yield* inbox("notice", parent.sessionId, "a notice", "delivered")
@@ -126,8 +147,16 @@ describe("Db", () => {
           yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "completed" })
           yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { turnState: "open", turnPromptedAt: 5 })
           const row = (kind: string, senderId: string | null, content: string, status = "delivered") =>
-            sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, status)
-            VALUES ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', ${kind}, ${senderId}, ${content}, ${status})`
+            fact("inbox.queued", {
+              sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              data: {
+                kind,
+                recipient: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                ...(senderId === null ? {} : { sender: senderId }),
+                content,
+                status,
+              },
+            })
           yield* row("send", parent.sessionId, "from parent")
           yield* row("send", null, "and docs")
           assert.strictEqual((yield* db.rescheduleSource("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).delivered, "and docs")
@@ -299,7 +328,7 @@ describe("Db", () => {
         })
         yield* db.finishTurn(
           "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          { status: "completed", output: "the answer", failure: { message: "late" } },
+          { status: "completed", failure: { message: "late" } },
           { turnState: "completed" },
           {
             sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -324,9 +353,13 @@ describe("Db", () => {
       const sql = yield* SqlClient.SqlClient
       yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
       yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), yield* projectOf("r"))
-      yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
-      yield* sql`UPDATE session SET parent_session_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', report_to_session_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
-      yield* sql`UPDATE project SET entry_session_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'`
+      yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
+        parentSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      })
+      yield* fact("project.entry_changed", {
+        projectId: yield* projectOf("r"),
+        data: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+      })
       const recipient = Effect.flatMap(
         sql<{
           recipient: string
@@ -350,30 +383,64 @@ describe("Db", () => {
         })
       yield* round("one")
       assert.strictEqual(yield* recipient, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
-      yield* sql`UPDATE session SET ended_at = 1 WHERE id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'`
+      yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { metadata: { archived: true, removed: true } })
       yield* round("two")
       assert.strictEqual(yield* recipient, "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
+  )
+
+  it.effect("a peer item received again after the project's entry changed is a duplicate, not a second notice", () =>
+    Effect.gen(function* () {
+      const db = yield* Db
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projectOf("r")
+      const ended = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+      yield* db.insertSession(session(ended), project)
+      yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), project)
+      yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), project)
+      yield* db.updateSession(ended, { metadata: { archived: true, removed: true } })
+      const item = { id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f", recipient: ended, content: "done on mb" }
+      yield* fact("project.entry_changed", {
+        projectId: project,
+        data: { session: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" },
+      })
+      assert.strictEqual(yield* db.receivePeerItem(item), "queued")
+      yield* fact("project.entry_changed", {
+        projectId: project,
+        data: { session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+      })
+      assert.strictEqual(yield* db.receivePeerItem(item), "duplicate")
+      assert.deepStrictEqual(
+        yield* sql<{
+          recipient: string
+        }>`SELECT recipient_session_id AS recipient FROM inbox WHERE peer_item = ${item.id}`,
+        [{ recipient: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }],
+      )
     }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
 
   it.effect("sessionBriefs: the task is the session's task row; latest is its newest turn", () =>
     Effect.gen(function* () {
       const db = yield* Db
-      const sql = yield* SqlClient.SqlClient
       const turn = (id: string, at: number, end?: { at: number; status: string; output?: string; result?: string }) =>
         Effect.gen(function* () {
-          const [start] = yield* sql<{ id: number }>`INSERT INTO event (at, session_id, type, data)
-            VALUES (${at}, ${id}, 'turn.start', '{"by":"delivery"}') RETURNING id`
+          const start = yield* fact("turn.started", { sessionId: id, at, data: {} })
           if (end === undefined) return
-          const data = JSON.stringify({
-            status: end.status,
-            ...(end.output === undefined ? {} : { output: end.output }),
+          const report =
+            end.output === undefined
+              ? undefined
+              : yield* fact("turn.reported", { sessionId: id, at: end.at, data: { harness: "pi", text: end.output } })
+          yield* fact("turn.ended", {
+            sessionId: id,
+            at: end.at,
+            data: { turn: start, status: end.status, ...(report === undefined ? {} : { report }) },
           })
-          const [last] = yield* sql<{ id: number }>`INSERT INTO event (at, session_id, type, turn_id, data)
-            VALUES (${end.at}, ${id}, 'turn.end', ${start!.id}, ${data}) RETURNING id`
           if (end.result !== undefined)
-            yield* sql`INSERT INTO inbox (recipient_session_id, kind, sender_session_id, content, result_event_id, status)
-              VALUES (${id}, 'result', ${id}, ${end.result}, ${last!.id}, 'dropped')`
+            yield* fact("inbox.queued", {
+              sessionId: id,
+              at: end.at,
+              data: { kind: "result", recipient: id, sender: id, content: end.result, turn: start, status: "dropped" },
+            })
         })
       yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"))
       yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
@@ -406,12 +473,17 @@ describe("Db", () => {
 
       const reportedId = "22222222-2222-4222-8222-222222222222"
       yield* db.insertSession(session(reportedId), yield* projectOf("r"))
-      const [reported] = yield* sql<{ id: number }>`INSERT INTO event (at, session_id, type, data)
-        VALUES (30, ${reportedId}, 'turn.reported', ${JSON.stringify({ harness: "pi", text: "new line\nmore" })}) RETURNING id`
-      const [start] = yield* sql<{ id: number }>`INSERT INTO event (at, session_id, type, data)
-        VALUES (29, ${reportedId}, 'turn.start', '{}') RETURNING id`
-      yield* sql`INSERT INTO event (at, session_id, type, turn_id, data)
-        VALUES (31, ${reportedId}, 'turn.end', ${start!.id}, ${JSON.stringify({ status: "failed", report: reported!.id })})`
+      const reported = yield* fact("turn.reported", {
+        sessionId: reportedId,
+        at: 30,
+        data: { harness: "pi", text: "new line\nmore" },
+      })
+      const start = yield* fact("turn.started", { sessionId: reportedId, at: 29, data: {} })
+      yield* fact("turn.ended", {
+        sessionId: reportedId,
+        at: 31,
+        data: { turn: start, status: "failed", report: reported },
+      })
 
       const briefs = yield* db.sessionBriefs([
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -562,8 +634,79 @@ describe("Db", () => {
           assert.match((yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).sessionId, ID)
         }).pipe(Effect.provide(database(file)))
         assert.strictEqual((yield* header(file)).applicationId, APPLICATION_ID)
-        assert.strictEqual((yield* header(file)).userVersion, SCHEMA_VERSION)
+        assert.deepStrictEqual(
+          yield* Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            return (yield* sql<{ id: string }>`SELECT id FROM migration ORDER BY id`).map((row) => row.id)
+          }).pipe(Effect.provide(Platform.sqlite(file))),
+          migrations.map((migration) => migration.id),
+        )
       }
+    }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "a database with another read-model version is rebuilt at open and keeps its migration rows; it opens again",
+    () =>
+      Effect.gen(function* () {
+        const file = yield* fileAt(yield* tempDirectory("vibest-projection-"), "vibest.db")
+        const sessions = Effect.flatMap(Db, (db) => db.listSessions({ stopped: true })).pipe(
+          Effect.map((rows) => rows.map((row) => row.id)),
+          Effect.provide(database(file)),
+        )
+        yield* Effect.gen(function* () {
+          const db = yield* Db
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
+        }).pipe(Effect.provide(database(file)))
+        yield* writeSql(file, [
+          "INSERT INTO migration (id, time_completed) VALUES ('20270101000000_kept', 1)",
+          "UPDATE meta SET value = '0' WHERE key = 'projection'",
+        ])
+        assert.deepStrictEqual(yield* sessions, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"])
+        assert.deepStrictEqual(yield* sessions, ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"])
+        const kept = yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return {
+            ids: (yield* sql<{ id: string }>`SELECT id FROM migration`).map((row) => row.id),
+            projection: (yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'projection'`)[0]?.value,
+          }
+        }).pipe(Effect.provide(Platform.sqlite(file)))
+        assert.deepStrictEqual(kept, { ids: ["20270101000000_kept"], projection: String(PROJECTION_VERSION) })
+      }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect("pending migrations run in order at open, each once and recorded; a failing one changes nothing", () =>
+    Effect.gen(function* () {
+      const file = yield* fileAt(yield* tempDirectory("vibest-migrations-"), "vibest.db")
+      yield* Effect.void.pipe(Effect.provide(database(file)))
+      const ran: Array<string> = []
+      const creating = (id: string, table: string, fails = false): Migration => ({
+        id,
+        up: (tx) =>
+          tx.unsafe(`CREATE TABLE ${table} (x INTEGER) STRICT`).pipe(
+            Effect.tap(() => Effect.sync(() => ran.push(id))),
+            Effect.andThen(fails ? Effect.die("injected migration failure") : Effect.void),
+          ),
+      })
+      const state = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return {
+          ids: (yield* sql<{ id: string }>`SELECT id FROM migration ORDER BY id`).map((row) => row.id),
+          tables: (yield* sql<{
+            name: string
+          }>`SELECT name FROM sqlite_schema WHERE name LIKE 'later_%' ORDER BY name`).map((row) => row.name),
+        }
+      })
+      const steps = [creating("20270101000000_a", "later_a"), creating("20270102000000_b", "later_b")]
+      yield* applyOnly(steps).pipe(Effect.provide(Platform.sqlite(file)))
+      yield* applyOnly(steps).pipe(Effect.provide(Platform.sqlite(file)))
+      assert.deepStrictEqual(ran, ["20270101000000_a", "20270102000000_b"])
+      const failing = applyOnly([...steps, creating("20270103000000_c", "later_c", true)])
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(failing.pipe(Effect.provide(Platform.sqlite(file))))))
+      assert.deepStrictEqual(yield* state.pipe(Effect.provide(Platform.sqlite(file))), {
+        ids: ["20270101000000_a", "20270102000000_b"],
+        tables: ["later_a", "later_b"],
+      })
     }).pipe(Effect.provide(Platform.services)),
   )
 
@@ -571,40 +714,6 @@ describe("Db", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const dir = yield* tempDirectory("vibest-schema-partial-")
-      const pragma = [`PRAGMA application_id = ${APPLICATION_ID}`, `PRAGMA user_version = ${SCHEMA_VERSION}`]
-      const tables = [
-        "CREATE TABLE project (id TEXT PRIMARY KEY) STRICT",
-        "CREATE TABLE project_repository (project_id TEXT, path TEXT) STRICT",
-        "CREATE TABLE session (id TEXT PRIMARY KEY, project_id INTEGER, parent_session_id TEXT, machine TEXT, directory TEXT) STRICT",
-        "CREATE TABLE inbox (id INTEGER PRIMARY KEY) STRICT",
-        "CREATE TABLE event (id INTEGER PRIMARY KEY) STRICT",
-      ]
-      const cases = [
-        [
-          "missing-index.db",
-          [
-            ...pragma,
-            ...tables,
-            "CREATE INDEX project_repository_project ON project_repository (project_id)",
-            "CREATE INDEX session_project ON session (project_id)",
-            "CREATE INDEX session_parent ON session (parent_session_id)",
-            "CREATE INDEX session_live ON session (machine, directory)",
-          ],
-          "missing inbox_status",
-        ],
-      ] as const
-      for (const [name, statements, expected] of cases) {
-        const file = yield* fileAt(dir, name)
-        yield* writeSql(file, statements)
-        const before = yield* fs.readFile(file)
-        const pretty = yield* refusal(file)
-        assert.include(pretty, "SchemaMismatch")
-        assert.include(pretty, expected)
-        assert.deepStrictEqual(yield* fs.readFile(file), before)
-        assert.isFalse(yield* fs.exists(`${file}-wal`))
-        assert.include(yield* refusal(file), expected)
-        assert.deepStrictEqual(yield* fs.readFile(file), before)
-      }
       const dropped = yield* fileAt(dir, "missing-table.db")
       yield* Effect.void.pipe(Effect.provide(database(dropped)))
       yield* writeSql(dropped, ["DROP INDEX project_repository_project", "DROP TABLE project_repository"])
@@ -615,7 +724,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a file of the shape before this baseline (version 1 too, no event table) is refused, naming its path and how to move it aside, since vibest never migrates one",
+    "a file of the shape before the event table (version 1 too, no event table) is refused, naming its path and how to move it aside",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -627,11 +736,9 @@ describe("Db", () => {
           "CREATE TABLE session (id TEXT PRIMARY KEY, project_id INTEGER NOT NULL)",
           "CREATE TABLE inbox (id INTEGER PRIMARY KEY)",
         ])
-        assert.strictEqual(SCHEMA_VERSION, 1)
         const before = yield* fs.readFile(file)
         const pretty = yield* refusal(file)
         assert.include(pretty, `${file} is from an older vibest`)
-        assert.include(pretty, "vibest never migrates a database")
         assert.include(pretty, "the sessions, results and queued messages it holds are lost")
         assert.notInclude(pretty, "migration script")
         assert.deepStrictEqual(yield* fs.readFile(file), before)
@@ -639,7 +746,26 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a foreign database with user_version 1, or ours at a newer user_version, is refused without changing its bytes",
+    "import-check replays the log: it passes on a ledger, names the first row a changed read model differs in, and only replays an older read model",
+    () =>
+      Effect.gen(function* () {
+        const file = yield* fileAt(yield* tempDirectory("vibest-import-check-"), "vibest.db")
+        yield* Effect.gen(function* () {
+          const db = yield* Db
+          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
+        }).pipe(Effect.provide(database(file)))
+        yield* Platform.daemon.checkDatabase(file)
+        yield* writeSql(file, ["UPDATE session SET name = 'changed'"])
+        const differs = yield* Effect.flip(Platform.daemon.checkDatabase(file))
+        assert.strictEqual(differs._tag, "ReplayDiffers")
+        assert.match(differs.message, /^the read model differs from a replay of its log: session row 1/)
+        yield* writeSql(file, ["UPDATE meta SET value = '0' WHERE key = 'projection'"])
+        yield* Platform.daemon.checkDatabase(file)
+      }).pipe(Effect.provide(Platform.services)),
+  )
+
+  it.effect(
+    "a foreign database with user_version 1, or ours written by a newer event catalog, is refused without changing its bytes",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -666,14 +792,13 @@ describe("Db", () => {
 
         const newer = yield* fileAt(yield* tempDirectory("vibest-schema-newer-"), "vibest.db")
         yield* Effect.void.pipe(Effect.provide(database(newer)))
-        yield* writeSql(newer, ["PRAGMA user_version = 99"])
+        yield* writeSql(newer, [`UPDATE meta SET value = '${CATALOG_VERSION + 1}' WHERE key = 'catalog'`])
         const newerBytes = yield* fs.readFile(newer)
         const newerSaid = yield* refusal(newer)
         assert.match(newerSaid, /SchemaMismatch/)
-        assert.include(newerSaid, `${newer} is not this vibest's schema`)
         assert.include(
           newerSaid,
-          `for f in ${newer} ${newer}-wal ${newer}-shm; do [ -e "$f" ] && mv "$f" "$f.old"; done`,
+          `${newer} was written by a newer vibest (event catalog ${CATALOG_VERSION + 1}, this vibest knows ${CATALOG_VERSION}): run vibest update`,
         )
         assert.deepStrictEqual(yield* fs.readFile(newer), newerBytes)
       }).pipe(Effect.provide(Platform.services)),
@@ -733,7 +858,7 @@ describe("Db", () => {
       }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("sessionAt finds the one live session at that runtime, machine and terminal", () =>
+  it.effect("sessionAt finds the one live session at that runtime and terminal", () =>
     fresh(
       Effect.gen(function* () {
         const db = yield* Db
@@ -749,13 +874,6 @@ describe("Db", () => {
         )
         yield* db.insertSession(
           session("cccccccc-cccc-4ccc-8ccc-cccccccccccc", { runtime: "other", address: terminal, createdAt: 0 }),
-          project,
-        )
-        yield* db.insertSession(
-          session("dddddddd-dddd-4ddd-8ddd-dddddddddddd", {
-            address: { machine: "remote", id: "pane-a" },
-            createdAt: 0,
-          }),
           project,
         )
         yield* db.insertSession(

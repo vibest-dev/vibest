@@ -221,7 +221,7 @@ describe.concurrent("Sessions", () => {
           inbox: number | null
         }>`SELECT i.recipient_session_id AS recipient,
             i.sender_session_id AS sender, m.input, m.output, m.inbox_id AS inbox
-          FROM inbox i JOIN ${sql.literal(TURNS)} m ON m.end_id = i.result_event_id ORDER BY i.id`.pipe(Effect.orDie)
+          FROM inbox i JOIN ${sql.literal(TURNS)} m ON m.id = i.result_turn_id ORDER BY i.id`.pipe(Effect.orDie)
 
       yield* sessions.userPrompt(main, "hello")
       yield* sessions.userPrompt(id, "do it")

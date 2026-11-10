@@ -737,17 +737,17 @@ export class Sessions extends Context.Service<
       const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
         switch (event.type) {
           case "turn.reported":
-            return resultReady(event.sessionId)
-          case "turn.end":
-            return deliverNext(event.sessionId)
+            return resultReady(event.sessionId!)
+          case "turn.ended":
+            return deliverNext(event.sessionId!)
           case "inbox.queued":
-            return queued(event.sessionId, event.inboxId)
+            return queued(event.sessionId!, event.seq)
           case "live.state":
             return onTerminal(event.runtime, event.terminal, event.state === "working")
           case "live.exited":
             return onTerminal(event.runtime, event.terminal, false)
-          case "process.end":
-            return forget(event.sessionId)
+          case "process.ended":
+            return forget(event.sessionId!)
           case "live.reset":
             return republish().pipe(
               Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine })),

@@ -363,11 +363,8 @@ describe.concurrent("Sessions", () => {
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
       const free = [{ window: "5h", percent: 5, status: "available" as const, resetTime: null }]
-      const limitedEnds = sql<{ harness: string; provider: string | null }>`SELECT
-          json_extract(ps.data, '$.harness') AS harness, json_extract(ps.data, '$.provider') AS provider
-        FROM event pe JOIN event ps ON ps.id = pe.process_id
-        WHERE pe.session_id = ${id} AND pe.type = 'process.end' AND json_extract(pe.data, '$.reason') = 'limited'
-        ORDER BY pe.id`.pipe(Effect.orDie)
+      const limitedEnds = sql<{ harness: string; provider: string | null }>`SELECT harness, provider FROM process
+        WHERE session_id = ${id} AND end_reason = 'limited' ORDER BY ended_at, id`.pipe(Effect.orDie)
       yield* subs.report({ harness: "pi", provider: "openai", limits: [limited] })
       yield* TestClock.adjust("10 seconds")
       yield* writeResult(id, "pi", { error: "rate_limit" })
@@ -489,12 +486,10 @@ describe.concurrent("Sessions", () => {
     "agent.fail gets the real parent and the attempts, and the subscriptions",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const sql = yield* SqlClient.SqlClient
       const subs = yield* Subscriptions
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "pi", { underMain: true })
       const row = (yield* db.getSession(id))!
       const main = (yield* db.coordinatorOf(row.projectId))!
-      yield* sql`UPDATE session SET parent_session_id = ${main.id} WHERE id = ${id}`
       yield* subs.report({
         harness: "pi",
         provider: "openai",

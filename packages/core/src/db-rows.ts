@@ -94,49 +94,12 @@ export type ProcessStart = {
   readonly model?: string
   readonly routing?: unknown
   readonly runtime: string
-  readonly machine: string
   readonly terminal: string
   readonly resume?: string
   readonly pid?: number
 }
 
 export type Integration = { readonly version: string; readonly protocol: number }
-
-export type SessionSql = {
-  readonly id: string
-  readonly project: string
-  readonly role: string
-  readonly name: string
-  readonly machine: string
-  readonly archive: number
-  readonly createdAt: number
-  readonly endedAt: number | null
-  readonly pId: number | null
-  readonly pAt: number | null
-  readonly pData: string | null
-  readonly pEnded: number | null
-  readonly pid: number | null
-  readonly readyAt: number | null
-  readonly integration: string | null
-  readonly conversation: string | null
-  readonly tId: number | null
-  readonly tAt: number | null
-  readonly tEnd: string | null
-  readonly lastAt: number | null
-  readonly attempts: string | null
-}
-
-export type Current = {
-  readonly id: number
-  readonly start: ProcessStart
-  readonly at: number
-  readonly ended: number | null
-}
-
-export const currentOf = (row: SessionSql): Current | undefined =>
-  row.pId === null || row.pData === null || row.pAt === null
-    ? undefined
-    : { id: row.pId, start: JSON.parse(row.pData) as ProcessStart, at: row.pAt, ended: row.pEnded }
 
 export const attemptsOf = (raw: string | null) => {
   const seen: Array<{ harness: string; provider?: string; outcome: "limited"; at: number }> = []
@@ -147,48 +110,6 @@ export const attemptsOf = (raw: string | null) => {
   }
   return seen
 }
-
-export const fromColumns = (row: SessionSql, status: AgentStatus, integration: Integration | undefined) => {
-  const p = currentOf(row)
-  const start = p?.start
-  const ended = row.endedAt !== null
-  const integrationNow =
-    integration ?? (row.integration !== null ? (JSON.parse(row.integration) as Integration) : undefined)
-  const pid = row.pid ?? start?.pid ?? null
-  const attempts = attemptsOf(row.attempts)
-  const metadata = {
-    ...(integrationNow === undefined ? {} : { integration: integrationNow }),
-    ...(pid === null ? {} : { pid }),
-    ...(row.readyAt === null ? {} : { ready: row.readyAt }),
-    ...(start?.routing === undefined ? {} : { routing: start.routing }),
-    ...(row.archive === 1 ? { archive: true } : {}),
-    ...(ended && row.role !== "main" ? { archived: true, removed: true } : {}),
-    ...(attempts.length > 0 ? { attempts } : {}),
-  }
-  const started = p !== undefined && start!.terminal !== "" ? p.at : null
-  return {
-    id: row.id,
-    projectId: row.project,
-    agent: row.role,
-    harnessId: start?.harness ?? "",
-    harnessSessionId: row.conversation ?? start?.resume ?? null,
-    runtime: start?.runtime ?? "",
-    address: JSON.stringify({ machine: start?.machine ?? row.machine, id: start?.terminal ?? "" }),
-    name: row.name,
-    provider: start?.provider ?? null,
-    model: start?.model ?? null,
-    status,
-    startedAt: started,
-    exitedAt: row.role === "main" ? row.endedAt : (p?.ended ?? null),
-    turnState:
-      row.tId === null ? "none" : row.tEnd === null ? "open" : row.tEnd === "not_started" ? "not_started" : row.tEnd,
-    turnPromptedAt: row.tAt ?? 0,
-    metadata: JSON.stringify(metadata),
-    createdAt: row.createdAt,
-    lastActive: row.lastAt ?? row.createdAt,
-  }
-}
-export const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
 
 export const storedStatus = (status: InboxStatus) => (status === "sending" ? "delivering" : status)
 
@@ -213,7 +134,6 @@ export const ROUND_STATUS = ["completed", "failed", "interrupted", "lost", "not_
 
 export type TurnEnd = {
   readonly status: (typeof ROUND_STATUS)[number]
-  readonly output?: string
   readonly report?: number
   readonly failure?: { readonly message: string }
 }
@@ -262,16 +182,6 @@ export type SessionBrief = {
     readonly summary: string
     readonly endedAt: number | null
   } | null
-}
-
-export type BriefRow = {
-  readonly id: string
-  readonly task: string | null
-  readonly turnId: number | null
-  readonly endData: string | null
-  readonly endedAt: number | null
-  readonly resultContent: string | null
-  readonly answer: string | null
 }
 
 export const roundStatus = (status: unknown): TurnEnd["status"] =>

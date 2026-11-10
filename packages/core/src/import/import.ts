@@ -47,8 +47,6 @@ export const v2Reader = (sql: SqlClient.SqlClient): Reader => ({
         .map((r) => ({ path: r.path, remoteUrl: r.remoteUrl })),
     }))
   }),
-  hasPeerItem: (item: string) =>
-    sql`SELECT 1 FROM inbox WHERE peer_item = ${item}`.pipe(Effect.map((rows) => rows.length > 0)),
 })
 
 const translated = (snapshot: Snapshot) =>

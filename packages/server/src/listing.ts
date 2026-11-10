@@ -206,8 +206,9 @@ export const sessionListing = (deps: {
       const projectIds = new Set<string>()
       const sessionIds = new Set<string>()
       for (const event of events) {
-        if ("id" in event || event.type === "live.session" || event.type === "live.turn_start")
-          sessionIds.add(event.sessionId)
+        if ("seq" in event) {
+          if (event.sessionId !== undefined) sessionIds.add(event.sessionId)
+        } else if (event.type === "live.session" || event.type === "live.turn_start") sessionIds.add(event.sessionId)
         else if (event.type === "live.project") projectIds.add(event.projectId)
         else if (event.type === "live.state" || event.type === "live.exited") {
           const project = yield* db.coordinatorAt(event.runtime, event.terminal)
