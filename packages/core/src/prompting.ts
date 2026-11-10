@@ -140,7 +140,12 @@ export const sessionPrompting = (deps: {
     return state !== undefined && busy(state)
   }
 
-  const settleAfterInterrupt = (h: Runtime, session: SessionRow, terminal: Terminal) => {
+  const settleAfterInterrupt = (
+    h: Runtime,
+    session: SessionRow,
+    terminal: Terminal,
+    stop: Effect.Effect<void> = Effect.void,
+  ) => {
     const settledNow = agentState(h, terminal).pipe(
       Effect.map((seen) => {
         const state = stateOf(seen)
@@ -148,7 +153,10 @@ export const sessionPrompting = (deps: {
       }),
     )
     return awaitEvent(
-      settledNow.pipe(Effect.map((idle) => (idle ? Option.some(true) : Option.none()))),
+      stop.pipe(
+        Effect.andThen(settledNow),
+        Effect.map((idle) => (idle ? Option.some(true) : Option.none())),
+      ),
       (event) =>
         Effect.succeed(
           (event.type === "live.state" &&
@@ -163,12 +171,15 @@ export const sessionPrompting = (deps: {
       settledNow,
     ).pipe(Effect.provideService(Bus, bus))
   }
-  const interruptAgent = (h: Runtime, session: SessionRow, terminal: Terminal) =>
-    Effect.gen(function* () {
-      const key = harnesses.find(session.harnessId)?.interruptKey
-      if (key !== undefined) yield* h.send(terminal, { keys: [key] }).pipe(Effect.ignore)
-      return yield* settleAfterInterrupt(h, session, terminal)
-    })
+  const interruptAgent = (h: Runtime, session: SessionRow, terminal: Terminal) => {
+    const key = harnesses.find(session.harnessId)?.interruptKey
+    return settleAfterInterrupt(
+      h,
+      session,
+      terminal,
+      key === undefined ? Effect.void : h.send(terminal, { keys: [key] }).pipe(Effect.ignore),
+    )
+  }
 
   const prompt = Effect.fn("Sessions.prompt")(function* (
     h: Runtime,

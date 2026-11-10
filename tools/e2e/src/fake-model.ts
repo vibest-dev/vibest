@@ -5,7 +5,7 @@ import { claudeShadow, FAKE_ANTHROPIC_KEY, piShadow } from "./world/shadow.ts"
 
 export type Message = { role: string; content: unknown }
 
-export type Step = { readonly tool: string; readonly input: Record<string, string> } | string
+export type Step = { readonly tool: string; readonly input: Record<string, unknown> } | string
 
 export const text = (m: Message | undefined) =>
   m === undefined ? "" : typeof m.content === "string" ? m.content : JSON.stringify(m.content)

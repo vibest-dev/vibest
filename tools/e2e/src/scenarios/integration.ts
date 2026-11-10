@@ -355,14 +355,18 @@ const checks: ReadonlyArray<Check> = [
     id: "I7",
     covers: ["I4"],
     title:
-      "Claude (fake model): every main-loop turn end is the plugin's turn.complete: an answer is the result, Esc in the pane is one interrupted result, `vibest interrupt` is none; I4: vibest's plugin loads beside a plugin the user installed",
+      "Claude (fake model): every main-loop turn end is the plugin's turn.complete: an answer is the result, Esc in the pane is one interrupted result, `vibest interrupt` is none, also while a background shell keeps the terminal working; I4: vibest's plugin loads beside a plugin the user installed",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const HOLD = "Keep working on this until you are stopped."
+      const BACKGROUND = "Start a background shell, then keep working until you are stopped."
       let held = 0
       const model = fakeAnthropic((r) => {
         if (r.tools.length === 0 || subagentFolder(r.system) === undefined) return "ok"
-        if (!text(lastUser(r)).includes(HOLD)) return "status: completed\nsummary: e2e answer"
+        if (text(lastUser(r)).includes(BACKGROUND))
+          return { tool: "Bash", input: { command: "sleep 120", run_in_background: true, description: "background" } }
+        if (!text(lastUser(r)).includes(HOLD) && !r.messages.some((m) => text(m).includes(BACKGROUND)))
+          return "status: completed\nsummary: e2e answer"
         held++
         return new Promise<Step>(() => {})
       })
@@ -407,6 +411,18 @@ const checks: ReadonlyArray<Check> = [
           await until("the turn interrupted", settled("interrupted"), 30_000)
           const third = await latest(w, id)
           expect(third?.id === second!.id, `a result after vibest interrupt: ${third?.message.slice(0, 500)}`)
+
+          await w.ok(["send", id, BACKGROUND])
+          await until("the background turn held at the model", () => held === 3, 60_000)
+          await until("the background turn open", settled("open"), 60_000)
+          await w.ok(["interrupt", id], { timeoutMs: 60_000 })
+          await until("the background turn's turn.complete", async () => (await aborted()) === 3, 30_000)
+          await until("the background turn interrupted", settled("interrupted"), 30_000)
+          const fourth = await latest(w, id)
+          expect(
+            fourth?.id === second!.id,
+            `a result after vibest interrupt with background work: ${fourth?.message.slice(0, 500)}`,
+          )
         })
       } finally {
         model.stop()
