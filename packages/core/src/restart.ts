@@ -1,8 +1,8 @@
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-import { Duration, Effect, Exit, Option, Schedule, type Scope } from "effect"
+import { Duration, Effect, Exit, Fiber, Option, Schedule, type Scope } from "effect"
 
-import { awaitEvent, Bus } from "./bus.ts"
+import { awaitEvent, Bus, type EngineEvent } from "./bus.ts"
 import type { CoordinatorRow, Db, SessionRow } from "./db.ts"
 import type { HarnessId } from "./harness.ts"
 import type { HarnessDefinition, HarnessesShape } from "./host.ts"
@@ -144,9 +144,22 @@ export const sessionRestart = (deps: {
       Effect.map((live) => live?.pid !== undefined && live.ready !== undefined && current(live.integration)),
     )
     const look = Effect.map(again, (yes) => (yes ? Option.some(true) : Option.none()))
+    const reported = (event: EngineEvent) => {
+      if (event.type !== "process.ready" || event.sessionId !== id) return false
+      const { pid, integration } = event.data
+      if (typeof pid !== "number" || typeof integration !== "object" || integration === null) return false
+      const version = "version" in integration ? integration.version : undefined
+      const protocol = "protocol" in integration ? integration.protocol : undefined
+      return typeof version === "string" && typeof protocol === "number" && current({ version, protocol })
+    }
     return awaitEvent(
       look,
-      (event) => (event.type === "process.ready" && event.sessionId === id ? look : Effect.succeed(Option.none())),
+      (event) =>
+        reported(event)
+          ? Effect.succeed(Option.some(true))
+          : event.type === "process.ready" && event.sessionId === id
+            ? look
+            : Effect.succeed(Option.none()),
       RESTART_TIMEOUT,
       again,
     ).pipe(Effect.provideService(Bus, deps.bus))
@@ -173,10 +186,14 @@ export const sessionRestart = (deps: {
       )
       if (signalled === "denied") return failed(`not restarted: SIGTERM to ${pid} was refused`)
       const ran = yield* h.run!(t.terminal, argv).pipe(Effect.exit)
-      const back =
-        Exit.isSuccess(ran) &&
-        (yield* startedAgain(id, t.liveNow)) &&
-        Option.isSome(yield* deps.awaitReady(h, t.terminal, adapter, id).pipe(Effect.option))
+      const cameBack = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* startedAgain(id, t.liveNow).pipe(Effect.forkScoped)
+          const ready = yield* deps.awaitReady(h, t.terminal, adapter, id).pipe(Effect.option, Effect.forkScoped)
+          return (yield* Fiber.join(started)) && Option.isSome(yield* Fiber.join(ready))
+        }),
+      )
+      const back = Exit.isSuccess(ran) && cameBack
       return yield* t.locked(
         Effect.gen(function* () {
           yield* deps.restarting.clear(id)
@@ -351,12 +368,22 @@ export const sessionRestart = (deps: {
       return outcomes
     })
 
+  const runningTheCommand = (main: CoordinatorRow, command: number) =>
+    main.pid === undefined
+      ? Effect.succeed(false)
+      : processes.tree(main.pid).pipe(Effect.map((tree) => tree?.includes(command) === true))
+
   const restartLater = (ids: ReadonlyArray<string>, after: number | undefined) =>
     Effect.gen(function* () {
       const working: Array<string> = []
-      for (const main of yield* db.coordinators)
-        if (ids.includes(main.id) && stateOf((yield* mainRunning(main)) ?? "unknown") === "working")
+      for (const main of yield* db.coordinators) {
+        if (!ids.includes(main.id)) continue
+        if (
+          stateOf((yield* mainRunning(main)) ?? "unknown") === "working" ||
+          (after !== undefined && (yield* runningTheCommand(main, after)))
+        )
           working.push(main.id)
+      }
       const waited =
         after === undefined
           ? Effect.void

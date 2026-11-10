@@ -4,7 +4,15 @@ import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
-import { HARNESS_HEADER, PROJECT_HEADER, ACK_ROUTE, parseHookRoute, POLL_ROUTE } from "@vibest/protocol/protocol"
+import {
+  ACK_ROUTE,
+  HARNESS_HEADER,
+  parseHookRoute,
+  PLUGIN_VERSION_HEADER,
+  POLL_ROUTE,
+  PROJECT_HEADER,
+  PROTOCOL_HEADER,
+} from "@vibest/protocol/protocol"
 import { Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -82,7 +90,14 @@ export const make = Effect.gen(function* () {
         const pid = Option.getOrUndefined(
           yield* Schema.decodeUnknownEffect(ReadyBody)(request.body).pipe(Effect.option),
         )?.pid
-        yield* integration.ready(who.id, pid)
+        const read = reader(request.headers)
+        const version = read(PLUGIN_VERSION_HEADER)
+        const protocol = Number(read(PROTOCOL_HEADER) ?? "0")
+        yield* integration.ready(
+          who.id,
+          pid,
+          version === undefined ? undefined : { version, protocol: Number.isFinite(protocol) ? protocol : 0 },
+        )
         return ok()
       }
       const hook = parseHookRoute(request.path)

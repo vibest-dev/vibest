@@ -530,6 +530,7 @@ const make = Effect.gen(function* () {
       patch: {
         readonly pid?: number | null
         readonly ready?: number | null
+        readonly integration?: Integration
       },
     ) =>
       tx(
@@ -538,11 +539,12 @@ const make = Effect.gen(function* () {
           if (!ready && typeof patch.pid !== "number") return
           const current = yield* currentProcess(id)
           if (current === undefined) return
-          const integration = integrations.get(id)
+          const integration = patch.integration ?? integrations.get(id)
           if (!ready) {
             yield* emit(ProcessPid, { sessionId: id, data: { process: current.id, pid: patch.pid as number } })
             return
           }
+          if (integration !== undefined) integrations.set(id, integration)
           yield* emit(ProcessReady, {
             sessionId: id,
             at: patch.ready as number,
