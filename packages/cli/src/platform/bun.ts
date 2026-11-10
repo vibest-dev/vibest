@@ -22,6 +22,7 @@ import { DatabaseOpenFailed, type Host, LockFailed } from "@vibest/server/daemon
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
+import { FetchHttpClient } from "effect/http"
 
 import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
 
@@ -48,6 +49,7 @@ const user = Layer.succeed(UserPlatform, {
 
 const platform = Layer.mergeAll(
   BunServices.layer,
+  FetchHttpClient.layer,
   unrefStdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector, (endpoint) => BunSocket.makeNet({ path: endpoint })),

@@ -4,11 +4,12 @@ import net from "node:net"
 import { assert, describe, it } from "@effect/vitest"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
-import { checkEveryHour, installMethod, isSemver, UpdateCheck } from "@vibest/core/update-check"
+import { checkEveryHour, installMethod, isSemver, latestOf, UpdateCheck } from "@vibest/core/update-check"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
 import * as Server from "@vibest/server/server"
-import { Deferred, Effect, FileSystem, Layer } from "effect"
+import { ConfigProvider, Deferred, Effect, FileSystem, Layer } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -18,6 +19,24 @@ import { removeCommand, stageCommand, upgradeCommand } from "../src/update.ts"
 import { makeRepository, runVibest, tempDirectory, testLayer } from "./fakes.ts"
 
 describe("vibest update", () => {
+  it.effect("latestOf reads the version through the HttpClient it is given", () =>
+    Effect.gen(function* () {
+      const urls: Array<string> = []
+      const http = HttpClient.make((request) => {
+        urls.push(request.url)
+        return Effect.succeed(HttpClientResponse.fromWeb(request, new Response("9.9.9\n")))
+      })
+      const version = yield* latestOf({ kind: "curl", share: "/share" }).pipe(
+        Effect.provideService(HttpClient.HttpClient, http),
+        Effect.provide(
+          ConfigProvider.layer(ConfigProvider.fromUnknown({ VIBEST_DOWNLOAD_URL: "http://downloads.test" })),
+        ),
+      )
+      assert.strictEqual(version, "9.9.9")
+      assert.deepStrictEqual(urls, ["http://downloads.test/version"])
+    }),
+  )
+
   it("compareVersions orders versions as semver does", () => {
     const ordered = [
       "0.0.1-alpha",
