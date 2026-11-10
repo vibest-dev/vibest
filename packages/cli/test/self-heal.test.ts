@@ -90,8 +90,8 @@ const fakeVibestd = (
         sock.on("error", (err) => {
           const code =
             typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined
-          if (code !== "EPIPE") throw err
-          finishPing("EPIPE")
+          if (code === "EPIPE") finishPing("EPIPE")
+          else if (code !== "ECONNRESET") throw err
         })
         let buf = ""
         const onChunk = (chunk: Buffer) => {
