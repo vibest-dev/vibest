@@ -79,7 +79,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/vibest-e2e-tools
-          key: e2e-tools-${{ runner.os }}-${{ env.HERDR_VERSION }}-${{ env.HC_VERSION }}-${{ env.PI_VERSION }}-${{ env.CLAUDE_VERSION }}-${{ env.CURSOR_VERSION }}
+          key: e2e-tools-2-${{ runner.os }}-${{ env.HERDR_VERSION }}-${{ env.HC_VERSION }}-${{ env.PI_VERSION }}-${{ env.CLAUDE_VERSION }}-${{ env.CURSOR_VERSION }}
       # Into ~/.local/bin, which the login shell puts on PATH: E2E runs the harnesses with the login environment.
       - name: Install herdr, hc, pi, claude and cursor-agent
         run: |
@@ -101,23 +101,29 @@ jobs:
             curl -fsSL "https://downloads.cursor.com/lab/$CURSOR_VERSION/linux/x64/agent-cli-package.tar.gz" \
               | tar --strip-components=1 -xzf - -C "$tools/cursor"
           fi
-          if [ ! -x "$tools/npm/node_modules/.bin/claude" ]; then
+          # Claude's platform package holds the native binary itself (the wrapper package needs its install script).
+          claude="$tools/npm/node_modules/@anthropic-ai/claude-code-linux-x64/claude"
+          if [ ! -x "$claude" ]; then
             npm install --prefix "$tools/npm" --no-audit --no-fund \
-              "@earendil-works/pi-coding-agent@$PI_VERSION" "@anthropic-ai/claude-code@$CLAUDE_VERSION"
+              "@earendil-works/pi-coding-agent@$PI_VERSION" "@anthropic-ai/claude-code-linux-x64@$CLAUDE_VERSION"
+            chmod +x "$claude"
           fi
           ln -sf "$tools/herdr" "$bin/herdr"
           ln -sf "$tools/hc/herdr-core" "$bin/hc"
           ln -sf "$tools/hc/herdr-core" "$bin/herdr-core"
           ln -sf "$tools/cursor/cursor-agent" "$bin/cursor-agent"
           ln -sf "$tools/npm/node_modules/.bin/pi" "$bin/pi"
-          ln -sf "$tools/npm/node_modules/.bin/claude" "$bin/claude"
+          ln -sf "$claude" "$bin/claude"
           ln -sf "$(command -v node)" "$bin/node"
           echo "$bin" >> "$GITHUB_PATH"
-          if ! env -i HOME="$HOME" PATH=/usr/bin:/bin bash -l -i -c 'command -v herdr' >/dev/null 2>&1; then
-            echo 'PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile"
-          fi
+          # bash -l reads the first of these that exists.
+          profile="$HOME/.bash_profile"
+          for f in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+            if [ -e "$f" ]; then profile=$f; break; fi
+          done
+          echo 'PATH="$HOME/.local/bin:$PATH"' >> "$profile"
           env -i HOME="$HOME" PATH=/usr/bin:/bin bash -l -i -c \
-            'for b in herdr hc pi claude cursor-agent node; do printf "%s: " "$b"; "$b" --version 2>&1 | head -1; done'
+            'for b in herdr hc pi claude cursor-agent node; do printf "%s: " "$b"; "$b" --version 2>&1 | head -1 || exit 1; command -v "$b" >/dev/null || exit 1; done'
 
       # The version every job checks and publishes, set once in this checkout. A release commits it and tags v<version>
       # here; publish pushes that commit and tag after the owner approves.
