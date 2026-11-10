@@ -137,6 +137,16 @@ export const make = (
             const caller = yield* Caller
             if (caller._tag === "Session" || caller._tag === "Coordinator")
               return yield* sendWithinProject(caller, input, p)
+            const { scope } = yield* reach("Send")
+            const target = yield* db.resolveSession(input, scope)
+            if ((yield* db.sessionIdentity(target))?.agent === "coordinator") {
+              if (!(yield* db.insertSend(target, p.message, p.request)))
+                return yield* new NoSuchSession({
+                  id: target,
+                  message: `${target} is the main agent of this project and is not running`,
+                })
+              return { id: target }
+            }
             const id = yield* managed("Send", input)
             yield* sessions.send(id, p.message, p.request)
             return { id }

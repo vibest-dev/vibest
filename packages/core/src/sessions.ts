@@ -279,7 +279,7 @@ export class Sessions extends Context.Service<
 
       const live = (session: SessionRow) => runtimes.route(session.runtime)
 
-      const announceExit = (session: SessionRow, duringTurn: boolean) =>
+      const announceExit = (session: SessionRow, duringTurn: boolean, afterError: boolean) =>
         Effect.gen(function* () {
           const queued = yield* db.pendingInbox(session.id)
           const signed = queued.filter((r) => r.kind === "send" && r.sender)
@@ -290,8 +290,15 @@ export class Sessions extends Context.Service<
             "failed",
           )
           const lost = unsigned.map((r) => r.message).join("\n\n")
-          const text = `${session.id} (${session.harnessId}) exited${duringTurn ? " during a turn" : ""}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
-          if (duringTurn) yield* finish(session, "failed", "the harness exited", undefined, undefined, text)
+          const failure = afterError ? ((yield* db.latestAnswer(session.id))?.failure ?? "") : ""
+          const how = afterError
+            ? ` after its turn ended with an error: ${failure}`
+            : duringTurn
+              ? " during a turn"
+              : ""
+          const text = `${session.id} (${session.harnessId}) exited${how}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
+          if (duringTurn && !afterError)
+            yield* finish(session, "failed", "the harness exited", undefined, undefined, text)
           else yield* notice(session, text)
         })
 
@@ -358,6 +365,7 @@ export class Sessions extends Context.Service<
       let collectResult: (
         h: Runtime | undefined,
         session: SessionRow,
+        exiting?: boolean,
       ) => Effect.Effect<
         Collected,
         RuntimeError | NoSuchSession | PlatformError.PlatformError,
@@ -469,16 +477,23 @@ export class Sessions extends Context.Service<
         const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
         if (state !== undefined && session.status !== state) yield* db.updateSession(session.id, { status: state })
         if (state === "working" || state === "blocked") yield* Ref.set(r.sawWorking, true)
-        if ((yield* collectResult(h, session)) !== "none") return
+        const exited =
+          state === undefined &&
+          (yield* Effect.gen(function* () {
+            const terminalRunning = yield* alive(h, terminal)
+            const reportedPid = session.metadata.pid
+            return (
+              !terminalRunning ||
+              (typeof reportedPid === "number" && (yield* processes.liveness(reportedPid)) === "exited")
+            )
+          }))
+        if ((yield* collectResult(h, session, exited)) !== "none") return
         if (state === undefined) {
-          const terminalRunning = yield* alive(h, terminal)
-          const reportedPid = session.metadata.pid
-          const harnessGone =
-            terminalRunning && typeof reportedPid === "number" && (yield* processes.liveness(reportedPid)) === "exited"
-          if (harnessGone || !terminalRunning) {
+          if (exited) {
             const cutOff = session.startedAt === null
+            const afterError = open && (yield* db.getSession(id))?.turnState !== "open"
             const announce = !cutOff && (open || session.exitedAt === null)
-            if (announce) yield* announceExit(session, open)
+            if (announce) yield* announceExit(session, open, afterError)
             if (session.exitedAt === null) {
               yield* db.updateSession(id, {
                 status: "unknown",

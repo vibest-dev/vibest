@@ -314,6 +314,11 @@ describe("vibest.sock", () => {
         /^<agent-message>\n<agent-id>[a-f0-9-]{36}<\/agent-id>\n<title>[^<]*<\/title>\n<message>\nhalf way\n<\/message>\n<\/agent-message>$/,
       )
       assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+      assert.deepStrictEqual(yield* c.Send({ id: launch.sessionId, message: "from the user" }), {
+        id: launch.sessionId,
+      })
+      const fromUser = yield* db.latestInbox(launch.sessionId, "send")
+      assert.deepInclude(fromUser, { message: "from the user", sender: null })
       yield* raw.CoordinatorSessionReady(
         { sessionId: launch.sessionId, harness: "claude", harnessSessionId: "stale" },
         { headers: protocolHeaders() },

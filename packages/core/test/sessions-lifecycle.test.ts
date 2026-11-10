@@ -164,6 +164,23 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a turn that reported an error and whose harness is gone gives one notice carrying both",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      yield* writeResult(id, "pi", { text: "", error: "model_error" })
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
+      yield* sessions.check(id)
+      const notices = yield* sqlNotices(id)
+      assert.lengthOf(notices, 1)
+      assert.include(notices[0], "exited after its turn ended with an error: model_error")
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
     "launch failure rolls back the worktree and notifies the owner",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem

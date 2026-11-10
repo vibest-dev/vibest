@@ -314,16 +314,20 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   )
 
   test(
-    "its harness already exited: not archived, and the notice says to archive it by hand",
+    "its harness already exited: archived once nothing it sent is waiting, and delivering the exit notice repeats nothing",
     Effect.gen(function* () {
       const w = yield* archiveSession(yield* makeRepository)
-      yield* askMain(w)
       yield* writeResult(w.id, "pi", { text: "status: completed" })
       yield* w.herdr.updateAgent(w.id, (a) => ({ ...a, alive: false }))
       yield* w.sessions.check(w.id)
-      yield* until(latestNotice(w.id), (m) => m.includes("not archived"))
-      assert.include(yield* latestNotice(w.id), "its harness already exited")
+      yield* w.sessions.check(w.id)
       assert.isFalse(yield* archived(w.db, w.id))
+      yield* ackResult(w)
+      yield* until(archived(w.db, w.id), (a) => a)
+      yield* letForkedArchiveRun
+      const notices = yield* sqlNotices(w.id)
+      assert.lengthOf(notices, 1)
+      assert.include(notices[0], "exited")
     }),
   )
 

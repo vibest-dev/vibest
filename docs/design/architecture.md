@@ -961,7 +961,7 @@ vibest stop <run|agent>                 end it (§3.3)
 vibest wait | resume <run>
 vibest ls [--run …] [--all]             Runs and their Agents
 vibest read <agent> · attach <agent> · result <run|agent> · events [--run …]
-vibest report [--json] -- <text|->      from inside a subagent
+vibest send <agent> -- <text|->             from the user, the main agent or any subagent
 vibest project info | search                                                     the project folder's paths, text search
 vibest daemon [--foreground] · daemon restart · status · update · doctor · plugins · models [<harness>]
 vibest harness list | models <harness>

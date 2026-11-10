@@ -163,13 +163,11 @@ export const sessionArchive = (deps: {
             const h = yield* live(session)
             const terminal = session.address
             const seen = yield* agentState(h, terminal)
-            if (seen === "absent")
-              return yield* skip(
-                `its harness already exited, so vibest cannot prove its processes are gone; run vibest archive ${id} when you are done with it`,
-              )
-            const settled = yield* settleAfterInterrupt(h, session, terminal)
-            if (!settled)
-              return yield* skip(`it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`)
+            if (seen !== "absent") {
+              const settled = yield* settleAfterInterrupt(h, session, terminal)
+              if (!settled)
+                return yield* skip(`it did not go idle within ${Duration.format(STOP_WAIT)}; run vibest archive ${id}`)
+            }
             const out = yield* removeLocked(id, { unlessPending: true })
             if (!out) return
             const kept = out.reasons.length > 0 ? ` Kept because: ${out.reasons.join("; ")}.` : ""

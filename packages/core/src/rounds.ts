@@ -77,7 +77,7 @@ export const sessionRounds = (deps: {
     error: string | undefined,
     at?: number,
     reported?: number,
-    notice?: string,
+    notice?: string | null,
   ) {
     const failure = failureOf(error)
     yield* db.endTurn(
@@ -88,7 +88,9 @@ export const sessionRounds = (deps: {
         ...(failure === undefined ? {} : { failure }),
       },
       { turnState: end, lastActive: yield* Clock.currentTimeMillis },
-      end === "completed" && !error ? undefined : (notice ?? `${session.id}'s turn ended with an error: ${error}`),
+      (end === "completed" && !error) || notice === null
+        ? undefined
+        : (notice ?? `${session.id}'s turn ended with an error: ${error}`),
       at,
     )
   })
@@ -156,7 +158,11 @@ export const sessionRounds = (deps: {
       )
   })
 
-  const collectResult = Effect.fn("Sessions.collectResult")(function* (h: Runtime | undefined, session: SessionRow) {
+  const collectResult = Effect.fn("Sessions.collectResult")(function* (
+    h: Runtime | undefined,
+    session: SessionRow,
+    exiting = false,
+  ) {
     const terminal = session.address
     const adapter = harnesses.find(session.harnessId)
     if (adapter === undefined) return "none" as const
@@ -177,8 +183,15 @@ export const sessionRounds = (deps: {
     }
     if (!adapter.ownSessionId && !session.harnessSessionId && found.conversationId)
       yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
-    yield* finish(session, found.error ? "failed" : "completed", found.error, found.at, found.id)
-    return "delivered" as const
+    yield* finish(
+      session,
+      found.error ? "failed" : "completed",
+      found.error,
+      found.at,
+      found.id,
+      exiting ? null : undefined,
+    )
+    return exiting && found.error ? ("none" as const) : ("delivered" as const)
   })
 
   const userPrompt = (id: string, text: string, at?: number) =>
