@@ -33,6 +33,9 @@ queued message is active. The client waits 55 s for the reply (above an older vi
 proof it exited, so the new vibestd waits for the lock, boundedly. With `--version` (15 s) and the new start, a
 replacement ends in about two minutes whatever the other side does, not counting the wait for the yes.
 
+`vibest update` sends `Daemon.Handoff` the same way, in the running vibestd's protocol, so a newer vibest hands over
+a vibestd of any older protocol that has the `handoff` capability.
+
 After `vibest update` installs another version and vibestd answers Ping with that version, the old process does not
 offer the agent restarts itself: across a protocol change vibestd refuses it (`IncompatibleDaemon`). It runs the
 installed binary as `<installed vibest> update --restart-agents-after <pid> [--yes]` on the same terminal and exits
