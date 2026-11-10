@@ -607,9 +607,10 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
 
 Copied from omac `db.ts`, on the four tables of `schema.md`:
 
-- SQLite, WAL, STRICT tables, foreign keys on, all SQL in one service. The database carries an
-  `application_id` and a `user_version`; a file that is not vibest's, or not this version, is refused before any
-  writable open (`SchemaMismatch`), leaving it untouched. Migrations start with the first release.
+- SQLite, WAL, STRICT tables, all SQL in one service. The database carries an `application_id`, the catalog version
+  that last wrote it and the migrations applied to it; a file that is not vibest's, or written by a newer catalog, is
+  refused before any writable open (`SchemaMismatch`), leaving it untouched. Pending migrations run in order when it
+  opens (schema.md, Opening and migrations).
 - The check runs on a read-only connection, which sees committed WAL frames and does not checkpoint, so a refused
   database and its WAL keep their bytes (the WAL index, `-shm`, may still change). WAL mode stays off until `Db`
   accepts the file. A missing database is created mode 0600, and each open forces 0600 on the database and any
@@ -617,15 +618,15 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
   connection may delete `-wal` / `-shm` (SQLite's default, as on Linux) or keep them (Apple's system SQLite), and two
   first opens of a missing file at once fail with `SQLITE_CANTOPEN`. A writable transaction
   is `BEGIN IMMEDIATE`, with a 5 s busy timeout.
-- Tables `project`, `session`, `inbox` (delivery) and the append-only `event` (each process and turn, and each
-  inbox row's queue and status changes) in `docs/design/schema.md` are the state, changed in transactions. The
+- The append-only `event` log of facts in `docs/design/schema.md` is the state; the read-model tables (`project`,
+  `session`, `process`, `turn`, `inbox` and the machine tables) are projected from it in the same transaction. The
   conversation is the Project's entry session row. An Agent's status is live from the runtime (memory only); its
-  task is its `task` inbox row. Rows are never deleted.
+  task is its `task` inbox row. Facts are never deleted.
 - Files keep one writer each and are written to a temporary file and renamed (omac write model): system prompt
   files by the daemon (the main Agent's by `vibest`); never the user's harness configuration.
 - Not stored: worktree branches and dirty state (asked from git), herdr panes and states (asked from herdr).
-- Events reach the engine through one in-memory Bus (`core/bus.ts`): the Db publishes a committed transaction's rows
-  in id order, and observations the schema does not store (`live.*`) are published only. A waiter subscribes before
+- Events reach the engine through one in-memory Bus (`core/bus.ts`): the Db publishes a committed transaction's facts
+  in seq order, and observations the schema does not store (`live.*`) are published only. A waiter subscribes before
   the action whose consequence it waits for (`awaitEvent` before its first look), so an event in between is not lost.
   The engine (`core/engine.ts`) knows events, not sessions or projects: each handler runs in a fiber of its own, a
   failing one is logged and stops nothing else, and none depends on the order events arrive in. Each re-derives what

@@ -92,19 +92,20 @@ refused), checks that the checkout has `commit`
 (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
 and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
-started it is one `peer.start` event (peer, project, parent?, reportTo?), written in the transaction that creates
-the session row; it has no `report_to` when A's project had no main agent. The forwarded `request` finds the session on a retry.
-A `peer.start` row that fails to decode is logged as a warning and the session is treated as local: its results go to
-B's own inbox delivery and no outbox row is written for it.
+started it is the `origin` of its `session.created` fact (peer, project, parent?, reportTo?), kept in the session's
+`origin_*` columns; it has no `reportTo` when A's project had no main agent. The forwarded `request` finds the session
+on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
+results go to B's own inbox delivery and no outbox row is written for it.
 
-Every result and notice of a peer session with a `report_to` goes to B's `outbox` in the transaction that writes it. B still writes the
+Every result and notice of a peer session with a `reportTo` goes to B's `outbox` (`outbox.queued`) in the transaction that writes it. B still writes the
 inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
 B's own delivery never sees it. With no `peer` row nothing is queued. `Peer.Outbox` streams
-the peer's rows in `created_at` order (insertion order on a tie), then each new one after its commit; an item over
-1 MiB is sent cut with `cut: true`. `Peer.Ack { ids }` deletes them. Archiving a peer session deletes its rows.
+the peer's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
+`Peer.Ack { ids }` appends `outbox.acked`, which deletes them. Archiving a peer session (`session.ended`) deletes its
+rows.
 
 `List`, `Get`, `Send`, `Interrupt`, `Remove` and `Peek` from a peer resolve a session id only among sessions whose
-`peer.start` has that peer and that project; any other session is `NoSuchSession`.
+origin has that peer and that project; any other session is `NoSuchSession`.
 
 ## Repository identity
 
@@ -160,14 +161,12 @@ a machine that is not connected fails at once; nothing is queued. The 1 MiB prom
 and passes `PromptTooLarge` through.
 
 After `Peer.Hello`, A opens `Peer.Outbox`. For each item it runs one transaction (`Db.receivePeerItem`): the
-recipient's project (none: logged and acknowledged); the dedupe key `inbox.queued` with `request = 'peer:<outbox
-id>'` on the item's recipient or on where it is routed now (found: only acknowledged); otherwise a `notice` row with no sender, routed to the
-recipient while it has not ended, else to the project's entry session, `pending` when that one is present, else
-`dropped`, with content `<name>/<id8>: <text>` (and a pointer to `vibest result` when the item was cut). Then
-`Peer.Ack`. A pipe that drops between the commit and the ack sends the item again at the next connect, and the key
-finds it. One edge case is left: if the recipient ended and the project's entry session changed between the first
-delivery and the redelivery, the key sits on the old entry, which is neither of the two looked at, so one more notice
-is written. The outbox stream failing (the 10 s ping timeout of a held pipe, for one) counts as the connection going
+recipient's project (none: logged and acknowledged); an inbox row whose `peer_item` is the outbox id (found: only
+acknowledged); otherwise an `inbox.queued` `notice` with no sender and `peerItem` set, routed to the recipient while it
+has not ended, else to the project's entry session, `pending` when that one is present, else `dropped`, with content
+`<name>/<id8>: <text>` (and a pointer to `vibest result` when the item was cut). Then `Peer.Ack`. A pipe that drops
+between the commit and the ack sends the item again at the next connect, and `peer_item` finds it wherever the first
+copy was routed. The outbox stream failing (the 10 s ping timeout of a held pipe, for one) counts as the connection going
 down.
 
 ## Terminals on other machines
@@ -272,16 +271,18 @@ mirror does not save, so A shows them as having no saved machine until they end.
 Not covered yet: Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote row (its own PR);
 replacing a mirror row when B's vibestd moved to another hc session on the same host.
 
-## Optional tables
+## Tables
 
-Created when missing at open (schema.md, Optional objects).
+Read-model tables of the ledger (schema.md), written only by their facts: `machine.added`, `machine.connected` and
+`machine.removed`; `peer.seen`; `outbox.queued` and `outbox.acked`. No fact names a machine: everything in one ledger
+is on this machine, and a session on B is only in B's ledger (A asks B for it).
 
 ```sql
 CREATE TABLE machine (             -- A: another machine's vibestd this one dials
   name         TEXT PRIMARY KEY,   -- what --machine takes; the first part of an address racknerd/<id>
   target       TEXT NOT NULL,      -- ssh target; never a password
   vibestd_id   TEXT NOT NULL UNIQUE CHECK (length(vibestd_id) = 36),  -- B's identity id at machine add; never changed
-  connected_at INTEGER NOT NULL,   -- last successful connect (the add is the first)
+  connected_at INTEGER NOT NULL,   -- last successful connect (the add is the first; machine.connected)
   created_at   INTEGER NOT NULL
 ) STRICT;
 
@@ -289,18 +290,19 @@ CREATE TABLE peer (                -- B: a vibestd that dials this one, like an 
   id           TEXT PRIMARY KEY CHECK (length(id) = 36),  -- that vibestd's identity id
   name         TEXT NOT NULL,      -- its identity name, as it last presented it
   calls_me     TEXT NOT NULL,      -- the machine name it uses for this vibestd, as it last presented it
-  connected_at INTEGER NOT NULL    -- its last successful Peer.Hello
+  connected_at INTEGER NOT NULL    -- its last successful Peer.Hello (peer.seen)
 ) STRICT;
 
 CREATE TABLE outbox (              -- B: what this vibestd still has to deliver to a peer
-  id         TEXT PRIMARY KEY CHECK (length(id) = 36),  -- random UUIDv4; the dedupe key on A
-  peer_id    TEXT NOT NULL REFERENCES peer (id),
-  session_id TEXT NOT NULL REFERENCES session (id),  -- the peer session it is about
+  id         TEXT PRIMARY KEY CHECK (length(id) = 36),  -- random UUIDv4; the dedupe key on A (inbox.peer_item)
+  seq        INTEGER NOT NULL,     -- its outbox.queued: the order it is sent in
+  peer_id    TEXT NOT NULL,
+  session_id TEXT NOT NULL,        -- the peer session it is about
   kind       TEXT NOT NULL CHECK (kind IN ('result', 'notice')),
   content    TEXT NOT NULL,        -- rendered on B
   created_at INTEGER NOT NULL
 ) STRICT;
-CREATE INDEX outbox_peer ON outbox (peer_id, created_at);
+CREATE INDEX outbox_peer ON outbox (peer_id, seq);
 CREATE INDEX outbox_session ON outbox (session_id);
 ```
 
