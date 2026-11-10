@@ -164,17 +164,21 @@ jobs:
           else
             case "$version" in *-*) dist_tag=beta ;; *) dist_tag=latest ;; esac
             # Released already: merge a release pull request that bumps the version first. A dry run only warns, so it
-            # can run the gates on any branch.
+            # can run the gates on any branch. A tag on this very commit is a release that stopped partway (publish
+            # tags first): this run finishes it, and publish skips what is already done.
             level=error
             if [ "$DRY_RUN" = true ]; then level=warning; fi
-            released=
-            if [ -n "$(git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/v$version")" ]; then
-              echo "::$level::tag v$version already exists; bump the version in a release pull request"; released=1
+            tagged=$(git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" "v$version*" \
+              | awk -v r="refs/tags/v$version" '{ s[$2] = $1 } END { print (r "^{}") in s ? s[r "^{}"] : s[r] }')
+            if [ "$tagged" = "$GITHUB_SHA" ]; then
+              echo "::notice::v$version already tags this commit: this run finishes that release"
+            elif [ -n "$tagged" ]; then
+              echo "::$level::tag v$version already exists on $tagged, not this commit; bump the version in a release pull request"
+              [ "$level" = warning ] || exit 1
+            elif [ "$(npm view "@vibest/cli@$version" version 2>/dev/null </dev/null)" = "$version" ]; then
+              echo "::$level::@vibest/cli@$version is already on npm; bump the version in a release pull request"
+              [ "$level" = warning ] || exit 1
             fi
-            if [ "$(npm view "@vibest/cli@$version" version 2>/dev/null </dev/null)" = "$version" ]; then
-              echo "::$level::@vibest/cli@$version is already on npm; bump the version in a release pull request"; released=1
-            fi
-            if [ -n "$released" ] && [ "$level" = error ]; then exit 1; fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
@@ -282,12 +286,17 @@ jobs:
           path: ${{ runner.temp }}/release
 
       # The commit the gates ran on (GITHUB_SHA, the run's commit on main), with GITHUB_TOKEN: nothing is pushed to a
-      # branch. CHANGELOG.md comes from it too.
+      # branch. CHANGELOG.md comes from it too. Every step below is safe to rerun after a release that stopped partway:
+      # it skips what is already done exactly as this run would do it, and fails on anything else.
       - uses: actions/checkout@v4
         if: needs.build.outputs.dist_tag != 'canary'
       - name: Tag v${{ needs.build.outputs.version }}
         if: needs.build.outputs.dist_tag != 'canary'
         run: |
+          tagged=$(git ls-remote --tags origin "v$VERSION*" \
+            | awk -v r="refs/tags/v$VERSION" '{ s[$2] = $1 } END { print (r "^{}") in s ? s[r "^{}"] : s[r] }')
+          if [ "$tagged" = "$GITHUB_SHA" ]; then echo "v$VERSION already tags $GITHUB_SHA; skipped"; exit 0; fi
+          if [ -n "$tagged" ]; then echo "::error::v$VERSION tags $tagged, not $GITHUB_SHA"; exit 1; fi
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             tag --annotate --message "v$VERSION" "v$VERSION" "$GITHUB_SHA"
           git push origin "refs/tags/v$VERSION"
@@ -297,10 +306,9 @@ jobs:
         with:
           node-version: 26.13.0
 
-      # The checked tarballs, not rebuilt or repacked, dependencies first (publish-order); versions already on npm are
-      # skipped. The registry can lag behind a successful publish. Publishing is not atomic: a failure can leave only
-      # some packages released, and a rerun neither rolls back a partial release nor repairs its tags; reconcile it
-      # deliberately.
+      # The checked tarballs, not rebuilt or repacked, dependencies first (publish-order). Publishing is not atomic: a
+      # failure can leave only some packages released. A rerun skips each package already on npm with this exact
+      # tarball (the same integrity) and fails on one published from a different tarball.
       - name: Publish
         env:
           DIST_TAG: ${{ needs.build.outputs.dist_tag }}
@@ -308,8 +316,13 @@ jobs:
           npm --version
           npm_dir="$RUNNER_TEMP/release/npm"
           while read -r name file; do
-            if [ "$(npm view "$name@$VERSION" version 2>/dev/null </dev/null)" = "$VERSION" ]; then
-              echo "$name@$VERSION is already on npm; skipped"
+            published=$(npm view "$name@$VERSION" dist.integrity 2>/dev/null </dev/null)
+            if [ -n "$published" ]; then
+              tested="sha512-$(openssl dgst -sha512 -binary "$npm_dir/$file" | base64 -w0)"
+              if [ "$published" != "$tested" ]; then
+                echo "::error::$name@$VERSION is on npm from a different tarball ($published, tested $tested)"; exit 1
+              fi
+              echo "$name@$VERSION is already on npm from this tarball; skipped"
               continue
             fi
             npm publish "$npm_dir/$file" --provenance --tag "$DIST_TAG" --access public </dev/null
@@ -321,6 +334,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "The GitHub Release v$VERSION exists; skipped"; exit 0
+          fi
           # The notes: the CHANGELOG.md section headed with this version when there is one, otherwise GitHub's generated
           # notes. No section is required.
           awk -v v="$VERSION" '/^## /{ h = $2; sub(/^v/, "", h); on = (h == v); next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
