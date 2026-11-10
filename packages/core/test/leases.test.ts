@@ -1,8 +1,11 @@
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import * as Leases from "@vibest/core/leases"
 import { Duration, Effect, Ref, type Scope } from "effect"
 import { TestClock } from "effect/testing"
+
+import { testEffect } from "./lib/effect.ts"
+import { compile } from "./lib/layers.ts"
 
 const settled = Effect.yieldNow.pipe(Effect.repeat({ times: 20 }))
 
@@ -12,8 +15,10 @@ const leases = Effect.gen(function* () {
   return { leases: yield* Leases.make, expired: Ref.get(expired), onExpire }
 })
 
+const it = testEffect(compile(Bus.node))
+
 const test = (name: string, program: Effect.Effect<void, never, Bus | Scope.Scope>) =>
-  it.effect(name, () => program.pipe(Effect.scoped, Effect.provide(Bus.layer)))
+  it(name, () => program.pipe(Effect.scoped))
 
 describe("leases", () => {
   test(

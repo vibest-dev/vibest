@@ -13,13 +13,15 @@ import { MachineTransport } from "@vibest/core/machines"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout } from "@vibest/core/paths"
 import { type Candidate, makeHost, Plugins } from "@vibest/core/plugins"
-import { type Liveness, ProcessPlatform, Processes } from "@vibest/core/processes"
+import { ProcessPlatform, Processes } from "@vibest/core/processes"
 import { SshHosts } from "@vibest/core/repository-url"
 import { turnEndFrom } from "@vibest/core/results"
 import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
+import { projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
+import { FakeProcesses } from "@vibest/core/test/lib/fake-processes"
 import * as VibestPlugin from "@vibest/plugin"
 import type { DaemonIdentity } from "@vibest/protocol/rpc"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
@@ -35,7 +37,6 @@ import {
   type Duration,
   Effect,
   FileSystem,
-  HashMap,
   Layer,
   Option,
   Path,
@@ -55,7 +56,7 @@ import * as Platform from "#platform"
 import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime, type FakeRuntimeOptions, KIND } from "./fake-runtime.ts"
 
-export { FakeGit, FakeRuntime }
+export { FakeGit, FakeProcesses, FakeRuntime, projectOf, tempDirectory }
 
 export const TEST_HERDR = "herdr"
 
@@ -147,18 +148,6 @@ export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS e
     (SELECT r.content FROM inbox r WHERE r.result_event_id = te.id) AS output
   FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
 
-export const projectOf = (directory: string) =>
-  Effect.gen(function* () {
-    const db = yield* Db
-    return (yield* db.projectAt(directory))?.id ?? (yield* db.createProject(directory, []))
-  })
-
-export const tempDirectory = (prefix: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix }))
-  }).pipe(Effect.orDie)
-
 const STDIN_FROM_FILE = 'f=$1; shift; exec "$@" <"$f"'
 
 export const withStdin = (input: string, command: string, args: ReadonlyArray<string>) =>
@@ -200,122 +189,6 @@ export const makeRepository = Effect.gen(function* () {
   yield* (yield* FakeGit).repository(root, { files: { "README.md": "hi\n" } })
   return root
 }).pipe(Effect.orDie)
-
-export class FakeProcesses extends Context.Service<
-  FakeProcesses,
-  {
-    readonly set: (pid: number, liveness: Liveness) => Effect.Effect<void>
-    readonly setCwdUsers: (users: ReadonlyArray<number> | undefined) => Effect.Effect<void>
-    readonly probed: Effect.Effect<ReadonlyArray<number>>
-    readonly signaled: Effect.Effect<ReadonlyArray<number>>
-    readonly setSignalDenied: (denied: boolean) => Effect.Effect<void>
-    readonly setSignalIgnored: (ignored: boolean) => Effect.Effect<void>
-    readonly holdSignal: () => Effect.Effect<{
-      readonly reached: Effect.Effect<void>
-      readonly release: () => Effect.Effect<void>
-    }>
-    readonly holdCwd: () => Effect.Effect<{
-      readonly reached: Effect.Effect<void>
-      readonly release: () => Effect.Effect<void>
-    }>
-    readonly setCwdDelay: (delay: Duration.Input) => Effect.Effect<void>
-    readonly cwdListings: Effect.Effect<number>
-    readonly processes: Processes["Service"]
-  }
->()("test/FakeProcesses") {
-  static readonly layer = Layer.effect(
-    FakeProcesses,
-    Effect.gen(function* () {
-      const states = yield* Ref.make(HashMap.empty<number, Liveness>())
-      const users = yield* Ref.make<ReadonlyArray<number> | undefined>([])
-      const cwdDelay = yield* Ref.make<Duration.Input>(0)
-      const listings = yield* Ref.make(0)
-      const probed = yield* Ref.make<ReadonlyArray<number>>([])
-      const signaled = yield* Ref.make<ReadonlyArray<number>>([])
-      const denied = yield* Ref.make(false)
-      const ignored = yield* Ref.make(false)
-      const signalGate = yield* Ref.make(
-        Option.none<{ readonly reached: Deferred.Deferred<void>; readonly release: Deferred.Deferred<void> }>(),
-      )
-      const cwdGate = yield* Ref.make(
-        Option.none<{ readonly reached: Deferred.Deferred<void>; readonly release: Deferred.Deferred<void> }>(),
-      )
-      const holdNext = (gate: typeof cwdGate) =>
-        Effect.gen(function* () {
-          const reached = yield* Deferred.make<void>()
-          const release = yield* Deferred.make<void>()
-          yield* Ref.set(gate, Option.some({ reached, release }))
-          return {
-            reached: Deferred.await(reached),
-            release: () => Deferred.succeed(release, undefined).pipe(Effect.asVoid),
-          }
-        })
-      return FakeProcesses.of({
-        set: (pid, liveness) => Ref.update(states, HashMap.set(pid, liveness)),
-        setCwdUsers: (u) => Ref.set(users, u),
-        cwdListings: Ref.get(listings),
-        probed: Ref.get(probed),
-        signaled: Ref.get(signaled),
-        setSignalDenied: (d) => Ref.set(denied, d),
-        setSignalIgnored: (i) => Ref.set(ignored, i),
-        holdSignal: () => holdNext(signalGate),
-        holdCwd: () => holdNext(cwdGate),
-        setCwdDelay: (d) => Ref.set(cwdDelay, d),
-        processes: Processes.of({
-          liveness: (pid) =>
-            Ref.update(probed, (p) => [...p, pid]).pipe(
-              Effect.andThen(Ref.get(states)),
-              Effect.map((m) => Option.getOrElse(HashMap.get(m, pid), (): Liveness => "exited")),
-            ),
-          terminate: (pid) =>
-            Effect.gen(function* () {
-              const gate = yield* Ref.modify(
-                signalGate,
-                (g) =>
-                  [
-                    g,
-                    Option.none<{
-                      readonly reached: Deferred.Deferred<void>
-                      readonly release: Deferred.Deferred<void>
-                    }>(),
-                  ] as const,
-              )
-              if (Option.isSome(gate)) {
-                yield* Deferred.succeed(gate.value.reached, undefined)
-                yield* Deferred.await(gate.value.release)
-                for (let i = 0; i < 8; i++) yield* Effect.yieldNow
-              }
-              if (yield* Ref.get(denied)) return "denied" as const
-              yield* Ref.update(signaled, (s) => [...s, pid])
-              if (!(yield* Ref.get(ignored))) yield* Ref.update(states, HashMap.set(pid, "exited" as Liveness))
-              return "sent" as const
-            }),
-          cwdUsers: () =>
-            Effect.gen(function* () {
-              yield* Ref.update(listings, (n) => n + 1)
-              const gate = yield* Ref.modify(
-                cwdGate,
-                (g) =>
-                  [
-                    g,
-                    Option.none<{
-                      readonly reached: Deferred.Deferred<void>
-                      readonly release: Deferred.Deferred<void>
-                    }>(),
-                  ] as const,
-              )
-              if (Option.isSome(gate)) {
-                yield* Deferred.succeed(gate.value.reached, undefined)
-                yield* Deferred.await(gate.value.release)
-              }
-              yield* Effect.sleep(yield* Ref.get(cwdDelay))
-              return yield* Ref.get(users)
-            }),
-        }),
-      })
-    }),
-  )
-}
 
 export interface TestOptions extends FakeRuntimeOptions {
   readonly hooked?: ReadonlyArray<string>
