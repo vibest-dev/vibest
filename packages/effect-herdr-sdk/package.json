@@ -1,6 +1,6 @@
 {
   "name": "effect-herdr-sdk",
-  "version": "0.0.1-beta.17",
+  "version": "0.0.1-beta.18",
   "description": "Effect-native client for the herdr socket API. Types generated from herdr's published JSON Schema; forked from @brooswit/herdr-sdk (MIT).",
   "license": "MIT",
   "repository": {

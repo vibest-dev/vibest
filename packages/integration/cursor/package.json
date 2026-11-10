@@ -1,6 +1,6 @@
 {
   "name": "@vibest/cursor",
-  "version": "0.0.1-beta.17",
+  "version": "0.0.1-beta.18",
   "private": true,
   "description": "vibest's Cursor CLI plugin: a session's turn-end result and the tool guard, loaded with `cursor-agent --plugin-dir`.",
   "license": "MIT",
