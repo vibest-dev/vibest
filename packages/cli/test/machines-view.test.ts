@@ -61,7 +61,9 @@ const viewPlugin = (s: Side) =>
                   : {
                       missing: false,
                       as: name,
-                      terminals: new Map(sessions.map((id) => [id, { machine: "local", id: `${name}/${id}` }])),
+                      terminals: new Map(
+                        [...sessions.keys()].map((id) => [id, { machine: "local", id: `${name}/${id}` }]),
+                      ),
                     }
               }),
           }),

@@ -109,7 +109,7 @@ export interface RuntimeDefinition {
   readonly doctor?: (machine: Machine, harnesses: ReadonlyArray<string>) => Effect.Effect<RuntimeReport>
   readonly attach?: (machine: Machine) => ReadonlyArray<string>
   readonly link?: () => Effect.Effect<Readonly<Record<string, string>> | undefined>
-  readonly locate?: (machine: Machine, sessions: ReadonlyArray<string>) => Effect.Effect<Located>
+  readonly locate?: (machine: Machine, sessions: ReadonlyMap<string, string>) => Effect.Effect<Located>
 }
 
 export interface RuntimeEditor {

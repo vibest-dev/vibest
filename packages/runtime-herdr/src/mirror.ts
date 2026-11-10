@@ -1,7 +1,7 @@
 import type * as VibestPlugin from "@vibest/plugin"
-import { Effect, type Scope } from "effect"
+import { Duration, Effect, Option, type Scope } from "effect"
 
-import { type Cli, DEFAULT_SESSION, mirrorOf, profiles, said, sameTarget, versionOf } from "./machines.ts"
+import { type Cli, DEFAULT_SESSION, mirrorOf, profiles, said, sameTarget } from "./machines.ts"
 import { KIND } from "./terminal-runtime.ts"
 
 type Event = VibestPlugin.MachineEvent
@@ -29,16 +29,20 @@ const addArgs = (event: Event, session: string) => [
   session,
 ]
 
+const CONNECT_BUDGET = Duration.seconds(25)
+
 export const connect = (cli: Cli, event: Event) =>
   Effect.gen(function* () {
     const there = herdrThere(event)
     if (there === undefined) return
     const session = there.link?.session
     if (session === undefined) {
-      if (there.status !== "online")
-        event.notes.push({
-          message: `${event.name}'s herdr is ${there.status}${there.reason ? `: ${there.reason}` : ""}`,
-        })
+      event.notes.push({
+        message:
+          there.status === "online"
+            ? `${event.name}'s herdr is online but its vibestd named no herdr session, so its agents cannot be shown here`
+            : `${event.name}'s herdr is ${there.status}${there.reason ? `: ${there.reason}` : ""}`,
+      })
       return
     }
     const theirs = there.link?.version
@@ -49,11 +53,9 @@ export const connect = (cli: Cli, event: Event) =>
       })
       return
     }
-    const ours = versionOf((yield* cli(["--version"])).stdout)
-    if (ours !== undefined && older(ours, MINIMUM_VERSION)) {
+    if (there.link?.detached === "no") {
       event.notes.push({
-        message: `herdr ${ours} here cannot show other machines (herdr ${MINIMUM_VERSION} or newer is needed)`,
-        fix: "herdr update",
+        message: `${event.name}'s herdr session ${session} runs as a herdr server that is not its own session leader, which herdr here cannot save as a machine; restart that session on ${event.name} once no agent runs there`,
       })
       return
     }
@@ -72,20 +74,30 @@ export const connect = (cli: Cli, event: Event) =>
     if (holder !== undefined) {
       event.notes.push({
         message: `herdr here has a machine ${label} that is another one`,
-        fix: `herdr machine rename ${holder.id} --label <another label>, then herdr ${addArgs(event, session).join(" ")}`,
+        fix: `herdr machine rename ${holder.id} --label <another label>, then vibest machine ls`,
       })
       return
     }
     const added = yield* cli(addArgs(event, session))
-    event.notes.push(
-      added.code === 0
-        ? { message: `herdr: added ${label} here; the herdr sidebar shows its agents` }
-        : {
-            message: `herdr here could not add ${label}: ${said(added)}`,
-            fix: `herdr ${addArgs(event, session).join(" ")}`,
-          },
-    )
-  }).pipe(Effect.catch((message) => Effect.sync(() => void event.notes.push({ message }))))
+    event.notes.push({
+      message:
+        added.code === 0
+          ? `herdr: added ${label} here; the herdr sidebar shows its agents`
+          : `herdr here could not add ${label}: ${said(added)}`,
+    })
+  }).pipe(
+    Effect.timeoutOption(CONNECT_BUDGET),
+    Effect.map(
+      Option.match({
+        onNone: () =>
+          void event.notes.push({
+            message: `herdr here took over ${Duration.format(CONNECT_BUDGET)} to add ${event.name}; herdr machine list shows whether it did`,
+          }),
+        onSome: () => undefined,
+      }),
+    ),
+    Effect.catch((message) => Effect.sync(() => void event.notes.push({ message }))),
+  )
 
 export const remove = (cli: Cli, event: Event) =>
   Effect.gen(function* () {

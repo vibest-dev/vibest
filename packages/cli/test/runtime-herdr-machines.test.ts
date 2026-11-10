@@ -4,8 +4,10 @@ import { type Cli, link, locate, type Profile } from "@vibest/runtime-herdr/mach
 import { connect, remove } from "@vibest/runtime-herdr/mirror"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import { agentName, fromPool, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
-import { Effect, Stream } from "effect"
+import { RuntimeUnreachable } from "@vibest/schema/session"
+import { Effect, Fiber, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/process"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -13,42 +15,38 @@ const SESSION = "11111111-2222-4333-8444-555555555555"
 
 const fake = (
   options: {
-    readonly version?: string
     readonly addFails?: string
+    readonly addHangs?: boolean
     readonly removeFails?: boolean
     readonly listFails?: boolean
-    readonly agents?: ReadonlyArray<{ readonly name: string | null; readonly pane_id: string }>
-    readonly sessions?: ReadonlyArray<{ readonly name: string; readonly socket_path: string }>
   } = {},
   catalog: Array<Profile> = [],
 ) => {
   const calls: Array<ReadonlyArray<string>> = []
   const ok = (stdout: string) => ({ code: 0, stdout, stderr: "" })
   const cli: Cli = (args) =>
-    Effect.sync(() => {
-      calls.push(args)
-      const [a, b, c] = args
-      if (a === "--version") return ok(`herdr ${options.version ?? "0.9.5"}\n`)
-      if (a === "session") return ok(JSON.stringify({ sessions: options.sessions ?? [] }))
-      if (a === "--machine")
-        return ok(JSON.stringify({ id: "cli:agent:list", result: { agents: options.agents ?? [] } }))
-      if (a === "machine" && b === "list")
-        return options.listFails ? { code: 1, stdout: "", stderr: "boom\n" } : ok(JSON.stringify(catalog))
-      if (a === "machine" && b === "add") {
-        if (options.addFails !== undefined) return { code: 1, stdout: "", stderr: options.addFails }
-        catalog.push({ id: `p${catalog.length + 1}`, label: args[4]!, target: c!, session: args[6]!, enabled: true })
-        return ok("Saved SSH machine. Remote server is ready.\n")
-      }
-      if (a === "machine" && b === "remove") {
-        if (options.removeFails) return { code: 1, stdout: "", stderr: "cannot\n" }
-        catalog.splice(
-          catalog.findIndex((p) => p.id === c),
-          1,
-        )
-        return ok("")
-      }
-      return { code: 2, stdout: "", stderr: `unexpected ${args.join(" ")}` }
-    })
+    (options.addHangs && args[1] === "add" ? Effect.never : Effect.void).pipe(
+      Effect.map(() => {
+        calls.push(args)
+        const [a, b, c] = args
+        if (a === "machine" && b === "list")
+          return options.listFails ? { code: 1, stdout: "", stderr: "boom\n" } : ok(JSON.stringify(catalog))
+        if (a === "machine" && b === "add") {
+          if (options.addFails !== undefined) return { code: 1, stdout: "", stderr: options.addFails }
+          catalog.push({ id: `p${catalog.length + 1}`, label: args[4]!, target: c!, session: args[6]!, enabled: true })
+          return ok("Saved SSH machine. Remote server is ready.\n")
+        }
+        if (a === "machine" && b === "remove") {
+          if (options.removeFails) return { code: 1, stdout: "", stderr: "cannot\n" }
+          catalog.splice(
+            catalog.findIndex((p) => p.id === c),
+            1,
+          )
+          return ok("")
+        }
+        return { code: 2, stdout: "", stderr: `unexpected ${args.join(" ")}` }
+      }),
+    )
   return { cli, calls, catalog }
 }
 
@@ -73,14 +71,60 @@ const event = (link?: Record<string, string>, extra: Partial<MachineEvent> = {})
 const ADD = ["machine", "add", "b-host", "--label", "racknerd/vibest", "--remote-session", "vibest"]
 const adds = (calls: ReadonlyArray<ReadonlyArray<string>>) => calls.filter((c) => c[0] === "machine" && c[1] === "add")
 
+const pinging = (version: string, sockets: Record<string, string>, detached?: boolean) => {
+  const asked: Array<string> = []
+  const pool = HerdrPool.of({
+    resolve: (location) =>
+      "socketPath" in location && sockets[location.socketPath] !== undefined
+        ? Effect.succeed(sockets[location.socketPath]!)
+        : Effect.fail(new RuntimeUnreachable({ session: "?", message: "no session" })),
+    client: (session) =>
+      Effect.sync(() => {
+        asked.push(session)
+        return {
+          call: () =>
+            Effect.succeed({
+              type: "pong",
+              version,
+              protocol: 1,
+              ...(detached === undefined
+                ? {}
+                : { capabilities: { live_handoff: true, detached_server_daemon: detached } }),
+            }),
+        } as unknown as Effect.Success<ReturnType<HerdrPool["Service"]["client"]>>
+      }),
+    events: Stream.empty,
+    restarts: Stream.empty,
+    sessions: Effect.succeed([]),
+  })
+  return { pool, asked }
+}
+
 describe("runtime-herdr machines: link", () => {
-  it.effect("names the default session with B's herdr version; an ambient socket names its session or nothing", () =>
-    Effect.gen(function* () {
-      const herdr = fake({ version: "0.9.6", sessions: [{ name: "work", socket_path: "/s/work.sock" }] })
-      assert.deepStrictEqual(yield* link(herdr.cli, undefined), { session: "vibest", version: "0.9.6" })
-      assert.deepStrictEqual(yield* link(herdr.cli, "/s/work.sock"), { session: "work", version: "0.9.6" })
-      assert.isUndefined(yield* link(herdr.cli, "/s/other.sock"))
-    }),
+  it.effect(
+    "the default session with its server's version over the socket; an ambient socket names its session or nothing",
+    () =>
+      Effect.gen(function* () {
+        const herdr = pinging("0.9.6", { "/s/work.sock": "work" })
+        assert.deepStrictEqual(yield* link(herdr.pool, undefined), { session: "vibest", version: "0.9.6" })
+        assert.deepStrictEqual(yield* link(herdr.pool, "/s/work.sock"), { session: "work", version: "0.9.6" })
+        assert.isUndefined(yield* link(herdr.pool, "/s/other.sock"))
+        assert.deepStrictEqual(herdr.asked, ["vibest", "work"])
+        const down = HerdrPool.of({
+          ...herdr.pool,
+          client: (session) => Effect.fail(new RuntimeUnreachable({ session, message: "not running" })),
+        })
+        assert.deepStrictEqual(yield* link(down, undefined), { session: "vibest" })
+        assert.deepStrictEqual(yield* link(pinging("0.9.5", {}, true).pool, undefined), {
+          session: "vibest",
+          version: "0.9.5",
+        })
+        assert.deepStrictEqual(yield* link(pinging("0.9.5", {}, false).pool, undefined), {
+          session: "vibest",
+          version: "0.9.5",
+          detached: "no",
+        })
+      }),
   )
 })
 
@@ -126,11 +170,11 @@ describe("runtime-herdr machines: connect", () => {
       yield* connect(herdr.cli, e)
       assert.strictEqual(adds(herdr.calls).length, 0)
       assert.include(e.notes[0]!.message, "a machine racknerd/vibest that is another one")
-      assert.include(e.notes[0]!.fix!, "herdr machine rename p9 --label")
+      assert.strictEqual(e.notes[0]!.fix, "herdr machine rename p9 --label <another label>, then vibest machine ls")
     }),
   )
 
-  it.effect("herdr's refusal becomes the note, with the add command as the fix", () =>
+  it.effect("herdr's refusal becomes the note, never with a command that could stop B's server", () =>
     Effect.gen(function* () {
       const herdr = fake({
         addFails: "remote herdr server is still running v0.9.5\nerror: remote server is not ready for saved machines\n",
@@ -138,32 +182,50 @@ describe("runtime-herdr machines: connect", () => {
       const e = event({ session: "vibest" })
       yield* connect(herdr.cli, e)
       assert.include(e.notes[0]!.message, "error: remote server is not ready for saved machines")
-      assert.strictEqual(e.notes[0]!.fix, `herdr ${ADD.join(" ")}`)
+      assert.isUndefined(e.notes[0]!.fix)
     }),
   )
 
-  it.effect("no herdr link, an old herdr on either side, or no herdr on B: a note or nothing, never an add", () =>
+  it.effect("a B session whose server is not its own session leader gets the restart note and no add", () =>
+    Effect.gen(function* () {
+      const herdr = fake()
+      const e = event({ session: "vibest", version: "0.9.5", detached: "no" })
+      yield* connect(herdr.cli, e)
+      assert.deepStrictEqual(herdr.calls, [])
+      assert.include(e.notes[0]!.message, "racknerd's herdr session vibest runs as a herdr server that is not its own")
+      assert.include(e.notes[0]!.message, "restart that session on racknerd once no agent runs there")
+      assert.isUndefined(e.notes[0]!.fix)
+    }),
+  )
+
+  it.effect("a herdr machine add slower than the hook's budget becomes a note", () =>
+    Effect.gen(function* () {
+      const e = event({ session: "vibest" })
+      const fiber = yield* Effect.forkChild(connect(fake({ addHangs: true }).cli, e))
+      yield* TestClock.adjust("26 seconds")
+      yield* Fiber.join(fiber)
+      assert.deepStrictEqual(e.notes, [
+        { message: "herdr here took over 25s to add racknerd; herdr machine list shows whether it did" },
+      ])
+    }),
+  )
+
+  it.effect("no herdr link, an old herdr on B, or no herdr on B: a note or nothing, never an add", () =>
     Effect.gen(function* () {
       const herdr = fake()
       const offline = event(undefined, { runtimes: [{ kind: "herdr", status: "offline", reason: "no server" }] })
       yield* connect(herdr.cli, offline)
       assert.deepStrictEqual(offline.notes, [{ message: "racknerd's herdr is offline: no server" }])
+      const nameless = event(undefined)
+      yield* connect(herdr.cli, nameless)
+      assert.include(nameless.notes[0]!.message, "racknerd's herdr is online but its vibestd named no herdr session")
       const theirs = event({ session: "vibest", version: "0.9.4" })
       yield* connect(herdr.cli, theirs)
       assert.include(theirs.notes[0]!.message, "racknerd's herdr 0.9.4 cannot be viewed from here")
       const none = event(undefined, { runtimes: [{ kind: "hc", status: "online" }] })
       yield* connect(herdr.cli, none)
       assert.deepStrictEqual(none.notes, [])
-      const old = fake({ version: "0.9.1" })
-      const ours = event({ session: "vibest" })
-      yield* connect(old.cli, ours)
-      assert.deepStrictEqual(ours.notes, [
-        {
-          message: "herdr 0.9.1 here cannot show other machines (herdr 0.9.5 or newer is needed)",
-          fix: "herdr update",
-        },
-      ])
-      assert.strictEqual(adds([...herdr.calls, ...old.calls]).length, 0)
+      assert.strictEqual(adds(herdr.calls).length, 0)
     }),
   )
 })
@@ -215,12 +277,13 @@ describe("runtime-herdr machines: remove", () => {
 
 describe("runtime-herdr machines: locate", () => {
   const machine = { id: "racknerd", target: "b-host", link: { session: "vibest" } }
+  const there = `vibest/w1:p3/${agentName(SESSION)}`
 
-  it.effect("missing with no profile; with one, its label and nothing over ssh when no session is asked", () =>
+  it.effect("missing with no profile; with one, its label, from herdr machine list alone", () =>
     Effect.gen(function* () {
-      assert.isTrue((yield* locate(fake().cli, machine, [SESSION])).missing)
+      assert.isTrue((yield* locate(fake().cli, machine, new Map([[SESSION, there]]))).missing)
       const herdr = fake({}, [profile({ label: "racknerd/vibest" })])
-      const found = yield* locate(herdr.cli, machine, [])
+      const found = yield* locate(herdr.cli, machine, new Map())
       assert.deepStrictEqual(
         { ...found, terminals: [...found.terminals] },
         {
@@ -233,35 +296,34 @@ describe("runtime-herdr machines: locate", () => {
     }),
   )
 
-  it.effect("each session's agent becomes <B session>/<pane>/<agent>@<label>; a missing one gets a note", () =>
-    Effect.gen(function* () {
-      const herdr = fake(
-        {
-          agents: [
-            { name: agentName(SESSION), pane_id: "w1:p3" },
-            { name: null, pane_id: "w1:p1" },
-          ],
-        },
-        [profile({ id: "p7", label: "racknerd/vibest" })],
-      )
-      const other = "99999999-2222-4333-8444-555555555555"
-      const found = yield* locate(herdr.cli, machine, [SESSION, other])
-      assert.deepStrictEqual(found.terminals.get(SESSION), {
-        machine: "local",
-        id: `vibest/w1:p3/${agentName(SESSION)}@racknerd/vibest`,
-      })
-      assert.isFalse(found.terminals.has(other))
-      assert.include(found.note!, "herdr has no agent of that session on racknerd/vibest")
-      assert.deepStrictEqual(herdr.calls.at(-1), ["--machine", "p7", "agent", "list"])
-    }),
+  it.effect(
+    "each B terminal becomes <B terminal>@<label of its herdr session>; one in an unsaved session gets a note",
+    () =>
+      Effect.gen(function* () {
+        const herdr = fake({}, [profile({ id: "p7", label: "racknerd/vibest" })])
+        const other = "99999999-2222-4333-8444-555555555555"
+        const found = yield* locate(
+          herdr.cli,
+          machine,
+          new Map([
+            [SESSION, there],
+            [other, `work/w2:p1/${agentName(other)}`],
+          ]),
+        )
+        assert.deepStrictEqual(found.terminals.get(SESSION), { machine: "local", id: `${there}@racknerd/vibest` })
+        assert.isFalse(found.terminals.has(other))
+        assert.include(found.note!, "no enabled saved machine for that agent's herdr session on racknerd")
+        assert.deepStrictEqual(herdr.calls, [["machine", "list", "--json"]])
+      }),
   )
 
   it.effect("a disabled profile and a failing herdr give a note, not missing", () =>
     Effect.gen(function* () {
-      const disabled = yield* locate(fake({}, [profile({ enabled: false })]).cli, machine, [SESSION])
+      const asked = new Map([[SESSION, there]])
+      const disabled = yield* locate(fake({}, [profile({ enabled: false })]).cli, machine, asked)
       assert.isFalse(disabled.missing)
       assert.include(disabled.note!, "herdr machine enable p0")
-      const failing = yield* locate(fake({ listFails: true }).cli, machine, [SESSION])
+      const failing = yield* locate(fake({ listFails: true }).cli, machine, asked)
       assert.isFalse(failing.missing)
       assert.include(failing.note!, "herdr machine list here: boom")
     }),

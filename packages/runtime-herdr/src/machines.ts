@@ -2,7 +2,8 @@ import type * as VibestPlugin from "@vibest/plugin"
 import { Duration, Effect, Option, Schema, Stream } from "effect"
 import { ChildProcess, type ChildProcessSpawner } from "effect/process"
 
-import { agentName } from "./terminal-runtime.ts"
+import type { HerdrPool } from "./pool.ts"
+import { parseTerminal } from "./terminal-runtime.ts"
 
 export interface Ran {
   readonly code: number
@@ -60,24 +61,6 @@ export type Profile = typeof ProfileRow.Type
 
 const decodeProfiles = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(ProfileRow)))
 
-const decodeAgents = Schema.decodeUnknownOption(
-  Schema.fromJsonString(
-    Schema.Struct({
-      result: Schema.Struct({
-        agents: Schema.Array(
-          Schema.Struct({ name: Schema.optional(Schema.NullOr(Schema.String)), pane_id: Schema.String }),
-        ),
-      }),
-    }),
-  ),
-)
-
-const decodeSessions = Schema.decodeUnknownOption(
-  Schema.fromJsonString(
-    Schema.Struct({ sessions: Schema.Array(Schema.Struct({ name: Schema.String, socket_path: Schema.String })) }),
-  ),
-)
-
 export const profiles = (cli: Cli): Effect.Effect<ReadonlyArray<Profile>, string> =>
   Effect.flatMap(cli(["machine", "list", "--json"]), (ran) => {
     const found = ran.code === 0 ? Option.getOrUndefined(decodeProfiles(ran.stdout)) : undefined
@@ -98,19 +81,18 @@ export const mirrorOf = (rows: ReadonlyArray<Profile>, target: string, session: 
 
 const NONE: ReadonlyMap<string, Terminal> = new Map()
 
-export const remoteTerminal = (session: string, pane: string, agent: string, label: string) =>
-  `${session}/${pane}/${agent}@${label}`
-
 export const locate = (
   cli: Cli,
   machine: VibestPlugin.Runtime.Machine,
-  sessions: ReadonlyArray<string>,
+  sessions: ReadonlyMap<string, string>,
 ): Effect.Effect<VibestPlugin.Runtime.Located> =>
   Effect.gen(function* () {
     const session = machine.link?.session
-    if (session === undefined || machine.target === undefined)
+    const target = machine.target
+    if (session === undefined || target === undefined)
       return { missing: false, terminals: NONE, note: `${machine.id} gave no herdr link` }
-    const profile = mirrorOf(yield* profiles(cli), machine.target, session)
+    const rows = yield* profiles(cli)
+    const profile = mirrorOf(rows, target, session)
     if (profile === undefined) return { missing: true, terminals: NONE }
     if (!profile.enabled)
       return {
@@ -119,46 +101,38 @@ export const locate = (
         as: profile.label,
         note: `herdr here has ${profile.label} disabled; fix: herdr machine enable ${profile.id}`,
       }
-    if (sessions.length === 0) return { missing: false, terminals: NONE, as: profile.label }
-    const ran = yield* cli(["--machine", profile.id, "agent", "list"])
-    if (ran.code !== 0)
-      return {
-        missing: false,
-        terminals: NONE,
-        as: profile.label,
-        note: `herdr here could not list ${profile.label}'s agents: ${said(ran)}`,
-      }
-    const agents = Option.match(decodeAgents(ran.stdout), { onNone: () => [], onSome: (r) => r.result.agents })
-    const panes = new Map(agents.map((agent) => [agent.name, agent.pane_id]))
     const terminals = new Map<string, Terminal>()
-    for (const id of sessions) {
-      const pane = panes.get(agentName(id))
-      if (pane !== undefined)
-        terminals.set(id, { machine: "local", id: remoteTerminal(session, pane, agentName(id), profile.label) })
+    for (const [id, there] of sessions) {
+      const parsed = parseTerminal({ machine: "local", id: there })
+      const shown = parsed === undefined ? undefined : mirrorOf(rows, target, parsed.session)
+      if (shown?.enabled === true) terminals.set(id, { machine: "local", id: `${there}@${shown.label}` })
     }
     return {
       missing: false,
       terminals,
       as: profile.label,
-      ...(terminals.size < sessions.length
-        ? { note: `herdr has no agent of that session on ${profile.label} (it may have exited there)` }
+      ...(terminals.size < sessions.size
+        ? { note: `herdr here has no enabled saved machine for that agent's herdr session on ${machine.id}` }
         : {}),
     }
   }).pipe(Effect.catch((note) => Effect.succeed({ missing: false, terminals: NONE, note })))
 
 export const DEFAULT_SESSION = "vibest"
 
-export const link = (cli: Cli, ambientSocket: string | undefined) =>
+export const link = (pool: HerdrPool["Service"], ambientSocket: string | undefined) =>
   Effect.gen(function* () {
     const session =
       ambientSocket === undefined
         ? DEFAULT_SESSION
-        : Option.getOrUndefined(decodeSessions((yield* cli(["session", "list", "--json"])).stdout))?.sessions.find(
-            (row) => row.socket_path === ambientSocket,
-          )?.name
+        : yield* pool.resolve({ socketPath: ambientSocket }).pipe(Effect.orElseSucceed(() => undefined))
     if (session === undefined) return undefined
-    const version = versionOf((yield* cli(["--version"])).stdout)
-    return { session, ...(version === undefined ? {} : { version }) }
+    const pong = yield* pool.client(session).pipe(
+      Effect.flatMap((h) => h.call("ping", {})),
+      Effect.orElseSucceed(() => undefined),
+    )
+    return {
+      session,
+      ...(pong === undefined ? {} : { version: pong.version }),
+      ...(pong?.capabilities?.detached_server_daemon === false ? { detached: "no" } : {}),
+    }
   })
-
-export const versionOf = (text: string) => /\d+\.\d+\.\d+/.exec(text)?.[0]
