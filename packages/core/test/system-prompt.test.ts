@@ -2,9 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { coordinatorSystemPrompt, projectText, sessionSystemPrompt } from "@vibest/core/system-prompt"
 import { Effect, FileSystem, Path } from "effect"
 
-import * as Platform from "#platform"
-
-import { tempDirectory } from "./fakes.ts"
+import { tempDirectory } from "./lib/directory.ts"
+import * as Platform from "./platform/bun.ts"
 
 const promptOf = (dir: string, text: { preferences: string; memories: string }) =>
   sessionSystemPrompt({ id: "a", projectDir: dir, vibest: ["vibest"], ...text })

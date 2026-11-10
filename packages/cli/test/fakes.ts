@@ -6,20 +6,32 @@ import { Db } from "@vibest/core/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { Git } from "@vibest/core/git"
-import { Harness, Harnesses, HarnessUnavailable, makeHarnesses } from "@vibest/core/harness"
-import type { HarnessDefinition, HarnessesShape, RuntimeDefinition, RuntimesShape } from "@vibest/core/host"
+import { Harness, Harnesses } from "@vibest/core/harness"
+import type { HarnessDefinition, RuntimeDefinition, RuntimesShape } from "@vibest/core/host"
 import { VibestdIdentity } from "@vibest/core/identity"
 import { MachineTransport } from "@vibest/core/machines"
-import { normalizeModels } from "@vibest/core/models"
 import { Layout } from "@vibest/core/paths"
 import { type Candidate, makeHost, Plugins } from "@vibest/core/plugins"
-import { type Liveness, ProcessPlatform, Processes } from "@vibest/core/processes"
+import { ProcessPlatform, Processes } from "@vibest/core/processes"
 import { SshHosts } from "@vibest/core/repository-url"
 import { turnEndFrom } from "@vibest/core/results"
 import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { systemPromptRoot } from "@vibest/core/system-prompt"
+import { projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
+import { FakeProcesses } from "@vibest/core/test/lib/fake-processes"
+import {
+  CLAUDE,
+  CURSOR,
+  HARNESSES,
+  PI,
+  harnessLayer,
+  harnessesLayer,
+  noHostEnv,
+  runtimesLayer,
+  subscriptionsLayer,
+} from "@vibest/core/test/lib/harnesses"
 import * as VibestPlugin from "@vibest/plugin"
 import type { DaemonIdentity } from "@vibest/protocol/rpc"
 import { choicePlugin } from "@vibest/runtime-herdr/choice"
@@ -35,7 +47,6 @@ import {
   type Duration,
   Effect,
   FileSystem,
-  HashMap,
   Layer,
   Option,
   Path,
@@ -55,7 +66,20 @@ import * as Platform from "#platform"
 import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime, type FakeRuntimeOptions, KIND } from "./fake-runtime.ts"
 
-export { FakeGit, FakeRuntime }
+export {
+  CLAUDE,
+  CURSOR,
+  FakeGit,
+  FakeProcesses,
+  FakeRuntime,
+  HARNESSES,
+  PI,
+  harnessesLayer,
+  projectOf,
+  runtimesLayer,
+  subscriptionsLayer,
+  tempDirectory,
+}
 
 export const TEST_HERDR = "herdr"
 
@@ -147,18 +171,6 @@ export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS e
     (SELECT r.content FROM inbox r WHERE r.result_event_id = te.id) AS output
   FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
 
-export const projectOf = (directory: string) =>
-  Effect.gen(function* () {
-    const db = yield* Db
-    return (yield* db.projectAt(directory))?.id ?? (yield* db.createProject(directory, []))
-  })
-
-export const tempDirectory = (prefix: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    return yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix }))
-  }).pipe(Effect.orDie)
-
 const STDIN_FROM_FILE = 'f=$1; shift; exec "$@" <"$f"'
 
 export const withStdin = (input: string, command: string, args: ReadonlyArray<string>) =>
@@ -201,122 +213,6 @@ export const makeRepository = Effect.gen(function* () {
   return root
 }).pipe(Effect.orDie)
 
-export class FakeProcesses extends Context.Service<
-  FakeProcesses,
-  {
-    readonly set: (pid: number, liveness: Liveness) => Effect.Effect<void>
-    readonly setCwdUsers: (users: ReadonlyArray<number> | undefined) => Effect.Effect<void>
-    readonly probed: Effect.Effect<ReadonlyArray<number>>
-    readonly signaled: Effect.Effect<ReadonlyArray<number>>
-    readonly setSignalDenied: (denied: boolean) => Effect.Effect<void>
-    readonly setSignalIgnored: (ignored: boolean) => Effect.Effect<void>
-    readonly holdSignal: () => Effect.Effect<{
-      readonly reached: Effect.Effect<void>
-      readonly release: () => Effect.Effect<void>
-    }>
-    readonly holdCwd: () => Effect.Effect<{
-      readonly reached: Effect.Effect<void>
-      readonly release: () => Effect.Effect<void>
-    }>
-    readonly setCwdDelay: (delay: Duration.Input) => Effect.Effect<void>
-    readonly cwdListings: Effect.Effect<number>
-    readonly processes: Processes["Service"]
-  }
->()("test/FakeProcesses") {
-  static readonly layer = Layer.effect(
-    FakeProcesses,
-    Effect.gen(function* () {
-      const states = yield* Ref.make(HashMap.empty<number, Liveness>())
-      const users = yield* Ref.make<ReadonlyArray<number> | undefined>([])
-      const cwdDelay = yield* Ref.make<Duration.Input>(0)
-      const listings = yield* Ref.make(0)
-      const probed = yield* Ref.make<ReadonlyArray<number>>([])
-      const signaled = yield* Ref.make<ReadonlyArray<number>>([])
-      const denied = yield* Ref.make(false)
-      const ignored = yield* Ref.make(false)
-      const signalGate = yield* Ref.make(
-        Option.none<{ readonly reached: Deferred.Deferred<void>; readonly release: Deferred.Deferred<void> }>(),
-      )
-      const cwdGate = yield* Ref.make(
-        Option.none<{ readonly reached: Deferred.Deferred<void>; readonly release: Deferred.Deferred<void> }>(),
-      )
-      const holdNext = (gate: typeof cwdGate) =>
-        Effect.gen(function* () {
-          const reached = yield* Deferred.make<void>()
-          const release = yield* Deferred.make<void>()
-          yield* Ref.set(gate, Option.some({ reached, release }))
-          return {
-            reached: Deferred.await(reached),
-            release: () => Deferred.succeed(release, undefined).pipe(Effect.asVoid),
-          }
-        })
-      return FakeProcesses.of({
-        set: (pid, liveness) => Ref.update(states, HashMap.set(pid, liveness)),
-        setCwdUsers: (u) => Ref.set(users, u),
-        cwdListings: Ref.get(listings),
-        probed: Ref.get(probed),
-        signaled: Ref.get(signaled),
-        setSignalDenied: (d) => Ref.set(denied, d),
-        setSignalIgnored: (i) => Ref.set(ignored, i),
-        holdSignal: () => holdNext(signalGate),
-        holdCwd: () => holdNext(cwdGate),
-        setCwdDelay: (d) => Ref.set(cwdDelay, d),
-        processes: Processes.of({
-          liveness: (pid) =>
-            Ref.update(probed, (p) => [...p, pid]).pipe(
-              Effect.andThen(Ref.get(states)),
-              Effect.map((m) => Option.getOrElse(HashMap.get(m, pid), (): Liveness => "exited")),
-            ),
-          terminate: (pid) =>
-            Effect.gen(function* () {
-              const gate = yield* Ref.modify(
-                signalGate,
-                (g) =>
-                  [
-                    g,
-                    Option.none<{
-                      readonly reached: Deferred.Deferred<void>
-                      readonly release: Deferred.Deferred<void>
-                    }>(),
-                  ] as const,
-              )
-              if (Option.isSome(gate)) {
-                yield* Deferred.succeed(gate.value.reached, undefined)
-                yield* Deferred.await(gate.value.release)
-                for (let i = 0; i < 8; i++) yield* Effect.yieldNow
-              }
-              if (yield* Ref.get(denied)) return "denied" as const
-              yield* Ref.update(signaled, (s) => [...s, pid])
-              if (!(yield* Ref.get(ignored))) yield* Ref.update(states, HashMap.set(pid, "exited" as Liveness))
-              return "sent" as const
-            }),
-          cwdUsers: () =>
-            Effect.gen(function* () {
-              yield* Ref.update(listings, (n) => n + 1)
-              const gate = yield* Ref.modify(
-                cwdGate,
-                (g) =>
-                  [
-                    g,
-                    Option.none<{
-                      readonly reached: Deferred.Deferred<void>
-                      readonly release: Deferred.Deferred<void>
-                    }>(),
-                  ] as const,
-              )
-              if (Option.isSome(gate)) {
-                yield* Deferred.succeed(gate.value.reached, undefined)
-                yield* Deferred.await(gate.value.release)
-              }
-              yield* Effect.sleep(yield* Ref.get(cwdDelay))
-              return yield* Ref.get(users)
-            }),
-        }),
-      })
-    }),
-  )
-}
-
 export interface TestOptions extends FakeRuntimeOptions {
   readonly hooked?: ReadonlyArray<string>
   readonly unusable?: ReadonlyArray<string>
@@ -339,148 +235,8 @@ export interface TestOptions extends FakeRuntimeOptions {
 
 const noTransport: MachineTransport["Service"] = () => Effect.fail(new Error("no machine transport in this test"))
 
-const opt = (flag: string, value: string | null) => (value ? [flag, value] : [])
-
-const providerModel = (provider: string | null, model: string | null) =>
-  model ? [...opt("--provider", provider), "--model", model] : []
-
-export const PI: HarnessDefinition = {
-  id: "pi",
-  binary: "pi",
-  ownSessionId: true,
-  systemPromptInPrompt: false,
-  interruptKey: "esc",
-  resultField: "text",
-  inbox: "subscribe",
-  ready: "integration",
-  launchArgs: (i) => [
-    "--session-id",
-    i.sessionId!,
-    "--append-system-prompt",
-    i.systemPromptFile,
-    "-e",
-    `${i.pluginDir}/extension.mjs`,
-    ...providerModel(i.provider, i.model),
-  ],
-  coordinatorArgs: (i) => [
-    ...opt("--session-id", i.sessionId),
-    "--system-prompt",
-    i.systemPromptFile,
-    "-e",
-    `${i.pluginDir}/extension.mjs`,
-    ...providerModel(i.provider, i.model),
-  ],
-  models: { args: () => [], answer: () => undefined },
-  turnEnd: (event, coordinator) =>
-    coordinator || event.type !== "agent_settled"
-      ? undefined
-      : { result: { text: typeof event.text === "string" ? event.text : "", error: "", aborted: false } },
-  userPrompt: (event, coordinator) =>
-    coordinator || event.type !== "input" || typeof event.text !== "string" || event.text.trim() === ""
-      ? undefined
-      : { text: event.text },
-}
-
-const noProvider = (harness: string) => (provider: string | null) =>
-  provider ? `${harness} has no provider option` : undefined
-
-export const CLAUDE: HarnessDefinition = {
-  id: "claude",
-  binary: "claude",
-  ownSessionId: true,
-  systemPromptInPrompt: false,
-  interruptKey: "esc",
-  resultField: "last_assistant_message",
-  inbox: "poll",
-  ready: "integration",
-  checkProvider: noProvider("claude"),
-  launchArgs: (i) => [
-    ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),
-    "--append-system-prompt-file",
-    i.systemPromptFile,
-    "--plugin-dir",
-    i.pluginDir,
-    ...opt("--model", i.model),
-  ],
-  coordinatorArgs: (i) => [
-    ...opt("--resume", i.sessionId),
-    "--append-system-prompt-file",
-    i.systemPromptFile,
-    "--plugin-dir",
-    i.pluginDir,
-    ...opt("--model", i.model),
-  ],
-  models: { args: () => [], answer: () => undefined },
-  turnEnd: (event, coordinator) =>
-    coordinator || event.hook_event_name !== "TurnComplete"
-      ? undefined
-      : {
-          result:
-            event.reason === "answer"
-              ? event
-              : event.reason === "aborted"
-                ? {
-                    ...event,
-                    aborted: true,
-                    error: "interrupted",
-                    error_details: "the turn was stopped in its terminal (Esc) before it ended",
-                  }
-                : { ...event, error: "error", error_details: "the turn ended on an API error" },
-        },
-  userPrompt: (event, coordinator) =>
-    coordinator || event.hook_event_name !== "PromptSubmit" || typeof event.text !== "string" || !event.text.trim()
-      ? undefined
-      : { text: event.text },
-}
-
-export const CURSOR: HarnessDefinition = {
-  id: "cursor",
-  binary: "cursor-agent",
-  ownSessionId: false,
-  systemPromptInPrompt: true,
-  interruptKey: "ctrl+c",
-  resultField: "text",
-  ready: "runtime",
-  checkProvider: noProvider("cursor"),
-  launchArgs: (i) => [
-    ...(i.resume && i.sessionId ? [`--resume=${i.sessionId}`] : []),
-    "--plugin-dir",
-    i.pluginDir,
-    ...opt("--model", i.model),
-  ],
-  models: { args: () => [], answer: () => undefined },
-  guardAnswer: (reason) =>
-    reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
-  conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),
-  turnEnd: (event, coordinator) =>
-    !coordinator && event.hook_event_name === "afterAgentResponse" ? { result: event } : undefined,
-  userPrompt: (event, coordinator) => {
-    if (coordinator) return undefined
-    if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }
-    return event.hook_event_name === "beforeSubmitPrompt" && typeof event.prompt === "string" && event.prompt.trim()
-      ? { text: event.prompt }
-      : undefined
-  },
-}
-
-export const HARNESSES: ReadonlyArray<HarnessDefinition> = [PI, CLAUDE, CURSOR]
-
-export const harnessesFrom = (
-  definitions: ReadonlyArray<HarnessDefinition> = HARNESSES,
-): Effect.Effect<HarnessesShape, never, Scope.Scope> =>
-  Effect.tap(makeHarnesses, (harnesses) =>
-    harnesses.transform((editor) => definitions.forEach((definition) => editor.add(definition))),
-  )
-
-export const noHostEnv = Layer.succeed(HostEnv, { drop: () => {} })
-
 export const processesOn = (platform: ProcessPlatform["Service"]) =>
   Processes.layer.pipe(Layer.provide(Layer.succeed(ProcessPlatform, platform)))
-
-export const runtimesLayer = Runtimes.layer.pipe(Layer.provide(noHostEnv))
-
-export const harnessesLayer = (definitions: ReadonlyArray<HarnessDefinition> = HARNESSES) =>
-  Layer.effect(Harnesses, harnessesFrom(definitions))
 
 export const callerPlugin = (id: string, caller: VibestPlugin.Runtime.RuntimeCaller) =>
   VibestPlugin.Plugin.define({
@@ -501,31 +257,6 @@ export const runtimesFrom = (
   Effect.tap(makeRuntimes, (runtimes) =>
     runtimes.transform((editor) => definitions.forEach((definition) => editor.add(definition))),
   )
-
-const harnessOf = (options: TestOptions) =>
-  Layer.succeed(Harness, {
-    available: (id) => Effect.succeed(!(options.missingBinary ?? []).includes(id)),
-    plugin: (id) =>
-      (options.hooked ?? (options.harnesses ?? HARNESSES).map((h) => h.id)).includes(id)
-        ? Effect.succeed(`/vibest/harnesses/${id}`)
-        : Effect.fail(
-            new HarnessUnavailable({
-              harness: id,
-              message: `vibest's ${id} plugin is missing: /vibest/harnesses/${id}`,
-            }),
-          ),
-    models: (id, provider) =>
-      options.unusable?.includes(id)
-        ? Effect.fail(new HarnessUnavailable({ harness: id, message: "Not logged in" }))
-        : Effect.succeed(
-            normalizeModels(id, provider, [
-              { model: "fake-model", default: true },
-              ...["fake-strong", ...(options.models ?? [])].map((model) => ({ model, default: false })),
-            ]),
-          ),
-  })
-
-export const subscriptionsLayer = Subscriptions.testLayer.pipe(Layer.provide(harnessOf({})))
 
 type PluginEntry = NonNullable<TestOptions["plugins"]>[number]
 
@@ -644,7 +375,7 @@ const over = (options: TestOptions) => {
     PlatformNode.layout.replace(home),
     PlatformNode.sqlClient.replace(Platform.sqlite(":memory:")),
     Runtimes.node.replace(runtimes),
-    Harness.node.replace(harnessOf(options)),
+    Harness.node.replace(harnessLayer(options)),
     Harnesses.node.replace(harnessesLayer(options.harnesses)),
     Processes.node.replace(processes),
     Git.node.replace(fakeGit),

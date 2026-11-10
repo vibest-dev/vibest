@@ -1,15 +1,16 @@
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe } from "@effect/vitest"
 import { Bus, type EngineEvent, type StoredEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
-import { Cause, Effect, Exit, Layer, PubSub } from "effect"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
+import { Cause, Effect, Exit, PubSub } from "effect"
 import { SqlClient } from "effect/sql"
 
-import * as Platform from "#platform"
+import { projectOf } from "./lib/directory.ts"
+import { testEffect } from "./lib/effect.ts"
+import { compile } from "./lib/layers.ts"
 
-import { projectOf } from "./fakes.ts"
-
-const sqlite = Platform.sqlite(":memory:")
-const dbLayer = Layer.merge(Db.layer.pipe(Layer.provideMerge(sqlite)), Bus.layer).pipe(Layer.provide(Bus.layer))
+const it = testEffect(compile(LayerNode.group([Db.node, Bus.node, PlatformNode.sqlClient])))
 
 const session = {
   id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -34,7 +35,7 @@ const session = {
 const isStored = (event: EngineEvent): event is StoredEvent => "id" in event
 
 describe("bus", () => {
-  it.effect("a commit publishes in id order", () =>
+  it("a commit publishes in id order", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const db = yield* Db
@@ -49,10 +50,9 @@ describe("bus", () => {
         )
         assert.isBelow(published[0]!.id, published[1]!.id)
       }),
-    ).pipe(Effect.provide(dbLayer)),
-  )
+    ))
 
-  it.effect("a rollback publishes nothing", () =>
+  it("a rollback publishes nothing", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const db = yield* Db
@@ -68,10 +68,9 @@ describe("bus", () => {
         assert.deepStrictEqual(yield* PubSub.takeUpTo(sub, 10), [])
         assert.deepStrictEqual(yield* sql<{ n: number }>`SELECT count(*) AS n FROM event`, before)
       }),
-    ).pipe(Effect.provide(dbLayer)),
-  )
+    ))
 
-  it.effect("a nested tx publishes once, after the outer commit", () =>
+  it("a nested tx publishes once, after the outer commit", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const db = yield* Db
@@ -94,10 +93,9 @@ describe("bus", () => {
           rows.map((row) => ["inbox.status", row.id, "failed"]),
         )
       }),
-    ).pipe(Effect.provide(dbLayer)),
-  )
+    ))
 
-  it.effect("a start that opens the terminal publishes the ready reports it carries over", () =>
+  it("a start that opens the terminal publishes the ready reports it carries over", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const db = yield* Db
@@ -115,6 +113,5 @@ describe("bus", () => {
         assert.deepInclude(published[1]!.data, { pid: 4242 })
         assert.strictEqual((yield* db.getSession(session.id))!.metadata.pid, 4242)
       }),
-    ).pipe(Effect.provide(dbLayer)),
-  )
+    ))
 })

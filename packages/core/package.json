@@ -5,7 +5,9 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    "./*": "./src/*.ts"
+    "./*": "./src/*.ts",
+    "./test/lib/*": "./test/lib/*.ts",
+    "./test/platform/*": "./test/platform/*.ts"
   },
   "scripts": {
     "typecheck": "tsrs --noEmit --fast",
@@ -17,5 +19,9 @@
     "@vibest/protocol": "workspace:*",
     "@vibest/schema": "workspace:*",
     "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "catalog:",
+    "@effect/sql-sqlite-bun": "catalog:"
   }
 }

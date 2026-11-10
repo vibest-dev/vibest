@@ -1,11 +1,12 @@
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { AgentRefused, Plugin } from "@vibest/plugin"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 
-import glmOnly from "../../../packages/plugin/examples/glm-only.ts"
-import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./fakes.ts"
+import glmOnly from "../../plugin/examples/glm-only.ts"
+import { testEffect } from "./lib/effect.ts"
+import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
 
 const candidate = (id: string, plugin: Plugin.Plugin, options: Record<string, unknown> = {}): Candidate => ({
   source: id,
@@ -49,63 +50,60 @@ const failed = {
   harnesses: usableHarnesses,
 }
 
+const pluginHost = Layer.provideMerge(
+  Layer.provideMerge(Layer.provideMerge(subscriptionsLayer, harnessesLayer()), runtimesLayer),
+  Bus.layer,
+)
+
+const it = testEffect(pluginHost)
+
 const run = <A, E, R>(plugins: ReadonlyArray<Candidate>, f: (p: Plugins["Service"]) => Effect.Effect<A, E, R>) =>
-  Plugins.make(plugins).pipe(
-    Effect.flatMap(f),
-    Effect.scoped,
-    Effect.provide(subscriptionsLayer),
-    Effect.provide(harnessesLayer()),
-    Effect.provide(runtimesLayer),
-    Effect.provide(Bus.layer),
-  )
+  Plugins.make(plugins).pipe(Effect.flatMap(f), Effect.scoped)
 
 describe("plugin host: one event mutated in place in plugin order, refusals and failures always surface, a trace of who changed what", () => {
-  it.effect(
-    "callbacks mutate one event in place, in plugin order: a later plugin sees and overwrites what an earlier one wrote",
-    () => {
-      const seen: Array<string | undefined> = []
-      return run(
-        [
-          candidate(
-            "A",
-            Plugin.define({
-              id: "A",
-              effect: (ctx) => ctx.agent.hook("start.before", (e) => Effect.sync(() => (e.model = "a"))),
-            }),
-          ),
-          candidate(
-            "B",
-            Plugin.define({
-              id: "B",
-              effect: (ctx) =>
-                ctx.agent.hook("start.before", (e) =>
-                  Effect.sync(() => {
-                    seen.push(e.model)
-                    e.model = "b"
-                  }),
-                ),
-            }),
-          ),
-        ],
-        (p) =>
-          Effect.gen(function* () {
-            const d = yield* p.start({ ...start, harness: "claude", model: "requested" })
-            assert.strictEqual(d.model, "b")
-            assert.deepStrictEqual(seen, ["a"])
-            assert.deepStrictEqual(d.decidedBy, { model: "B" })
-            assert.deepStrictEqual(
-              d.trace.map((t) => [t.plugin, t.outcome, t.changes]),
-              [
-                ["A", "ok", [{ field: "model", from: "requested", to: "a" }]],
-                ["B", "ok", [{ field: "model", from: "a", to: "b", overwrote: "A" }]],
-              ],
-            )
+  it("callbacks mutate one event in place, in plugin order: a later plugin sees and overwrites what an earlier one wrote", () => {
+    const seen: Array<string | undefined> = []
+    return run(
+      [
+        candidate(
+          "A",
+          Plugin.define({
+            id: "A",
+            effect: (ctx) => ctx.agent.hook("start.before", (e) => Effect.sync(() => (e.model = "a"))),
           }),
-      )
-    },
-  )
+        ),
+        candidate(
+          "B",
+          Plugin.define({
+            id: "B",
+            effect: (ctx) =>
+              ctx.agent.hook("start.before", (e) =>
+                Effect.sync(() => {
+                  seen.push(e.model)
+                  e.model = "b"
+                }),
+              ),
+          }),
+        ),
+      ],
+      (p) =>
+        Effect.gen(function* () {
+          const d = yield* p.start({ ...start, harness: "claude", model: "requested" })
+          assert.strictEqual(d.model, "b")
+          assert.deepStrictEqual(seen, ["a"])
+          assert.deepStrictEqual(d.decidedBy, { model: "B" })
+          assert.deepStrictEqual(
+            d.trace.map((t) => [t.plugin, t.outcome, t.changes]),
+            [
+              ["A", "ok", [{ field: "model", from: "requested", to: "a" }]],
+              ["B", "ok", [{ field: "model", from: "a", to: "b", overwrote: "A" }]],
+            ],
+          )
+        }),
+    )
+  })
 
-  it.effect("a refusal stops the chain with its reason and the plugin id; later plugins never run", () =>
+  it("a refusal stops the chain with its reason and the plugin id; later plugins never run", () =>
     run(
       [
         candidate(
@@ -136,10 +134,9 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
             ],
           )
         }),
-    ),
-  )
+    ))
 
-  it.effect("a JS throw, or a typed failure that is not AgentRefused, is a refusal in the host's words", () =>
+  it("a JS throw, or a typed failure that is not AgentRefused, is a refusal in the host's words", () =>
     Effect.gen(function* () {
       yield* run(
         [
@@ -174,10 +171,9 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
             assert.deepInclude(refused, { plugin: "nope", reason: "plugin nope crashed: bad option" })
           }),
       )
-    }),
-  )
+    }))
 
-  it.effect("a crash in agent.fail fails the operation instead of moving", () =>
+  it("a crash in agent.fail fails the operation instead of moving", () =>
     run(
       [
         candidate(
@@ -197,10 +193,9 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
           assert.deepInclude(error, { _tag: "HookFailed", message: "plugin mover crashed: moved?" })
           assert.strictEqual((yield* p.list).find((q) => q.id === "mover")!.crashed, 1)
         }),
-    ),
-  )
+    ))
 
-  it.effect("glm-only: subagents run on Pi with its provider and model; the main agent keeps its harness", () =>
+  it("glm-only: subagents run on Pi with its provider and model; the main agent keeps its harness", () =>
     run([candidate("glm-only", glmOnly, { provider: "zai", model: "glm-5.3" })], (p) =>
       Effect.gen(function* () {
         const s = yield* p.start({ ...start, harness: "claude" })
@@ -209,6 +204,5 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
         const m = yield* p.start({ ...start, agentType: "main", harness: "claude" })
         assert.deepStrictEqual([m.harness, m.provider, m.model], ["claude", undefined, undefined])
       }),
-    ),
-  )
+    ))
 })
