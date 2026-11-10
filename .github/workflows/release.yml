@@ -3,11 +3,14 @@ name: Release
 # The only way to release (.agents/rules/release.md, which also lists the GitHub and npm settings it needs). Trunk-based:
 # main never carries a release version; its package.json files hold the development version 0.0.1-dev, and the tag
 # v<version> is the only record of a release. The owner starts this workflow on main from the Actions page, or
-#   gh workflow run release-beta.yml -R vibest-dev/vibest --ref main [-f version=<exact version>]
-# version: empty for the next beta after the highest v<x.y.z>-beta.<n> tag, or an exact version. The run sets it in every
-# package.json of its own checkout only. A CHANGELOG.md section for it is optional.
-# Started by hand, not by a push to main: the owner chooses when.
-# It never pushes to main. build checks the version is not released yet, runs the release gate on main's commit (the
+#   gh workflow run release.yml -R vibest-dev/vibest --ref main [-f commit=<sha>] [-f version=<exact version>]
+# commit: the known-good commit of main to release, empty for main's head; it must be an ancestor of main. Every job
+# builds, verifies, tags and publishes exactly that commit. version: empty for the next beta after the highest
+# v<x.y.z>-beta.<n> tag, or an exact beta version. The run sets it in every package.json of its own checkout only. A
+# CHANGELOG.md section for it is optional. Beta only for now (.agents/rules/release.md says what stable will need).
+# Started by hand, not by a push to main: the owner chooses when. The file name stays release.yml: npm trusted
+# publishing binds each package to it.
+# It never pushes to main. build checks the version is not released yet, runs the release gate on that commit (the
 # whole of pnpm verify but the macOS-only H4, which keeps the linux-x64 curl archive it checked), and packs and checks
 # the npm tarballs. darwin (macos-latest) runs pnpm verify H4 on the same commit (keeping the darwin-arm64 curl archive
 # it checked) and checks the same tarballs. Both record the SHA-256 of every file they keep. publish waits for the
@@ -24,8 +27,13 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      commit:
+        description: "The commit of main to release (an ancestor of main); empty: the head of main"
+        required: false
+        default: ""
+        type: string
       version:
-        description: "An exact version (0.0.1-beta.20); empty: the next beta after the highest v*-beta.N tag"
+        description: "An exact beta version (0.0.1-beta.20); empty: the next beta after the highest v*-beta.N tag"
         required: false
         default: ""
         type: string
@@ -65,6 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     outputs:
+      sha: ${{ steps.commit.outputs.sha }}
       version: ${{ steps.version.outputs.version }}
       dist_tag: ${{ steps.version.outputs.dist_tag }}
     steps:
@@ -73,8 +82,24 @@ jobs:
         run: |
           echo "::error::a release runs on main, not $GITHUB_REF; start it with --ref main, or set dry_run"
           exit 1
+      # The commit every job builds, verifies, tags and publishes: the input, which must be on main, or the run's own.
+      - name: Commit
+        id: commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT: ${{ inputs.commit }}
+        run: |
+          if [ -z "$INPUT" ]; then echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"; exit 0; fi
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$INPUT" --jq .sha)
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$sha...main" --jq .status)
+          case "$status" in
+            identical | ahead) ;;
+            *) echo "::error::$INPUT ($sha) is not an ancestor of main (main is $status of it)"; exit 1 ;;
+          esac
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
+          ref: ${{ steps.commit.outputs.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -160,16 +185,18 @@ jobs:
           same "$(node -p 'require("./packages/cli/package.json").version')"
           if [ -n "$INPUT" ]; then
             version=$INPUT
-            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then echo "::error::$version is not a version"; exit 1; fi
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+              echo "::error::$version is not a beta version (x.y.z-beta.n); stable releases are not supported yet"; exit 1
+            fi
           else
             last=$(git ls-remote --tags "$repo" 'v*-beta.*' \
               | sed -n 's#^[0-9a-f]*\trefs/tags/v\([0-9]*\.[0-9]*\.[0-9]*-beta\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)
             if [ -z "$last" ]; then echo "::error::no v<x.y.z>-beta.<n> tag to follow; pass -f version=<version>"; exit 1; fi
             version="${last%.*}.$((${last##*.} + 1))"
           fi
-          # The beta is released under npm's `beta` and as GitHub's Latest release (the installer and `vibest update`
+          # Beta only for now: under npm's `beta`, and as GitHub's Latest release (the installer and `vibest update`
           # follow Latest).
-          case "$version" in *-*) dist_tag=beta ;; *) dist_tag=latest ;; esac
+          dist_tag=beta
           # Released already: a dry run only warns, so it can run the gates on any branch. A release that stopped
           # partway is finished by re-running its publish job, not by a new run, which would build new bytes.
           level=error
@@ -193,7 +220,7 @@ jobs:
           git diff HEAD | shasum -a 256 > "$RUNNER_TEMP/versioned-tree"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
-          echo "Release $version of $GITHUB_SHA under the npm dist-tag $dist_tag" >> "$GITHUB_STEP_SUMMARY"
+          echo "Release $version of $(git rev-parse HEAD) under the npm dist-tag $dist_tag" >> "$GITHUB_STEP_SUMMARY"
 
       # The release gate: the whole of pnpm verify on the commit to release (build, typecheck and lint, unit tests, the
       # curl and npm installs, and every E2E check on each, --strict), --no-cache so every check runs. H4 is macOS-only:
@@ -263,6 +290,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.build.outputs.sha }}
           persist-credentials: false
       # The version build set, in this checkout only.
       - name: Version
@@ -318,6 +346,7 @@ jobs:
     env:
       VERSION: ${{ needs.build.outputs.version }}
       DIST_TAG: ${{ needs.build.outputs.dist_tag }}
+      SHA: ${{ needs.build.outputs.sha }}
     # Every step is safe to re-run after a release that stopped partway: it keeps what is already done when it is exactly
     # what this run would do, and fails on anything else.
     steps:
@@ -337,17 +366,18 @@ jobs:
           found=$(find npm github -type f | LC_ALL=C sort)
           if [ "$listed" != "$found" ]; then echo "::error::the artifacts hold files no job checked"; diff <(echo "$listed") <(echo "$found"); exit 1; fi
 
-      # The commit the gates ran on (GITHUB_SHA, the run's commit on main), with GITHUB_TOKEN: nothing is pushed to a
-      # branch. CHANGELOG.md comes from it too.
+      # The commit the gates ran on, with GITHUB_TOKEN: nothing is pushed to a branch. CHANGELOG.md comes from it too.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.sha }}
       - name: Tag v${{ needs.build.outputs.version }}
         run: |
           tagged=$(git ls-remote --tags origin "v$VERSION*" \
             | awk -v r="refs/tags/v$VERSION" '{ s[$2] = $1 } END { print (r "^{}") in s ? s[r "^{}"] : s[r] }')
-          if [ "$tagged" = "$GITHUB_SHA" ]; then echo "v$VERSION already tags $GITHUB_SHA; kept"; exit 0; fi
-          if [ -n "$tagged" ]; then echo "::error::v$VERSION tags $tagged, not $GITHUB_SHA"; exit 1; fi
+          if [ "$tagged" = "$SHA" ]; then echo "v$VERSION already tags $SHA; kept"; exit 0; fi
+          if [ -n "$tagged" ]; then echo "::error::v$VERSION tags $tagged, not $SHA"; exit 1; fi
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            tag --annotate --message "v$VERSION" "v$VERSION" "$GITHUB_SHA"
+            tag --annotate --message "v$VERSION" "v$VERSION" "$SHA"
           git push origin "refs/tags/v$VERSION"
 
       # Trusted publishing (OIDC, no token) needs npm 11.5.1 or later.

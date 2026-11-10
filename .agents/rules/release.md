@@ -7,16 +7,18 @@
    `0.0.0-old`) sort before it. Builds from different commits of `main` share it: like any two builds of one version,
    they do not tell each other apart. When the release line moves past it (a `0.0.2` beta, or `0.0.1` itself), raise
    it on `main` in an ordinary pull request (`0.0.2-dev`); that is not a release.
-2. **The Release workflow** (`.github/workflows/release-beta.yml`) is the only way to release, started by the owner on
-   `main` from the Actions page or with `gh workflow run release-beta.yml -R vibest-dev/vibest --ref main`
-   (`-f version=<exact version>`; without it, the next beta after the highest `v<x.y.z>-beta.<n>` tag). It sets that
-   version in every package.json of its own checkout only and fails when the version is already tagged or on npm. It
+2. **The Release workflow** (`.github/workflows/release.yml`) is the only way to release, started by the owner on
+   `main` from the Actions page or with `gh workflow run release.yml -R vibest-dev/vibest --ref main`. It releases a
+   chosen known-good commit of `main` (`-f commit=<sha>`, which must be an ancestor of `main`; without it, the head of
+   `main`): every job builds, verifies, tags and publishes exactly that commit. `-f version=<x.y.z-beta.n>` names the
+   version; without it, the next beta after the highest `v<x.y.z>-beta.<n>` tag. It sets that version in every
+   package.json of its own checkout only and fails when the version is already tagged or on npm. It
    runs the release gate on that tree (the whole of `pnpm verify --no-cache`, the single entry for all verification,
    on GitHub-hosted runners: `ubuntu-latest` runs it with `--elsewhere H4`, and `macos-latest` runs
    `pnpm verify --no-cache H4`, the macOS-only check, on the same commit and version), packs the npm tarballs and
    checks them on Linux and macOS, keeps the curl archive each platform's verify installed and checked
    (`--keep-archive`), records the SHA-256 of every kept file, then waits for the owner's approval (environment
-   `release`). Only after the approval does it check those hashes, tag the run's commit `v<version>` (with
+   `release`). Only after the approval does it check those hashes, tag that commit `v<version>` (with
    `GITHUB_TOKEN`), publish exactly those tarballs to npm, make the GitHub Release from exactly those archives, and check
    every package's dist-tag. Nothing is rebuilt after verify checked it. A CHANGELOG.md section for the version
    (`## <version>`) is optional.
@@ -31,20 +33,26 @@
    to finish a release: it builds new bytes, and it refuses a version that is already tagged or on npm. Changed code
    needs a new version. A dist-tag that does not point at the version is reported, not moved: move it by hand only when
    no newer release owns it.
-4. **Channels.** A version with a prerelease part (`0.0.1-beta.19`) is published under npm's `beta`, a plain one under
-   `latest`. The GitHub Release is a regular release marked Latest, not a prerelease, also for a beta: `install.sh` and
-   `vibest update` follow GitHub's Latest release. Separate a stable channel (GitHub prereleases, an installer and
-   updater that choose a channel) before the first stable release. The notes are the CHANGELOG.md section of the
-   version when there is one, otherwise GitHub's generated notes.
-5. Agents may prepare a release (fixes, the changelog) and start a run when the owner asks, and may run it
+4. **Channels: beta only for now.** Every release is a beta, `x.y.z-beta.n` (the workflow refuses any other version),
+   published under npm's `beta`, and a regular GitHub Release marked Latest, not a prerelease, because `install.sh` and
+   `vibest update` follow GitHub's Latest release. The notes are the CHANGELOG.md section of the version when there is
+   one, otherwise GitHub's generated notes. A stable channel, added before the first stable release, will need: stable
+   versions published under npm's `latest` (betas keep `beta`); betas made GitHub prereleases, so Latest is the newest
+   stable; and `install.sh` and `vibest update` choosing a channel (stable by default, beta on request) instead of
+   following Latest. It stays in this same workflow file: npm trusted publishing binds each package to one workflow file
+   name, `release.yml`, so the file is never renamed.
+5. **Bugs are fixed on `main` and rolled forward.** There are no release branches: a bug found in a release is fixed on
+   `main` like any change, and a new release ships it, cut from a known-good commit of `main` that contains the fix. A
+   released version is never rebuilt, re-tagged or patched in place.
+6. Agents may prepare a release (fixes, the changelog) and start a run when the owner asks, and may run it
    with `-f dry_run=true` (every gate, then stop: nothing tagged or published) on any branch; a dry run only warns when
    the version is already released. Agents never approve the `release` environment, push `v*` tags, or publish to npm
    themselves.
-6. Only the owner's runs do anything: every job checks that the owner started the run and the attempt; anyone else's
+7. Only the owner's runs do anything: every job checks that the owner started the run and the attempt; anyone else's
    run is skipped. A run that is not a dry run must be on `main`.
-7. The workflow's `VERSIONED` list names every workspace package.json that carries the version; a new package goes into
+8. The workflow's `VERSIONED` list names every workspace package.json that carries the version; a new package goes into
    it, and every file in it holds `0.0.1-dev` on `main`.
-8. The gate is `pnpm verify` as it is: the workflow does not replace any part of it with other commands. A part the
+9. The gate is `pnpm verify` as it is: the workflow does not replace any part of it with other commands. A part the
    runner cannot run fails the run; fix the runner or verify, never narrow the gate.
 
 ## Owner checklist
@@ -57,9 +65,9 @@ Settings the workflow needs and cannot set itself. Check them before the first r
       release gets an attestation. Drafts stay editable, which recovery relies on.
 - [ ] npm trusted publisher on each published package, `@vibest/cli`, `@vibest/cli-darwin-arm64`,
       `@vibest/cli-linux-x64`, `@vibest/plugin` and `effect-herdr-sdk`: GitHub Actions, repository `vibest-dev/vibest`,
-      workflow `release-beta.yml`, environment `release`, "Allow npm publish" on (a new configuration otherwise only
+      workflow `release.yml`, environment `release`, "Allow npm publish" on (a new configuration otherwise only
       allows staged publishing), for example
-      `npm trust github @vibest/cli --file release-beta.yml --repo vibest-dev/vibest --env release --allow-publish`.
+      `npm trust github @vibest/cli --file release.yml --repo vibest-dev/vibest --env release --allow-publish`.
       Each package.json `repository.url` is `git+https://github.com/vibest-dev/vibest.git`, which provenance requires.
 - [ ] Once a release has published with OIDC: revoke any npm token that could publish these packages.
 - [ ] npm 11.5.1 or later in the publish job (Node 26.13.0 ships 11.20.0; the job checks it), Node 22.14.0 or later.
