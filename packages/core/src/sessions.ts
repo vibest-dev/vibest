@@ -133,6 +133,7 @@ export class Sessions extends Context.Service<
     readonly inMemory: Effect.Effect<{
       readonly tracked: number
       readonly locks: number
+      readonly reconciles: number
     }>
     readonly outdated: Effect.Effect<ReadonlyArray<Outdated>>
     readonly restart: (ids: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<Restarted>>
@@ -734,6 +735,7 @@ export class Sessions extends Context.Service<
         }
       }
 
+      let reconciles = 0
       const reconcile = (where: "all" | { readonly runtime: string; readonly machine?: string }) =>
         Effect.gen(function* () {
           const here = (yield* db.listSessions()).filter(
@@ -766,6 +768,7 @@ export class Sessions extends Context.Service<
             { concurrency: 8, discard: true },
           )
           for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
+          reconciles++
         })
 
       const archives = yield* FiberSet.make()
@@ -863,7 +866,7 @@ export class Sessions extends Context.Service<
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: Effect.gen(function* () {
           const map = yield* SynchronizedRef.get(tracked)
-          return { tracked: HashMap.size(map), locks: locks.size() }
+          return { tracked: HashMap.size(map), locks: locks.size(), reconciles }
         }),
         outdated,
         restart,
