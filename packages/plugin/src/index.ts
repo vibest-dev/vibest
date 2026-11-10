@@ -8,6 +8,8 @@ export * as Harness from "./harness.ts"
 export * as Plugin from "./plugin.ts"
 export * as Runtime from "./runtime.ts"
 export type { Hooks, Registration, Transform } from "./registration.ts"
+export { capture, type Captured } from "./capture.ts"
+export { reconnectSchedule } from "./reconnect.ts"
 
 export class AgentRefused extends Schema.TaggedError<AgentRefused>()("AgentRefused", { reason: Schema.String }) {}
 
