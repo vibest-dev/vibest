@@ -58,35 +58,34 @@ export const writeResult = (id: string, harness: string, payload: object, offset
 export const eventsOf = (sessionId: string, type?: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ id: number; type: string; at: number; data: string }>`SELECT id, type, at, data FROM event
-      WHERE session_id = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY id`
-    return rows.map((r) => ({ id: r.id, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
+    const rows = yield* sql<{ seq: number; type: string; at: number; data: string }>`SELECT seq, type, at, data
+      FROM event WHERE session_id = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY seq`
+    return rows.map((r) => ({ id: r.seq, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
   }).pipe(Effect.orDie)
 
 export const resultText = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [row] = yield* sql<{ text: string | null }>`SELECT CASE WHEN EXISTS (
-        SELECT 1 FROM event te WHERE te.type = 'turn.end' AND json_extract(te.data, '$.report') = r.id)
-      THEN NULL ELSE json_extract(r.data, '$.text') END AS text
-      FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' ORDER BY r.id DESC LIMIT 1`.pipe(
+    const [row] = yield* sql<{ data: string; consumed: number }>`SELECT r.data,
+        EXISTS (SELECT 1 FROM turn t WHERE t.report_seq = r.seq) AS consumed
+      FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' ORDER BY r.seq DESC LIMIT 1`.pipe(
       Effect.orDie,
     )
-    return row?.text ?? ""
+    return row === undefined || row.consumed ? "" : String((JSON.parse(row.data) as { text?: unknown }).text ?? "")
   })
 
-export const TURNS = `(SELECT t.id, t.session_id, t.at AS started_at, te.at AS ended_at, te.id AS end_id,
-    (SELECT max(e.inbox_id) FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
-      AND json_extract(e.data, '$.to') = 'delivered') AS inbox_id,
-    coalesce(json_extract(t.data, '$.typed'), (SELECT group_concat(c, char(10) || char(10)) FROM (SELECT i.content AS c
-      FROM inbox i WHERE i.id IN (SELECT e.inbox_id FROM event e WHERE e.turn_id = t.id AND e.type = 'inbox.status'
-        AND json_extract(e.data, '$.to') = 'delivered') ORDER BY i.id)), '') AS input,
-    CASE WHEN te.id IS NULL THEN 'working' ELSE json_extract(te.data, '$.status') END AS status,
-    (SELECT r.content FROM inbox r WHERE r.result_event_id = te.id) AS output
-  FROM event t LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end' WHERE t.type = 'turn.start')`
+export const TURNS = `(SELECT t.id, t.session_id, t.started_at, t.ended_at,
+    (SELECT max(i.id) FROM inbox i WHERE i.turn_id = t.id) AS inbox_id,
+    coalesce(t.typed, (SELECT group_concat(c, char(10) || char(10)) FROM (SELECT i.content AS c
+      FROM inbox i WHERE i.turn_id = t.id ORDER BY i.id)), '') AS input,
+    coalesce(t.status, 'working') AS status,
+    (SELECT r.content FROM inbox r WHERE r.result_turn_id = t.id) AS output
+  FROM turn t)`
 
 export const processEnds = (sessionId: string) =>
-  eventsOf(sessionId, "process.end").pipe(Effect.map((rows) => rows.map((r) => r.data.reason)))
+  eventsOf(sessionId, "process.ended").pipe(
+    Effect.map((rows) => rows.map((r) => r.data.reason).filter((reason) => reason !== "superseded")),
+  )
 
 export const systemPromptFile = (id: string) =>
   Effect.gen(function* () {

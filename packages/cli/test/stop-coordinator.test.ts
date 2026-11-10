@@ -283,7 +283,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   )
 
   test(
-    "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded (an older vibest), a remote machine, or no agent seen but a live (reused) PID; an exited PID moves without a signal",
+    "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded (an older vibest), or no agent seen but a live (reused) PID; an exited PID moves without a signal",
     Effect.gen(function* () {
       const s = yield* workingPiMain
       const restore = s.db.coordinatorLaunch(s.projectId, "pi", false, s.origin, { pid: HARNESS })
@@ -296,14 +296,6 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
       const old = yield* s.stop
       assert.strictEqual(old.result, "unsupported")
       assert.include(old.reason, "started by an older vibest")
-      const remote = { ...s.origin, address: { machine: "elsewhere", id: s.paneId } }
-      yield* s.db.coordinatorLaunch(s.projectId, "pi", false, remote, { pid: HARNESS })
-      const far = yield* s.c["Project.StopCoordinator"]({
-        runtime: remote.runtime,
-        address: encodeAddress(remote.address),
-      })
-      assert.strictEqual(far.result, "unsupported")
-      assert.include(far.reason, "another machine")
       yield* restore
       yield* s.processes.setSignalDenied(true)
       assert.deepStrictEqual(yield* s.stop, { result: "running" })

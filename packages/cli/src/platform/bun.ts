@@ -94,6 +94,7 @@ const inspectFile = (filename: string) =>
             applicationId: e.applicationId,
             ...(e.detail === undefined ? {} : { detail: e.detail }),
             ...(e.older === undefined ? {} : { older: e.older }),
+            ...(e.catalog === undefined ? {} : { catalog: e.catalog }),
             file: filename,
           })
         : new DatabaseOpenFailed({ file: filename, message: e.message }),

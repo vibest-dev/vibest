@@ -57,7 +57,7 @@ describe.concurrent("Sessions", () => {
       const results = () =>
         sql<{
           input: string
-        }>`SELECT m.input FROM inbox i JOIN ${sql.literal(TURNS)} m ON m.end_id = i.result_event_id WHERE i.sender_session_id = ${id} ORDER BY i.id`.pipe(
+        }>`SELECT m.input FROM inbox i JOIN ${sql.literal(TURNS)} m ON m.id = i.result_turn_id WHERE i.sender_session_id = ${id} ORDER BY i.id`.pipe(
           Effect.orDie,
         )
       assert.deepStrictEqual(

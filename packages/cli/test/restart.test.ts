@@ -225,7 +225,7 @@ describe("restart in place", () => {
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
       yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((rows) => Ref.set(outcomes, rows))))
       yield* held.reached
-      const [restarted] = (yield* eventsOf(id, "process.start")).slice(-1)
+      const [restarted] = (yield* eventsOf(id, "process.started")).slice(-1)
       yield* writeResult(id, "pi", { text: "status: completed\nsummary: old harness" })
       assert.isAbove((yield* eventsOf(id, "turn.reported")).at(-1)!.id, restarted!.id)
       yield* db.noteIntegration(id, { version: VERSION, protocol: PROTOCOL })
@@ -236,7 +236,7 @@ describe("restart in place", () => {
       yield* sessions.check(id)
       const freshSessions = yield* Sessions.make({ maxSessions: undefined })
       yield* freshSessions.check(id)
-      assert.strictEqual((yield* eventsOf(id, "turn.end")).length, 0)
+      assert.strictEqual((yield* eventsOf(id, "turn.ended")).length, 0)
       assert.isUndefined(yield* db.latestInbox(id, "result"))
     }),
   )

@@ -129,7 +129,7 @@ describe.concurrent("Sessions", () => {
       assert.notInclude(result!.message, "stale")
       const linked = yield* sql<{
         inbox: number | null
-      }>`SELECT m.inbox_id AS inbox FROM inbox i JOIN ${sql.literal(TURNS)} m ON m.end_id = i.result_event_id WHERE i.sender_session_id = ${id}`.pipe(
+      }>`SELECT m.inbox_id AS inbox FROM inbox i JOIN ${sql.literal(TURNS)} m ON m.id = i.result_turn_id WHERE i.sender_session_id = ${id}`.pipe(
         Effect.orDie,
       )
       assert.strictEqual(linked[0]!.inbox, open[0]!.inbox)

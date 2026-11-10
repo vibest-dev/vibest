@@ -39,7 +39,7 @@ const reported = sessionLayer([Harness.node.replace(harnessLayer({ hooked: ["pi"
 
 const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) => testEffect(reported)(name, () => program)
 
-const resultCount = (id: string) => eventsOf(id, "turn.end").pipe(Effect.map((rows) => rows.length))
+const resultCount = (id: string) => eventsOf(id, "turn.ended").pipe(Effect.map((rows) => rows.length))
 
 describe("turn.reported", () => {
   test(
@@ -51,8 +51,7 @@ describe("turn.reported", () => {
       yield* writeResult(id, "pi", { text: "status: completed\nsummary: second" }, 2_000)
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      const [end] = yield* eventsOf(id, "turn.end")
-      assert.strictEqual(end?.data.output, undefined)
+      const [end] = yield* eventsOf(id, "turn.ended")
       assert.strictEqual(typeof end?.data.report, "number")
       const message = (yield* db.latestInbox(id, "result"))!.message
       assert.include(message, "summary: second")

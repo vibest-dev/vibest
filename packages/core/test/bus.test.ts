@@ -1,8 +1,9 @@
 import { assert, describe } from "@effect/vitest"
-import { Bus, type EngineEvent, type StoredEvent } from "@vibest/core/bus"
+import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
+import { type Fact } from "@vibest/schema/event"
 import { Cause, Effect, Exit, PubSub } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -32,7 +33,7 @@ const session = {
   lastActive: 1,
 }
 
-const isStored = (event: EngineEvent): event is StoredEvent => "id" in event
+const isStored = (event: EngineEvent): event is Fact => "seq" in event
 
 describe("bus", () => {
   it("a commit publishes in id order", () =>
@@ -46,9 +47,9 @@ describe("bus", () => {
         const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
         assert.deepStrictEqual(
           published.map((event) => event.type),
-          ["process.end", "process.start"],
+          ["process.ended", "process.started"],
         )
-        assert.isBelow(published[0]!.id, published[1]!.id)
+        assert.isBelow(published[0]!.seq, published[1]!.seq)
       }),
     ))
 
@@ -60,7 +61,7 @@ describe("bus", () => {
         const sql = yield* SqlClient.SqlClient
         yield* db.insertSession(session, yield* projectOf("r"))
         const before = yield* sql<{ n: number }>`SELECT count(*) AS n FROM event`
-        yield* sql.unsafe(`CREATE TEMP TRIGGER refuse BEFORE INSERT ON event WHEN NEW.type = 'process.start'
+        yield* sql.unsafe(`CREATE TEMP TRIGGER refuse BEFORE INSERT ON event WHEN NEW.type = 'process.started'
           BEGIN SELECT RAISE(ABORT, 'refused'); END`)
         const sub = yield* bus.subscribe
         const exit = yield* db.restartProcess(session.id).pipe(Effect.exit)
@@ -89,13 +90,17 @@ describe("bus", () => {
         yield* db.recoverDelivering([], () => "")
         const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
         assert.deepStrictEqual(
-          published.map((event) => [event.type, event.inboxId, event.data.to]),
-          rows.map((row) => ["inbox.status", row.id, "failed"]),
+          published.map((event) => [
+            event.type,
+            event.type === "inbox.moved" ? event.data.inbox : 0,
+            (event.data as { to?: string }).to,
+          ]),
+          rows.map((row) => ["inbox.moved", row.id, "failed"]),
         )
       }),
     ))
 
-  it("a start that opens the terminal publishes the ready reports it carries over", () =>
+  it("a start that opens the terminal places the unplaced process and keeps its ready report", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const db = yield* Db
@@ -107,10 +112,8 @@ describe("bus", () => {
         const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
         assert.deepStrictEqual(
           published.map((event) => event.type),
-          ["process.start", "process.ready"],
+          ["process.placed"],
         )
-        assert.strictEqual(published[1]!.processId, published[0]!.id)
-        assert.deepInclude(published[1]!.data, { pid: 4242 })
         assert.strictEqual((yield* db.getSession(session.id))!.metadata.pid, 4242)
       }),
     ))

@@ -1,7 +1,7 @@
 import { decodeRow, type FactOf } from "@vibest/schema/event"
-import { InboxRow } from "@vibest/schema/session"
+import { type AgentStatus, InboxRow } from "@vibest/schema/session"
 import { Effect, Schema } from "effect"
-import type { SqlClient } from "effect/sql"
+import type { SqlClient, Statement } from "effect/sql"
 
 import type { MachineRow, OutboxRow } from "./db-remote.ts"
 import {
@@ -10,6 +10,7 @@ import {
   MESSAGE_STATUSES,
   type MessageStatusName,
   SessionRow,
+  type Integration,
   type SessionBrief,
   type SpawnedBefore,
   summaryIn,
@@ -45,7 +46,7 @@ export type PeerRow = {
   readonly connectedAt: number
 }
 
-type SessionColumns = {
+export type SessionColumns = {
   readonly id: string
   readonly project: string
   readonly role: string
@@ -82,9 +83,18 @@ const integrationOf = (row: Pick<SessionColumns, "integrationVersion" | "integra
 
 const addressOf = (terminal: string | null) => JSON.stringify({ machine: LOCAL_MACHINE, id: terminal ?? "" })
 
-const sessionOf = (row: SessionColumns) => {
-  const integration = integrationOf(row)
+export type Live = {
+  readonly status: AgentStatus
+  readonly integration: Integration | undefined
+  readonly promptedAt: number | undefined
+}
+
+const NOT_LIVE: Live = { status: "unknown", integration: undefined, promptedAt: undefined }
+
+export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
+  const integration = live.integration ?? integrationOf(row)
   const attempts = attemptsOf(row.attempts)
+  const open = row.tId !== null && row.tStatus === null
   const metadata = {
     ...(integration === undefined ? {} : { integration }),
     ...(row.pid === null ? {} : { pid: row.pid }),
@@ -105,95 +115,118 @@ const sessionOf = (row: SessionColumns) => {
     name: row.name,
     provider: row.provider,
     model: row.model,
-    status: "unknown",
+    status: live.status,
     startedAt: row.placedAt,
     exitedAt: row.role === "main" ? row.endedAt : row.pEnded,
     turnState: row.tId === null ? "none" : (row.tStatus ?? "open"),
-    turnPromptedAt: row.tAt ?? 0,
+    turnPromptedAt: (open ? live.promptedAt : undefined) ?? row.tAt ?? 0,
     metadata: JSON.stringify(metadata),
     createdAt: row.createdAt,
     lastActive: row.activeAt ?? row.createdAt,
   }
 }
 
-const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
+export type CoordinatorColumns = SessionColumns & {
+  readonly projectDirectory: string | null
+  readonly ownDirectory: string
+}
+
+export const coordinatorOf = (
+  row: CoordinatorColumns,
+  live: { readonly integration: Integration | undefined; readonly moving: boolean } = {
+    integration: undefined,
+    moving: false,
+  },
+) => {
+  const here = row.pId !== null && row.pEnded === null && row.terminal !== null && !live.moving
+  const integration = live.integration ?? integrationOf(row)
+  const directory = row.projectDirectory || row.ownDirectory
+  return {
+    id: row.id,
+    projectId: row.project,
+    harnessId: row.harness ?? "",
+    harnessSessionId: row.conversation ?? row.resume ?? null,
+    runtime: here ? row.runtime : null,
+    address: here ? addressOf(row.terminal) : null,
+    ...(directory ? { projectDirectory: directory } : {}),
+    createdAt: row.createdAt,
+    provider: row.provider,
+    model: row.model,
+    ...(row.routing === null ? {} : { routing: JSON.parse(row.routing) as unknown }),
+    ...(integration === undefined ? {} : { integration }),
+    ...(row.pid === null ? {} : { pid: row.pid }),
+    ...(row.readyAt === null ? {} : { ready: row.readyAt }),
+  }
+}
+
+export const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
 const decodeInbox = Schema.decodeUnknownEffect(Schema.Array(InboxRow))
-const decodeCoordinators = Schema.decodeUnknownEffect(Schema.Array(CoordinatorRow))
+export const decodeCoordinators = Schema.decodeUnknownEffect(Schema.Array(CoordinatorRow))
+
+type InboxColumns = {
+  readonly id: number
+  readonly recipientSessionId: string | null
+  readonly senderSessionId: string | null
+  readonly kind: string
+  readonly content: string
+  readonly status: string
+  readonly resultTurnId: number | null
+  readonly turnStatus: string | null
+  readonly failure: string | null
+}
+
+const inboxOf = (row: InboxColumns) =>
+  toInbox({
+    ...row,
+    turnEnd:
+      row.turnStatus === null
+        ? null
+        : JSON.stringify({
+            status: row.turnStatus,
+            ...(row.failure === null ? {} : { failure: { message: row.failure } }),
+          }),
+  })
 
 export const ledgerReads = (sql: SqlClient.SqlClient) => {
-  const sessionColumns = sql<SessionColumns>`SELECT s.id, s.project_id AS project, s.role, s.name,
-      s.archive_on_completion AS archive, s.created_at, s.ended_at, s.active_at,
-      p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.resume, p.runtime, p.terminal, p.pid,
-      p.integration_version, p.integration_protocol, p.conversation, p.placed_at, p.ready_at, p.ended_at AS p_ended,
-      t.id AS t_id, t.started_at AS t_at, t.status AS t_status,
-      (SELECT json_group_array(json_object('harness', l.harness, 'provider', l.provider, 'at', l.ended_at))
-        FROM (SELECT * FROM process WHERE session_id = s.id AND end_reason = 'limited' ORDER BY id) l) AS attempts
-    FROM session s LEFT JOIN process p ON p.id = s.process_id LEFT JOIN turn t ON t.id = s.turn_id
-    ORDER BY s.created_at, s.id`
+  const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
+    sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.role, s.name,
+        s.archive_on_completion AS archive, s.created_at, s.ended_at, s.active_at,
+        p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.resume, p.runtime, p.terminal, p.pid,
+        p.integration_version, p.integration_protocol, p.conversation, p.placed_at, p.ready_at,
+        p.ended_at AS p_ended, t.id AS t_id, t.started_at AS t_at, t.status AS t_status,
+        (SELECT json_group_array(json_object('harness', l.harness, 'provider', l.provider, 'at', l.ended_at))
+          FROM (SELECT * FROM process WHERE session_id = s.id AND end_reason = 'limited' ORDER BY id) l) AS attempts
+      FROM session s LEFT JOIN process p ON p.id = s.process_id LEFT JOIN turn t ON t.id = s.turn_id
+      ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
+    ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
-  const sessions = sessionColumns.pipe(Effect.flatMap((rows) => decodeSessions(rows.map(sessionOf))))
+  const sessions = sessionRows([]).pipe(Effect.flatMap((rows) => decodeSessions(rows.map((row) => sessionOf(row)))))
 
-  const coordinators = Effect.gen(function* () {
-    const rows = yield* sql<
-      SessionColumns & { projectDirectory: string | null; ownDirectory: string }
-    >`SELECT s.id, s.project_id AS project, s.created_at, s.directory AS own_directory, q.directory AS project_directory,
+  const coordinatorRows = (project?: string) =>
+    sql<CoordinatorColumns>`SELECT s.id, s.project_id AS project, s.created_at, s.directory AS own_directory,
+        q.directory AS project_directory,
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.resume, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.ready_at, p.ended_at AS p_ended
       FROM project q JOIN session s ON s.id = q.entry_session_id LEFT JOIN process p ON p.id = s.process_id
+      ${project === undefined ? sql`` : sql`WHERE q.id = ${project}`}
       ORDER BY s.created_at, s.id`
-    return yield* decodeCoordinators(
-      rows.map((row) => {
-        const here = row.pId !== null && row.pEnded === null && row.terminal !== null
-        const integration = integrationOf(row)
-        const directory = row.projectDirectory || row.ownDirectory
-        return {
-          id: row.id,
-          projectId: row.project,
-          harnessId: row.harness ?? "",
-          harnessSessionId: row.conversation ?? row.resume ?? null,
-          runtime: here ? row.runtime : null,
-          address: here ? addressOf(row.terminal) : null,
-          ...(directory ? { projectDirectory: directory } : {}),
-          createdAt: row.createdAt,
-          provider: row.provider,
-          model: row.model,
-          ...(row.routing === null ? {} : { routing: JSON.parse(row.routing) as unknown }),
-          ...(integration === undefined ? {} : { integration }),
-          ...(row.pid === null ? {} : { pid: row.pid }),
-          ...(row.readyAt === null ? {} : { ready: row.readyAt }),
-        }
-      }),
+
+  const coordinators = coordinatorRows().pipe(
+    Effect.flatMap((rows) => decodeCoordinators(rows.map((row) => coordinatorOf(row)))),
+  )
+
+  const inboxWhere = (where: Statement.Fragment, order: Statement.Fragment = sql`m.id`) =>
+    sql<InboxColumns>`SELECT m.id, m.recipient_session_id, m.sender_session_id, m.kind, m.content, m.status,
+        m.result_turn_id, t.status AS turn_status, t.failure
+      FROM inbox m LEFT JOIN turn t ON t.id = m.result_turn_id WHERE ${where} ORDER BY ${order}`.pipe(
+      Effect.flatMap((rows) => decodeInbox(rows.map(inboxOf))),
     )
-  })
 
   const inbox = Effect.gen(function* () {
-    const rows = yield* sql<{
-      id: number
-      recipientSessionId: string | null
-      senderSessionId: string | null
-      kind: string
-      content: string
-      status: string
-      resultTurnId: number | null
-      turnStatus: string | null
-      failure: string | null
-    }>`SELECT m.id, m.recipient_session_id, m.sender_session_id, m.kind, m.content, m.status, m.result_turn_id,
-        t.status AS turn_status, t.failure
+    const rows = yield* sql<InboxColumns>`SELECT m.id, m.recipient_session_id, m.sender_session_id, m.kind,
+        m.content, m.status, m.result_turn_id, t.status AS turn_status, t.failure
       FROM inbox m LEFT JOIN turn t ON t.id = m.result_turn_id WHERE m.kind != 'task' ORDER BY m.id`
-    const decoded = yield* decodeInbox(
-      rows.map((row) =>
-        toInbox({
-          ...row,
-          turnEnd:
-            row.turnStatus === null
-              ? null
-              : JSON.stringify({
-                  status: row.turnStatus,
-                  ...(row.failure === null ? {} : { failure: { message: row.failure } }),
-                }),
-        }),
-      ),
-    )
+    const decoded = yield* decodeInbox(rows.map(inboxOf))
     return rows.map((row, i) => ({
       row: decoded[i]!,
       id: row.id,
@@ -366,6 +399,11 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     queuedBy,
     spawnedBy,
     outboxOf,
+    sessionRows,
+    coordinatorRows,
+    inboxWhere,
+    hasPeerItem: (item: string) =>
+      sql`SELECT 1 FROM inbox WHERE peer_item = ${item}`.pipe(Effect.map((rows) => rows.length > 0)),
     machines: sql<MachineRow>`SELECT name, target, vibestd_id, connected_at, created_at FROM machine ORDER BY name`,
     peers: sql<PeerRow>`SELECT id, name, calls_me, connected_at FROM peer ORDER BY id`,
   }

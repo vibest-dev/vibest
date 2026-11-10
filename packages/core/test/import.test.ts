@@ -5,12 +5,13 @@ import path from "node:path"
 
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { assert, describe, it } from "@effect/vitest"
-import { SQL_NAMES } from "@vibest/core/db"
+import { Bus } from "@vibest/core/bus"
+import { Db, SQL_NAMES } from "@vibest/core/db"
 import { importCheck, ImportFailed, importInPlace, v2Reader } from "@vibest/core/import/import"
 import { compare, viewOf } from "@vibest/core/import/referee"
 import { highestId, translate } from "@vibest/core/import/translate"
 import { probesOf, readSnapshot, v1Reader } from "@vibest/core/import/v1-read"
-import { append, equalToReplay, installLedger, LEDGER_VERSION } from "@vibest/core/journal"
+import { append, equalToReplay, installLedger } from "@vibest/core/journal"
 import type { Fact } from "@vibest/schema/event"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -201,7 +202,10 @@ describe("v1 import", () => {
         const { file, sql, report } = yield* imported(name)
         assert.deepStrictEqual(report.differences, [])
         assert.isUndefined(yield* equalToReplay(sql).pipe(Effect.provide(memory)))
-        assert.strictEqual(shape(file).userVersion, LEDGER_VERSION)
+        assert.includeDeepMembers(
+          shape(file).tables.map(([name]) => name),
+          ["event", "meta"],
+        )
       }),
     )
 
@@ -243,6 +247,51 @@ describe("v1 import", () => {
       assert.deepStrictEqual(shape(file), before)
       assert.strictEqual(before.userVersion, 1)
     }),
+  )
+
+  const opened = (file: string) =>
+    Db.layer.pipe(
+      Layer.provideMerge(Layer.fresh(SqliteClient.layer({ filename: file, disableWAL: true, ...SQL_NAMES }))),
+      Layer.provide(Bus.layer),
+    )
+
+  it.effect("opening a v1 database applies the ledger migration once, with its history imported", () =>
+    Effect.gen(function* () {
+      const file = fixtureFile("sessions")
+      const listed = Effect.gen(function* () {
+        const db = yield* Db
+        assert.isFalse(yield* db.historyNotImported)
+        return (yield* db.listSessions({ stopped: true })).map((row) => row.id)
+      })
+      const sessions = yield* listed.pipe(Effect.provide(opened(file)))
+      assert.isAbove(sessions.length, 0)
+      assert.deepStrictEqual(yield* listed.pipe(Effect.provide(opened(file))), sessions)
+      const tables = shape(file).tables
+      assert.deepInclude(tables, ["migration", 1])
+      assert.isFalse(tables.some(([name]) => name.startsWith("v1_")))
+      assert.isUndefined(yield* equalToReplay(yield* client(file)).pipe(Effect.provide(memory)))
+    }),
+  )
+
+  it.effect(
+    "a v1 database the import refuses keeps its tables as v1_<name>, starts with an empty history, and is not imported again",
+    () =>
+      Effect.gen(function* () {
+        const file = fixtureFile("referee-fails")
+        const before = shape(file).tables
+        const opening = Effect.gen(function* () {
+          const db = yield* Db
+          assert.isTrue(yield* db.historyNotImported)
+          assert.deepStrictEqual(yield* db.listSessions({ stopped: true }), [])
+          assert.deepStrictEqual(yield* db.coordinators, [])
+        })
+        yield* opening.pipe(Effect.provide(opened(file)))
+        const after = shape(file).tables
+        for (const [name, rows] of before) assert.deepInclude(after, [`v1_${name}`, rows])
+        assert.deepInclude(after, ["migration", 1])
+        yield* opening.pipe(Effect.provide(opened(file)))
+        assert.deepStrictEqual(shape(file).tables, after)
+      }),
   )
 
   it.effect("import-check reads a read-only source and reports the referee result without writing", () =>
@@ -288,6 +337,19 @@ describe("v1 import", () => {
       const report = yield* importInPlace.pipe(Effect.provideService(SqlClient.SqlClient, sql))
       assert.deepStrictEqual(report.differences, [])
       assert.isUndefined(yield* equalToReplay(sql).pipe(Effect.provide(memory)))
+    }),
+  )
+
+  it.effect("a session whose first peer.start does not decode imports as a local session, as v1 read it", () =>
+    Effect.gen(function* () {
+      const file = edited("machines", [
+        `INSERT INTO event (id, at, session_id, type, data)
+          SELECT 0, at, session_id, 'peer.start', '{"peer":1}' FROM event WHERE type = 'peer.start' LIMIT 1`,
+      ])
+      const sql = yield* client(file)
+      const report = yield* importInPlace.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      assert.deepStrictEqual(report.differences, [])
+      assert.strictEqual(report.counts.undecodablePeerStarts, 1)
     }),
   )
 

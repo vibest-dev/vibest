@@ -1,30 +1,8 @@
 import type { Runtime } from "@vibest/plugin"
+import type { Fact } from "@vibest/schema/event"
 import { Context, type Duration, Effect, Layer, Option, PubSub, type Scope } from "effect"
 
 import { LayerNode } from "./effect/layer-node.ts"
-
-export interface StoredEvent<T extends StoredType = StoredType> {
-  readonly id: number
-  readonly at: number
-  readonly sessionId: string
-  readonly type: T
-  readonly processId?: number
-  readonly turnId?: number
-  readonly inboxId?: number
-  readonly data: Readonly<Record<string, unknown>>
-}
-
-export type StoredType =
-  | "process.start"
-  | "process.ready"
-  | "process.conversation"
-  | "process.end"
-  | "turn.start"
-  | "turn.end"
-  | "turn.reported"
-  | "inbox.queued"
-  | "inbox.status"
-  | "peer.start"
 
 export type LiveEvent =
   | {
@@ -42,7 +20,7 @@ export type LiveEvent =
   | { readonly type: "live.project"; readonly projectId: string }
   | { readonly type: "live.outbox"; readonly peerId: string }
 
-export type EngineEvent = StoredEvent | LiveEvent
+export type EngineEvent = Fact | LiveEvent
 
 const make = Effect.gen(function* () {
   const pubsub = yield* PubSub.unbounded<EngineEvent>()

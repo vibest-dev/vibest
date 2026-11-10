@@ -1,26 +1,35 @@
+import {
+  ProcessConversation,
+  ProcessEnded,
+  ProcessPid,
+  ProcessReady,
+  ProjectCreated,
+  ProjectEntryChanged,
+  ProjectMoved,
+  ProjectRepositoriesChanged,
+  SessionCreated,
+  SessionDirectoryChanged,
+  SessionEnded,
+  TurnEnded,
+} from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { AmbiguousSession, NoSuchSession, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, String as Str } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { Bus } from "./bus.ts"
+import { apply } from "./database/migration.ts"
+import { NOT_IMPORTED_TABLE } from "./database/migration/20261110120000_ledger.ts"
 import { inboxMethods } from "./db-inbox.ts"
-import type { PeerStart } from "./db-remote.ts"
+import { remoteQueries, type PeerStart } from "./db-remote.ts"
 import {
   SessionRow,
-  summaryIn,
-  MESSAGE_STATUSES,
   type EndReason,
   type SessionPatch,
   type SpawnedBefore,
   type RepositoryRow,
   type Integration,
-  type TurnEnd,
-  type MessageStatusName,
-  type SessionBrief,
-  type BriefRow,
 } from "./db-rows.ts"
-import { migrate } from "./db-schema.ts"
 import { makeStore } from "./db-store.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
@@ -43,15 +52,7 @@ export {
   failureOf,
   type SessionBrief,
 } from "./db-rows.ts"
-export {
-  APPLICATION_ID,
-  DatabaseOpenFailed,
-  SCHEMA_VERSION,
-  SCHEMA,
-  SchemaMismatch,
-  inspectSchema,
-  migrate,
-} from "./db-schema.ts"
+export { APPLICATION_ID, DatabaseOpenFailed, SchemaMismatch, inspectSchema } from "./db-schema.ts"
 
 export type SessionFilter = {
   readonly projectId?: string
@@ -63,29 +64,30 @@ const make = Effect.gen(function* () {
   const store = yield* makeStore
   const {
     sql,
-    currentStart,
+    reads,
     now,
     statuses,
     integrations,
     moving,
     remember,
-    append,
+    emit,
     tx,
     notify,
     projectPrefixTaken,
-    putRepositories,
+    repositoriesOf,
+    changedRepositories,
     notMain,
     running,
     selectRaw,
     selectSessions,
     readSession,
-    anySession,
+    currentProcess,
     findCoordinators,
-    spawnedBy,
-    insertInboxSql,
+    queueInbox,
     linkTask,
     endProcess,
     startProcess,
+    startTurn,
     updateSession,
     dropWaiting,
     sessionAt,
@@ -93,28 +95,18 @@ const make = Effect.gen(function* () {
     clearMainAt,
     unusedId,
     conversationOf,
-    remote,
   } = store
+  const remote = remoteQueries(store)
   const canResumeConversation = (sessionId: string, harnessSessionId: string) =>
     sql<{ ok: number }>`SELECT (
       EXISTS (
-        SELECT 1 FROM event te
-        WHERE te.session_id = ${sessionId} AND te.type = 'turn.end'
-          AND EXISTS (
-            SELECT 1 FROM event c
-            WHERE (c.id = te.process_id AND c.type = 'process.start'
-                AND json_extract(c.data, '$.resume') = ${harnessSessionId})
-              OR (c.process_id = te.process_id AND c.type = 'process.conversation'
-                AND json_extract(c.data, '$.conversation') = ${harnessSessionId})
-          )
+        SELECT 1 FROM turn t JOIN process p ON p.id = t.process_id
+        WHERE t.session_id = ${sessionId} AND t.status IS NOT NULL
+          AND (p.resume = ${harnessSessionId} OR p.conversation = ${harnessSessionId})
       )
       OR (
         EXISTS (SELECT 1 FROM project WHERE entry_session_id = ${sessionId})
-        AND EXISTS (
-          SELECT 1 FROM event c
-          WHERE c.session_id = ${sessionId} AND c.type = 'process.conversation'
-            AND json_extract(c.data, '$.conversation') = ${harnessSessionId}
-        )
+        AND EXISTS (SELECT 1 FROM process WHERE session_id = ${sessionId} AND conversation = ${harnessSessionId})
       )
     ) AS ok`.pipe(
       Effect.map((rows) => rows[0]?.ok === 1),
@@ -133,17 +125,32 @@ const make = Effect.gen(function* () {
     createProject: (directory: string, repositories: ReadonlyArray<RepositoryRow>) =>
       tx(
         Effect.gen(function* () {
-          const id = yield* newId(projectPrefixTaken)
-          yield* sql`INSERT INTO project ${sql.insert({ id, directory })} ON CONFLICT (directory) DO NOTHING`
+          const [existing] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
+          if (existing !== undefined) {
+            const changed = yield* changedRepositories(existing.id, repositories)
+            if (changed.length > 0)
+              yield* emit(ProjectRepositoriesChanged, { projectId: existing.id, data: { repositories: changed } })
+          } else {
+            const id = yield* newId(projectPrefixTaken)
+            yield* emit(ProjectCreated, {
+              projectId: id,
+              data: { ...(directory ? { directory } : {}), repositories: repositoriesOf(repositories) },
+            })
+          }
           const [row] = yield* sql<{ id: string }>`SELECT id FROM project WHERE directory = ${directory}`
-          yield* putRepositories(row!.id, repositories)
           yield* notify({ type: "live.project", projectId: row!.id })
           return row!.id
         }),
       ).pipe(Effect.orDie),
 
     refreshRepositories: (id: string, repositories: ReadonlyArray<RepositoryRow>) =>
-      tx(putRepositories(id, repositories)).pipe(Effect.orDie),
+      tx(
+        Effect.gen(function* () {
+          const changed = yield* changedRepositories(id, repositories)
+          if (changed.length > 0)
+            yield* emit(ProjectRepositoriesChanged, { projectId: id, data: { repositories: changed } })
+        }),
+      ).pipe(Effect.orDie),
 
     moveCandidates: (remotes: ReadonlyArray<string>) =>
       Effect.gen(function* () {
@@ -168,12 +175,11 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const [row] = yield* sql<{ directory: string }>`SELECT directory FROM project WHERE id = ${id}`
           const from = row!.directory
-          yield* sql`UPDATE project SET directory = ${to} WHERE id = ${id}`
+          yield* emit(ProjectMoved, {
+            projectId: id,
+            data: { from, to, repositories: repositoriesOf(repositories) },
+          })
           yield* notify({ type: "live.project", projectId: id })
-          yield* sql`DELETE FROM project_repository WHERE project_id = ${id}`
-          yield* putRepositories(id, repositories)
-          yield* sql`UPDATE session SET directory = ${to} || substr(directory, ${from.length + 1})
-              WHERE project_id = ${id} AND (directory = ${from} OR substr(directory, 1, ${from.length + 1}) = ${`${from}/`})`
           for (const session of yield* sql<{
             id: string
           }>`SELECT id FROM session WHERE project_id = ${id} AND ended_at IS NULL`)
@@ -210,22 +216,16 @@ const make = Effect.gen(function* () {
       ),
 
     startedByPeer: (id: string) =>
-      sql<{ one: number }>`SELECT 1 AS one FROM event WHERE session_id = ${id} AND type = 'peer.start' LIMIT 1`.pipe(
+      sql`SELECT 1 FROM session WHERE id = ${id} AND origin_peer IS NOT NULL`.pipe(
         Effect.map((rows) => rows.length > 0),
         Effect.orDie,
       ),
 
-    hadTerminal: (id: string) =>
-      sql<{ one: number }>`SELECT 1 AS one FROM event WHERE session_id = ${id} AND type = 'process.start'
-        AND json_extract(data, '$.terminal') != '' LIMIT 1`.pipe(
-        Effect.map((rows) => rows.length > 0),
-        Effect.orDie,
-      ),
+    hadTerminal: (id: string) => reads.hadTerminal(id).pipe(Effect.orDie),
 
     liveSharers: (id: string) =>
       sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
-        WHERE o.id != s.id AND o.machine = s.machine AND o.directory = s.directory AND s.directory != ''
-          AND o.ended_at IS NULL
+        WHERE o.id != s.id AND o.directory = s.directory AND s.directory != '' AND o.ended_at IS NULL
         ORDER BY o.id`.pipe(
         Effect.map((rows) => rows.map((r) => r.id)),
         Effect.orDie,
@@ -233,7 +233,7 @@ const make = Effect.gen(function* () {
 
     earlierSharer: (id: string) =>
       sql<{ id: string }>`SELECT o.id FROM session o JOIN session s ON s.id = ${id}
-        WHERE o.id != s.id AND o.machine = s.machine AND o.directory = s.directory AND s.directory != ''
+        WHERE o.id != s.id AND o.directory = s.directory AND s.directory != ''
           AND o.ended_at IS NULL AND (o.created_at, o.rowid) < (s.created_at, s.rowid)
         ORDER BY o.created_at, o.rowid LIMIT 1`.pipe(
         Effect.map((rows) => rows[0]?.id),
@@ -262,11 +262,11 @@ const make = Effect.gen(function* () {
       tx(
         Effect.gen(function* () {
           if (request !== undefined) {
-            const before = yield* spawnedBy(project, request)
+            const before = yield* reads.spawnedBy(project, request)
             if (before !== undefined) return before
           }
           if (max !== undefined) {
-            const n = (yield* selectRaw([notMain, sql`a.ended_at IS NULL`], running)).length
+            const n = (yield* selectRaw([notMain, sql`s.ended_at IS NULL`], running)).length
             if (n >= max) return false
           }
           const [entry] =
@@ -275,23 +275,31 @@ const make = Effect.gen(function* () {
               : []
           const reportTo = parentSessionId ?? entry?.id ?? undefined
           const stopped = row.metadata.archived || row.metadata.removed
-          yield* sql`INSERT INTO session ${sql.insert({
-            id: row.id,
+          yield* emit(SessionCreated, {
+            sessionId: row.id,
             projectId: project,
-            ...(parentSessionId === undefined ? {} : { parentSessionId }),
-            ...(reportTo === undefined ? {} : { reportToSessionId: reportTo }),
-            role: row.agent,
-            name: row.name,
-            machine: row.address.machine,
-            directory: cwd,
-            archiveOnCompletion: row.metadata.archive ? 1 : 0,
-            createdAt: row.createdAt,
-            ...(stopped ? { endedAt: row.lastActive } : {}),
-          })}`
-          if (origin !== undefined)
-            yield* append({ sessionId: row.id, type: "peer.start", at: row.createdAt, data: origin })
+            at: row.createdAt,
+            data: {
+              role: row.agent,
+              name: row.name,
+              directory: cwd,
+              ...(parentSessionId === undefined ? {} : { parent: parentSessionId }),
+              ...(reportTo === undefined ? {} : { reportTo }),
+              archiveOnCompletion: row.metadata.archive === true,
+              ...(origin === undefined
+                ? {}
+                : {
+                    origin: {
+                      peer: origin.peer,
+                      project: origin.project,
+                      ...(origin.parent === undefined ? {} : { parent: origin.parent }),
+                      ...(origin.reportTo === undefined ? {} : { reportTo: origin.reportTo }),
+                    },
+                  }),
+            },
+          })
           const processAt = row.startedAt ?? row.createdAt
-          const processId = yield* startProcess(
+          const process = yield* startProcess(
             row.id,
             {
               harness: row.harnessId,
@@ -299,33 +307,25 @@ const make = Effect.gen(function* () {
               ...(row.model ? { model: row.model } : {}),
               ...(row.metadata.routing === undefined ? {} : { routing: row.metadata.routing }),
               runtime: row.runtime,
-              machine: row.address.machine,
               terminal: row.address.id,
               ...(row.harnessSessionId ? { resume: row.harnessSessionId } : {}),
             },
             processAt,
           )
           if (row.metadata.pid !== undefined || row.metadata.integration !== undefined)
-            yield* append({
+            yield* emit(ProcessReady, {
               sessionId: row.id,
-              type: "process.ready",
-              processId,
               at: row.metadata.ready ?? processAt,
               data: {
+                process,
                 ...(row.metadata.pid === undefined ? {} : { pid: row.metadata.pid }),
                 ...(row.metadata.integration === undefined ? {} : { integration: row.metadata.integration }),
               },
             })
           if (row.exitedAt !== null)
-            yield* append({
-              sessionId: row.id,
-              type: "process.end",
-              processId,
-              at: row.exitedAt,
-              data: { reason: "exited" },
-            })
+            yield* emit(ProcessEnded, { sessionId: row.id, at: row.exitedAt, data: { process, reason: "exited" } })
           if (task !== undefined)
-            yield* insertInboxSql({
+            yield* queueInbox({
               recipient: row.id,
               kind: "task",
               sender: parentSessionId ?? null,
@@ -334,24 +334,17 @@ const make = Effect.gen(function* () {
               request,
             })
           if (row.turnState !== "none") {
-            const turnId = yield* append({
-              sessionId: row.id,
-              type: "turn.start",
-              processId,
-              at: row.turnPromptedAt,
-              data: {},
-            })
-            yield* linkTask(row.id, turnId, row.turnPromptedAt)
+            const turn = yield* startTurn(row.id, row.turnPromptedAt)
+            yield* linkTask(row.id, turn, row.turnPromptedAt)
             if (row.turnState !== "open")
-              yield* append({
+              yield* emit(TurnEnded, {
                 sessionId: row.id,
-                type: "turn.end",
-                processId,
-                turnId,
                 at: row.turnPromptedAt,
-                data: { status: row.turnState },
+                data: { turn, status: row.turnState },
               })
           }
+          if (stopped)
+            yield* emit(SessionEnded, { sessionId: row.id, at: row.lastActive, data: { reason: "archived" } })
           remember(row)
           return true
         }),
@@ -381,10 +374,10 @@ const make = Effect.gen(function* () {
 
     sessionIdentity: (id: string) =>
       sql<{ id: string; projectId: string; agent: string; harness: string }>`SELECT a.id, a.project_id,
-          coalesce(json_extract(p.data, '$.harness'), '') AS harness,
+          coalesce(p.harness, '') AS harness,
           CASE WHEN q.entry_session_id = a.id THEN 'coordinator' ELSE a.role END AS agent
         FROM session a JOIN project q ON q.id = a.project_id
-        LEFT JOIN event p ON p.id = ${currentStart(sql`a.id`)}
+        LEFT JOIN process p ON p.id = a.process_id
         WHERE a.id = ${id}`.pipe(
         Effect.map((rows) => rows[0]),
         Effect.orDie,
@@ -399,49 +392,14 @@ const make = Effect.gen(function* () {
     listSessions: (filter: SessionFilter = {}) =>
       selectSessions(
         [
-          ...(filter.projectId === undefined ? [] : [sql`a.project_id = ${filter.projectId}`]),
-          ...(filter.peer === undefined ? [] : [remote.ofPeer(sql`a.id`, filter.peer)]),
+          ...(filter.projectId === undefined ? [] : [sql`s.project_id = ${filter.projectId}`]),
+          ...(filter.peer === undefined ? [] : [remote.ofPeer(sql`s.id`, filter.peer)]),
         ],
         filter.stopped === true,
         filter.stopped ? undefined : running,
       ).pipe(Effect.orDie),
 
-    sessionBriefs: (ids: ReadonlyArray<string>) =>
-      (ids.length === 0
-        ? Effect.succeed([] as ReadonlyArray<BriefRow>)
-        : sql<BriefRow>`SELECT a.id,
-            (SELECT i.content FROM inbox i WHERE i.recipient_session_id = a.id AND i.kind = 'task'
-              ORDER BY i.id LIMIT 1) AS task,
-            t.id AS turn_id,
-            te.data AS end_data,
-            te.at AS ended_at,
-            (SELECT i.content FROM inbox i WHERE i.result_event_id = te.id ORDER BY i.id LIMIT 1) AS result_content,
-            coalesce(json_extract(tr.data, '$.text'), json_extract(te.data, '$.output')) AS answer
-          FROM session a
-          LEFT JOIN event t ON t.id = (SELECT max(id) FROM event WHERE session_id = a.id AND type = 'turn.start')
-          LEFT JOIN event te ON te.turn_id = t.id AND te.type = 'turn.end'
-          LEFT JOIN event tr ON tr.id = json_extract(te.data, '$.report') AND tr.type = 'turn.reported'
-          WHERE ${sql.in("a.id", ids)}`
-      ).pipe(
-        Effect.map((rows) => {
-          const briefs = new Map<string, SessionBrief>()
-          for (const row of rows) {
-            const end = row.endData === null ? undefined : (JSON.parse(row.endData) as TurnEnd)
-            const raw = row.turnId === null ? undefined : (end?.status ?? "working")
-            const status = raw !== undefined && MESSAGE_STATUSES.has(raw) ? (raw as MessageStatusName) : undefined
-            const summary =
-              (row.resultContent === null ? undefined : summaryIn(row.resultContent)) ??
-              (row.answer === null ? undefined : row.answer.split("\n")[0]) ??
-              ""
-            briefs.set(row.id, {
-              task: row.task ?? null,
-              latest: status === undefined ? null : { status, summary, endedAt: row.endedAt ?? null },
-            })
-          }
-          return briefs
-        }),
-        Effect.orDie,
-      ),
+    sessionBriefs: (ids: ReadonlyArray<string>) => reads.briefs(ids).pipe(Effect.orDie),
 
     coordinators: findCoordinators().pipe(Effect.orDie),
 
@@ -488,23 +446,32 @@ const make = Effect.gen(function* () {
             if (!existing?.main || fresh) {
               if (existing?.main) {
                 yield* endProcess(existing.main, "archived", at)
-                yield* sql`UPDATE session SET ended_at = ${at} WHERE id = ${existing.main}`
+                yield* emit(SessionEnded, { sessionId: existing.main, at, data: { reason: "replaced" } })
               }
-              yield* sql`INSERT INTO session ${sql.insert({
-                id,
+              yield* emit(SessionCreated, {
+                sessionId: id,
                 projectId: project,
-                role: "main",
-                name: "main",
-                machine: location.address.machine,
-                directory: start.projectDirectory ?? "",
-                createdAt: at,
-              })}`
-              yield* sql`UPDATE project SET entry_session_id = ${id} WHERE id = ${project}`
+                at,
+                data: {
+                  role: "main",
+                  name: "main",
+                  directory: start.projectDirectory ?? "",
+                  archiveOnCompletion: false,
+                },
+              })
+              yield* emit(ProjectEntryChanged, { projectId: project, at, data: { session: id } })
               yield* notify({ type: "live.project", projectId: project })
             }
             const mainId = !existing?.main || fresh ? id : existing.main
-            if (start.projectDirectory)
-              yield* sql`UPDATE session SET directory = ${start.projectDirectory} WHERE id = ${mainId} AND directory = ''`
+            if (start.projectDirectory) {
+              const [own] = yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${mainId}`
+              if (own?.directory === "")
+                yield* emit(SessionDirectoryChanged, {
+                  sessionId: mainId,
+                  at,
+                  data: { directory: start.projectDirectory },
+                })
+            }
             const { current, conversation } = yield* conversationOf(mainId)
             if (current !== undefined && current.ended === null)
               yield* endProcess(mainId, movingHere ? "move" : "exited", at)
@@ -523,7 +490,6 @@ const make = Effect.gen(function* () {
                 ...(start.model ? { model: start.model } : {}),
                 ...(start.routing ? { routing: start.routing } : {}),
                 runtime: location.runtime,
-                machine: location.address.machine,
                 terminal: location.address.id,
                 ...(resume === undefined ? {} : { resume }),
                 ...(start.pid === undefined ? {} : { pid: start.pid }),
@@ -542,11 +508,9 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const { current, conversation } = yield* conversationOf(id)
           if (current === undefined || conversation === harnessSessionId) return false
-          yield* append({
+          yield* emit(ProcessConversation, {
             sessionId: id,
-            type: "process.conversation",
-            processId: current.id,
-            data: { conversation: harnessSessionId },
+            data: { process: current.id, conversation: harnessSessionId },
           })
           return true
         }),
@@ -554,11 +518,9 @@ const make = Effect.gen(function* () {
 
     noteIntegration: (id: string, integration: Integration) =>
       Effect.gen(function* () {
-        const found = yield* anySession(id)
-        if (found === undefined) return false
-        const known =
-          integrations.get(id) ??
-          (found.row.integration === null ? undefined : (JSON.parse(found.row.integration) as Integration))
+        const exists = yield* sql`SELECT 1 FROM session WHERE id = ${id}`
+        if (exists.length === 0) return false
+        const known = integrations.get(id) ?? (yield* currentProcess(id))?.integration
         if (known?.version === integration.version && known.protocol === integration.protocol) return false
         integrations.set(id, integration)
         return true
@@ -575,27 +537,28 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const ready = typeof patch.ready === "number"
           if (!ready && typeof patch.pid !== "number") return
-          const found = yield* anySession(id)
-          const current = found?.current
+          const current = yield* currentProcess(id)
           if (current === undefined) return
           const integration = integrations.get(id)
-          yield* append({
+          if (!ready) {
+            yield* emit(ProcessPid, { sessionId: id, data: { process: current.id, pid: patch.pid as number } })
+            return
+          }
+          yield* emit(ProcessReady, {
             sessionId: id,
-            type: "process.ready",
-            processId: current.id,
-            ...(ready ? { at: patch.ready as number } : {}),
+            at: patch.ready as number,
             data: {
+              process: current.id,
               ...(typeof patch.pid === "number" ? { pid: patch.pid } : {}),
-              ...(ready ? {} : { pidOnly: true }),
-              ...(!ready || integration === undefined ? {} : { integration }),
+              ...(integration === undefined ? {} : { integration }),
             },
           })
         }),
       ).pipe(Effect.orDie),
 
     readyAt: (id: string) =>
-      anySession(id).pipe(
-        Effect.map((found) => found?.row.readyAt ?? undefined),
+      currentProcess(id).pipe(
+        Effect.map((current) => current?.readyAt ?? undefined),
         Effect.orDie,
       ),
 
@@ -622,11 +585,9 @@ const make = Effect.gen(function* () {
           if (main === undefined || current === undefined || current.start.harness !== harness)
             return yield* Effect.logDebug(`main agent session report ignored for ${sessionId}`)
           if (conversation === harnessSessionId) return
-          yield* append({
+          yield* emit(ProcessConversation, {
             sessionId,
-            type: "process.conversation",
-            processId: current.id,
-            data: { conversation: harnessSessionId },
+            data: { process: current.id, conversation: harnessSessionId },
           })
         }),
       ).pipe(Effect.orDie),
@@ -647,6 +608,10 @@ const make = Effect.gen(function* () {
       tx(clearMainAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
     canResumeConversation,
+    historyNotImported: sql`SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ${NOT_IMPORTED_TABLE}`.pipe(
+      Effect.map((rows) => rows.length > 0),
+      Effect.orDie,
+    ),
     ...inboxMethods(store),
   }
 })
@@ -657,12 +622,11 @@ export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibe
   static readonly layer = Layer.effect(
     Db,
     SqlClient.SqlClient.pipe(
-      Effect.flatMap((sql) => sql.unsafe("PRAGMA foreign_keys = ON")),
-      Effect.andThen(migrate),
+      Effect.andThen(apply),
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA journal_mode = WAL")))),
       Effect.andThen(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.unsafe("PRAGMA synchronous = NORMAL")))),
       Effect.andThen(
-        SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE project SET directory = directory WHERE id = ''`)),
+        SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql`UPDATE meta SET value = value WHERE key = ''`)),
       ),
       Effect.andThen(make),
     ),

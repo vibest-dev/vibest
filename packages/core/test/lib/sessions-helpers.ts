@@ -40,15 +40,23 @@ export const claudeEnd = (reason: string) =>
     }
   ).result
 
-export const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
+export const spawnWorking = (
+  repo: string,
+  harness: HarnessId = "pi",
+  extra: { readonly archive?: boolean; readonly underMain?: boolean } = {},
+) =>
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const db = yield* Db
-    yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+    const main = yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
       runtime: RUNTIME,
       address: { machine: "local", id: "test/coord" },
     })
-    const { id } = yield* sessions.spawn(yield* spawnInput(repo, harness))
+    const { id } = yield* sessions.spawn({
+      ...(yield* spawnInput(repo, harness)),
+      ...(extra.archive ? { archive: true } : {}),
+      ...(extra.underMain ? { parentSessionId: main.sessionId } : {}),
+    })
     yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
     yield* sessions.check(id)
     yield* (yield* FakeRuntime).seedAgent("test/coord")
@@ -57,10 +65,10 @@ export const spawnWorking = (repo: string, harness: HarnessId = "pi") =>
     return { id, row, sessions, db }
   })
 
-export const idleSession = (repo: string) =>
+export const idleSession = (repo: string, extra: { readonly archive?: boolean } = {}) =>
   Effect.gen(function* () {
     const herdr = yield* FakeRuntime
-    const w = yield* spawnWorking(repo)
+    const w = yield* spawnWorking(repo, "pi", extra)
     yield* writeResult(w.id, "pi", { text: "status: completed" })
     yield* herdr.endTurn(w.id)
     yield* w.sessions.check(w.id)

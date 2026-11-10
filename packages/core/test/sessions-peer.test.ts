@@ -131,11 +131,6 @@ describe.concurrent("Sessions", () => {
       const otherRepo = yield* makeRepository
       const cross = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(otherRepo)), peer: id }))
       assert.include(cross.message, "belongs to another project")
-      const address = (yield* db.getSession(id))!.address
-      yield* db.updateSession(id, { address: { ...address, machine: "other" } })
-      const otherSession = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: id }))
-      assert.include(otherSession.message, "ineligible")
-      yield* db.updateSession(id, { address })
       const worktree = yield* sessionWorktree(id)
       yield* fs.rename(worktree, `${worktree}.away`)
       const gone = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: id }))
@@ -151,7 +146,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "run --peer without --runtime uses the peer runtime and machine, and an explicit other runtime is still refused",
+    "run --peer without --runtime uses the peer runtime, and an explicit other runtime is still refused",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
@@ -160,8 +155,6 @@ describe.concurrent("Sessions", () => {
         address: { machine: "local", id: "test/coord-hc" },
       })
       assert.strictEqual((yield* owner.db.coordinatorOf(owner.row.projectId))?.runtime, "hc")
-      const place = (yield* owner.db.getSession(owner.id))!
-      yield* owner.db.updateSession(owner.id, { address: { ...place.address, machine: "other" } })
       const base = yield* spawnInput(repo)
       const followed = yield* owner.sessions.spawn({
         machine: base.machine,
@@ -185,7 +178,7 @@ describe.concurrent("Sessions", () => {
         }),
       )
       assert.strictEqual(refused._tag, "NoSuchSession")
-      assert.include(refused.message, "ineligible: it runs in herdr on other, not hc on local")
+      assert.include(refused.message, "ineligible: it runs in herdr on local, not hc on local")
     }),
     {
       plugins: [callerPlugin("hc", { env: ["HC_ID"], terminal: (env) => Effect.succeed(env.HC_ID) })],

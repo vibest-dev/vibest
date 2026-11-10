@@ -11,26 +11,8 @@ import {
 import { Clock, Context, Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import { APPLICATION_ID } from "./db-schema.ts"
+import { LOG_SCHEMA } from "./db-schema.ts"
 import { project, PROJECTION_SCHEMA, PROJECTION_TABLES, PROJECTION_VERSION } from "./projectors.ts"
-
-export const LEDGER_VERSION = 2
-
-export const LOG_SCHEMA = [
-  `PRAGMA application_id = ${APPLICATION_ID}`,
-  `PRAGMA user_version = ${LEDGER_VERSION}`,
-  `CREATE TABLE event (
-    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-    at         INTEGER NOT NULL,
-    type       TEXT    NOT NULL,
-    project_id TEXT,
-    session_id TEXT,
-    data       TEXT    NOT NULL
-  ) STRICT`,
-  `CREATE TRIGGER event_no_update BEFORE UPDATE ON event
-    BEGIN SELECT RAISE(ABORT, 'event is append-only'); END`,
-  `CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT`,
-]
 
 type Definition = (typeof Catalog)[FactType]
 
@@ -42,7 +24,7 @@ export interface Emit<D extends Definition> {
 }
 
 const Buffer = Context.Reference<
-  { readonly facts: Array<Fact>; readonly fiberId: number; closed: boolean } | undefined
+  { readonly events: Array<unknown>; readonly fiberId: number; closed: boolean } | undefined
 >("vibest/JournalBuffer", { defaultValue: () => undefined })
 
 const setMeta = (sql: SqlClient.SqlClient, key: "catalog" | "projection", value: number) =>
@@ -202,7 +184,7 @@ export const append = (fact: Fact) =>
     return yield* write(sql, fact, data)
   })
 
-export const makeJournal = (published: (facts: ReadonlyArray<Fact>) => Effect.Effect<void>) =>
+export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fact | Signal>) => Effect.Effect<void>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
 
@@ -211,11 +193,11 @@ export const makeJournal = (published: (facts: ReadonlyArray<Fact>) => Effect.Ef
         if ((yield* Buffer) !== undefined) return yield* body
         return yield* Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
-            const buffer = { facts: [] as Array<Fact>, fiberId: yield* Effect.fiberId, closed: false }
+            const buffer = { events: [] as Array<Fact | Signal>, fiberId: yield* Effect.fiberId, closed: false }
             const result = yield* sql
               .withTransaction(restore(Effect.provideService(body, Buffer, buffer)))
               .pipe(Effect.ensuring(Effect.sync(() => (buffer.closed = true))))
-            if (buffer.facts.length > 0) yield* published(buffer.facts)
+            if (buffer.events.length > 0) yield* published(buffer.events)
             return result
           }),
         )
@@ -253,9 +235,16 @@ export const makeJournal = (published: (facts: ReadonlyArray<Fact>) => Effect.Ef
         const fact = yield* write(sql, { at, type: definition.type, projectId, sessionId: input.sessionId }, data).pipe(
           Effect.orDie,
         )
-        buffer.facts.push(fact)
+        buffer.events.push(fact)
         return fact.seq
       })
 
-    return { commit, emit, rebuild }
+    const notify = (signal: Signal) =>
+      Effect.gen(function* () {
+        const buffer = yield* Buffer
+        if (buffer !== undefined && !buffer.closed) buffer.events.push(signal)
+        else yield* published([signal])
+      })
+
+    return { commit, emit, notify, rebuild }
   })

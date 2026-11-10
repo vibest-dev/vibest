@@ -1,34 +1,8 @@
-import { randomId } from "@vibest/schema/id"
-import { Effect, Option, Schema } from "effect"
-import type { SqlClient, SqlError, Statement } from "effect/sql"
+import { MachineAdded, MachineConnected, MachineRemoved, OutboxAcked, PeerSeen } from "@vibest/schema/event"
+import { Effect } from "effect"
+import type { Statement } from "effect/sql"
 
-import type { LiveEvent } from "./bus.ts"
-
-export const REMOTE_TABLES: ReadonlyArray<string> = [
-  `CREATE TABLE IF NOT EXISTS machine (
-    name         TEXT PRIMARY KEY,
-    target       TEXT NOT NULL,
-    vibestd_id   TEXT NOT NULL UNIQUE CHECK (length(vibestd_id) = 36),
-    connected_at INTEGER NOT NULL,
-    created_at   INTEGER NOT NULL
-  ) STRICT`,
-  `CREATE TABLE IF NOT EXISTS peer (
-    id           TEXT PRIMARY KEY CHECK (length(id) = 36),
-    name         TEXT NOT NULL,
-    calls_me     TEXT NOT NULL,
-    connected_at INTEGER NOT NULL
-  ) STRICT`,
-  `CREATE TABLE IF NOT EXISTS outbox (
-    id         TEXT PRIMARY KEY CHECK (length(id) = 36),
-    peer_id    TEXT NOT NULL REFERENCES peer (id),
-    session_id TEXT NOT NULL REFERENCES session (id),
-    kind       TEXT NOT NULL CHECK (kind IN ('result', 'notice')),
-    content    TEXT NOT NULL,
-    created_at INTEGER NOT NULL
-  ) STRICT`,
-  `CREATE INDEX IF NOT EXISTS outbox_peer ON outbox (peer_id, created_at)`,
-  `CREATE INDEX IF NOT EXISTS outbox_session ON outbox (session_id)`,
-]
+import type { Store } from "./db-store.ts"
 
 export type MachineRow = {
   readonly name: string
@@ -38,24 +12,12 @@ export type MachineRow = {
   readonly createdAt: number
 }
 
-export const PeerStart = Schema.Struct({
-  peer: Schema.String,
-  project: Schema.String,
-  parent: Schema.optional(Schema.String),
-  reportTo: Schema.optional(Schema.String),
-})
-export type PeerStart = typeof PeerStart.Type
-
-const decodeStart = Schema.decodeUnknownOption(Schema.fromJsonString(PeerStart))
-
-export const peerStartOf = (sessionId: string, data: string | null) =>
-  Effect.gen(function* () {
-    if (data === null) return undefined
-    const start = decodeStart(data)
-    if (Option.isSome(start)) return start.value
-    yield* Effect.logWarning(`session ${sessionId}: its peer.start event does not decode; skipped`)
-    return undefined
-  })
+export type PeerStart = {
+  readonly peer: string
+  readonly project: string
+  readonly parent?: string | undefined
+  readonly reportTo?: string | undefined
+}
 
 export type OutboxRow = {
   readonly id: string
@@ -66,62 +28,20 @@ export type OutboxRow = {
   readonly reportTo: string
 }
 
-type Deps = {
-  readonly sql: SqlClient.SqlClient
-  readonly now: Effect.Effect<number>
-  readonly tx: <A, E, R>(body: Effect.Effect<A, E, R>) => Effect.Effect<A, E | SqlError.SqlError, R>
-  readonly notify: (event: LiveEvent) => Effect.Effect<void>
-  readonly present: (project: string, recipient: string) => Effect.Effect<boolean, unknown>
-  readonly queuedBy: (sessionId: string, request: string) => Effect.Effect<number | undefined, unknown>
-  readonly insertInbox: (row: {
-    readonly recipient: string
-    readonly kind: string
-    readonly sender: null
-    readonly content: string
-    readonly status: string
-    readonly request: string
-  }) => Effect.Effect<unknown, unknown>
-}
-
-export const remoteQueries = ({ sql, now, tx, notify, present, queuedBy, insertInbox }: Deps) => {
+export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, currentProcess }: Store) => {
   const machineColumns = sql`name, target, vibestd_id, connected_at, created_at`
+  const machineNamed = (name: string) =>
+    sql<MachineRow>`SELECT ${machineColumns} FROM machine WHERE name = ${name}`.pipe(Effect.map((rows) => rows[0]))
 
   return {
     ofPeer: (session: Statement.Fragment, scope: { readonly peer: string; readonly project: string }) =>
-      sql`EXISTS (SELECT 1 FROM event pe WHERE pe.session_id = ${session} AND pe.type = 'peer.start'
-        AND json_extract(pe.data, '$.peer') = ${scope.peer} AND json_extract(pe.data, '$.project') = ${scope.project})`,
-
-    queueForPeer: (
-      origin: PeerStart,
-      row: {
-        readonly sessionId: string
-        readonly kind: string
-        readonly content: string
-        readonly at?: number | undefined
-      },
-    ) =>
-      Effect.gen(function* () {
-        if (origin.reportTo === undefined) return
-        if ((yield* sql<{ one: number }>`SELECT 1 AS one FROM peer WHERE id = ${origin.peer}`).length === 0) return
-        yield* sql`INSERT INTO outbox ${sql.insert({
-          id: randomId(),
-          peerId: origin.peer,
-          sessionId: row.sessionId,
-          kind: row.kind === "result" ? "result" : "notice",
-          content: row.content,
-          createdAt: row.at ?? (yield* now),
-        })}`
-        yield* notify({ type: "live.outbox", peerId: origin.peer })
-      }),
+      sql`EXISTS (SELECT 1 FROM session o WHERE o.id = ${session} AND o.origin_peer = ${scope.peer}
+        AND o.origin_project = ${scope.project})`,
 
     queries: {
-      machines: sql<MachineRow>`SELECT ${machineColumns} FROM machine ORDER BY name`.pipe(Effect.orDie),
+      machines: reads.machines.pipe(Effect.orDie),
 
-      machineNamed: (name: string) =>
-        sql<MachineRow>`SELECT ${machineColumns} FROM machine WHERE name = ${name}`.pipe(
-          Effect.map((rows) => rows[0]),
-          Effect.orDie,
-        ),
+      machineNamed: (name: string) => machineNamed(name).pipe(Effect.orDie),
 
       machineWithVibestd: (id: string) =>
         sql<MachineRow>`SELECT ${machineColumns} FROM machine WHERE vibestd_id = ${id}`.pipe(
@@ -130,24 +50,30 @@ export const remoteQueries = ({ sql, now, tx, notify, present, queuedBy, insertI
         ),
 
       addMachine: (row: { readonly name: string; readonly target: string; readonly vibestdId: string }) =>
-        Effect.gen(function* () {
-          const at = yield* now
-          const [added] =
-            yield* sql<MachineRow>`INSERT INTO machine ${sql.insert({ ...row, connectedAt: at, createdAt: at })}
-            ON CONFLICT DO NOTHING RETURNING ${machineColumns}`
-          return added
-        }).pipe(Effect.orDie),
+        tx(
+          Effect.gen(function* () {
+            const taken = yield* sql`SELECT 1 FROM machine WHERE name = ${row.name} OR vibestd_id = ${row.vibestdId}`
+            if (taken.length > 0) return undefined
+            yield* emit(MachineAdded, { data: { name: row.name, target: row.target, vibestd: row.vibestdId } })
+            return yield* machineNamed(row.name)
+          }),
+        ).pipe(Effect.orDie),
 
       removeMachine: (name: string) =>
-        sql`DELETE FROM machine WHERE name = ${name} RETURNING name`.pipe(
-          Effect.map((rows) => rows.length > 0),
-          Effect.orDie,
-        ),
+        tx(
+          Effect.gen(function* () {
+            if ((yield* machineNamed(name)) === undefined) return false
+            yield* emit(MachineRemoved, { data: { name } })
+            return true
+          }),
+        ).pipe(Effect.orDie),
 
       machineConnected: (name: string) =>
-        Effect.gen(function* () {
-          yield* sql`UPDATE machine SET connected_at = ${yield* now} WHERE name = ${name}`
-        }).pipe(Effect.orDie),
+        tx(
+          Effect.gen(function* () {
+            if ((yield* machineNamed(name)) !== undefined) yield* emit(MachineConnected, { data: { name } })
+          }),
+        ).pipe(Effect.orDie),
 
       projectRemote: (projectId: string) =>
         sql<{ path: string; remote: string | null }>`SELECT path, remote_url AS remote FROM project_repository
@@ -165,18 +91,18 @@ export const remoteQueries = ({ sql, now, tx, notify, present, queuedBy, insertI
                 CASE WHEN s.ended_at IS NULL THEN s.id ELSE p.entry_session_id END AS recipient
               FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${item.recipient}`
             if (route === undefined) return "unknown" as const
-            const key = `peer:${item.id}`
+            if (yield* reads.hasPeerItem(item.id)) return "duplicate" as const
             const recipient = route.recipient
-            for (const at of new Set([item.recipient, recipient ?? item.recipient]))
-              if ((yield* queuedBy(at, key)) !== undefined) return "duplicate" as const
-            const here = recipient !== null && (recipient !== route.entry || (yield* present(route.project, recipient)))
-            yield* insertInbox({
+            const here =
+              recipient !== null &&
+              (recipient !== route.entry || placed(route.project, yield* currentProcess(recipient)))
+            yield* queueInbox({
               recipient: recipient ?? item.recipient,
               kind: "notice",
               sender: null,
               content: item.content,
               status: here ? "pending" : "dropped",
-              request: key,
+              peerItem: item.id,
             })
             return "queued" as const
           }),
@@ -188,35 +114,26 @@ export const remoteQueries = ({ sql, now, tx, notify, present, queuedBy, insertI
           FROM project p JOIN project_repository r ON r.project_id = p.id
           WHERE r.remote_url IS NOT NULL ORDER BY p.rowid, r.rowid`.pipe(Effect.orDie),
 
-      outboxOf: (peer: string) =>
-        sql<Omit<OutboxRow, "reportTo"> & { readonly start: string | null }>`SELECT o.id, o.session_id, o.kind,
-            o.content, o.created_at,
-            (SELECT pe.data FROM event pe WHERE pe.session_id = o.session_id AND pe.type = 'peer.start' LIMIT 1) AS start
-          FROM outbox o WHERE o.peer_id = ${peer} ORDER BY o.created_at, o.rowid`.pipe(
-          Effect.flatMap((rows) =>
-            Effect.forEach(rows, ({ start, ...row }) =>
-              Effect.map(peerStartOf(row.sessionId, start), (origin): Array<OutboxRow> =>
-                origin?.reportTo === undefined ? [] : [{ ...row, reportTo: origin.reportTo }],
-              ),
-            ),
-          ),
-          Effect.map((rows) => rows.flat()),
-          Effect.orDie,
-        ),
+      outboxOf: (peer: string) => reads.outboxOf(peer).pipe(Effect.orDie),
 
       ackOutbox: (peer: string, ids: ReadonlyArray<string>) =>
         (ids.length === 0
           ? Effect.void
-          : sql`DELETE FROM outbox WHERE peer_id = ${peer} AND ${sql.in("id", ids)}`.pipe(Effect.asVoid)
+          : tx(
+              Effect.gen(function* () {
+                const found = yield* sql<{ id: string }>`SELECT id FROM outbox WHERE peer_id = ${peer}
+                  AND ${sql.in("id", ids)} ORDER BY seq`
+                const [first, ...rest] = found.map((row) => row.id)
+                if (first !== undefined) yield* emit(OutboxAcked, { data: { peer, ids: [first, ...rest] } })
+              }),
+            )
         ).pipe(Effect.orDie),
 
       notePeer: (peer: { readonly id: string; readonly name: string; readonly callsMe: string }) =>
-        Effect.gen(function* () {
-          const at = yield* now
-          yield* sql`INSERT INTO peer ${sql.insert({ id: peer.id, name: peer.name, callsMe: peer.callsMe, connectedAt: at })}
-            ON CONFLICT (id) DO UPDATE SET name = excluded.name, calls_me = excluded.calls_me,
-              connected_at = excluded.connected_at`
-        }).pipe(Effect.orDie),
+        tx(emit(PeerSeen, { data: { id: peer.id, name: peer.name, callsMe: peer.callsMe } })).pipe(
+          Effect.asVoid,
+          Effect.orDie,
+        ),
 
       peerKnown: (id: string) =>
         sql`SELECT 1 FROM peer WHERE id = ${id}`.pipe(

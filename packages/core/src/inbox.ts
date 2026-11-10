@@ -150,10 +150,10 @@ export class Inbox extends Context.Service<
       yield* engine.on((event) => {
         switch (event.type) {
           case "inbox.queued":
-            return wake(event.sessionId).pipe(Effect.andThen(ifMain(event.sessionId, deliver)))
-          case "inbox.status":
+            return wake(event.sessionId!).pipe(Effect.andThen(ifMain(event.sessionId!, deliver)))
+          case "inbox.moved":
             return event.data.to === "pending"
-              ? wake(event.sessionId).pipe(Effect.andThen(ifMain(event.sessionId, deliver)))
+              ? wake(event.sessionId!).pipe(Effect.andThen(ifMain(event.sessionId!, deliver)))
               : Effect.void
           case "live.state":
             return db

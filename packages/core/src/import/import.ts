@@ -1,6 +1,7 @@
 import { Clock, Effect } from "effect"
 import { SqlClient } from "effect/sql"
 
+import { MIGRATION_TABLE } from "../db-schema.ts"
 import { append, installLedger } from "../journal.ts"
 import { ledgerReads } from "../ledger-read.ts"
 import { compare, type InboxColumns, type Reader, type SessionColumns, viewOf } from "./referee.ts"
@@ -29,6 +30,7 @@ const failed = (what: string) => (cause: unknown) =>
 
 export const v2Reader = (sql: SqlClient.SqlClient): Reader => ({
   ...ledgerReads(sql),
+
   inboxColumns: sql<InboxColumns>`SELECT id, kind, recipient_session_id AS recipient, sender_session_id AS sender,
       content, status, turn_id AS turn FROM inbox ORDER BY id`,
   sessionColumns: sql<SessionColumns & { readonly id: string }>`SELECT id, project_id, parent_session_id,
@@ -47,8 +49,6 @@ export const v2Reader = (sql: SqlClient.SqlClient): Reader => ({
         .map((r) => ({ path: r.path, remoteUrl: r.remoteUrl })),
     }))
   }),
-  hasPeerItem: (item: string) =>
-    sql`SELECT 1 FROM inbox WHERE peer_item = ${item}`.pipe(Effect.map((rows) => rows.length > 0)),
 })
 
 const translated = (snapshot: Snapshot) =>
@@ -113,7 +113,7 @@ export const importCheck = (source: SqlClient.SqlClient) =>
 const dropAll = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     const tables = yield* sql<{ name: string }>`SELECT name FROM sqlite_schema
-      WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`
+      WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != ${MIGRATION_TABLE}`
     yield* sql.unsafe("PRAGMA defer_foreign_keys = ON")
     for (const table of tables) yield* sql.unsafe(`DROP TABLE "${table.name}"`)
   })
@@ -129,7 +129,6 @@ export const refereeFailed = (report: Report) =>
 export const importInPlace = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const started = yield* Clock.currentTimeMillis
-  yield* sql.unsafe("PRAGMA foreign_keys = OFF")
   return yield* sql
     .withTransaction(
       Effect.gen(function* () {
