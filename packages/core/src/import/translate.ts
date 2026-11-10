@@ -9,6 +9,7 @@ export class ImportFailed extends Schema.TaggedError<ImportFailed>()("ImportFail
 export type Counts = {
   readonly endsOfEndedProcesses: number
   readonly turnsLost: number
+  readonly endsOfEndedTurns: number
   readonly duplicatePeerKeys: number
   readonly undecodablePeerStarts: number
 }
@@ -40,13 +41,26 @@ const text = (value: unknown) => (typeof value === "string" && value !== "" ? va
 const present = <K extends string, V>(key: K, value: V | undefined): { [P in K]?: V } =>
   (value === undefined ? {} : { [key]: value }) as { [P in K]?: V }
 
+export const highestId = (snapshot: Pick<Snapshot, "events" | "inbox">) => {
+  let highest = 0
+  for (const { id } of snapshot.events) if (id > highest) highest = id
+  for (const { id } of snapshot.inbox) if (id > highest) highest = id
+  return highest
+}
+
 export const translate = (snapshot: Snapshot, importedAt: number): Translation => {
-  const base = Math.max(0, ...snapshot.events.map((e) => e.id), ...snapshot.inbox.map((i) => i.id))
+  const base = highestId(snapshot)
   const facts: Array<Fact> = []
   const eventSeq = new Map<number, number>()
   const inboxSeq = new Map<number, number>()
   const sources = new Map<number, string>()
-  const counts = { endsOfEndedProcesses: 0, turnsLost: 0, duplicatePeerKeys: 0, undecodablePeerStarts: 0 }
+  const counts = {
+    endsOfEndedProcesses: 0,
+    turnsLost: 0,
+    endsOfEndedTurns: 0,
+    duplicatePeerKeys: 0,
+    undecodablePeerStarts: 0,
+  }
   const sessions = new Map(snapshot.sessions.map((s) => [s.id, s]))
   const inbox = new Map(snapshot.inbox.map((i) => [i.id, i]))
   const events = new Map(snapshot.events.map((e) => [e.id, e]))
@@ -54,6 +68,7 @@ export const translate = (snapshot: Snapshot, importedAt: number): Translation =
   const ended = new Set<number>()
   const liveProcess = new Map<string, number>()
   const openTurn = new Map<string, number>()
+  const endedTurns = new Set<number>()
   const created = new Set<string>()
   const peerKeys = new Set<string>()
 
@@ -231,6 +246,7 @@ export const translate = (snapshot: Snapshot, importedAt: number): Translation =
         const open = openTurn.get(event.sessionId)
         if (open !== undefined) {
           counts.turnsLost++
+          endedTurns.add(open)
           push("turn.ended", event.at, on, { turn: open, status: "lost" }, source)
         }
         const seq = push(
@@ -267,6 +283,13 @@ export const translate = (snapshot: Snapshot, importedAt: number): Translation =
       }
       case "turn.end": {
         const turn = mapped(event.turnId, "turn", source) ?? fail(`${source}: no turn`)
+        if (endedTurns.has(turn)) {
+          counts.endsOfEndedTurns++
+          return
+        }
+        endedTurns.add(turn)
+        if (data["report"] !== undefined && typeof data["report"] !== "number")
+          fail(`${source}: its report ${JSON.stringify(data["report"])} is not an event id`)
         const failure = data["failure"] as { message?: unknown } | undefined
         const output = data["output"]
         const report =

@@ -57,6 +57,7 @@ const printed = (report: Report) =>
       `took: ${report.ms} ms`,
       `ends of already ended processes: ${report.counts.endsOfEndedProcesses}`,
       `turns lost: ${report.counts.turnsLost}`,
+      `ends of already ended turns: ${report.counts.endsOfEndedTurns}`,
       `repeated peer keys: ${report.counts.duplicatePeerKeys}`,
       `undecodable peer starts: ${report.counts.undecodablePeerStarts}`,
       `referee: ${report.differences.length === 0 ? "passed" : "failed"}`,

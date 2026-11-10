@@ -592,6 +592,23 @@ export const v1Reader = (sql: SqlClient.SqlClient, snapshot: Snapshot, seqOf: Se
     sessions: selectRaw([]).pipe(
       Effect.flatMap((rows) => decodeSessions(rows.map((row) => fromColumns(row, "unknown", undefined)))),
     ),
+    inboxColumns: Effect.sync(() => {
+      const turnOf = new Map<number, number>()
+      for (const e of snapshot.events)
+        if (e.type === "inbox.status" && e.inboxId !== null && e.turnId !== null) turnOf.set(e.inboxId, e.turnId)
+      return snapshot.inbox.map((row) => {
+        const turn = turnOf.get(row.id)
+        return {
+          id: seqOf.inbox(row.id),
+          kind: row.kind,
+          recipient: row.recipientSessionId,
+          sender: row.senderSessionId,
+          content: row.content,
+          status: row.status,
+          turn: turn === undefined ? null : seqOf.event(turn),
+        }
+      })
+    }),
     sessionColumns: Effect.succeed(
       snapshot.sessions.map((s) => {
         const origin = origins.get(s.id)

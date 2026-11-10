@@ -20,6 +20,16 @@ export type SessionColumns = {
   readonly originReportTo: string | null
 }
 
+export type InboxColumns = {
+  readonly id: number
+  readonly kind: string
+  readonly recipient: string | null
+  readonly sender: string | null
+  readonly content: string
+  readonly status: string
+  readonly turn: number | null
+}
+
 export type ProjectView = {
   readonly id: string
   readonly directory: string | null
@@ -43,6 +53,7 @@ export interface Reader {
   readonly projects: Read<ReadonlyArray<ProjectView>>
   readonly coordinators: Read<ReadonlyArray<CoordinatorRow>>
   readonly inbox: Read<ReadonlyArray<InboxView>>
+  readonly inboxColumns: Read<ReadonlyArray<InboxColumns>>
   readonly briefs: (ids: ReadonlyArray<string>) => Read<ReadonlyMap<string, SessionBrief>>
   readonly latestReport: (id: string, fence: "ready" | "start") => Read<TurnReport | undefined>
   readonly hadTerminal: (id: string) => Read<boolean>
@@ -76,6 +87,7 @@ export const viewOf = (reader: Reader, probes: Probes) =>
     for (const project of yield* reader.projects) put("project", project.id, project)
     for (const row of yield* reader.coordinators) put("coordinator", row.projectId, row)
     for (const row of yield* reader.inbox) put("inbox", row.id, row)
+    for (const row of yield* reader.inboxColumns) put("inbox columns", row.id, row)
     for (const [id, brief] of yield* reader.briefs(probes.sessions)) put("brief", id, brief)
     for (const id of probes.sessions) {
       put("latest report from start", id, (yield* reader.latestReport(id, "start")) ?? null)

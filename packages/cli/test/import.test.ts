@@ -8,7 +8,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { SQL_NAMES } from "@vibest/core/db"
 import { importCheck, ImportFailed, importInPlace, v2Reader } from "@vibest/core/import/import"
 import { compare, viewOf } from "@vibest/core/import/referee"
-import { translate } from "@vibest/core/import/translate"
+import { highestId, translate } from "@vibest/core/import/translate"
 import { probesOf, readSnapshot, v1Reader } from "@vibest/core/import/v1-read"
 import { append, equalToReplay, installLedger, LEDGER_VERSION } from "@vibest/core/journal"
 import type { Fact } from "@vibest/schema/event"
@@ -172,6 +172,25 @@ const BREAKAGES: ReadonlyArray<
       (d) => "typed" in d,
     ),
   ],
+  [
+    "a task row status",
+    "sessions",
+    (facts) => {
+      const task = first(facts, "inbox.queued", (d) => d["kind"] === "task")
+      return facts.filter(
+        (fact, i) => i === task || fact.type !== "inbox.moved" || (fact.data as Data)["inbox"] !== facts[task]!.seq,
+      )
+    },
+  ],
+  [
+    "a task sender",
+    "sessions",
+    changed(
+      "inbox.queued",
+      (d) => ({ ...d, sender: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }),
+      (d) => d["kind"] === "task" && "sender" in d,
+    ),
+  ],
   ["a conversation id", "sessions", changed("process.conversation", (d) => ({ ...d, conversation: "other" }))],
 ]
 
@@ -192,6 +211,7 @@ describe("v1 import", () => {
       assert.deepStrictEqual(report.counts, {
         endsOfEndedProcesses: 0,
         turnsLost: 0,
+        endsOfEndedTurns: 0,
         duplicatePeerKeys: 1,
         undecodablePeerStarts: 0,
       })
@@ -233,6 +253,44 @@ describe("v1 import", () => {
       const report = yield* importCheck(source).pipe(Effect.provide(memory))
       assert.isAbove(report.differences.length, 0)
       assert.deepStrictEqual(shape(file), before)
+    }),
+  )
+
+  it("the highest v1 id is found among more ids than a call can take as arguments", () => {
+    const events = Array.from({ length: 1_000_000 }, (_, i) => ({ id: i + 1 }))
+    const inbox = Array.from({ length: 1_000_000 }, (_, i) => ({ id: i + 7 }))
+    assert.strictEqual(highestId({ events, inbox } as never), 1_000_006)
+  })
+
+  it.effect("imports inside an outer transaction with foreign keys on", () =>
+    Effect.gen(function* () {
+      const sql = yield* client(fixtureFile("sessions"))
+      yield* sql.unsafe("PRAGMA foreign_keys = ON")
+      const report = yield* sql.withTransaction(importInPlace.pipe(Effect.provideService(SqlClient.SqlClient, sql)))
+      assert.deepStrictEqual(report.differences, [])
+    }),
+  )
+
+  const snapshotOf = (name: string) => Effect.flatMap(client(fixtureFile(name), true), readSnapshot)
+
+  it.effect("a second end of an ended turn is counted, not imported", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* snapshotOf("sessions")
+      const end = snapshot.events.find((e) => e.type === "turn.end")!
+      const again = { ...end, id: highestId(snapshot) + 1, at: end.at + 1 }
+      const translation = translate({ ...snapshot, events: [...snapshot.events, again] }, 0)
+      assert.strictEqual(translation.counts.endsOfEndedTurns, 1)
+      assert.strictEqual(translation.facts.length, translate(snapshot, 0).facts.length)
+    }),
+  )
+
+  it.effect("a turn end whose report is not an event id fails the import", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* snapshotOf("sessions")
+      const events = snapshot.events.map((e) =>
+        e.type === "turn.end" ? { ...e, data: JSON.stringify({ ...JSON.parse(e.data), report: "r1" }) } : e,
+      )
+      assert.throws(() => translate({ ...snapshot, events }, 0), /is not an event id/)
     }),
   )
 
