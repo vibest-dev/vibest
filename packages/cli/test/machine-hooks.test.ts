@@ -74,6 +74,7 @@ describe("plugins: machine hooks", () => {
         { plugin: "crashing", message: "plugin crashing crashed: boom" },
         { plugin: "two", message: "second", fix: "fix two" },
       ])
+      assert.strictEqual((yield* plugins.list).find((p) => p.id === "crashing")?.lastError, "boom")
       assert.deepStrictEqual((yield* plugins.machine("connect", event, "view")).plugins, ["one", "crashing", "two"])
       assert.deepStrictEqual((yield* plugins.machine("connect", event, "other")).plugins, ["one", "crashing"])
       const removed = yield* plugins.machine("remove", event)
