@@ -124,11 +124,12 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: bun tools/verify/src/release-artifacts.ts "$VERSION" --out "$RUNNER_TEMP/release/npm"
-      - name: E2E probe
-        run: |
-          for b in herdr hc pi claude cursor-agent python3 git curl; do printf '%s: ' "$b"; command -v "$b" || echo missing; done
-          echo "SHELL=$SHELL HOME=$HOME"
-          bun tools/e2e/src/main.ts || true
+      # tools/verify: this version installed as a user gets it (curl | sh from the release archive, and npm install of
+      # the packed tarballs), then the E2E checks on each install, --strict (a skip fails) and --no-cache (every check
+      # runs). Only the checks this runner can run: it has no herdr, hc, pi, claude or cursor-agent, so every check that
+      # starts an agent or a runtime (and H1, I2, which need a harness CLI on PATH) runs only in a local pnpm verify.
+      - name: Install checks and E2E
+        run: pnpm run verify --no-cache daemon plugins update P1 P2 P9 I1
       # What install.sh downloads (releases/latest/download/...): an archive per platform, install.sh itself, and
       # `version`, which `vibest update` reads. Not for a canary.
       - name: GitHub Release files
