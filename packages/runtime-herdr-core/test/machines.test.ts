@@ -180,12 +180,14 @@ describe("hc mirrors vibest's machines", () => {
     }),
   )
 
+  const asked = (ids: ReadonlyArray<string>) => new Map(ids.map((id) => [id, `b/${id}`]))
+
   it.effect("locate: missing, found by core id under a renamed name, and unreachable with its why", () =>
     Effect.gen(function* () {
       const machine = { id: "mb", target: "b-host", link: linked }
-      const none = yield* locate(fake([]).hc, "/a.sock", machine, ["s1"])
+      const none = yield* locate(fake([]).hc, "/a.sock", machine, asked(["s1"]))
       assert.isTrue(none.missing)
-      const found = yield* locate(fake([row("mb", "core-new")]).hc, "/a.sock", machine, ["s1", "s2", "s9"])
+      const found = yield* locate(fake([row("mb", "core-new")]).hc, "/a.sock", machine, asked(["s1", "s2", "s9"]))
       assert.isFalse(found.missing)
       assert.include(found.note ?? "", "no terminal of that session under mb/")
       assert.strictEqual(found.as, "mb")
@@ -200,11 +202,11 @@ describe("hc mirrors vibest's machines", () => {
         fake([row("mb", "core-new", { state: "unreachable", why: "ssh refused" })]).hc,
         "/a.sock",
         machine,
-        ["s1"],
+        asked(["s1"]),
       )
       assert.isFalse(down.missing)
       assert.strictEqual(down.note, "hc here reaches mb as mb: unreachable (ssh refused)")
-      const offline = yield* locate(fake([], { offline: true }).hc, "/a.sock", machine, ["s1"])
+      const offline = yield* locate(fake([], { offline: true }).hc, "/a.sock", machine, asked(["s1"]))
       assert.isFalse(offline.missing)
       assert.include(offline.note ?? "", "fix: hc server start")
     }),

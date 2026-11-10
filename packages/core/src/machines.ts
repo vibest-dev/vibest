@@ -182,7 +182,7 @@ const make = Effect.gen(function* () {
         .map((r): PluginNote => ({ message: cannotShow(name, r.kind) })),
     )
 
-  const ensure = (name: string, kind: string, sessions: ReadonlyArray<string>, always = false) =>
+  const ensure = (name: string, kind: string, sessions: ReadonlyMap<string, string>, always = false) =>
     lock.withLock(name)(
       Effect.gen(function* () {
         const row = yield* db.machineNamed(name)
@@ -498,7 +498,7 @@ const make = Effect.gen(function* () {
               seen?.runtimes ?? [],
               (r) =>
                 (info.state === "connected"
-                  ? ensure(info.name, r.kind, [])
+                  ? ensure(info.name, r.kind, new Map())
                   : Effect.succeed<View>({ terminals: NONE, note: `${info.name} is ${info.state}` })
                 ).pipe(
                   Effect.map((view): RuntimeView => ({

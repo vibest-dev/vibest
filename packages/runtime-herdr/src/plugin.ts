@@ -38,8 +38,9 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
       const built = yield* Layer.build(layer)
       const spawner = Context.get(built, ChildProcessSpawner.ChildProcessSpawner)
       const cli = Machines.cliOf(spawner)
+      const pool = Context.get(built, HerdrPool)
       const runtime = yield* fromPool({
-        pool: Context.get(built, HerdrPool),
+        pool,
         spawner,
         fs: Context.get(built, FileSystem.FileSystem),
         scope,
@@ -53,7 +54,7 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
             Config.option(Config.String("HERDR_SOCKET_PATH")).pipe(
               Effect.map(Option.getOrUndefined),
               Effect.orElseSucceed(() => undefined),
-              Effect.flatMap((socket) => Machines.link(cli, socket === "" ? undefined : socket)),
+              Effect.flatMap((socket) => Machines.link(pool, socket === "" ? undefined : socket)),
             ),
           locate: (machine, sessions) => Machines.locate(cli, machine, sessions),
         }),

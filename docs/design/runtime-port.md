@@ -49,8 +49,8 @@ see it); each is the runtime's to honor as it can.
 | `seen`, `see`                | —                                                                                                                | —                              | —                                        | never `done` in Watch                          |
 | `prepare(machine)`           | `herdr machine add <target> --remote-session vibest`                                                             | `rex hosts add`                | `tern remote setup`                      | the user prepares the machine                  |
 | `attach(machine)`            | `herdr --session vibest`                                                                                         | — (Rex.app)                    | `tern`                                   | none                                           |
-| `link()`                     | `{session, version}`: the session it opens agents in, `herdr --version`                                          | —                              | —                                        | other machines cannot show its terminals       |
-| `locate(machine, sessions)`  | the saved herdr machine for (target, session), then `herdr --machine <id> agent list`                            | —                              | —                                        | remote rows: "cannot be shown here"            |
+| `link()`                     | `{session, version}`: the session it opens agents in, `ping` on its socket                                       | —                              | —                                        | other machines cannot show its terminals       |
+| `locate(machine, sessions)`  | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                    | —                              | —                                        | remote rows: "cannot be shown here"            |
 | `doctor(machine, harnesses)` | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs                 | what tern needs                          | `vibest doctor` shows `status` only            |
 
 How the required members map: herdr `tab.create` (env) + `agent.start`, `pane.send_*`, `pane.read`,
@@ -62,7 +62,8 @@ How the required members map: herdr `tab.create` (env) + `agent.start`, `pane.se
 `link()` and `locate(machine, sessions)` let one machine show another's terminals (hc implements both:
 [runtime-herdr-core.md](runtime-herdr-core.md), [multi-machine.md](multi-machine.md#terminals-on-other-machines)):
 `link` is what the same runtime elsewhere needs to reach this machine's terminals, sent in `Peer.Hello`; `locate`
-answers `missing` when the runtime has no machine with the link's id, else the local terminal ids of those sessions,
+gets each session id with the terminal id that machine reported for it, and answers `missing` when the runtime has no
+machine with the link's id, else the local terminal ids of those sessions,
 `as` (its name for the machine) and a `note` when it cannot show them. It is read-only and runs inside `vibest ls`.
 
 Core helpers over the interface, so no plugin writes them: `readFile(machine, path)` (local: the file system; remote:

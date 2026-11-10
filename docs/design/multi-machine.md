@@ -229,14 +229,19 @@ ignored.
 The herdr plugin (`runtime-herdr/src/machines.ts`) uses herdr's saved SSH machines, which live on the client side
 (`$XDG_STATE_HOME/herdr/client/endpoints.json`, read and written only through `herdr machine …`). B's `link` is
 `{session, version}`: the session B opens agents in (the one `HERDR_SOCKET_PATH` names in vibestd's environment, else
-`vibest`) and B's `herdr --version`. A's `locate` reads `herdr machine list --json` and takes the profile whose target
-(without `ssh://`) and session equal the event's target and the link's session, under any label: none is `missing`, a
-disabled one is a note with `herdr machine enable <id>`. With sessions asked, it runs `herdr --machine <profile id>
-agent list` once (one ssh round trip, kept short by herdr's ControlPersist), finds each session's agent by its name
-`s-<30 hex of the id>`, and answers `<B session>/<pane>/<agent>@<label>`. A's herdr server never holds B's panes, so
+`vibest`) and the version its server answers to `ping` (none when that session is not running). A's `locate` reads
+`herdr machine list --json` and takes the profile whose target (without `ssh://`) and session equal the event's target
+and the link's session, under any label: none is `missing`, a disabled one is a note with `herdr machine enable <id>`.
+Each session comes with the terminal id B reported for it (`<B session>/<pane>/<agent>`), so `locate` answers
+`<B terminal>@<label of the profile for that terminal's herdr session>` without reaching B; a terminal in a herdr
+session A has no enabled profile for gets a note. A's herdr server never holds B's panes, so
 such an id is only a place to look in the herdr sidebar: `parseTerminal` refuses an id with `@`, and every runtime
 member called with one fails `not_found` ("a pane on <label>; vibest peek and send reach it through vibest"). There
 is no `focus` onto a remote herdr pane; herdr has no way to switch a TUI to a machine from outside.
+The plugin asks a herdr server over its socket API wherever that API has the answer (`ping` for the version). It runs
+the herdr CLI only where the API has none: saved machines are a client-side catalog with no server method
+(`herdr machine list`), naming the session behind a socket path is a client-side directory listing (`herdr session
+list`, inside the pool), and a server that is not running has no socket to ask (`herdr server`, inside the pool).
 
 Not covered yet: Rex `link`, `locate` and subscribers; herdr-app's panel focusing a remote row (its own PR);
 replacing a mirror row when B's vibestd moved to another hc session on the same host.
