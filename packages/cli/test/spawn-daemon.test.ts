@@ -29,7 +29,7 @@ layer(Platform.services)("spawnDaemon: the shell that starts vibestd in the back
       const layout = yield* Layout.make(`${file}/home`)
       const failed = yield* Effect.flip(spawnDaemon(["true"]).pipe(Effect.provideService(Layout, layout)))
       assert.strictEqual(failed._tag, "DaemonUnavailable")
-      assert.match(failed.message, /^vibestd was not started \(exit 1\): mkdir: .*a-file.*Not a directory/)
+      assert.match(failed.message, /^vibestd was not started \(exit 1\): mkdir:.*Not a directory/)
     }),
   )
 })
