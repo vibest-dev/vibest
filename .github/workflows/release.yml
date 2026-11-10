@@ -50,6 +50,12 @@ concurrency:
 permissions:
   contents: read
 
+# bash -eo pipefail: a failed command anywhere in a pipeline (git ls-remote into awk, a download into tar) fails the
+# step, instead of leaving a variable empty.
+defaults:
+  run:
+    shell: bash
+
 # What pnpm verify's E2E checks drive, pinned. The runners are fresh, so build installs them each run (cached by these
 # versions). E2E answers every harness with a fake model: no login.
 env:
