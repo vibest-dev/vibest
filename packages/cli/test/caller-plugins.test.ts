@@ -4,10 +4,11 @@ import { Bus } from "@vibest/core/bus"
 import { callerTarget, mainPlace, specHits, type CallerHit } from "@vibest/core/caller"
 import type { Caller, RuntimeDefinition } from "@vibest/core/host"
 import { Layout, VibestCommand } from "@vibest/core/paths"
+import { Builtins } from "@vibest/core/plugins"
 import { HostEnv, make as makeRuntimes, type RuntimeEvent } from "@vibest/core/runtimes"
 import { Plugin } from "@vibest/plugin"
 import { run as runDaemon, type Host } from "@vibest/server/daemon"
-import { ConfigProvider, Effect, FileSystem, Path, PubSub, Queue, Stream } from "effect"
+import { ConfigProvider, Effect, FileSystem, Layer, Path, PubSub, Queue, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
@@ -279,7 +280,10 @@ describe("caller runtimes", () => {
       })
       const host: Host = {
         ...Platform.daemon,
-        builtins: [{ source: "builtin:runtime-user", revision: "-", options: {}, plugin: user }],
+        layer: Layer.merge(
+          Platform.daemon.layer,
+          Layer.succeed(Builtins, [{ source: "builtin:runtime-user", revision: "-", options: {}, plugin: user }]),
+        ),
       }
       const layout = yield* Layout.make(dir)
       yield* runDaemon(host).pipe(

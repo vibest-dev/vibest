@@ -63,7 +63,7 @@ describe("vibest.sock", () => {
         assert.include(refused.message, "it keeps running")
         assert.strictEqual((yield* raw.Ping()).instance, instance)
         assert.deepStrictEqual(yield* c.List({}), { sessions: [], machines: [] })
-      }).pipe(Effect.provide(served()), Effect.provideService(Server.Identity, { instance: "vibestd-before" })),
+      }).pipe(Effect.provide(served({ identity: { instance: "vibestd-before" } }))),
   )
 
   test(

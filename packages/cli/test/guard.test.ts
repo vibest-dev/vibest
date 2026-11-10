@@ -711,7 +711,7 @@ describe("vibest --session inside herdr", () => {
       process.chdir(sub)
       const secret = "probe-value-9f3c"
       const herdr: Array<string> = []
-      const host = new Proxy({ plugins: Platform.plugins } as unknown as Host, {
+      const host = new Proxy({} as Host, {
         get: (target, prop, receiver) =>
           prop in target ? Reflect.get(target, prop, receiver) : () => Effect.die("host"),
       })
@@ -744,7 +744,7 @@ describe("vibest integration guard through vibestd", () => {
   const cursorAnswer = (reason: string | undefined) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" }
   const served = Server.layer.pipe(
-    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+    Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(
       testLayer({

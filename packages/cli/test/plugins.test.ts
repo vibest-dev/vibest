@@ -3,7 +3,6 @@ import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
-import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import { mainCheckout } from "@vibest/core/worktree"
@@ -14,6 +13,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import {
+  runtimesLayer,
   FakeRuntime,
   makeRepository,
   testLayer,
@@ -257,7 +257,7 @@ describe("plugins: spawn hook", () => {
       Effect.scoped,
       Effect.provide(Subscriptions.layer),
       Effect.provide(harnessesLayer()),
-      Effect.provide(Runtimes.layer),
+      Effect.provide(runtimesLayer),
       Effect.provide(Bus.layer),
     ),
   )
@@ -300,7 +300,7 @@ describe("plugins: spawn hook", () => {
         Effect.scoped,
         Effect.provide(Subscriptions.layer),
         Effect.provide(harnessesLayer()),
-        Effect.provide(Runtimes.layer),
+        Effect.provide(runtimesLayer),
         Effect.provide(Bus.layer),
       ),
   )
@@ -328,7 +328,7 @@ const loaded = (dir: string) =>
     Layer.provide(Subscriptions.layer),
     Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
-    Layer.provide(Runtimes.layer),
+    Layer.provide(runtimesLayer),
     Layer.provide(Bus.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),

@@ -184,7 +184,7 @@ describe("multi-repository project", () => {
 })
 
 const served = Server.layer.pipe(
-  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.daemon.socketServer(layout.socket)))),
+  Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
   Layer.provideMerge(testLayer()),
 )

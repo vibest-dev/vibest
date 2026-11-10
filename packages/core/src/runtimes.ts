@@ -32,7 +32,7 @@ const live = (runtime: string, event: RuntimeEvent): LiveEvent => {
   }
 }
 
-export const HostEnv = Context.Reference<HostEnvShape>("vibest/HostEnv", { defaultValue: () => ({ drop: () => {} }) })
+export class HostEnv extends Context.Service<HostEnv, HostEnvShape>()("vibest/HostEnv") {}
 
 const notLoaded = (id: string, loaded: ReadonlyArray<Runtime>) =>
   new NoRuntime({
@@ -44,7 +44,7 @@ const sameMembers = (a: Runtime, b: Runtime) => {
   return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
 }
 
-export const make: Effect.Effect<RuntimesShape, never, Bus | Scope.Scope> = Effect.gen(function* () {
+export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Scope> = Effect.gen(function* () {
   const bus = yield* Bus
   const env = yield* HostEnv
   const own = yield* Effect.scope

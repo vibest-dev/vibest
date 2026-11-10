@@ -1,22 +1,21 @@
 import { accepts, DAEMON_START_TIMEOUT, probe, stopByHand } from "@vibest/client/client"
 import { Bus } from "@vibest/core/bus"
-import { Db } from "@vibest/core/db"
+import { Db, type SchemaMismatch } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Git } from "@vibest/core/git"
 import { Harness, Harnesses } from "@vibest/core/harness"
-import type { HostEnv as HostEnvShape } from "@vibest/core/host"
 import { type HostFacts, loadIdentity, VibestdIdentity } from "@vibest/core/identity"
 import { Inbox } from "@vibest/core/inbox"
-import { Machines, MachineTransport } from "@vibest/core/machines"
+import { Machines, type MachineTransport } from "@vibest/core/machines"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { Peers } from "@vibest/core/peer"
-import { Builtins, Plugins, PluginLoader, type Candidate } from "@vibest/core/plugins"
-import { type ProcessPlatform, Processes } from "@vibest/core/processes"
+import { type PluginLoader, Plugins } from "@vibest/core/plugins"
+import type { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
 import { Remote } from "@vibest/core/remote"
 import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
-import { HostEnv, Runtimes } from "@vibest/core/runtimes"
+import { type HostEnv, Runtimes } from "@vibest/core/runtimes"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as UpdateCheck from "@vibest/core/update-check"
@@ -25,8 +24,10 @@ import { newId } from "@vibest/schema/id"
 import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 import { FetchHttpClient } from "effect/http"
 import type { HttpServer } from "effect/http/HttpServer"
-import type { SocketServer } from "effect/socket/SocketServer"
-import type { SqlClient } from "effect/sql"
+import type { ServeError } from "effect/http/HttpServerError"
+import type { ChildProcessSpawner } from "effect/process"
+import type { SocketServer, SocketServerError } from "effect/socket/SocketServer"
+import type { SqlClient, SqlError } from "effect/sql"
 
 import * as Http from "./http.ts"
 import * as Server from "./server.ts"
@@ -48,20 +49,29 @@ export const readDaemonInfo = (file: string) =>
     Effect.option,
   )
 
+export class LockFailed extends Schema.TaggedError<LockFailed>()("LockFailed", {
+  file: Schema.String,
+  message: Schema.String,
+}) {}
+export class DatabaseOpenFailed extends Schema.TaggedError<DatabaseOpenFailed>()("DatabaseOpenFailed", {
+  file: Schema.String,
+  message: Schema.String,
+}) {}
+
+export type PlatformServices = SqlClient.SqlClient | MachineTransport | PluginLoader | HostEnv | Processes
+
 export interface Host {
-  readonly sqlite: (filename: string) => Layer.Layer<SqlClient.SqlClient, unknown>
-  readonly socketServer: (path: string) => Layer.Layer<SocketServer, unknown>
-  readonly httpServer: (path: string) => Layer.Layer<HttpServer, unknown>
-  readonly plugins: PluginLoader["Service"]
-  readonly builtins: ReadonlyArray<Candidate>
-  readonly env: HostEnvShape
-  readonly processes: ProcessPlatform
+  readonly layer: Layer.Layer<
+    PlatformServices,
+    DatabaseOpenFailed | SchemaMismatch | SqlError.SqlError,
+    Layout | ChildProcessSpawner.ChildProcessSpawner
+  >
+  readonly servers: Layer.Layer<SocketServer | HttpServer, SocketServerError | ServeError, Layout>
   readonly lock: (
     file: string,
-  ) => Effect.Effect<((text: string) => Effect.Effect<void, Error>) | undefined, Error, Scope.Scope>
-  readonly checkDatabase: (filename: string) => Effect.Effect<void, Error>
-  readonly host: Omit<HostFacts, "pid">
-  readonly transport: MachineTransport["Service"]
+  ) => Effect.Effect<((text: string) => Effect.Effect<void, LockFailed>) | undefined, LockFailed, Scope.Scope>
+  readonly checkDatabase: (filename: string) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch>
+  readonly facts: HostFacts
 }
 
 export { HANDOFF_ENV } from "./server.ts"
@@ -80,32 +90,24 @@ export class DaemonSocketInUse extends Schema.TaggedError<DaemonSocketInUse>()("
   message: Schema.String,
 }) {}
 
-const services = (host: Host, layout: Layout["Service"]) =>
-  Layer.merge(
-    Server.layer.pipe(Layer.provide(host.socketServer(layout.socket))),
-    Http.layer.pipe(Layer.provide(host.httpServer(layout.httpSocket))),
-  ).pipe(
+const services = (host: Host) =>
+  Layer.merge(Server.layer, Http.layer).pipe(
+    Layer.provide(host.servers),
     Layer.provideMerge(Remote.layer),
-    Layer.provideMerge(Machines.layer.pipe(Layer.provide(Layer.succeed(MachineTransport, host.transport)))),
+    Layer.provideMerge(Machines.layer),
     Layer.provideMerge(Peers.layer),
     Layer.provideMerge(Sessions.layer),
-    Layer.provideMerge(Processes.layer(host.processes)),
     Layer.provideMerge(Git.layer),
     Layer.provideMerge(SshHosts.layer),
-    Layer.provideMerge(
-      Plugins.layer.pipe(
-        Layer.provide(Layer.succeed(Builtins, host.builtins)),
-        Layer.provide(Layer.succeed(PluginLoader, host.plugins)),
-      ),
-    ),
+    Layer.provideMerge(Plugins.layer),
     Layer.provideMerge(Subscriptions.live),
     Layer.provideMerge(UpdateCheck.layer),
     Layer.provideMerge(FetchHttpClient.layer),
     Layer.provideMerge(Inbox.layer),
     Layer.provideMerge(Project.layer),
     Layer.provideMerge(Harness.layer),
-    Layer.provideMerge(Db.layer.pipe(Layer.provide(host.sqlite(layout.database)))),
-    Layer.provideMerge(Runtimes.layer.pipe(Layer.provide(Layer.succeed(HostEnv, host.env)))),
+    Layer.provideMerge(Db.layer),
+    Layer.provideMerge(Runtimes.layer),
     Layer.provideMerge(Harnesses.layer),
     Layer.provide(Drain.layer),
     Layer.provide(Restarting.layer),
@@ -117,7 +119,7 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
     const layout = yield* Layout
     const fs = yield* FileSystem.FileSystem
     yield* fs.makeDirectory(layout.home, { recursive: true })
-    let write: ((text: string) => Effect.Effect<void, Error>) | undefined
+    let write: ((text: string) => Effect.Effect<void, LockFailed>) | undefined
     const held = yield* host.lock(layout.daemonInfo).pipe(
       Effect.mapError(
         (e) =>
@@ -166,19 +168,20 @@ export const run = (host: Host, options: { readonly handoff?: boolean } = {}) =>
           yield* fs.copyFile(`${layout.database}${suffix}`, `${backup}${suffix}`)
       yield* Effect.log(`vibestd took over from the previous one; its database is backed up at ${backup}`)
     }
-    const self = yield* loadIdentity(layout.identity, { ...host.host, pid: host.processes.pid })
+    const self = yield* loadIdentity(layout.identity, host.facts)
     if (self.warning !== undefined) yield* Effect.logWarning(self.warning)
     const identity = {
-      pid: host.processes.pid,
+      pid: host.facts.pid,
       instance: yield* newId(),
       command: yield* VibestCommand,
       startedAt: yield* Clock.currentTimeMillis,
     }
     const shutdown = yield* Deferred.make<void>()
     yield* Layer.build(
-      services(host, layout).pipe(
+      services(host).pipe(
         Layer.provide(
           Layer.mergeAll(
+            host.layer,
             Layer.succeed(Server.Identity, identity),
             Layer.succeed(Server.Shutdown, shutdown),
             Layer.succeed(VibestdIdentity, { id: self.identity.id, name: self.identity.name }),

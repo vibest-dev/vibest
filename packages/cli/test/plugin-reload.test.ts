@@ -27,7 +27,7 @@ import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
-import { harnessesLayer } from "./fakes.ts"
+import { runtimesLayer, harnessesLayer } from "./fakes.ts"
 
 const events: Array<string> = []
 const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.void) =>
@@ -82,7 +82,7 @@ const host = <A, E>(f: (host: Effect.Success<ReturnType<typeof makeHost>>) => Ef
     Effect.scoped,
     Effect.provide(Subscriptions.layer),
     Effect.provide(harnessesLayer()),
-    Effect.provide(Runtimes.layer),
+    Effect.provide(runtimesLayer),
     Effect.provide(Bus.layer),
   )
 
@@ -95,7 +95,7 @@ describe("plugins: registrations", () => {
       Effect.scoped,
       Effect.provide(Subscriptions.layer),
       Effect.provide(harnessesLayer()),
-      Effect.provide(Runtimes.layer),
+      Effect.provide(runtimesLayer),
       Effect.provide(Bus.layer),
     )
 
@@ -461,7 +461,7 @@ const supervise = (dir: string) =>
     Layer.provide(Subscriptions.layer),
     Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
-    Layer.provide(Runtimes.layer),
+    Layer.provide(runtimesLayer),
     Layer.provide(Bus.layer),
     Layer.build,
     Effect.map(Context.get(Plugins)),
@@ -699,7 +699,7 @@ describe("plugins: supervisor", () => {
         Layer.provide(Subscriptions.layer),
         Layer.provide(harnessesLayer()),
         Layer.provide(Layer.effect(Layout, Layout.make(dir))),
-        Layer.provideMerge(Runtimes.layer),
+        Layer.provideMerge(runtimesLayer),
         Layer.provide(Bus.layer),
         Layer.build,
       )

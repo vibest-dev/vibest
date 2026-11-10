@@ -68,11 +68,9 @@ import { remoteHandlers } from "./remote-handlers.ts"
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A | readonly [A, "peer"] ? K : never }[keyof Access]
 
-export const Identity = Context.Reference<DaemonIdentity>("vibest/DaemonIdentity", { defaultValue: () => ({}) })
+export class Identity extends Context.Service<Identity, DaemonIdentity>()("vibest/DaemonIdentity") {}
 
-export const Shutdown = Context.Reference<Deferred.Deferred<void>>("vibest/DaemonShutdown", {
-  defaultValue: () => Deferred.makeUnsafe<void>(),
-})
+export class Shutdown extends Context.Service<Shutdown, Deferred.Deferred<void>>()("vibest/DaemonShutdown") {}
 
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
