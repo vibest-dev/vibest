@@ -17,7 +17,10 @@ vibestd's unix socket `<VIBEST_HOME>/vibest-http.sock`; the plugin runs no `vibe
   `$.prompt.submit` from the AbovePrompt `ui.render` hook, one batch per draw, and this module's own `prompt.submit`
   hook attaches the full text as context. An accepted submit is acked by row id (`/inbox/ack`) on the next tick; a
   `drop` puts the batch back at the front of the queue. The submit has to come from inside a hook's call stack: a
-  submit from a clock callback would skip this module's own `prompt.submit` hook as re-entry. The module remembers the
+  submit from a clock callback would skip this module's own `prompt.submit` hook as re-entry. The render hook awaits
+  the submit before it returns: Claude Code reads the call against the hooks still running when it arrives, and under
+  load a hook that returned at once had often settled first, so its own `prompt.submit` hook was skipped the same way
+  and the line went out without its full text. The module remembers the
   row ids it has taken, so a batch handed out again after its lease ran out or vibestd restarted is not shown twice:
   in a batch that mixes taken rows with new ones, the taken ones are acked and the new ones given back, so they come
   alone. Full texts wait for `prompt.submit` for at most the last 100 lines. A one-line notice is its own full text and
