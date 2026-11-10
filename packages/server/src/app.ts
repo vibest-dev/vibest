@@ -1,0 +1,42 @@
+import { Bus } from "@vibest/core/bus"
+import { Db } from "@vibest/core/db"
+import { Drain } from "@vibest/core/drain"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import { Git } from "@vibest/core/git"
+import { Harness, Harnesses } from "@vibest/core/harness"
+import { Inbox } from "@vibest/core/inbox"
+import { Machines } from "@vibest/core/machines"
+import { Peers } from "@vibest/core/peer"
+import { Plugins } from "@vibest/core/plugins"
+import { Project } from "@vibest/core/project"
+import { Remote } from "@vibest/core/remote"
+import { SshHosts } from "@vibest/core/repository-url"
+import { Restarting } from "@vibest/core/restarting"
+import { Runtimes } from "@vibest/core/runtimes"
+import { Sessions } from "@vibest/core/sessions"
+import { Subscriptions } from "@vibest/core/subscriptions/service"
+
+import * as Http from "./http.ts"
+import * as Server from "./server.ts"
+
+export const services = LayerNode.group([
+  Bus.node,
+  Restarting.node,
+  Drain.node,
+  Harnesses.node,
+  Runtimes.node,
+  Db.node,
+  Harness.node,
+  Project.node,
+  Inbox.node,
+  Subscriptions.node,
+  Plugins.node,
+  SshHosts.node,
+  Git.node,
+  Sessions.node,
+  Peers.node,
+  Machines.node,
+  Remote.node,
+])
+
+export const daemon = LayerNode.group([services, Server.node, Http.node])

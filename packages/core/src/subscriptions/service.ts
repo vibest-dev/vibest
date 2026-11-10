@@ -2,6 +2,7 @@ import type { SubscriptionReport } from "@vibest/plugin"
 import { type Subscription, type SubscriptionLimit } from "@vibest/schema/subscription"
 import { Clock, Config, Context, Duration, Effect, Fiber, Layer, Option, Ref, Semaphore } from "effect"
 
+import { LayerNode } from "../effect/layer-node.ts"
 import { logFailure } from "../engine.ts"
 import { Harness, type HarnessId, Harnesses } from "../harness.ts"
 import type { HarnessDefinition, SubscriptionsShape } from "../host.ts"
@@ -147,4 +148,10 @@ export class Subscriptions extends Context.Service<Subscriptions, SubscriptionsS
       })
     }),
   )
+
+  static readonly node = LayerNode.make({
+    service: Subscriptions,
+    layer: Subscriptions.layer,
+    deps: [Harness.node, Harnesses.node],
+  })
 }

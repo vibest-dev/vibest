@@ -3,6 +3,7 @@ import { AmbiguousSession, NoSuchSession, RuntimeAddress } from "@vibest/schema/
 import { Context, Effect, Layer, String as Str } from "effect"
 import { SqlClient } from "effect/sql"
 
+import { Bus } from "./bus.ts"
 import { inboxMethods } from "./db-inbox.ts"
 import type { PeerStart } from "./db-remote.ts"
 import {
@@ -21,6 +22,8 @@ import {
 } from "./db-rows.ts"
 import { migrate } from "./db-schema.ts"
 import { makeStore } from "./db-store.ts"
+import { LayerNode } from "./effect/layer-node.ts"
+import * as PlatformNode from "./effect/platform.ts"
 import type { HarnessId } from "./harness.ts"
 
 export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"
@@ -40,7 +43,15 @@ export {
   failureOf,
   type SessionBrief,
 } from "./db-rows.ts"
-export { APPLICATION_ID, SCHEMA_VERSION, SCHEMA, SchemaMismatch, inspectSchema, migrate } from "./db-schema.ts"
+export {
+  APPLICATION_ID,
+  DatabaseOpenFailed,
+  SCHEMA_VERSION,
+  SCHEMA,
+  SchemaMismatch,
+  inspectSchema,
+  migrate,
+} from "./db-schema.ts"
 
 export type SessionFilter = {
   readonly projectId?: string
@@ -624,4 +635,6 @@ export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibe
       Effect.andThen(make),
     ),
   )
+
+  static readonly node = LayerNode.make({ service: Db, layer: Db.layer, deps: [Bus.node, PlatformNode.sqlClient] })
 }

@@ -574,6 +574,16 @@ Rule state lives in `storage` and decisions are idempotent, because decision hoo
   one `Layer`.
 - Configuration replaces entries at the composition root (`Database.entry.replace(Database.configured(...))`).
   Product identity and runtime are replacements, which is how one core yields several isolated products.
+- Implemented with `LayerNode` (`packages/core/src/effect/layer-node.ts`, ported with its tests from OpenCode's
+  `packages/util/src/effect/layer-node.ts`, MIT, Copyright (c) 2025 opencode; its release-tracking diagnostics are
+  left out, and `unbound<E>()(service)` declares the errors a host's replacement may fail with). Each service has a
+  `node` listing its `deps`; what the host supplies (sqlite, the sockets, the platform services, the daemon's
+  identity) is an unbound node. `packages/server/src/app.ts` holds the roots: `services`, and `daemon`, which adds
+  the RPC and HTTP servers. The daemon compiles `daemon` and the tests compile `services`, each with its own
+  replacements. Dependencies of one node build concurrently and a group's roots build in order; a replacement drops
+  the replaced node's own dependencies, so a fake is never built beside the real service.
+- Today there is only the daemon scope: plugins and catalogs are the same for every Project. Tags exist in
+  `LayerNode` and are not declared until a project scope is built.
 
 | Scope       | Lives                                                               | Holds                                                                                                                    |
 | ----------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |

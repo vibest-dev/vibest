@@ -7,6 +7,7 @@ import { Context, Effect, Layer } from "effect"
 
 import { callerKind } from "./caller.ts"
 import { Db } from "./db.ts"
+import { LayerNode } from "./effect/layer-node.ts"
 import { Git } from "./git.ts"
 import { VibestdIdentity } from "./identity.ts"
 import { Machines } from "./machines.ts"
@@ -234,4 +235,10 @@ const make = Effect.gen(function* () {
 
 export class Remote extends Context.Service<Remote, Effect.Success<typeof make>>()("vibest/Remote") {
   static readonly layer = Layer.effect(Remote, make)
+
+  static readonly node = LayerNode.make({
+    service: Remote,
+    layer: Remote.layer,
+    deps: [Db.node, Git.node, Machines.node, Plugins.node, Runtimes.node, VibestdIdentity.node],
+  })
 }

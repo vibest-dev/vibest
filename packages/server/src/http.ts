@@ -1,5 +1,7 @@
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
 import * as Guard from "@vibest/core/guard"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
@@ -9,6 +11,7 @@ import { HARNESS_HEADER, PROJECT_HEADER, ACK_ROUTE, parseHookRoute, POLL_ROUTE }
 import { Clock, ConfigProvider, Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
+import type { ServeError } from "effect/http/HttpServerError"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 
@@ -136,3 +139,21 @@ export const layer = Layer.unwrap(
     ),
   ),
 )
+
+export const httpServer = LayerNode.unbound<ServeError>()(HttpServer.HttpServer)
+
+export const node = LayerNode.make({
+  name: "vibest/HttpServer",
+  layer,
+  deps: [
+    Db.node,
+    Drain.node,
+    Harnesses.node,
+    Inbox.node,
+    Sessions.node,
+    httpServer,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ],
+})
