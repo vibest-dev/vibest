@@ -9,6 +9,7 @@ import {
   withVibest,
 } from "@vibest/client/client"
 import type { LayerNode } from "@vibest/core/effect/layer-node"
+import { resumeOrFresh, withoutResume } from "@vibest/core/launch"
 import { askLine, askYesNo, interactive, Layout, VibestCommand } from "@vibest/core/paths"
 import { messageOf } from "@vibest/core/plugin-sources"
 import { describeSpawn } from "@vibest/core/plugins"
@@ -425,7 +426,11 @@ const startMain =
           }),
         ),
       )
-      return yield* Effect.sync(() => exec(started.command.file, started.command.args, started.command.env))
+      const argv = resumeOrFresh(
+        [started.command.file, ...started.command.args],
+        withoutResume([started.command.file, ...started.command.args]),
+      )
+      return yield* Effect.sync(() => exec(argv[0]!, argv.slice(1), started.command.env))
     })
 
 const send = Command.make("send", { id, message: text("message") }, (o) =>

@@ -41,7 +41,7 @@ import * as Engine from "./engine.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox } from "./inbox.ts"
 import { keyedLock } from "./keyed-lock.ts"
-import { coordinatorCommand, restartArgv } from "./launch.ts"
+import { coordinatorCommand, restartArgv, resumeOrFresh } from "./launch.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 import { sessionPlacement } from "./placement.ts"
@@ -305,21 +305,23 @@ export class Sessions extends Context.Service<
         )
         const adapter = yield* harnesses.get(session.harnessId)
         const pluginDir = yield* harness.plugin(adapter.id)
-        return [
+        const input = {
+          worktree: yield* worktreeOf(session),
+          projectDir: layout.project(session.projectId),
+          systemPromptFile: file,
+          provider: session.provider,
+          model: session.model,
+          sessionId: session.harnessSessionId,
+          pluginDir,
+          vibest,
+          env: vibestEnv(session),
+        }
+        const argvFor = (resumeThis: boolean) => [
           adapter.binary,
-          ...adapter.launchArgs({
-            worktree: yield* worktreeOf(session),
-            projectDir: layout.project(session.projectId),
-            systemPromptFile: file,
-            provider: session.provider,
-            model: session.model,
-            sessionId: session.harnessSessionId,
-            resume,
-            pluginDir,
-            vibest,
-            env: vibestEnv(session),
-          }),
+          ...adapter.launchArgs({ ...input, resume: resumeThis }),
         ]
+        const chosen = argvFor(resume)
+        return resume ? resumeOrFresh(chosen, argvFor(false)) : chosen
       })
 
       let collectResult: (
@@ -852,8 +854,6 @@ export class Sessions extends Context.Service<
             Effect.provideService(FileSystem.FileSystem, fs),
             Effect.provideService(Path.Path, path),
           ),
-        worktreeOf,
-        withPlatform: (effect) => effect.pipe(Effect.provideContext(platform)),
         awaitReady,
         prompt: (h, session, terminal, text) =>
           prompt(h, session, terminal, text).pipe(Effect.provideContext(platform)),

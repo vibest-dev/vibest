@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import { resumeOrFresh } from "@vibest/core/launch"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout, shellQuote } from "@vibest/core/paths"
 import { envelope, isUsageLimitError, outcome, parseReport } from "@vibest/core/results"
@@ -158,5 +159,24 @@ describe("pure", () => {
     assert.strictEqual(shellQuote("a b"), "'a b'")
     assert.strictEqual(shellQuote("it's"), "'it'\\''s'")
     assert.strictEqual(shellQuote(""), "''")
+  })
+})
+
+describe("claude resume", () => {
+  it("a resume that exits at once runs the fresh command, and a clean exit does not", () => {
+    assert.deepStrictEqual(resumeOrFresh(["claude", "--session-id", "s"], ["claude"]), ["claude", "--session-id", "s"])
+    assert.deepStrictEqual(resumeOrFresh(["claude", "--resume=s"], ["claude"]), ["claude", "--resume=s"])
+    const failed = Bun.spawnSync([...resumeOrFresh(["sh", "-c", "exit 1", "--resume", "missing"], ["echo", "fresh"])], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    assert.strictEqual(failed.exitCode, 0, failed.stderr.toString())
+    assert.strictEqual(failed.stdout.toString().trim(), "fresh")
+    const kept = Bun.spawnSync([...resumeOrFresh(["true", "--resume", "s"], ["echo", "fresh"])], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    assert.strictEqual(kept.exitCode, 0, kept.stderr.toString())
+    assert.strictEqual(kept.stdout.toString(), "")
   })
 })
