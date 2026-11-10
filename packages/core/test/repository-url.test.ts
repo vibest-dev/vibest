@@ -4,7 +4,7 @@ import { Context, Effect, Fiber, Layer } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 
-import * as Platform from "#platform"
+import * as Platform from "./platform/bun.ts"
 
 const hosts = Layer.succeed(SshHosts, {
   hostName: (alias) => Effect.succeed(alias === "gh-me" ? "GitHub.com" : alias),

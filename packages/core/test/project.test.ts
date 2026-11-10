@@ -3,9 +3,8 @@ import { Layout } from "@vibest/core/paths"
 import { Project, type ProjectScope } from "@vibest/core/project"
 import { Effect, FileSystem, Layer, Path } from "effect"
 
-import * as Platform from "#platform"
-
-import { tempDirectory } from "./fakes.ts"
+import { tempDirectory } from "./lib/directory.ts"
+import * as Platform from "./platform/bun.ts"
 
 const scope: ProjectScope = { id: "0f5a8b2c-1d3e-4f60-8a7b-9c0d1e2f3a4b" }
 
