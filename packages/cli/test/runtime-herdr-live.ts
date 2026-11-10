@@ -1,6 +1,8 @@
 import childProcess from "node:child_process"
 import crypto from "node:crypto"
 import fs from "node:fs"
+import net from "node:net"
+import os from "node:os"
 import path from "node:path"
 
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
@@ -65,25 +67,70 @@ export const killDetachedProcessGroup = (leader: number) => {
   }
 }
 
+const sessionDirectory = (name: string, env: Record<string, string>) =>
+  path.join(env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "herdr", "sessions", name)
+
+const socketListening = (sock: string) =>
+  new Promise<boolean>((resolve) => {
+    let settled = false
+    let socket: net.Socket | undefined
+    const finish = (up: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      socket?.destroy()
+      resolve(up)
+    }
+    const timer = setTimeout(() => finish(false), 500)
+    fs.stat(sock, (error, st) => {
+      if (settled) return
+      if (error || !st.isSocket()) return finish(false)
+      socket = net.connect(sock)
+      socket.once("connect", () => finish(true))
+      socket.once("error", () => finish(false))
+    })
+  })
+
 export const stopSession = async (name: string) => {
   if (!sessionName.test(name)) return
   const env = herdrChildEnv()
+  const dir = sessionDirectory(name, env)
+  const sock = path.join(dir, "herdr.sock")
   const child = children.get(name)
-  const deadline = Date.now() + 5_000
-  for (;;) {
-    childProcess.spawnSync("herdr", ["session", "stop", name], { env, stdio: "ignore", timeout: 2_000 })
+  const killChild = () => {
     const pid = livePid(child)
     if (pid !== undefined) killDetachedProcessGroup(pid)
-    childProcess.spawnSync("herdr", ["session", "delete", name], { env, stdio: "ignore", timeout: 2_000 })
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    const sessions = readSessions()
-    if (sessions !== undefined && !sessions.some((session) => session.name === name) && livePid(child) === undefined) {
-      started.delete(name)
-      children.delete(name)
-      return
-    }
-    if (Date.now() >= deadline) return
   }
+  killChild()
+  if (await socketListening(sock)) {
+    const stop = childProcess.spawn("herdr", ["session", "stop", name], { env, stdio: "ignore" })
+    stop.unref()
+    const deadline = Date.now() + 8_000
+    while ((await socketListening(sock)) && Date.now() < deadline) {
+      killChild()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    if (stop.exitCode === null) stop.kill("SIGKILL")
+  }
+  if (!(await socketListening(sock))) {
+    childProcess.spawnSync("herdr", ["session", "delete", name], { env, stdio: "ignore", timeout: 2_000 })
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+  if (fs.existsSync(dir)) throw new Error(`herdr session ${name} is still at ${dir}`)
+  started.delete(name)
+  children.delete(name)
+}
+
+export const stopStartedSessions = async () => {
+  const failed: Array<string> = []
+  for (const name of started) {
+    try {
+      await stopSession(name)
+    } catch {
+      failed.push(name)
+    }
+  }
+  if (failed.length > 0) throw new Error(`herdr sessions left: ${failed.join(", ")}`)
 }
 
 export const socketOf = (name: string) => {

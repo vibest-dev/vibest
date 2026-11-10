@@ -7,12 +7,10 @@ import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { ConfigProvider, Effect, Option } from "effect"
 
-import { herdrOnPath, started, stopSession, layer, waitFor, withSession, withRuntime } from "./runtime-herdr-live.ts"
+import { herdrOnPath, stopStartedSessions, layer, waitFor, withSession, withRuntime } from "./runtime-herdr-live.ts"
 
 describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
-  afterAll(async () => {
-    for (const name of started) await stopSession(name)
-  })
+  afterAll(() => stopStartedSessions(), 30_000)
 
   it.live(
     "the terminal runtime passes the shared contract suite (runtime-port.md §3)",

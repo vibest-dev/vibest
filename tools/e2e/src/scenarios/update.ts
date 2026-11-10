@@ -3,7 +3,22 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { alive, buildVersion, checkout, compiled, expect, harnesses, method, until, type World } from "../world.ts"
+import { ask, holdsSlowResultModel, piDir } from "../fake-model.ts"
+import {
+  alive,
+  buildVersion,
+  checkout,
+  compiled,
+  expect,
+  harnesses,
+  method,
+  readDb,
+  SESSIONS,
+  Skip,
+  until,
+  type World,
+} from "../world.ts"
+import { dropHerdrSession, project } from "./inbox.ts"
 
 const userVersion = (w: World, v?: number) => {
   const db = new Database(path.join(w.vibestHome, "vibest.db"))
@@ -28,6 +43,34 @@ const putMovedDatabaseBack = async (w: World) => {
     return
   for (const f of DATABASE_FILES) await fs.rm(file(f), { force: true })
   for (const f of DATABASE_FILES) await fs.rename(file(`${f}.old`), file(f)).catch(() => undefined)
+}
+
+const swapOnce = (bytes: Buffer, from: string, to: string) => {
+  const at = bytes.indexOf(from)
+  expect(at >= 0 && bytes.indexOf(from, at + 1) < 0 && from.length === to.length, `cannot swap ${from} for ${to}`)
+  bytes.write(to, at)
+}
+
+const olderVibest = async (w: World, share: string, version: string, protocol: number) => {
+  const dir = path.join(share, "versions", version)
+  const bin = path.join(dir, "bin", "vibest")
+  await fs.mkdir(path.dirname(bin), { recursive: true })
+  const bytes = Buffer.from(await fs.readFile(compiled))
+  swapOnce(bytes, `PROTOCOL = ${protocol}`, `PROTOCOL = ${protocol - 1}`)
+  swapOnce(bytes, `version: "${buildVersion}"`, `version: "${version}"`)
+  await fs.writeFile(bin, bytes, { mode: 0o755 })
+  if (process.platform === "darwin") {
+    const signed = await w.run(dir, ["codesign", "--force", "-s", "-", bin])
+    expect(signed.code === 0, `codesign: ${out(signed)}`)
+  }
+  await fs.cp(harnesses, path.join(dir, "harnesses"), { recursive: true })
+  const extension = path.join(dir, "harnesses", "pi", "extension.mjs")
+  const source = Buffer.from(await fs.readFile(extension))
+  swapOnce(source, `PROTOCOL = ${protocol}`, `PROTOCOL = ${protocol - 1}`)
+  const older = source.toString().replace("var VERSION = package_default.version;", `var VERSION = "${version}";`)
+  expect(older !== source.toString(), `${extension}: its version was not found`)
+  await fs.writeFile(extension, older)
+  return bin
 }
 
 const out = (r: { stdout: string; stderr: string }) => `${r.stdout}${r.stderr}`.replace(/\r/g, "")
@@ -225,6 +268,154 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         if (userVersion(w) !== schema) userVersion(w, schema)
         await w.stopDaemon()
+      }
+    },
+  },
+  {
+    id: "U11",
+    title:
+      "one vibest update run by an older vibest that speaks an older protocol installs this build, hands vibestd over, and the installed vibest restarts the agents still on the old integration in place",
+    run: async (w) => {
+      for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      const protocol = Number(
+        /PROTOCOL = (\d+)/.exec(await fs.readFile(path.join(harnesses, "pi", "extension.mjs"), "utf8"))![1],
+      )
+      const version = buildVersion.replace(/\d/g, "0")
+      const model = holdsSlowResultModel()
+      const session = `${w.herdrSession}-u11`
+      await fs.mkdir(path.join(w.root, "u11-install"), { recursive: true })
+      const root = await fs.realpath(path.join(w.root, "u11-install"))
+      const share = path.join(root, "share")
+      const bin = path.join(root, "bin")
+      const link = path.join(bin, "vibest")
+      const release = path.join(root, "release")
+      const archive = `vibest-${process.platform}-${process.arch}.tar.gz`
+      await fs.mkdir(path.join(release, "bin"), { recursive: true })
+      await fs.copyFile(compiled, path.join(release, "bin", "vibest"))
+      await fs.chmod(path.join(release, "bin", "vibest"), 0o755)
+      await fs.cp(harnesses, path.join(release, "harnesses"), { recursive: true })
+      const packed = await w.run(root, ["tar", "-czf", path.join(root, archive), "-C", release, "bin", "harnesses"])
+      expect(packed.code === 0, `tar: ${out(packed)}`)
+      const server = Bun.serve({
+        port: 0,
+        hostname: "127.0.0.1",
+        fetch: (req) => {
+          const url = new URL(req.url).pathname
+          if (url === "/version") return new Response(`${buildVersion}\n`)
+          if (url === "/install.sh") return new Response(Bun.file(path.join(checkout, "packages", "cli", "install.sh")))
+          if (url === `/${archive}`) return new Response(Bun.file(path.join(root, archive)))
+          return new Response("not found", { status: 404 })
+        },
+      })
+      try {
+        const old = await olderVibest(w, share, version, protocol)
+        await fs.mkdir(bin, { recursive: true })
+        await fs.symlink(old, link)
+        await fs.writeFile(path.join(share, "bin"), `${bin}\n`)
+        await fs.writeFile(path.join(share, "current"), `${version}\n`)
+        const repo = await project(w, "u11")
+        const agentDir = await piDir(w, "pi-u11", model.url)
+        const env = {
+          PATH: `${bin}:${w.env().PATH}`,
+          VIBEST_DOWNLOAD_URL: `http://127.0.0.1:${server.port}`,
+          npm_config_registry: "http://127.0.0.1:9",
+        }
+        const vibest = (args: ReadonlyArray<string>, timeoutMs = 120_000) =>
+          w.run(repo, [link, ...args], { env, timeoutMs })
+        const read = (where: string, arg: string) => {
+          const db = readDb(path.join(w.vibestHome, "vibest.db"))
+          try {
+            return db
+              .query<
+                { id: string; harness_session_id: string | null; pid: number | null; version: string | null },
+                [string]
+              >(`SELECT s.id, s.harness_session_id, s.pid, s.version FROM ${SESSIONS} s WHERE ${where}`)
+              .get(arg)
+          } finally {
+            db.close()
+          }
+        }
+        const main = () =>
+          read(`s.agent_type = 'main' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
+        const reported = (row: ReturnType<typeof main>, v: string) =>
+          row?.version === v && row.harness_session_id !== null && row.pid !== null
+
+        await w.stopDaemon()
+        const started = await vibest(["daemon"])
+        expect(started.code === 0, `the older vibest daemon exited ${started.code}: ${out(started)}`)
+        await w.startMain({
+          harness: "pi",
+          session,
+          cwd: repo,
+          env: { PI_CODING_AGENT_DIR: agentDir },
+          processEnv: env,
+          bin: link,
+          timeoutMs: 60_000,
+        })
+        const ran = await vibest([
+          "run",
+          "--runtime",
+          "herdr",
+          "pi",
+          "--session",
+          session,
+          "--env",
+          `PI_CODING_AGENT_DIR=${agentDir}`,
+          ask("zero"),
+        ])
+        expect(ran.code === 0, `vibest run exited ${ran.code}: ${out(ran)}`)
+        const sub = (JSON.parse(ran.stdout) as { id: string }).id
+        await until(
+          "both agents report the older integration and their conversations",
+          () => reported(main(), version) && reported(read("s.id = ?", sub), version),
+          120_000,
+        )
+        const before = { main: main()!, sub: read("s.id = ?", sub)! }
+        const daemonBefore = await w.daemonPid()
+
+        const updated = await vibest(["update", "--yes"], 300_000)
+        const said = out(updated)
+        expect(updated.code === 0, `vibest update exited ${updated.code}: ${said}`)
+        expect(
+          said.includes(`vibest ${buildVersion} is available (this is ${version})`) &&
+            /vibestd: handoff\./.test(said) &&
+            said.includes(`vibestd ${buildVersion} (pid`) &&
+            said.includes("vibest update has finished") &&
+            said.includes(before.main.id.slice(0, 8)) &&
+            said.includes(sub.slice(0, 8)),
+          `unexpected: ${said}`,
+        )
+        expect(!said.includes("IncompatibleDaemon"), `the older vibest talked to the new vibestd: ${said}`)
+        expect(
+          (await fs.readlink(link)) === path.join(share, "versions", buildVersion, "bin", "vibest"),
+          `${link} does not point at ${buildVersion}`,
+        )
+        const daemonAfter = await w.daemonPid()
+        expect(daemonAfter !== undefined && daemonAfter !== daemonBefore, `vibestd ${daemonBefore} -> ${daemonAfter}`)
+        for (const [name, row, now] of [
+          ["subagent", before.sub, () => read("s.id = ?", sub)],
+          ["main agent", before.main, main],
+        ] as const) {
+          await until(
+            `the ${name} restarted on this integration`,
+            () => reported(now(), buildVersion) && now()!.pid !== row.pid,
+            120_000,
+          ).catch(async (e: Error) => {
+            const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
+            throw new Error(`${e.message}; row ${JSON.stringify(now())}\nvibestd.log:\n${log.slice(-4000)}`)
+          })
+          expect(now()?.id === row.id, `the ${name}'s session changed: ${row.id} -> ${now()?.id}`)
+          expect(
+            now()?.harness_session_id === row.harness_session_id,
+            `the ${name}'s conversation changed: ${row.harness_session_id} -> ${now()?.harness_session_id}`,
+          )
+          expect(!alive(row.pid!), `the ${name}'s old harness ${row.pid} still runs`)
+        }
+      } finally {
+        model.stop()
+        await server.stop(true)
+        await w.stopDaemon()
+        await dropHerdrSession(w, session)
       }
     },
   },
