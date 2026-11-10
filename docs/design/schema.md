@@ -322,12 +322,16 @@ None for now. Later: delete whole sessions that ended more than N days ago, with
 ## Event catalog v3 (not used yet)
 
 `packages/schema/src/event.ts` defines the facts of the next storage shape: 25 types, each with its envelope (`project`,
-`session` or `none`) and a Schema for its data. Nothing reads or writes them yet; the live database is still the shape
-above. A key marked optional is absent, never null, and a string key that is present is never empty. Encoding and
-decoding refuse keys a definition does not have, and encoding fails when its JSON does not decode back (a number that is
-NaN or infinite becomes null in JSON). `Routing` and `TraceEntry` (with `Change`) from `packages/schema/src/plugin.ts`
-are part of the catalog contract through `process.started.routing`: change them by the same rules as a fact.
+`session` or `none`) and a Schema for its data. `packages/core/src/journal.ts` (the log, `commit`, `emit`, `rebuild`,
+`equalToReplay`) and `packages/core/src/projectors.ts` (the read model and one projector per type) run them, so far only
+from tests on `:memory:` databases; the live database is still the shape above. A key marked optional is absent, never
+null, and a string key that is present is never empty. Encoding and decoding refuse keys a definition does not have, and
+encoding fails when its JSON does not decode back (a number that is NaN or infinite becomes null in JSON). `Routing` and
+`TraceEntry` (with `Change`) from `packages/schema/src/plugin.ts` are part of the catalog contract through
+`process.started.routing`: change them by the same rules as a fact.
 
 Changing the catalog: add an optional key directly; a change of meaning or structure gets a new type name and the old
-definition stays in the catalog. Both raise `CATALOG_VERSION` by one. `packages/schema/test/event-rows.json` holds fixed
-sample rows that must keep decoding and re-encoding to the same bytes: add rows to it, never change or remove one.
+definition stays in the catalog. Both raise `CATALOG_VERSION` by one. Changing the read model (a column, table, index or
+projector rule) raises `PROJECTION_VERSION` instead; a database with another projection version is rebuilt by replaying
+its log, so the read model needs no migration. `packages/schema/test/event-rows.json` holds fixed sample rows that must
+keep decoding and re-encoding to the same bytes: add rows to it, never change or remove one.
