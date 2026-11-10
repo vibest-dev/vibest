@@ -637,7 +637,8 @@ export class Sessions extends Context.Service<
                   return { message: `${id} had already finished its turn; its result is delivered` }
                 const state = stateOf(yield* agentState(h, terminal))
                 const runtimeKnows = state !== undefined && state !== "unknown"
-                if (runtimeKnows ? !busy(state) : session.turnState !== "open")
+                const started = session.turnState === "open" && (yield* Ref.get((yield* track(id)).sawWorking))
+                if (!started && (runtimeKnows ? !busy(state) : session.turnState !== "open"))
                   return { message: `${id} is not working; nothing to interrupt` }
                 if (!(yield* interruptAgent(h, session, terminal)))
                   return yield* new SessionBusy({
