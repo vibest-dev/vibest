@@ -25,6 +25,7 @@ const STAGES = ["build", "typecheck", "test", "archive", "pack", "e2e"]
 const stages = valueOf("--stage", `stage names from ${STAGES.join(", ")}, comma-separated`)?.split(",") ?? STAGES
 const legs = valueOf("--leg", "curl, npm or curl,npm")?.split(",") ?? ["curl", "npm"]
 const shard = valueOf("--shard", "k/n")
+const jobs = valueOf("--jobs", "a number of checks to run at once")
 const unknown = [...stages.filter((s) => !STAGES.includes(s)), ...legs.filter((l) => l !== "curl" && l !== "npm")]
 if (unknown.length) {
   console.error(`verify: unknown ${unknown.join(", ")}; stages: ${STAGES.join(", ")}; legs: curl, npm`)
@@ -193,6 +194,7 @@ const e2e = (method: string, install: string, ids: ReadonlyArray<string>) =>
       ...(noCache ? ["--no-cache"] : []),
       ...(elsewhere ? ["--elsewhere", elsewhere] : []),
       ...(shard ? ["--shard", shard] : []),
+      ...(jobs ? ["--jobs", jobs] : []),
       ...ids,
     ],
     {

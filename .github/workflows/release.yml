@@ -275,9 +275,9 @@ jobs:
       fail-fast: false
       matrix:
         leg: [curl, npm]
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
-      SHARDS: 6
+      SHARDS: 8
     steps:
       - uses: actions/checkout@v4
         with:
@@ -295,7 +295,7 @@ jobs:
       - uses: ./.github/actions/e2e-tools
       - run: >-
           pnpm run verify --no-cache --elsewhere H4 --stage e2e
-          --leg ${{ matrix.leg }} --shard ${{ matrix.shard }}/${{ env.SHARDS }}
+          --leg ${{ matrix.leg }} --shard ${{ matrix.shard }}/${{ env.SHARDS }} --jobs 1
           --keep-archive "$RUNNER_TEMP/release/github" --packs "$RUNNER_TEMP/release/npm"
       # On a failure: each check's evidence (redacted) and the vibestd log of every world E2E kept.
       - uses: actions/upload-artifact@v4
