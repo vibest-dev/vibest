@@ -292,6 +292,19 @@ export const inboxMethods = (store: Store) => {
         Effect.orDie,
       ),
 
+    latestAnswer: (sessionId: string) =>
+      sql<{
+        turn: number
+        status: string
+        text: string | null
+        failure: string | null
+        endedAt: number
+      }>`SELECT id AS turn, status, answer AS text, failure, ended_at FROM turn
+        WHERE session_id = ${sessionId} AND status IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]),
+        Effect.orDie,
+      ),
+
     projectOfSession: (sessionId: string) =>
       sql<{ project: string }>`SELECT project_id AS project FROM session WHERE id = ${sessionId}`.pipe(
         Effect.map((rows) => rows[0]?.project),

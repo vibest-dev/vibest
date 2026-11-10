@@ -2,7 +2,7 @@ import type { Fact, FactOf, FactType } from "@vibest/schema/event"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 
-export const PROJECTION_VERSION = 1
+export const PROJECTION_VERSION = 2
 
 export const PROJECTION_SCHEMA = [
   `CREATE INDEX event_session ON event (session_id, seq) WHERE session_id IS NOT NULL`,
@@ -75,6 +75,7 @@ export const PROJECTION_SCHEMA = [
     status     TEXT CHECK (status IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),
     report_seq INTEGER,
     failure    TEXT,
+    answer     TEXT,
     ended_at   INTEGER
   ) STRICT`,
   `CREATE UNIQUE INDEX turn_open ON turn (session_id) WHERE status IS NULL`,
@@ -247,6 +248,7 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
   "turn.reported": () => Effect.void,
   "turn.ended": (fact, sql) =>
     sql`UPDATE turn SET status = ${fact.data.status}, report_seq = ${fact.data.report ?? null},
+        answer = (SELECT data ->> '$.text' FROM event WHERE seq = ${fact.data.report ?? null} AND type = 'turn.reported'),
         failure = ${fact.data.failure?.message ?? null}, ended_at = ${fact.at}
       WHERE id = ${fact.data.turn} AND status IS NULL`,
 

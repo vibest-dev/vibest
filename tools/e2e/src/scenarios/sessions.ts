@@ -34,7 +34,12 @@ const ls = async (w: World, p: Project, all = false) =>
   (await w.json<{ sessions: Array<Listed> }>(all ? ["ls", "--all"] : ["ls"], { cwd: p.repo, env: p.env })).sessions
 
 const resultOf = (w: World, p: Project, id: string) =>
-  w.json<{ id: string; status: string; result: { kind: string; message: string } | null }>(["result", id], {
+  w.json<{
+    id: string
+    status: string
+    result: { kind: string; message: string } | null
+    answer: { turn: number; status: string; text: string | null } | null
+  }>(["result", id], {
     cwd: p.repo,
     env: p.env,
   })
@@ -147,6 +152,20 @@ const checks: ReadonlyArray<Check> = [
         await answered(w, p, a, "s5")
         const after = await resultOf(w, p, a)
         expect(after.result?.kind === "result", `result: ${JSON.stringify(after)}`)
+        const projected = row<{ answer: string | null; reported: string | null }>(
+          w,
+          `SELECT t.answer, e.data ->> '$.text' AS reported FROM turn t
+            JOIN event e ON e.seq = t.report_seq AND e.type = 'turn.reported'
+            WHERE t.session_id = ? AND t.status = 'completed'`,
+          a,
+        )
+        expect(
+          projected?.answer?.includes("done-s5") === true &&
+            projected.answer === projected.reported &&
+            after.answer?.text === projected.answer &&
+            after.answer.status === "completed",
+          `turn.answer: ${JSON.stringify(projected)}, vibest result: ${JSON.stringify(after.answer)}`,
+        )
         const status = await w.json<{ daemon: { status: string; pid: number | null } }>(["status"], {
           cwd: p.repo,
           env: p.env,
