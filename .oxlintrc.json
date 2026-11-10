@@ -1,6 +1,16 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "jsPlugins": ["./tools/oxlint/node-import-style.mjs"],
+  "jsPlugins": [
+    "./tools/oxlint/node-import-style.mjs",
+    {
+      "name": "anti-slop",
+      "specifier": "./tools/oxlint/anti-slop/index.ts"
+    },
+    {
+      "name": "anti-slop-effect",
+      "specifier": "./tools/oxlint/anti-slop/effect/index.ts"
+    }
+  ],
   "categories": {
     "correctness": "error"
   },
@@ -10,8 +20,36 @@
     "vibest/no-restricted-disable": "error",
     "vibest/no-comments": "error",
     "eslint/no-unused-vars": "error",
-    "eslint/no-unused-expressions": ["error", { "allowTernary": true }],
-    "eslint/max-lines": ["error", { "max": 1000, "skipBlankLines": false, "skipComments": false }]
+    "eslint/no-unused-expressions": [
+      "error",
+      {
+        "allowTernary": true
+      }
+    ],
+    "eslint/max-lines": [
+      "error",
+      {
+        "max": 1000,
+        "skipBlankLines": false,
+        "skipComments": false
+      }
+    ],
+    "anti-slop/no-chained-type-assertions": "off",
+    "anti-slop/no-conditional-empty-object-spread": "off",
+    "anti-slop/no-known-value-widening": "off",
+    "anti-slop/no-module-mocking": "off",
+    "anti-slop/no-object-parameters": "off",
+    "anti-slop/no-reflect-apply": "error",
+    "anti-slop/no-reflect-get": "off",
+    "anti-slop/no-runtime-typeof": "off",
+    "anti-slop/no-shape-in-symbol-names": "off",
+    "anti-slop/no-unknown-parameters": "off",
+    "anti-slop/no-unknown-returns": "off",
+    "anti-slop/no-unknown-type-aliases": "error",
+    "anti-slop/no-unsafe-dictionary-type": "off",
+    "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/require-safety-comment-for-type-assertion": "off",
+    "anti-slop-effect/no-service-constructor-imports": "off"
   },
   "overrides": [
     {
@@ -75,6 +113,7 @@
     "node_modules",
     ".cache",
     "packages/effect-herdr-sdk/src/generated",
-    "packages/effect-herdr-core-sdk/src/generated"
+    "packages/effect-herdr-core-sdk/src/generated",
+    "tools/oxlint/anti-slop"
   ]
 }
