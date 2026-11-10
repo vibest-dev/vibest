@@ -183,7 +183,7 @@ const clockSafeKeychain = FileSystem.makeNoop({
 })
 
 describe("subscription polls and vibest subscriptions over fake CLIs, keychain and HTTP: nothing touches the network", () => {
-  it.effect("an expired or missing token skips the endpoint and keeps the last limits", () =>
+  it.effect("Claude reports its login with no usage limits; a missing Cursor token keeps the last limits", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -255,7 +255,7 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           row.limits[0]?.percent,
         ]),
         [
-          ["claude", "", "subscription", "max", "token expired", 1],
+          ["claude", "", "subscription", "max", undefined, undefined],
           ["cursor", "", "subscription", "Ultra", "token unreadable", 2],
           ["pi", "anthropic", "none", undefined, undefined, undefined],
           ["pi", "custom-proxy", "none", undefined, undefined, undefined],
@@ -316,14 +316,12 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           return yield* subs.list
         }),
       )
-      assert.deepStrictEqual(listed.find((row) => row.harness === "claude")?.limits, [
-        { window: "5h", percent: 4, status: "available", resetTime: Date.parse("2026-10-31T17:20:00.296Z") },
-        { window: "7d", percent: 100, status: "limited", resetTime: Date.parse("2026-11-01T21:00:00.296Z") },
-      ])
+      assert.deepStrictEqual(listed.find((row) => row.harness === "claude")?.limits, [])
+      assert.strictEqual(listed.find((row) => row.harness === "claude")?.error, undefined)
       assert.strictEqual(listed.find((row) => row.harness === "cursor")?.limits[0]?.percent, 35.891)
       assert.deepStrictEqual(
         fresh.requests.map((r) => r.authorization).sort(),
-        [`Bearer ${CLAUDE_SECRET}`, `Bearer ${CURSOR_SECRET}`, `Bearer ${CURSOR_SECRET}`].sort(),
+        [`Bearer ${CURSOR_SECRET}`, `Bearer ${CURSOR_SECRET}`].sort(),
       )
       assert.notInclude(JSON.stringify({ logs: fresh.logs, listed }), CLAUDE_SECRET)
       assert.notInclude(JSON.stringify(listed), CURSOR_SECRET)
@@ -348,8 +346,10 @@ describe("subscription polls and vibest subscriptions over fake CLIs, keychain a
           return (yield* subs.list)[0]!
         }),
       )
-      assert.strictEqual(kept.error, "usage endpoint answered 401")
-      assert.strictEqual(kept.limits[0]?.percent, 9)
+      assert.strictEqual(kept.error, undefined)
+      assert.deepStrictEqual(kept.limits, [])
+      assert.strictEqual(kept.account.plan, "max")
+      assert.deepStrictEqual(denied.requests, [])
       assert.notInclude(JSON.stringify(kept) + JSON.stringify(denied.logs), CLAUDE_SECRET)
 
       const hung = fakeMachine({

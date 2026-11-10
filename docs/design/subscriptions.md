@@ -20,7 +20,7 @@ interface Limit { window: string; percent: number /* 0–100 */; status: "availa
 
 - A Subscription is per `(harness, provider, machine)`. `provider` is empty for a single-login harness (Claude
   Code, Cursor) and set for Pi (one login per provider).
-- The adapter reads the source; the pure parsers (`claudeAccount`, `claudeUsage`, …) turn it into this shape.
+- The adapter reads the source; the pure parsers (`claudeAccount`, `cursorUsage`, …) turn it into this shape.
   A failed read never fails the Effect: it keeps the last Subscription and the core records its age in
   `time.update`. Plugins decide what a stale reading is worth.
 - Usage limits come only from official or CLI-provided sources. `limits: []` means unknown, not unlimited, and
@@ -41,31 +41,14 @@ interface Limit { window: string; percent: number /* 0–100 */; status: "availa
 
 ## Claude Code
 
-|             | Source                                                                                                                                                  | Fields                                                                                                                                                                                                                                                                                                        | Freshness                       | Status                                                  |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------- |
-| Login       | `claude auth status --json` (`--json` is the default)                                                                                                   | `loggedIn`, `authMethod` (`claude.ai`), `apiProvider` (`firstParty`), `subscriptionType` (`max`); also `email`, `orgId`, `orgName` (not kept)                                                                                                                                                                 | live, local, no network, ~0.5 s | verified                                                |
-| Usage, poll | `GET https://api.anthropic.com/api/oauth/usage`, `Authorization: Bearer <OAuth access token>`, `anthropic-beta: oauth-2025-04-20` (what `/usage` shows) | `five_hour` and `seven_day`: `{ utilization` 0–100, `resets_at` ISO 8601 `}`; `seven_day_opus`, `seven_day_sonnet`: same or null. Also a newer `limits[] { kind` (`session`, `weekly_all`, `weekly_scoped`), `percent`, `severity` (`normal`), `resets_at`, `scope`, `is_active }` and `extra_usage`, `spend` | live, server side, free         | verified (200)                                          |
-| Usage, push | the running session: stream-json `rate_limit_event` (in `-p`), or the statusline JSON's `rate_limits`                                                   | `rate_limit_info.unifiedWindows.{five_hour,seven_day}`: `utilization` **0–1**, `resetsAt` epoch **seconds**, `status` (`allowed`, `allowed_warning`, `rejected`); statusline: `rate_limits.{five_hour,seven_day}.{used_percentage` 0–100, `resets_at` epoch s`}`                                              | after each API response         | event verified (one Haiku prompt); statusline from docs |
+|             | Source                                                                                                                                              | Fields                                                                                                                                        | Freshness                       | Status   |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | -------- |
+| Login       | `claude auth status --json` (`--json` is the default)                                                                                               | `loggedIn`, `authMethod` (`claude.ai`), `apiProvider` (`firstParty`), `subscriptionType` (`max`); also `email`, `orgId`, `orgName` (not kept) | live, local, no network, ~0.5 s | verified |
+| Usage, poll | none. vibest does not read Claude's OAuth token, `~/.claude/.credentials.json`, or the Anthropic usage API. `limits` stays `[]` (unknown, not full) | —                                                                                                                                             | —                               | —        |
+| Usage, push | none from the adapter. A plugin may still report limits; the next poll replaces them with `[]`                                                      | —                                                                                                                                             | —                               | —        |
 
-Token: macOS keychain item `Claude Code-credentials` (JSON `claudeAiOauth.{accessToken, expiresAt,
-subscriptionType, rateLimitTier}`); on Linux `~/.claude/.credentials.json`, same shape. On this Mac the file
-also exists but was **stale** (expired 10 minutes before, while the keychain token was valid for 7 hours): read
-the keychain first on macOS. vibestd reads a keychain item with `security -w` (at most 10 s); an empty answer,
-a non-zero exit or a timeout is unreadable, and the value is never logged.
-
-Push in practice: vibest's Claude sessions are interactive, so stream-json is not available. Hook payloads do not
-carry rate limits (assumed: none of the documented hook inputs has them). The statusline is the only in-session
-source, and it is the user's setting; a `--settings '{"statusLine":…}'` at launch would replace the user's
-statusline in vibest's sessions. Recommended: poll only for Claude, push later if the poll proves too coarse.
-
-Failure modes: not signed in (`loggedIn: false`); API key, `apiKeyHelper`, Bedrock or Vertex (no windows;
-assumed values of `authMethod`/`apiProvider`); keychain locked or access prompt (a background daemon may be
-denied: unverified); token expired (skip the poll); endpoint is undocumented and can change or answer 429 when
-polled often (assumed: poll no more than once a minute, and on `agent.fail`); `resets_at` null for a window not yet
-started; Claude drops a statusline window once its `resets_at` passes.
-
-`limited` from the poll: `utilization >= 100` (assumed: the `limits[].severity` values past `normal` were not
-seen). From push: `status: rejected`.
+Failure modes: not signed in (`loggedIn: false`); API key, `apiKeyHelper`, Bedrock or Vertex (`authMethod` other
+than `claude.ai` is an API-key login, with no windows). A failed `claude auth status` keeps the last row.
 
 ## Cursor (`cursor-agent`)
 

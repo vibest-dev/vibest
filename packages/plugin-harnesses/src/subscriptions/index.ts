@@ -75,6 +75,6 @@ export const usageOf = (
     },
   })
 
-export { claudeAccount, claudeUsage } from "./claude.ts"
+export { claudeAccount } from "./claude.ts"
 export { cursorAccount, cursorUsage } from "./cursor.ts"
 export { piAccount } from "./pi.ts"

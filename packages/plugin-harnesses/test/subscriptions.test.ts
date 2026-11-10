@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 
-import { claudeAccount, claudeUsage, cursorAccount, cursorUsage, piAccount } from "../src/subscriptions/index.ts"
+import { claudeAccount, cursorAccount, cursorUsage, piAccount } from "../src/subscriptions/index.ts"
 import { providersFromList } from "../src/subscriptions/pi.ts"
 
 describe("claude", () => {
@@ -17,32 +17,6 @@ describe("claude", () => {
     assert.deepStrictEqual(claudeAccount({ loggedIn: false }), { kind: "none" })
     assert.deepStrictEqual(claudeAccount({ loggedIn: true, authMethod: "api_key" }), { kind: "api-key" })
     assert.deepStrictEqual(claudeAccount("not json"), { kind: "none" })
-  })
-
-  it("reads the 5-hour and weekly windows from the OAuth usage endpoint", () => {
-    const body = {
-      five_hour: {
-        utilization: 4.0,
-        resets_at: "2026-10-31T17:20:00.296129+00:00",
-        limit_dollars: null,
-        locked_reason: null,
-      },
-      seven_day: {
-        utilization: 10.0,
-        resets_at: "2026-11-01T21:00:00.296147+00:00",
-        limit_dollars: null,
-        locked_reason: null,
-      },
-      seven_day_opus: null,
-      seven_day_sonnet: null,
-      extra_usage: { is_enabled: false },
-    }
-    assert.deepStrictEqual(claudeUsage(body), [
-      { window: "5h", percent: 4, status: "available", resetTime: Date.parse("2026-10-31T17:20:00.296Z") },
-      { window: "7d", percent: 10, status: "available", resetTime: Date.parse("2026-11-01T21:00:00.296Z") },
-    ])
-    assert.strictEqual(claudeUsage({ five_hour: { utilization: 100, resets_at: null } })[0]?.status, "limited")
-    assert.deepStrictEqual(claudeUsage({ error: { type: "rate_limit_error" } }), [])
   })
 })
 
