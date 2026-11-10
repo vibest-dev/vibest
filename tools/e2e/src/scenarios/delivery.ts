@@ -226,7 +226,11 @@ const sendChecks: ReadonlyArray<Check> = [
         )
         expect(written.includes(mainOf(w)), `the archived refusal does not name the main agent: ${written}`)
         expect(
-          countFacts(w, "type = 'inbox.queued' AND json_extract(data, '$.sender') = ?", id) === 0,
+          countFacts(
+            w,
+            "type = 'inbox.queued' AND json_extract(data, '$.kind') = 'send' AND json_extract(data, '$.sender') = ?",
+            id,
+          ) === 0,
           `an inbox.queued names ${id} as sender`,
         )
       } finally {

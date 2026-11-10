@@ -63,8 +63,14 @@ export const make = (
       p: PayloadOf<"Send">,
     ) =>
       Effect.gen(function* () {
-        if (caller._tag === "Session" && (yield* db.sendToOrigin(caller.sessionId, input, p.message)))
-          return { id: input }
+        const toOrigin =
+          caller._tag === "Session" ? yield* db.sendToOrigin(caller.sessionId, input, p.message, p.request) : undefined
+        if (toOrigin === false)
+          return yield* new NoSuchSession({
+            id: input,
+            message: `${input} is on another machine that vibestd does not know; nothing was sent`,
+          })
+        if (toOrigin === true) return { id: input }
         const id = yield* db.resolveSession(input)
         const target = yield* db.sessionIdentity(id)
         if (target?.projectId !== caller.projectId)

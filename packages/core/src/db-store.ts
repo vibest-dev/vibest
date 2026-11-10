@@ -351,14 +351,15 @@ export const makeStore = Effect.gen(function* () {
     row: { readonly sessionId: string; readonly kind: string; readonly content: string; readonly at?: number },
   ) =>
     Effect.gen(function* () {
-      if (reportTo === null) return
-      if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return
+      if (reportTo === null) return false
+      if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
       yield* emit(OutboxQueued, {
         sessionId: row.sessionId,
         ...(row.at === undefined ? {} : { at: row.at }),
         data: { id: randomId(), peer, kind: row.kind === "result" ? "result" : "notice", content: row.content },
       })
       yield* notify({ type: "live.outbox", peerId: peer })
+      return true
     })
 
   const liveRecipient = (id: string) =>

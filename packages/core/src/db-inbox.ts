@@ -16,6 +16,7 @@ export const inboxMethods = (store: Store) => {
     findSession,
     liveRecipient,
     queueSend,
+    queueInbox,
     tellSender,
     tellSendersOf,
     queueForPeer,
@@ -50,14 +51,15 @@ export const inboxMethods = (store: Store) => {
 
     insertNoticeTo: (recipient: string, message: string) => tx(tellSender(recipient, message)).pipe(Effect.orDie),
 
-    sendToOrigin: (sessionId: string, target: string, message: string) =>
+    sendToOrigin: (sessionId: string, target: string, message: string, request?: string) =>
       tx(
         Effect.gen(function* () {
           const origin = yield* origins(sessionId)
           const creator = origin?.reportTo
-          if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return false
+          if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return undefined
+          if (request !== undefined && (yield* queuedBy(sessionId, request)) !== undefined) return true
           const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sessionId}`
-          yield* queueForPeer(origin.peer, creator, {
+          const written = yield* queueForPeer(origin.peer, creator, {
             sessionId,
             kind: "notice",
             content: envelope(
@@ -69,6 +71,15 @@ export const inboxMethods = (store: Store) => {
               ["message", message],
             ),
           })
+          if (!written) return false
+          yield* queueInbox({
+            recipient: sessionId,
+            kind: "send",
+            sender: sessionId,
+            content: message,
+            status: "dropped",
+            request,
+          })
           return true
         }),
       ).pipe(Effect.orDie),
@@ -76,6 +87,8 @@ export const inboxMethods = (store: Store) => {
     failLeased: (ids: ReadonlyArray<number>) =>
       tx(
         Effect.gen(function* () {
+          const unsigned = sql`kind = 'send' AND sender_session_id IS NULL`
+          yield* moveInbox(sql`${sql.in("id", ids)} AND status = 'delivering' AND ${unsigned}`, "pending")
           const failed = yield* moveInbox(sql`${sql.in("id", ids)} AND status = 'delivering'`, "failed")
           yield* tellSendersOf(
             failed,
@@ -254,7 +267,7 @@ export const inboxMethods = (store: Store) => {
               WHERE ${pollHarnesses.length === 0 ? sql`0` : sql`p.harness IN ${sql.in(pollHarnesses)}`})`
           const toEntry = sql`EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = recipient_session_id)`
           const claimed = sql`status = 'delivering' AND ${toEntry}`
-          yield* moveInbox(sql`${claimed} AND ${polling}`, "pending")
+          yield* moveInbox(sql`${claimed} AND (${polling} OR (kind = 'send' AND sender_session_id IS NULL))`, "pending")
           const lost = yield* moveInbox(claimed, "failed")
           yield* tellSendersOf(
             lost,

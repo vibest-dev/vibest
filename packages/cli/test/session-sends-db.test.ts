@@ -114,8 +114,9 @@ describe("sends from sessions", () => {
             reportTo: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
           },
         })
-        assert.isFalse(yield* db.sendToOrigin(B, "eeeeeeee", "hi"))
-        assert.isTrue(yield* db.sendToOrigin(B, "dddddddd", "hi"))
+        assert.isUndefined(yield* db.sendToOrigin(B, "eeeeeeee", "hi"))
+        assert.isTrue(yield* db.sendToOrigin(B, "dddddddd", "hi", "req-1"))
+        assert.isTrue(yield* db.sendToOrigin(B, "dddddddd", "hi", "req-1"))
         const out = yield* sql<{ kind: string; content: string }>`SELECT kind, content FROM outbox`
         assert.deepStrictEqual(
           out.map((o) => o.kind),
@@ -123,6 +124,44 @@ describe("sends from sessions", () => {
         )
         assert.include(out[0]!.content, "<agent-message>")
         assert.include(out[0]!.content, "hi")
+      }),
+    ),
+  )
+
+  it.effect("a send to a creator on a machine vibestd does not know writes nothing and says so", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project } = yield* setup
+        const sql = yield* SqlClient.SqlClient
+        yield* db.insertSession(session(B), project, {
+          cwd: "/w",
+          task: "b",
+          origin: { peer: "22222222-2222-4222-8222-222222222222", project: "p", reportTo: X },
+        })
+        assert.isFalse(yield* db.sendToOrigin(B, "cccccccc", "hi", "req-1"))
+        assert.deepStrictEqual(yield* sql`SELECT 1 FROM outbox`, [])
+        assert.deepStrictEqual(yield* sql`SELECT 1 FROM inbox WHERE request = 'req-1'`, [])
+      }),
+    ),
+  )
+
+  it.effect("a send with no sender session is put back for the next poll when its delivery is cut", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project, main } = yield* setup
+        const first = (yield* db.insertSend(main, "one"))!
+        yield* db.claim([first.id])
+        yield* db.recoverDelivering([], () => "")
+        assert.deepStrictEqual(
+          (yield* db.coordinatorPending(project)).map((r) => r.message),
+          ["one"],
+        )
+        yield* db.claim([first.id])
+        yield* db.failLeased([first.id])
+        assert.deepStrictEqual(
+          (yield* db.coordinatorPending(project)).map((r) => r.message),
+          ["one"],
+        )
       }),
     ),
   )
