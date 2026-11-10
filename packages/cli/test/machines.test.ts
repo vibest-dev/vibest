@@ -740,6 +740,48 @@ describe("vibest run --machine and remote sessions", () => {
   )
 
   it.effect(
+    "an ssh that takes 20 s to connect, past the 10 s ping limit, is added, and comes back as slowly after a cut",
+    () =>
+      Effect.gen(function* () {
+        const net = new Net()
+        const a = yield* stack(net)
+        const b = yield* stack(net)
+        net.route("b-host", b.layout.socket)
+        net.slow("b-host", "20 seconds")
+        const adding = yield* Effect.forkChild(a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" })))
+        yield* untilVirtual(
+          Effect.sync(() => adding.pollUnsafe()),
+          (exit) => exit !== undefined,
+        )
+        assert.strictEqual((yield* Fiber.join(adding)).name, "mb")
+        net.fail("b-host", 255, "ssh: Connection to b-host closed")
+        yield* net.cutAll("b-host")
+        yield* until(a.cli(a.raw["Machine.List"]()), (r) => r[0]?.state === "unreachable")
+        net.route("b-host", b.layout.socket)
+        const [back] = yield* untilVirtual(a.cli(a.raw["Machine.List"]()), (r) => r[0]?.state === "connected")
+        assert.strictEqual(back?.state, "connected")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect("an ssh that does not connect in 30 s fails machine add and says what timed out", () =>
+    Effect.gen(function* () {
+      const net = new Net()
+      const a = yield* stack(net)
+      const b = yield* stack(net)
+      net.route("b-host", b.layout.socket)
+      net.slow("b-host", "40 seconds")
+      const adding = yield* Effect.forkChild(Effect.flip(a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))))
+      yield* untilVirtual(
+        Effect.sync(() => adding.pollUnsafe()),
+        (exit) => exit !== undefined,
+      )
+      const failed = yield* Fiber.join(adding)
+      assert.strictEqual(failed._tag, "MachineFailed")
+      assert.include(failed.message, "did not answer in 30s: ssh is still connecting")
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.effect(
     "a silent connection is dropped by keepalive: pings go out every 5 s and 10 s without a frame ends it",
     () =>
       Effect.gen(function* () {

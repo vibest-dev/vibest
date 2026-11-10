@@ -1,4 +1,4 @@
-import { connectPipe, type PipeClient } from "@vibest/client/pipe"
+import { connectPipe, firstAnswer, PING_TIMEOUT, type PipeClient, pingTimedOut } from "@vibest/client/pipe"
 import { peerHeaders, PROTOCOL } from "@vibest/protocol/protocol"
 import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
@@ -98,6 +98,9 @@ class MachineDown extends Schema.TaggedError<MachineDown>()("MachineDown", {
 
 export const differentMessage = (name: string, answered: string) =>
   `${name} now answers as a different vibestd (${shortId(answered)}): its database was replaced or the target points elsewhere; remove the machine and add it again`
+
+export const noAnswer = (name: string) =>
+  `${name} did not answer in ${Duration.format(ADD_TIMEOUT)}: ssh is still connecting, or vibest connect there does not answer`
 
 const exitReason = (name: string, exit: PipeExit) => {
   if (exit.code === 127) return `vibest is not installed on ${name}`
@@ -251,7 +254,11 @@ const make = Effect.gen(function* () {
           Effect.timeoutOption(EXIT_WAIT),
           Effect.map((reason) =>
             Option.getOrElse(reason, () =>
-              error instanceof Error && error.message !== "" ? error.message : `the connection to ${name} failed`,
+              pingTimedOut(error)
+                ? `${name} did not answer a ping in ${Duration.format(PING_TIMEOUT)}`
+                : error instanceof Error && error.message !== ""
+                  ? error.message
+                  : `the connection to ${name} failed`,
             ),
           ),
         )
@@ -284,7 +291,17 @@ const make = Effect.gen(function* () {
           `lost the line to ${name} during the call (${reason}); it may have happened there; check, then retry`,
       )
       const opening = line((reason) => reason)
-      const client = yield* connectPipe(pipe.socket)
+      const answered = yield* firstAnswer(pipe.socket).pipe(
+        Effect.raceFirst(Effect.flatMap(ended, (reason) => Effect.fail(new MachineDown({ message: reason })))),
+        Effect.timeoutOrElse({
+          duration: ADD_TIMEOUT,
+          orElse: () => Effect.fail(new MachineDown({ message: noAnswer(name) })),
+        }),
+        Effect.catchTag("SocketError", (e) =>
+          Effect.flatMap(down(e), (message) => Effect.fail(new MachineDown({ message }))),
+        ),
+      )
+      const client = yield* connectPipe(answered)
       const failed = (e: { readonly message: string }) => new MachineDown({ message: e.message })
       const ping = yield* opening(client.Ping(undefined)).pipe(Effect.mapError(failed))
       if (ping.protocol !== PROTOCOL)
@@ -458,7 +475,7 @@ const make = Effect.gen(function* () {
           Scope.provide(pipe),
           Effect.timeoutOrElse({
             duration: ADD_TIMEOUT,
-            orElse: () => Effect.fail(new MachineDown({ message: `${name} did not answer in 30 s` })),
+            orElse: () => Effect.fail(new MachineDown({ message: noAnswer(name) })),
           }),
           Effect.mapError((e) =>
             e.stop === "mismatch" ? new MachineIncompatible({ machine: name, message: e.message }) : failed(e.message),

@@ -41,7 +41,10 @@ changes what this vibestd presents to others.
 Machine A's vibestd reaches machine B's vibestd through one long-lived pipe: `ssh <target> … vibest connect` on B
 joins its stdin and stdout to B's vibestd socket, starting B's vibestd when it is not running. Over the pipe A speaks
 the ordinary RPC protocol (`packages/client/src/pipe.ts`: a socket over the child's stdin and stdout, pinged every
-5 s, dead after 10 s without a frame, no reconnect of its own).
+5 s, dead after 10 s without a frame, no reconnect of its own). The ping limit starts only after the first answer:
+ssh may take long to connect, so A first writes one `Ping` and waits up to 30 s for any frame (`firstAnswer`) before
+the RPC client starts, and says "<name> did not answer in 30s: ssh is still connecting, or vibest connect there does
+not answer" when none comes. A line dropped by the ping limit says "<name> did not answer a ping in 10s".
 
 Every request on the pipe carries `vibest-caller: peer`, `vibest-peer: <A's identity id>` and, when it acts for a
 project, `vibest-peer-project: <A's project id>`. B refuses every peer request except `Ping` and `Peer.Hello` until

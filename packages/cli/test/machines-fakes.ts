@@ -9,7 +9,7 @@ import type { SpawnInput, Sessions } from "@vibest/core/sessions"
 import { peerHeaders, sessionHeaders } from "@vibest/protocol/protocol"
 import { randomId } from "@vibest/schema/id"
 import * as Server from "@vibest/server/server"
-import { Clock, Deferred, Effect, Layer } from "effect"
+import { Clock, Deferred, Duration, Effect, Layer } from "effect"
 import { RpcClient } from "effect/rpc"
 import * as Socket from "effect/socket/Socket"
 
@@ -32,6 +32,7 @@ type Pipes = {
 type Route = {
   socket?: string
   exit?: { readonly code: number; readonly stderr: string }
+  connecting?: Duration.Input
   readonly pipes: Array<Pipes>
 }
 
@@ -52,6 +53,12 @@ export class Net {
   fail(host: string, code: number, stderr: string) {
     const route = this.routes.get(host) ?? { pipes: [] }
     route.exit = { code, stderr }
+    this.routes.set(host, route)
+  }
+
+  slow(host: string, connecting: Duration.Input) {
+    const route = this.routes.get(host) ?? { pipes: [] }
+    route.connecting = connecting
     this.routes.set(host, route)
   }
 
@@ -76,6 +83,7 @@ export class Net {
             exited: Effect.succeed(exit),
           }
         }
+        const upAt = (yield* Clock.currentTimeMillis) + Duration.toMillis(route.connecting ?? 0)
         const inner = yield* dial(route.socket)
         const cut = yield* Deferred.make<void>()
         const held = { on: false }
@@ -83,10 +91,13 @@ export class Net {
           cut: Deferred.succeed(cut, undefined).pipe(Effect.asVoid),
           hold: Effect.sync(() => (held.on = true)),
         })
+        const connected = Effect.flatMap(Clock.currentTimeMillis, (now) => Effect.sleep(Math.max(0, upAt - now)))
         const failOnCut = Deferred.await(cut).pipe(Effect.andThen(Effect.fail(closed())))
         const socket = Socket.make({
           reader: Effect.map(inner.reader, (r) => ({
-            pull: Effect.suspend(() => (held.on ? Effect.never : r.pull)).pipe(Effect.raceFirst(failOnCut)),
+            pull: Effect.suspend(() => (held.on ? Effect.never : Effect.andThen(connected, r.pull))).pipe(
+              Effect.raceFirst(failOnCut),
+            ),
             upgrade: r.upgrade,
           })),
           writer: Effect.map(inner.writer, (w) => ({

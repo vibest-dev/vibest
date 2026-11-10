@@ -21,6 +21,7 @@ export const fakeSsh = (root: string, exports: string, empty: string) =>
     `printf '%s\\n' "$*" >> ${sh(path.join(root, "ssh.log"))}`,
     `echo $$ >> ${sh(path.join(root, "ssh.pids"))}`,
     `[ -e ${sh(path.join(root, "down"))} ] && { echo "ssh: connect to host b-host port 22: Connection refused" >&2; exit 255; }`,
+    `[ -e ${sh(path.join(root, "slow"))} ] && sleep "$(cat ${sh(path.join(root, "slow"))})"`,
     "host=",
     "while [ $# -gt 0 ]; do",
     '  case "$1" in',
@@ -276,7 +277,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M2",
     title:
-      "recovery: a result written while A's vibestd is stopped, and one written while the ssh child is killed, each arrive once; A's ls shows mb not connected meanwhile",
+      "recovery: a result written while A's vibestd is stopped, and one written while the ssh child is killed, each arrive once, the second over a reconnect whose ssh takes 15 s to connect; A's ls shows mb not connected meanwhile",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -305,8 +306,10 @@ const checks: ReadonlyArray<Check> = [
         )
         s.subs.release("heldtwo")
         await until("B's outbox row", () => s!.bDb<{ n: number }>("SELECT count(*) AS n FROM outbox")?.n === 1, 60_000)
+        await fs.writeFile(path.join(w.root, "slow"), "15")
         await fs.rm(path.join(w.root, "down"))
         await until("the second notice", () => s!.notices(second, "heldtwo") === 1, 120_000)
+        await fs.rm(path.join(w.root, "slow"))
         await Bun.sleep(2_000)
         expect(s.notices(first, "heldone") === 1 && s.notices(second, "heldtwo") === 1, "a notice repeated")
       } finally {
@@ -316,7 +319,8 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "M3",
-    title: "two A's on one B: B records two peers; the second A gets nothing from the first's task and cannot list it",
+    title:
+      "two A's on one B: the second A adds B over an ssh that takes 15 s to connect; B records two peers; the second A gets nothing from the first's task and cannot list it",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -326,8 +330,10 @@ const checks: ReadonlyArray<Check> = [
         await until("the notice on A", () => s!.notices(address, "m3") === 1, 120_000)
         const a2 = { ...s.aEnv, VIBEST_HOME: path.join(w.root, "a2") }
         await fs.mkdir(a2.VIBEST_HOME, { recursive: true })
+        await fs.writeFile(path.join(w.root, "slow"), "15")
         const added = await w.run(w.repository, [binary, "machine", "add", "mb", "b-host"], { env: a2 })
-        expect(added.code === 0, `second A machine add: ${added.stderr}`)
+        await fs.rm(path.join(w.root, "slow"))
+        expect(added.code === 0, `second A machine add over a 15 s ssh connect: ${added.stderr}`)
         const peers = s.bDb<{ n: number }>("SELECT count(*) AS n FROM peer")?.n
         expect(peers === 2, `B's peer rows: ${peers}`)
         const listed = await w.run(w.repository, [binary, "ls"], { env: a2 })
