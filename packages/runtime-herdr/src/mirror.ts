@@ -1,8 +1,8 @@
 import type * as VibestPlugin from "@vibest/plugin"
 import { Duration, Effect, Option, type Scope } from "effect"
 
-import { type Cli, DEFAULT_SESSION, mirrorOf, profiles, said, sameTarget } from "./machines.ts"
-import { KIND } from "./terminal-runtime.ts"
+import { type Cli, mirrorOf, profiles, said, sameTarget } from "./machines.ts"
+import { KIND, REMOTE_SESSION } from "./terminal-runtime.ts"
 
 type Event = VibestPlugin.MachineEvent
 
@@ -101,7 +101,7 @@ export const remove = (cli: Cli, event: Event) =>
   Effect.gen(function* () {
     const there = herdrThere(event)
     if (there === undefined && event.runtimes.length > 0) return
-    const session = there?.link?.session ?? DEFAULT_SESSION
+    const session = there?.link?.session ?? REMOTE_SESSION
     const doomed = (yield* profiles(cli)).filter(
       (row) => sameTarget(row.target, event.target) && row.session === session,
     )

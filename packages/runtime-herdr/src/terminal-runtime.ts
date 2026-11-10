@@ -19,6 +19,8 @@ export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 
 export const KIND = "herdr"
 
+export const REMOTE_SESSION = "default"
+
 export const terminalOf = (session: string, paneId: string, name?: string): Terminal => ({
   machine: "local",
   id: name === undefined ? `${session}/${paneId}` : `${session}/${paneId}/${name}`,
@@ -329,15 +331,17 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
 
     const open: Runtime["open"] = (machine, input) =>
       Effect.gen(function* () {
-        const near = input.near !== undefined ? parseTerminal(input.near) : undefined
+        const near = input.near !== undefined && input.remote !== true ? parseTerminal(input.near) : undefined
         const ambient = Option.getOrUndefined(
           yield* Config.option(Config.String("HERDR_SOCKET_PATH")).pipe(Effect.orDie),
         )
         const location: RuntimeLocation =
           near !== undefined
             ? { session: near.session }
-            : (decodeTarget(machine.target) ??
-              (ambient !== undefined ? { socketPath: ambient } : { session: "vibest" }))
+            : input.remote === true
+              ? { session: REMOTE_SESSION }
+              : (decodeTarget(machine.target) ??
+                (ambient !== undefined ? { socketPath: ambient } : { session: "vibest" }))
         const session = yield* pool
           .resolve(near !== undefined ? { session: near.session } : location)
           .pipe(Effect.mapError(failure))

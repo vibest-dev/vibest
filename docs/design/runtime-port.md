@@ -36,8 +36,9 @@ An Agent row stores `runtime { kind, address: Terminal }` (JSON, no DDL); equal 
 Required: `id`, `status(machine)`, `events` (exited, state, reset, and seen from a runtime with `seen`: core reads a
 runtime only when one arrives, and once at start and on a reset), and on terminals `open`, `send`, `read`, `process`, `close`. `open`'s input
 beside the placement (`project`, `cwd`, `argv`, `env`, `label`) carries `near` (beside that terminal when possible),
-`split` (a split beside `near` instead of a tab of its own, `vibest run --peer`) and `focus` (the user is waiting to
-see it); each is the runtime's to honor as it can.
+`split` (a split beside `near` instead of a tab of its own, `vibest run --peer`), `focus` (the user is waiting to
+see it) and `remote` (another machine's vibestd started the agent, `Peer.Spawn`; herdr then opens it in its default
+session `default` and ignores `near`); each is the runtime's to honor as it can.
 
 | Optional                     | herdr                                                                                                            | rex                            | tern                                     | Core's fallback when absent                    |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------- | ---------------------------------------------- |
@@ -49,7 +50,7 @@ see it); each is the runtime's to honor as it can.
 | `seen`, `see`                | —                                                                                                                | —                              | —                                        | never `done` in Watch                          |
 | `prepare(machine)`           | `herdr machine add <target> --remote-session vibest`                                                             | `rex hosts add`                | `tern remote setup`                      | the user prepares the machine                  |
 | `attach(machine)`            | `herdr --session vibest`                                                                                         | — (Rex.app)                    | `tern`                                   | none                                           |
-| `link()`                     | `{session, version}`: the session it opens agents in, `ping` on its socket                                       | —                              | —                                        | other machines cannot show its terminals       |
+| `link()`                     | `{session, version}`: `default`, where remote agents open; `ping` on its socket                                  | —                              | —                                        | other machines cannot show its terminals       |
 | `locate(machine, sessions)`  | the saved herdr machine for each B terminal's session; `<B terminal>@<label>`                                    | —                              | —                                        | remote rows: "cannot be shown here"            |
 | `doctor(machine, harnesses)` | herdr version; each harness's state hook (`herdr integration status`), fix `herdr integration install <harness>` | what rex needs                 | what tern needs                          | `vibest doctor` shows `status` only            |
 

@@ -71,13 +71,10 @@ const event = (link?: Record<string, string>, extra: Partial<MachineEvent> = {})
 const ADD = ["machine", "add", "b-host", "--label", "racknerd/vibest", "--remote-session", "vibest"]
 const adds = (calls: ReadonlyArray<ReadonlyArray<string>>) => calls.filter((c) => c[0] === "machine" && c[1] === "add")
 
-const pinging = (version: string, sockets: Record<string, string>, detached?: boolean) => {
+const pinging = (version: string, detached?: boolean) => {
   const asked: Array<string> = []
   const pool = HerdrPool.of({
-    resolve: (location) =>
-      "socketPath" in location && sockets[location.socketPath] !== undefined
-        ? Effect.succeed(sockets[location.socketPath]!)
-        : Effect.fail(new RuntimeUnreachable({ session: "?", message: "no session" })),
+    resolve: () => Effect.die("resolve reached"),
     client: (session) =>
       Effect.sync(() => {
         asked.push(session)
@@ -102,25 +99,20 @@ const pinging = (version: string, sockets: Record<string, string>, detached?: bo
 
 describe("runtime-herdr machines: link", () => {
   it.effect(
-    "the default session with its server's version over the socket; an ambient socket names its session or nothing",
+    "herdr's default session, where agents of other machines open, with its server's version over the socket",
     () =>
       Effect.gen(function* () {
-        const herdr = pinging("0.9.6", { "/s/work.sock": "work" })
-        assert.deepStrictEqual(yield* link(herdr.pool, undefined), { session: "vibest", version: "0.9.6" })
-        assert.deepStrictEqual(yield* link(herdr.pool, "/s/work.sock"), { session: "work", version: "0.9.6" })
-        assert.isUndefined(yield* link(herdr.pool, "/s/other.sock"))
-        assert.deepStrictEqual(herdr.asked, ["vibest", "work"])
+        const herdr = pinging("0.9.6")
+        assert.deepStrictEqual(yield* link(herdr.pool), { session: "default", version: "0.9.6" })
+        assert.deepStrictEqual(herdr.asked, ["default"])
         const down = HerdrPool.of({
           ...herdr.pool,
           client: (session) => Effect.fail(new RuntimeUnreachable({ session, message: "not running" })),
         })
-        assert.deepStrictEqual(yield* link(down, undefined), { session: "vibest" })
-        assert.deepStrictEqual(yield* link(pinging("0.9.5", {}, true).pool, undefined), {
-          session: "vibest",
-          version: "0.9.5",
-        })
-        assert.deepStrictEqual(yield* link(pinging("0.9.5", {}, false).pool, undefined), {
-          session: "vibest",
+        assert.deepStrictEqual(yield* link(down), { session: "default" })
+        assert.deepStrictEqual(yield* link(pinging("0.9.5", true).pool), { session: "default", version: "0.9.5" })
+        assert.deepStrictEqual(yield* link(pinging("0.9.5", false).pool), {
+          session: "default",
           version: "0.9.5",
           detached: "no",
         })
@@ -248,11 +240,14 @@ describe("runtime-herdr machines: remove", () => {
     }),
   )
 
-  it.effect("with no link the session vibest; several matches leave all with a note; nothing found is done", () =>
+  it.effect("with no link the session default; several matches leave all with a note; nothing found is done", () =>
     Effect.gen(function* () {
-      const herdr = fake({}, [profile({ id: "p1" })])
+      const herdr = fake({}, [profile({ id: "p1", session: "default" }), profile({ id: "p2" })])
       yield* remove(herdr.cli, event(undefined, { runtimes: [] }))
-      assert.deepStrictEqual(herdr.catalog, [])
+      assert.deepStrictEqual(
+        herdr.catalog.map((p) => p.id),
+        ["p2"],
+      )
       const twice = fake({}, [profile({ id: "p1" }), profile({ id: "p2", target: "ssh://b-host" })])
       const e = event({ session: "vibest" })
       yield* remove(twice.cli, e)

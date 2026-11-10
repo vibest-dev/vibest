@@ -35,6 +35,9 @@ release. Each release lists what broke, who is affected and how to migrate under
   unscoped hook runs every time), replacing the old "only the plugin that registered the runtime" rule; `link` and
   `locate` are members of the runtime definition. A harness name in a plugin's own code is a plain
   `string` now, not a union of `pi`, `claude` and `cursor`.
+- **`vibest run --machine` with herdr** (users): the agent opens in herdr's default session `default` on that machine
+  (where its user's herdr TUI usually is), no longer in the session `vibest` or the one vibestd there was started in;
+  vibestd starts that session when it is not running. A runtime's `open` gets `remote: true` for such an agent.
 - **Runtime `locate`** (plugin authors): its second argument is a `ReadonlyMap` from session id to the terminal id the
   other machine reported for it, instead of an array of session ids, so a runtime can build its local id without
   asking the other machine. Migrate: read the session ids with `sessions.keys()` and the size with `sessions.size`.
