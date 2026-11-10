@@ -336,7 +336,7 @@ describe.concurrent("Sessions", () => {
       const mid = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
       yield* until(owner.db.getSession(mid.id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       const midPane = (yield* herdr.agent(mid.id))!.terminal
-      yield* herdr.runtime.close({ machine: "local", id: midPane })
+      yield* herdr.runtime.close({ id: midPane })
       yield* owner.db.updateSession(mid.id, { status: "unknown", exitedAt: 1 })
       const parked = yield* parkAdmitBeforeInsert
       const cwd = yield* processes.holdCwd()

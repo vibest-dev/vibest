@@ -87,7 +87,7 @@ const make = Effect.gen(function* () {
           ...row,
           id: addressed(name, row.id),
           machine: name,
-          address: terminal === undefined ? { machine: name, id: "" } : { machine: terminal.machine, id: terminal.id },
+          address: terminal === undefined ? { machine: name, id: "" } : { machine: "local", id: terminal.id },
           ...(terminal === undefined && found?.note !== undefined ? { view: found.note } : {}),
         }
       })

@@ -20,7 +20,7 @@ const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'"
 const runtime: Runtime.RuntimeDefinition = {
   id: "status-fixture",
   status: () => Effect.succeed({ status: "online" }),
-  open: (machine, input) =>
+  open: (input) =>
     hc(
       "run",
       "--bg",
@@ -36,7 +36,7 @@ const runtime: Runtime.RuntimeDefinition = {
       path.join(root, "status-pty.py"),
       path.join(root, "status-output", crypto.randomUUID()),
       ...input.argv,
-    ).pipe(Effect.map((raw) => ({ machine: machine.id, id: prefix + "/" + JSON.parse(raw).address }))),
+    ).pipe(Effect.map((raw) => ({ id: prefix + "/" + JSON.parse(raw).address }))),
   send: (terminal, input) =>
     hc(
       ...(input.text !== undefined

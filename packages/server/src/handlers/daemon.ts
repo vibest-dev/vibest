@@ -64,12 +64,9 @@ export const make = ({ cliOnly }: Checks) =>
       Plugins: () => plugins.list,
 
       "Runtimes.Doctor": ({ harnesses }) =>
-        Effect.flatMap(runtimes.statuses({ id: "local" }), (rows) =>
+        Effect.flatMap(runtimes.statuses, (rows) =>
           Effect.forEach(rows, ({ runtime, status }) =>
-            (runtime.doctor
-              ? runtime.doctor({ id: "local" }, harnesses)
-              : Effect.succeed({ name: runtime.id, checks: [] })
-            ).pipe(
+            (runtime.doctor ? runtime.doctor(harnesses) : Effect.succeed({ name: runtime.id, checks: [] })).pipe(
               Effect.map((report) => ({
                 kind: runtime.id,
                 status: status.status,

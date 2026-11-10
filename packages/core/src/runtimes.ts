@@ -1,6 +1,6 @@
 import * as VibestPlugin from "@vibest/plugin"
-import { NoRuntime } from "@vibest/schema/session"
-import { Cause, Context, Effect, Fiber, FileSystem, Layer, PubSub, type Scope, Stream } from "effect"
+import { NoRuntime, type RuntimeAddress } from "@vibest/schema/session"
+import { Cause, Context, Effect, Fiber, Layer, PubSub, type Scope, Stream } from "effect"
 
 import { Bus, type LiveEvent } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -11,9 +11,8 @@ import * as Registry from "./registry.ts"
 export { NoRuntime }
 
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
-export type Machine = VibestPlugin.Runtime.Machine
-export type MachineStatus = VibestPlugin.Runtime.MachineStatus
-export type Terminal = VibestPlugin.Runtime.Terminal
+export type RuntimeStatus = VibestPlugin.Runtime.RuntimeStatus
+export type Terminal = RuntimeAddress
 export type AgentState = VibestPlugin.Runtime.AgentState
 export type RuntimeError = VibestPlugin.Runtime.RuntimeError
 export const RuntimeError = VibestPlugin.Runtime.RuntimeError
@@ -21,16 +20,18 @@ export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
 
 export type { RuntimesShape }
 
+export const addressOf = (terminal: VibestPlugin.Runtime.Terminal): Terminal => ({ machine: "local", id: terminal.id })
+
 const live = (runtime: string, event: RuntimeEvent): LiveEvent => {
   switch (event.type) {
     case "state":
-      return { type: "live.state", runtime, terminal: event.terminal, state: event.state }
+      return { type: "live.state", runtime, terminal: addressOf(event.terminal), state: event.state }
     case "exited":
-      return { type: "live.exited", runtime, terminal: event.terminal }
+      return { type: "live.exited", runtime, terminal: addressOf(event.terminal) }
     case "seen":
-      return { type: "live.seen", runtime, terminal: event.terminal }
+      return { type: "live.seen", runtime, terminal: addressOf(event.terminal) }
     case "reset":
-      return { type: "live.reset", runtime, machine: event.machine }
+      return { type: "live.reset", runtime, machine: "local" }
   }
 }
 
@@ -100,20 +101,21 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
         const found = loaded.find((runtime) => runtime.id === id)
         return found === undefined ? Effect.fail(notLoaded(id, loaded)) : Effect.succeed(found)
       }),
-    statuses: (machine) =>
+    statuses: Effect.suspend(() =>
       Effect.forEach(
         registry.get(),
-        (runtime) => runtime.status(machine).pipe(Effect.map((status) => ({ runtime, status }))),
+        (runtime) => runtime.status().pipe(Effect.map((status) => ({ runtime, status }))),
         { concurrency: "unbounded" },
       ),
-    online: (runtime, machine) =>
-      runtime.status(machine).pipe(
+    ),
+    online: (runtime) =>
+      runtime.status().pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.failCause(cause)
             : Effect.fail(
                 new NoRuntime({
-                  message: `the runtime ${runtime.id}'s status on ${machine.id} could not be read: ${messageOf(Cause.squash(cause))}`,
+                  message: `the runtime ${runtime.id}'s status could not be read: ${messageOf(Cause.squash(cause))}`,
                 }),
               ),
         ),
@@ -122,7 +124,7 @@ export const make: Effect.Effect<RuntimesShape, never, Bus | HostEnv | Scope.Sco
             ? Effect.void
             : Effect.fail(
                 new NoRuntime({
-                  message: `the runtime ${runtime.id} is ${status.status} on ${machine.id}${"reason" in status ? ` (${status.reason})` : ""}`,
+                  message: `the runtime ${runtime.id} is ${status.status}${"reason" in status ? ` (${status.reason})` : ""}`,
                 }),
               ),
         ),
@@ -149,14 +151,6 @@ export class Runtimes extends Context.Service<Runtimes, RuntimesShape>()("vibest
 
   static readonly node = LayerNode.make({ service: Runtimes, layer: Runtimes.layer, deps: [Bus.node, HostEnv.node] })
 }
-
-export const readFile = (machine: Machine, file: string): Effect.Effect<string, Error, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    if (machine.id !== "local")
-      return yield* Effect.fail(new Error(`reading ${file} on machine ${machine.id} is not supported yet`))
-    const fs = yield* FileSystem.FileSystem
-    return yield* fs.readFileString(file)
-  }).pipe(Effect.mapError((e) => new Error(`read ${file}: ${e.message}`)))
 
 export type AgentSeen = AgentState | "absent"
 
@@ -194,7 +188,7 @@ export const paneTail = (h: Runtime, terminal: Terminal | undefined, lines = 30)
     : Effect.succeed("")
 
 export const runtimesHere = (runtimes: RuntimesShape) =>
-  Effect.flatMap(runtimes.statuses({ id: "local" }), (rows) =>
+  Effect.flatMap(runtimes.statuses, (rows) =>
     Effect.forEach(
       rows,
       ({ runtime, status }) =>
@@ -215,7 +209,7 @@ export const machinesListing = (
   runtimes: RuntimesShape,
   harnesses: ReadonlyArray<string>,
 ): Effect.Effect<ReadonlyArray<VibestPlugin.MachineInfo>> =>
-  runtimes.statuses({ id: "local" }).pipe(
+  runtimes.statuses.pipe(
     Effect.map((rows) => [
       {
         machine: "local",

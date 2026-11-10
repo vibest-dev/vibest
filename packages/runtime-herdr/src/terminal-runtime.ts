@@ -11,7 +11,6 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import type { HerdrPool } from "./pool.ts"
 
 export type AgentState = VibestPlugin.Runtime.AgentState
-export type Machine = VibestPlugin.Runtime.Machine
 export type Terminal = VibestPlugin.Runtime.Terminal
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
@@ -22,7 +21,6 @@ export const KIND = "herdr"
 export const REMOTE_SESSION = "default"
 
 export const terminalOf = (session: string, paneId: string, name?: string): Terminal => ({
-  machine: "local",
   id: name === undefined ? `${session}/${paneId}` : `${session}/${paneId}/${name}`,
 })
 
@@ -137,7 +135,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.void
           : Effect.logError(`${what}: ${Cause.pretty(cause)}`).pipe(
-              Effect.andThen(PubSub.publish(events, { type: "reset", machine: "local" })),
+              Effect.andThen(PubSub.publish(events, { type: "reset" })),
             ),
       )
     const subscribedPanes = new Set<string>()
@@ -218,7 +216,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       Effect.forkIn(scope),
     )
     yield* pool.restarts.pipe(
-      Stream.runForEach((_session) => PubSub.publish(events, { type: "reset", machine: "local" })),
+      Stream.runForEach((_session) => PubSub.publish(events, { type: "reset" })),
       logStreamEnd("herdr restarts"),
       Effect.forkIn(scope),
     )
@@ -229,7 +227,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         Effect.catch(() => Effect.succeed({ status: "blocked" as const, reason: "herdr is not on PATH" })),
       )
 
-    const doctor: NonNullable<Runtime["doctor"]> = (_machine, harnesses) => {
+    const doctor: NonNullable<Runtime["doctor"]> = (harnesses) => {
       const herdr = (args: ReadonlyArray<string>) =>
         (spawner.string(ChildProcess.make("herdr", [...args])) as Effect.Effect<string, unknown>).pipe(Effect.option)
       return Effect.all([herdr(["--version"]), herdr(["integration", "status"])]).pipe(
@@ -337,7 +335,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
         Effect.andThen(failWith(h.call("pane.send_keys", { pane_id: paneId, keys: ["enter"] }))),
       )
 
-    const open: Runtime["open"] = (machine, input) =>
+    const open: Runtime["open"] = (input) =>
       Effect.gen(function* () {
         const near = input.near !== undefined && input.remote !== true ? parseTerminal(input.near) : undefined
         const ambient = Option.getOrUndefined(
@@ -348,7 +346,7 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
             ? { session: near.session }
             : input.remote === true
               ? { session: REMOTE_SESSION }
-              : (decodeTarget(machine.target) ??
+              : (decodeTarget(input.target) ??
                 (ambient !== undefined ? { socketPath: ambient } : { session: "vibest" }))
         const session = yield* pool
           .resolve(near !== undefined ? { session: near.session } : location)
@@ -660,9 +658,11 @@ export const fromPool = (deps: PoolDeps): Effect.Effect<Runtime> =>
       events: Stream.fromPubSub(events),
       present,
       doctor,
-      attach: (machine) => {
-        const target = decodeTarget(machine.target)
-        return target !== undefined && "session" in target ? ["herdr", "session", "attach", target.session] : ["herdr"]
+      attach: (target) => {
+        const location = decodeTarget(target)
+        return location !== undefined && "session" in location
+          ? ["herdr", "session", "attach", location.session]
+          : ["herdr"]
       },
     } satisfies Runtime
   })

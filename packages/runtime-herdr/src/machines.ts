@@ -74,14 +74,13 @@ const NONE: ReadonlyMap<string, Terminal> = new Map()
 
 export const locate = (
   cli: Cli,
-  machine: VibestPlugin.Runtime.Machine,
+  peer: VibestPlugin.Runtime.Peer,
   sessions: ReadonlyMap<string, string>,
 ): Effect.Effect<VibestPlugin.Runtime.Located> =>
   Effect.gen(function* () {
-    const session = machine.link?.session
-    const target = machine.target
-    if (session === undefined || target === undefined)
-      return { missing: false, terminals: NONE, note: `${machine.id} gave no herdr link` }
+    const session = peer.link.session
+    const target = peer.target
+    if (session === undefined) return { missing: false, terminals: NONE, note: `${peer.id} gave no herdr link` }
     const rows = yield* profiles(cli)
     const profile = mirrorOf(rows, target, session)
     if (profile === undefined) return { missing: true, terminals: NONE }
@@ -94,16 +93,16 @@ export const locate = (
       }
     const terminals = new Map<string, Terminal>()
     for (const [id, there] of sessions) {
-      const parsed = parseTerminal({ machine: "local", id: there })
+      const parsed = parseTerminal({ id: there })
       const shown = parsed === undefined ? undefined : mirrorOf(rows, target, parsed.session)
-      if (shown?.enabled === true) terminals.set(id, { machine: "local", id: `${there}@${shown.label}` })
+      if (shown?.enabled === true) terminals.set(id, { id: `${there}@${shown.label}` })
     }
     return {
       missing: false,
       terminals,
       as: profile.label,
       ...(terminals.size < sessions.size
-        ? { note: `herdr here has no enabled saved machine for that agent's herdr session on ${machine.id}` }
+        ? { note: `herdr here has no enabled saved machine for that agent's herdr session on ${peer.id}` }
         : {}),
     }
   }).pipe(Effect.catch((note) => Effect.succeed({ missing: false, terminals: NONE, note })))

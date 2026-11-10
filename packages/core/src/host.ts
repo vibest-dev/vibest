@@ -16,12 +16,10 @@ export interface RuntimesShape extends PluginRuntime.RuntimeDomain {
   readonly all: Effect.Effect<ReadonlyArray<RuntimeDefinition>>
   readonly route: (id: string) => Effect.Effect<RuntimeDefinition, NoRuntime>
   readonly find: (id: string | null | undefined) => RuntimeDefinition | undefined
-  readonly statuses: (
-    machine: PluginRuntime.Machine,
-  ) => Effect.Effect<
-    ReadonlyArray<{ readonly runtime: RuntimeDefinition; readonly status: PluginRuntime.MachineStatus }>
+  readonly statuses: Effect.Effect<
+    ReadonlyArray<{ readonly runtime: RuntimeDefinition; readonly status: PluginRuntime.RuntimeStatus }>
   >
-  readonly online: (runtime: RuntimeDefinition, machine: PluginRuntime.Machine) => Effect.Effect<void, NoRuntime>
+  readonly online: (runtime: RuntimeDefinition) => Effect.Effect<void, NoRuntime>
   readonly callers: Effect.Effect<ReadonlyArray<Caller>>
   readonly added: Stream.Stream<ReadonlyArray<string>>
 }

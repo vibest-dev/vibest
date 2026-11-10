@@ -9,7 +9,7 @@ import type { Git } from "./git.ts"
 import { Harness, harnessOptions, Harnesses, preflight } from "./harness.ts"
 import { errorMessage, type Plugins } from "./plugins.ts"
 import { RuntimeError } from "./runtimes.ts"
-import { type Machine, type Runtime, type Terminal } from "./runtimes.ts"
+import { type Runtime, type Terminal } from "./runtimes.ts"
 import type { Subscriptions } from "./subscriptions/service.ts"
 
 export type MovePlatform =
@@ -73,7 +73,7 @@ export const sessionMove = (deps: {
   ) => Effect.Effect<string | undefined, unknown, MovePlatform>
   readonly open: (
     h: Runtime,
-    machine: Machine,
+    target: string | undefined,
     session: SessionRow,
     input: {
       readonly project: string
@@ -116,7 +116,6 @@ export const sessionMove = (deps: {
     ownsTerminal: boolean,
     error: string,
   ) {
-    const machine: Machine = { id: session.address.machine }
     const source = yield* db.rescheduleSource(session.id)
     const task = source.working || fallbackTask || source.delivered
     let row = session
@@ -337,7 +336,7 @@ export const sessionMove = (deps: {
         })
       const placed = inPlace
         ? yield* h.run!(terminal!, argv).pipe(Effect.as(terminal!), Effect.exit)
-        : yield* deps.open(h, machine, nextRow, { project: root, cwd, argv }).pipe(Effect.exit)
+        : yield* deps.open(h, undefined, nextRow, { project: root, cwd, argv }).pipe(Effect.exit)
       if (Exit.isFailure(placed)) {
         const failed = Cause.squash(placed.cause)
         const startDeath = failed instanceof RuntimeError && failed.code === "failed"

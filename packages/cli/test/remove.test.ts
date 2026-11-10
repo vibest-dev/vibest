@@ -107,7 +107,7 @@ describe.concurrent("vibest rm: process proof", () => {
       const held = yield* herdr.hold("close")
       const removing = yield* Effect.forkChild(Effect.flip(sessions.remove(id)))
       yield* held.reached
-      const closedButReplyLost = herdr.runtime.close({ machine: "local", id: pane })
+      const closedButReplyLost = herdr.runtime.close({ id: pane })
       yield* closedButReplyLost
       yield* held.release("unreachable")
       assert.strictEqual((yield* Fiber.join(removing))._tag, "RuntimeUnreachable")
@@ -143,7 +143,7 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.deepInclude(yield* a.sessions.remove(a.id), { pane: "closed", worktree: "removed" })
 
       const b = yield* idleSession
-      const closeByHand = b.herdr.runtime.close({ machine: "local", id: b.pane })
+      const closeByHand = b.herdr.runtime.close({ id: b.pane })
       yield* closeByHand
       const gone = yield* b.sessions.remove(b.id)
       assert.deepInclude(gone, { processes: "exited", pane: "closed", worktree: "removed" })
@@ -167,7 +167,7 @@ describe.concurrent("vibest rm: process proof", () => {
       const reportedTurnEndEvent = (id: string) =>
         eventsOf(id, "turn.reported").pipe(Effect.map((rows) => rows.at(-1)?.data.text))
       const a = yield* idleSession
-      yield* a.herdr.runtime.close({ machine: "local", id: a.pane })
+      yield* a.herdr.runtime.close({ id: a.pane })
       yield* worktreeDeletedOutsideVibest(a)
       yield* until(a.db.getSession(a.id), (row) => row?.exitedAt !== null)
       yield* settled

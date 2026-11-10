@@ -1,18 +1,8 @@
-import { Config, Effect, Option, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Herdr } from "effect-herdr-sdk"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import { encodeTarget } from "./terminal-runtime.ts"
-
-export const callerLocation = (named?: string) =>
-  Effect.gen(function* () {
-    if (named !== undefined) return { session: named }
-    const socketPath = Option.getOrUndefined(yield* Config.option(Config.String("HERDR_SOCKET_PATH")))
-    return socketPath !== undefined ? { socketPath } : { session: "vibest" }
-  })
-
-export const callerMachine = (named?: string) =>
-  callerLocation(named).pipe(Effect.map((location) => ({ id: "local", target: encodeTarget(location) })))
 
 export const targetFrom = (env: Readonly<Record<string, string | undefined>>, named?: string): string | undefined => {
   if (named !== undefined) return encodeTarget({ session: named })

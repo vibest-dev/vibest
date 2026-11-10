@@ -1,5 +1,5 @@
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
-import { reconnectSchedule } from "@vibest/plugin"
+import { reconnectSchedule, type Runtime } from "@vibest/plugin"
 import { peerHeaders, PROTOCOL } from "@vibest/protocol/protocol"
 import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
@@ -38,7 +38,7 @@ import { LayerNode } from "./effect/layer-node.ts"
 import { VibestdIdentity } from "./identity.ts"
 import { keyedLock } from "./keyed-lock.ts"
 import { errorMessage, type MachineHook, type PluginNote, Plugins } from "./plugins.ts"
-import { Runtimes, type Terminal } from "./runtimes.ts"
+import { Runtimes } from "./runtimes.ts"
 
 export type PipeExit = { readonly code: number | undefined; readonly stderr: string }
 
@@ -71,12 +71,12 @@ const shownKind = (here: ReadonlyArray<{ readonly id: string; readonly name?: st
 export const noteText = (note: PluginNote) => `${note.message}${note.fix === undefined ? "" : `; fix: ${note.fix}`}`
 
 export interface View {
-  readonly terminals: ReadonlyMap<string, Terminal>
+  readonly terminals: ReadonlyMap<string, Runtime.Terminal>
   readonly as?: string | undefined
   readonly note?: string | undefined
 }
 
-const NONE: ReadonlyMap<string, Terminal> = new Map()
+const NONE: ReadonlyMap<string, Runtime.Terminal> = new Map()
 
 export const REMOTE_LINE = `sh -c 'p=$(command -v vibest) || p=$HOME/.local/bin/vibest; [ -x "$p" ] || { echo "vibest is not installed here" >&2; exit 127; }; exec "$p" connect'`
 

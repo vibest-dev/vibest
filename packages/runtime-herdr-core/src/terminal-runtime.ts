@@ -5,7 +5,6 @@ import { shellQuote } from "@vibest/schema/layout"
 import { Clock, Deferred, Duration, Effect, PubSub, type Scope, Schedule, Stream } from "effect"
 import { type api, type HcFailure, type HcShape, HcTransportError, type Notice } from "effect-herdr-core-sdk"
 
-export type Machine = VibestPlugin.Runtime.Machine
 export type Terminal = VibestPlugin.Runtime.Terminal
 export type Runtime = VibestPlugin.Runtime.RuntimeDefinition
 export type RuntimeEvent = VibestPlugin.Runtime.RuntimeEvent
@@ -71,7 +70,7 @@ const slug = (text: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
 
-export const terminalName = (input: Parameters<Runtime["open"]>[1], attempt = 0) => {
+export const terminalName = (input: Parameters<Runtime["open"]>[0], attempt = 0) => {
   const id = input.env["VIBEST_SESSION_ID"]
   const session = id !== undefined && ID.test(id) ? id : undefined
   const title =
@@ -146,9 +145,7 @@ export const make = (deps: {
     const exited = (socket: string, core: Core, address: string) => {
       core.busy.delete(address)
       return wake(core, address).pipe(
-        Effect.andThen(
-          PubSub.publish(events, { type: "exited", terminal: { machine: "local", id: terminalId(socket, address) } }),
-        ),
+        Effect.andThen(PubSub.publish(events, { type: "exited", terminal: { id: terminalId(socket, address) } })),
       )
     }
     const track = (core: Core, t: api.Terminal) => {
@@ -161,7 +158,7 @@ export const make = (deps: {
           core.busy.clear()
           for (const t of notice.result.terminals) track(core, t)
           for (const t of notice.result.terminals) if (!core.busy.has(t.address)) yield* wake(core, t.address)
-          yield* PubSub.publish(events, { type: "reset", machine: "local" })
+          yield* PubSub.publish(events, { type: "reset" })
         })
       if (notice._tag === "Notification")
         return notice.method === "missed"
@@ -179,14 +176,14 @@ export const make = (deps: {
           ? Effect.void
           : PubSub.publish(events, {
               type: "state",
-              terminal: { machine: "local", id: terminalId(socket, terminal) },
+              terminal: { id: terminalId(socket, terminal) },
               state,
             })
       }
       if (SEEN_EVENTS.has(type))
         return PubSub.publish(events, {
           type: "seen",
-          terminal: { machine: "local", id: terminalId(socket, terminal) },
+          terminal: { id: terminalId(socket, terminal) },
         })
       if (type === "foreground") {
         if (!atShell(data as api.Foreground)) {
@@ -219,7 +216,7 @@ export const make = (deps: {
             Effect.ignore,
           )
           if (subscribed) {
-            yield* PubSub.publish(events, { type: "reset", machine: "local" })
+            yield* PubSub.publish(events, { type: "reset" })
             step = yield* Schedule.toStep(FOLLOW_BACKOFF)
           }
           failures = subscribed ? 1 : failures + 1
@@ -274,7 +271,7 @@ export const make = (deps: {
         Effect.asVoid,
       )
 
-    const open: Runtime["open"] = (machine, input) =>
+    const open: Runtime["open"] = (input) =>
       Effect.gen(function* () {
         const near = input.near !== undefined ? parseTerminalId(input.near.id, deps.socket) : undefined
         const socket = near?.socket ?? deps.socket
@@ -307,7 +304,7 @@ export const make = (deps: {
             }),
           ),
         )
-        const terminal: Terminal = { machine: machine.id, id: terminalId(socket, started.address) }
+        const terminal: Terminal = { id: terminalId(socket, started.address) }
         if (input.argv.length > 0) {
           yield* typeLine(hc, started.address, input.argv).pipe(
             Effect.tapError(() => close(terminal).pipe(Effect.ignore)),
