@@ -39,6 +39,9 @@ export const stopOnce =
         last = (yield* drain.pending).map(busy)
         return Option.none<true>()
       })
+      const reopenUnlessShuttingDown = Effect.flatMap(Deferred.isDone(shutdown), (done) =>
+        done ? Effect.void : drain.reopen,
+      )
       return yield* Effect.gen(function* () {
         const accepted = yield* awaitEvent(
           acceptedOnceIdle,
@@ -52,5 +55,5 @@ export const stopOnce =
         if (!accepted) return yield* new DaemonBusy({ blockers: last })
         yield* Effect.uninterruptible(takeOver.pipe(Effect.andThen(Deferred.succeed(shutdown, undefined))))
         return { instance }
-      }).pipe(Effect.onError(() => drain.reopen))
+      }).pipe(Effect.onError(() => reopenUnlessShuttingDown))
     })
