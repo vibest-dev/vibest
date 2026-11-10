@@ -6,15 +6,21 @@ import path from "node:path"
 
 const root = path.resolve(import.meta.dirname, "../../..")
 const noCache = process.argv.includes("--no-cache")
-const elsewhereAt = process.argv.indexOf("--elsewhere")
-const elsewhere = elsewhereAt === -1 ? undefined : process.argv[elsewhereAt + 1]
-if (elsewhere === undefined && elsewhereAt !== -1) {
-  console.error("--elsewhere takes check ids, comma-separated")
-  process.exit(1)
+const flagSlots = new Set<number>()
+const valueOf = (flag: string, what: string) => {
+  const at = process.argv.indexOf(flag)
+  if (at === -1) return undefined
+  const value = process.argv[at + 1]
+  if (value === undefined || value.startsWith("--")) {
+    console.error(`${flag} takes ${what}`)
+    process.exit(1)
+  }
+  flagSlots.add(at).add(at + 1)
+  return value
 }
-const only = process.argv
-  .slice(2)
-  .filter((a, i) => a !== "--no-cache" && i + 2 !== elsewhereAt && i + 2 !== elsewhereAt + 1)
+const elsewhere = valueOf("--elsewhere", "check ids, comma-separated")
+const keepArchive = valueOf("--keep-archive", "a directory")
+const only = process.argv.filter((a, i) => i >= 2 && a !== "--no-cache" && !flagSlots.has(i))
 const NPM_SMOKE = ["I1", "I2", "U1", "U9", "U10", "H1"]
 
 type Options = { cwd?: string; env?: NodeJS.ProcessEnv }
@@ -56,7 +62,7 @@ if (!fs.existsSync(platform)) {
   process.exit(1)
 }
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-verify-"))
-const release = path.join(dir, "release")
+const release = keepArchive ? path.resolve(keepArchive) : path.join(dir, "release")
 const curl = path.join(dir, "curl")
 const packs = path.join(dir, "packs")
 const npm = path.join(dir, "npm")

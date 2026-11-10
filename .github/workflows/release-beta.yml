@@ -1,19 +1,21 @@
 name: Release
 
-# The only way to release (.agents/rules/release.md). The version comes from main: a release is prepared as a pull
-# request that bumps every package (pnpm bump --release <prerelease|patch|minor|major|version>, which commits only the
-# version change) and, when there is one, adds the CHANGELOG.md section; it merges like any change, through CI. Then
-# the owner starts this workflow on main from the Actions page, or
+# The only way to release (.agents/rules/release.md, which also lists the GitHub and npm settings it needs). The version
+# comes from main: a release is prepared as a pull request that bumps every package (pnpm bump --release
+# <prerelease|patch|minor|major|version>, which commits only the version change) and, optionally, adds the CHANGELOG.md
+# section; it merges like any change, through CI. Then the owner starts this workflow on main from the Actions page, or
 #   gh workflow run release-beta.yml -R vibest-dev/vibest --ref main
-# Started by hand, not by a push to main: the owner chooses when, and a run that failed is simply started again.
-# It never pushes to main. build checks main's version has no v<version> tag and no npm release yet, runs the release
-# gate on main's commit (the whole of pnpm verify but the macOS-only H4) and packs and checks the tarballs. darwin
-# (macos-latest) runs pnpm verify H4 on the same commit and checks the same tarballs. publish waits for the owner's
-# approval (environment `release`), then tags that commit v<version> (GITHUB_TOKEN; no ruleset covers tags), publishes
-# exactly the tarballs build checked to npm, and makes the GitHub Release (install.sh and an archive per platform;
-# notes from CHANGELOG.md when it has this version, else GitHub's).
-# canary publishes <version>-canary.<time>.g<sha> to npm under `canary`, set in the run's checkout only: no tag, no
-# GitHub Release; from any branch.
+# Started by hand, not by a push to main: the owner chooses when.
+# It never pushes to main. build checks main's version is not released yet, runs the release gate on main's commit (the
+# whole of pnpm verify but the macOS-only H4, which keeps the linux-x64 curl archive it checked), and packs and checks
+# the npm tarballs. darwin (macos-latest) runs pnpm verify H4 on the same commit (keeping the darwin-arm64 curl archive
+# it checked) and checks the same tarballs. Both record the SHA-256 of every file they keep. publish waits for the
+# owner's approval (environment `release`), checks those hashes, tags that commit v<version> (GITHUB_TOKEN; no ruleset
+# covers tags), publishes exactly those npm tarballs and makes the GitHub Release from exactly those archives (notes
+# from CHANGELOG.md when it has this version, else GitHub's). Nothing is rebuilt after verify checked it.
+# Recovery: a release that stopped partway is finished by re-running the failed publish job of the same run (its
+# artifacts are kept 90 days). It keeps what is already done when it is exactly what this run would do, and fails on
+# anything else. A new run builds new bytes: it refuses a version that is already tagged.
 # dry_run runs every gate on any branch and stops: nothing is tagged or published.
 # Only the owner starts it; anyone else's run is skipped. Every job checks it: the owner both started the run (actor)
 # and started this attempt (triggering_actor, which differs on a rerun), since rerunning one job reuses the others'
@@ -21,11 +23,6 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      canary:
-        description: "Publish a canary of main's version to npm under `canary` (no tag, no GitHub Release)"
-        required: true
-        default: false
-        type: boolean
       dry_run:
         description: "Run every gate, then stop: no tag, no publish"
         required: true
@@ -63,9 +60,9 @@ jobs:
       dist_tag: ${{ steps.version.outputs.dist_tag }}
     steps:
       - name: Release only from main
-        if: ${{ !inputs.dry_run && !inputs.canary && github.ref != 'refs/heads/main' }}
+        if: ${{ !inputs.dry_run && github.ref != 'refs/heads/main' }}
         run: |
-          echo "::error::a release runs on main, not $GITHUB_REF; start it with --ref main, or set dry_run or canary"
+          echo "::error::a release runs on main, not $GITHUB_REF; start it with --ref main, or set dry_run"
           exit 1
       - uses: actions/checkout@v4
         with:
@@ -137,12 +134,10 @@ jobs:
           env -i HOME="$HOME" PATH=/usr/bin:/bin bash -l -i -c \
             'for b in herdr hc pi claude cursor-agent node; do printf "%s: " "$b"; "$b" --version 2>&1 | head -1 || exit 1; command -v "$b" >/dev/null || exit 1; done'
 
-      # The version every job checks and publishes: main's, which a merged release pull request set. A canary sets its
-      # own in this checkout only.
+      # The version every job checks and publishes: main's, which a merged release pull request set.
       - name: Version
         id: version
         env:
-          CANARY: ${{ inputs.canary }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           # Every workspace package moves together: workspace:* resolves to it, and the binary embeds it (Hello compares it).
@@ -155,39 +150,36 @@ jobs:
           }
           version=$(node -p 'require("./packages/cli/package.json").version')
           same "$version"
-          if [ "$CANARY" = true ]; then
-            # g<sha>: a prerelease identifier of only digits may not start with 0.
-            version="${version%%-*}-canary.$(date -u +%Y%m%d%H%M%S).g$(git rev-parse --short=7 HEAD)"
-            dist_tag=canary
-            pnpm -r exec npm pkg set version="$version"
-            same "$version"
-          else
-            case "$version" in *-*) dist_tag=beta ;; *) dist_tag=latest ;; esac
-            # Released already: merge a release pull request that bumps the version first. A dry run only warns, so it
-            # can run the gates on any branch. A tag on this very commit is a release that stopped partway (publish
-            # tags first): this run finishes it, and publish skips what is already done.
-            level=error
-            if [ "$DRY_RUN" = true ]; then level=warning; fi
-            tagged=$(git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" "v$version*" \
-              | awk -v r="refs/tags/v$version" '{ s[$2] = $1 } END { print (r "^{}") in s ? s[r "^{}"] : s[r] }')
-            if [ "$tagged" = "$GITHUB_SHA" ]; then
-              echo "::notice::v$version already tags this commit: this run finishes that release"
-            elif [ -n "$tagged" ]; then
-              echo "::$level::tag v$version already exists on $tagged, not this commit; bump the version in a release pull request"
-              [ "$level" = warning ] || exit 1
-            elif [ "$(npm view "@vibest/cli@$version" version 2>/dev/null </dev/null)" = "$version" ]; then
-              echo "::$level::@vibest/cli@$version is already on npm; bump the version in a release pull request"
-              [ "$level" = warning ] || exit 1
-            fi
+          # The beta is released under npm's `beta` and as GitHub's Latest release (the installer and `vibest update`
+          # follow Latest).
+          case "$version" in *-*) dist_tag=beta ;; *) dist_tag=latest ;; esac
+          # Released already: merge a release pull request that bumps the version first. A dry run only warns, so it
+          # can run the gates on any branch. A release that stopped partway is finished by re-running its publish job,
+          # not by a new run, which would build new bytes.
+          level=error
+          if [ "$DRY_RUN" = true ]; then level=warning; fi
+          tagged=$(git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" "v$version*" \
+            | awk -v r="refs/tags/v$version" '{ s[$2] = $1 } END { print (r "^{}") in s ? s[r "^{}"] : s[r] }')
+          # The field, empty when the package or version does not exist (E404); any other npm error fails.
+          npm_view() {
+            if out=$(npm view "$1" "$2" 2>"$RUNNER_TEMP/npm-view.err" </dev/null); then printf '%s' "$out"; return; fi
+            grep -q 'code E404' "$RUNNER_TEMP/npm-view.err" && return
+            cat "$RUNNER_TEMP/npm-view.err" >&2; return 1
+          }
+          on_npm=$(npm_view "@vibest/cli@$version" version)
+          if [ -n "$tagged" ] || [ -n "$on_npm" ]; then
+            echo "::$level::$version is released already (tag: ${tagged:-none}, npm: ${on_npm:-none}); bump the version in a release pull request, or re-run the failed publish job of the run that started this release"
+            [ "$level" = warning ] || exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
-          echo "Release $version under the npm dist-tag $dist_tag" >> "$GITHUB_STEP_SUMMARY"
+          echo "Release $version of $GITHUB_SHA under the npm dist-tag $dist_tag" >> "$GITHUB_STEP_SUMMARY"
 
       # The release gate: the whole of pnpm verify on the commit to release (build, typecheck and lint, unit tests, the
       # curl and npm installs, and every E2E check on each, --strict), --no-cache so every check runs. H4 is macOS-only:
-      # verify leaves it to the darwin job's verify of the same commit, and publish needs both.
-      - run: pnpm run verify --no-cache --elsewhere H4
+      # verify leaves it to the darwin job's verify of the same commit, and publish needs both. The linux-x64 archive
+      # the curl install was checked with is kept: it is the one the GitHub Release gets.
+      - run: pnpm run verify --no-cache --elsewhere H4 --keep-archive "$RUNNER_TEMP/release/github"
       # On a failure: each check's evidence (redacted) and the vibestd log of every world E2E kept.
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -204,34 +196,39 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: bun tools/verify/src/release-artifacts.ts "$VERSION" --out "$RUNNER_TEMP/release/npm"
-      # What install.sh downloads (releases/latest/download/...): an archive per platform, install.sh itself, and
-      # `version`, which `vibest update` reads. Not for a canary.
+      # What install.sh downloads (releases/latest/download/...): an archive per platform (linux-x64 here, from verify;
+      # darwin-arm64 from the darwin job), install.sh itself, and `version`, which `vibest update` reads.
       - name: GitHub Release files
-        if: ${{ !inputs.canary }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           out="$RUNNER_TEMP/release/github"
-          mkdir -p "$out"
-          for target in darwin-arm64 linux-x64; do
-            (cd packages/cli && bun scripts/build-archive.ts "$target" "$out")
-          done
+          test "$(ls "$out")" = vibest-linux-x64.tar.gz
+          check=$(mktemp -d) && tar -xzf "$out/vibest-linux-x64.tar.gz" -C "$check"
+          test "$("$check/bin/vibest" --version)" = "vibest v$VERSION"
           cp packages/cli/install.sh "$out/install.sh"
           printf '%s\n' "$VERSION" > "$out/version"
-      # The tarballs are built from this tree: it must be the commit (plus a canary's version) the gates ran on.
+      # Everything above is built from this tree: it must be the commit the gates ran on.
       - name: Tree unchanged
-        if: ${{ !inputs.canary }}
         run: |
           if ! git diff --quiet HEAD; then echo "::error::the gates changed tracked files"; git diff --stat HEAD; exit 1; fi
+      # The identity of every file publish ships, checked again before it ships them.
+      - name: Hashes
+        run: |
+          cd "$RUNNER_TEMP/release"
+          find npm github -type f | LC_ALL=C sort | xargs shasum -a 256 > SHA256SUMS-linux
+          { echo '```'; cat SHA256SUMS-linux; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      # Kept long enough to finish a release that stopped partway by re-running its publish job.
       - uses: actions/upload-artifact@v4
         with:
           name: release
           path: ${{ runner.temp }}/release
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 90
 
-  # On a GitHub-hosted arm64 Mac: pnpm verify H4 (the macOS-only check build's verify leaves to it) on the same
-  # commit, and build's tarballs: @vibest/cli installed with the darwin-arm64 binary and run.
+  # On a GitHub-hosted arm64 Mac: pnpm verify H4 (the macOS-only check build's verify leaves to it) on the same commit,
+  # keeping the darwin-arm64 archive its curl install was checked with, and build's tarballs: @vibest/cli installed with
+  # the darwin-arm64 binary and run.
   darwin:
     needs: build
     if: >-
@@ -258,9 +255,23 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: pnpm install --frozen-lockfile --prefer-offline
-      - run: pnpm run verify --no-cache H4
+      - run: pnpm run verify --no-cache H4 --keep-archive "$RUNNER_TEMP/darwin/github"
       - name: Check the tarballs
         run: node tools/verify/src/release-artifacts.ts "$VERSION" --from "$RUNNER_TEMP/release/npm"
+      - name: Check the archive and record its hash
+        run: |
+          cd "$RUNNER_TEMP/darwin"
+          test "$(ls github)" = vibest-darwin-arm64.tar.gz
+          check=$(mktemp -d) && tar -xzf github/vibest-darwin-arm64.tar.gz -C "$check"
+          test "$("$check/bin/vibest" --version)" = "vibest v$VERSION"
+          shasum -a 256 github/vibest-darwin-arm64.tar.gz > SHA256SUMS-darwin
+          { echo '```'; cat SHA256SUMS-darwin; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-darwin
+          path: ${{ runner.temp }}/darwin
+          if-no-files-found: error
+          retention-days: 90
 
   publish:
     needs: [build, darwin]
@@ -270,76 +281,134 @@ jobs:
       (github.triggering_actor == github.repository_owner || github.triggering_actor == 'iamdin')
     # The owner approves here: the environment's required reviewer, and only main may deploy to it.
     environment: release
-    # GitHub-hosted: npm provenance and trusted publishing (OIDC) refuse self-hosted runners. It downloads the artifact
-    # and tags and publishes it as it is: no install, build or check.
+    # GitHub-hosted: npm provenance and trusted publishing (OIDC) refuse self-hosted runners. It ships the artifacts as
+    # they are: no install, build or check of the code.
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: write # the tag and the GitHub Release
       id-token: write # npm trusted publishing (OIDC) and provenance
     env:
       VERSION: ${{ needs.build.outputs.version }}
+      DIST_TAG: ${{ needs.build.outputs.dist_tag }}
+    # Every step is safe to re-run after a release that stopped partway: it keeps what is already done when it is exactly
+    # what this run would do, and fails on anything else.
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: release
           path: ${{ runner.temp }}/release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-darwin
+          path: ${{ runner.temp }}/release
+      - name: Check the files are the ones build and darwin checked
+        run: |
+          cd "$RUNNER_TEMP/release"
+          shasum -a 256 -c SHA256SUMS-linux SHA256SUMS-darwin
+          listed=$(cat SHA256SUMS-linux SHA256SUMS-darwin | sed 's/^[0-9a-f]*  //' | LC_ALL=C sort)
+          found=$(find npm github -type f | LC_ALL=C sort)
+          if [ "$listed" != "$found" ]; then echo "::error::the artifacts hold files no job checked"; diff <(echo "$listed") <(echo "$found"); exit 1; fi
 
       # The commit the gates ran on (GITHUB_SHA, the run's commit on main), with GITHUB_TOKEN: nothing is pushed to a
-      # branch. CHANGELOG.md comes from it too. Every step below is safe to rerun after a release that stopped partway:
-      # it skips what is already done exactly as this run would do it, and fails on anything else.
+      # branch. CHANGELOG.md comes from it too.
       - uses: actions/checkout@v4
-        if: needs.build.outputs.dist_tag != 'canary'
       - name: Tag v${{ needs.build.outputs.version }}
-        if: needs.build.outputs.dist_tag != 'canary'
         run: |
           tagged=$(git ls-remote --tags origin "v$VERSION*" \
             | awk -v r="refs/tags/v$VERSION" '{ s[$2] = $1 } END { print (r "^{}") in s ? s[r "^{}"] : s[r] }')
-          if [ "$tagged" = "$GITHUB_SHA" ]; then echo "v$VERSION already tags $GITHUB_SHA; skipped"; exit 0; fi
+          if [ "$tagged" = "$GITHUB_SHA" ]; then echo "v$VERSION already tags $GITHUB_SHA; kept"; exit 0; fi
           if [ -n "$tagged" ]; then echo "::error::v$VERSION tags $tagged, not $GITHUB_SHA"; exit 1; fi
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             tag --annotate --message "v$VERSION" "v$VERSION" "$GITHUB_SHA"
           git push origin "refs/tags/v$VERSION"
 
-      # npm 11.5.1 or later publishes with OIDC; no token.
+      # Trusted publishing (OIDC, no token) needs npm 11.5.1 or later.
       - uses: actions/setup-node@v4
         with:
           node-version: 26.13.0
+      - name: npm supports trusted publishing
+        run: |
+          v=$(npm --version)
+          node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$v" \
+            || { echo "::error::npm $v cannot publish with OIDC; it needs 11.5.1 or later"; exit 1; }
+          echo "npm $v"
 
       # The checked tarballs, not rebuilt or repacked, dependencies first (publish-order). Publishing is not atomic: a
-      # failure can leave only some packages released. A rerun skips each package already on npm with this exact
+      # failure can leave only some packages released. A re-run keeps each package already on npm with this exact
       # tarball (the same integrity) and fails on one published from a different tarball.
       - name: Publish
-        env:
-          DIST_TAG: ${{ needs.build.outputs.dist_tag }}
         run: |
-          npm --version
+          # The field, empty when the package or version does not exist (E404); any other npm error fails.
+          npm_view() {
+            if out=$(npm view "$1" "$2" 2>"$RUNNER_TEMP/npm-view.err" </dev/null); then printf '%s' "$out"; return; fi
+            grep -q 'code E404' "$RUNNER_TEMP/npm-view.err" && return
+            cat "$RUNNER_TEMP/npm-view.err" >&2; return 1
+          }
           npm_dir="$RUNNER_TEMP/release/npm"
           while read -r name file; do
-            published=$(npm view "$name@$VERSION" dist.integrity 2>/dev/null </dev/null)
+            published=$(npm_view "$name@$VERSION" dist.integrity)
             if [ -n "$published" ]; then
               tested="sha512-$(openssl dgst -sha512 -binary "$npm_dir/$file" | base64 -w0)"
               if [ "$published" != "$tested" ]; then
                 echo "::error::$name@$VERSION is on npm from a different tarball ($published, tested $tested)"; exit 1
               fi
-              echo "$name@$VERSION is already on npm from this tarball; skipped"
+              echo "$name@$VERSION is already on npm from this tarball; kept"
               continue
             fi
             npm publish "$npm_dir/$file" --provenance --tag "$DIST_TAG" --access public </dev/null
           done < "$npm_dir/publish-order"
 
-      # Marked latest, so the download URLs move to it.
+      # Marked latest, so the download URLs move to it: the beta is GitHub's Latest release, since the installer and
+      # `vibest update` follow Latest. Created as a draft with every asset, then published; a draft an earlier attempt
+      # left gets its missing assets. Every asset is downloaded and compared with the checked file before the release
+      # is published or accepted; a published release is never changed.
       - name: GitHub Release
-        if: needs.build.outputs.dist_tag != 'canary'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "The GitHub Release v$VERSION exists; skipped"; exit 0
+          files="$RUNNER_TEMP/release/github"
+          if ! state=$(gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>"$RUNNER_TEMP/gh.err"); then
+            grep -q 'release not found' "$RUNNER_TEMP/gh.err" || { cat "$RUNNER_TEMP/gh.err" >&2; exit 1; }
+            # The notes: the CHANGELOG.md section headed with this version when there is one, otherwise GitHub's
+            # generated notes. No section is required.
+            awk -v v="$VERSION" '/^## /{ h = $2; sub(/^v/, "", h); on = (h == v); next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+            if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then notes=(--notes-file "$RUNNER_TEMP/notes.md"); else notes=(--generate-notes); fi
+            gh release create "v$VERSION" "$files"/* -R "$GITHUB_REPOSITORY" --draft \
+              --title "vibest $VERSION" --verify-tag "${notes[@]}"
+            state=true
           fi
-          # The notes: the CHANGELOG.md section headed with this version when there is one, otherwise GitHub's generated
-          # notes. No section is required.
-          awk -v v="$VERSION" '/^## /{ h = $2; sub(/^v/, "", h); on = (h == v); next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then notes=(--notes-file "$RUNNER_TEMP/notes.md"); else notes=(--generate-notes); fi
-          gh release create "v$VERSION" "$RUNNER_TEMP"/release/github/* -R "$GITHUB_REPOSITORY" \
-            --title "vibest $VERSION" --latest --verify-tag "${notes[@]}"
+          info=$(gh release view "v$VERSION" -R "$GITHUB_REPOSITORY" --json tagName,isPrerelease,assets)
+          test "$(jq -r .tagName <<<"$info")" = "v$VERSION"
+          if [ "$(jq -r .isPrerelease <<<"$info")" = true ]; then echo "::error::v$VERSION is a prerelease; the beta is released as Latest"; exit 1; fi
+          have=$(jq -r '.assets[].name' <<<"$info" | LC_ALL=C sort)
+          want=$(find "$files" -type f -exec basename {} \; | LC_ALL=C sort)
+          extra=$(comm -23 <(echo "$have") <(echo "$want"))
+          missing=$(comm -13 <(echo "$have") <(echo "$want"))
+          if [ -n "$extra" ]; then echo "::error::v$VERSION has assets no job checked: $extra"; exit 1; fi
+          if [ -n "$missing" ]; then
+            if [ "$state" != true ]; then echo "::error::the published v$VERSION lacks $missing"; exit 1; fi
+            for f in $missing; do gh release upload "v$VERSION" "$files/$f" -R "$GITHUB_REPOSITORY"; done
+          fi
+          got="$RUNNER_TEMP/downloaded"
+          gh release download "v$VERSION" -R "$GITHUB_REPOSITORY" -D "$got" --clobber
+          for f in $want; do cmp "$files/$f" "$got/$f" || { echo "::error::the $f of v$VERSION is not the checked file"; exit 1; }; done
+          if [ "$state" = true ]; then
+            gh release edit "v$VERSION" -R "$GITHUB_REPOSITORY" --draft=false --latest
+          else
+            echo "v$VERSION is published with exactly the checked assets; kept"
+          fi
+
+      # Every package's dist-tag points at this version (the registry can lag behind a publish). A wrong one is reported,
+      # not moved: a newer release may own it.
+      - name: Dist-tags
+        run: |
+          while read -r name _; do
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+              at=$(npm view "$name" "dist-tags.$DIST_TAG" </dev/null)
+              [ "$at" = "$VERSION" ] && break
+              sleep 15
+            done
+            if [ "$at" != "$VERSION" ]; then echo "::error::$name's $DIST_TAG is $at, not $VERSION"; exit 1; fi
+            echo "$name@$DIST_TAG = $VERSION"
+          done < "$RUNNER_TEMP/release/npm/publish-order"

@@ -9,6 +9,8 @@ pnpm verify daemon integration   # install as a user, then only these areas of E
 pnpm verify --no-cache           # before a release: every check runs, the whole gate on both installs
 pnpm verify --elsewhere H4       # leave these checks to another machine's verify (the release's Linux job leaves the
                                  # macOS-only H4 to its macOS job, which runs pnpm verify H4 on the same commit)
+pnpm verify --keep-archive <dir> # build this platform's release archive into <dir> and keep it: the Release workflow
+                                 # publishes the archive the curl install was checked with
 ```
 
 verify is a deterministic program: CI runs it and it passes or fails. It does not read the capability docs in
