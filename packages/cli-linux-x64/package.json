@@ -1,6 +1,6 @@
 {
   "name": "@vibest/cli-linux-x64",
-  "version": "0.0.1-beta.18",
+  "version": "0.0.1-dev",
   "description": "The vibest binary for GNU/Linux x64 (glibc); installed by @vibest/cli.",
   "license": "MIT",
   "repository": {

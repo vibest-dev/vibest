@@ -1,24 +1,29 @@
 # Release
 
-1. A release has two steps, and neither pushes to `main` outside a pull request:
-   - **The release pull request.** On a new branch from `main`, `pnpm bump --release <prerelease, patch, minor, major or
-     an exact version>` sets every package version and commits only that change ("chore: release v<version>"; no tag,
-     no push). A CHANGELOG.md section for the version (`## <version>`) is optional. Push the branch and open the pull
-     request; it merges like any change, through CI's required check, by the owner or the coordinator.
-   - **The Release workflow** (`.github/workflows/release-beta.yml`), started by the owner on `main` from the Actions
-     page or with `gh workflow run release-beta.yml -R vibest-dev/vibest --ref main`. It releases main's version as it
-     is and fails when that version is already tagged or on npm. It runs the release gate on main's commit (the whole
-     of `pnpm verify --no-cache`, the single entry for all verification, on GitHub-hosted runners: `ubuntu-latest` runs
-     it with `--elsewhere H4`, and `macos-latest` runs `pnpm verify --no-cache H4`, the macOS-only check, on the same
-     commit), packs the npm tarballs and checks them on Linux and macOS, keeps the curl archive each platform's verify
-     installed and checked (`--keep-archive`), records the SHA-256 of every kept file, then waits for the owner's
-     approval (environment `release`). Only after the approval does it check those hashes, tag that commit
-     `v<version>` (with `GITHUB_TOKEN`), publish exactly those tarballs to npm, make the GitHub Release from exactly
-     those archives, and check every package's dist-tag. Nothing is rebuilt after verify checked it.
+1. **Trunk-based: `main` never carries a release version.** Every workspace package.json on `main` holds the development
+   version `0.0.1-dev`; there is no version bump commit or pull request, and the tag `v<version>` is the only record of a
+   release. `0.0.1-dev` sorts after every `0.0.1-beta.N` release, so a build from `main` is never offered an update to
+   an older beta and `vibest update` installs nothing on it; E2E's older versions (digits zeroed: `0.0.0-dev`, and
+   `0.0.0-old`) sort before it. Builds from different commits of `main` share it: like any two builds of one version,
+   they do not tell each other apart. When the release line moves past it (a `0.0.2` beta, or `0.0.1` itself), raise
+   it on `main` in an ordinary pull request (`0.0.2-dev`); that is not a release.
+2. **The Release workflow** (`.github/workflows/release-beta.yml`) is the only way to release, started by the owner on
+   `main` from the Actions page or with `gh workflow run release-beta.yml -R vibest-dev/vibest --ref main`
+   (`-f version=<exact version>`; without it, the next beta after the highest `v<x.y.z>-beta.<n>` tag). It sets that
+   version in every package.json of its own checkout only and fails when the version is already tagged or on npm. It
+   runs the release gate on that tree (the whole of `pnpm verify --no-cache`, the single entry for all verification,
+   on GitHub-hosted runners: `ubuntu-latest` runs it with `--elsewhere H4`, and `macos-latest` runs
+   `pnpm verify --no-cache H4`, the macOS-only check, on the same commit and version), packs the npm tarballs and
+   checks them on Linux and macOS, keeps the curl archive each platform's verify installed and checked
+   (`--keep-archive`), records the SHA-256 of every kept file, then waits for the owner's approval (environment
+   `release`). Only after the approval does it check those hashes, tag the run's commit `v<version>` (with
+   `GITHUB_TOKEN`), publish exactly those tarballs to npm, make the GitHub Release from exactly those archives, and check
+   every package's dist-tag. Nothing is rebuilt after verify checked it. A CHANGELOG.md section for the version
+   (`## <version>`) is optional.
 
    There is no local release or publish path: nobody tags or publishes from a machine.
 
-2. **Recovery.** A release that stopped partway is finished by re-running the failed publish job of the same run
+3. **Recovery.** A release that stopped partway is finished by re-running the failed publish job of the same run
    ("Re-run failed jobs"; its artifacts are kept 90 days). It keeps a tag already on that commit, each package already
    on npm with the same tarball integrity, and a published GitHub Release whose tag and assets match the checked files;
    it uploads the missing assets of a draft, compares every asset with the checked file, then publishes it. Anything
@@ -26,20 +31,20 @@
    to finish a release: it builds new bytes, and it refuses a version that is already tagged or on npm. Changed code
    needs a new version. A dist-tag that does not point at the version is reported, not moved: move it by hand only when
    no newer release owns it.
-3. **Channels.** A version with a prerelease part (`0.0.1-beta.19`) is published under npm's `beta`, a plain one under
+4. **Channels.** A version with a prerelease part (`0.0.1-beta.19`) is published under npm's `beta`, a plain one under
    `latest`. The GitHub Release is a regular release marked Latest, not a prerelease, also for a beta: `install.sh` and
    `vibest update` follow GitHub's Latest release. Separate a stable channel (GitHub prereleases, an installer and
    updater that choose a channel) before the first stable release. The notes are the CHANGELOG.md section of the
    version when there is one, otherwise GitHub's generated notes.
-4. Agents may prepare a release (the release pull request, fixes) and start a run when the owner asks, and may run it
+5. Agents may prepare a release (fixes, the changelog) and start a run when the owner asks, and may run it
    with `-f dry_run=true` (every gate, then stop: nothing tagged or published) on any branch; a dry run only warns when
    the version is already released. Agents never approve the `release` environment, push `v*` tags, or publish to npm
    themselves.
-5. Only the owner's runs do anything: every job checks that the owner started the run and the attempt; anyone else's
+6. Only the owner's runs do anything: every job checks that the owner started the run and the attempt; anyone else's
    run is skipped. A run that is not a dry run must be on `main`.
-6. The root `bump` script and the workflow's Version step list the same package.json files; a package added to one goes
-   into the other.
-7. The gate is `pnpm verify` as it is: the workflow does not replace any part of it with other commands. A part the
+7. The workflow's `VERSIONED` list names every workspace package.json that carries the version; a new package goes into
+   it, and every file in it holds `0.0.1-dev` on `main`.
+8. The gate is `pnpm verify` as it is: the workflow does not replace any part of it with other commands. A part the
    runner cannot run fails the run; fix the runner or verify, never narrow the gate.
 
 ## Owner checklist

@@ -1,6 +1,6 @@
 {
   "name": "effect-herdr-core-sdk",
-  "version": "0.0.1-beta.18",
+  "version": "0.0.1-dev",
   "private": true,
   "description": "Effect-native client for the herdr-core (hc) JSON-RPC API. Schemas generated from the OpenRPC document hc schema prints.",
   "license": "MIT",

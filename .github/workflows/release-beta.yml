@@ -1,12 +1,13 @@
 name: Release
 
-# The only way to release (.agents/rules/release.md, which also lists the GitHub and npm settings it needs). The version
-# comes from main: a release is prepared as a pull request that bumps every package (pnpm bump --release
-# <prerelease|patch|minor|major|version>, which commits only the version change) and, optionally, adds the CHANGELOG.md
-# section; it merges like any change, through CI. Then the owner starts this workflow on main from the Actions page, or
-#   gh workflow run release-beta.yml -R vibest-dev/vibest --ref main
+# The only way to release (.agents/rules/release.md, which also lists the GitHub and npm settings it needs). Trunk-based:
+# main never carries a release version; its package.json files hold the development version 0.0.1-dev, and the tag
+# v<version> is the only record of a release. The owner starts this workflow on main from the Actions page, or
+#   gh workflow run release-beta.yml -R vibest-dev/vibest --ref main [-f version=<exact version>]
+# version: empty for the next beta after the highest v<x.y.z>-beta.<n> tag, or an exact version. The run sets it in every
+# package.json of its own checkout only. A CHANGELOG.md section for it is optional.
 # Started by hand, not by a push to main: the owner chooses when.
-# It never pushes to main. build checks main's version is not released yet, runs the release gate on main's commit (the
+# It never pushes to main. build checks the version is not released yet, runs the release gate on main's commit (the
 # whole of pnpm verify but the macOS-only H4, which keeps the linux-x64 curl archive it checked), and packs and checks
 # the npm tarballs. darwin (macos-latest) runs pnpm verify H4 on the same commit (keeping the darwin-arm64 curl archive
 # it checked) and checks the same tarballs. Both record the SHA-256 of every file they keep. publish waits for the
@@ -23,6 +24,11 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: "An exact version (0.0.1-beta.20); empty: the next beta after the highest v*-beta.N tag"
+        required: false
+        default: ""
+        type: string
       dry_run:
         description: "Run every gate, then stop: no tag, no publish"
         required: true
@@ -46,6 +52,9 @@ env:
   PI_VERSION: 1.5.0 # @earendil-works/pi-coding-agent
   CLAUDE_VERSION: 2.1.322 # @anthropic-ai/claude-code
   CURSOR_VERSION: 2026.11.05-86047df
+  # Every workspace package moves together: workspace:* resolves to it, and the binary and plugins embed it. A run sets
+  # the release version in each, in its own checkout.
+  VERSIONED: packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json
 
 jobs:
   build:
@@ -134,31 +143,38 @@ jobs:
           env -i HOME="$HOME" PATH=/usr/bin:/bin bash -l -i -c \
             'for b in herdr hc pi claude cursor-agent node; do printf "%s: " "$b"; "$b" --version 2>&1 | head -1 || exit 1; command -v "$b" >/dev/null || exit 1; done'
 
-      # The version every job checks and publishes: main's, which a merged release pull request set.
+      # The version every job checks and publishes, set in this checkout only.
       - name: Version
         id: version
         env:
           DRY_RUN: ${{ inputs.dry_run }}
+          INPUT: ${{ inputs.version }}
         run: |
-          # Every workspace package moves together: workspace:* resolves to it, and the binary embeds it (Hello compares it).
-          # The same files as the root `bump` script. A package left behind fails the run before anything is built.
+          repo="https://github.com/$GITHUB_REPOSITORY.git"
           same() {
-            for f in packages/*/package.json packages/integration/*/package.json tools/tsconfig/package.json tools/verify/package.json; do
+            for f in $VERSIONED; do
               v=$(node -p "require('./$f').version")
               if [ "$v" != "$1" ]; then echo "::error::$f is $v, not $1"; exit 1; fi
             done
           }
-          version=$(node -p 'require("./packages/cli/package.json").version')
-          same "$version"
+          same "$(node -p 'require("./packages/cli/package.json").version')"
+          if [ -n "$INPUT" ]; then
+            version=$INPUT
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then echo "::error::$version is not a version"; exit 1; fi
+          else
+            last=$(git ls-remote --tags "$repo" 'v*-beta.*' \
+              | sed -n 's#^[0-9a-f]*\trefs/tags/v\([0-9]*\.[0-9]*\.[0-9]*-beta\.[0-9]*\)$#\1#p' | sort -V | tail -n 1)
+            if [ -z "$last" ]; then echo "::error::no v<x.y.z>-beta.<n> tag to follow; pass -f version=<version>"; exit 1; fi
+            version="${last%.*}.$((${last##*.} + 1))"
+          fi
           # The beta is released under npm's `beta` and as GitHub's Latest release (the installer and `vibest update`
           # follow Latest).
           case "$version" in *-*) dist_tag=beta ;; *) dist_tag=latest ;; esac
-          # Released already: merge a release pull request that bumps the version first. A dry run only warns, so it
-          # can run the gates on any branch. A release that stopped partway is finished by re-running its publish job,
-          # not by a new run, which would build new bytes.
+          # Released already: a dry run only warns, so it can run the gates on any branch. A release that stopped
+          # partway is finished by re-running its publish job, not by a new run, which would build new bytes.
           level=error
           if [ "$DRY_RUN" = true ]; then level=warning; fi
-          tagged=$(git ls-remote --tags "https://github.com/$GITHUB_REPOSITORY.git" "v$version*" \
+          tagged=$(git ls-remote --tags "$repo" "v$version*" \
             | awk -v r="refs/tags/v$version" '{ s[$2] = $1 } END { print (r "^{}") in s ? s[r "^{}"] : s[r] }')
           # The field, empty when the package or version does not exist (E404); any other npm error fails.
           npm_view() {
@@ -168,9 +184,13 @@ jobs:
           }
           on_npm=$(npm_view "@vibest/cli@$version" version)
           if [ -n "$tagged" ] || [ -n "$on_npm" ]; then
-            echo "::$level::$version is released already (tag: ${tagged:-none}, npm: ${on_npm:-none}); bump the version in a release pull request, or re-run the failed publish job of the run that started this release"
+            echo "::$level::$version is released already (tag: ${tagged:-none}, npm: ${on_npm:-none}); choose another version, or re-run the failed publish job of the run that started this release"
             [ "$level" = warning ] || exit 1
           fi
+          # shellcheck disable=SC2086 # VERSIONED is a list of globs
+          VERSION=$version node -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace(/"version": "[^"]*"/, `"version": "${process.env.VERSION}"`)) }' $VERSIONED
+          same "$version"
+          git diff HEAD | shasum -a 256 > "$RUNNER_TEMP/versioned-tree"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
           echo "Release $version of $GITHUB_SHA under the npm dist-tag $dist_tag" >> "$GITHUB_STEP_SUMMARY"
@@ -208,10 +228,12 @@ jobs:
           test "$("$check/bin/vibest" --version)" = "vibest v$VERSION"
           cp packages/cli/install.sh "$out/install.sh"
           printf '%s\n' "$VERSION" > "$out/version"
-      # Everything above is built from this tree: it must be the commit the gates ran on.
+      # Everything above is built from this tree: the run's commit with only the version set, as the gates ran on it.
       - name: Tree unchanged
         run: |
-          if ! git diff --quiet HEAD; then echo "::error::the gates changed tracked files"; git diff --stat HEAD; exit 1; fi
+          if [ "$(git diff HEAD | shasum -a 256)" != "$(cat "$RUNNER_TEMP/versioned-tree")" ]; then
+            echo "::error::the gates changed tracked files"; git diff --stat HEAD; exit 1
+          fi
       # The identity of every file publish ships, checked again before it ships them.
       - name: Hashes
         run: |
@@ -242,6 +264,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # The version build set, in this checkout only.
+      - name: Version
+        run: |
+          # shellcheck disable=SC2086 # VERSIONED is a list of globs
+          node -e 'const fs = require("fs"); for (const f of process.argv.slice(1)) { fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace(/"version": "[^"]*"/, `"version": "${process.env.VERSION}"`)) }' $VERSIONED
       - uses: actions/download-artifact@v4
         with:
           name: release
