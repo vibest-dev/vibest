@@ -1,15 +1,21 @@
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Runtimes } from "@vibest/core/runtimes"
 import { Sessions, START_TIMEOUT } from "@vibest/core/sessions"
 import type { Runtime } from "@vibest/plugin"
-import { Effect, Ref, type Scope, Stream } from "effect"
+import { Effect, Ref, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import { FakeRuntime, makeRepository, projectOf, TEST_HERDR, testLayer, type TestServices, until } from "./fakes.ts"
+import { projectOf } from "./lib/directory.ts"
+import { testEffect } from "./lib/effect.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { until } from "./lib/observe.ts"
+import { makeRepository, sessionFrom } from "./lib/session.ts"
 
-const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
-  it.effect(name, () => program.pipe(Effect.provide(testLayer({ hooked: ["pi"] }))))
+const TEST_HERDR = "herdr"
+
+const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) =>
+  testEffect(sessionFrom({ hooked: ["pi"] }))(name, () => program)
 
 const idleSubagentsBetweenTurns = (n: number, runtime = TEST_HERDR) =>
   Effect.gen(function* () {
