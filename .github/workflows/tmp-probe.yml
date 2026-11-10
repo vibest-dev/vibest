@@ -4,19 +4,10 @@ on:
   push:
     branches: [feat/release-pipeline]
 
-env:
-  HERDR_VERSION: 0.9.5
-  HERDR_SHA256: 14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d # herdr-linux-x86_64
-  HC_VERSION: 0.1.19
-  HC_SHA256: 4adcfb423d52f24c5cc4a1e2cd2fcad1f62d28bb77876ac472c29082a3eaa424 # herdr-core-linux-x86_64.tar.gz
-  PI_VERSION: 1.5.0 # @earendil-works/pi-coding-agent
-  CLAUDE_VERSION: 2.1.322 # @anthropic-ai/claude-code
-  CURSOR_VERSION: 2026.11.05-86047df
-
 jobs:
-  probe:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
+  probe-macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,85 +21,4 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: pnpm install --frozen-lockfile --prefer-offline
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/vibest-e2e-tools
-          key: e2e-tools-2-${{ runner.os }}-${{ env.HERDR_VERSION }}-${{ env.HC_VERSION }}-${{ env.PI_VERSION }}-${{ env.CLAUDE_VERSION }}-${{ env.CURSOR_VERSION }}
-      # Into ~/.local/bin, which the login shell puts on PATH: E2E runs the harnesses with the login environment.
-      - name: Install herdr, hc, pi, claude and cursor-agent
-        run: |
-          tools="$HOME/.cache/vibest-e2e-tools"
-          bin="$HOME/.local/bin"
-          mkdir -p "$tools" "$bin"
-          if [ ! -x "$tools/herdr" ]; then
-            curl -fsSL -o "$tools/herdr.download" "https://github.com/herdrdev/herdr/releases/download/v$HERDR_VERSION/herdr-linux-x86_64"
-            echo "$HERDR_SHA256  $tools/herdr.download" | sha256sum -c -
-            chmod +x "$tools/herdr.download" && mv "$tools/herdr.download" "$tools/herdr"
-          fi
-          if [ ! -x "$tools/hc/herdr-core" ]; then
-            curl -fsSL -o "$tools/hc.tar.gz" "https://releases.herdr.dev/core/$HC_VERSION/herdr-core-linux-x86_64.tar.gz"
-            echo "$HC_SHA256  $tools/hc.tar.gz" | sha256sum -c -
-            mkdir -p "$tools/hc" && tar -xzf "$tools/hc.tar.gz" -C "$tools/hc" && rm "$tools/hc.tar.gz"
-          fi
-          if [ ! -x "$tools/cursor/cursor-agent" ]; then
-            mkdir -p "$tools/cursor"
-            curl -fsSL "https://downloads.cursor.com/lab/$CURSOR_VERSION/linux/x64/agent-cli-package.tar.gz" \
-              | tar --strip-components=1 -xzf - -C "$tools/cursor"
-          fi
-          # Claude's platform package holds the native binary itself (the wrapper package needs its install script).
-          claude="$tools/npm/node_modules/@anthropic-ai/claude-code-linux-x64/claude"
-          if [ ! -x "$claude" ]; then
-            npm install --prefix "$tools/npm" --no-audit --no-fund \
-              "@earendil-works/pi-coding-agent@$PI_VERSION" "@anthropic-ai/claude-code-linux-x64@$CLAUDE_VERSION"
-            chmod +x "$claude"
-          fi
-          ln -sf "$tools/herdr" "$bin/herdr"
-          ln -sf "$tools/hc/herdr-core" "$bin/hc"
-          ln -sf "$tools/hc/herdr-core" "$bin/herdr-core"
-          ln -sf "$tools/cursor/cursor-agent" "$bin/cursor-agent"
-          ln -sf "$tools/npm/node_modules/.bin/pi" "$bin/pi"
-          ln -sf "$claude" "$bin/claude"
-          ln -sf "$(command -v node)" "$bin/node"
-          echo "$bin" >> "$GITHUB_PATH"
-          # vibest lists the processes working in a worktree with lsof, which the image lacks.
-          command -v lsof >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq lsof; }
-          # A machine Claude Code has already run on: a first run writes its onboarding state into ~/.claude.json, which
-          # E2E counts as a change to the user's files.
-          [ -e "$HOME/.claude.json" ] || cat > "$HOME/.claude.json" <<'JSON'
-          {"hasCompletedOnboarding": true, "lastOnboardingVersion": "2.1.322", "hasSeenAutoModeEntryWarning": true,
-           "hasResetAutoModeOptInForDefaultOffer": true, "hasSeenAutoModeOutsideReadPrompt": true}
-          JSON
-          # bash -l reads the first of these that exists.
-          profile="$HOME/.bash_profile"
-          for f in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
-            if [ -e "$f" ]; then profile=$f; break; fi
-          done
-          echo 'PATH="$HOME/.local/bin:$PATH"' >> "$profile"
-          env -i HOME="$HOME" PATH=/usr/bin:/bin bash -l -i -c \
-            'for b in herdr hc pi claude cursor-agent node; do printf "%s: " "$b"; "$b" --version 2>&1 | head -1 || exit 1; command -v "$b" >/dev/null || exit 1; done'
-
-      - name: lsof as vibest runs it
-        run: |
-          set +e
-          lsof +w -a -u "$(id -u)" -d cwd -Fpfn0 > /tmp/lsof.out 2> /tmp/lsof.err
-          echo "exit=$?"
-          echo "stderr:"; cat /tmp/lsof.err
-          tr '\0' '|' < /tmp/lsof.out | grep -v '^p[0-9]*|$' | grep -n 'readlink\|stat\|^p[0-9]*|$' | head -20
-          for pid in $(tr '\0' '|' < /tmp/lsof.out | awk -F'|' '/^p/{p=substr($1,2)} /readlink/{print p}'); do
-            ps -o pid,ppid,user,etime,args -p "$pid"; cat "/proc/$pid/status" | grep -i "name\|uid\|cap"; done
-          systemctl status "user@$(id -u).service" --no-pager | head -12 || true
-      - name: Stop the runner user's systemd manager (experiment)
-        run: |
-          sudo systemctl stop "user@$(id -u).service"
-          lsof +w -a -u "$(id -u)" -d cwd -Fpfn0 | tr '\0' '|' | grep -c readlink || true
-      - run: pnpm run build
-      - run: bun tools/e2e/src/main.ts --strict --no-cache S27 S28 S30 S31
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: probe-evidence
-          path: |
-            tools/e2e/evidence
-            /tmp/vbe-*/vibest/vibestd.log
-          if-no-files-found: ignore
-          retention-days: 3
+      - run: pnpm run verify --no-cache H4
