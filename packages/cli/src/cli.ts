@@ -180,7 +180,7 @@ const run = Command.make(
     ),
     peer: Flag.String("peer").pipe(
       Flag.withDescription(
-        "A session id (or a unique prefix of at least 8 characters): run in its directory, in a pane split from its pane, instead of a new worktree (the directory goes with the archive of the last live session in it)",
+        "A session id (or a unique prefix of at least 8 characters): run in its directory, on its runtime and machine, in a pane split from its pane, instead of a new worktree (the directory goes with the archive of the last live session in it)",
       ),
       Flag.optional,
     ),
@@ -191,7 +191,9 @@ const run = Command.make(
       Flag.withDefault(false),
     ),
     runtime: Flag.String("runtime").pipe(
-      Flag.withDescription("The terminal runtime for this session. Default: its parent's"),
+      Flag.withDescription(
+        "The terminal runtime for this session. Default: the --peer session's, otherwise its parent's",
+      ),
       Flag.optional,
     ),
     machine: Flag.String("machine").pipe(

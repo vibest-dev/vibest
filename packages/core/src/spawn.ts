@@ -159,6 +159,15 @@ export const sessionSpawn = (deps: {
         : (worker ??
           main ??
           (input.parentSessionId === undefined ? yield* db.coordinatorOf(input.projectId) : undefined))
+    const namedPeer =
+      input.runtime === undefined && input.peer !== undefined ? yield* db.getSession(input.peer) : undefined
+    const followedPeer =
+      namedPeer !== undefined &&
+      namedPeer.projectId === input.projectId &&
+      !namedPeer.metadata.archived &&
+      !namedPeer.metadata.removed
+        ? namedPeer
+        : undefined
     const decision = yield* plugins.start({
       project: root,
       agentType: agent,
@@ -172,8 +181,8 @@ export const sessionSpawn = (deps: {
         Effect.provideService(Harnesses, harnesses),
       ),
       attempts: [],
-      machine: { id: input.machine.id },
-      runtime: input.runtime,
+      machine: { id: followedPeer?.address.machine ?? input.machine.id },
+      runtime: followedPeer?.runtime ?? input.runtime,
       parentRuntime,
       machines: yield* machinesListing,
     })
