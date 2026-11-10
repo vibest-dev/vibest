@@ -1,14 +1,11 @@
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import * as PlatformNode from "@vibest/core/effect/platform"
-import * as Guard from "@vibest/core/guard"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
-import { Layout } from "@vibest/core/paths"
-import { Sessions } from "@vibest/core/sessions"
+import { Integration } from "@vibest/core/integration"
 import { HARNESS_HEADER, PROJECT_HEADER, ACK_ROUTE, parseHookRoute, POLL_ROUTE } from "@vibest/protocol/protocol"
-import { Clock, ConfigProvider, Effect, Layer, Option, Schema } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
 import type { ServeError } from "effect/http/HttpServerError"
@@ -16,7 +13,6 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 
 import { admit, checkProtocol, identify, reader } from "./gates.ts"
-import * as Hooks from "./hooks.ts"
 import { services } from "./services.ts"
 
 export type Request = {
@@ -37,10 +33,9 @@ const ReadyBody = Schema.fromJsonString(Schema.Struct({ pid: Schema.optional(Sch
 export const make = Effect.gen(function* () {
   const db = yield* Db
   const inbox = yield* Inbox
-  const sessions = yield* Sessions
+  const integration = yield* Integration
   const drain = yield* Drain
   const harnesses = yield* Harnesses
-  const layout = yield* Layout
   const caller = (headers: Headers.Headers) =>
     Effect.gen(function* () {
       const read = reader(headers)
@@ -87,7 +82,7 @@ export const make = Effect.gen(function* () {
         const pid = Option.getOrUndefined(
           yield* Schema.decodeUnknownEffect(ReadyBody)(request.body).pipe(Effect.option),
         )?.pid
-        yield* db.patchLive(who.id, { ready: yield* Clock.currentTimeMillis, ...(pid === undefined ? {} : { pid }) })
+        yield* integration.ready(who.id, pid)
         return ok()
       }
       const hook = parseHookRoute(request.path)
@@ -96,21 +91,10 @@ export const make = Effect.gen(function* () {
       if (hook.harness !== who.harness)
         return failure(403, `session ${who.id} runs ${who.harness}, not ${hook.harness}`)
       if (hook.hook === "turn-end")
-        return yield* admitted(
-          "hook turn-end",
-          true,
-          Hooks.turnEnd(db, adapter, who, request.body).pipe(Effect.as(ok())),
-        )
+        return yield* admitted("hook turn-end", true, integration.turnEnd(who, request.body).pipe(Effect.as(ok())))
       if (hook.hook === "prompt")
-        return yield* admitted(
-          "hook prompt",
-          true,
-          Hooks.prompt(sessions, db, adapter, who, request.body).pipe(Effect.as(ok())),
-        )
-      const own = { VIBEST_PROJECT_DIR: layout.project(who.projectId) }
-      return yield* Guard.check(who.agent, request.body).pipe(
-        Effect.provideService(Harnesses, harnesses),
-        Effect.provide(ConfigProvider.layerAdd(ConfigProvider.fromEnv({ env: own }), { asPrimary: true })),
+        return yield* admitted("hook prompt", true, integration.prompt(who, request.body).pipe(Effect.as(ok())))
+      return yield* integration.guard(who.agent, request.body, who.projectId).pipe(
         Effect.map((reason) => ok(reason === undefined ? {} : { deny: reason })),
         Effect.catch((e) =>
           Effect.succeed(ok({ deny: `vibest could not check this tool call (${String(e)}); it is refused.` })),
@@ -146,16 +130,5 @@ export const httpServer = LayerNode.unbound<ServeError>()(HttpServer.HttpServer)
 export const node = LayerNode.make({
   name: "vibest/HttpServer",
   layer,
-  deps: [
-    services,
-    Db.node,
-    Drain.node,
-    Harnesses.node,
-    Inbox.node,
-    Sessions.node,
-    httpServer,
-    PlatformNode.fileSystem,
-    PlatformNode.layout,
-    PlatformNode.path,
-  ],
+  deps: [services, Db.node, Drain.node, Harnesses.node, Inbox.node, Integration.node, httpServer],
 })

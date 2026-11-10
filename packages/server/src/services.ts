@@ -5,6 +5,7 @@ import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Git } from "@vibest/core/git"
 import { Harness, Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
+import { Integration } from "@vibest/core/integration"
 import { Machines } from "@vibest/core/machines"
 import { MainAgent } from "@vibest/core/main-agent"
 import { Peers } from "@vibest/core/peer"
@@ -32,6 +33,7 @@ export const services = LayerNode.group([
   SshHosts.node,
   Git.node,
   Sessions.node,
+  Integration.node,
   Peers.node,
   MainAgent.node,
   Machines.node,
