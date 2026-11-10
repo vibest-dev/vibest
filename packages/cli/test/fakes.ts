@@ -701,7 +701,11 @@ export type TestServices = Layer.Success<ReturnType<typeof testLayer>> | FakeRun
 
 export class GaveUp extends Schema.TaggedError<GaveUp>()("GaveUp", { helper: Schema.String }) {}
 
-export const yieldToIo = TestClock.withLive(Effect.sleep("10 millis"))
+const isTestClock = (clock: Clock.Clock): clock is TestClock.TestClock => "withLive" in clock
+
+const ioPause = Effect.sleep("10 millis")
+
+export const yieldToIo = Clock.clockWith((clock) => (isTestClock(clock) ? clock.withLive(ioPause) : ioPause))
 
 const UNTIL_ATTEMPTS = 2000
 
