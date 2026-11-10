@@ -231,3 +231,5 @@ export const sessionListing = (deps: {
 
   return { listed, watched, snapshotProjects, watchDeltas }
 }
+
+export type Listing = ReturnType<typeof sessionListing>
