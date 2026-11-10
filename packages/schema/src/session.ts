@@ -97,7 +97,7 @@ export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", {
 }) {}
 export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {}) {
   override get message() {
-    return "no harness to inherit: name one, for example `vibest run <harness> -- <prompt>`"
+    return "no harness to inherit: name one, for example `vibest run claude -- <prompt>`"
   }
 }
 

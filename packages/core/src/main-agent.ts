@@ -45,7 +45,7 @@ export const sameCoordinator = (
 }
 
 const firstStart = new LaunchFailed({
-  message: "no harness to inherit: pass --harness",
+  message: "no harness to inherit: pass --harness, for example `vibest --harness claude`",
 })
 
 const make = Effect.gen(function* () {
