@@ -1,9 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { targetFrom } from "@vibest/runtime-herdr/caller"
-import { HerdrPool } from "@vibest/runtime-herdr/pool"
+import { HerdrPool, type SessionEvent } from "@vibest/runtime-herdr/pool"
 import * as TerminalRuntime from "@vibest/runtime-herdr/terminal-runtime"
 import { fromPool } from "@vibest/runtime-herdr/terminal-runtime"
-import { Deferred, Effect, Fiber, Stream } from "effect"
+import { Deferred, Effect, Fiber, Logger, Queue, Stream } from "effect"
 import { HerdrError, type HerdrShape, type PushFrame } from "effect-herdr-sdk"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
@@ -229,5 +229,43 @@ describe("terminal ids", () => {
     })
     assert.isUndefined(TerminalRuntime.decodeTarget("{}"))
     assert.isUndefined(TerminalRuntime.decodeTarget(undefined))
+  })
+})
+
+describe("herdr event stream", () => {
+  it.effect("a failed herdr event stream is logged with its cause and emits reset", () => {
+    const logs: Array<unknown> = []
+    return Effect.gen(function* () {
+      const open = yield* Deferred.make<void>()
+      const pool = HerdrPool.of({
+        resolve: () => Effect.succeed("s"),
+        client: () => Effect.die("unused"),
+        events: Stream.unwrap(
+          Deferred.await(open).pipe(Effect.as(Stream.fail(new Error("socket closed")))),
+        ) as unknown as Stream.Stream<SessionEvent>,
+        restarts: Stream.empty,
+        sessions: Effect.succeed([]),
+      })
+      const runtime = yield* fromPool({
+        pool,
+        spawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+        fs: undefined,
+        scope: yield* Effect.scope,
+      })
+      const seen = yield* Queue.unbounded<TerminalRuntime.RuntimeEvent>()
+      yield* runtime.events.pipe(
+        Stream.runForEach((event) => Queue.offer(seen, event)),
+        Effect.forkScoped,
+      )
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(open, undefined)
+      assert.deepStrictEqual(yield* Queue.take(seen), { type: "reset", machine: "local" })
+      assert.include(JSON.stringify(logs), "socket closed")
+      assert.strictEqual(yield* Queue.size(seen), 0)
+    }).pipe(
+      Effect.provide(Platform.services),
+      Effect.provide(Logger.layer([Logger.make((entry) => void logs.push(entry.message))])),
+      Effect.scoped,
+    )
   })
 })
