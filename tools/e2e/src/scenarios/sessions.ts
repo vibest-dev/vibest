@@ -176,12 +176,12 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S6",
     title:
-      "a just-finished --archive-on-completion session loses its worktree; vibest archive of a clean subagent closes its pane, its harness process exits and removes the worktree; uncommitted changes or commits on no branch keep it with the reason; a commit on a branch is kept in that branch and the worktree removed; --keep-worktree keeps a clean one",
+      "a just-finished --archive-on-idle session loses its worktree, with no notice and nothing it sent still waiting; vibest run --archive-on-completion is a usage error; vibest archive of a clean subagent closes its pane, its harness process exits and removes the worktree; uncommitted changes or commits on no branch keep it with the reason; a commit on a branch is kept in that branch and the worktree removed; --keep-worktree keeps a clean one",
     run: async (w) => {
       const p = await piProject(w, "s6")
       try {
         p.model.release()
-        const auto = await p.runSub("auto", "--archive-on-completion")
+        const auto = await p.runSub("auto", "--archive-on-idle")
         let autoTree = ""
         await until(
           "the session's worktree path",
@@ -198,6 +198,15 @@ const checks: ReadonlyArray<Check> = [
           45_000,
         )
         expect(p.notices(auto, "working directory") === 0, "its own exiting processes kept the worktree")
+        expect(p.notices(auto, "") === 0, "a notice for a clean archive")
+        const waiting = row<{ n: number }>(
+          w,
+          "SELECT count(*) AS n FROM inbox WHERE (sender_session_id = ?1 OR recipient_session_id = ?1) AND status IN ('pending', 'delivering')",
+          auto,
+        )
+        expect(waiting?.n === 0, `rows still waiting for the archived session: ${waiting?.n}`)
+        const old = await w.vibest(["run", "pi", "--archive-on-completion", "--", "x"], { cwd: p.repo, env: p.env })
+        expect(old.code !== 0, "--archive-on-completion was accepted")
         const ready = async (task: string) => {
           const id = await p.runSub(task)
           await answered(w, p, id, task)

@@ -11,20 +11,7 @@ import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import { CALLER_HEADER, PROJECT_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
 import * as Server from "@vibest/server/server"
-import {
-  Cause,
-  Context,
-  Deferred,
-  Duration,
-  Effect,
-  Exit,
-  Fiber,
-  Layer,
-  Option,
-  Queue,
-  type Scope,
-  Stream,
-} from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
 
 import * as Platform from "#platform"
 
@@ -285,27 +272,6 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       )
       assert.deepStrictEqual(yield* db.inboxWithStatus(worker, "failed"), [])
       yield* Fiber.interrupt(subscribed)
-    }),
-  )
-
-  test(
-    "a delivered row stays counted until its completion work is done",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const { db, worker, projectId } = yield* idleMainWithWorker(repo, "pi")
-      const inbox = Context.get(yield* Layer.build(Layer.fresh(Inbox.layer)), Inbox)
-      const stream = yield* Effect.forkScoped(Stream.runDrain(inbox.stream(projectId)))
-      const row = yield* inbox.enqueue({ sessionId: worker, kind: "report", message: "completion", details: {} })
-      yield* until(db.latestInbox(worker, "report"), (r) => r?.status === "delivered")
-      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
-      yield* draining
-      assert.include(yield* (yield* Drain).pending, `completion inbox ${row.id}`)
-      assert.isFalse(yield* shutdownDone)
-      const consequence = yield* Queue.take(inbox.delivered)
-      assert.strictEqual(consequence.row.id, row.id)
-      yield* consequence.done
-      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
-      yield* Fiber.interrupt(stream)
     }),
   )
 

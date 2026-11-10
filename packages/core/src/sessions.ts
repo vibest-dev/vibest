@@ -26,7 +26,6 @@ import {
   PlatformError,
   Predicate,
   Ref,
-  Stream,
   SynchronizedRef,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
@@ -534,7 +533,7 @@ export class Sessions extends Context.Service<
             ),
           )
 
-      const { undoCutOffStart, remove, archiveDelivered, finishArchive } = sessionArchive({
+      const { undoCutOffStart, remove, archiveIfIdle, finishArchive } = sessionArchive({
         db,
         fs,
         removal,
@@ -739,7 +738,13 @@ export class Sessions extends Context.Service<
           case "turn.reported":
             return resultReady(event.sessionId!)
           case "turn.ended":
-            return deliverNext(event.sessionId!)
+            return deliverNext(event.sessionId!).pipe(
+              Effect.andThen(event.data.status === "completed" ? archiveSoon([event.sessionId!]) : Effect.void),
+            )
+          case "inbox.moved":
+            return event.data.to === "pending" || event.data.to === "delivering"
+              ? Effect.void
+              : db.inboxParties(event.data.inbox).pipe(Effect.flatMap(archiveSoon))
           case "inbox.queued":
             return queued(event.sessionId!, event.seq)
           case "live.state":
@@ -783,10 +788,9 @@ export class Sessions extends Context.Service<
           yield* Effect.forEach(
             rows.filter((row) => row.metadata.archive),
             (row) =>
-              Effect.all([db.latestInbox(row.id, "result"), live(row).pipe(Effect.option)]).pipe(
-                Effect.flatMap(([latest, routed]) =>
-                  latest === undefined || Option.isNone(routed) ? Effect.void : archiveDelivered(latest),
-                ),
+              live(row).pipe(
+                Effect.option,
+                Effect.flatMap((routed) => (Option.isNone(routed) ? Effect.void : archiveIfIdle(row.id))),
                 logged(`archive ${row.id}`),
                 Effect.provideContext(platform),
               ),
@@ -797,19 +801,20 @@ export class Sessions extends Context.Service<
         })
 
       const archives = yield* FiberSet.make()
-      yield* Stream.fromQueue(inbox.delivered).pipe(
-        Stream.runForEach(({ row, done }) =>
-          FiberSet.run(
-            archives,
-            archiveDelivered(row).pipe(
-              Effect.ensuring(done),
-              logged(`archive ${row.sessionId}`),
-              Effect.provideContext(platform),
+      const archiveSoon = (ids: ReadonlyArray<string>) =>
+        Effect.forEach(
+          ids,
+          (id) =>
+            FiberSet.run(
+              archives,
+              drain.work(
+                `archive ${id}`,
+                archiveIfIdle(id).pipe(logged(`archive ${id}`), Effect.provideContext(platform)),
+                true,
+              ),
             ),
-          ),
-        ),
-        Effect.forkIn(scope),
-      )
+          { discard: true },
+        )
 
       const resultReady = (id: string) =>
         Effect.forkIn(

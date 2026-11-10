@@ -14,22 +14,10 @@ import { settled, until, untilVirtual, writeResult } from "./lib/observe.ts"
 import { makeRepository, type TestOptions } from "./lib/session.ts"
 import { spawnInput, idleSession, sessionWorktree, test, slowTest, sqlNotices } from "./lib/sessions-helpers.ts"
 
-let pauseAfterResultRead:
-  | { readonly reached: Deferred.Deferred<void>; readonly release: Deferred.Deferred<void> }
-  | undefined
 let archiveStartedSignal: { readonly id: string; readonly done: Deferred.Deferred<void> } | undefined
 const gated: TestOptions = {
   db: (db) => ({
     ...db,
-    latestInbox: (id, kind) =>
-      db.latestInbox(id, kind).pipe(
-        Effect.tap(() => {
-          const gate = kind === "result" ? pauseAfterResultRead : undefined
-          if (!gate) return Effect.void
-          pauseAfterResultRead = undefined
-          return Deferred.succeed(gate.reached, undefined).pipe(Effect.andThen(Deferred.await(gate.release)))
-        }),
-      ),
     getSession: (id) =>
       db.getSession(id).pipe(
         Effect.tap(() => {
@@ -42,7 +30,7 @@ const gated: TestOptions = {
   }),
 }
 
-describe.concurrent("vibest run --archive-on-completion", () => {
+describe.concurrent("vibest run --archive-on-idle", () => {
   const archiveSession = (
     repo: string,
     coordinator: "claude" | "pi" = "claude",
@@ -168,7 +156,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   slowTest(
-    "not archived while the result is only queued, when its poll lease is released or it is dropped, or when the Pi extension never acked it",
+    "not archived while the result is only queued or its poll lease is released; archived once the result is dropped or failed, since nothing is waiting",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const inbox = yield* Inbox
@@ -187,14 +175,13 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       yield* b.herdr.updateAgent("test/coord", (c) => ({ ...c, alive: false }))
       yield* finishTurn(b, "status: completed")
       yield* until(b.db.latestInbox(b.id, "result"), (r) => r?.status === "dropped")
-      yield* letForkedArchiveRun
-      assert.isFalse(yield* archived(b.db, b.id))
+      yield* until(archived(b.db, b.id), (a) => a)
       const c = yield* archiveSession(repo, "pi")
       yield* finishTurn(c, "status: completed")
       yield* inbox.stream(c.projectId).pipe(Stream.take(1), Stream.runDrain)
       yield* letForkedArchiveRun
       assert.strictEqual((yield* c.db.latestInbox(c.id, "result"))!.status, "failed")
-      assert.isFalse(yield* archived(c.db, c.id))
+      yield* until(archived(c.db, c.id), (a) => a)
     }),
   )
 
@@ -309,6 +296,9 @@ describe.concurrent("vibest run --archive-on-completion", () => {
       assert.isDefined(yield* a.db.insertSend(a.id, "first"))
       assert.isFalse(yield* a.db.archiveIfNoPending(a.id))
       assert.isFalse(yield* archived(a.db, a.id))
+      const sender = yield* archiveSession(repo)
+      yield* finishTurn(sender, "status: completed")
+      assert.isFalse(yield* sender.db.archiveIfNoPending(sender.id))
       const b = yield* archiveSession(repo)
       assert.isTrue(yield* b.db.archiveIfNoPending(b.id))
       assert.isUndefined(yield* b.db.insertSend(b.id, "late"))
@@ -388,73 +378,7 @@ describe.concurrent("vibest run --archive-on-completion", () => {
   )
 
   test(
-    "a newer result still being sent when the waiting archive reads it: archived once it is acked; never when its lease is released",
-    Effect.gen(function* () {
-      const inbox = yield* Inbox
-      const repo = yield* makeRepository
-      for (const released of [false, true]) {
-        const w = yield* archiveSession(repo)
-        const first = yield* firstArchiveWaiting(w, { status: "completed", summary: "second" })
-        const polled = yield* inbox.poll(w.projectId)
-        assert.lengthOf(polled.ids, 1)
-        const read = { reached: yield* Deferred.make<void>(), release: yield* Deferred.make<void>() }
-        pauseAfterResultRead = read
-        yield* first.release
-        yield* Deferred.await(read.reached)
-        assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "sending")
-        const looked = yield* awaitArchiveStart(w.id)
-        yield* inbox.ack(w.projectId, released ? [] : polled.ids, released ? polled.ids : [])
-        if (!released) {
-          assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
-          yield* looked
-        }
-        yield* Deferred.succeed(read.release, undefined)
-        if (!released) {
-          yield* until(archived(w.db, w.id), (a) => a)
-          yield* assertArchivesDone(w)
-          assert.deepStrictEqual(yield* sqlNotices(w.id), [])
-          continue
-        }
-        archiveStartedSignal = undefined
-        yield* assertArchivesDone(w)
-        assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "pending")
-        assert.isFalse(yield* archived(w.db, w.id))
-      }
-    }),
-    gated,
-    true,
-  )
-
-  test(
-    "the newer delivered result is failed, a message waits, or a new turn began: the waiting archive does not archive on it",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      for (const newer of ["failed", "message", "turn"]) {
-        const w = yield* archiveSession(repo)
-        const completed = newer === "message" || newer === "turn"
-        const first = yield* firstArchiveWaiting(w, { status: completed ? "completed" : newer })
-        if (newer === "message") assert.isDefined(yield* w.db.insertSend(w.id, "one more thing"))
-        if (newer === "turn") yield* w.db.updateSession(w.id, { turnState: "open" })
-        const looked = completed ? yield* awaitArchiveStart(w.id) : Effect.void
-        yield* ackResult(w)
-        assert.strictEqual((yield* w.db.latestInbox(w.id, "result"))!.status, "delivered")
-        yield* looked
-        yield* first.release
-        yield* assertArchivesDone(w)
-        assert.isFalse(yield* archived(w.db, w.id), newer)
-        assert.isUndefined((yield* w.db.getSession(w.id))!.metadata.removed, newer)
-        if (newer === "message") {
-          assert.lengthOf(yield* w.db.inboxWithStatus(w.id, "failed"), 0)
-          assert.lengthOf(yield* w.db.inboxWithStatus(w.id, "delivered"), 1)
-        }
-      }
-    }),
-    gated,
-    true,
-  )
-
-  test(
-    "an owner started with --archive-on-completion keeps its worktree while a borrower is live",
+    "an owner started with --archive-on-idle keeps its worktree while a borrower is live",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const repo = yield* makeRepository

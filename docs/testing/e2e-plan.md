@@ -67,7 +67,7 @@ login smoke (I5). Prompts are deterministic:
 | 5   | `--peer`, `--in-parent`, `--name`, `--model`, `--provider`, `--headless`, `--env` | each flag visible in the row and the pane                                                                                 |
 | 6   | `archive` clean                                                                   | pane closed with PID proof, worktree removed, branch kept                                                                 |
 | 7   | `archive` dirty / unpushed / `--keep-worktree`                                    | worktree kept, `reasons` names why                                                                                        |
-| 8   | `run --archive-on-completion`                                                     | archived right after the completed result reaches the coordinator                                                         |
+| 8   | `run --archive-on-idle`                                                           | archived right after the completed result reaches the coordinator                                                         |
 | 9   | Self-heal                                                                         | kill the daemon mid-turn, restart: turn ends `lost` or resumes; no blind replay                                           |
 | 10  | Startup failure                                                                   | bad model: a failed result with the error, no screen text; `vibest peek <id>` shows the pane                              |
 | 11  | Limits                                                                            | `VIBEST_MAX_SESSIONS=1`: the second `run` gets `LimitReached`                                                             |

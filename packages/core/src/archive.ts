@@ -2,7 +2,7 @@ import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
 import { Cause, Clock, Context, Duration, Effect, FileSystem, Ref } from "effect"
 import type { Scope } from "effect"
 
-import type { Db, InboxRow, SessionRow } from "./db.ts"
+import type { Db, SessionRow } from "./db.ts"
 import { directoryLock, type keyedLock } from "./keyed-lock.ts"
 import type { sessionPlacement } from "./placement.ts"
 import { errorMessage } from "./plugins.ts"
@@ -140,13 +140,10 @@ export const sessionArchive = (deps: {
       Effect.provideContext(platform),
     )
 
-  const archiveDelivered = (row: InboxRow) =>
+  const archiveIfIdle = (id: string) =>
     Effect.gen(function* () {
-      if (row.kind !== "result") return
-      const id = row.sessionId
       const owner = yield* db.getSession(id)
       if (!owner?.metadata.archive || owner.metadata.archived || owner.metadata.removed) return
-      if (row.details.status !== "completed") return
       yield* locked(
         id,
         true,
@@ -157,15 +154,8 @@ export const sessionArchive = (deps: {
           yield* Effect.gen(function* () {
             const session = yield* getRow(id)
             if (session.metadata.archived || session.metadata.removed) return
-            const skip = (why: string) =>
-              notice(session, `${id} not archived (vibest run --archive-on-completion): ${why}`)
-            const latest = yield* db.latestInbox(id, "result")
-            if (
-              session.turnState !== "completed" ||
-              latest?.status !== "delivered" ||
-              latest.details.status !== "completed"
-            )
-              return
+            const skip = (why: string) => notice(session, `${id} not archived (vibest run --archive-on-idle): ${why}`)
+            if (session.turnState !== "completed") return
             const h = yield* live(session)
             const terminal = session.address
             const seen = yield* agentState(h, terminal)
@@ -183,7 +173,7 @@ export const sessionArchive = (deps: {
             if (kept || again)
               yield* notice(
                 session,
-                `${id} archived (vibest run --archive-on-completion): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}`,
+                `${id} archived (vibest run --archive-on-idle): terminal ${out.pane}, worktree ${out.worktree} at ${out.path}, branch ${out.branch ?? "(none)"} kept.${kept}${again}`,
               )
           }).pipe(
             Effect.catchCause((cause) =>
@@ -219,5 +209,5 @@ export const sessionArchive = (deps: {
       }),
     ).pipe(logged(`archive ${id}`), Effect.provideContext(platform))
 
-  return { undoCutOffStart, remove, archiveDelivered, finishArchive }
+  return { undoCutOffStart, remove, archiveIfIdle, finishArchive }
 }

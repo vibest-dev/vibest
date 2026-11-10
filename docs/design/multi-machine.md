@@ -135,7 +135,7 @@ their case; either gives `NoProject`.
 the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`), the caller as `parent` and the
 main agent as `reportTo`; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. With no main agent there is no `report_to`, as in `hc run --on`
 with no parent: nothing is sent back, the result stays on B and `vibest result <name>/<id>` reads it there.
-`--env`, `--peer`, `--archive-on-completion`, `--agent` and `--session` are refused with it, by vibestd, after the
+`--env`, `--peer`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
 path), which means nothing on B. A sends a runtime kind instead. With `--runtime` it is that one; without it, the
