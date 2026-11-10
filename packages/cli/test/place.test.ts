@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { placeOf } from "@vibest/server/listing"
+import { placeOf } from "@vibest/core/main-agent"
 
 describe("place", () => {
   it("reads as the runtime name and the address, or not placed", () => {

@@ -2,31 +2,29 @@ import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { raisesSeen } from "@vibest/core/activity"
 import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { callerTarget, filterCallerEnv, mainPlace, specHits } from "@vibest/core/caller"
-import { AddressJson, Db, encodeAddress } from "@vibest/core/db"
+import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
-import { Harness, harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
+import { Harness, Harnesses } from "@vibest/core/harness"
 import type { HarnessDefinition } from "@vibest/core/host"
 import { VibestdIdentity } from "@vibest/core/identity"
-import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
+import { Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
-import * as Launch from "@vibest/core/launch"
 import { Machines } from "@vibest/core/machines"
-import { Layout, shellQuote } from "@vibest/core/paths"
+import { MainAgent } from "@vibest/core/main-agent"
+import { shellQuote } from "@vibest/core/paths"
 import { Peers } from "@vibest/core/peer"
-import { describeSpawn, Plugins } from "@vibest/core/plugins"
+import { Plugins } from "@vibest/core/plugins"
 import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
 import { createProject } from "@vibest/core/project-create"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
 import { Remote } from "@vibest/core/remote"
-import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
 import { SshHosts } from "@vibest/core/repository-url"
-import { Restarting } from "@vibest/core/restarting"
 import { envelope } from "@vibest/core/results"
-import { machinesListing, NoRuntime, Runtimes, type Terminal } from "@vibest/core/runtimes"
-import { defaultSessionName, NoSuchSession, runtimeEnv, Sessions } from "@vibest/core/sessions"
+import { machinesListing, Runtimes } from "@vibest/core/runtimes"
+import { defaultSessionName, NoSuchSession, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as UpdateCheckNode from "@vibest/core/update-check"
 import { UpdateCheck } from "@vibest/core/update-check"
@@ -48,7 +46,7 @@ import {
 } from "@vibest/protocol/rpc"
 import { LaunchFailed } from "@vibest/schema/session"
 import { RuntimeUnreachable } from "@vibest/schema/session"
-import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
+import { Clock, Context, Deferred, Effect, Layer, Queue, Stream } from "effect"
 import * as Headers from "effect/http/Headers"
 import { ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
@@ -57,7 +55,7 @@ import * as SocketServer from "effect/socket/SocketServer"
 import { AdmissionLive, CallerGateLive, noteOpen, ProtocolGateLive, reader } from "./gates.ts"
 import * as Hooks from "./hooks.ts"
 import { integrationHandlers } from "./integration.ts"
-import { placeOf, sameCoordinator, sessionListing, toInfo } from "./listing.ts"
+import { sessionListing, toInfo } from "./listing.ts"
 import { remoteHandlers } from "./remote-handlers.ts"
 import { services } from "./services.ts"
 import { stopOnce as stopDaemon } from "./stop.ts"
@@ -76,7 +74,7 @@ export class Shutdown extends Context.Service<Shutdown, Deferred.Deferred<void>>
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
 export { DRAIN_TIMEOUT } from "./stop.ts"
-export const PRESENT_TIMEOUT = Duration.seconds(5)
+export { PRESENT_TIMEOUT } from "@vibest/core/main-agent"
 
 export const WATCH_BACKLOG = 10_000
 
@@ -85,10 +83,8 @@ export const handlers = VibestRpcs.toLayer(
     const sessions = yield* Sessions
     const inbox = yield* Inbox
     const db = yield* Db
-    const restarting = yield* Restarting
     const runtimes = yield* Runtimes
     const project = yield* Project
-    const layout = yield* Layout
     const plugins = yield* Plugins
     const subscriptions = yield* Subscriptions
     const identity = yield* Identity
@@ -98,6 +94,7 @@ export const handlers = VibestRpcs.toLayer(
     const bus = yield* Bus
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const harnesses = yield* Harnesses
+    const mainAgent = yield* MainAgent
 
     const hook = <E>(
       sessionId: string,
@@ -160,38 +157,11 @@ export const handlers = VibestRpcs.toLayer(
         const target = callerTarget(specs, filterCallerEnv(specs, input.callerEnv), input.runtimeSession)
         return { id: "local", ...(target !== undefined ? { target } : {}) }
       })
-    const projectLocked = keyedLock<string>()
     const seenLocked = keyedLock<string>()
 
-    const runningCoordinator = (projectId: string, terminal: string) =>
-      Effect.gen(function* () {
-        const coord = yield* db.coordinatorOf(projectId)
-        if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
-        const runtimeId = coord.runtime
-        if (coord.address.id === terminal) return null
-        const found = runtimes.find(runtimeId)
-        if (!restarting.has(coord.id)) {
-          if (found === undefined) return null
-          const presence = yield* coordinatorIdle(found, coord.address).pipe(Effect.option)
-          if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
-        }
-        return {
-          harness: coord.harnessId,
-          place: placeOf(found ?? { id: runtimeId }, coord.address),
-          runtime: runtimeId,
-          address: encodeAddress(coord.address),
-        }
-      })
     const { listed, watched, snapshotProjects, watchDeltas } = sessionListing({ db, sessions, runtimes })
 
     const integration = yield* integrationHandlers
-    const harnessIds = () => harnesses.all.map((definition) => definition.id)
-    const firstStart = new LaunchFailed({
-      message: "no harness to inherit: pass --harness, for example `vibest --harness claude`",
-    })
-
-    const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
-
     const stopOnce = stopDaemon({ drain, bus, sendingInbox: db.sendingInbox, shutdown })
 
     const cliOnly = (method: MethodOf<"cli">) =>
@@ -320,133 +290,19 @@ export const handlers = VibestRpcs.toLayer(
 
       Launch: ({ argv, focus, runtime, callerEnv, runtimeSession }) =>
         Effect.gen(function* () {
-          const { id, directory: root } = yield* scope("Launch")
+          const { id, directory } = yield* scope("Launch")
           const at = yield* machineFromCaller({ callerEnv, runtimeSession })
-          const current = yield* db.coordinatorOf(id)
-          const asked = Launch.flagValue(argv, "--harness")
-          const decision = yield* plugins.start({
-            project: root,
-            agentType: "main",
-            parentSessionId: undefined,
-            prompt: "",
-            harness: asked ?? current?.harnessId,
-            provider: Launch.flagValue(argv, "--provider"),
-            model: Launch.flagValue(argv, "--model"),
-            harnesses: yield* harnessOptions,
-            attempts: [],
-            machine: { id: at.id },
-            runtime,
-            parentRuntime: current?.runtime ?? undefined,
-            machines: yield* machinesListing(runtimes, harnessIds()).pipe(Effect.orElseSucceed(() => [])),
-          })
-          if (decision.runtime === undefined) {
-            const loaded = (yield* runtimes.all).map((h) => h.id)
-            return yield* new NoRuntime({
-              message: `no terminal runtime was chosen for the main agent${loaded.length === 0 ? "" : `; loaded: ${loaded.join(", ")}`}`,
-            })
-          }
-          if (decision.harness === undefined) return yield* firstStart
-          if (harnesses.find(decision.harness) === undefined)
-            return yield* new LaunchFailed({
-              message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")}`,
-            })
-          const harness = decision.harness
-          const rt = yield* runtimes.route(decision.runtime)
-          yield* runtimes.online(rt, { id: decision.machine.id })
-          const run = rt.run
-          if (run === undefined)
-            return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
-          const fresh = argv.includes("--new")
-          let opened: Terminal | undefined
-          let claimedId: string | undefined
-          const command = yield* Launch.coordinatorCommand({
-            harness,
-            root,
-            provider: decision.provider ?? null,
-            model: decision.model ?? null,
-            session: projectLocked.withLock(id)(
-              Effect.gen(function* () {
-                const running = yield* runningCoordinator(id, "")
-                if (running)
-                  return yield* new Forbidden({
-                    method: "Launch",
-                    message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there first`,
-                  })
-                const existing = yield* db.coordinatorOf(id)
-                const sessionId =
-                  existing === undefined || fresh ? yield* db.allocateSessionId().pipe(Effect.orDie) : existing.id
-                const pane = yield* Launch.openInParentWorkspace(rt, at, {
-                  root,
-                  label: "vibest",
-                  home: layout.home,
-                  focus,
-                })
-                opened = pane
-                const claimed = yield* db
-                  .coordinatorLaunch(
-                    id,
-                    harness,
-                    fresh,
-                    { runtime: rt.id, address: pane },
-                    {
-                      provider: decision.provider,
-                      model: decision.model,
-                      routing: { decidedBy: decision.decidedBy, trace: decision.trace },
-                      projectDirectory: root,
-                      ...(existing === undefined || fresh ? { sessionId } : {}),
-                    },
-                  )
-                  .pipe(Effect.tapError(() => rt.close(pane).pipe(Effect.ignore)))
-                claimedId = claimed.sessionId
-                return { ...claimed, runtime: runtimeEnv(rt.id, pane) }
+          return yield* mainAgent.launch({ projectId: id, root: directory, at, argv, focus, runtime })
+        }).pipe(
+          Effect.catchTag("MainAgentRunning", (e) =>
+            Effect.fail(
+              new Forbidden({
+                method: "Launch",
+                message: `the main agent (${e.harness}) is still running in ${e.place}, and a project has one main agent; exit it there first`,
               }),
             ),
-          }).pipe(
-            Effect.catchTag("HarnessUnavailable", (error) => Effect.fail(new LaunchFailed({ message: error.message }))),
-            Effect.catchTag("SystemPromptDirUnsafe", (error) =>
-              Effect.fail(new LaunchFailed({ message: error.message })),
-            ),
-            Effect.tapError(() =>
-              opened === undefined
-                ? Effect.void
-                : rt
-                    .close(opened)
-                    .pipe(
-                      Effect.ignore,
-                      Effect.andThen(claimedId === undefined ? Effect.void : db.endProcess(claimedId, "launch_failed")),
-                    ),
-            ),
-          )
-          if (opened === undefined) return yield* Effect.die("launch opened no terminal")
-          const pane = opened
-          yield* run(pane, Launch.restartArgv(command)).pipe(
-            Effect.catch((error) =>
-              rt
-                .close(pane)
-                .pipe(
-                  Effect.ignore,
-                  Effect.andThen(claimedId === undefined ? Effect.void : db.endProcess(claimedId, "launch_failed")),
-                  Effect.andThen(Effect.fail(new LaunchFailed({ message: error.message }))),
-                ),
-            ),
-          )
-          const routing =
-            Object.keys(decision.decidedBy).length === 0
-              ? undefined
-              : describeSpawn({
-                  harness,
-                  provider: decision.provider,
-                  model: decision.model,
-                  decidedBy: decision.decidedBy,
-                })
-          return {
-            runtime: rt.id,
-            terminal: pane.id,
-            place: placeOf(rt, pane),
-            attach: rt.attach?.(at) ?? null,
-            ...(routing === undefined ? {} : { routing }),
-          }
-        }),
+          ),
+        ),
 
       Send: (p) =>
         routed.Send(p, (id) =>
@@ -598,34 +454,8 @@ export const handlers = VibestRpcs.toLayer(
 
       "Project.StartMain": ({ harness, provider, model, runtime }) =>
         Effect.gen(function* () {
-          const { id, directory: root } = yield* scope("Project.StartMain")
-          const current = yield* db.coordinatorOf(id)
-          const decision = yield* plugins.start({
-            project: root,
-            agentType: "main",
-            parentSessionId: undefined,
-            prompt: "",
-            harness: harness ?? current?.harnessId,
-            provider,
-            model,
-            harnesses: yield* harnessOptions,
-            attempts: [],
-            machine: { id: "local" },
-            runtime,
-            parentRuntime: current?.runtime ?? undefined,
-            machines: yield* machinesListing(runtimes, harnessIds()).pipe(Effect.orElseSucceed(() => [])),
-          })
-          if (decision.harness === undefined) return yield* firstStart
-          if (harnesses.find(decision.harness) === undefined)
-            return yield* new HarnessUnavailable({
-              harness: decision.harness,
-              message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})`,
-            })
-          if (decision.runtime === undefined)
-            return yield* new NoRuntime({ message: "no terminal runtime was chosen for the main agent" })
-          const rt = yield* runtimes.route(decision.runtime)
-          yield* runtimes.online(rt, { id: decision.machine.id })
-          return { ...decision, harness: decision.harness, runtime: rt.id }
+          const { id, directory } = yield* scope("Project.StartMain")
+          return yield* mainAgent.start({ projectId: id, root: directory, harness, provider, model, runtime })
         }),
 
       "Project.Open": ({ move }) =>
@@ -661,111 +491,58 @@ export const handlers = VibestRpcs.toLayer(
 
       "Project.CoordinatorSession": ({ harness, fresh, terminal, runtime, provider, model, routing, pid }) =>
         Effect.gen(function* () {
-          const { id: projectId, directory } = yield* scope("Project.CoordinatorSession")
-          const kind = runtime ?? (yield* onlyRuntime)?.id
-          if (kind === undefined)
-            return yield* new InvalidCaller({
-              method: "Project.CoordinatorSession",
-              message: "Project.CoordinatorSession needs the runtime the main agent runs in",
-            })
-          return yield* projectLocked.withLock(projectId)(
-            Effect.gen(function* () {
-              const running = yield* runningCoordinator(projectId, terminal)
-              if (running)
-                return yield* new Forbidden({
+          const { id, directory } = yield* scope("Project.CoordinatorSession")
+          return yield* mainAgent.claim({
+            projectId: id,
+            directory,
+            harness,
+            fresh,
+            terminal,
+            runtime,
+            provider,
+            model,
+            routing,
+            pid,
+          })
+        }).pipe(
+          Effect.catchTags({
+            NoRuntime: () =>
+              Effect.fail(
+                new InvalidCaller({
                   method: "Project.CoordinatorSession",
-                  message: `the main agent (${running.harness}) is still running in ${running.place}, and a project has one main agent; exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
-                })
-              const address = { machine: "local", id: terminal }
-              let claimed:
-                | {
-                    readonly sessionId: string
-                    readonly harnessSessionId: string | null
-                    readonly projectId: string
-                    readonly runtime: string
-                  }
-                | undefined
-              const command = yield* Launch.coordinatorCommand({
-                harness,
-                root: directory,
-                provider: provider ?? null,
-                model: model ?? null,
-                session: Effect.gen(function* () {
-                  const saved = yield* db.coordinatorLaunch(
-                    projectId,
-                    harness,
-                    fresh,
-                    { runtime: kind, address },
-                    { provider, model, routing, pid, projectDirectory: directory },
-                  )
-                  claimed = { ...saved, runtime: runtimeEnv(kind, address) }
-                  return claimed
+                  message: "Project.CoordinatorSession needs the runtime the main agent runs in",
                 }),
-              }).pipe(
-                Effect.catchTag("SystemPromptDirUnsafe", (error) =>
-                  Effect.fail(new LaunchFailed({ message: error.message })),
-                ),
-              )
-              if (claimed === undefined) return yield* Effect.die("coordinator command returned without a session")
-              const rt = runtimes.find(kind)
-              if (rt?.present !== undefined)
-                yield* rt
-                  .present(address, { mainSession: claimed.sessionId, projectId })
-                  .pipe(Effect.timeout(PRESENT_TIMEOUT), Effect.ignore)
-              return {
-                sessionId: claimed.sessionId,
-                harnessSessionId: claimed.harnessSessionId,
-                projectId: claimed.projectId,
-                runtime: claimed.runtime,
-                command: { file: command.file, args: [...command.args], env: { ...command.env } },
-              }
-            }),
-          )
-        }),
+              ),
+            MainAgentRunning: (e) =>
+              Effect.fail(
+                new Forbidden({
+                  method: "Project.CoordinatorSession",
+                  message: `the main agent (${e.harness}) is still running in ${e.place}, and a project has one main agent; exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
+                }),
+              ),
+          }),
+        ),
 
       "Project.FocusCoordinator": () =>
         Effect.gen(function* () {
           const c = yield* cliOnly("Project.FocusCoordinator")
           const project = yield* resolveAt(c.repositoryRoot)
-          const running = yield* runningCoordinator(project.id, "")
-          if (running === null) return null
-          const runtime = runtimes.find(running.runtime)
-          if (runtime?.focus === undefined) return { place: running.place, focused: false }
-          const address = yield* Schema.decodeUnknownEffect(AddressJson)(running.address).pipe(Effect.orDie)
-          const focused = yield* runtime.focus(address).pipe(Effect.exit)
-          return { place: running.place, focused: focused._tag === "Success" }
+          return yield* mainAgent.focus(project.id)
         }),
 
       "Project.RunningCoordinator": ({ terminal }) =>
-        scope("Project.RunningCoordinator").pipe(Effect.flatMap(({ id }) => runningCoordinator(id, terminal))),
+        scope("Project.RunningCoordinator").pipe(Effect.flatMap(({ id }) => mainAgent.running(id, terminal))),
 
       "Project.StopCoordinator": ({ runtime, address }) =>
         Effect.gen(function* () {
-          const { id: projectId } = yield* scope("Project.StopCoordinator")
-          return yield* projectLocked.withLock(projectId)(
-            Effect.gen(function* () {
-              const coord = yield* db.coordinatorOf(projectId)
-              const place = coord?.address
-              if (!coord?.runtime || !place || place.id === "" || !sameCoordinator(coord, runtime, address))
-                return { result: "moved" as const }
-              if (restarting.has(coord.id))
-                return {
-                  result: "unsupported" as const,
-                  reason: "vibest update is restarting it there; run vibest again once it is ready",
-                }
-              const h = yield* runtimes
-                .route(runtime)
-                .pipe(
-                  Effect.mapError((e) => new InvalidCaller({ method: "Project.StopCoordinator", message: e.message })),
-                )
-              return yield* stopAgent(h, place, {
-                pid: coord.pid,
-                detach: db.detachCoordinator(projectId, runtime, place),
-                reattach: db.reattachCoordinator(projectId, runtime, place),
-                wait: HARNESS_EXIT_WAIT,
-              }).pipe(Effect.provideService(Bus, bus))
-            }),
-          )
+          const { id } = yield* scope("Project.StopCoordinator")
+          return yield* mainAgent
+            .stop(id, runtime, address)
+            .pipe(
+              Effect.catchTag("NoRuntime", (e) =>
+                Effect.fail(new InvalidCaller({ method: "Project.StopCoordinator", message: e.message })),
+              ),
+            )
         }),
 
       "Session.Ready": ({ id, pid }) =>
@@ -780,7 +557,7 @@ export const handlers = VibestRpcs.toLayer(
         cliOnly("Agents.Restart").pipe(Effect.andThen(sessions.restartLater(ids, after))),
 
       CoordinatorSessionReady: ({ sessionId, harness, harnessSessionId }) =>
-        db.reportCoordinatorSession(sessionId, harness, harnessSessionId),
+        mainAgent.ready(sessionId, harness, harnessSessionId),
       "Project.Create": ({ directory, from }) =>
         Effect.gen(function* () {
           const c = yield* cliOnly("Project.Create")
@@ -864,13 +641,13 @@ export const node = LayerNode.make({
     Harnesses.node,
     Identity.node,
     Inbox.node,
+    MainAgent.node,
     Machines.node,
     Peers.node,
     Plugins.node,
     Processes.node,
     Project.node,
     Remote.node,
-    Restarting.node,
     Runtimes.node,
     Sessions.node,
     Shutdown.node,
