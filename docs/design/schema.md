@@ -301,8 +301,9 @@ rows that must keep decoding and re-encoding to the same bytes: add rows to it, 
 - A usage-limit move resends the open turn's input (its typed text or the rows it consumed); when that is empty, the
   trailing run of delivered `task` and `send` rows from one sender that no turn consumed, oldest first, joined with a
   blank line.
-- A task still pending was never handed over. A turn that ended before its handover (vibestd stopped while waiting for
-  ready) took nothing, so the task is still handed over.
+- A task is queued `delivered` with no turn; one that never moved since (its `seq` is still its `id`) was never
+  handed over. A turn that ended before its handover (vibestd stopped while waiting for ready) took nothing, so the
+  task is still handed over.
 - A conversation can be resumed when a process of the session that resumed it or reported it has an ended turn, or,
   for an entry session, when a process of it reported it. The read model keeps only each process's latest
   conversation, so an earlier one in the same process no longer counts.
