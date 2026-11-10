@@ -145,8 +145,10 @@ const daemon = (host: Daemon.Host, replacements: LayerNode.Replacements) =>
           "Replace the running vibestd with this vibest, after a yes on a terminal; agents keep running and queued messages are kept, but unfinished daemon operations may refuse the restart. Then offers to restart the agents on another integration in place, with their conversations",
         ),
       ),
-      Command.make("import-check", {}, () =>
-        userOnly("daemon import-check").pipe(Effect.andThen(Daemon.checkImport(host))),
+      Command.make(
+        "import-check",
+        { ledger: Flag.Boolean("v2").pipe(Flag.withHidden, Flag.withDefault(false)) },
+        ({ ledger }) => userOnly("daemon import-check").pipe(Effect.andThen(Daemon.checkImport(host, ledger))),
       ),
     ]),
   )

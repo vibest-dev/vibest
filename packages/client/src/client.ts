@@ -264,7 +264,7 @@ export const runCaptured = (
   })
 
 export const importCheck = (command: ReadonlyArray<string>) =>
-  runCaptured([...command, "daemon", "import-check"], Duration.seconds(15))
+  runCaptured([...command, "daemon", "import-check"], Duration.seconds(120))
 
 export const spawnDaemon = (
   command: ReadonlyArray<string>,

@@ -3,10 +3,11 @@ import type { DatabaseOpenFailed, SchemaMismatch } from "@vibest/core/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts } from "@vibest/core/identity"
+import { type ImportFailed, refereeFailed, type Report } from "@vibest/core/import/import"
 import { Layout, VibestCommand } from "@vibest/core/paths"
 import { VERSION } from "@vibest/protocol/rpc"
 import { newId } from "@vibest/schema/id"
-import { Clock, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
+import { Clock, Console, Deferred, Duration, Effect, FileSystem, Layer, Schedule, type Scope, Schema } from "effect"
 
 import { daemon } from "./app.ts"
 import * as Server from "./server.ts"
@@ -38,6 +39,9 @@ export interface Host {
     file: string,
   ) => Effect.Effect<((text: string) => Effect.Effect<void, LockFailed>) | undefined, LockFailed, Scope.Scope>
   readonly checkDatabase: (filename: string) => Effect.Effect<void, DatabaseOpenFailed | SchemaMismatch>
+  readonly checkLedgerImport: (
+    filename: string,
+  ) => Effect.Effect<Report, DatabaseOpenFailed | SchemaMismatch | ImportFailed>
 }
 
 export { HANDOFF_ENV } from "./server.ts"
@@ -45,7 +49,31 @@ export { HANDOFF_ENV } from "./server.ts"
 export const HANDOFF_TIMEOUT = Duration.seconds(30)
 const STOP_REPLY_GRACE = Duration.millis(200)
 
-export const checkImport = (host: Host) => Effect.flatMap(Layout, (layout) => host.checkDatabase(layout.database))
+const printed = (report: Report) =>
+  Console.log(
+    [
+      `v1 events: ${report.events}`,
+      `v2 facts: ${report.facts}`,
+      `took: ${report.ms} ms`,
+      `ends of already ended processes: ${report.counts.endsOfEndedProcesses}`,
+      `turns lost: ${report.counts.turnsLost}`,
+      `repeated peer keys: ${report.counts.duplicatePeerKeys}`,
+      `undecodable peer starts: ${report.counts.undecodablePeerStarts}`,
+      `referee: ${report.differences.length === 0 ? "passed" : "failed"}`,
+    ].join("\n"),
+  )
+
+const checkLedgerImport = (host: Host, database: string) =>
+  Effect.gen(function* () {
+    const report = yield* host.checkLedgerImport(database)
+    yield* printed(report)
+    if (report.differences.length > 0) return yield* refereeFailed(report)
+  })
+
+export const checkImport = (host: Host, ledger: boolean) =>
+  Effect.flatMap(Layout, (layout) =>
+    ledger ? checkLedgerImport(host, layout.database) : host.checkDatabase(layout.database),
+  )
 
 export class DaemonLockUnavailable extends Schema.TaggedError<DaemonLockUnavailable>()("DaemonLockUnavailable", {
   message: Schema.String,
