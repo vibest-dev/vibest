@@ -25,7 +25,8 @@ fails and prints the reason.
 
 A plugin can pick the harness for `vibest run`. Without it, a run that names no harness and has nothing to inherit
 fails saying there is no harness to inherit; with a plugin that picks Pi, the same run starts a Pi session, `vibest ls`
-names the plugin as the one that decided the harness, and the result arrives.
+names the plugin as the one that decided the harness (the `routing` field of `vibest ls` and `vibest result`; `vibest
+run` itself prints only `{"id":"<session id>"}`), and the result arrives.
 
 ## G6. A plugin changes a builtin harness
 

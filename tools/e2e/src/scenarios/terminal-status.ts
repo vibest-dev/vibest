@@ -375,7 +375,9 @@ const checks: ReadonlyArray<Check> = [
           await until(
             "unchanged vibest result",
             async () =>
-              JSON.stringify(await w.json(["result", launched.id], { env })).includes("native-status-completed"),
+              (
+                await w.json<{ answer: { text: string } | null }>(["result", launched.id], { env })
+              ).answer?.text.includes("native-status-completed") === true,
             30_000,
           )
           const conversation = row<{ conversation: string }>(
@@ -512,7 +514,9 @@ const checks: ReadonlyArray<Check> = [
         await model.next("pi-status-completed")
         await status("Pi settled", "done")
         expect(
-          JSON.stringify(await w.json(["result", pi], { env })).includes("pi-status-completed"),
+          (await w.json<{ answer: { text: string } | null }>(["result", pi], { env })).answer?.text.includes(
+            "pi-status-completed",
+          ) === true,
           "Pi result changed",
         )
         await hc("send", terminal(), "Wait for the model, then interrupt.")

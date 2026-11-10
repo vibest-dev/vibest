@@ -12,7 +12,6 @@ import { DatabaseOpenFailed, inspectSchema, SchemaMismatch, SQL_NAMES } from "@v
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import * as PlatformNode from "@vibest/core/effect/platform"
 import { HostFacts, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
-import { importCheck } from "@vibest/core/import/import"
 import { checkReplay } from "@vibest/core/journal"
 import { MachineTransport } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
@@ -127,18 +126,6 @@ export const checkDatabase: Host["checkDatabase"] = (filename) =>
     yield* checkReplay(yield* readOnly(filename)).pipe(
       Effect.provide(sqliteLayer(":memory:", false)),
       Effect.catchTag("SqlError", (e) => new DatabaseOpenFailed({ file: filename, message: e.message })),
-    )
-  }).pipe(Effect.scoped)
-
-const checkLedgerImport: Host["checkLedgerImport"] = (filename) =>
-  Effect.gen(function* () {
-    if (!(yield* Effect.promise(() => Bun.file(filename).exists())))
-      return yield* new DatabaseOpenFailed({ file: filename, message: "there is no database file" })
-    yield* inspectFile(filename)
-    const source = yield* readOnly(filename)
-    return yield* importCheck(source).pipe(
-      Effect.provide(sqliteLayer(":memory:", false)),
-      Effect.catchTag("SqlError", (e) => new DatabaseOpenFailed({ file: ":memory:", message: e.message })),
     )
   }).pipe(Effect.scoped)
 
@@ -355,7 +342,7 @@ export const replacements: LayerNode.Replacements = [
   HostFacts.node.replace(Layer.succeed(HostFacts, { name: os.hostname(), id: hostId, pid: process.pid })),
 ]
 
-export const daemon: Host = { lock, checkDatabase, checkLedgerImport }
+export const daemon: Host = { lock, checkDatabase }
 
 export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")
