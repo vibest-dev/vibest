@@ -260,6 +260,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "I3",
+    covers: ["R6", "R8"],
     title:
       "Pi: vibest run pi (fake model) loads the built extension, which refuses the session's herdr call in process, and the reply lands as the session result",
     run: async (w) => {
@@ -353,7 +354,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "I7",
-    covers: ["I4"],
+    covers: ["I4", "R7", "S4"],
     title:
       "Claude (fake model): every main-loop turn end is the plugin's turn.complete: an answer is the result, Esc in the pane is one interrupted result, `vibest interrupt` is none, also while a background shell keeps the terminal working; I4: vibest's plugin loads beside a plugin the user installed",
     run: async (w) => {
@@ -431,6 +432,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "I9",
+    covers: ["R7"],
     title:
       "Claude with no --settings (fake model): the plugin's tool.call guard refuses a session's herdr call and its Read, find, grep and Grep of another project, still lets it read its own project folder, and no refused file's text reaches the model",
     run: async (w) => {

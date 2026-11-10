@@ -5,14 +5,15 @@ import { Deferred, Effect, Fiber, FileSystem, HashMap, Path } from "effect"
 import { TestClock } from "effect/testing"
 
 import {
-  FakeRuntime,
+  callerPlugin,
   FakeProcesses,
+  FakeRuntime,
   makeRepository,
+  resultText,
+  systemPromptFile,
   until,
   untilVirtual,
   writeResult,
-  resultText,
-  systemPromptFile,
 } from "./fakes.ts"
 import { spawnInput, spawnWorking, idleSession, sessionWorktree, test } from "./sessions-helpers.ts"
 
@@ -154,6 +155,48 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual(yield* created(), before)
       assert.isUndefined(yield* db.getSession("ffffffff-ffff-4fff-8fff-ffffffffffff"))
     }),
+  )
+
+  test(
+    "run --peer without --runtime uses the peer runtime and machine, and an explicit other runtime is still refused",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const owner = yield* idleSession(repo)
+      const parent = yield* owner.db.coordinatorLaunch(owner.row.projectId, "pi", false, {
+        runtime: "hc",
+        address: { machine: "local", id: "test/coord-hc" },
+      })
+      assert.strictEqual((yield* owner.db.coordinatorOf(owner.row.projectId))?.runtime, "hc")
+      const place = (yield* owner.db.getSession(owner.id))!
+      yield* owner.db.updateSession(owner.id, { address: { ...place.address, machine: "other" } })
+      const base = yield* spawnInput(repo)
+      const followed = yield* owner.sessions.spawn({
+        machine: base.machine,
+        root: base.root,
+        projectId: base.projectId,
+        name: base.name,
+        prompt: base.prompt,
+        harness: base.harness,
+        peer: owner.id,
+        parentSessionId: parent.sessionId,
+      })
+      assert.strictEqual(followed.runtime, "herdr")
+      assert.strictEqual(yield* owner.db.sessionDirectory(followed.id), yield* owner.db.sessionDirectory(owner.id))
+      yield* until(owner.db.getSession(followed.id), (w) => !!w && w.startedAt !== null)
+      const refused = yield* Effect.flip(
+        owner.sessions.spawn({
+          ...base,
+          runtime: "hc",
+          peer: owner.id,
+          parentSessionId: parent.sessionId,
+        }),
+      )
+      assert.strictEqual(refused._tag, "NoSuchSession")
+      assert.include(refused.message, "ineligible: it runs in herdr on other, not hc on local")
+    }),
+    {
+      plugins: [callerPlugin("hc", { env: ["HC_ID"], terminal: (env) => Effect.succeed(env.HC_ID) })],
+    },
   )
 
   const started: Array<string> = []

@@ -31,12 +31,13 @@ export const plugin: VibestPlugin.Plugin.Plugin = VibestPlugin.Plugin.define({
     Effect.gen(function* () {
       const socket = yield* defaultSocketPath().pipe(Effect.provide(platform), Effect.orDie)
       const session = yield* hcSession.pipe(Effect.orDie)
-      const connect = (socketPath: string) => Effect.runSync(Hc.make(socketPath).pipe(Effect.provide(platform)))
-      const home = connect(socket)
+      const connect = (socketPath: string) => Hc.make(socketPath).pipe(Effect.provide(platform))
+      const home = yield* connect(socket)
       const runtime = yield* make({ connect, socket, scope: yield* Effect.scope })
       const definition: VibestPlugin.Runtime.RuntimeDefinition = {
         ...runtime,
         id: KIND,
+        name: "herdr-core",
         caller,
         link: () =>
           home.hello.pipe(

@@ -66,6 +66,7 @@ export interface RuntimeCaller {
 
 export interface RuntimeDefinition {
   readonly id: string
+  readonly name?: string
   readonly caller?: RuntimeCaller
   readonly status: (machine: Machine) => Effect.Effect<MachineStatus>
 

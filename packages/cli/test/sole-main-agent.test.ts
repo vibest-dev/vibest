@@ -19,7 +19,7 @@ const recordingClient = (stop: "stopped" | "running" | "moved" | "unsupported" =
     "Project.RunningCoordinator": () =>
       Effect.sync(() => {
         calls.push("RunningCoordinator")
-        return { harness: "claude" as const, place: "herdr terminal w1:p1", runtime: "herdr", address: "{}" }
+        return { harness: "claude" as const, place: "herdr w1:p1", runtime: "herdr", address: "{}" }
       }),
     "Project.StopCoordinator": () =>
       Effect.sync(() => {
@@ -46,7 +46,7 @@ describe("soleMainAgent while the main agent runs in another terminal: only a y 
         const f = recordingClient()
         const exit = yield* Effect.exit(f.run)
         assert.isTrue(Exit.isFailure(exit))
-        assert.include(String(exit), "the main agent (claude) runs in herdr terminal w1:p1")
+        assert.include(String(exit), "the main agent (claude) runs in herdr w1:p1")
         assert.deepStrictEqual(f.calls, ["RunningCoordinator"])
       }).pipe(Effect.provide(stdio(terminal, stdin))),
     )

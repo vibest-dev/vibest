@@ -23,6 +23,7 @@ import {
   writeResult,
   systemPromptFile,
   projectOf,
+  processesOn,
 } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>, options?: TestOptions) =>
@@ -433,7 +434,7 @@ describe.concurrent("Processes", () => {
         }
         const p = yield* Effect.gen(function* () {
           return yield* Processes
-        }).pipe(Effect.provide(Processes.layer(platform)))
+        }).pipe(Effect.provide(processesOn(platform)))
         for (const pid of [0, -1, 1.5, Number.NaN]) assert.strictEqual(yield* p.liveness(pid), "unknown")
         assert.strictEqual(yield* p.liveness(7), "alive")
         assert.deepStrictEqual(asked, [7])
@@ -456,7 +457,7 @@ describe.concurrent("Processes", () => {
             return yield* Processes
           }).pipe(
             Effect.provide(
-              Processes.layer({
+              processesOn({
                 liveness: Platform.liveness,
                 terminate: () => {
                   throw new Error("this test must not signal a process")
@@ -508,6 +509,25 @@ describe.concurrent("Processes", () => {
         const pid = Number((yield* fs.readFileString(file)).trim())
         assert.isTrue(pid > 0)
         assert.strictEqual(Platform.liveness(pid), "exited")
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
+  it.live(
+    "a zombie (a child its parent never reaps, as an old vibestd under a parent that does not wait) is exited; its live parent is alive",
+    () =>
+      Effect.gen(function* () {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const parent = yield* spawner.spawn(ChildProcess.make("sh", ["-c", "true & echo $!; exec sleep 30"]))
+        yield* Effect.addFinalizer(() => parent.kill().pipe(Effect.ignore))
+        const zombie = Number((yield* parent.stdout.pipe(Stream.decodeText, Stream.take(1), Stream.mkString)).trim())
+        assert.isTrue(zombie > 0)
+        yield* until(
+          Effect.sync(() => Platform.liveness(zombie)),
+          (seen) => seen === "exited",
+        )
+        assert.doesNotThrow(() => process.kill(zombie, 0), "kill 0 alone reports the zombie as alive")
+        assert.strictEqual(Platform.liveness(zombie), "exited")
+        assert.strictEqual(Platform.liveness(Number(parent.pid)), "alive")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 

@@ -33,6 +33,18 @@ queued message is active. The client waits 55 s for the reply (above an older vi
 proof it exited, so the new vibestd waits for the lock, boundedly. With `--version` (15 s) and the new start, a
 replacement ends in about two minutes whatever the other side does, not counting the wait for the yes.
 
+Every start of vibestd (`vibest daemon`, the auto-start of a CLI or a harness plugin, the new vibestd of a handoff)
+goes through `spawnDaemon`: a shell that starts vibestd in the background and exits, and that the caller waits for.
+vibestd is then adopted by launchd on macOS, and on Linux by the nearest subreaper (such as `systemd --user`) or
+init, so a long-lived caller such as a Pi process or an old vibestd never leaves it a zombie. A process is exited for vibest (`liveness`) when `kill(pid, 0)` fails or it is a
+zombie (`sysctl` `KERN_PROC_PID` on macOS, `/proc/<pid>/stat` on Linux); every wait for an old vibestd or harness to
+exit uses it.
+
+`vibest update` sends `Daemon.Handoff` the same way, in the running vibestd's protocol, so a newer vibest hands over
+a vibestd of any older protocol that has the `handoff` capability. A handoff (like a Stop) accepts the stop in the
+same step that finds vibestd idle, and only then starts the new vibestd: from then on no turn end or other work is
+admitted, so a started new vibestd always takes over, and a refused handoff has started nothing.
+
 After `vibest update` installs another version and vibestd answers Ping with that version, the old process does not
 offer the agent restarts itself: across a protocol change vibestd refuses it (`IncompatibleDaemon`). It runs the
 installed binary as `<installed vibest> update --restart-agents-after <pid> [--yes]` on the same terminal and exits
@@ -55,10 +67,13 @@ database the old vibestd left before this one opens and migrates it, sessions ar
 The lock is taken first and released last, after the socket server has closed and removed its path, so a successor's
 socket is never unlinked. The PID line is written into the locked file, and releasing the lock empties it; it is for
 people to read, since a stale file's PID may belong to another process by now, and nothing signals it. An accepted
-`Daemon.Stop` keeps a short grace before the server closes so its reply is written; a lost reply is still handled by
-the client, which watches Ping. Each daemon has its own plugin registry (a service, never a global), provided after
-every layer that reads it, since a `provideMerge` satisfies only requirements outstanding before it; and one event bus
-below Db and Runtimes, so a commit is visible to whoever subscribed first. The main Agents' `vibest --env` values live
+`Daemon.Stop` keeps a 200 ms grace (`STOP_REPLY_GRACE` in `packages/server/src/daemon.ts`) before the server closes so its reply is written; a lost reply is still handled by
+the client, which watches Ping. Each daemon has its own plugin registry (a service, never a global), and one event bus that
+Db and Runtimes depend on, so a commit is visible to whoever subscribed first. The services form one graph
+(`packages/server/src/app.ts`, see [architecture §5](architecture.md#5-service-composition)): a service is built after
+every node in its `deps`, and the nodes the host supplies are replacements, so the daemon and the tests compile the
+same graph. The RPC and HTTP servers list the whole services group (`packages/server/src/services.ts`) in their
+`deps`, so the socket and the HTTP port bind only after every service is built, whatever the order of the roots. The main Agents' `vibest --env` values live
 in vibestd's memory only (never stored, logged or sent); a handoff passes them to the next vibestd in its environment
 (`VIBEST_HANDOFF_ENV`), which `vibest daemon --import` reads and removes before anything starts, and a handoff first
 has the new binary check read-only that it can open the database (`vibest daemon import-check`). The pairs go on the

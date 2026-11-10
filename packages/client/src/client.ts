@@ -107,7 +107,10 @@ const fromEnv = Effect.gen(function* () {
     runtime: yield* read("VIBEST_RUNTIME"),
     cwd: (yield* Path.Path).resolve("."),
   }
-}).pipe(Effect.orElseSucceed(() => ({})))
+}).pipe(
+  Effect.tapCause((cause) => Effect.logDebug(`session claim headers fell back to the request: ${Cause.pretty(cause)}`)),
+  Effect.orElseSucceed(() => ({})),
+)
 
 export const claimHeaders = (claim: Claim) =>
   claim._tag === "cli"
@@ -122,18 +125,25 @@ export const claimHeaders = (claim: Claim) =>
         }),
       )
 
-export const connect = (socket: string) =>
+export const clientOver = <E, R>(
+  socket: Layer.Layer<Socket.Socket, E, R>,
+  options?: Parameters<typeof RpcClient.layerProtocolSocket>[0],
+) =>
   Layer.build(
-    RpcClient.layerProtocolSocket({ pingInterval: "1 minute", pingTimeout: "1 day" }).pipe(
-      Layer.provide(
-        Layer.effect(
-          Socket.Socket,
-          Effect.flatMap(SocketConnector, (dial) => dial(socket)),
-        ),
-      ),
+    RpcClient.layerProtocolSocket(options).pipe(
+      Layer.provide(socket),
       Layer.provide(RpcSerialization.layerNdJsonRpc()),
     ),
   ).pipe(Effect.flatMap((protocol) => RpcClient.make(VibestRpcs).pipe(Effect.provide(protocol))))
+
+export const connect = (socket: string) =>
+  clientOver(
+    Layer.effect(
+      Socket.Socket,
+      Effect.flatMap(SocketConnector, (dial) => dial(socket)),
+    ),
+    { pingInterval: "1 minute", pingTimeout: "1 day" },
+  )
 
 export const HOOK_TIMEOUT = Duration.seconds(2)
 export const HOOK_RETRY_DELAY = Duration.millis(300)
@@ -272,9 +282,10 @@ export const spawnDaemon = (
           "sh",
           [
             "-c",
-            `mkdir -p "$1" && shift && exec "$@" >>"${log}" 2>&1`,
+            'mkdir -p "$1" && log=$2 && shift 2 && { "$@" >>"$log" 2>&1 & }',
             "sh",
             layout.home,
+            log,
             ...command,
             "daemon",
             "--foreground",
@@ -286,11 +297,16 @@ export const spawnDaemon = (
             extendEnv: true,
             stdin: "ignore",
             stdout: "ignore",
-            stderr: "ignore",
+            stderr: "pipe",
           },
         ),
       )
       yield* handle.unref
+      const [said, code] = yield* Effect.all([Stream.mkString(Stream.decodeText(handle.stderr)), handle.exitCode], {
+        concurrency: "unbounded",
+      })
+      if (code !== 0)
+        return yield* Effect.fail(new Error(`vibestd was not started (exit ${code}): ${said.trim() || "no output"}`))
     }).pipe(
       Effect.scoped,
       Effect.mapError((e) => new DaemonUnavailable({ socket: layout.socket, message: e.message })),

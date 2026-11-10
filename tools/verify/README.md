@@ -11,6 +11,10 @@ pnpm verify --elsewhere H4       # leave these checks to another machine's verif
                                  # macOS-only H4 to its macOS job, which runs pnpm verify H4 on the same commit)
 ```
 
+verify is a deterministic program: CI runs it and it passes or fails. It does not read the capability docs in
+`docs/features/`; an agent does, with the `verify-features` skill (`.agents/skills/verify-features/SKILL.md`), and uses
+verify's results as evidence.
+
 A failed build, typecheck, test, pack or install stops the run; a failed E2E leg does not stop the other leg, and the
 run fails at the end naming each failed leg:
 
@@ -25,11 +29,10 @@ run fails at the end naming each failed leg:
    binary bytes, so it runs the smoke set (I1, I2, U1, U9, U10, H1) while its file layout (paths and links) matches the
    last one that passed the whole gate, and the whole gate when it changed. Checks whose key is unchanged are cache hits
    (docs/testing/e2e-plan.md §3).
-3. Prints, by name, the feature-map checks marked `agent`, `slow` or `runtime`: no gate script proves them, so an agent
-   does, with evidence.
+3. Prints `verify: passed.` when every leg passed.
 
 Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `update`, `start`, `inbox`, `exits`, `restart`, `hc`,
-`terminal-status`; or check ids.
+`sessions`, `delivery`, `routing`, `main-agent`, `machines`, `terminal-status`; or check ids.
 
 Nothing is published: no GitHub Release, no npm package, nothing in `~/.local`.
 

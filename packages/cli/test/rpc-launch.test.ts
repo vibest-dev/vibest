@@ -39,7 +39,7 @@ describe("vibest.sock", () => {
       assert.deepStrictEqual(opened, {
         runtime: "herdr",
         terminal: opened.terminal,
-        place: `herdr terminal ${opened.terminal}`,
+        place: `herdr ${opened.terminal}`,
         attach: ["fake", "attach"],
       })
       const [open] = yield* herdr.callsTo("open")

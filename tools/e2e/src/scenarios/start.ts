@@ -229,7 +229,7 @@ const move = (harness: "claude" | "pi"): Check => ({
 
 const checks: ReadonlyArray<Check> = [
   {
-    id: "S1",
+    id: "S10-start",
     title:
       "in a project directory, `vibest` starts its main agent in this run's herdr session; `vibest ls` shows it first",
     run: async (w) => {

@@ -4,8 +4,11 @@ import type { Caller } from "./host.ts"
 
 export interface CallerHit {
   readonly id: string
+  readonly name?: string
   readonly terminal: string | undefined
 }
+
+const shown = (id: string, name: string | undefined) => name ?? id
 
 export type MainPlace =
   | { readonly in: "terminal"; readonly runtime: string; readonly terminal: string }
@@ -21,7 +24,7 @@ export const mainPlace = (o: {
     const hit = named(o.runtime)
     if (hit === undefined) return { in: "launch", runtime: o.runtime }
     return hit.terminal === undefined
-      ? { in: "refused", message: `this ${o.runtime} terminal could not be named` }
+      ? { in: "refused", message: `this ${shown(o.runtime, hit.name)} place could not be named` }
       : { in: "terminal", runtime: o.runtime, terminal: hit.terminal }
   }
   const chosen = o.hits[0]
@@ -30,7 +33,7 @@ export const mainPlace = (o: {
   return chosen.terminal === undefined
     ? {
         in: "refused",
-        message: `${chosen.id} is detected in this environment, but its terminal could not be named; pass --runtime`,
+        message: `${shown(chosen.id, chosen.name)} is detected in this environment, but its place could not be named; pass --runtime`,
       }
     : { in: "terminal", runtime: chosen.id, terminal: chosen.terminal }
 }
@@ -47,7 +50,7 @@ export const callerKind = (
 ) => specs.find((spec) => present(spec.env, env))?.id
 
 export const specHits = (
-  specs: ReadonlyArray<Pick<Caller, "id" | "env" | "terminal">>,
+  specs: ReadonlyArray<Pick<Caller, "id" | "name" | "env" | "terminal">>,
   env: Readonly<Record<string, string | undefined>>,
   runtime?: string,
 ) =>
@@ -57,6 +60,7 @@ export const specHits = (
     const terminal = chosen === undefined ? undefined : yield* chosen.terminal(env)
     return matches.map((hit): CallerHit => ({
       id: hit.id,
+      ...(hit.name === undefined ? {} : { name: hit.name }),
       terminal: hit === chosen ? terminal : undefined,
     }))
   })

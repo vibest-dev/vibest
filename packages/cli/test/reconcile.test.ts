@@ -6,16 +6,7 @@ import type { Runtime } from "@vibest/plugin"
 import { Effect, Ref, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import {
-  FakeRuntime,
-  makeRepository,
-  projectOf,
-  settled,
-  TEST_HERDR,
-  testLayer,
-  type TestServices,
-  until,
-} from "./fakes.ts"
+import { FakeRuntime, makeRepository, projectOf, TEST_HERDR, testLayer, type TestServices, until } from "./fakes.ts"
 
 const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Scope.Scope>) =>
   it.effect(name, () => program.pipe(Effect.provide(testLayer({ hooked: ["pi"] }))))
@@ -64,10 +55,13 @@ const terminalReads = Effect.gen(function* () {
   return ours(yield* herdr.callsTo("state")) + ours(yield* herdr.callsTo("process"))
 })
 
+const startupSettled = (sessions: Sessions["Service"]) => until(sessions.inMemory, (memory) => memory.reconciles >= 1)
+
 describe("reconcile: a terminal whose agent has not started", () => {
   test(
     "a runtime that reports the terminal alive with no agent process yet is left running; a terminal it cannot find is ended",
     Effect.gen(function* () {
+      yield* startupSettled(yield* Sessions)
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
@@ -100,9 +94,9 @@ describe("reconcile: a terminal whose agent has not started", () => {
         projectId,
         { cwd: repo },
       )
-      yield* Sessions.make({ maxSessions: undefined })
-      yield* until(db.getSession(gone), (session) => session?.exitedAt != null)
-      yield* settled
+      const sessions = yield* Sessions.make({ maxSessions: undefined })
+      yield* startupSettled(sessions)
+      assert.isNotNull((yield* db.getSession(gone))!.exitedAt)
       assert.isNull((yield* db.getSession(alive))!.exitedAt)
       assert.strictEqual((yield* db.getSession(alive))!.turnState, "open")
     }),
@@ -117,6 +111,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
       const projectId = yield* projectOf(repo)
       const id = "cccccccc-cccc-4ccc-8ccc-000000000001"
       yield* herdr.addPane("w8:pending", "w8", repo)
+      yield* startupSettled(yield* Sessions)
       yield* db.insertSession(
         {
           id,
@@ -140,12 +135,11 @@ describe("reconcile: a terminal whose agent has not started", () => {
         projectId,
         { cwd: repo },
       )
-      yield* Sessions.make({ maxSessions: undefined })
-      yield* settled
+      const sessions = yield* Sessions.make({ maxSessions: undefined })
+      yield* startupSettled(sessions)
       assert.isNull((yield* db.getSession(id))!.exitedAt)
       yield* herdr.seedAgent("w8:pending")
       yield* herdr.updateAgent("w8:pending", (agent) => ({ ...agent, alive: false }))
-      yield* settled
       assert.isNull((yield* db.getSession(id))!.exitedAt)
       yield* TestClock.adjust(START_TIMEOUT)
       yield* until(db.getSession(id), (session) => session?.exitedAt != null)
@@ -159,6 +153,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
+      yield* startupSettled(yield* Sessions)
       const id = "dddddddd-dddd-4ddd-8ddd-000000000001"
       const terminal = "w8:once"
       yield* herdr.addPane(terminal, "w8", repo)
@@ -191,17 +186,15 @@ describe("reconcile: a terminal whose agent has not started", () => {
           const process = (yield* herdr.callsTo("process")).filter((call) => call.terminal === terminal).length
           return state + process
         })
-      yield* Sessions.make({ maxSessions: undefined })
-      yield* until(reads(), (n) => n >= 2)
-      yield* settled
+      const sessions = yield* Sessions.make({ maxSessions: undefined })
+      yield* startupSettled(sessions)
       const afterFirst = yield* reads()
       assert.isNull((yield* db.getSession(id))!.exitedAt)
       yield* TestClock.adjust(START_TIMEOUT)
-      yield* until(reads(), (n) => n > afterFirst)
-      yield* settled
+      yield* until(Effect.all([reads(), sessions.inMemory]), ([n, memory]) => n > afterFirst && memory.locks === 0)
       const afterSecond = yield* reads()
       yield* TestClock.adjust(START_TIMEOUT)
-      yield* settled
+      yield* until(sessions.inMemory, (memory) => memory.locks === 0)
       assert.strictEqual(yield* reads(), afterSecond)
       assert.isNull((yield* db.getSession(id))!.exitedAt)
     }),
@@ -214,6 +207,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
+      yield* startupSettled(yield* Sessions)
       const id = "eeeeeeee-eeee-4eee-8eee-000000000001"
       const terminal = "w8:again"
       yield* herdr.addPane(terminal, "w8", repo)
@@ -247,19 +241,19 @@ describe("reconcile: a terminal whose agent has not started", () => {
           return state + process
         })
       const sessions = yield* Sessions.make({ maxSessions: undefined })
-      yield* until(reads(), (n) => n >= 2)
-      yield* settled
+      yield* startupSettled(sessions)
+      const afterFirst = yield* reads()
       yield* TestClock.adjust(START_TIMEOUT)
-      yield* until(reads(), (n) => n >= 4)
-      yield* settled
+      yield* until(Effect.all([reads(), sessions.inMemory]), ([n, memory]) => n > afterFirst && memory.locks === 0)
       const spent = yield* reads()
       yield* herdr.seedAgent(terminal)
       yield* sessions.check(id)
       yield* herdr.addPane(terminal, "w8", repo)
       yield* sessions.check(id)
+      const armed = yield* reads()
+      assert.ok(armed > spent)
       yield* TestClock.adjust(START_TIMEOUT)
-      yield* until(reads(), (n) => n > spent)
-      yield* settled
+      yield* until(Effect.all([reads(), sessions.inMemory]), ([n, memory]) => n > armed && memory.locks === 0)
       assert.isNull((yield* db.getSession(id))!.exitedAt)
     }),
   )
@@ -269,22 +263,25 @@ describe("reconcile: one look at every live session at start, when a runtime reg
   test(
     "50 idle sessions: one read each when the next vibestd starts over their rows, then none over an idle hour",
     Effect.gen(function* () {
+      yield* startupSettled(yield* Sessions)
       yield* idleSubagentsBetweenTurns(50)
-      yield* Sessions.make({ maxSessions: undefined })
-      yield* until(terminalReads, (n) => n >= 50)
-      yield* settled
+      const sessions = yield* Sessions.make({ maxSessions: undefined })
+      yield* startupSettled(sessions)
       assert.strictEqual(yield* terminalReads, 50)
       for (let minute = 0; minute < 60; minute++) {
         yield* TestClock.adjust("1 minute")
-        yield* settled
+        yield* until(sessions.inMemory, (memory) => memory.locks === 0)
       }
       assert.strictEqual(yield* terminalReads, 50)
+      assert.strictEqual((yield* sessions.inMemory).reconciles, 1)
     }),
   )
 
   test(
     "a runtime registered after the start is reconciled: each of its sessions is read once",
     Effect.gen(function* () {
+      const sessions = yield* Sessions
+      yield* startupSettled(sessions)
       const read = yield* Ref.make<ReadonlyArray<string>>([])
       yield* idleSubagentsBetweenTurns(3, "late")
       const late = {
@@ -295,8 +292,7 @@ describe("reconcile: one look at every live session at start, when a runtime reg
         present: () => Effect.void,
       } as unknown as Runtime.RuntimeDefinition
       yield* (yield* Runtimes).transform((editor) => editor.add(late))
-      yield* until(Ref.get(read), (all) => all.length >= 3)
-      yield* settled
+      yield* until(sessions.inMemory, (memory) => memory.reconciles >= 2)
       assert.deepStrictEqual([...(yield* Ref.get(read))].toSorted(), ["w9:p0", "w9:p1", "w9:p2"])
     }),
   )

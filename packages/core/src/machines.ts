@@ -1,4 +1,5 @@
 import { connectPipe, type PipeClient } from "@vibest/client/pipe"
+import { reconnectSchedule } from "@vibest/plugin"
 import { peerHeaders, PROTOCOL } from "@vibest/protocol/protocol"
 import type { DaemonStopping, InvalidCaller, ProtocolRejected } from "@vibest/protocol/rpc"
 import { shortId } from "@vibest/schema/id"
@@ -14,11 +15,26 @@ import {
   type RuntimeView,
   UnknownMachine,
 } from "@vibest/schema/machine"
-import { Clock, Context, Duration, Effect, Exit, Fiber, Layer, Option, Predicate, Schema, Scope, Stream } from "effect"
+import {
+  Clock,
+  Context,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Predicate,
+  Schedule,
+  Schema,
+  Scope,
+  Stream,
+} from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
 import type * as Socket from "effect/socket/Socket"
 
 import { Db, type MachineRow } from "./db.ts"
+import { LayerNode } from "./effect/layer-node.ts"
 import { VibestdIdentity } from "./identity.ts"
 import { keyedLock } from "./keyed-lock.ts"
 import { errorMessage, type MachineHook, type PluginNote, Plugins } from "./plugins.ts"
@@ -34,17 +50,23 @@ export interface Pipe {
 export class MachineTransport extends Context.Service<
   MachineTransport,
   (argv: ReadonlyArray<string>) => Effect.Effect<Pipe, Error, Scope.Scope>
->()("vibest/MachineTransport") {}
+>()("vibest/MachineTransport") {
+  static readonly node = LayerNode.unbound(MachineTransport)
+}
 
 export const ADD_TIMEOUT = Duration.seconds(30)
 export const RETRY_FIRST = Duration.millis(500)
 export const RETRY_MAX = Duration.seconds(120)
 export const RETRY_RESET = Duration.seconds(60)
+const RETRY = reconnectSchedule({ first: RETRY_FIRST, max: RETRY_MAX })
 const EXIT_WAIT = Duration.seconds(1)
 export const REPAIR_PAUSE = Duration.seconds(30)
 
 export const cannotShow = (name: string, kind: string) =>
-  `${name}'s ${kind} terminals cannot be shown here; vibest peek ${name}/<id> reads them`
+  `${name}'s ${kind} agents cannot be shown here; vibest peek ${name}/<id> reads them`
+
+const shownKind = (here: ReadonlyArray<{ readonly id: string; readonly name?: string }>, kind: string) =>
+  here.find((runtime) => runtime.id === kind)?.name ?? kind
 
 export const noteText = (note: PluginNote) => `${note.message}${note.fix === undefined ? "" : `; fix: ${note.fix}`}`
 
@@ -179,15 +201,17 @@ const make = Effect.gen(function* () {
     Effect.map(runtimes.all, (here) =>
       (there.get(name)?.runtimes ?? [])
         .filter((r) => !here.some((h) => h.id === r.kind && h.locate !== undefined))
-        .map((r): PluginNote => ({ message: cannotShow(name, r.kind) })),
+        .map((r): PluginNote => ({ message: cannotShow(name, shownKind(here, r.kind)) })),
     )
 
   const ensure = (name: string, kind: string, sessions: ReadonlyMap<string, string>, always = false) =>
     lock.withLock(name)(
       Effect.gen(function* () {
         const row = yield* db.machineNamed(name)
-        const locate = (yield* runtimes.all).find((r) => r.id === kind)?.locate
-        if (row === undefined || locate === undefined) return { terminals: NONE, note: cannotShow(name, kind) } as View
+        const here = yield* runtimes.all
+        const locate = here.find((r) => r.id === kind)?.locate
+        const label = shownKind(here, kind)
+        if (row === undefined || locate === undefined) return { terminals: NONE, note: cannotShow(name, label) } as View
         const seen = there.get(name)
         const reported = seen?.runtimes.find((r) => r.kind === kind)
         if (reported?.link === undefined)
@@ -225,8 +249,7 @@ const make = Effect.gen(function* () {
           repairs.delete(key)
           return again as View
         }
-        const note =
-          again.note ?? (notes.map(noteText).join("; ") || `${name}'s ${kind} terminals are not in ${kind} here`)
+        const note = again.note ?? (notes.map(noteText).join("; ") || `${name}'s agents are not in ${label} here`)
         repairs.set(key, { at: yield* Clock.currentTimeMillis, note })
         return { terminals: NONE, note } as View
       }),
@@ -370,7 +393,7 @@ const make = Effect.gen(function* () {
 
   const supervise = (name: string, first: First | undefined): Effect.Effect<void> =>
     Effect.gen(function* () {
-      let delay = RETRY_FIRST
+      let step = yield* Schedule.toStep(RETRY)
       let given = first
       while (true) {
         const row = given?.row ?? (yield* db.machineNamed(name))
@@ -387,11 +410,12 @@ const make = Effect.gen(function* () {
         }
         const was = entries.get(name)
         const now = yield* Clock.currentTimeMillis
-        const wait =
-          was?.state === "connected" && now - was.since >= Duration.toMillis(RETRY_RESET) ? RETRY_FIRST : delay
+        if (was?.state === "connected" && now - was.since >= Duration.toMillis(RETRY_RESET)) {
+          step = yield* Schedule.toStep(RETRY)
+        }
         yield* set(name, { state: "unreachable", reason: down.message })
-        yield* Effect.sleep(wait)
-        delay = Duration.min(Duration.times(wait, 2), RETRY_MAX)
+        const [, delay] = yield* Effect.orDie(step(now, undefined))
+        yield* Effect.sleep(delay)
       }
     })
 
@@ -559,4 +583,10 @@ const make = Effect.gen(function* () {
 
 export class Machines extends Context.Service<Machines, Effect.Success<typeof make>>()("vibest/Machines") {
   static readonly layer = Layer.effect(Machines, make)
+
+  static readonly node = LayerNode.make({
+    service: Machines,
+    layer: Machines.layer,
+    deps: [Db.node, MachineTransport.node, Plugins.node, Runtimes.node, VibestdIdentity.node],
+  })
 }

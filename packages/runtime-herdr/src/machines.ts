@@ -1,6 +1,7 @@
 import type * as VibestPlugin from "@vibest/plugin"
-import { Duration, Effect, Option, Schema, Stream } from "effect"
-import { ChildProcess, type ChildProcessSpawner } from "effect/process"
+import { capture } from "@vibest/plugin"
+import { Duration, Effect, Option, Schema } from "effect"
+import { ChildProcessSpawner } from "effect/process"
 
 import type { HerdrPool } from "./pool.ts"
 import { parseTerminal, REMOTE_SESSION } from "./terminal-runtime.ts"
@@ -20,22 +21,12 @@ const CLI_TIMEOUT = Duration.seconds(25)
 export const cliOf =
   (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]): Cli =>
   (args) =>
-    Effect.gen(function* () {
-      const handle = yield* spawner.spawn(ChildProcess.make("herdr", [...args], { stdin: "ignore" }))
-      const [stdout, stderr, code] = yield* Effect.all(
-        [
-          Stream.mkString(Stream.decodeText(handle.stdout)),
-          Stream.mkString(Stream.decodeText(handle.stderr)),
-          handle.exitCode,
-        ],
-        { concurrency: "unbounded" },
-      )
-      return { code: Number(code), stdout: stdout ?? "", stderr: stderr ?? "" }
-    }).pipe(
-      Effect.scoped,
-      Effect.timeoutOption(CLI_TIMEOUT),
-      Effect.map(
-        Option.getOrElse(() => ({ code: 124, stdout: "", stderr: `timed out after ${Duration.format(CLI_TIMEOUT)}` })),
+    capture("herdr", args, { stdin: "ignore", timeout: CLI_TIMEOUT }).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.map((run) =>
+        run === undefined
+          ? { code: 124, stdout: "", stderr: `timed out after ${Duration.format(CLI_TIMEOUT)}` }
+          : { code: run.exitCode, stdout: run.stdout, stderr: run.stderr },
       ),
       Effect.catch((e) =>
         Effect.succeed({ code: 127, stdout: "", stderr: `herdr: ${e instanceof Error ? e.message : String(e)}` }),

@@ -230,7 +230,7 @@ export function register(on: On, _options?: unknown) {
       draining = true
       queue.shift()
       keep(batch.line, batch.text)
-      host.submit(batch.line).then(
+      await host.submit(batch.line).then(
         (r) => {
           draining = false
           if (r.drop !== undefined) {

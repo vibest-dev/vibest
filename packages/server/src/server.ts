@@ -1,35 +1,42 @@
 import { importCheck, spawnDaemon } from "@vibest/client/client"
 import { raisesSeen } from "@vibest/core/activity"
-import { awaitEvent, Bus, type EngineEvent } from "@vibest/core/bus"
+import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { callerTarget, filterCallerEnv, mainPlace, specHits } from "@vibest/core/caller"
 import { AddressJson, Db, encodeAddress } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
-import { harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
+import { Harness, harnessOptions, Harnesses, HarnessUnavailable } from "@vibest/core/harness"
 import type { HarnessDefinition } from "@vibest/core/host"
+import { VibestdIdentity } from "@vibest/core/identity"
 import { coordinatorIdle, Inbox } from "@vibest/core/inbox"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import * as Launch from "@vibest/core/launch"
+import { Machines } from "@vibest/core/machines"
 import { Layout, shellQuote } from "@vibest/core/paths"
+import { Peers } from "@vibest/core/peer"
 import { describeSpawn, Plugins } from "@vibest/core/plugins"
+import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
 import { createProject } from "@vibest/core/project-create"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
+import { Remote } from "@vibest/core/remote"
 import { HARNESS_EXIT_WAIT, stopAgent } from "@vibest/core/remove"
+import { SshHosts } from "@vibest/core/repository-url"
 import { Restarting } from "@vibest/core/restarting"
 import { envelope } from "@vibest/core/results"
 import { machinesListing, NoRuntime, Runtimes, type Terminal } from "@vibest/core/runtimes"
 import { defaultSessionName, NoSuchSession, runtimeEnv, Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
+import * as UpdateCheckNode from "@vibest/core/update-check"
 import { UpdateCheck } from "@vibest/core/update-check"
-import { NotInRepository } from "@vibest/core/worktree"
+import { Git, NotInRepository } from "@vibest/core/worktree"
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import {
   type ACCESS,
   Caller,
   CAPABILITIES,
-  DaemonBusy,
   type DaemonIdentity,
-  DaemonStopping,
   Forbidden,
   InvalidCaller,
   VibestRpcs,
@@ -45,23 +52,30 @@ import { Clock, Context, Deferred, Duration, Effect, Layer, Option, Queue, Schem
 import * as Headers from "effect/http/Headers"
 import { ChildProcessSpawner } from "effect/process"
 import { RpcSerialization, RpcServer } from "effect/rpc"
+import * as SocketServer from "effect/socket/SocketServer"
 
 import { AdmissionLive, CallerGateLive, noteOpen, ProtocolGateLive, reader } from "./gates.ts"
 import * as Hooks from "./hooks.ts"
 import { integrationHandlers } from "./integration.ts"
 import { placeOf, sameCoordinator, sessionListing, toInfo } from "./listing.ts"
 import { remoteHandlers } from "./remote-handlers.ts"
+import { services } from "./services.ts"
+import { stopOnce as stopDaemon } from "./stop.ts"
 
 type Access = typeof ACCESS
 type MethodOf<A> = { [K in keyof Access]: Access[K] extends A | readonly [A, "peer"] ? K : never }[keyof Access]
 
-export class Identity extends Context.Service<Identity, DaemonIdentity>()("vibest/DaemonIdentity") {}
+export class Identity extends Context.Service<Identity, DaemonIdentity>()("vibest/DaemonIdentity") {
+  static readonly node = LayerNode.unbound(Identity)
+}
 
-export class Shutdown extends Context.Service<Shutdown, Deferred.Deferred<void>>()("vibest/DaemonShutdown") {}
+export class Shutdown extends Context.Service<Shutdown, Deferred.Deferred<void>>()("vibest/DaemonShutdown") {
+  static readonly node = LayerNode.unbound(Shutdown)
+}
 
 export const HANDOFF_ENV = "VIBEST_HANDOFF_ENV"
 
-export const DRAIN_TIMEOUT = Duration.seconds(5)
+export { DRAIN_TIMEOUT } from "./stop.ts"
 export const PRESENT_TIMEOUT = Duration.seconds(5)
 
 export const WATCH_BACKLOG = 10_000
@@ -153,17 +167,18 @@ export const handlers = VibestRpcs.toLayer(
       Effect.gen(function* () {
         const coord = yield* db.coordinatorOf(projectId)
         if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
+        const runtimeId = coord.runtime
         if (coord.address.id === terminal) return null
+        const found = runtimes.find(runtimeId)
         if (!restarting.has(coord.id)) {
-          const h = yield* runtimes.route(coord.runtime).pipe(Effect.option)
-          if (Option.isNone(h)) return null
-          const presence = yield* coordinatorIdle(h.value, coord.address).pipe(Effect.option)
+          if (found === undefined) return null
+          const presence = yield* coordinatorIdle(found, coord.address).pipe(Effect.option)
           if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
         }
         return {
           harness: coord.harnessId,
-          place: placeOf(coord.runtime, coord.address),
-          runtime: coord.runtime,
+          place: placeOf(found ?? { id: runtimeId }, coord.address),
+          runtime: runtimeId,
           address: encodeAddress(coord.address),
         }
       })
@@ -177,45 +192,7 @@ export const handlers = VibestRpcs.toLayer(
 
     const onlyRuntime = Effect.flatMap(runtimes.all, (all) => Effect.succeed(all.length === 1 ? all[0] : undefined))
 
-    const stopOnce = <E, R>(instance: string, method: string, before: Effect.Effect<void, E, R>) =>
-      Effect.gen(function* () {
-        if (!(yield* drain.begin)) return yield* new DaemonStopping({ method })
-        let last: Array<{ id: string; reason: string }> = []
-        const blockers = Effect.gen(function* () {
-          last = (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" }))
-          if (last.length > 0) return last
-          last = [{ id: "inbox", reason: "checking unsettled delivery" }]
-          last = (yield* db.sendingInbox).map((row) => ({
-            id: `inbox ${row.id}`,
-            reason: `${row.kind} for session ${row.sessionId}: delivery not settled`,
-          }))
-          return last
-        })
-        return yield* Effect.gen(function* () {
-          const none = blockers.pipe(
-            Effect.map((pending) => (pending.length === 0 ? Option.some(true) : Option.none())),
-          )
-          const idle = yield* awaitEvent(
-            none,
-            (event) =>
-              event.type === "live.drain" || event.type === "inbox.status" ? none : Effect.succeed(Option.none()),
-            DRAIN_TIMEOUT,
-            Effect.map(none, Option.isSome),
-          ).pipe(Effect.provideService(Bus, bus))
-          if (!idle) return yield* new DaemonBusy({ blockers: last })
-          yield* before
-          yield* Effect.uninterruptible(
-            Effect.gen(function* () {
-              if (!(yield* drain.accept))
-                return yield* new DaemonBusy({
-                  blockers: (yield* drain.pending).map((id) => ({ id, reason: "daemon operation still running" })),
-                })
-              yield* Deferred.succeed(shutdown, undefined)
-            }),
-          )
-          return { instance }
-        }).pipe(Effect.ensuring(drain.reopen))
-      })
+    const stopOnce = stopDaemon({ drain, bus, sendingInbox: db.sendingInbox, shutdown })
 
     const cliOnly = (method: MethodOf<"cli">) =>
       Effect.flatMap(Caller, (c) =>
@@ -465,7 +442,7 @@ export const handlers = VibestRpcs.toLayer(
           return {
             runtime: rt.id,
             terminal: pane.id,
-            place: placeOf(rt.id, pane),
+            place: placeOf(rt, pane),
             attach: rt.attach?.(at) ?? null,
             ...(routing === undefined ? {} : { routing }),
           }
@@ -588,12 +565,12 @@ export const handlers = VibestRpcs.toLayer(
             identity.agent === "coordinator" ? yield* db.coordinatorOf(identity.projectId) : yield* db.getSession(id)
           if (at?.id !== id || !at.runtime || !at.address || at.address.id === "") return
           const address = at.address
-          const rt = yield* runtimes.route(at.runtime).pipe(Effect.option)
-          if (Option.isNone(rt) || rt.value.seen === undefined || rt.value.see === undefined) return
-          const see = rt.value.see
+          const rt = runtimes.find(at.runtime)
+          if (rt === undefined || rt.seen === undefined || rt.see === undefined) return
+          const see = rt.see
           const unreachable = (e: { readonly message: string }) =>
             new RuntimeUnreachable({ session: id, message: e.message })
-          const seen = rt.value.seen
+          const seen = rt.seen
           yield* Effect.gen(function* () {
             const now = yield* seen(address).pipe(Effect.mapError(unreachable))
             if (raisesSeen(now, turn)) yield* see(address, turn).pipe(Effect.mapError(unreachable))
@@ -676,7 +653,7 @@ export const handlers = VibestRpcs.toLayer(
             const spec = specs.find((item) => item.id === place.runtime)
             if (spec?.ready !== undefined && !(yield* spec.ready(env).pipe(Effect.orDie)))
               return yield* new LaunchFailed({
-                message: spec.missing ?? `this ${place.runtime} terminal could not be named`,
+                message: spec.missing ?? `this ${spec.name ?? place.runtime} place could not be named`,
               })
           }
           return { directory: project.directory, place }
@@ -730,7 +707,7 @@ export const handlers = VibestRpcs.toLayer(
                 ),
               )
               if (claimed === undefined) return yield* Effect.die("coordinator command returned without a session")
-              const rt = Option.getOrUndefined(yield* runtimes.route(kind).pipe(Effect.option))
+              const rt = runtimes.find(kind)
               if (rt?.present !== undefined)
                 yield* rt
                   .present(address, { mainSession: claimed.sessionId, projectId })
@@ -752,7 +729,7 @@ export const handlers = VibestRpcs.toLayer(
           const project = yield* resolveAt(c.repositoryRoot)
           const running = yield* runningCoordinator(project.id, "")
           if (running === null) return null
-          const runtime = Option.getOrUndefined(yield* runtimes.route(running.runtime).pipe(Effect.option))
+          const runtime = runtimes.find(running.runtime)
           if (runtime?.focus === undefined) return { place: running.place, focused: false }
           const address = yield* Schema.decodeUnknownEffect(AddressJson)(running.address).pipe(Effect.orDie)
           const focused = yield* runtime.focus(address).pipe(Effect.exit)
@@ -871,3 +848,40 @@ export const layer = RpcServer.layer(VibestRpcs).pipe(
   Layer.provide(RpcServer.layerProtocolSocketServer),
   Layer.provide(RpcSerialization.layerNdJsonRpc()),
 )
+
+export const socketServer = LayerNode.unbound<SocketServer.SocketServerError>()(SocketServer.SocketServer)
+
+export const node = LayerNode.make({
+  name: "vibest/RpcServer",
+  layer,
+  deps: [
+    services,
+    Bus.node,
+    Db.node,
+    Drain.node,
+    Git.node,
+    Harness.node,
+    Harnesses.node,
+    Identity.node,
+    Inbox.node,
+    Machines.node,
+    Peers.node,
+    Plugins.node,
+    Processes.node,
+    Project.node,
+    Remote.node,
+    Restarting.node,
+    Runtimes.node,
+    Sessions.node,
+    Shutdown.node,
+    SshHosts.node,
+    Subscriptions.node,
+    UpdateCheckNode.node,
+    VibestdIdentity.node,
+    socketServer,
+    PlatformNode.childProcessSpawner,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ],
+})

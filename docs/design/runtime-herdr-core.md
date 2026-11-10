@@ -1,6 +1,6 @@
 # The herdr-core runtime (`hc`)
 
-`packages/runtime-herdr-core` is the builtin runtime plugin that adds the runtime definition `hc`. It drives herdr-core through `effect-herdr-core-sdk`, a client generated from the OpenRPC document `hc schema` prints (pinned in `packages/effect-herdr-core-sdk/schema/`). `hc` is chosen by running `vibest` inside an hc terminal. Without `--runtime`, vibest uses the runtime of the terminal it was started in. When that terminal carries both herdr-core and herdr variables (they are inherited), hc wins because the builtin runtime-herdr-core loads before runtime-herdr. `vibest --runtime hc` names hc, and a subagent follows a parent that runs in hc.
+`packages/runtime-herdr-core` is the builtin runtime plugin that adds the runtime definition `hc` (its place text is `herdr-core`; `--runtime` and stored ids stay `hc`). It drives herdr-core through `effect-herdr-core-sdk`, a client generated from the OpenRPC document `hc schema` prints (pinned in `packages/effect-herdr-core-sdk/schema/`). `hc` is chosen by running `vibest` inside an hc terminal. Without `--runtime`, vibest uses the runtime of the terminal it was started in. When that terminal carries both herdr-core and herdr variables (they are inherited), hc wins because the builtin runtime-herdr-core loads before runtime-herdr. `vibest --runtime hc` names hc, and a subagent follows a parent that runs in hc.
 
 ## Which core
 

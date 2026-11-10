@@ -8,20 +8,25 @@ import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { pre } from "@vibest/builtins"
 import { stdioSocket } from "@vibest/client/pipe"
 import { SocketConnector } from "@vibest/client/socket-connector"
-import { inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
-import { MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
+import { DatabaseOpenFailed, inspectSchema, SchemaMismatch, SQL_NAMES } from "@vibest/core/db"
+import { LayerNode } from "@vibest/core/effect/layer-node"
+import * as PlatformNode from "@vibest/core/effect/platform"
+import { HostFacts, MACHINE_ID_FILES, readHostId } from "@vibest/core/identity"
 import { MachineTransport } from "@vibest/core/machines"
 import { Layout } from "@vibest/core/paths"
 import { messageOf } from "@vibest/core/plugin-sources"
-import { Builtins, PluginLoader } from "@vibest/core/plugins"
-import { type Liveness, livenessOf, type ProcessPlatform, Processes, validPid } from "@vibest/core/processes"
+import { Builtins, builtinsNode, PluginLoader } from "@vibest/core/plugins"
+import { type Liveness, livenessOf, ProcessPlatform, validPid } from "@vibest/core/processes"
 import { HostEnv } from "@vibest/core/runtimes"
 import { UserPlatform } from "@vibest/core/system-prompt"
 import * as VibestPlugin from "@vibest/plugin"
-import { DatabaseOpenFailed, type Host, LockFailed } from "@vibest/server/daemon"
+import { type Host, LockFailed } from "@vibest/server/daemon"
+import * as Http from "@vibest/server/http"
+import * as Server from "@vibest/server/server"
 import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
+import { FetchHttpClient } from "effect/http"
 
 import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
 
@@ -48,6 +53,7 @@ const user = Layer.succeed(UserPlatform, {
 
 const platform = Layer.mergeAll(
   BunServices.layer,
+  FetchHttpClient.layer,
   unrefStdio,
   HerdrBun.layerSocketConnector,
   Layer.succeed(SocketConnector, (endpoint) => BunSocket.makeNet({ path: endpoint })),
@@ -141,14 +147,55 @@ export const plugins: PluginLoader["Service"] = {
   watch,
 }
 
-export const liveness = (pid: number): Liveness => livenessOf(() => process.kill(pid, 0))
+const darwinLibc =
+  process.platform === "darwin"
+    ? dlopen("libc.dylib", {
+        sysctl: {
+          args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u64],
+          returns: FFIType.i32,
+        },
+      }).symbols
+    : undefined
+const CTL_KERN = 1
+const KERN_PROC = 14
+const KERN_PROC_PID = 1
+const KINFO_PROC_BYTES = 648
+const KINFO_PROC_P_STAT_AT = 36
+const SZOMB = 5
+
+const darwinZombie = (sysctl: NonNullable<typeof darwinLibc>["sysctl"], pid: number) => {
+  const info = new Uint8Array(KINFO_PROC_BYTES)
+  const size = new BigUint64Array([BigInt(KINFO_PROC_BYTES)])
+  const query = new Int32Array([CTL_KERN, KERN_PROC, KERN_PROC_PID, pid])
+  return (
+    sysctl(query, query.length, info, size, null, 0) === 0 &&
+    size[0] === BigInt(KINFO_PROC_BYTES) &&
+    info[KINFO_PROC_P_STAT_AT] === SZOMB
+  )
+}
+
+const linuxZombie = (pid: number) => {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8")
+    return stat.slice(stat.lastIndexOf(")") + 2).startsWith("Z")
+  } catch {
+    return false
+  }
+}
+
+const isZombie = (pid: number) => (darwinLibc ? darwinZombie(darwinLibc.sysctl, pid) : linuxZombie(pid))
+
+export const liveness = (pid: number): Liveness => {
+  const seen = livenessOf(() => process.kill(pid, 0))
+  return seen === "alive" && isZombie(pid) ? "exited" : seen
+}
 
 const terminate = (pid: number) => {
   if (!validPid(pid)) return
   process.kill(pid, "SIGTERM")
 }
 
-const processes: ProcessPlatform = { liveness, terminate, pid: process.pid, uid: process.getuid?.() }
+const processes: ProcessPlatform["Service"] = { liveness, terminate, pid: process.pid, uid: process.getuid?.() }
 
 const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
   flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
@@ -246,24 +293,43 @@ export const services = platform
 
 export const socketServer = (path: string) => BunSocketServer.layer({ path })
 
-export const daemon: Host = {
-  layer: Layer.mergeAll(
-    Layer.unwrap(Effect.map(Layout, (layout) => sqlite(layout.database))),
-    Layer.succeed(MachineTransport, transport),
-    Layer.succeed(PluginLoader, plugins),
-    Layer.succeed(Builtins, pre),
-    Layer.succeed(HostEnv, { drop: dropEnv }),
-    Processes.layer(processes),
+const platformNode = LayerNode.make({ name: "vibest/Platform", layer: platform, deps: [] })
+
+export const replacements: LayerNode.Replacements = [
+  PlatformNode.fileSystem.replace(platformNode),
+  PlatformNode.path.replace(platformNode),
+  PlatformNode.crypto.replace(platformNode),
+  PlatformNode.childProcessSpawner.replace(platformNode),
+  PlatformNode.sqlClient.replace(
+    LayerNode.make({
+      name: "vibest/Sqlite",
+      layer: Layer.unwrap(Effect.map(Layout, (layout) => sqlite(layout.database))),
+      deps: [PlatformNode.layout],
+    }),
   ),
-  servers: Layer.unwrap(
-    Effect.map(Layout, (layout) =>
-      Layer.merge(socketServer(layout.socket), BunHttpServer.layerServer({ unix: layout.httpSocket })),
-    ),
+  MachineTransport.node.replace(Layer.succeed(MachineTransport, transport)),
+  PluginLoader.node.replace(Layer.succeed(PluginLoader, plugins)),
+  builtinsNode.replace(Layer.succeed(Builtins, pre)),
+  HostEnv.node.replace(Layer.succeed(HostEnv, { drop: dropEnv })),
+  ProcessPlatform.node.replace(Layer.succeed(ProcessPlatform, processes)),
+  Server.socketServer.replace(
+    LayerNode.make({
+      name: "vibest/SocketServer",
+      layer: Layer.unwrap(Effect.map(Layout, (layout) => socketServer(layout.socket))),
+      deps: [PlatformNode.layout],
+    }),
   ),
-  lock,
-  checkDatabase,
-  facts: { name: os.hostname(), id: hostId, pid: process.pid },
-}
+  Http.httpServer.replace(
+    LayerNode.make({
+      name: "vibest/HttpServer/unix",
+      layer: Layer.unwrap(Effect.map(Layout, (layout) => BunHttpServer.layerServer({ unix: layout.httpSocket }))),
+      deps: [PlatformNode.layout],
+    }),
+  ),
+  HostFacts.node.replace(Layer.succeed(HostFacts, { name: os.hostname(), id: hostId, pid: process.pid })),
+]
+
+export const daemon: Host = { lock, checkDatabase }
 
 export const selfCommand: ReadonlyArray<string> =
   process.argv[1] === undefined || process.argv[1].startsWith("/$bunfs/")

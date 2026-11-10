@@ -155,6 +155,7 @@ const usageLimitMove = async (
 const checks: ReadonlyArray<Check> = [
   {
     id: "U2",
+    covers: ["D8"],
     title:
       "vibest update: vibestd hands over; No keeps an old Pi main agent mid-turn (its old protocol is told to run vibest update), Yes restarts its Pi subagent (herdr lists it as s-<id> before and after) and then it in its pane on the same session and conversation, its inbox continues the turn, and results still arrive",
     run: async (w) => {
@@ -339,6 +340,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "U6",
+    covers: ["D7"],
     title:
       "vibest daemon restart onto another vibest: Yes to both questions replaces vibestd and restarts an old Pi subagent in place, in the same pane on the same conversation",
     run: async (w) => {
@@ -431,6 +433,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "U4",
+    covers: ["D8"],
     title:
       "vibest update run by a Claude main agent itself (fake model): the CLI hands the restart to vibestd and returns; vibestd restarts it in its pane on the same conversation, its inbox gets the continue notice and that turn ends with a reply, and vibest update runs once",
     run: async (w) => {
