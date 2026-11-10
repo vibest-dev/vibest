@@ -292,7 +292,7 @@ const heldSubagent = async (w: World, pastWindow: boolean) => {
 const checks: ReadonlyArray<Check> = [
   {
     id: "S15",
-    covers: ["S11"],
+    covers: ["S11", "D7"],
     title:
       "Claude main agent over HTTP: two subagents' lines and contexts match one to one, a result arriving mid-turn still arrives, a lease goes back to pending once its poller leaves, curl --unix-socket poll / ack / project and protocol mismatch, and delivery after `vibest daemon restart`; S11: a result still arrives as one line with its context after /clear, and after the main agent is stopped (SIGTERM) and `vibest` resumes it in the same pane",
     run: async (w) => {
@@ -458,6 +458,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "S12",
+    covers: ["D7"],
     title:
       "Pi main agent: each result reaches the real Pi TUI as its own turn: a Claude subagent's first and second result, and one after `vibest daemon restart`",
     run: async (w) => {
@@ -579,6 +580,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "S19",
+    covers: ["D7", "S4"],
     title:
       "a Pi subagent with herdr's own Pi hook starts its first turn within seconds of vibest run: vibest daemon restart is not refused and vibest interrupt stops it while the model still holds the turn",
     run: async (w) => {
@@ -633,6 +635,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "S26",
+    covers: ["S2", "S13"],
     title:
       "latency: 3 rounds of a busy Pi subagent, a queued send, then release, and 3 pane closes of idle subagents; every queued send goes out and every closed pane's process ends; the times (turn end to delivering, pane close to process.end) are recorded",
     run: async (w, evidence) => {

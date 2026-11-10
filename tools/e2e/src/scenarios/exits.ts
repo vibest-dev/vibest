@@ -8,7 +8,7 @@ import { ask, heldModel, piDir } from "../fake-model.ts"
 import { expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
-const piProject = async (w: World, name: string) => {
+export const piProject = async (w: World, name: string) => {
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   const model = heldModel()
   const session = `${w.herdrSession}-${name}`
@@ -183,6 +183,7 @@ const killWindowTries = 5
 const checks: ReadonlyArray<Check> = [
   {
     id: "S21",
+    covers: ["S8"],
     title:
       "pane killed mid-turn: the turn is failed (the session exited), the queued message failed with its notice, and the session exited; one result; the time it took is recorded",
     run: async (w, evidence) => {
@@ -216,6 +217,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "S23",
+    covers: ["S8"],
     title:
       "vibestd restarted mid-turn: (a) restart while held, then release; (b) kill -9 vibestd right after the turn end is logged; both: exactly one completed result whose turn.end points at its report",
     run: async (w) => {
@@ -313,6 +315,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "S25",
+    covers: ["S13"],
     title:
       "herdr hands over to a new server: the reset reconcile runs, a pane closed after it is seen exited (the time it took is recorded), and a send to another idle subagent is delivered",
     run: async (w, evidence) => {
@@ -501,6 +504,7 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "S31",
+    covers: ["S7"],
     title:
       "vibest run --archive-on-completion, vibestd killed (kill -9) after the completed result was delivered and before the archive: the next vibestd archives it once, with no notice",
     run: async (w) => {

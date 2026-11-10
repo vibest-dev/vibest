@@ -4,6 +4,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import { consistency, type ListedCheck, parseFeatureMap, provenByVerify } from "./feature-map.ts"
+
 const root = path.resolve(import.meta.dirname, "../../..")
 const noCache = process.argv.includes("--no-cache")
 const only = process.argv.slice(2).filter((a) => a !== "--no-cache")
@@ -39,6 +41,16 @@ const steps = async (list: ReadonlyArray<readonly [string, ReadonlyArray<string>
 
 const all = async (legs: ReadonlyArray<Promise<boolean>>) => {
   if (!(await Promise.all(legs)).every(Boolean)) process.exit(1)
+}
+
+const featureMap = parseFeatureMap(fs.readFileSync(path.join(root, "docs/testing/feature-map.md"), "utf8"))
+const listed = JSON.parse(
+  childProcess.execFileSync("bun", ["tools/e2e/src/main.ts", "--list"], { cwd: root, encoding: "utf8" }),
+) as ReadonlyArray<ListedCheck>
+const mapProblems = [...featureMap.problems, ...consistency(featureMap.rows, listed)]
+if (mapProblems.length) {
+  console.error(`verify: the feature map and the E2E checks disagree:\n  ${mapProblems.join("\n  ")}`)
+  process.exit(1)
 }
 
 const target = `${process.platform}-${process.arch}`
@@ -127,17 +139,15 @@ if (failedLegs.length) {
   console.error(`\nverify: failed on the ${failedLegs.join(" and ")} install`)
   process.exit(1)
 }
-console.log("\nverify: passed.")
-if (only.length === 0) {
-  const manual: Array<string> = []
-  let section = ""
-  for (const line of fs.readFileSync(path.join(root, "docs/testing/feature-map.md"), "utf8").split("\n")) {
-    if (line.startsWith("## ")) section = line.slice(3)
-    const m = /^\| [A-Z]+\d+ +\| (.+?) \| (agent|runtime|slow) +\|/.exec(line)
-    if (m)
-      manual.push(
-        `  ${section}: ${m[1]!.trim().replaceAll("`", "")}${{ agent: " (an agent checks it: pnpm e2e --tier agent)", slow: " (pnpm e2e --tier slow)", runtime: " (needs the Agent runtime)" }[m[2]!]}`,
-      )
+const skipped = featureMap.rows.filter((r) => !provenByVerify(r.method))
+console.log(
+  `\nverify: passed${only.length ? ` (only ${only.join(" ")})` : ""}: ${featureMap.rows.length - skipped.length} feature-map rows proven by script and unit checks, ${skipped.length} skipped.`,
+)
+if (skipped.length) {
+  const how: Record<string, string> = {
+    agent: "an agent checks it: pnpm e2e --tier agent",
+    slow: "pnpm e2e --tier slow",
   }
-  if (manual.length) console.log(`Not proven by a script (docs/testing/feature-map.md):\n${manual.join("\n")}`)
+  console.log(`Not proven by a script, skipped (docs/testing/feature-map.md):`)
+  for (const r of skipped) console.log(`SKIP ${r.id} ${r.section}: ${r.capability} (${how[r.method]})`)
 }
