@@ -33,8 +33,11 @@ export class ProcessPlatform extends Context.Service<
 
 export const LSOF_TIMEOUT = Duration.seconds(10)
 export const LSOF_KILL_AFTER = Duration.seconds(1)
+export const PS_TIMEOUT = Duration.seconds(2)
 
 export const lsofArgs = (uid: number) => ["+w", "-a", "-u", String(uid), "-d", "cwd", "-FpRcfn0"]
+
+const PS_ARGS = ["-x", "-o", "pid=,ppid=,comm="]
 
 export type ProcessRun = Captured
 
@@ -44,6 +47,7 @@ export class Processes extends Context.Service<
     readonly liveness: (pid: number) => Effect.Effect<Liveness>
     readonly terminate: (pid: number) => Effect.Effect<"sent" | "denied">
     readonly cwdUsers: (dirs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<number> | undefined>
+    readonly tree: (root: number) => Effect.Effect<ReadonlyArray<number> | undefined>
   }
 >()("vibest/Processes") {
   static readonly layer = Layer.effect(
@@ -55,6 +59,9 @@ export class Processes extends Context.Service<
         runFor("lsof", lsofArgs(uid), LSOF_TIMEOUT).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         )
+      const ps = runFor("ps", PS_ARGS, PS_TIMEOUT).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      )
       return Processes.of({
         liveness: (pid) => Effect.sync(() => (validPid(pid) ? platform.liveness(pid) : "unknown")),
         terminate: (pid) =>
@@ -71,6 +78,16 @@ export class Processes extends Context.Service<
           platform.uid === undefined || !Number.isInteger(platform.uid) || platform.uid < 0
             ? Effect.succeed(undefined)
             : lsof(platform.uid).pipe(Effect.map((run) => cwdHolders(run, platform.pid, dirs))),
+        tree: (root) =>
+          validPid(root)
+            ? ps.pipe(
+                Effect.map((run) =>
+                  run === undefined || run.exitCode !== 0
+                    ? undefined
+                    : sessionTree(root, parseProcessTable(run.stdout)),
+                ),
+              )
+            : Effect.succeed(undefined),
       })
     }),
   )
@@ -84,6 +101,49 @@ export class Processes extends Context.Service<
 
 export const runFor = (command: string, args: ReadonlyArray<string>, timeout: Duration.Input) =>
   capture(command, args, { timeout, forceKillAfter: LSOF_KILL_AFTER }).pipe(Effect.orElseSucceed(() => undefined))
+
+export type ProcessRow = { readonly pid: number; readonly ppid: number; readonly command: string }
+
+const SHELLS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "nu"])
+
+const commandName = (command: string) => command.replace(/^-/, "").replace(/^.*\//, "")
+
+export const parseProcessTable = (stdout: string): ReadonlyArray<ProcessRow> => {
+  const rows: Array<ProcessRow> = []
+  for (const line of stdout.split("\n")) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S.*)$/.exec(line)
+    if (!match) continue
+    const pid = Number(match[1])
+    const ppid = Number(match[2])
+    const command = match[3]
+    if (!validPid(pid) || !Number.isInteger(ppid) || ppid < 0 || command === undefined) continue
+    rows.push({ pid, ppid, command: command.trim() })
+  }
+  return rows
+}
+
+export const sessionTree = (root: number, rows: ReadonlyArray<ProcessRow>): ReadonlyArray<number> => {
+  const byPid = new Map(rows.map((row) => [row.pid, row]))
+  const children = new Map<number, Array<number>>()
+  for (const row of rows) {
+    const list = children.get(row.ppid)
+    if (list) list.push(row.pid)
+    else children.set(row.ppid, [row.pid])
+  }
+  const seen = new Set<number>()
+  const out: Array<number> = []
+  const walk = (pid: number) => {
+    if (!validPid(pid) || seen.has(pid)) return
+    seen.add(pid)
+    out.push(pid)
+    for (const child of children.get(pid) ?? []) walk(child)
+  }
+  walk(root)
+  const shell = byPid.get(byPid.get(root)?.ppid ?? -1)
+  if (shell !== undefined && shell.pid > 1 && SHELLS.has(commandName(shell.command)) && !seen.has(shell.pid))
+    out.push(shell.pid)
+  return out
+}
 
 export const cwdHolders = (
   run: ProcessRun | undefined,

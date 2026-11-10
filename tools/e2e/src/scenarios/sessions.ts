@@ -176,11 +176,28 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S6",
     title:
-      "vibest archive of a clean subagent closes its pane, its harness process exits, removes the worktree; uncommitted changes or commits on no branch keep it with the reason; a commit on a branch is kept in that branch and the worktree removed; --keep-worktree keeps a clean one",
+      "a just-finished --archive-on-completion session loses its worktree; vibest archive of a clean subagent closes its pane, its harness process exits and removes the worktree; uncommitted changes or commits on no branch keep it with the reason; a commit on a branch is kept in that branch and the worktree removed; --keep-worktree keeps a clean one",
     run: async (w) => {
       const p = await piProject(w, "s6")
       try {
         p.model.release()
+        const auto = await p.runSub("auto", "--archive-on-completion")
+        let autoTree = ""
+        await until(
+          "the session's worktree path",
+          async () => {
+            autoTree = (await ls(w, p, true)).find((e) => e.id === auto)?.worktree ?? ""
+            return autoTree !== ""
+          },
+          30_000,
+        )
+        await answered(w, p, auto, "auto")
+        await until(
+          "the just-finished session is archived and its worktree is gone",
+          async () => p.exited(auto) && !(await exists(autoTree)),
+          45_000,
+        )
+        expect(p.notices(auto, "working directory") === 0, "its own exiting processes kept the worktree")
         const ready = async (task: string) => {
           const id = await p.runSub(task)
           await answered(w, p, id, task)

@@ -447,6 +447,11 @@ How `packages/core/src/remove.ts` and `processes.ts` keep this:
   contract; vibestd still proves it by cwd before the worktree goes), and a close that failed proves nothing. The
   only signal vibest sends is SIGTERM to one harness pid it was told (a restart, a usage-limit move, a main agent
   moving terminal), never its group. A reused pid reads as alive, which can only keep more.
+- Before that close, on this machine only, the session's process tree is read (`ps -x -o pid=,ppid=,comm=`): the
+  harness pid recorded for the session, its descendants, and the shell that is that pid's parent (not the shell's
+  other children). After the close those pids get 10 s to exit, by the liveness probe only. A tree `ps` could not
+  read is not waited on. A process that is not in the tree is not waited on either: the one cwd listing below keeps
+  the worktree as soon as it names one.
 - The cwd check is one lsof run (`lsof +w -a -u <uid> -d cwd -FpRcfn0`, no shell) in its own process group, cut off
   after 10 s, then SIGTERM and SIGKILL 1 s later; a helper stuck in uninterruptible I/O holds the run until it
   returns. The listing is trusted only when lsof exited 0 with nothing on stderr (warnings mean a partial listing),
