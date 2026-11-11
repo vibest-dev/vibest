@@ -5,6 +5,7 @@ packages:
   - tools/tsconfig
   - tools/verify
   - tools/bench
+  - tools/e2e
 catalog:
   # Effect v4 moves in lockstep: every `effect` / `@effect/*` package on one version, or two runtimes meet. Exact pins.
   effect: 4.0.2
