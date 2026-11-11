@@ -600,7 +600,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "U5",
     title:
-      "a usage-limit move in place: a Pi subagent whose turn hits a usage limit ends only its harness; the next login runs in the same pane (herdr lists it as s-<id> there) and finishes the round",
+      "a usage-limit move in place: a Pi subagent whose turn hits a usage limit ends only its harness; the next login runs in the same pane (herdr lists it as s-<id> there) and finishes the work in a new turn",
     run: (w) =>
       usageLimitMove(
         w,
@@ -633,7 +633,7 @@ export default Plugin.define({
           expect(alive(row().pid!), `the moved harness ${row().pid} does not run`)
           expect(row().harness === "pi", `moved to ${row().harness}`)
           await until(
-            "the round completes on the second login",
+            "the work completes on the second login",
             () => status().some((m) => m.status === "completed"),
             120_000,
           ).catch(async (e: Error) => {
@@ -641,7 +641,12 @@ export default Plugin.define({
               `${e.message}; rounds ${JSON.stringify(status())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
             )
           })
-          expect(status().length === 1, `one round: ${JSON.stringify(status())}`)
+          expect(
+            status()
+              .map((m) => m.status)
+              .join() === "failed,completed",
+            `the limited turn, then the completed one: ${JSON.stringify(status())}`,
+          )
           expect(
             seen.some((s) => s.startsWith("/v2/")),
             `the second login got no request: ${JSON.stringify(seen)}`,
@@ -657,7 +662,7 @@ export default Plugin.define({
   {
     id: "U8",
     title:
-      "a usage-limit move tries each login at most once per round: both Pi logins answer a usage limit while their usage rows read free; the round fails once with no harness left and no third start",
+      "a usage-limit move tries each login at most once for one input: both Pi logins answer a usage limit while their usage rows read free; each login's turn fails, the last with no harness left, and no third start",
     run: (w) =>
       usageLimitMove(
         w,
@@ -709,13 +714,16 @@ export default Plugin.define({
             )
           }
           await until("the move to the second login", () => row().provider === "second", 120_000).catch(fail)
-          await until("the round fails", () => status().some((m) => m.status === "failed"), 120_000).catch(fail)
-          const moved = row()
-          await until("the round's no-harness-left notice", () =>
-            notices().some((r) => r.includes("no harness left")),
+          await until(
+            "the no-harness-left notice",
+            () => notices().some((r) => r.includes("no harness left")),
+            120_000,
           ).catch(fail)
-          expect(status().length === 1, `one round: ${JSON.stringify(status())}`)
-          expect(status()[0]!.status === "failed", `the round: ${JSON.stringify(status())}`)
+          const moved = row()
+          expect(
+            status().length === 2 && status().every((m) => m.status === "failed"),
+            `one failed turn per login: ${JSON.stringify(status())}`,
+          )
           const said = notices()
           expect(said.length === 1 && said[0]!.includes("no harness left"), `notices: ${JSON.stringify(said)}`)
           expect(

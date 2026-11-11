@@ -41,7 +41,6 @@ export {
   type SpawnedBefore,
   type RepositoryRow,
   type TurnEnd,
-  type TurnReport,
   failureOf,
   type SessionBrief,
 } from "./db-rows.ts"

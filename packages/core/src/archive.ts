@@ -86,7 +86,8 @@ export const sessionArchive = (deps: {
       const seen = yield* agentState(h, terminal)
       const reasons: Array<string> = []
       const working = busyOf(seen)
-      if (working || session.turnState === "open") {
+      const turn = yield* db.openTurn(id)
+      if (working || turn !== undefined) {
         if (options.unlessPending) return undefined
         if (working) {
           const stopped = yield* interruptAgent(h, session, terminal)
@@ -96,9 +97,7 @@ export const sessionArchive = (deps: {
               : `${id} did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; its terminal closed anyway`,
           )
         }
-        if (session.turnState === "open") {
-          yield* db.closeTurn(id, "interrupted", { lastActive: yield* Clock.currentTimeMillis })
-        }
+        if (turn !== undefined) yield* db.closeTurn(id, turn, "interrupted")
         session = yield* getRow(id)
       }
       if (!(session.metadata.archived || session.metadata.removed)) {

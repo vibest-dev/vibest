@@ -26,7 +26,6 @@ import {
   type TestServices,
   until,
   writeResult,
-  resultText,
   systemPromptFile,
   projectOf,
   callerPlugin,
@@ -330,7 +329,6 @@ describe("vibest CLI", () => {
       yield* sessions.check(id)
       const before = decodeJson((yield* run(["result", id])).stdout) as { answer: { text: string } }
       assert.include(before.answer.text, "kept finding")
-      assert.strictEqual(yield* resultText(id), "")
       assert.isTrue(yield* fs.exists(yield* systemPromptFile(id)))
 
       const archived = yield* run(["archive", id])

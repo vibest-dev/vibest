@@ -4,7 +4,6 @@ import { AgentStatus, InboxStatus, RuntimeAddress, TurnState } from "@vibest/sch
 import { Schema } from "effect"
 
 import { Routing } from "./plugins.ts"
-import type { TurnEnded } from "./results.ts"
 
 export const AddressJson = Schema.fromJsonString(RuntimeAddress)
 export const encodeAddress = Schema.encodeSync(AddressJson)
@@ -126,11 +125,10 @@ export type InboxSql = {
 
 export type TurnEnd = {
   readonly status: typeof TurnStatus.Type
-  readonly report?: number
   readonly failure?: { readonly message: string }
+  readonly conversation?: string
+  readonly reply?: string
 }
-
-export type TurnReport = TurnEnded & { readonly id: number }
 
 export const failureOf = (error: string | undefined): TurnEnd["failure"] =>
   error === undefined || error === "" ? undefined : { message: error }

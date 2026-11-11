@@ -52,7 +52,7 @@ export const writeResult = (id: string, harness: string, payload: object, offset
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses).get(harness)
     const at = (yield* Clock.currentTimeMillis) + offsetMs
-    yield* (yield* Db).reportTurn(id, turnEndFrom(adapter, payload as Record<string, unknown>, at))
+    yield* (yield* Db).endObserved(id, turnEndFrom(adapter, payload as Record<string, unknown>, at))
   })
 
 export const eventsOf = (sessionId: string, type?: string) =>
@@ -63,16 +63,7 @@ export const eventsOf = (sessionId: string, type?: string) =>
     return rows.map((r) => ({ id: r.seq, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
   }).pipe(Effect.orDie)
 
-export const resultText = (id: string) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const [row] = yield* sql<{ data: string; consumed: number }>`SELECT r.data,
-        EXISTS (SELECT 1 FROM turn t WHERE t.report_seq = r.seq) AS consumed
-      FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' ORDER BY r.seq DESC LIMIT 1`.pipe(
-      Effect.orDie,
-    )
-    return row === undefined || row.consumed ? "" : String((JSON.parse(row.data) as { text?: unknown }).text ?? "")
-  })
+export const resultText = (id: string) => answerOf(id).pipe(Effect.map((answer) => answer ?? ""))
 
 export const answerOf = (id: string) =>
   Effect.gen(function* () {

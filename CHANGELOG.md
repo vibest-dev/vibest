@@ -7,6 +7,12 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Turn ends** (anyone reading `vibest.db`, and anyone counting turns): a turn end the harness reports is written at
+  once as `turn.ended`, carrying `reply` and `conversation`; vibestd no longer writes `turn.reported` (older ones still
+  decode and project), so `turn.report_seq` stays null for new turns. An older vibest cannot read a log with the new
+  `turn.ended` keys. A usage limit now ends its turn `failed` and the next harness gets the input in a new turn, so a
+  limit move is two turns instead of one. A reply that arrives after vibestd gave a turn up as `lost` is a turn of its
+  own.
 - **The read model** (anyone reading `vibest.db`): the projection is version 4 and is rebuilt from the log when vibestd
   opens the file. `session.report_to_session_id`, `session.origin_parent`, `session.seq`, `project.seq`,
   `inbox.queued_at` and `process.resume` are gone: a session's notices go to its parent while it lives, else to the

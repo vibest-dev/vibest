@@ -56,7 +56,7 @@ export const limitMoveBox = (): {
 export const sessionMove = (deps: {
   readonly db: Pick<
     Db["Service"],
-    "getSession" | "updateSession" | "rescheduleSource" | "endProcess" | "linkTask" | "latestRoundAt" | "limitedSince"
+    "getSession" | "updateSession" | "rescheduleSource" | "endProcess" | "linkTask" | "limitedSince"
   >
   readonly plugins: Plugins["Service"]
   readonly subscriptions: Subscriptions["Service"]
@@ -69,7 +69,6 @@ export const sessionMove = (deps: {
     terminal: Terminal,
     text: string,
     onHandover?: Effect.Effect<void>,
-    options?: { readonly keepRound?: boolean },
   ) => Effect.Effect<string | undefined, unknown, MovePlatform>
   readonly open: (
     h: Runtime,
@@ -95,11 +94,7 @@ export const sessionMove = (deps: {
     session: SessionRow,
     resume: boolean,
   ) => Effect.Effect<ReadonlyArray<string>, unknown, MovePlatform>
-  readonly finish: (
-    session: SessionRow,
-    end: "failed",
-    error: string | undefined,
-  ) => Effect.Effect<unknown, unknown, MovePlatform>
+  readonly finish: (session: SessionRow, end: "failed", error: string) => Effect.Effect<unknown, unknown, MovePlatform>
   readonly systemPromptOf: (session: SessionRow) => Effect.Effect<string, unknown, MovePlatform>
   readonly uuid: Effect.Effect<string>
   readonly terminate: (pid: number) => Effect.Effect<"sent" | "gone" | "denied">
@@ -208,9 +203,8 @@ export const sessionMove = (deps: {
       Effect.provideService(Harness, harness),
       Effect.provideService(Harnesses, harnesses),
     )
-    const roundStart = (yield* db.latestRoundAt(session.id)) ?? 0
     const thisRound = [
-      ...(yield* db.limitedSince(session.id, roundStart)).map((l) => ({
+      ...(yield* db.limitedSince(session.id, source.since)).map((l) => ({
         harness: l.harness,
         provider: l.provider ?? "",
       })),
@@ -361,9 +355,7 @@ export const sessionMove = (deps: {
       const text = (yield* harnesses.get(row.harnessId)).systemPromptInPrompt
         ? `${yield* deps.systemPromptOf(row)}\n\n# Task\n\n${next.prompt}`
         : next.prompt
-      const prompted = yield* deps
-        .prompt(h, row, terminal, text, db.linkTask(row.id), { keepRound: true })
-        .pipe(Effect.exit)
+      const prompted = yield* deps.prompt(h, row, terminal, text, db.linkTask(row.id)).pipe(Effect.exit)
       if (Exit.isFailure(prompted) || prompted.value !== undefined) {
         skip(next.harness, "not_confirmed")
         continue

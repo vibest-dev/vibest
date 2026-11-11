@@ -152,8 +152,8 @@ const checks: ReadonlyArray<Check> = [
         const after = await resultOf(w, p, a)
         const projected = row<{ answer: string | null; reported: string | null }>(
           w,
-          `SELECT t.answer, e.data ->> '$.text' AS reported FROM turn t
-            JOIN event e ON e.seq = t.report_seq AND e.type = 'turn.reported'
+          `SELECT t.answer, e.data ->> '$.reply' AS reported FROM turn t
+            JOIN event e ON e.type = 'turn.ended' AND e.data ->> '$.turn' = t.id
             WHERE t.session_id = ? AND t.status = 'completed'`,
           a,
         )

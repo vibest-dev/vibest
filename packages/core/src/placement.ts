@@ -50,7 +50,8 @@ export const sessionPlacement = (deps: {
   readonly db: {
     readonly coordinatorOf: (projectId: string) => Effect.Effect<CoordinatorRow | undefined>
     readonly listSessions: (filter?: { readonly projectId?: string }) => Effect.Effect<ReadonlyArray<SessionRow>>
-    readonly closeTurn: (id: string, end: "failed", patch: SessionPatch) => Effect.Effect<void>
+    readonly openTurn: (id: string) => Effect.Effect<number | undefined>
+    readonly closeTurn: (id: string, turn: number, status: "failed") => Effect.Effect<boolean>
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly endProcess: (id: string, reason: ProcessEndReason) => Effect.Effect<boolean>
@@ -88,7 +89,6 @@ export const sessionPlacement = (deps: {
     terminal: Terminal,
     text: string,
     onHandover?: Effect.Effect<void>,
-    options?: { readonly keepRound?: boolean },
   ) => Effect.Effect<string | undefined, NotReady | unknown, FileSystem.FileSystem>
   readonly afterOpen: (
     h: Runtime,
@@ -273,7 +273,9 @@ export const sessionPlacement = (deps: {
         Effect.gen(function* () {
           const e = Cause.squash(cause)
           const t = yield* Clock.currentTimeMillis
-          yield* db.closeTurn(session.id, "failed", {
+          const turn = yield* db.openTurn(session.id)
+          if (turn !== undefined) yield* db.closeTurn(session.id, turn, "failed")
+          yield* db.updateSession(session.id, {
             status: "unknown",
             exitedAt: t,
             lastActive: t,

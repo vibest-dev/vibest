@@ -1,21 +1,9 @@
-import { type HarnessUnavailable, NoSuchSession, NotReady } from "@vibest/schema/session"
-import { Clock, Effect, Exit, Ref } from "effect"
+import type { HarnessUnavailable, NotReady } from "@vibest/schema/session"
+import { Clock, Effect, Exit } from "effect"
 import type { FileSystem } from "effect"
 
-import {
-  type InboxRow,
-  type InboxStatus,
-  type SessionPatch,
-  type SessionRow,
-  type TurnEnd,
-  type TurnReport,
-  type TurnState,
-  failureOf,
-} from "./db.ts"
-import type { HarnessDefinition } from "./host.ts"
+import { type InboxRow, type InboxStatus, type SessionPatch, type SessionRow, type TurnEnd } from "./db.ts"
 import { nextBatch } from "./inbox.ts"
-import type { LimitMove } from "./move.ts"
-import { isUsageLimitError } from "./results.ts"
 import { type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
 
 export const sessionRounds = (deps: {
@@ -34,20 +22,7 @@ export const sessionRounds = (deps: {
       status: InboxStatus,
       from?: InboxStatus,
     ) => Effect.Effect<ReadonlyArray<InboxRow>>
-    readonly latestRoundAt: (sessionId: string) => Effect.Effect<number | undefined>
-    readonly latestReport: (sessionId: string, fence: "ready" | "start") => Effect.Effect<TurnReport | undefined>
-    readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
-    readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
-    readonly beginUserTurn: (id: string, text: string, patch: SessionPatch) => Effect.Effect<boolean>
   }
-  readonly harnesses: {
-    readonly all: ReadonlyArray<HarnessDefinition>
-    readonly get: (id: SessionRow["harnessId"]) => Effect.Effect<HarnessDefinition, HarnessUnavailable>
-    readonly find: (id: string | null | undefined) => HarnessDefinition | undefined
-  }
-  readonly track: (id: string) => Effect.Effect<{ readonly prompting: Ref.Ref<boolean> }>
-  readonly lock: (id: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
-  readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
   readonly undelivered: (
     session: SessionRow,
     rows: ReadonlyArray<{
@@ -58,40 +33,22 @@ export const sessionRounds = (deps: {
     }>,
     reason: string,
   ) => Effect.Effect<unknown>
-  readonly logged: (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<void | A, never, R>
   readonly prompt: (
     h: Runtime,
     session: SessionRow,
     terminal: Terminal,
     text: string,
     onHandover?: Effect.Effect<void>,
-    options?: { readonly keepRound?: boolean },
   ) => Effect.Effect<string | undefined, NotReady | RuntimeError | HarnessUnavailable, FileSystem.FileSystem>
-  readonly limitMove: Pick<LimitMove, "rerun">
 }) => {
-  const { db, harnesses } = deps
+  const { db } = deps
 
-  const finish = Effect.fn("Sessions.finish")(function* (
-    session: SessionRow,
-    end: Extract<TurnState, "completed" | "failed" | "lost">,
-    error: string | undefined,
-    at?: number,
-    reported?: number,
-    notice?: string | null,
-  ) {
-    const failure = failureOf(error)
+  const finish = Effect.fn("Sessions.finish")(function* (session: SessionRow, end: "failed", error: string) {
     yield* db.endTurn(
       session.id,
-      {
-        status: end,
-        ...(reported === undefined ? {} : { report: reported }),
-        ...(failure === undefined ? {} : { failure }),
-      },
+      { status: end, failure: { message: error } },
       { turnState: end, lastActive: yield* Clock.currentTimeMillis },
-      (end === "completed" && !error) || notice === null
-        ? undefined
-        : (notice ?? `${session.id}'s turn ended with an error: ${error}`),
-      at,
+      `${session.id}'s turn ended with an error: ${error}`,
     )
   })
 
@@ -158,61 +115,5 @@ export const sessionRounds = (deps: {
       )
   })
 
-  const collectResult = Effect.fn("Sessions.collectResult")(function* (
-    h: Runtime | undefined,
-    session: SessionRow,
-    exiting = false,
-  ) {
-    const terminal = session.address
-    const adapter = harnesses.find(session.harnessId)
-    if (adapter === undefined) return "none" as const
-    const found = yield* db.latestReport(session.id, adapter.ready === "integration" ? "ready" : "start")
-    if (found === undefined) return "none" as const
-    if (found.harness !== session.harnessId) return "none" as const
-    if (session.turnState === "open") {
-      if (found.at <= session.turnPromptedAt) return "none" as const
-    } else {
-      if (found.interrupted) return "none" as const
-      const last = yield* db.latestRoundAt(session.id)
-      if (last !== undefined && found.at <= last) return "none" as const
-    }
-    if (found.error && isUsageLimitError(found.error)) {
-      if (h === undefined) return "none" as const
-      yield* deps.limitMove.rerun(h, session, terminal.id === "" ? undefined : terminal, "", false, found.error)
-      return "delivered" as const
-    }
-    if (!adapter.ownSessionId && !session.harnessSessionId && found.conversationId)
-      yield* db.updateSession(session.id, { harnessSessionId: found.conversationId })
-    yield* finish(
-      session,
-      found.error ? "failed" : "completed",
-      found.error,
-      found.at,
-      found.id,
-      exiting ? null : undefined,
-    )
-    return exiting && found.error ? ("none" as const) : ("delivered" as const)
-  })
-
-  const userPrompt = (id: string, text: string, at?: number) =>
-    deps.logged(`prompt ${id}`)(
-      Effect.gen(function* () {
-        if (text.trim() === "") return
-        const session = yield* db.getSession(id)
-        if (!session || session.agent === "main") return
-        const { prompting } = yield* deps.track(id)
-        if (yield* Ref.get(prompting)) return
-        const now = at ?? (yield* Clock.currentTimeMillis)
-        const record = Effect.gen(function* () {
-          const current = yield* db.getSession(id)
-          if (!current || current.turnState === "open") return false
-          const opened = yield* db.beginUserTurn(id, text, { turnPromptedAt: now, lastActive: now })
-          if (!opened)
-            yield* Effect.logWarning(`prompt ${id}: a round is already open; the typed text was not recorded`)
-        })
-        yield* deps.lock(id)(record)
-      }),
-    )
-
-  return { finish, deliverQueued, collectResult, userPrompt }
+  return { finish, deliverQueued }
 }

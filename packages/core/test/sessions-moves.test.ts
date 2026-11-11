@@ -72,7 +72,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "an unconfirmed prompt after a limit tries the next harness, leaves the task round working and is not remembered, so the next limit can use that harness",
+    "an unconfirmed prompt after a limit tries the next harness in a new turn and is not remembered, so the next limit can use that harness",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
@@ -99,8 +99,12 @@ describe.concurrent("Sessions", () => {
         (SELECT id FROM inbox WHERE recipient_session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
         FROM ${sql.literal(TURNS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
       assert.deepStrictEqual(
-        rounds.map((round) => [round.id, round.status, round.inbox === round.task]),
-        [[roundId, "working", true]],
+        rounds.map((round) => [round.id === roundId, round.status, round.inbox === round.task]),
+        [
+          [true, "failed", true],
+          [false, "not_started", false],
+          [false, "working", false],
+        ],
       )
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),

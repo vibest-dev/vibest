@@ -188,18 +188,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a result file from before the prompt is ignored",
-    Effect.gen(function* () {
-      yield* TestClock.adjust("2 minutes")
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "old" }, -60_000)
-      yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
-    }),
-    { hooked: ["pi"] },
-  )
-
-  test(
     "a typed round ends like any round: its answer is kept and nothing is sent; typing during an open round records nothing",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient

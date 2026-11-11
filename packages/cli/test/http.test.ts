@@ -310,6 +310,7 @@ describe("vibestd's HTTP API", () => {
       const { call, db, worker, main } = yield* project
       const layout = yield* Layout
       const events = yield* busEvents
+      assert.strictEqual((yield* call("/session/ready", { sessionId: worker })).status, 204)
       const prompt = yield* call(
         "/hooks/claude/prompt",
         { sessionId: worker },

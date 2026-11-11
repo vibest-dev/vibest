@@ -358,28 +358,41 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
       }),
     )
 
-    it.effect("turn ends: text field per harness; error marks failure; a junk hook input is no turn end", () =>
-      Effect.gen(function* () {
-        const harnesses = yield* Harnesses
-        assert.deepInclude(turnEndFrom(yield* harnesses.get("claude"), { last_assistant_message: "hi" }, 5), {
-          harness: "claude",
-          at: 5,
-          text: "hi",
-          error: undefined,
-          interrupted: false,
-        })
-        assert.deepInclude(
-          turnEndFrom(yield* harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1),
-          {
-            error: "boom: why",
-          },
-        )
-        for (const bad of ["--flag", "-f", "--yolo", "--force", "a b", ""])
-          assert.deepInclude(turnEndFrom(yield* harnesses.get("cursor"), { text: "x", conversation_id: bad }, 1), {
-            conversationId: undefined,
+    it.effect(
+      "turn ends: reply field per harness; error fails, aborted interrupts; a junk hook input is no turn end",
+      () =>
+        Effect.gen(function* () {
+          const harnesses = yield* Harnesses
+          assert.deepInclude(turnEndFrom(yield* harnesses.get("claude"), { last_assistant_message: "hi" }, 5), {
+            harness: "claude",
+            at: 5,
+            status: "completed",
+            reply: "hi",
+            failure: undefined,
+            needsReady: true,
           })
-        assert.isUndefined(turnEndOf(yield* harnesses.get("claude"), "general", "{", 1))
-      }),
+          assert.deepInclude(
+            turnEndFrom(yield* harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1),
+            { status: "failed", failure: "boom: why", limited: false },
+          )
+          assert.deepInclude(turnEndFrom(yield* harnesses.get("pi"), { text: "", error: "rate limit hit" }, 1), {
+            status: "failed",
+            limited: true,
+          })
+          assert.deepInclude(
+            turnEndFrom(yield* harnesses.get("pi"), { text: "so far", error: "aborted", aborted: true }, 1),
+            { status: "interrupted", reply: "so far", failure: "aborted" },
+          )
+          assert.deepInclude(turnEndFrom(yield* harnesses.get("cursor"), { text: "x", conversation_id: "c-1" }, 1), {
+            conversation: "c-1",
+            needsReady: false,
+          })
+          for (const bad of ["--flag", "-f", "--yolo", "--force", "a b", ""])
+            assert.deepInclude(turnEndFrom(yield* harnesses.get("cursor"), { text: "x", conversation_id: bad }, 1), {
+              conversation: undefined,
+            })
+          assert.isUndefined(turnEndOf(yield* harnesses.get("claude"), "general", "{", 1))
+        }),
     )
 
     it.effect(

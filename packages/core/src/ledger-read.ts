@@ -1,4 +1,3 @@
-import { decodeRow, type FactOf } from "@vibest/schema/event"
 import { type AgentStatus, InboxRow } from "@vibest/schema/session"
 import { Effect, Schema } from "effect"
 import type { SqlClient, Statement } from "effect/sql"
@@ -14,7 +13,6 @@ import {
   type SessionBrief,
   type SpawnedBefore,
   toInbox,
-  type TurnReport,
 } from "./db-rows.ts"
 
 export const LOCAL_MACHINE = "local"
@@ -23,7 +21,10 @@ export type RescheduleSource = {
   readonly working: string
   readonly delivered: string
   readonly parentSessionId: string | undefined
+  readonly since: number
 }
+
+const retried = (turn: { readonly status: string | null }) => turn.status === "failed" || turn.status === "not_started"
 
 export const latestRun = (rows: ReadonlyArray<{ readonly content: string; readonly sender: string | null }>) => {
   const last = rows.at(-1)
@@ -189,16 +190,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     sql<InboxColumns>`SELECT m.id, m.recipient_session_id, m.sender_session_id, m.kind, m.content, m.status
       FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(toInbox))))
 
-  const reportOf = (row: { seq: number; at: number; data: string; sessionId: string }) =>
-    decodeRow({
-      seq: row.seq,
-      at: row.at,
-      type: "turn.reported",
-      project_id: "",
-      session_id: row.sessionId,
-      data: row.data,
-    }).pipe(Effect.map((fact) => (fact as FactOf<"turn.reported">).data))
-
   const briefs = (ids: ReadonlyArray<string>) =>
     Effect.gen(function* () {
       if (ids.length === 0) return new Map<string, SessionBrief>() as ReadonlyMap<string, SessionBrief>
@@ -228,29 +219,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         })
       }
       return found as ReadonlyMap<string, SessionBrief>
-    })
-
-  const latestReport = (id: string, fence: "ready" | "start") =>
-    Effect.gen(function* () {
-      const after =
-        fence === "start"
-          ? sql`(SELECT process_id FROM session WHERE id = ${id})`
-          : sql`(SELECT p.ready_seq FROM session s JOIN process p ON p.id = s.process_id WHERE s.id = ${id})`
-      const [row] = yield* sql<{ seq: number; at: number; data: string; consumed: number }>`SELECT r.seq, r.at, r.data,
-          EXISTS (SELECT 1 FROM turn t WHERE t.report_seq = r.seq) AS consumed
-        FROM event r WHERE r.session_id = ${id} AND r.type = 'turn.reported' AND r.seq > ${after}
-        ORDER BY r.seq DESC LIMIT 1`
-      if (row === undefined || row.consumed) return undefined
-      const data = yield* reportOf({ ...row, sessionId: id })
-      return {
-        id: row.seq,
-        at: row.at,
-        harness: data.harness,
-        text: data.text,
-        error: data.error,
-        conversationId: data.conversation,
-        interrupted: data.interrupted === true,
-      } satisfies TurnReport
     })
 
   const hadTerminal = (id: string) =>
@@ -309,13 +277,22 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       const [head] = yield* sql<{
         parentSessionId: string | null
       }>`SELECT parent_session_id FROM session WHERE id = ${id}`
-      if (head === undefined) return { working: "", delivered: "", parentSessionId: undefined } as RescheduleSource
-      const [open] = yield* sql<{ id: number; typed: string | null }>`SELECT id, typed FROM turn
-        WHERE session_id = ${id} AND status IS NULL`
+      if (head === undefined)
+        return { working: "", delivered: "", parentSessionId: undefined, since: 0 } as RescheduleSource
+      const turns = yield* sql<{
+        id: number
+        typed: string | null
+        status: string | null
+        startedAt: number
+        taken: number
+      }>`SELECT t.id, t.typed, t.status, t.started_at,
+          EXISTS (SELECT 1 FROM inbox i WHERE i.turn_id = t.id) AS taken
+        FROM turn t WHERE session_id = ${id} ORDER BY id DESC`
+      const turn = turns.find((t, i) => (t.typed !== null || t.taken === 1) && turns.slice(0, i).every(retried))
       let working = ""
-      if (open !== undefined) {
-        const taken = yield* sql<{ content: string }>`SELECT content FROM inbox WHERE turn_id = ${open.id} ORDER BY id`
-        working = open.typed ?? taken.map((row) => row.content).join("\n\n")
+      if (turn !== undefined) {
+        const taken = yield* sql<{ content: string }>`SELECT content FROM inbox WHERE turn_id = ${turn.id} ORDER BY id`
+        working = turn.typed ?? taken.map((row) => row.content).join("\n\n")
       }
       const [linked] = yield* sql<{ id: number | null }>`SELECT max(id) AS id FROM inbox
         WHERE recipient_session_id = ${id} AND turn_id IS NOT NULL`
@@ -327,13 +304,13 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         working,
         delivered: latestRun(rows),
         parentSessionId: head.parentSessionId ?? undefined,
+        since: (turn ?? turns[0])?.startedAt ?? 0,
       } as RescheduleSource
     })
 
   return {
     rescheduleSource,
     briefs,
-    latestReport,
     hadTerminal,
     untakenTask,
     queuedBy,

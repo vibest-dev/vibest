@@ -28,7 +28,8 @@ conversation and terminal; it gets a notice to continue, and the update runs onc
 ## U5. Moving past a usage limit
 
 When a harness hits its usage limit, only that harness ends, and the next login runs in the same pane and session; the
-old process is gone and the round of work completes on the next login.
+old process is gone, the limited turn ends failed, and the next login gets the same input in a new turn that completes
+the work.
 
 ## U6. Restarting agents on an old integration
 
@@ -37,8 +38,8 @@ in place: the same pane and conversation, a new harness process, and the new int
 
 ## U8. Each login at most once per round
 
-A usage-limit move tries each login at most once per round, whatever its usage reading says. When none is left, the
-round ends with one notice saying no harness is left, and nothing starts a third time in the pane.
+A usage-limit move tries each login at most once for one input, across the turns its limits moved it through, whatever
+its usage reading says. When none is left, the last turn ends with one notice saying no harness is left, and nothing starts a third time in the pane.
 
 ## U9. Update to a version that cannot open the database
 

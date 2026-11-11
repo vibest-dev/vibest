@@ -92,6 +92,8 @@ export const TurnEnded = fact("turn.ended", "session", {
   status: TurnStatus,
   report: optional(Seq),
   failure: optional(Schema.Struct({ message: Text })),
+  conversation: optional(Text),
+  reply: optional(Schema.String),
 })
 
 export const InboxKind = Schema.Literals(["task", "send", "report", "result", "notice"])

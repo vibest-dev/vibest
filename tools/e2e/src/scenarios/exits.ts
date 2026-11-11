@@ -59,8 +59,8 @@ export const piProject = async (w: World, name: string) => {
   const sent = (id: string) =>
     q<{ n: number }>("SELECT count(*) AS n FROM inbox WHERE sender_session_id = ?", id)?.n ?? 0
   const lastEnd = (id: string) => {
-    return q<{ status: string; report: number | null; failure: string | null }>(
-      `SELECT status, report_seq AS report, failure FROM turn WHERE session_id = ? AND status IS NOT NULL
+    return q<{ status: string; reply: string | null; failure: string | null }>(
+      `SELECT status, answer AS reply, failure FROM turn WHERE session_id = ? AND status IS NOT NULL
         ORDER BY ended_at DESC, id DESC LIMIT 1`,
       id,
     )
@@ -255,7 +255,7 @@ const checks: ReadonlyArray<Check> = [
             `${what}: ${p.turnEnds(sub)} turn ends, ${p.sent(sub)} rows sent`,
           )
           const end = p.lastEnd(sub)!
-          expect(typeof end.report === "number", `${what}: turn ${JSON.stringify(end)}`)
+          expect(typeof end.reply === "string", `${what}: turn ${JSON.stringify(end)}`)
         }
         const a = await p.runSub("a")
         await until("(a) held", () => p.model.held() > 0, 60_000)

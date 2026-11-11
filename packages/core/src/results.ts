@@ -41,10 +41,12 @@ export const envelope = (
 export type TurnEnded = {
   readonly harness: HarnessId
   readonly at: number
-  readonly text: string
-  readonly error: string | undefined
-  readonly conversationId: string | undefined
-  readonly interrupted: boolean
+  readonly status: "completed" | "failed" | "interrupted"
+  readonly reply: string
+  readonly failure: string | undefined
+  readonly limited: boolean
+  readonly conversation: string | undefined
+  readonly needsReady: boolean
 }
 
 export const turnEndOf = (
@@ -59,27 +61,32 @@ export const turnEndOf = (
 }
 
 const PLAIN_ID_NOT_A_FLAG = /^\w[\w.:-]{0,127}$/
+const errorOf = (payload: Readonly<Record<string, unknown>>) => {
+  const error = payload.error
+  const details = payload.error_details
+  if (typeof error !== "string" || !error) return undefined
+  return typeof details === "string" && details ? `${error}: ${details}` : error
+}
+
 export const turnEndFrom = (
   adapter: HarnessDefinition,
   payload: Readonly<Record<string, unknown>>,
   at: number,
 ): TurnEnded => {
   const text = payload[adapter.resultField]
-  const error = payload.error
-  const details = payload.error_details
   const conversation = payload.conversation_id
+  const error = errorOf(payload)
   return {
     harness: adapter.id,
     at,
-    text: typeof text === "string" ? text : "",
-    error:
-      typeof error === "string" && error
-        ? typeof details === "string" && details
-          ? `${error}: ${details}`
-          : error
+    status: payload.aborted === true ? "interrupted" : error ? "failed" : "completed",
+    reply: typeof text === "string" ? text : "",
+    failure: error,
+    limited: isUsageLimitError(error),
+    conversation:
+      !adapter.ownSessionId && typeof conversation === "string" && PLAIN_ID_NOT_A_FLAG.test(conversation)
+        ? conversation
         : undefined,
-    conversationId:
-      typeof conversation === "string" && PLAIN_ID_NOT_A_FLAG.test(conversation) ? conversation : undefined,
-    interrupted: payload.aborted === true,
+    needsReady: adapter.ready === "integration",
   }
 }

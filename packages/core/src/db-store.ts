@@ -323,8 +323,9 @@ export const makeStore = Effect.gen(function* () {
         data: {
           turn,
           status: end.status,
-          ...(end.report === undefined ? {} : { report: end.report }),
           ...(end.failure === undefined ? {} : { failure: end.failure }),
+          ...(end.conversation === undefined ? {} : { conversation: end.conversation }),
+          ...(end.reply === undefined ? {} : { reply: end.reply }),
         },
       })
       return turn
@@ -655,6 +656,7 @@ export const makeStore = Effect.gen(function* () {
     unusedId,
     conversationOf,
     placed,
+    prompted,
   }
 })
 

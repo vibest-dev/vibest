@@ -31,12 +31,10 @@ const make = Effect.gen(function* () {
   const turnEnd = Effect.fn("Integration.turnEnd")(function* (who: HookCaller, raw: string) {
     const definition = harnesses.find(who.harness)
     if (definition === undefined) return
-    yield* noteConversation(definition, who, raw)
     const end = turnEndOf(definition, who.agent, raw, yield* Clock.currentTimeMillis)
-    if (!end) return
-    yield* db.reportTurn(who.id, end)
-    yield* db.updateSession(who.id, { status: "idle" })
-    yield* Effect.log(`turn end ${who.id} (${end.harness}${end.interrupted ? ", interrupted" : ""})`)
+    if (!end) return yield* noteConversation(definition, who, raw)
+    const written = yield* db.endObserved(who.id, end)
+    yield* Effect.log(`turn end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)
   })
 
   const prompt = Effect.fn("Integration.prompt")(function* (who: HookCaller, raw: string) {

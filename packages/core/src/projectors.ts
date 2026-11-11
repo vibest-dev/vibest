@@ -236,10 +236,17 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
     ),
   "turn.reported": () => Effect.void,
   "turn.ended": (fact, sql) =>
-    sql`UPDATE turn SET status = ${fact.data.status}, report_seq = ${fact.data.report ?? null},
-        answer = (SELECT data ->> '$.text' FROM event WHERE seq = ${fact.data.report ?? null} AND type = 'turn.reported'),
-        failure = ${fact.data.failure?.message ?? null}, ended_at = ${fact.at}
-      WHERE id = ${fact.data.turn} AND status IS NULL`,
+    Effect.andThen(
+      sql`UPDATE turn SET status = ${fact.data.status}, report_seq = ${fact.data.report ?? null},
+          answer = coalesce(${fact.data.reply ?? null},
+            (SELECT data ->> '$.text' FROM event WHERE seq = ${fact.data.report ?? null} AND type = 'turn.reported')),
+          failure = ${fact.data.failure?.message ?? null}, ended_at = ${fact.at}
+        WHERE id = ${fact.data.turn} AND status IS NULL`,
+      fact.data.conversation === undefined
+        ? Effect.void
+        : sql`UPDATE process SET conversation = ${fact.data.conversation}
+            WHERE id = (SELECT process_id FROM session WHERE id = ${sessionIdOf(fact)})`,
+    ),
 
   "inbox.queued": (fact, sql) => {
     const { data } = fact
