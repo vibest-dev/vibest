@@ -411,7 +411,7 @@ export class Sessions extends Context.Service<
         const open = session.executionState === "open"
         const limited = session.executionState === "failed" ? yield* db.limitedExecution(id) : undefined
         if (!open && session.exitedAt !== null && limited === undefined) return
-        if (restarting.has(id)) return
+        if (yield* restarting.has(id)) return
         const routed = yield* live(session).pipe(Effect.option)
         if (Option.isNone(routed)) return yield* live(session)
         const h = routed.value
@@ -572,7 +572,7 @@ export class Sessions extends Context.Service<
           session.executionState === "open" ||
           session.status === "blocked" ||
           (session.startedAt === null && session.exitedAt === null) ||
-          restarting.has(id)
+          (yield* restarting.has(id))
         )
           return
         const h = yield* live(session)

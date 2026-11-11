@@ -109,6 +109,30 @@ const make = Effect.gen(function* () {
     }),
   )
 
+  const status = Effect.fn("SessionLive.status")((id: string): Effect.Effect<AgentStatus> =>
+    Effect.sync(() => statuses.get(id) ?? "unknown"),
+  )
+
+  const integration = Effect.fn("SessionLive.integration")((id: string) => Effect.sync(() => integrations.get(id)))
+
+  const archivesOnIdle = Effect.fn("SessionLive.archivesOnIdle")((id: string) =>
+    Effect.sync(() => archiveOnIdle.has(id)),
+  )
+
+  const isRestarting = Effect.fn("SessionLive.restarting.has")((id: string) => Effect.sync(() => restarting.has(id)))
+
+  const markRestarting = Effect.fn("SessionLive.restarting.mark")((id: string) =>
+    Effect.sync(() => {
+      restarting.add(id)
+    }),
+  )
+
+  const clearRestarting = Effect.fn("SessionLive.restarting.clear")((id: string) =>
+    Effect.sync(() => {
+      restarting.delete(id)
+    }),
+  )
+
   const size = Effect.gen(function* () {
     return { tracked: HashMap.size(yield* SynchronizedRef.get(tracked)), statuses: statuses.size }
   })
@@ -118,26 +142,16 @@ const make = Effect.gen(function* () {
     stop,
     forget,
     release,
-    status: (id: string): AgentStatus => statuses.get(id) ?? "unknown",
+    status,
     setStatus,
-    integration: (id: string) => integrations.get(id),
+    integration,
     setIntegration,
     dropIntegration,
-    archivesOnIdle: (id: string) => archiveOnIdle.has(id),
+    archivesOnIdle,
     archiveWhenIdle,
     ended,
     size,
-    restarting: {
-      has: (id: string) => restarting.has(id),
-      mark: (id: string) =>
-        Effect.sync(() => {
-          restarting.add(id)
-        }),
-      clear: (id: string) =>
-        Effect.sync(() => {
-          restarting.delete(id)
-        }),
-    },
+    restarting: { has: isRestarting, mark: markRestarting, clear: clearRestarting },
   }
 })
 

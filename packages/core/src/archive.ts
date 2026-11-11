@@ -133,7 +133,7 @@ export const sessionArchive = (deps: {
 
   const archiveIfIdle = (id: string) =>
     Effect.gen(function* () {
-      if (!sessionLive.archivesOnIdle(id)) return
+      if (!(yield* sessionLive.archivesOnIdle(id))) return
       const owner = yield* db.getSession(id)
       if (owner === undefined || owner.metadata.archived || owner.metadata.removed) return
       yield* locked(

@@ -548,7 +548,7 @@ const make = Effect.gen(function* () {
         if (exists.length === 0) return false
         const current = yield* currentProcess(id)
         if (process !== undefined && process !== current?.id) return false
-        const known = sessionLive.integration(id) ?? current?.integration
+        const known = (yield* sessionLive.integration(id)) ?? current?.integration
         if (known?.version === integration.version && known.protocol === integration.protocol) return false
         yield* sessionLive.setIntegration(id, integration)
         return true
@@ -571,7 +571,7 @@ const make = Effect.gen(function* () {
           if (current === undefined) return undefined
           if (ready && !(yield* fromCurrentHarness(id, current.id, patch.reporter, patch.pid ?? undefined)))
             return undefined
-          const integration = patch.integration ?? sessionLive.integration(id)
+          const integration = patch.integration ?? (yield* sessionLive.integration(id))
           if (!ready) {
             yield* emit(ProcessPid, { sessionId: id, data: { process: current.id, pid: patch.pid as number } })
             return current.id

@@ -108,7 +108,7 @@ const make = Effect.gen(function* () {
     const runtimeId = coord.runtime
     if (coord.address.id === terminal) return null
     const found = runtimes.find(runtimeId)
-    if (!restarting.has(coord.id)) {
+    if (!(yield* restarting.has(coord.id))) {
       if (found === undefined) return null
       const presence = yield* coordinatorIdle(found, coord.address).pipe(Effect.option)
       if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
@@ -364,7 +364,7 @@ const make = Effect.gen(function* () {
         const place = coord?.address
         if (!coord?.runtime || !place || place.id === "" || !sameCoordinator(coord, runtime, address))
           return { result: "moved" as const }
-        if (restarting.has(coord.id))
+        if (yield* restarting.has(coord.id))
           return {
             result: "unsupported" as const,
             reason: "vibest update is restarting it there; run vibest again once it is ready",

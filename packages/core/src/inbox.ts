@@ -103,7 +103,7 @@ export class Inbox extends Context.Service<
             const coord = yield* db.coordinatorOf(projectId)
             if (!coord?.address || coord.address.id === "" || !coord.runtime)
               return yield* db.dropWaiting(projectId, "absent")
-            if (restarting.has(coord.id)) return
+            if (yield* restarting.has(coord.id)) return
             const address = encodeAddress(coord.address)
             const guard = { projectId, runtime: coord.runtime, address }
             const h = runtimes.find(coord.runtime)

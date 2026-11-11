@@ -130,15 +130,16 @@ export const makeStore = Effect.gen(function* () {
   const selectSessions = (where: ReadonlyArray<Statement.Fragment>, endedMains = false, filter?: Statement.Fragment) =>
     selectRaw([endedMains ? sql`(${notMain} OR ${endedMain})` : notMain, ...where], filter).pipe(
       Effect.flatMap((rows) =>
-        decodeSessions(
-          rows.map((row) =>
-            sessionOf(row, {
-              status: sessionLive.status(row.id),
-              integration: sessionLive.integration(row.id),
-            }),
-          ),
+        Effect.forEach(rows, (row) =>
+          Effect.gen(function* () {
+            return sessionOf(row, {
+              status: yield* sessionLive.status(row.id),
+              integration: yield* sessionLive.integration(row.id),
+            })
+          }),
         ),
       ),
+      Effect.flatMap(decodeSessions),
     )
   const findSession = (id: string) => selectSessions([sql`s.id = ${id}`]).pipe(Effect.map((rows) => rows[0]))
   const readSession = (id: string) => selectSessions([sql`s.id = ${id}`], true).pipe(Effect.map((rows) => rows[0]))
@@ -158,17 +159,16 @@ export const makeStore = Effect.gen(function* () {
     current !== undefined && current.ended === null && current.terminal !== null && !moving.has(projectIdValue)
 
   const findCoordinators = (project?: string) =>
-    reads
-      .coordinatorRows(project)
-      .pipe(
-        Effect.flatMap((rows) =>
-          decodeCoordinators(
-            rows.map((row) =>
-              coordinatorOf(row, { integration: sessionLive.integration(row.id), moving: moving.has(row.project) }),
-            ),
-          ),
+    reads.coordinatorRows(project).pipe(
+      Effect.flatMap((rows) =>
+        Effect.forEach(rows, (row) =>
+          sessionLive
+            .integration(row.id)
+            .pipe(Effect.map((integration) => coordinatorOf(row, { integration, moving: moving.has(row.project) }))),
         ),
-      )
+      ),
+      Effect.flatMap(decodeCoordinators),
+    )
 
   const inbox = reads.inboxWhere
   const inboxIn = (session: string, ids: ReadonlyArray<number>) =>
