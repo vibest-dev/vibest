@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
+import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
 import { Effect, Fiber, FileSystem, HashMap, Path, PlatformError } from "effect"
 import { SqlClient } from "effect/sql"
@@ -276,6 +277,7 @@ describe.concurrent("Sessions", () => {
             : fs.copyFile(from, to).pipe(Effect.tap(() => Effect.sync(() => copied.push(to)))),
       })
       const sessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
+        Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
         Effect.provideService(FileSystem.FileSystem, faulty),
       )
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
