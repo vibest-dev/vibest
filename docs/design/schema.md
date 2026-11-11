@@ -359,7 +359,8 @@ E2E runs it on every world's database at the end of each check.
 - An execution start an integration reports, or the runtime showing the session working while an execution is open,
   is that execution's `execution.accepted`, written once. An execution end is its `execution.ended` fact, written as
   the hook is admitted (a settlement, so it still lands while vibestd drains). The proof that an execution was taken up
-  is its acceptance, its typed text or an inbox row delivered into it.
+  is its acceptance or its typed text; an inbox row linked into it is not, since a task is linked before the runtime
+  gets it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.
 - `vibest run --archive-on-idle`: the flag is kept only in the memory of the vibestd that started the session (set at

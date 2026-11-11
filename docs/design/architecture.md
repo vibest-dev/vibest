@@ -364,8 +364,7 @@ How `packages/core/src/sessions.ts` keeps these:
   pid has died is an exit even when that report still says the terminal is running: a launch herdr has not finished
   keeps saying so after the process was killed. A terminal the runtime cannot
   find is. An execution counts
-  as worked when it was accepted (seen working, or a start of it was reported), typed, or a row was delivered into
-  it. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
+  as worked when it was accepted (seen working, or a start of it was reported) or typed. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
   after the hook grace. A prompt that failed part way closes the execution so the queue moves again.
 - A Message stays queued only for what a retry can fix (the runtime unreachable, vibestd stopping); a refused start
   is final. A session whose harness is being restarted is never resumed in another terminal.

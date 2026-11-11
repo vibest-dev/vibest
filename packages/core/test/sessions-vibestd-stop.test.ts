@@ -197,6 +197,35 @@ describe.concurrent("after a vibestd stop", () => {
     { hooked: ["pi"] },
   )
 
+  test(
+    "vibestd stopped after the task is linked but before the runtime got it ends that execution not_started, not lost",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db
+      const repo = yield* makeRepository
+      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+        runtime: RUNTIME,
+        address: { machine: "local", id: "test/coord" },
+      })
+      const sending = yield* herdr.hold("send")
+      const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
+      yield* sending.reached
+      yield* Effect.gen(function* () {
+        assert.isUndefined(yield* db.untakenTask(id))
+        assert.isFalse(yield* db.executionAccepted(id))
+        yield* Sessions.make({ maxSessions: undefined }).pipe(
+          Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+        )
+        yield* untilVirtual(executionInputs(id), (executions) => executions[0]?.status !== "working")
+        assert.deepStrictEqual(
+          (yield* executionInputs(id)).map((e) => e.status),
+          ["not_started"],
+        )
+      }).pipe(Effect.ensuring(sending.release("unreachable")))
+    }),
+    { hooked: ["pi"] },
+  )
+
   const limitedMidMove = <A, E, R>(body: (id: string) => Effect.Effect<A, E, R>) =>
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

@@ -358,9 +358,15 @@ describe("Db", () => {
         assert.strictEqual(yield* db.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), "do it")
         yield* db.linkTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
         assert.isUndefined(yield* db.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+        assert.isFalse(
+          yield* db.executionTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+          "a task linked to the open execution is not yet proof the harness took it up",
+        )
+        const open = (yield* db.openExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!
+        yield* db.acceptExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", open)
         assert.isTrue(
           yield* db.executionTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-          "the task delivered into the open execution is the stored proof it was taken up",
+          "its acceptance is the stored proof it was taken up",
         )
         assert.strictEqual(
           (yield* sql<{

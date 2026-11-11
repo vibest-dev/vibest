@@ -212,8 +212,7 @@ export const inboxMethods = (store: Store) => {
       Effect.gen(function* () {
         const execution = yield* openExecution(id)
         if (execution === undefined) return false
-        const [row] = yield* sql<{ taken: number }>`SELECT (t.accepted_at IS NOT NULL OR t.typed IS NOT NULL
-            OR EXISTS (SELECT 1 FROM inbox i WHERE i.session_id = t.session_id AND i.execution_id = t.id)) AS taken
+        const [row] = yield* sql<{ taken: number }>`SELECT (t.accepted_at IS NOT NULL OR t.typed IS NOT NULL) AS taken
           FROM execution t WHERE t.session_id = ${id} AND t.id = ${execution}`
         return row?.taken === 1
       }).pipe(Effect.orDie),
