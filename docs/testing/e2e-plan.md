@@ -34,6 +34,15 @@ A test that starts the built vibestd itself (`test/plugin-binary.test.ts`) asks 
 `vibest` CLI: the CLI starts a vibestd of its own when a Ping is slow and would leave a second, untracked one behind. It
 gives vibestd a `PATH` of the system directories only, so vibestd does not poll the harnesses the user installed.
 
+Every process a test or a check starts that could outlive it is recorded in the run's reap file
+(`<tmpdir>/vibest-reap-<run pid>`, `tools/reap.ts`) with its command and start time: herdr servers, vibestd daemons,
+herdr-core cores (with the `hc hold` children that keep their terminals, which outlive a core ended by a signal), and,
+under `pnpm test`, every Bun process a test starts (vitest's setup puts `tools/reap-preload.ts` into `BUN_OPTIONS`, so a
+vibestd started from source records itself before it runs). A detached watcher stops them when the run exits; when the
+watcher dies with the run (a killed agent session, a crash), the next `pnpm test` or `pnpm e2e` stops what every reap
+file of an ended run still names and deletes the file. Only a process with the recorded command and start time is
+stopped, so the user's own vibestd, herdr and herdr-core are never touched.
+
 ## 2. Layers
 
 **L0, already automated, no keys.** `pnpm test`; `HERDR_LIVE=1 pnpm test` inside a herdr pane (the two live files);
