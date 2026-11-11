@@ -774,8 +774,9 @@ export default Plugin.define({
 })
 ```
 
-Settings of core concepts (definitions, machines, skills) are top-level keys or files in the vibest home, not plugin
-options, as in OpenCode.
+`vibest.json` has one key, `plugins`. Machines are not configuration: `vibest machine add` and `vibest machine rm` record them in
+the ledger (`machine.added`, `machine.removed`). There are no agent definitions and no user skills to configure (skills
+are builtin, §4.2).
 
 ## 8. Harness adapters
 
