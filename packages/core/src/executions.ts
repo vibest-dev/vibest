@@ -1,20 +1,13 @@
 import type { HarnessUnavailable, NotReady } from "@vibest/schema/session"
-import { Clock, Effect, Exit } from "effect"
+import { Effect, Exit } from "effect"
 import type { FileSystem, Path } from "effect"
 
-import { type InboxRow, type InboxStatus, type SessionPatch, type SessionRow, type ExecutionEnd } from "./db.ts"
+import { type InboxRow, type InboxStatus, type SessionRow } from "./db.ts"
 import { nextBatch } from "./inbox.ts"
 import { type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
 
 export const sessionExecutions = (deps: {
   readonly db: {
-    readonly endExecution: (
-      id: string,
-      end: ExecutionEnd,
-      patch: SessionPatch,
-      notice: string | undefined,
-      at?: number,
-    ) => Effect.Effect<void>
     readonly pendingInbox: (sessionId: string) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly claim: (sessionId: string, ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<number>>
     readonly setInboxStatus: (
@@ -52,15 +45,6 @@ export const sessionExecutions = (deps: {
   ) => Effect.Effect<void, NotReady | RuntimeError | HarnessUnavailable, FileSystem.FileSystem | Path.Path>
 }) => {
   const { db } = deps
-
-  const finish = Effect.fn("Sessions.finish")(function* (session: SessionRow, end: "failed", error: string) {
-    yield* db.endExecution(
-      session.id,
-      { outcome: end, failure: { message: error } },
-      { executionState: end, lastActive: yield* Clock.currentTimeMillis },
-      `${session.id}'s execution ended with an error: ${error}`,
-    )
-  })
 
   const deliverQueued = Effect.fn("Sessions.deliverQueued")(function* (
     h: Runtime,
@@ -139,5 +123,5 @@ export const sessionExecutions = (deps: {
       )
   })
 
-  return { finish, deliverQueued }
+  return { deliverQueued }
 }

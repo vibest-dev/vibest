@@ -43,7 +43,6 @@ import { sessionPlacement } from "./placement.ts"
 import { errorMessage, Plugins } from "./plugins.ts"
 import { Processes } from "./processes.ts"
 import { projectRoot, workspaceGit } from "./project-create.ts"
-import { CONFIRM_TIMEOUT, sessionPrompting, STOP_WAIT } from "./prompting.ts"
 import * as Remove from "./remove.ts"
 import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
 import {
@@ -58,6 +57,7 @@ import {
   type Terminal,
 } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
+import { busy, busyOf, CONFIRM_TIMEOUT, Executions, STOP_WAIT } from "./session/executions.ts"
 import { SessionLive } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
 import { sessionSpawn, type SpawnInput, type Spawned } from "./spawn.ts"
@@ -79,7 +79,7 @@ export {
   SessionBusy,
 } from "@vibest/schema/session"
 
-export { CONFIRM_TIMEOUT, READY_TIMEOUT, STOP_WAIT } from "./prompting.ts"
+export { CONFIRM_TIMEOUT, READY_TIMEOUT, STOP_WAIT } from "./session/executions.ts"
 export { allocationNameSource, defaultSessionName, peerAdmitPause, type SpawnInput, type Spawned } from "./spawn.ts"
 
 export const START_TIMEOUT = Duration.seconds(120)
@@ -90,6 +90,7 @@ const SESSION_DEPS = [
   Bus.node,
   Db.node,
   Drain.node,
+  Executions.node,
   Git.node,
   Harness.node,
   Harnesses.node,
@@ -271,12 +272,7 @@ export class Sessions extends Context.Service<
           )
         })
 
-      const { awaitReady, busy, busyOf, settleAfterInterrupt, interruptAgent, prompt } = sessionPrompting({
-        db,
-        harnesses,
-        bus,
-        track,
-      })
+      const { awaitReady, settleAfterInterrupt, interruptAgent, prompt, finish } = yield* Executions
 
       const vibestEnv = (session: SessionRow, process?: number) => ({
         ...(process === undefined ? {} : { VIBEST_PROCESS: String(process) }),
@@ -329,7 +325,7 @@ export class Sessions extends Context.Service<
       })
 
       const limit = limitMoveBox()
-      const { finish, deliverQueued } = sessionExecutions({
+      const { deliverQueued } = sessionExecutions({
         db,
         undelivered,
         prompt,
@@ -423,7 +419,7 @@ export class Sessions extends Context.Service<
         if (Option.isNone(maybe)) return
         const seen = maybe.value
         const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
-        if (state !== undefined && session.status !== state) yield* db.updateSession(session.id, { status: state })
+        if (state !== undefined && session.status !== state) yield* db.setStatus(session.id, state)
         if ((state === "working" || state === "blocked") && execution !== undefined)
           yield* db.acceptExecution(id, execution)
         const exited =
@@ -460,8 +456,7 @@ export class Sessions extends Context.Service<
         } else yield* Ref.set(r.launchRechecked, false)
         if (!(yield* harnesses.get(session.harnessId)).ownSessionId && h.session !== undefined) {
           const sessionId = yield* h.session(terminal).pipe(Effect.catch(() => Effect.succeed(null)))
-          if (sessionId !== null && sessionId !== session.harnessSessionId)
-            yield* db.updateSession(id, { harnessSessionId: sessionId })
+          if (sessionId !== null && sessionId !== session.harnessSessionId) yield* db.noteConversation(id, sessionId)
         }
 
         const s = state ?? "unknown"
@@ -658,7 +653,7 @@ export class Sessions extends Context.Service<
                     message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
                   })
                 const closed = yield* db.closeExecution(id, execution, "interrupted")
-                if (closed && !runtimeKnows) yield* db.updateSession(id, { status: "idle" })
+                if (closed && !runtimeKnows) yield* db.setStatus(id, "idle")
                 const last = closed ? undefined : yield* db.latestReply(id)
                 if (!closed && !(last?.execution === execution && last.status === "interrupted"))
                   return {
