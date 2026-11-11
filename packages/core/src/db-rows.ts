@@ -101,6 +101,9 @@ export const SessionRow = Schema.Struct({
 })
 export type SessionRow = typeof SessionRow.Type
 
+export const sessionEnded = (row: SessionRow | undefined) =>
+  row === undefined || row.exitedAt !== null || !!row.metadata.archived || !!row.metadata.removed
+
 export type SessionPatch = Partial<Omit<SessionRow, "id" | "projectId" | "agent" | "createdAt" | "runtime">> & {
   readonly end?: ProcessEndReason
 }

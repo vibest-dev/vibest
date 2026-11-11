@@ -3,7 +3,7 @@ import { Db } from "@vibest/core/db"
 import { line } from "@vibest/core/inbox"
 import { VibestCommand } from "@vibest/core/paths"
 import { CONTINUE, continueNotice, continueText, type Restarted } from "@vibest/core/restart"
-import { Restarting } from "@vibest/core/restarting"
+import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
 import { PROTOCOL } from "@vibest/protocol/protocol"
@@ -77,7 +77,7 @@ describe("restart in place", () => {
       yield* Effect.forkChild(sessions.restart([id]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
       yield* ran.reached
       assert.deepStrictEqual(yield* processes.signaled, [pid])
-      assert.isTrue((yield* Restarting).has(id))
+      assert.isTrue((yield* SessionLive).restarting.has(id))
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false, status: "idle" }))
       yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
       yield* sessions.check(id)
@@ -97,7 +97,7 @@ describe("restart in place", () => {
       assert.deepInclude(outcome, { id, ok: true, message: `${id} restarted; its interrupted execution continues` })
       assert.strictEqual((yield* herdr.callsTo("open")).length, opened, "no new terminal")
       const row = (yield* db.getSession(id))!
-      assert.isFalse((yield* Restarting).has(id))
+      assert.isFalse((yield* SessionLive).restarting.has(id))
       assert.notStrictEqual(row.metadata.pid, pid)
       assert.strictEqual(row.executionState, "open")
       assert.include(

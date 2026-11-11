@@ -13,8 +13,8 @@ import { Layout, VibestCommand } from "./paths.ts"
 import { describeSpawn, Plugins } from "./plugins.ts"
 import { Processes } from "./processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "./remove.ts"
-import { Restarting } from "./restarting.ts"
 import { machinesListing, Runtimes, type Terminal } from "./runtimes.ts"
+import { SessionLive } from "./session/live.ts"
 import { runtimeEnv } from "./sessions.ts"
 
 export const PRESENT_TIMEOUT = Duration.seconds(5)
@@ -52,7 +52,7 @@ const make = Effect.gen(function* () {
   const db = yield* Db
   const bus = yield* Bus
   const runtimes = yield* Runtimes
-  const restarting = yield* Restarting
+  const restarting = (yield* SessionLive).restarting
   const plugins = yield* Plugins
   const harness = yield* Harness
   const harnesses = yield* Harnesses
@@ -399,8 +399,8 @@ export class MainAgent extends Context.Service<MainAgent, Effect.Success<typeof 
       Harnesses.node,
       Plugins.node,
       Processes.node,
-      Restarting.node,
       Runtimes.node,
+      SessionLive.node,
       PlatformNode.fileSystem,
       PlatformNode.layout,
       PlatformNode.path,

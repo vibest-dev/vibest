@@ -34,6 +34,7 @@ import { makeStore } from "./db-store.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import type { HarnessId } from "./harness.ts"
+import { SessionLive } from "./session/live.ts"
 
 export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"
 export { InboxKind, type ProcessEndReason } from "@vibest/schema/event"
@@ -50,6 +51,7 @@ export {
   type RepositoryRow,
   type ExecutionEnd,
   failureOf,
+  sessionEnded,
   type SessionBrief,
 } from "./db-rows.ts"
 export { APPLICATION_ID, DatabaseOpenFailed, SchemaMismatch, inspectSchema } from "./db-schema.ts"
@@ -66,8 +68,7 @@ const make = Effect.gen(function* () {
     sql,
     reads,
     now,
-    statuses,
-    integrations,
+    sessionLive,
     moving,
     remember,
     emit,
@@ -96,7 +97,6 @@ const make = Effect.gen(function* () {
     unusedId,
     conversationOf,
     addressedCreator,
-    archiveOnIdle,
   } = store
   const remote = remoteQueries(store)
   const fromCurrentHarness = (sessionId: string, current: number, reporter?: number, pid?: number) =>
@@ -328,7 +328,7 @@ const make = Effect.gen(function* () {
                   }),
             },
           })
-          if (archives) archiveOnIdle.add(row.id)
+          if (archives) yield* sessionLive.archiveWhenIdle(row.id)
           const processAt = row.startedAt ?? row.createdAt
           const process = yield* startProcess(
             row.id,
@@ -376,7 +376,7 @@ const make = Effect.gen(function* () {
           }
           if (stopped)
             yield* emit(SessionEnded, { sessionId: row.id, at: row.lastActive, data: { reason: "archived" } })
-          remember(row)
+          yield* remember(row)
           return true
         }),
       ).pipe(Effect.orDie),
@@ -415,10 +415,6 @@ const make = Effect.gen(function* () {
       ),
 
     getSession: (id: string) => readSession(id).pipe(Effect.orDie),
-
-    archivesOnIdle: (id: string) => Effect.sync(() => archiveOnIdle.has(id)),
-
-    liveStatuses: Effect.sync(() => statuses.size),
 
     updateSession: (id: string, patch: SessionPatch) => tx(updateSession(id, patch)).pipe(Effect.orDie),
 
@@ -552,9 +548,9 @@ const make = Effect.gen(function* () {
         if (exists.length === 0) return false
         const current = yield* currentProcess(id)
         if (process !== undefined && process !== current?.id) return false
-        const known = integrations.get(id) ?? current?.integration
+        const known = sessionLive.integration(id) ?? current?.integration
         if (known?.version === integration.version && known.protocol === integration.protocol) return false
-        integrations.set(id, integration)
+        yield* sessionLive.setIntegration(id, integration)
         return true
       }).pipe(Effect.orDie),
 
@@ -575,12 +571,12 @@ const make = Effect.gen(function* () {
           if (current === undefined) return undefined
           if (ready && !(yield* fromCurrentHarness(id, current.id, patch.reporter, patch.pid ?? undefined)))
             return undefined
-          const integration = patch.integration ?? integrations.get(id)
+          const integration = patch.integration ?? sessionLive.integration(id)
           if (!ready) {
             yield* emit(ProcessPid, { sessionId: id, data: { process: current.id, pid: patch.pid as number } })
             return current.id
           }
-          if (integration !== undefined) integrations.set(id, integration)
+          if (integration !== undefined) yield* sessionLive.setIntegration(id, integration)
           yield* emit(ProcessReady, {
             sessionId: id,
             at: patch.ready as number,
@@ -666,5 +662,9 @@ export class Db extends Context.Service<Db, Effect.Success<typeof make>>()("vibe
     ),
   )
 
-  static readonly node = LayerNode.make({ service: Db, layer: Db.layer, deps: [Bus.node, PlatformNode.sqlClient] })
+  static readonly node = LayerNode.make({
+    service: Db,
+    layer: Db.layer,
+    deps: [Bus.node, SessionLive.node, PlatformNode.sqlClient],
+  })
 }
