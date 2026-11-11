@@ -152,7 +152,7 @@ export class Inbox extends Context.Service<
         projectId: string,
         mode: "subscribe" | "poll",
         origin: { readonly runtime: string; readonly address: string; readonly harnessId: string } | undefined,
-        hold: (ids: ReadonlyArray<number>) => Effect.Effect<void>,
+        hold: (session: string, ids: ReadonlyArray<number>) => Effect.Effect<void>,
       ) =>
         withLock(
           `claim project ${projectId}`,
@@ -179,7 +179,7 @@ export class Inbox extends Context.Service<
                 { projectId, runtime: current.runtime, address, harnessId: current.harnessId },
               )
               if (claimed.length === 0) return undefined
-              yield* hold(claimed)
+              yield* hold(current.id, claimed)
               return batch.filter((r) => claimed.includes(r.id))
             }),
           ),
@@ -213,14 +213,14 @@ export class Inbox extends Context.Service<
             const claimOne = () =>
               origin === undefined || main === undefined
                 ? Effect.succeed(undefined)
-                : claimNext(projectId, "subscribe", origin, (ids) =>
-                    leases.hold(recipient, ids, undefined, (ended) => db.failLeased(main, ended)),
+                : claimNext(projectId, "subscribe", origin, (session, ids) =>
+                    leases.hold(recipient, session, ids, undefined, (ended) => db.failLeased(main, ended)),
                   ).pipe(Effect.map((rows) => (rows === undefined ? undefined : text(rows))))
             return Stream.unfold(0, () =>
               Effect.gen(function* () {
                 const ids = leases.held(recipient)
                 if (ids.length > 0 && main !== undefined)
-                  yield* Effect.uninterruptible(markDelivered(main, ids).pipe(Effect.andThen(leases.settle(ids))))
+                  yield* Effect.uninterruptible(markDelivered(main, ids).pipe(Effect.andThen(leases.settle(main, ids))))
                 while (true) {
                   const batch = yield* claimOne()
                   if (batch !== undefined) return [batch, 0] as const
@@ -241,8 +241,8 @@ export class Inbox extends Context.Service<
           yield* engine.arm(`away:${projectId}`, AWAY, leases.expireAll(projectId))
           const empty: Polled = { ids: [], line: "", text: "" }
           if ((yield* drain.phase) !== "open") return empty
-          const rows = yield* claimNext(projectId, "poll", undefined, (ids) =>
-            leases.hold(projectId, ids, LEASE, released(projectId)),
+          const rows = yield* claimNext(projectId, "poll", undefined, (session, ids) =>
+            leases.hold(projectId, session, ids, LEASE, released(projectId)),
           )
           if (rows === undefined) return empty
           const last = rows.at(-1)!
@@ -260,8 +260,9 @@ export class Inbox extends Context.Service<
           projectId,
           Effect.uninterruptible(
             Effect.gen(function* () {
+              const main = yield* db.coordinatorOf(projectId)
               const rows = yield* db.settleLeased(projectId, ids, release)
-              yield* leases.settle([...ids, ...release])
+              if (main !== undefined) yield* leases.settle(main.id, [...ids, ...release])
               return rows.map((r) => r.id)
             }),
           ),
