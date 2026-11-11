@@ -281,6 +281,7 @@ const make = Effect.gen(function* () {
             if (n >= max) return false
           }
           const stopped = row.metadata.archived || row.metadata.removed
+          const originParent = origin?.parent ?? origin?.reportTo
           yield* emit(SessionCreated, {
             sessionId: row.id,
             projectId: project,
@@ -297,9 +298,7 @@ const make = Effect.gen(function* () {
                     origin: {
                       peer: origin.peer,
                       project: origin.project,
-                      ...((origin.parent ?? origin.reportTo) === undefined
-                        ? {}
-                        : { parent: origin.parent ?? origin.reportTo }),
+                      ...(originParent === undefined ? {} : { parent: originParent }),
                     },
                   }),
             },
