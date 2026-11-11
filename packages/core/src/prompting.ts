@@ -15,7 +15,7 @@ import {
   type Terminal,
   type AgentSeen,
 } from "./runtimes.ts"
-import type { Tracked } from "./session-types.ts"
+import type { Tracked } from "./session/live.ts"
 
 export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)

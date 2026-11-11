@@ -13,7 +13,7 @@ import {
   ExecutionStarted,
 } from "@vibest/schema/event"
 import { newId, randomId } from "@vibest/schema/id"
-import { AgentStatus, InboxStatus, RuntimeAddress } from "@vibest/schema/session"
+import { InboxStatus, RuntimeAddress } from "@vibest/schema/session"
 import { Clock, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
@@ -32,6 +32,7 @@ import { makeJournal } from "./journal.ts"
 import { coordinatorOf, decodeCoordinators, decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
 import { Routing } from "./plugins.ts"
 import { envelope } from "./replies.ts"
+import { SessionLive } from "./session/live.ts"
 
 type InboxKey = { readonly session: string; readonly id: number }
 
@@ -96,18 +97,12 @@ export const makeStore = Effect.gen(function* () {
   const { emit, commit: tx, notify } = journal
   const reads = ledgerReads(sql)
   const now = Clock.currentTimeMillis
-  const statuses = new Map<string, AgentStatus>()
-  const integrations = new Map<string, Integration>()
-  const archiveOnIdle = new Set<string>()
+  const sessionLive = yield* SessionLive
   const moving = new Set<string>()
-  const remember = (row: Pick<SessionRow, "id" | "status" | "metadata">) => {
-    if (row.metadata.archived || row.metadata.removed) {
-      integrations.delete(row.id)
-      archiveOnIdle.delete(row.id)
-    }
-    if (row.status === "unknown" || row.metadata.archived || row.metadata.removed) statuses.delete(row.id)
-    else statuses.set(row.id, row.status)
-  }
+  const remember = (row: Pick<SessionRow, "id" | "status" | "metadata">) =>
+    row.metadata.archived || row.metadata.removed
+      ? sessionLive.ended(row.id)
+      : sessionLive.setStatus(row.id, row.status)
 
   const projectPrefixTaken = (short: string) =>
     sql`SELECT 1 FROM project WHERE id >= ${short} AND id < ${`${short}~`} LIMIT 1`.pipe(
@@ -135,15 +130,16 @@ export const makeStore = Effect.gen(function* () {
   const selectSessions = (where: ReadonlyArray<Statement.Fragment>, endedMains = false, filter?: Statement.Fragment) =>
     selectRaw([endedMains ? sql`(${notMain} OR ${endedMain})` : notMain, ...where], filter).pipe(
       Effect.flatMap((rows) =>
-        decodeSessions(
-          rows.map((row) =>
-            sessionOf(row, {
-              status: statuses.get(row.id) ?? "unknown",
-              integration: integrations.get(row.id),
-            }),
-          ),
+        Effect.forEach(rows, (row) =>
+          Effect.gen(function* () {
+            return sessionOf(row, {
+              status: yield* sessionLive.status(row.id),
+              integration: yield* sessionLive.integration(row.id),
+            })
+          }),
         ),
       ),
+      Effect.flatMap(decodeSessions),
     )
   const findSession = (id: string) => selectSessions([sql`s.id = ${id}`]).pipe(Effect.map((rows) => rows[0]))
   const readSession = (id: string) => selectSessions([sql`s.id = ${id}`], true).pipe(Effect.map((rows) => rows[0]))
@@ -163,17 +159,16 @@ export const makeStore = Effect.gen(function* () {
     current !== undefined && current.ended === null && current.terminal !== null && !moving.has(projectIdValue)
 
   const findCoordinators = (project?: string) =>
-    reads
-      .coordinatorRows(project)
-      .pipe(
-        Effect.flatMap((rows) =>
-          decodeCoordinators(
-            rows.map((row) =>
-              coordinatorOf(row, { integration: integrations.get(row.id), moving: moving.has(row.project) }),
-            ),
-          ),
+    reads.coordinatorRows(project).pipe(
+      Effect.flatMap((rows) =>
+        Effect.forEach(rows, (row) =>
+          sessionLive
+            .integration(row.id)
+            .pipe(Effect.map((integration) => coordinatorOf(row, { integration, moving: moving.has(row.project) }))),
         ),
-      )
+      ),
+      Effect.flatMap(decodeCoordinators),
+    )
 
   const inbox = reads.inboxWhere
   const inboxIn = (session: string, ids: ReadonlyArray<number>) =>
@@ -272,7 +267,7 @@ export const makeStore = Effect.gen(function* () {
         ...(at === undefined ? {} : { at }),
         data: { process: current.id, reason },
       })
-      integrations.delete(id)
+      yield* sessionLive.dropIntegration(id)
       return true
     })
 
@@ -313,7 +308,7 @@ export const makeStore = Effect.gen(function* () {
           ...(start.pid === undefined ? {} : { pid: start.pid }),
         },
       })
-      integrations.delete(id)
+      yield* sessionLive.dropIntegration(id)
       return seq
     })
 
@@ -343,9 +338,7 @@ export const makeStore = Effect.gen(function* () {
       const [row] = yield* sql<{ endedAt: number | null }>`SELECT ended_at FROM session WHERE id = ${id}`
       if (row === undefined || row.endedAt !== null) return false
       yield* emit(SessionEnded, { sessionId: id, data: { reason: "archived" } })
-      integrations.delete(id)
-      archiveOnIdle.delete(id)
-      statuses.delete(id)
+      yield* sessionLive.ended(id)
       yield* notify({ type: "live.session", sessionId: id })
       return true
     })
@@ -521,7 +514,7 @@ export const makeStore = Effect.gen(function* () {
       const current = yield* findSession(id)
       if (current === undefined) return
       const next = { ...current, ...patch }
-      remember(next)
+      yield* remember(next)
       yield* notify({ type: "live.session", sessionId: id })
       if (patch.name !== undefined && patch.name !== current.name) yield* rename(id, patch.name)
       const ending = !!(next.metadata.archived || next.metadata.removed)
@@ -658,8 +651,7 @@ export const makeStore = Effect.gen(function* () {
     noteConversation,
     addressedCreator,
     now,
-    statuses,
-    integrations,
+    sessionLive,
     moving,
     remember,
     emit,
@@ -705,7 +697,6 @@ export const makeStore = Effect.gen(function* () {
     unusedId,
     conversationOf,
     placed,
-    archiveOnIdle,
   }
 })
 
