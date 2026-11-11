@@ -80,7 +80,8 @@ export const graph = (entry: string, provided: ReadonlySet<string>) => {
     }
     for (const item of imports) {
       if (!LOCAL.test(item.path)) {
-        if (!module.isBuiltin(item.path) && !provided.has(packageName(item.path))) visitPackage(item.path, path.dirname(file))
+        if (!module.isBuiltin(item.path) && !provided.has(packageName(item.path)))
+          visitPackage(item.path, path.dirname(file))
         continue
       }
       const resolved = resolveLocal(item.path, path.dirname(file))

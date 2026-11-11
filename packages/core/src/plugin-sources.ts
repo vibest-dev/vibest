@@ -69,7 +69,10 @@ const exportTarget = (value: unknown): string | undefined => {
 }
 const exportedEntries = (exports: unknown) =>
   (typeof exports === "object" && exports !== null && Object.keys(exports).some((key) => key.startsWith("."))
-    ? [exportTarget((exports as Record<string, unknown>)["./server"]), exportTarget((exports as Record<string, unknown>)["."])]
+    ? [
+        exportTarget((exports as Record<string, unknown>)["./server"]),
+        exportTarget((exports as Record<string, unknown>)["."]),
+      ]
     : [exportTarget(exports)]
   ).filter((entry) => entry !== undefined)
 const CONVENTIONAL_ENTRIES = ["server", "index"].flatMap((name) =>
