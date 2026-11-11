@@ -774,9 +774,9 @@ export default Plugin.define({
 })
 ```
 
-`vibest.json` has one key, `plugins`. Machines are not configuration: `vibest machine add` and `vibest machine rm` record them in
-the ledger (`machine.added`, `machine.removed`). There are no agent definitions and no user skills to configure (skills
-are builtin, §4.2).
+`vibest.json` has one key, `plugins`. Machines are not configuration: `vibest machine add` and `vibest machine rm`
+record them in the ledger (`machine.added`, `machine.removed`). There are no agent definitions and no user skills to
+configure (skills are builtin, §4.2).
 
 ## 8. Harness adapters
 
