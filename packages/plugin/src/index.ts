@@ -1,5 +1,6 @@
 import { type Effect, Schema, type Scope } from "effect"
 
+import type { EventDomain } from "./event.ts"
 import type { HarnessDomain } from "./harness.ts"
 import type { Hooks, Registration } from "./registration.ts"
 import type { RuntimeDomain } from "./runtime.ts"
@@ -7,6 +8,7 @@ import type { RuntimeDomain } from "./runtime.ts"
 export * as Harness from "./harness.ts"
 export * as Plugin from "./plugin.ts"
 export * as Runtime from "./runtime.ts"
+export type { EventDomain, Fact, FactOf, FactType } from "./event.ts"
 export type { Hooks, Registration, Transform } from "./registration.ts"
 export { capture, type Captured } from "./capture.ts"
 export { reconnectSchedule } from "./reconnect.ts"
@@ -218,4 +220,5 @@ export interface Context {
   readonly runtime: RuntimeDomain
   readonly harness: HarnessDomain
   readonly subscription: SubscriptionDomain
+  readonly event: EventDomain
 }

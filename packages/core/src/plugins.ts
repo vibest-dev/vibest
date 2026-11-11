@@ -1,8 +1,10 @@
 import type * as VibestPlugin from "@vibest/plugin"
+import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/event"
 import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 import { Cause, Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
 
 import { timeoutWithoutWaiting } from "./bounded.ts"
+import { Bus, type EngineEvent } from "./bus.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import { logFailure } from "./engine.ts"
@@ -142,6 +144,27 @@ const decide = (
   return change
 }
 
+const isFact = (event: EngineEvent): event is Fact => Object.hasOwn(Catalog, event.type)
+
+const factsFor =
+  (bus: Bus["Service"], plugin: string): VibestPlugin.EventDomain["subscribe"] =>
+  <T extends FactType>(input?: { readonly types?: ReadonlyArray<T> }) => {
+    const asked: ReadonlyArray<string> = input?.types ?? []
+    const known = new Set(asked.filter((type) => Object.hasOwn(Catalog, type)))
+    const unknown = asked.filter((type) => !known.has(type))
+    const warned =
+      unknown.length === 0
+        ? Effect.void
+        : Effect.logWarning(`plugin ${plugin} event.subscribe: ignoring unknown fact types ${unknown.join(", ")}`)
+    if (asked.length > 0 && known.size === 0) return Stream.unwrap(Effect.as(warned, Stream.never))
+    const wanted = (fact: Fact): fact is FactOf<T> => known.size === 0 || known.has(fact.type)
+    return Stream.unwrap(Effect.andThen(warned, Effect.map(bus.subscribe, Stream.fromSubscription))).pipe(
+      Stream.filter(isFact),
+      Stream.filter(wanted),
+      Stream.map((fact) => structuredClone(fact)),
+    )
+  }
+
 type Stopped = { readonly plugin: string; readonly reason: string }
 
 type Broken = { readonly running: Running; readonly refresh: Effect.Effect<void> }
@@ -177,6 +200,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const subscriptions = yield* Subscriptions
     const runtimes = yield* Runtimes
     const harnesses = yield* Harnesses
+    const bus = yield* Bus
     const setUp = Effect.fnUntraced(function* (candidate: Loaded, stats: Stats) {
       const plugin = candidate.plugin
       const scope = yield* Scope.fork(root)
@@ -212,6 +236,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         runtime: { transform: runtimes.transform, reload: runtimes.reload },
         harness: { transform: harnesses.transform, reload: harnesses.reload },
         subscription: { report: (input) => subscriptions.report(input) },
+        event: { subscribe: factsFor(bus, plugin.id) },
       }
       const report = (failure: Registry.Failure, refresh: Effect.Effect<void>) => {
         running.broken = `${failure.state}.transform threw: ${messageOf(failure.cause)}`
@@ -502,6 +527,7 @@ export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Pl
     layer: Plugins.layer,
     deps: [
       builtinsNode,
+      Bus.node,
       Harnesses.node,
       PluginLoader.node,
       Runtimes.node,

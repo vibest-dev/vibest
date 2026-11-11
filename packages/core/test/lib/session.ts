@@ -106,7 +106,7 @@ export const pluginsHost = (
         )
       }),
     ),
-    deps: [Harnesses.node, Runtimes.node, Subscriptions.node, platform, home],
+    deps: [Bus.node, Harnesses.node, Runtimes.node, Subscriptions.node, platform, home],
   })
 }
 

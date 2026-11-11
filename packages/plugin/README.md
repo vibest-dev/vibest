@@ -32,6 +32,7 @@ lists every plugin, builtins first, with its status and counters.
 | `harness.transform`                | add, change or remove `Harness.HarnessDefinition`s                                                                                                                |
 | `runtime.reload`, `harness.reload` | rebuild that registry, for a transform that reads data of its own                                                                                                 |
 | `subscription.report`              | replace one `(harness, provider)` row's usage limits                                                                                                              |
+| `event.subscribe`                  | a `Stream` of the ledger's facts after they commit, all or only the `types` asked for; run it with `Effect.forkScoped`                                            |
 
 **Hooks** run in plugin order; each callback gets a read-only event, returns what it decides, and has 5 seconds.
 Assigning to the event throws, and counts as the plugin crashing. **Transforms** take a synchronous

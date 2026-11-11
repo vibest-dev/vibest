@@ -237,6 +237,7 @@ export const machineHooks = (
       runtime: { transform: (f) => Effect.sync(() => (f(editor), registration)), reload: () => Effect.void },
       harness: { transform: () => Effect.succeed(registration), reload: () => Effect.void },
       subscription: { report: () => Effect.void },
+      event: { subscribe: () => Stream.empty },
     })
     return {
       runtimes,
