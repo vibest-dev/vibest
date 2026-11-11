@@ -611,7 +611,10 @@ export const makeStore = Effect.gen(function* () {
           ELSE p.entry_session_id END AS id
       FROM session s JOIN project p ON p.id = s.project_id
       LEFT JOIN session r ON r.id = s.parent_session_id
-      WHERE s.id = ${id}`.pipe(Effect.map((rows) => rows[0]?.id ?? undefined))
+      WHERE s.id = ${id}`.pipe(
+      Effect.map((rows) => rows[0]?.id ?? undefined),
+      Effect.orDie,
+    )
 
   return {
     sql,
