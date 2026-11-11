@@ -1,6 +1,5 @@
 import { Config, Effect, FileSystem, Option, Path, Schema } from "effect"
 
-import { ENTRY_AGENT } from "./db-rows.ts"
 import { Harnesses } from "./harness.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 import { Runtimes } from "./runtimes.ts"
@@ -438,8 +437,7 @@ const decodePreToolUse = Schema.decodeUnknownEffect(
 export const COORDINATOR = "coordinator"
 export const GENERAL = "general"
 
-export const rulesOf = (agent: string): Rules =>
-  agent === COORDINATOR || agent === ENTRY_AGENT ? coordinator : session
+export const rulesOf = (agent: string): Rules => (agent === COORDINATOR ? coordinator : session)
 
 export const check = (agent: string, raw: string) =>
   Effect.gen(function* () {

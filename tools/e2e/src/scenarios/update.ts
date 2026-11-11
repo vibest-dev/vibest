@@ -106,9 +106,9 @@ const olderAgents = async (
       db.close()
     }
   }
-  const main = () =>
+  const entryRow = () =>
     read(`s.agent_type = 'main' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
-  const reported = (row: ReturnType<typeof main>, v: string) =>
+  const reported = (row: ReturnType<typeof entryRow>, v: string) =>
     row?.version === v && row.harness_session_id !== null && row.pid !== null
 
   await w.stopDaemon()
@@ -131,10 +131,10 @@ const olderAgents = async (
   const sub = (JSON.parse(ran.stdout) as { id: string }).id
   await until(
     "both agents report the older integration and their conversations",
-    () => reported(main(), version) && reported(read("s.id = ?", sub), version),
+    () => reported(entryRow(), version) && reported(read("s.id = ?", sub), version),
     120_000,
   )
-  const before = { main: main()!, sub: read("s.id = ?", sub)! }
+  const before = { entry: entryRow()!, sub: read("s.id = ?", sub)! }
   const daemonBefore = await w.daemonPid()
 
   const restartedOnBuild = async () => {
@@ -151,7 +151,7 @@ const olderAgents = async (
     )
     for (const [name, row, now] of [
       ["subagent", before.sub, () => read("s.id = ?", sub)],
-      ["entry session", before.main, main],
+      ["entry session", before.entry, entryRow],
     ] as const) {
       await until(
         `the ${name} restarted on this integration`,
@@ -422,7 +422,7 @@ const checks: ReadonlyArray<Check> = [
             /vibestd: handoff\./.test(said) &&
             said.includes(`vibestd ${buildVersion} (pid`) &&
             said.includes("vibest update has finished") &&
-            said.includes(agents.before.main.id.slice(0, 8)) &&
+            said.includes(agents.before.entry.id.slice(0, 8)) &&
             said.includes(agents.before.sub.id.slice(0, 8)),
           `unexpected: ${said}`,
         )
@@ -462,7 +462,7 @@ const checks: ReadonlyArray<Check> = [
           /vibestd: handoff\./.test(said) &&
             said.includes(`vibestd ${buildVersion} (pid`) &&
             said.includes("vibest update has finished") &&
-            said.includes(agents.before.main.id.slice(0, 8)) &&
+            said.includes(agents.before.entry.id.slice(0, 8)) &&
             said.includes(agents.before.sub.id.slice(0, 8)),
           `unexpected: ${said}`,
         )

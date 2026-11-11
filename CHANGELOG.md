@@ -26,7 +26,7 @@ release. Each release lists what broke, who is affected and how to migrate under
   in `vibest ls` JSON is `entry` (was `main`), and errors that named the coordinator for the project's entry session say "entry session". The herdr action
   `open-main` is `open-entry` (rebind a key set to `vibest.open-main`), the runtime `present` info key `mainSession`
   is `entrySession`, and CLI help and errors say "entry session" where they said "main agent". The protocol number
-  is unchanged.
+  is unchanged. A session whose agent is named `entry` is an ordinary session: the entry session is the one the project records.
 - **Handoff database copies** (users): a handing-over vibestd no longer writes `vibest.db.before-<version>` (a copy of
   `vibest.db` and its `-wal`). Copies already in the home are left where they are. Copy the database yourself before
   `vibest update` if you want one.

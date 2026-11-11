@@ -181,14 +181,14 @@ const checks: ReadonlyArray<Check> = [
           await until(`${id}'s result`, async () => (await executionState(w, id)) === "completed", 120_000)
           expect(/pong/.test((await latest(w, id))?.message ?? ""), `${id}: ${(await latest(w, id))?.message}`)
         }
-        const main = (
+        const entry = (
           await w.json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"]).then((l) => l.sessions)
         ).find((e) => e.agent === "main")
-        expect(main !== undefined, "no entry session")
+        expect(entry !== undefined, "no entry session")
         await until(
           "the Pi entry session's ready report",
           () =>
-            row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, main!.id)
+            row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, entry!.id)
               ?.c != null,
           60_000,
         )

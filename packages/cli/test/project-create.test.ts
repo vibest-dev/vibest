@@ -173,7 +173,7 @@ describe("multi-repository project", () => {
   )
 
   test(
-    "projectRoot is the directory of a multi-repository project and the main checkout otherwise; projectRepositories lists each by its main checkout's realpath with origin as git prints it, through a symlink too",
+    "projectRoot is the directory of a multi-repository project and the entryId checkout otherwise; projectRepositories lists each by its entryId checkout's realpath with origin as git prints it, through a symlink too",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -372,8 +372,8 @@ describe("multi-repository isolated workspace", () => {
         ),
       )
       assert.strictEqual(command.env.VIBEST_AGENT, "coordinator")
-      const main = yield* db.entryOf(yield* projectOf(root))
-      assert.strictEqual(main?.projectDirectory, root)
+      const entry = yield* db.entryOf(yield* projectOf(root))
+      assert.strictEqual(entry?.projectDirectory, root)
     }),
   )
 
@@ -409,7 +409,7 @@ describe("multi-repository isolated workspace", () => {
   )
 
   sessionTest(
-    "resume after the main pane is gone uses the project path, and herdr runs lists that project",
+    "resume after the entryId pane is gone uses the project path, and herdr runs lists that project",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path

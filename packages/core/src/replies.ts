@@ -1,4 +1,3 @@
-import { ENTRY_AGENT } from "./db-rows.ts"
 import type { HarnessId } from "./harness.ts"
 import type { HarnessDefinition } from "./host.ts"
 
@@ -12,9 +11,9 @@ export const jsonObject = (raw: string): Record<string, unknown> | undefined => 
   }
 }
 
-export const promptOf = (adapter: HarnessDefinition, agent: string, raw: string) => {
+export const promptOf = (adapter: HarnessDefinition, entry: boolean, raw: string) => {
   const event = jsonObject(raw)
-  const prompt = event && adapter.userPrompt?.(event, agent === ENTRY_AGENT)
+  const prompt = event && adapter.userPrompt?.(event, entry)
   return prompt?.text
 }
 
@@ -52,12 +51,12 @@ export type ObservedEnd = {
 
 export const executionEndOf = (
   adapter: HarnessDefinition,
-  agent: string,
+  entry: boolean,
   raw: string,
   at: number,
 ): ObservedEnd | undefined => {
   const event = jsonObject(raw)
-  const payload = event && adapter.executionEnd?.(event, agent === ENTRY_AGENT)?.end
+  const payload = event && adapter.executionEnd?.(event, entry)?.end
   return payload ? executionEndFrom(adapter, payload, at) : undefined
 }
 

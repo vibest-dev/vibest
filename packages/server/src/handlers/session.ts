@@ -1,7 +1,6 @@
 import { raisesSeen } from "@vibest/core/activity"
 import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
-import { ENTRY_AGENT } from "@vibest/core/db-rows"
 import { Integration } from "@vibest/core/integration"
 import { keyedLock } from "@vibest/core/keyed-lock"
 import { Runtimes } from "@vibest/core/runtimes"
@@ -38,7 +37,7 @@ export const make = (
         const session = yield* db.getSession(id)
         if (!session) {
           const identity = yield* db.sessionIdentity(id)
-          if (identity?.agent === ENTRY_AGENT) {
+          if (identity?.entry) {
             const directory = yield* db.projectDirectory(identity.projectId)
             const name =
               directory !== undefined && directory !== ""
@@ -88,7 +87,7 @@ export const make = (
             message: `${id} is not the agent that started you, and you did not start it${creator === undefined ? "" : `; you may send to ${creator}`}`,
           })
         })
-        if (target.agent === ENTRY_AGENT) {
+        if (target.entry) {
           yield* allowed
           const row = yield* db.insertSend(id, p.message, p.request, caller.sessionId)
           if (!row)
@@ -150,7 +149,7 @@ export const make = (
             if (caller._tag === "Session" || caller._tag === "Entry") return yield* sendWithinProject(caller, input, p)
             const { scope } = yield* reach("Send")
             const target = yield* db.resolveSession(input, scope)
-            if ((yield* db.sessionIdentity(target))?.agent === ENTRY_AGENT) {
+            if ((yield* db.sessionIdentity(target))?.entry) {
               if (!(yield* db.insertSend(target, p.message, p.request)))
                 return yield* new NoSuchSession({
                   id: target,
@@ -249,7 +248,7 @@ export const make = (
           yield* cliOnly("Session.Seen")
           const identity = yield* db.sessionIdentity(id)
           if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
-          const at = identity.agent === ENTRY_AGENT ? yield* db.entryOf(identity.projectId) : yield* db.getSession(id)
+          const at = identity.entry ? yield* db.entryOf(identity.projectId) : yield* db.getSession(id)
           if (at?.id !== id || !at.runtime || !at.address || at.address.id === "") return
           const address = at.address
           const rt = runtimes.find(at.runtime)
@@ -270,7 +269,7 @@ export const make = (
           const read = reader(headers)
           if (conversation !== undefined) {
             const row = yield* db.sessionIdentity(id)
-            if (row?.agent === ENTRY_AGENT && conversation.harness === row.harness)
+            if (row?.entry === true && conversation.harness === row.harness)
               yield* integration.conversation(id, conversation.id, processOf(read))
             return {}
           }

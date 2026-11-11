@@ -71,16 +71,16 @@ const resultOf = (w: World, id: string, marker: string) =>
   until(`the answer of ${marker}`, async () => (await replyOf(w, id)).includes(`done-${marker}`), 90_000)
 
 const entrySession = async (w: World) => {
-  let main: Entry | undefined
+  let entry: Entry | undefined
   await until(
     "the entry session in vibest ls",
     async () => {
-      main = (await sessions(w)).find((e) => e.agent === "main")
-      return main !== undefined
+      entry = (await sessions(w)).find((e) => e.agent === "main")
+      return entry !== undefined
     },
     60_000,
   )
-  return main!
+  return entry!
 }
 
 const factLines = (file: string): Promise<Array<string>> =>
@@ -204,10 +204,10 @@ const checks: ReadonlyArray<Check> = [
           env: { PI_CODING_AGENT_DIR: dir },
           timeoutMs: 90_000,
         })
-        const main = await entrySession(w)
+        const entryRow = await entrySession(w)
         expect(
-          main.harness === "pi" && main.provider === "second" && main.model === "m2",
-          `entry session: ${JSON.stringify(main)}`,
+          entryRow.harness === "pi" && entryRow.provider === "second" && entryRow.model === "m2",
+          `entry session: ${JSON.stringify(entryRow)}`,
         )
         const inherited = await entry(w, await runId(w, ["--", ask("frommain")]))
         expect(
@@ -239,7 +239,7 @@ const checks: ReadonlyArray<Check> = [
           `first start without --harness: ${first.code} ${first.stderr}${first.stdout}`,
         )
         await w.startEntry({ harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
-        const main = await entrySession(w)
+        const entryRow = await entrySession(w)
         const processes = () => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
@@ -247,14 +247,14 @@ const checks: ReadonlyArray<Check> = [
               .query<{ harness: string; readyAt: number | null; endedAt: number | null }, [string]>(
                 "SELECT harness, ready_at AS readyAt, ended_at AS endedAt FROM process WHERE session_id = ? ORDER BY id",
               )
-              .all(main.id)
+              .all(entryRow.id)
           } finally {
             db.close()
           }
         }
         await until("the entry session ready", () => processes().some((p) => p.readyAt !== null), 60_000)
         const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
-        await herdr(socket, "pane.close", { pane_id: main.address.id.split("/").pop() })
+        await herdr(socket, "pane.close", { pane_id: entryRow.address.id.split("/").pop() })
         await until("the entry session's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
         const again = await w.vibest(["--headless"], { env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 60_000 })
         expect(again.code === 0, `restart without --harness: ${again.code} ${again.stderr}${again.stdout}`)

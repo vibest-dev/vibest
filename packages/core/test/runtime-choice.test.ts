@@ -31,22 +31,22 @@ const input = (
   ...extra,
 })
 
-const main = Effect.gen(function* () {
+const entryId = Effect.gen(function* () {
   const db = yield* Db
   const repo = yield* makeRepository
   const projectId = yield* projectOf(repo)
-  const coordinator = yield* db.startEntry(projectId, "pi", false, {
+  const entry = yield* db.startEntry(projectId, "pi", false, {
     runtime: "herdr",
     address: { machine: "local", id: "test/coord" },
   })
-  return { db, repo, projectId, sessions: yield* Sessions, parent: coordinator.sessionId }
+  return { db, repo, projectId, sessions: yield* Sessions, parent: entry.sessionId }
 })
 
 describe("subagent runtime", () => {
   test(
-    "a subagent of the entry session inherits the coordinator runtime",
+    "a subagent of the entry session inherits the entry session runtime",
     Effect.gen(function* () {
-      const { db, repo, projectId, sessions, parent } = yield* main
+      const { db, repo, projectId, sessions, parent } = yield* entryId
       assert.strictEqual(yield* db.getSession(parent), undefined)
       const spawned = yield* sessions.spawn(input(repo, projectId, { parentSessionId: parent }))
       assert.strictEqual(spawned.runtime, "herdr")
@@ -60,12 +60,12 @@ describe("subagent runtime", () => {
       const db = yield* Db
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      const coordinator = yield* db.startEntry(projectId, "pi", false, {
+      const entry = yield* db.startEntry(projectId, "pi", false, {
         runtime: "hc",
         address: { machine: "local", id: "test/coord" },
       })
       const spawned = yield* (yield* Sessions).spawn(
-        input(repo, projectId, { parentSessionId: coordinator.sessionId, runtime: "herdr" }),
+        input(repo, projectId, { parentSessionId: entry.sessionId, runtime: "herdr" }),
       )
       assert.strictEqual(spawned.runtime, "herdr")
       assert.strictEqual(spawned.decidedBy.runtime, undefined)
@@ -75,7 +75,7 @@ describe("subagent runtime", () => {
   test(
     "an offline parent runtime refuses the start with the runtime's reason",
     Effect.gen(function* () {
-      const { repo, projectId, sessions, parent } = yield* main
+      const { repo, projectId, sessions, parent } = yield* entryId
       const error = yield* Effect.flip(sessions.spawn(input(repo, projectId, { parentSessionId: parent })))
       assert.strictEqual(error._tag, "NoRuntime")
       assert.match("message" in error ? error.message : "", /herdr is offline \(not running\)/)

@@ -138,10 +138,10 @@ describe("restart in place", () => {
       })
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
-      const main = (yield* db.entryOf(projectId))!
-      yield* db.noteConversation(main.id, "conversation-1")
-      yield* db.patchLive(main.id, { pid: 100 })
-      return { db, herdr, id: main.id, projectId }
+      const entry = (yield* db.entryOf(projectId))!
+      yield* db.noteConversation(entry.id, "conversation-1")
+      yield* db.patchLive(entry.id, { pid: 100 })
+      return { db, herdr, id: entry.id, projectId }
     })
 
   test(
@@ -166,39 +166,39 @@ describe("restart in place", () => {
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
       const projectId = (yield* db.getSession(sub))!.projectId
-      const main = (yield* db.entryOf(projectId))!.id
+      const entryId = (yield* db.entryOf(projectId))!.id
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
-      yield* db.noteConversation(main, "conversation-1")
-      yield* db.patchLive(main, { pid: 400 })
+      yield* db.noteConversation(entryId, "conversation-1")
+      yield* db.patchLive(entryId, { pid: 400 })
       yield* herdr.endExecution(sub)
       const outcomes = yield* Ref.make<ReadonlyArray<Restarted> | undefined>(undefined)
-      yield* Effect.forkChild(sessions.restart([main, sub]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
+      yield* Effect.forkChild(sessions.restart([entryId, sub]).pipe(Effect.flatMap((r) => Ref.set(outcomes, r))))
       yield* until(processes.signaled, (t) => t.includes(pid))
       yield* db.noteIntegration(sub, { version: VERSION, protocol: PROTOCOL })
       yield* untilVirtual(processes.signaled, (t) => t.includes(400))
       assert.deepStrictEqual(yield* processes.signaled, [pid, 400], "the subagent first, the entry session last")
-      yield* db.patchLive(main, { pid: 500, ready: null })
-      yield* db.noteIntegration(main, { version: VERSION, protocol: PROTOCOL })
+      yield* db.patchLive(entryId, { pid: 500, ready: null })
+      yield* db.noteIntegration(entryId, { version: VERSION, protocol: PROTOCOL })
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "idle" }))
       yield* TestClock.adjust("5 seconds")
       assert.isUndefined(yield* Ref.get(outcomes), "not done before the integration's ready report")
-      yield* db.patchLive(main, { ready: 2 })
+      yield* db.patchLive(entryId, { ready: 2 })
       const done = (yield* untilVirtual(Ref.get(outcomes), (o) => o !== undefined))!
       assert.deepStrictEqual(
         done.map((o) => [o.id, o.ok]),
         [
           [sub, true],
-          [main, true],
+          [entryId, true],
         ],
       )
       const notices = (yield* db.entryPending(projectId)).filter((r) => r.kind === "notice")
       assert.lengthOf(notices, 1)
       assert.strictEqual(notices[0]!.message.split("\n")[0], CONTINUE)
-      assert.include(notices[0]!.message, `Restarted: ${sub}, ${main}.`)
+      assert.include(notices[0]!.message, `Restarted: ${sub}, ${entryId}.`)
       const entryArgv = (yield* herdr.callsTo("run")).map((c) => c.argv).find((argv) => argv[0] === "env")
       assert.ok(entryArgv, "the entry session is restarted by typing env")
-      assert.ok(entryArgv!.includes(`VIBEST_SESSION_ID=${main}`))
+      assert.ok(entryArgv!.includes(`VIBEST_SESSION_ID=${entryId}`))
       assert.ok(entryArgv!.includes("pi"))
       const identity = new Set([
         "VIBEST_SESSION_ID",

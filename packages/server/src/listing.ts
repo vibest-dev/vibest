@@ -1,7 +1,6 @@
 import { projectActivity, unseenDone } from "@vibest/core/activity"
 import { type EngineEvent } from "@vibest/core/bus"
 import { type EntryRow, Db, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
-import { ENTRY_AGENT } from "@vibest/core/db-rows"
 import { entryIdle } from "@vibest/core/inbox"
 import type { ListScope } from "@vibest/core/remote"
 import { agentState, Runtimes, type Runtime, type Terminal } from "@vibest/core/runtimes"
@@ -158,21 +157,20 @@ export const sessionListing = (deps: {
       const identity = yield* db.sessionIdentity(id)
       if (identity === undefined) return []
       const ended: WatchEvent = { _tag: "SessionEnded", id, projectId: identity.projectId }
-      const info =
-        identity.agent === ENTRY_AGENT
-          ? yield* listedEntry(yield* db.entryOf(identity.projectId))
-          : yield* Effect.gen(function* () {
-              const row = yield* db.getSession(id)
-              if (row === undefined || row.agent === "main" || row.exitedAt !== null) return undefined
-              const view = yield* sessions
-                .get(id)
-                .pipe(
-                  Effect.catchTag("NoSuchSession", () =>
-                    Effect.succeed({ ...row, worktree: "", repositoryRoot: undefined, git: undefined }),
-                  ),
-                )
-              return (yield* listedRows([view]))[0]
-            })
+      const info = identity.entry
+        ? yield* listedEntry(yield* db.entryOf(identity.projectId))
+        : yield* Effect.gen(function* () {
+            const row = yield* db.getSession(id)
+            if (row === undefined || row.agent === "main" || row.exitedAt !== null) return undefined
+            const view = yield* sessions
+              .get(id)
+              .pipe(
+                Effect.catchTag("NoSuchSession", () =>
+                  Effect.succeed({ ...row, worktree: "", repositoryRoot: undefined, git: undefined }),
+                ),
+              )
+            return (yield* listedRows([view]))[0]
+          })
       if (info === undefined || info.id !== id) return [ended]
       const [session] = yield* watched([info])
       return [{ _tag: "Session", session: session! } satisfies WatchEvent]

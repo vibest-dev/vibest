@@ -186,7 +186,7 @@ const checks: ReadonlyArray<Check> = [
             db.close()
           }
         }
-        const main = () =>
+        const entryId = () =>
           read(`s.agent_type = 'main' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
         const subRow = (id: string) => read("s.id = ?", id)
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
@@ -227,12 +227,12 @@ const checks: ReadonlyArray<Check> = [
         await until(
           "the entry session reports the old integration and its conversation",
           () => {
-            const row = main()
+            const row = entryId()
             return row?.version === old && row.harness_session_id !== null && row.pid !== null
           },
           60_000,
         )
-        const before = main()!
+        const before = entryId()!
         const daemonBefore = await w.daemonPid()
         const address = async () =>
           (
@@ -258,7 +258,7 @@ const checks: ReadonlyArray<Check> = [
         const daemonAfter = await w.daemonPid()
         expect(daemonAfter !== undefined && daemonAfter !== daemonBefore, `vibestd ${daemonBefore} -> ${daemonAfter}`)
         expect(daemonBefore === undefined || !alive(daemonBefore), `the old vibestd ${daemonBefore} still runs`)
-        const kept = main()
+        const kept = entryId()
         expect(
           kept?.pid === before.pid && alive(before.pid!),
           `No restarted the entry session: ${JSON.stringify(kept)}`,
@@ -303,11 +303,11 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         expect((await listed(zero))?.pane_id === subPane, `the subagent's pane changed: ${subPane}`)
-        let after = null as ReturnType<typeof main>
+        let after = null as ReturnType<typeof entryId>
         await until(
           "the entry session restarted on this integration",
           () => {
-            after = main()
+            after = entryId()
             return after?.pid != null && after.pid !== before.pid && after.version !== old && after.version !== null
           },
           120_000,
@@ -319,7 +319,7 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(after?.pid !== before.pid, `the harness pid did not change (${before.pid})`)
         expect(!alive(before.pid!), `the old harness ${before.pid} still runs`)
-        await until("the restarted entry session reports this integration", () => main()?.version !== old, 30_000)
+        await until("the restarted entry session reports this integration", () => entryId()?.version !== old, 30_000)
         expect(
           JSON.stringify(await address()) === JSON.stringify(addressBefore),
           `the entry session's terminal changed: ${JSON.stringify(addressBefore)} -> ${JSON.stringify(await address())}`,
@@ -515,7 +515,7 @@ const checks: ReadonlyArray<Check> = [
           pid: number | null
           version: string | null
         }
-        const main = () => {
+        const entryId = () => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
             return (
@@ -530,7 +530,7 @@ const checks: ReadonlyArray<Check> = [
             db.close()
           }
         }
-        const pane = () => ((JSON.parse(main()?.runtime ?? "{}") as { id?: string }).id ?? "").split("/")[1] ?? ""
+        const pane = () => ((JSON.parse(entryId()?.runtime ?? "{}") as { id?: string }).id ?? "").split("/")[1] ?? ""
         const screen = async () => {
           const r = await herdr(socket, "pane.read", { pane_id: pane(), source: "visible", strip_ansi: true })
           return String((r.read as { text?: string } | undefined)?.text ?? "")
@@ -538,7 +538,7 @@ const checks: ReadonlyArray<Check> = [
         const log = async () =>
           (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).slice(-4000)
         const failWith = async (e: Error) => {
-          throw new Error(`${e.message}; row ${JSON.stringify(main())}; screen:\n${await screen()}\n${await log()}`)
+          throw new Error(`${e.message}; row ${JSON.stringify(entryId())}; screen:\n${await screen()}\n${await log()}`)
         }
 
         await w.stopDaemon()
@@ -556,10 +556,10 @@ const checks: ReadonlyArray<Check> = [
         await answerFolderTrust(screen, (key) => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [key] }))
         await until(
           "the entry session polls on the old integration",
-          () => main()?.version === install.old && main()?.conversation != null && main()?.pid != null,
+          () => entryId()?.version === install.old && entryId()?.conversation != null && entryId()?.pid != null,
           120_000,
         ).catch(failWith)
-        const before = main()!
+        const before = entryId()!
 
         await install.point(binary)
         await typeAndEnter(
@@ -574,7 +574,7 @@ const checks: ReadonlyArray<Check> = [
         await until(
           "the entry session restarted on this integration",
           () => {
-            const row = main()
+            const row = entryId()
             return (
               row !== undefined &&
               row.pid != null &&
@@ -586,12 +586,15 @@ const checks: ReadonlyArray<Check> = [
           240_000,
         ).catch(failWith)
         expect(!alive(before.pid!), `the old Claude ${before.pid} still runs`)
-        expect(main()?.id === before.id, `the entry session's session changed: ${before.id} -> ${main()?.id}`)
+        expect(entryId()?.id === before.id, `the entry session's session changed: ${before.id} -> ${entryId()?.id}`)
         expect(
-          main()?.conversation === before.conversation,
-          `the conversation changed: ${before.conversation} -> ${main()?.conversation}`,
+          entryId()?.conversation === before.conversation,
+          `the conversation changed: ${before.conversation} -> ${entryId()?.conversation}`,
         )
-        expect(main()?.runtime === before.runtime, `the terminal changed: ${before.runtime} -> ${main()?.runtime}`)
+        expect(
+          entryId()?.runtime === before.runtime,
+          `the terminal changed: ${before.runtime} -> ${entryId()?.runtime}`,
+        )
         const asked = () => model.requests.findIndex((r) => text(lastUser(r)).includes(UPDATE))
         await until(
           "the continue notice in a request after the update",
@@ -604,7 +607,7 @@ const checks: ReadonlyArray<Check> = [
           120_000,
         ).catch(failWith)
         expect(updates === 1, `vibest update was asked for ${updates} times`)
-        expect(main()?.pid !== null && alive(main()!.pid!), "the restarted entry session is not running")
+        expect(entryId()?.pid !== null && alive(entryId()!.pid!), "the restarted entry session is not running")
       } finally {
         model.stop()
         await dropHerdrSession(w, session)

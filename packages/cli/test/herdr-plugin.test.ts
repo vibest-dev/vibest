@@ -210,7 +210,7 @@ describe("herdr plugin commands", () => {
         assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
 
         removed = ""
-        const main = yield* Effect.flip(
+        const failure = yield* Effect.flip(
           shown(
             "stop",
             ctx({ focusedPaneId: "w1:p1", focusedPaneAgent: "s-a1a10001a1a14a1a8a1aa1a10001a1" }),
@@ -227,7 +227,7 @@ describe("herdr plugin commands", () => {
             }),
           ),
         )
-        assert.strictEqual(main._tag, "NoFocusedSession")
+        assert.strictEqual(failure._tag, "NoFocusedSession")
         assert.strictEqual(removed, "")
       }),
   )
@@ -412,12 +412,12 @@ describe("herdr open-entry", () => {
         assert.strictEqual(stopped.code, 0, stopped.stderr)
         assert.match(stopped.stdout, /^opened /)
         assert.ok((yield* herdr.callsTo("open")).length > 0)
-        const main = (yield* db.entryOf(projectId))!.address!.id
-        yield* herdr.seedAgent(main)
+        const entryId = (yield* db.entryOf(projectId))!.address!.id
+        yield* herdr.seedAgent(entryId)
         const again = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.strictEqual(again.code, 0, again.stderr)
         assert.match(again.stdout, /^focused /)
-        assert.strictEqual((yield* herdr.callsTo("focus")).at(-1)?.terminal, main)
+        assert.strictEqual((yield* herdr.callsTo("focus")).at(-1)?.terminal, entryId)
       }).pipe(Effect.provide(served)),
   )
 })

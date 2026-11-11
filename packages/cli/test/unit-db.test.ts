@@ -68,9 +68,9 @@ describe("Db", () => {
           ORDER BY ended_at, id`
         assert.strictEqual(ends.at(-1)?.reason, "archived")
         const [project] = yield* sql<{
-          main: string
-        }>`SELECT entry_session_id AS main FROM project WHERE id = ${yield* projectOf("r")}`
-        assert.strictEqual(project!.main, renewed.sessionId)
+          entryId: string
+        }>`SELECT entry_session_id AS entryId FROM project WHERE id = ${yield* projectOf("r")}`
+        assert.strictEqual(project!.entryId, renewed.sessionId)
       }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
 
@@ -391,7 +391,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a execution-error notice goes to the parent while it has not ended, then to the project's current main session",
+    "a execution-error notice goes to the parent while it has not ended, then to the project's current entryId session",
     () =>
       Effect.gen(function* () {
         const db = yield* Db
@@ -540,7 +540,7 @@ describe("Db", () => {
       assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
     }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
-  it.effect("a notice with no coordinator is dropped; a claim takes a pending row once", () =>
+  it.effect("a notice with no entry session is dropped; a claim takes a pending row once", () =>
     memory(
       Effect.gen(function* () {
         const db = yield* Db
@@ -968,10 +968,10 @@ describe("Db", () => {
           yield* db.updateSession(id, { executionState: "open", executionPromptedAt: 1 })
           yield* db.updateSession(id, { executionState: "completed" })
           assert.isTrue(yield* db.canResumeConversation(id, "pre"))
-          const main = yield* db.startEntry(yield* projectOf("r"), "claude", false, place)
-          assert.isFalse(yield* db.canResumeConversation(main.sessionId, "c1"))
-          yield* db.noteConversation(main.sessionId, "c1")
-          assert.isTrue(yield* db.canResumeConversation(main.sessionId, "c1"))
+          const entry = yield* db.startEntry(yield* projectOf("r"), "claude", false, place)
+          assert.isFalse(yield* db.canResumeConversation(entry.sessionId, "c1"))
+          yield* db.noteConversation(entry.sessionId, "c1")
+          assert.isTrue(yield* db.canResumeConversation(entry.sessionId, "c1"))
           assert.strictEqual(
             (yield* db.startEntry(yield* projectOf("r"), "claude", false, place)).harnessSessionId,
             "c1",

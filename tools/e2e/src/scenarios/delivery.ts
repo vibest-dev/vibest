@@ -36,7 +36,7 @@ const needs = () => {
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
 }
 
-const piMain = async (w: World, name: string, url: string) => {
+const piEntry = async (w: World, name: string, url: string) => {
   const session = `${w.herdrSession}-${name}`
   const repo = await project(w, name)
   const dir = await piDir(w, `pi-${name}`, url)
@@ -85,7 +85,7 @@ const lastExecution = (w: World, sub: string) =>
     sub,
   )
 
-const mainOf = (w: World) =>
+const entryIdOf = (w: World) =>
   row<{ id: string }>(w, "SELECT id FROM session WHERE agent = 'main' AND ended_at IS NULL")!.id
 
 const sendsFrom = (w: World, sender: string, recipient: string) =>
@@ -119,7 +119,7 @@ const executionErrorChecks: ReadonlyArray<Check> = [
       const broken = recordingModel(() => `data: ${JSON.stringify({ error: { message: "model exploded" } })}\n\n`)
       let session = ""
       try {
-        const m = await piMain(w, "execution-error", main.url)
+        const m = await piEntry(w, "execution-error", main.url)
         session = m.session
         const id = await runSub(w, m.repo, session, broken.url, "pi-execution-error-sub", "fail")
         const notices = () =>
@@ -141,7 +141,7 @@ const executionErrorChecks: ReadonlyArray<Check> = [
         )
         expect(
           notices().length === 1 &&
-            notices()[0]!.recipient === mainOf(w) &&
+            notices()[0]!.recipient === entryIdOf(w) &&
             notices()[0]!.content.includes("model exploded"),
           `notices from ${id}: ${JSON.stringify(notices())}`,
         )
@@ -163,23 +163,23 @@ const sendChecks: ReadonlyArray<Check> = [
     run: async (w) => {
       needs()
       const main = recordingModel(() => reply("ok"))
-      let mainId = ""
-      const sub = sendingModel(() => mainId, "hello-main")
+      let entryId = ""
+      const sub = sendingModel(() => entryId, "hello-main")
       let session = ""
       try {
-        const m = await piMain(w, "send-main", main.url)
+        const m = await piEntry(w, "send-main", main.url)
         session = m.session
-        mainId = mainOf(w)
+        entryId = entryIdOf(w)
         const id = await runSub(w, m.repo, session, sub.url, "pi-send-main-sub", "send to the entry session")
-        await until("the send delivered", () => sendsFrom(w, id, mainId).some((r) => r.status === "delivered"), 60_000)
-        const sent = sendsFrom(w, id, mainId)
+        await until("the send delivered", () => sendsFrom(w, id, entryId).some((r) => r.status === "delivered"), 60_000)
+        const sent = sendsFrom(w, id, entryId)
         expect(sent.length === 1, `${sent.length} sends from ${id} to the entry session: ${JSON.stringify(sent)}`)
         expect(
-          countFacts(w, "aggregate = ? AND type = 'inbox.queued' AND seq = ?", mainId, sent[0]!.id) === 1 &&
+          countFacts(w, "aggregate = ? AND type = 'inbox.queued' AND seq = ?", entryId, sent[0]!.id) === 1 &&
             countFacts(
               w,
               "aggregate = ? AND type = 'inbox.moved' AND json_extract(data, '$.inbox') = ? AND json_extract(data, '$.to') = 'delivered'",
-              mainId,
+              entryId,
               sent[0]!.id,
             ) === 1,
           `the send ${sent[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
@@ -214,7 +214,7 @@ const sendChecks: ReadonlyArray<Check> = [
       )
       let session = ""
       try {
-        const m = await piMain(w, "send-sibling", main.url)
+        const m = await piEntry(w, "send-sibling", main.url)
         session = m.session
         siblingId = await runSub(w, m.repo, session, sibling.url, "pi-send-sibling-b", "wait")
         await until(
@@ -226,7 +226,7 @@ const sendChecks: ReadonlyArray<Check> = [
         await until("the sender answered", async () => (await replyOf(w, id, m.repo)).includes("done-send"), 90_000)
         const out = await fs.readFile(refused, "utf8")
         expect(
-          out.includes(siblingId) && out.includes("did not start") && out.includes(mainOf(w)),
+          out.includes(siblingId) && out.includes("did not start") && out.includes(entryIdOf(w)),
           `vibest send printed: ${out}`,
         )
         expect(
@@ -271,9 +271,9 @@ const sendChecks: ReadonlyArray<Check> = [
       )
       const sessions: Array<string> = []
       try {
-        const m = await piMain(w, "send-refused", main.url)
+        const m = await piEntry(w, "send-refused", main.url)
         sessions.push(m.session)
-        const o = await piMain(w, "send-refused-other", other.url)
+        const o = await piEntry(w, "send-refused-other", other.url)
         sessions.push(o.session)
         foreign = await runSub(w, o.repo, o.session, other.url, "pi-send-refused-other-sub", "idle in another project")
         archived = await runSub(w, m.repo, m.session, idle.url, "pi-send-refused-archived", "finish and be archived")
@@ -290,7 +290,7 @@ const sendChecks: ReadonlyArray<Check> = [
           written.includes("Forbidden") && written.includes("belongs to another entry session"),
           `no Forbidden for the other project's session: ${written}`,
         )
-        expect(written.includes(mainOf(w)), `the archived refusal does not name the entry session: ${written}`)
+        expect(written.includes(entryIdOf(w)), `the archived refusal does not name the entry session: ${written}`)
         expect(
           countFacts(
             w,
@@ -325,23 +325,23 @@ const sendChecks: ReadonlyArray<Check> = [
       const held = heldModel()
       let session = ""
       try {
-        const m = await piMain(w, "send-killed", main.url)
+        const m = await piEntry(w, "send-killed", main.url)
         session = m.session
-        const mainId = mainOf(w)
+        const entryId = entryIdOf(w)
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
         target = await runSub(w, m.repo, session, held.url, "pi-send-killed-b", ask("held"))
         await until("the subagent's execution held", () => held.held() > 0, 60_000)
-        await w.ok(["send", mainId, "--", "send-now"], { cwd: m.repo })
-        await until("the send pending", () => sendsFrom(w, mainId, target).some((r) => r.status === "pending"), 60_000)
+        await w.ok(["send", entryId, "--", "send-now"], { cwd: m.repo })
+        await until("the send pending", () => sendsFrom(w, entryId, target).some((r) => r.status === "pending"), 60_000)
         const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, target)!.r
         const pane = ((JSON.parse(runtime) as { id?: string }).id ?? "").split("/")[1] ?? ""
         await herdr(socket, "pane.close", { pane_id: pane })
-        await until("the send failed", () => sendsFrom(w, mainId, target).some((r) => r.status === "failed"), 60_000)
+        await until("the send failed", () => sendsFrom(w, entryId, target).some((r) => r.status === "failed"), 60_000)
         const notices = () =>
           rows<{ status: string; sender: string | null }>(
             w,
             "SELECT status, sender_session_id AS sender FROM inbox WHERE session_id = ? AND kind = 'notice' AND instr(content, 'was not delivered') > 0",
-            mainId,
+            entryId,
           )
         await until(
           "one notice to the sender, typed into it",
@@ -372,7 +372,7 @@ const checks: ReadonlyArray<Check> = [
       const model = heldModel()
       let session = ""
       try {
-        const m = await piMain(w, "merge", main.url)
+        const m = await piEntry(w, "merge", main.url)
         session = m.session
         const sub = await runSub(w, m.repo, session, model.url, "pi-merge-sub", ask("busy"))
         await until("the subagent's execution held", () => model.held() > 0, 60_000)
@@ -431,7 +431,7 @@ const checks: ReadonlyArray<Check> = [
       const sub = recordingModel(() => reply("done-s3\nstatus: completed"))
       let session = ""
       try {
-        const m = await piMain(w, "quiet", main.url)
+        const m = await piEntry(w, "quiet", main.url)
         session = m.session
         const id = await runSub(w, m.repo, session, sub.url, "pi-quiet-sub", "end the execution without sending")
         await until("the subagent's answer", async () => (await replyOf(w, id, m.repo)).includes("done-s3"), 60_000)
@@ -465,7 +465,7 @@ const checks: ReadonlyArray<Check> = [
       const model = heldModel()
       let session = ""
       try {
-        const m = await piMain(w, "next", main.url)
+        const m = await piEntry(w, "next", main.url)
         session = m.session
         const sub = await runSub(w, m.repo, session, model.url, "pi-next-sub", ask("stuck"))
         await until("the subagent's execution held", () => model.held() > 0, 60_000)
@@ -518,7 +518,7 @@ const checks: ReadonlyArray<Check> = [
       main.release()
       let session = ""
       try {
-        const m = await piMain(w, "badmodel", main.url)
+        const m = await piEntry(w, "badmodel", main.url)
         session = m.session
         const before = row<{ n: number }>(w, "SELECT count(*) AS n FROM session")?.n ?? 0
         const r = await w.viaEntry(
@@ -570,7 +570,7 @@ const checks: ReadonlyArray<Check> = [
       const stale = `${w.herdrSession}-stale`
       let server: ReturnType<typeof Bun.spawn> | undefined
       try {
-        const m = await piMain(w, "stale-env", main.url)
+        const m = await piEntry(w, "stale-env", main.url)
         session = m.session
         const id = await runSub(w, m.repo, session, sub.url, "pi-stale-env-sub", "dump the environment")
         await until("the subagent's answer", async () => (await replyOf(w, id, m.repo)).includes("done-s40"), 60_000)

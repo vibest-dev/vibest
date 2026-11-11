@@ -380,8 +380,8 @@ How `packages/core/src/sessions.ts` keeps these:
   project's last live session ends, the entry session's terminal publishes the workspace alone; without a stored
   project directory its name cannot be given again and is left as it is (a known gap).
 - Starting the entry session (`launch.ts`): every check that can refuse the launch (harness, provider, binary, plugin,
-  temporary directory) runs before the entry session session is recorded, since that supersedes the running main
-  Agent's launch. The shell a launch opens at the root runs the command and then stays, so a failed start (or a
+  temporary directory) runs before the entry session is recorded, since that supersedes the running entry
+  session's launch. The shell a launch opens at the root runs the command and then stays, so a failed start (or a
   entry session the user quits) leaves its error and a shell, not a closing terminal. `VIBEST_HOME` is set last in its
   environment, so a caller's `--env` cannot point that shell at another vibestd.
 - On start: subscribe before writing anything, settle the deliveries a stop cut off, label terminals again (the

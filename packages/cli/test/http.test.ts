@@ -65,7 +65,7 @@ const project = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
-  const main = yield* db.startEntry(key, "claude", false, {
+  const entry = yield* db.startEntry(key, "claude", false, {
     runtime: RUNTIME,
     address: { machine: "local", id: "test/coord" },
   })
@@ -80,7 +80,7 @@ const project = Effect.gen(function* () {
     runtime: "herdr",
     harness: "claude",
   })
-  const projectId = main.projectId
+  const projectId = entry.projectId
   const handle = yield* Http.make
   const call = (path: string, who: Partial<SessionIdentity> & { sessionId: string }, body = "{}") =>
     handle({
@@ -88,7 +88,7 @@ const project = Effect.gen(function* () {
       headers: Headers.fromInput(sessionHeaders({ projectId: String(projectId), harness: "claude", ...who })),
       body,
     })
-  return { db, herdr, main: main.sessionId, worker, projectId, call, inbox: yield* Inbox }
+  return { db, herdr, entryId: entry.sessionId, worker, projectId, repo, key, sessions, call, inbox: yield* Inbox }
 })
 
 const statusOf = (db: Db["Service"], worker: string) =>
@@ -98,11 +98,11 @@ describe("vibestd's HTTP API", () => {
   test(
     "the caller is checked: protocol 409, unknown session 404, missing or other project or harness 403, a subagent's poll 403",
     Effect.gen(function* () {
-      const { call, db, main, worker, projectId } = yield* project
+      const { call, db, entryId, worker, projectId } = yield* project
       const handle = yield* Http.make
       const raw = (headers: Record<string, string>) =>
         handle({ path: "/inbox/poll", headers: Headers.fromInput(headers), body: "{}" })
-      const own = sessionHeaders({ sessionId: main, harness: "claude" })
+      const own = sessionHeaders({ sessionId: entryId, harness: "claude" })
       const older = yield* raw({ ...own, "vibest-protocol": String(PROTOCOL - 1) })
       assert.strictEqual(older.status, 409)
       assert.deepInclude(older.body, {
@@ -132,34 +132,34 @@ describe("vibestd's HTTP API", () => {
         404,
       )
       assert.strictEqual((yield* raw(own)).status, 403)
-      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "pi" })).status, 403)
-      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "" })).status, 403)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: entryId, harness: "pi" })).status, 403)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: entryId, harness: "" })).status, 403)
       assert.strictEqual((yield* call("/hooks/cursor/guard", { sessionId: worker, harness: "claude" })).status, 403)
-      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, projectId: "999" })).status, 403)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: entryId, projectId: "999" })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: worker })).status, 403)
-      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main })).status, 200)
-      assert.strictEqual((yield* call("/nope", { sessionId: main })).status, 404)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: entryId })).status, 200)
+      assert.strictEqual((yield* call("/nope", { sessionId: entryId })).status, 404)
       yield* db.startEntry(projectId, "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
-      yield* db.noteConversation(main, "pi-conversation")
-      const old = yield* call("/inbox/poll", { sessionId: main, harnessSessionId: "claude-conversation" })
+      yield* db.noteConversation(entryId, "pi-conversation")
+      const old = yield* call("/inbox/poll", { sessionId: entryId, harnessSessionId: "claude-conversation" })
       assert.strictEqual(old.status, 403)
       assert.strictEqual((yield* db.entryOf(projectId))?.harnessSessionId, "pi-conversation")
-      assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "pi" })).status, 403)
+      assert.strictEqual((yield* call("/inbox/poll", { sessionId: entryId, harness: "pi" })).status, 403)
     }),
   )
 
   test(
     "the integration version and protocol are recorded per session, also on a protocol mismatch",
     Effect.gen(function* () {
-      const { call, db, main, worker, projectId } = yield* project
+      const { call, db, entryId, worker, projectId } = yield* project
       const integration = (id: string) =>
-        id === main
+        id === entryId
           ? Effect.map(db.entryOf(projectId), (m) => m?.integration)
           : Effect.map(db.getSession(id), (s) => s?.metadata.integration)
-      for (const id of [main, worker]) {
+      for (const id of [entryId, worker]) {
         assert.isUndefined(yield* integration(id))
         yield* call("/inbox/ack", { sessionId: id, pluginVersion: "1.0.0" }, JSON.stringify({ ids: [] }))
         assert.deepStrictEqual(yield* integration(id), { version: "1.0.0", protocol: PROTOCOL })
@@ -179,9 +179,9 @@ describe("vibestd's HTTP API", () => {
   test(
     "poll hands a batch out once, each row leased; ack delivers it; an expired lease hands it out again",
     Effect.gen(function* () {
-      const { call, db, inbox, main, worker, projectId } = yield* project
+      const { call, db, inbox, entryId, worker, projectId } = yield* project
       yield* inbox.enqueue({ sessionId: worker, message: "hello" })
-      const first = (yield* call("/inbox/poll", { sessionId: main })).body as Http.Reply["body"] & {
+      const first = (yield* call("/inbox/poll", { sessionId: entryId })).body as Http.Reply["body"] & {
         ids: Array<number>
         line: string
         text: string
@@ -193,11 +193,11 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
       yield* TestClock.adjust(LEASE)
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, first.ids)
-      const acked = yield* call("/inbox/ack", { sessionId: main }, JSON.stringify({ ids: first.ids }))
+      const acked = yield* call("/inbox/ack", { sessionId: entryId }, JSON.stringify({ ids: first.ids }))
       assert.deepStrictEqual(acked, { status: 200, body: { acked: first.ids } })
       assert.strictEqual(yield* statusOf(db, worker), "delivered")
       assert.deepStrictEqual(yield* inbox.ack(projectId, first.ids), [])
-      assert.strictEqual((yield* call("/inbox/ack", { sessionId: main }, "{}")).status, 400)
+      assert.strictEqual((yield* call("/inbox/ack", { sessionId: entryId }, "{}")).status, 400)
     }),
   )
 
@@ -343,7 +343,7 @@ describe("vibestd's HTTP API", () => {
   test(
     "execution-end, prompt and guard hooks: vibestd keeps the execution start and end",
     Effect.gen(function* () {
-      const { call, db, worker, main } = yield* project
+      const { call, db, worker, entryId } = yield* project
       const layout = yield* Layout
       const ready = yield* call("/session/ready", { sessionId: worker })
       assert.strictEqual(ready.status, 200)
@@ -367,10 +367,10 @@ describe("vibestd's HTTP API", () => {
       assert.include(yield* replyText(worker), "Fixed the guard.")
       yield* call(
         "/hooks/claude/execution-end",
-        { sessionId: main },
+        { sessionId: entryId },
         JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "answer", last_assistant_message: "x" }),
       )
-      assert.strictEqual(yield* replyText(main), "")
+      assert.strictEqual(yield* replyText(entryId), "")
       const key = (yield* db.getSession(worker))!.projectId
       const tool = (file: string) =>
         JSON.stringify({ tool_name: "Write", tool_input: { file_path: file, content: "x" }, cwd: "/tmp" })
@@ -378,12 +378,35 @@ describe("vibestd's HTTP API", () => {
       assert.isString((other.body as { deny?: string }).deny)
       const own = yield* call("/hooks/claude/guard", { sessionId: worker }, tool(`${layout.artifacts(key)}/notes.md`))
       assert.deepStrictEqual(own, { status: 200, body: {} })
-      const coordinator = yield* call("/hooks/claude/guard", { sessionId: main }, tool("/tmp/x"))
+      const coordinator = yield* call("/hooks/claude/guard", { sessionId: entryId }, tool("/tmp/x"))
       assert.isString((coordinator.body as { deny?: string }).deny)
-      const plan = yield* call("/hooks/claude/guard", { sessionId: main }, tool(`${layout.artifacts(key)}/plan.md`))
+      const plan = yield* call("/hooks/claude/guard", { sessionId: entryId }, tool(`${layout.artifacts(key)}/plan.md`))
       assert.deepStrictEqual(plan, { status: 200, body: {} })
       const bad = yield* call("/hooks/claude/guard", { sessionId: worker }, "not json")
       assert.isString((bad.body as { deny?: string }).deny)
+    }),
+  )
+
+  test(
+    "an ordinary session whose agent is named entry gets the session guard rules, not the entry session's",
+    Effect.gen(function* () {
+      const { call, repo, key, sessions } = yield* project
+      const { id } = yield* sessions.spawn({
+        machine: { id: "local" },
+        root: repo,
+        projectId: key,
+        name: "Named entry",
+        prompt: "do it",
+        runtime: "herdr",
+        harness: "claude",
+        agent: "entry",
+      })
+      const write = JSON.stringify({
+        tool_name: "Write",
+        tool_input: { file_path: "/tmp/x", content: "x" },
+        cwd: "/tmp",
+      })
+      assert.deepStrictEqual(yield* call("/hooks/claude/guard", { sessionId: id }, write), { status: 200, body: {} })
     }),
   )
 })

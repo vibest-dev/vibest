@@ -203,5 +203,3 @@ export type SessionBrief = {
     readonly endedAt: number | null
   } | null
 }
-
-export const ENTRY_AGENT = "entry"

@@ -28,7 +28,6 @@ import {
   type SpawnedBefore,
   type RepositoryRow,
   type Integration,
-  ENTRY_AGENT,
 } from "./db-rows.ts"
 import { makeStore } from "./db-store.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -404,13 +403,19 @@ const make = Effect.gen(function* () {
     newSessionId: unusedId.pipe(Effect.orDie),
 
     sessionIdentity: (id: string) =>
-      sql<{ id: string; projectId: string; agent: string; harness: string }>`SELECT a.id, a.project_id,
+      sql<{
+        id: string
+        projectId: string
+        agent: string
+        harness: string
+        entry: number
+      }>`SELECT a.id, a.project_id, a.agent,
           coalesce(p.harness, '') AS harness,
-          CASE WHEN q.entry_session_id = a.id THEN ${ENTRY_AGENT} ELSE a.agent END AS agent
+          q.entry_session_id = a.id AS entry
         FROM session a JOIN project q ON q.id = a.project_id
         LEFT JOIN process p ON p.session_id = a.id AND p.id = a.process_id
         WHERE a.id = ${id}`.pipe(
-        Effect.map((rows) => rows[0]),
+        Effect.map((rows) => (rows[0] === undefined ? undefined : { ...rows[0], entry: rows[0].entry === 1 })),
         Effect.orDie,
       ),
 

@@ -13,6 +13,7 @@ import { Sessions } from "./sessions.ts"
 export type HookCaller = {
   readonly id: string
   readonly agent: string
+  readonly entry: boolean
   readonly harness: string
   readonly process?: number | undefined
 }
@@ -36,7 +37,7 @@ const make = Effect.gen(function* () {
   const executionEnd = Effect.fn("Integration.executionEnd")(function* (who: HookCaller, raw: string) {
     const definition = harnesses.find(who.harness)
     if (definition === undefined) return
-    const end = executionEndOf(definition, who.agent, raw, yield* Clock.currentTimeMillis)
+    const end = executionEndOf(definition, who.entry, raw, yield* Clock.currentTimeMillis)
     if (!end) return yield* noteConversation(definition, who, raw)
     const written = yield* db.endObserved(who.id, end, who.process)
     yield* Effect.log(`execution end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)
@@ -46,7 +47,7 @@ const make = Effect.gen(function* () {
     const definition = harnesses.find(who.harness)
     if (definition === undefined) return
     yield* noteConversation(definition, who, raw)
-    const text = promptOf(definition, who.agent, raw)
+    const text = promptOf(definition, who.entry, raw)
     if (text === undefined) return
     yield* sessions.userPrompt(who.id, text, yield* Clock.currentTimeMillis, who.process)
   })

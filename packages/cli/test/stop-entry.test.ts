@@ -185,7 +185,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   )
 
   test(
-    "y with another harness: the same main session, a new conversation for that harness",
+    "y with another harness: the same entryId session, a new conversation for that harness",
     Effect.gen(function* () {
       const s = yield* workingPiMain
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })

@@ -378,6 +378,24 @@ describe("vibest.sock", () => {
   )
 
   test(
+    "an ordinary session whose agent is named entry is not an entry caller: the entry's calls are refused and its conversation payload is ignored",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const repo = yield* makeRepository
+      const raw = yield* client
+      const { id } = yield* asCli(raw, repo).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it", agent: "entry" })
+      const headers = sessionHeaders({
+        sessionId: id,
+        projectId: (yield* db.getSession(id))!.projectId,
+        pluginVersion: "1.2.3",
+      })
+      assert.strictEqual(failureTag(yield* Effect.exit(raw.List({}, { headers }))), "Forbidden")
+      yield* raw["Session.Ready"]({ id, conversation: { harness: "pi", id: "named-entry" } }, { headers })
+      assert.notStrictEqual((yield* db.getSession(id))!.harnessSessionId, "named-entry")
+    }),
+  )
+
+  test(
     "an entry session manages only the sessions it spawned, and another project's reads them but does not list them; the command line (the user) manages any",
     Effect.gen(function* () {
       const db = yield* Db
@@ -758,18 +776,18 @@ describe("vibest.sock", () => {
         runtime: "herdr",
         address: { machine: "local", id: "test/main" },
       })
-      const main = (yield* db.entryOf(projectId))!
-      const failed = yield* Effect.flip(asCli(yield* client, repo).Remove({ id: main.id }))
+      const entry = (yield* db.entryOf(projectId))!
+      const failed = yield* Effect.flip(asCli(yield* client, repo).Remove({ id: entry.id }))
       assert.strictEqual(failed._tag, "NoSuchSession")
       assert.strictEqual(
         "message" in failed ? failed.message : "",
-        `${main.id} is the session you opened in a terminal (project ${path.basename(repo)}); stop it in that terminal.`,
+        `${entry.id} is the session you opened in a terminal (project ${path.basename(repo)}); stop it in that terminal.`,
       )
     }),
   )
 
   test(
-    "FocusEntry is null without a running main, and focuses one that is running",
+    "FocusEntry is null without a running entryId, and focuses one that is running",
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime

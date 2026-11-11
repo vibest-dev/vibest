@@ -147,7 +147,7 @@ const checks: ReadonlyArray<Check> = [
               )
             },
           )
-        const main = (
+        const entryId = (
           await w
             .json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"], { cwd: repo })
             .then((l) => l.sessions)
@@ -155,7 +155,7 @@ const checks: ReadonlyArray<Check> = [
         const own = path.join(
           w.vibestHome,
           "projects",
-          row<{ p: string }>(w, "SELECT project_id AS p FROM session WHERE id = ?", main ?? "")?.p ?? "",
+          row<{ p: string }>(w, "SELECT project_id AS p FROM session WHERE id = ?", entryId ?? "")?.p ?? "",
         )
         for (const who of ["pi", "claude", "main"]) {
           expect(dirs[who] === own, `${who}'s system prompt names ${dirs[who]}, not ${own}`)
@@ -319,7 +319,7 @@ const checks: ReadonlyArray<Check> = [
       )
       const before = new Set(await panes())
       await herdr(socket, "pane.close", { pane_id: mainPane })
-      await until("the main pane closed", async () => !(await panes()).includes(mainPane), 15_000)
+      await until("the entryId pane closed", async () => !(await panes()).includes(mainPane), 15_000)
       const opened = await w.ok(["herdr", "open-entry"], {
         env: { HERDR_PLUGIN_CONTEXT_JSON: context, HERDR_SOCKET_PATH: socket },
       })

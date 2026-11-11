@@ -52,7 +52,7 @@ const flag = (argv: ReadonlyArray<string>, name: string) => {
   return at === -1 ? undefined : argv[at + 1]
 }
 
-const liveMain = (w: World) =>
+const liveEntry = (w: World) =>
   row<Main>(
     w,
     `SELECT s.id, s.directory, s.harness_session_id AS conversation, s.runtime FROM ${SESSIONS} s
@@ -82,7 +82,7 @@ const piReady = async (socket: string, what: string) => {
 const execution = async (w: World, socket: string, pane: string, prompt: string, answer: string) => {
   await herdr(socket, "agent.prompt", { target: pane, text: prompt })
   await until(`the answer ${answer} on screen`, async () => (await screen(socket, pane)).includes(answer), 60_000)
-  await until("the entry session's conversation", () => (liveMain(w)?.conversation ?? null) !== null, 30_000)
+  await until("the entry session's conversation", () => (liveEntry(w)?.conversation ?? null) !== null, 30_000)
   await until(
     "the entry session idle after its execution",
     async () => ["idle", "done"].includes(await status(socket, pane)),
@@ -141,13 +141,13 @@ const checks: ReadonlyArray<Check> = [
         expect(out.includes("the entry session is starting in"), `vibest printed: ${out}`)
         const socket = socketOf(w, w.herdrSession)
         const { argv } = await piReady(socket, "the launched entry session")
-        await until("the entry session's row", () => liveMain(w) !== undefined, 30_000)
-        const main = liveMain(w)!
+        await until("the entry session's row", () => liveEntry(w) !== undefined, 30_000)
+        const entry = liveEntry(w)!
         const root = await fs.realpath(w.repository)
-        expect(main.directory === root, `entry session directory ${main.directory}, not ${root}`)
-        const terminal = (JSON.parse(main.runtime ?? "{}") as { id?: string }).id ?? ""
+        expect(entry.directory === root, `entry session directory ${entry.directory}, not ${root}`)
+        const terminal = (JSON.parse(entry.runtime ?? "{}") as { id?: string }).id ?? ""
         expect(terminal.startsWith(`${w.herdrSession}/`), `entry session terminal ${terminal}`)
-        const file = path.join(w.root, "tmp", "vibest", main.id, "system-prompt.md")
+        const file = path.join(w.root, "tmp", "vibest", entry.id, "system-prompt.md")
         expect(flag(argv, "--system-prompt") === file, `pi argv: ${JSON.stringify(argv)}`)
         const info = await w.json<{ directory: string }>(["project", "info"])
         expect((await Bun.file(file).text()).includes(info.directory), `${file} does not name ${info.directory}`)
@@ -178,11 +178,11 @@ const checks: ReadonlyArray<Check> = [
         const first = await start([], "the first entry session")
         const prompt = ask("first")
         await execution(w, socket, first.pane, prompt, "done-first")
-        const one = liveMain(w)!
+        const one = liveEntry(w)!
         await exitMain(w, socket, first.pane, one.id)
 
         const again = await start([], "the reopened entry session")
-        expect(liveMain(w)?.id === one.id, `reopened ${liveMain(w)?.id}, not ${one.id}`)
+        expect(liveEntry(w)?.id === one.id, `reopened ${liveEntry(w)?.id}, not ${one.id}`)
         expect(
           flag(again.argv, "--session-id") === one.conversation,
           `pi argv: ${JSON.stringify(again.argv)}, conversation ${one.conversation}`,
@@ -195,7 +195,7 @@ const checks: ReadonlyArray<Check> = [
         await exitMain(w, socket, again.pane, one.id)
 
         const fresh = await start(["--new"], "the --new entry session")
-        const two = liveMain(w)!
+        const two = liveEntry(w)!
         expect(two.id !== one.id, `--new kept session ${one.id}`)
         expect(
           two.conversation !== one.conversation && !fresh.argv.includes("--session-id"),
