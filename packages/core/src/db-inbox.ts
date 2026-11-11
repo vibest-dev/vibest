@@ -42,6 +42,11 @@ export const inboxMethods = (store: Store) => {
     insertSend: (recipient: string, message: string, request?: string, sender?: string) =>
       tx(
         Effect.gen(function* () {
+          if (sender !== undefined) {
+            const from = yield* reads.creatorOf(sender)
+            const to = yield* reads.creatorOf(recipient)
+            if (from?.id !== recipient && to?.id !== sender) return undefined
+          }
           const before = request === undefined ? undefined : yield* queuedBy(recipient, request)
           if (before !== undefined) return (yield* inboxIn([before]))[0]
           if (!(yield* liveRecipient(recipient))) return undefined

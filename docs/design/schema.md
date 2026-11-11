@@ -198,7 +198,7 @@ An inbox row is text for one recipient: a session, or the user (`recipient_sessi
 | `kind`   | What it is                                                                                                                                         |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `task`   | the first input of a session, from whoever spawned it                                                                                              |
-| `send`   | a message from the user or a session to any unfinished session of its project, the main agent included                                             |
+| `send`   | a message from the user to any unfinished session of the project, or from a session to its creator or a session it started                         |
 | `notice` | something vibest tells the recipient about a session (`sender_session_id`): blocked, not started, undelivered, archived, exited, ended in an error |
 
 - Delivery scans rows with `recipient_session_id IS NOT NULL`. A row for the user is marked delivered once

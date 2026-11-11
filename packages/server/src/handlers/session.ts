@@ -78,6 +78,13 @@ export const make = (
             method: "Send",
             message: `${id} belongs to another coordinator's project; a message goes only to an agent of your own project`,
           })
+        const from = yield* db.creatorOf(caller.sessionId)
+        const to = yield* db.creatorOf(id)
+        if (from?.id !== id && to?.id !== caller.sessionId)
+          return yield* new Forbidden({
+            method: "Send",
+            message: `${id} is not the agent that started you, and you did not start it`,
+          })
         if (target.agent === "coordinator") {
           const row = yield* db.insertSend(id, p.message, p.request, caller.sessionId)
           if (!row)
