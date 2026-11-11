@@ -270,7 +270,7 @@ export const make = (
           const read = reader(headers)
           if (conversation !== undefined) {
             const row = yield* db.sessionIdentity(id)
-            if (row !== undefined && conversation.harness === row.harness)
+            if (row?.agent === ENTRY_AGENT && conversation.harness === row.harness)
               yield* integration.conversation(id, conversation.id, processOf(read))
             return {}
           }

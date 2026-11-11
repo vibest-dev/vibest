@@ -601,13 +601,13 @@ describe("vibest run --machine and remote sessions", () => {
     "a forwarded run starts a B session and nothing on A; its result arrives once as a notice; B's row is then deleted",
     () =>
       Effect.gen(function* () {
-        const { a, b, entry, asEntry } = yield* twoMachines()
+        const { a, b, entryId, asEntry } = yield* twoMachines()
         const spawned = yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "do it there", callerEnv: {} }))
         assert.match(spawned.id, /^mb\/[0-9a-f-]{36}$/, "the address, as every other method answers")
         assert.isUndefined(yield* a.db.getSession(onB(spawned.id)), "A stores no session")
         assert.strictEqual(b.spawns[0]!.commit, COMMIT)
         yield* finish(b.db, onB(spawned.id), "General Agent completed")
-        const [notice] = yield* until(a.run(inboxOf(entry)), (rows) => rows.length === 1)
+        const [notice] = yield* until(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
         assert.strictEqual(notice!.kind, "notice")
         assert.strictEqual(notice!.content, `${spawned.id.slice(0, 11)}: General Agent completed`)
         yield* until(b.run(outboxRows), (rows) => rows.length === 0)
@@ -623,7 +623,7 @@ describe("vibest run --machine and remote sessions", () => {
           listed.sessions.map((row) => [row.id, row.machine]),
           [spawned.id, "mb"],
         )
-        assert.lengthOf(yield* a.run(inboxOf(entry)), 1, "one notice")
+        assert.lengthOf(yield* a.run(inboxOf(entryId)), 1, "one notice")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
@@ -690,7 +690,7 @@ describe("vibest run --machine and remote sessions", () => {
   it.effect("a pipe cut after A's commit and before B got the ack gives one notice after reconnect", () =>
     Effect.gen(function* () {
       const cutOnce = { net: undefined as Net | undefined, done: false }
-      const { net, a, b, entry, asEntry } = yield* twoMachines({
+      const { net, a, b, entryId, asEntry } = yield* twoMachines({
         a: {
           db: (db) => ({
             ...db,
@@ -712,13 +712,13 @@ describe("vibest run --machine and remote sessions", () => {
       yield* finish(b.db, onB(spawned.id), "once")
       yield* untilVirtual(b.run(outboxRows), (rows) => rows.length === 0)
       assert.isTrue(cutOnce.done)
-      assert.lengthOf(yield* a.run(inboxOf(entry)), 1)
+      assert.lengthOf(yield* a.run(inboxOf(entryId)), 1)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
   it.effect("results written while A is away, or after machine rm, arrive once when A connects again", () =>
     Effect.gen(function* () {
-      const { net, a, b, entry, asEntry } = yield* twoMachines()
+      const { net, a, b, entryId, asEntry } = yield* twoMachines()
       const first = yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "one", callerEnv: {} }))
       const second = yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "two", callerEnv: {} }))
       net.fail("b-host", 255, "ssh: connect to host b-host port 22: Connection refused")
@@ -726,12 +726,12 @@ describe("vibest run --machine and remote sessions", () => {
       yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "unreachable")
       yield* finish(b.db, onB(first.id), "while away")
       net.route("b-host", b.layout.socket)
-      yield* untilVirtual(a.run(inboxOf(entry)), (rows) => rows.length === 1)
+      yield* untilVirtual(a.run(inboxOf(entryId)), (rows) => rows.length === 1)
       yield* a.cli(a.raw["Machine.Remove"]({ name: "mb" }))
       yield* finish(b.db, onB(second.id), "after rm")
       assert.lengthOf(yield* b.run(outboxRows), 1, "it waits on B")
       yield* a.cli(a.raw["Machine.Add"]({ name: "mb2", target: "b-host" }))
-      const rows = yield* until(a.run(inboxOf(entry)), (r) => r.length === 2)
+      const rows = yield* until(a.run(inboxOf(entryId)), (r) => r.length === 2)
       assert.strictEqual(rows[1]!.content, `mb2/${onB(second.id).slice(0, 8)}: after rm`)
       yield* until(b.run(outboxRows), (r) => r.length === 0)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),

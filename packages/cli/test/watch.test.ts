@@ -42,15 +42,15 @@ const withEntry = Effect.gen(function* () {
   const project = yield* projectOf(repo)
   yield* herdr.addPane("w1:p8", "ws", repo)
   yield* herdr.seedAgent("w1:p8")
-  const entry = yield* db.startEntry(
+  const started = yield* db.startEntry(
     project,
     "pi",
     false,
     { runtime: "herdr", address: { machine: "local", id: "w1:p8" } },
     { projectDirectory: repo },
   )
-  const entryClient = authed(yield* client, sessionHeaders({ sessionId: entry.sessionId, projectId: project }))
-  return { repo, project, entry: entry.sessionId, entryClient }
+  const entryClient = authed(yield* client, sessionHeaders({ sessionId: started.sessionId, projectId: project }))
+  return { repo, project, entryId: started.sessionId, entryClient }
 })
 
 const watching = (repo: string) =>
@@ -77,15 +77,15 @@ describe("Watch", () => {
   test(
     "a Snapshot of projects and sessions, then each change as it commits: subagents name their entry session",
     Effect.gen(function* () {
-      const { repo, project, entry, entryClient } = yield* withEntry
+      const { repo, project, entryId, entryClient } = yield* withEntry
       const { next, c } = yield* watching(repo)
       const snapshot = yield* next(isSnapshot)
       assert.deepStrictEqual(snapshot.projects, [
-        { id: project, directory: repo, entrySessionId: entry, activity: "idle" },
+        { id: project, directory: repo, entrySessionId: entryId, activity: "idle" },
       ])
       assert.deepStrictEqual(
         snapshot.sessions.map((s) => [s.id, s.agent, s.parentId]),
-        [[entry, "main", null]],
+        [[entryId, "main", null]],
       )
 
       const { id } = yield* entryClient.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
@@ -93,7 +93,7 @@ describe("Watch", () => {
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
           e._tag === "Session" && e.session.id === id && e.session.executionState === "open",
       )
-      assert.strictEqual(spawned.session.parentId, entry)
+      assert.strictEqual(spawned.session.parentId, entryId)
       assert.strictEqual(spawned.session.projectId, project)
       assert.strictEqual(spawned.session.task, "do it")
 
@@ -121,7 +121,7 @@ describe("Watch", () => {
     "a project move sends the sessions it moved again, with their new directories",
     Effect.gen(function* () {
       const db = yield* Db
-      const { repo, project, entry } = yield* withEntry
+      const { repo, project, entryId } = yield* withEntry
       const { next } = yield* watching(repo)
       yield* next(isSnapshot)
       const moved = `${yield* tempDirectory("vibest-moved-")}/repo`
@@ -129,7 +129,7 @@ describe("Watch", () => {
       yield* db.moveProject(project, moved, [])
       yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
-          e._tag === "Session" && e.session.id === entry && e.session.worktree === moved,
+          e._tag === "Session" && e.session.id === entryId && e.session.worktree === moved,
       )
     }),
   )

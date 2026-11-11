@@ -201,13 +201,13 @@ export const twoMachines = (options: { readonly a?: TestOptions; readonly b?: Te
     const a = yield* repoStack(net, options.a)
     const b = yield* repoStack(net, options.b)
     net.route("b-host", b.layout.socket)
-    const entry = yield* a.db.startEntry(a.project, "pi", false, {
+    const started = yield* a.db.startEntry(a.project, "pi", false, {
       runtime: "fake",
       address: { machine: "local", id: "main-pane" },
     })
     const asEntry = <A, E>(effect: Effect.Effect<A, E>) =>
-      RpcClient.withHeaders(effect, sessionHeaders({ sessionId: entry.sessionId, projectId: a.project }))
+      RpcClient.withHeaders(effect, sessionHeaders({ sessionId: started.sessionId, projectId: a.project }))
     yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
     yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
-    return { net, a, b, entry: entry.sessionId, asEntry }
+    return { net, a, b, entryId: started.sessionId, asEntry }
   })

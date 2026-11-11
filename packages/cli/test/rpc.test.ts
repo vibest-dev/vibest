@@ -364,6 +364,16 @@ describe("vibest.sock", () => {
         "s2",
         "a conversation reported by another harness than the session's is ignored",
       )
+      const worker = (yield* db.getSession(id))!
+      yield* raw["Session.Ready"](
+        { id, conversation: { harness: "pi", id: "worker-report" } },
+        { headers: sessionHeaders({ sessionId: id, projectId: worker.projectId, pluginVersion: "1.2.3" }) },
+      )
+      assert.notStrictEqual(
+        (yield* db.getSession(id))!.harnessSessionId,
+        "worker-report",
+        "a conversation reported by a session that is not its project's entry is ignored",
+      )
     }),
   )
 
