@@ -93,7 +93,7 @@ refused), checks that the checkout has `commit`
 and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
 started it is the `origin` of its `session.created` fact (peer, project, reportTo?), kept in the session's
-`origin_*` columns (`reportTo` as `origin_session`); it has no `reportTo` when A's project had no main agent. The forwarded `request` finds the session
+`origin_*` columns (`reportTo` as `origin_session`); it has no `reportTo` when A's project had no entry session. The forwarded `request` finds the session
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
 notices go to B's own inbox delivery and no outbox row is written for it.
 

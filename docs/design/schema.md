@@ -104,14 +104,14 @@ CREATE INDEX project_repository_project ON project_repository (project_id);
 CREATE TABLE session (
   id                    TEXT PRIMARY KEY,             -- UUIDv4
   project_id            TEXT NOT NULL,
-  parent_session_id     TEXT,                         -- the main agent that spawned it; null: the user. Its notices go here while it lives
+  parent_session_id     TEXT,                         -- the session that created it; null: the user. Its notices go here while it lives
   role                  TEXT NOT NULL,                -- agent definition name (open set)
   name                  TEXT NOT NULL,
   directory             TEXT NOT NULL,
   archive_on_idle       INTEGER NOT NULL DEFAULT 0 CHECK (archive_on_idle IN (0, 1)),
   origin_peer           TEXT,                         -- started by another vibestd: its id
   origin_project        TEXT,                         -- and its project there
-  origin_session        TEXT,                         -- and the main agent there its notices and sends go to
+  origin_session        TEXT,                         -- and the session there its notices and sends go to (that project's entry session)
   created_at            INTEGER NOT NULL,
   ended_at              INTEGER,                      -- archived, or replaced by vibest --new
   process_id            INTEGER,                      -- its current process
