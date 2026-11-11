@@ -39,6 +39,21 @@ const lines = (file: string) =>
     () => 0,
   )
 
+const counting = (id: string, file: string) => `import fs from "node:fs"
+import { Plugin } from "@vibest/plugin"
+import { Effect } from "effect"
+export default Plugin.define({
+  id: ${JSON.stringify(id)},
+  effect: (ctx) => Effect.sync(() => fs.appendFileSync(${JSON.stringify(file)}, JSON.stringify(ctx.options) + "\\n")),
+})
+`
+
+const setups = (file: string) =>
+  fs.readFile(file, "utf8").then(
+    (text) => text.split("\n").filter(Boolean),
+    () => [],
+  )
+
 const write = async (file: string, text: string) => {
   await fs.mkdir(path.dirname(file), { recursive: true })
   await fs.writeFile(`${file}.tmp`, text)
@@ -173,6 +188,52 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       await until("b retried after it changed", async () => (await lines(counter)) === 2)
       await fs.rm(first)
       await fs.rm(second)
+    },
+  },
+  {
+    id: "G8",
+    title: "a plugin edited into one that fails to import keeps running its last revision; nothing is set up again",
+    run: async (w) => {
+      const keep = path.join(w.root, "keep.log")
+      const after = path.join(w.root, "after.log")
+      const source = path.join(w.vibestHome, "plugins", "a-keep.ts")
+      await write(source, counting("keep", keep))
+      await write(path.join(w.vibestHome, "plugins", "b-after.ts"), counting("after", after))
+      await until("both plugins active", async () => {
+        const all = await list(w)
+        return ["keep", "after"].every((id) => all.some((p) => p.id === id && p.status === "active"))
+      })
+      await write(source, `throw new Error("broken on purpose")\n`)
+      await until("the failed revision reported beside the running one", async () =>
+        (await list(w)).some(
+          (p) => p.id === "keep" && p.status === "active" && (p.error ?? "").includes("broken on purpose"),
+        ),
+      )
+      const all = await list(w)
+      expect(
+        all.some((p) => p.id === "after" && p.status === "active"),
+        `after is not active: ${JSON.stringify(all)}`,
+      )
+      expect((await lines(keep)) === 1, `keep was set up again: ${await lines(keep)} setups`)
+      expect((await lines(after)) === 1, `after was set up again: ${await lines(after)} setups`)
+    },
+  },
+  {
+    id: "G9",
+    title: "a plugin folder found in plugins and named in vibest.json is one plugin, with the configured options",
+    run: async (w) => {
+      const seen = path.join(w.root, "foo.log")
+      await write(path.join(w.vibestHome, "plugins", "foo", "index.ts"), counting("foo", seen))
+      await write(
+        path.join(w.vibestHome, "vibest.json"),
+        JSON.stringify({ plugins: [{ package: "./plugins/foo", options: { tag: "e2e" } }] }),
+      )
+      await until("foo active with the configured options", async () => {
+        const active = (await list(w)).some((p) => p.id === "foo" && p.status === "active")
+        return active && (await setups(seen)).at(-1) === JSON.stringify({ tag: "e2e" })
+      })
+      const foo = (await list(w)).filter((p) => p.source.includes(`${path.sep}foo${path.sep}`))
+      expect(foo.length === 1, `foo is listed ${foo.length} times: ${JSON.stringify(foo)}`)
     },
   },
 ]
