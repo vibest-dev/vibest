@@ -55,10 +55,6 @@ export default Plugin.define({
   effect: (ctx) =>
     Effect.gen(function* () {
       yield* ctx.runtime.transform((editor) => editor.add(runtime))
-      yield* ctx.agent.hook("start.before", (event) =>
-        Effect.sync(() => {
-          event.runtime = runtime.id
-        }),
-      )
+      yield* ctx.agent.hook("start.before", () => Effect.succeed({ runtime: runtime.id }))
     }),
 })

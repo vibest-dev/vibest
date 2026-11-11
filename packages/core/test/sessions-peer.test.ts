@@ -205,7 +205,7 @@ describe.concurrent("Sessions", () => {
             ctx.agent.hook("start.before", (e) =>
               Effect.sync(() => {
                 started.push(`${e.project}: ${e.prompt}`)
-                e.model = "fake-strong"
+                return { model: "fake-strong" }
               }),
             ),
         },

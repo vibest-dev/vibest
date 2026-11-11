@@ -7,6 +7,17 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Plugin hooks return their decisions** (plugin authors): hooks no longer change the event they are given. Each
+  callback gets a read-only event (frozen: an assignment throws, and the plugin is reported as crashed, so a run it
+  routes fails with `plugin <id> crashed: …`) and returns what it decides, which core applies in plugin order, a
+  later plugin overriding an earlier one as before. `agent.start.before` returns an `AgentRoute` (any of `prompt`,
+  `harness`, `provider`, `model`, `machine`, `runtime`; `undefined` unsets `harness`, `provider`, `model` or
+  `runtime` and leaves `prompt` and `machine` as they are), `agent.fail` returns an
+  `AgentMove`, and `machine.connect`/`machine.remove` return their notes. `AgentFail` has no `move` and
+  `MachineEvent` has no `notes`; `@vibest/plugin/testing` `machineHooks().fire` takes an event without `notes`. The
+  trace's `changes` list the fields each callback returned. Migrate: `e.harness = "pi"` becomes
+  `return { harness: "pi" }` (for example `Effect.succeed({ harness: "pi" })`), `e.move = m` becomes `return m`, and
+  `e.notes.push(n)` becomes `return [n]`.
 - **The read model** (anyone reading `vibest.db`): the projection is version 4 and is rebuilt from the log when vibestd
   opens the file. `session.report_to_session_id`, `session.origin_parent`, `session.seq`, `project.seq`,
   `inbox.queued_at` and `process.resume` are gone: a session's notices go to its parent while it lives, else to the

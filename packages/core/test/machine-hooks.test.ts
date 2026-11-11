@@ -18,16 +18,8 @@ const noting = (id: string, message: string, runtime?: string) =>
     effect: (ctx) =>
       Effect.gen(function* () {
         const options = runtime === undefined ? undefined : { runtime }
-        yield* ctx.machine.hook(
-          "connect",
-          (e) => Effect.sync(() => e.notes.push({ message, fix: `fix ${id}` })),
-          options,
-        )
-        yield* ctx.machine.hook(
-          "remove",
-          (e) => Effect.sync(() => e.notes.push({ message: `removed by ${id}` })),
-          options,
-        )
+        yield* ctx.machine.hook("connect", () => Effect.succeed([{ message, fix: `fix ${id}` }]), options)
+        yield* ctx.machine.hook("remove", () => Effect.succeed([{ message: `removed by ${id}` }]), options)
       }),
   })
 
@@ -148,7 +140,7 @@ describe("plugins: machine hooks", () => {
           id: "disposing",
           effect: (ctx) =>
             ctx.machine
-              .hook("connect", (e) => Effect.sync(() => calls.push(e.name)))
+              .hook("connect", (e) => Effect.sync(() => void calls.push(e.name)))
               .pipe(Effect.map((registration) => void registrations.push(registration))),
         }),
       ],

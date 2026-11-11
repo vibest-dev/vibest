@@ -104,7 +104,6 @@ export interface MachineEvent {
   readonly target: string
   readonly vibestd: string
   readonly runtimes: ReadonlyArray<MachineRuntimeThere>
-  readonly notes: Array<MachineNote>
 }
 
 export interface MachineInfo {
@@ -136,12 +135,12 @@ export interface AgentContext {
 }
 
 export interface AgentStartBefore extends AgentContext {
-  prompt: string
-  harness: string | undefined
-  provider: string | undefined
-  model: string | undefined
-  machine: { id: string }
-  runtime: string | undefined
+  readonly prompt: string
+  readonly harness: string | undefined
+  readonly provider: string | undefined
+  readonly model: string | undefined
+  readonly machine: { readonly id: string }
+  readonly runtime: string | undefined
   readonly parentRuntime: string | undefined
   readonly machines: ReadonlyArray<MachineInfo>
 }
@@ -153,12 +152,31 @@ export interface AgentFail extends AgentContext {
   readonly turn: string
   readonly harness: string
   readonly provider: string | undefined
-  move: { harness: string; provider?: string | undefined; model?: string | undefined } | undefined
+}
+
+export interface AgentRoute {
+  readonly prompt?: string
+  readonly harness?: string | undefined
+  readonly provider?: string | undefined
+  readonly model?: string | undefined
+  readonly machine?: { readonly id: string }
+  readonly runtime?: string | undefined
+}
+
+export interface AgentMove {
+  readonly harness: string
+  readonly provider?: string | undefined
+  readonly model?: string | undefined
 }
 
 export interface AgentHooks {
   readonly "start.before": AgentStartBefore
   readonly fail: AgentFail
+}
+
+export interface AgentResults extends Record<keyof AgentHooks, unknown> {
+  readonly "start.before": AgentRoute
+  readonly fail: AgentMove
 }
 
 export interface AgentFailures extends Record<keyof AgentHooks, unknown> {
@@ -167,7 +185,7 @@ export interface AgentFailures extends Record<keyof AgentHooks, unknown> {
 }
 
 export interface AgentDomain {
-  readonly hook: Hooks<AgentHooks, AgentFailures>
+  readonly hook: Hooks<AgentHooks, AgentResults, AgentFailures>
 }
 
 export interface MachineHooks {
@@ -182,7 +200,7 @@ export interface MachineHookOptions {
 export interface MachineDomain {
   readonly hook: <Name extends keyof MachineHooks>(
     name: Name,
-    callback: (event: MachineHooks[Name]) => Effect.Effect<void>,
+    callback: (event: MachineHooks[Name]) => Effect.Effect<ReadonlyArray<MachineNote> | void>,
     options?: MachineHookOptions,
   ) => Effect.Effect<Registration, never, Scope.Scope>
 }

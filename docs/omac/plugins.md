@@ -1,6 +1,8 @@
 # omac Plugin Architecture (Master Plan)
 
-Status: Draft. Master plan + phased PRs (§7), progress tracked in issue #7. Installation / configuration / loading / activation aligned with OpenCode V2; hook execution rules follow omac's own design (§5), addressing OpenCode's open issues.
+Status: Draft, historical. Since vibest's hooks return values (CHANGELOG, "Plugin hooks return their decisions"),
+a callback no longer mutates the event: the rules below about one event mutated in place and diffed are replaced
+by `docs/design/architecture.md` §7, and the examples are updated. Master plan + phased PRs (§7), progress tracked in issue #7. Installation / configuration / loading / activation aligned with OpenCode V2; hook execution rules follow omac's own design (§5), addressing OpenCode's open issues.
 Reference: OpenCode V2 (anomalyco/opencode `dev` @ e31136bdb, 2026-10-11, effect 4.0.1), local `/tmp/github.com/anomalyco/opencode`.
 
 First use case: A plugin intercepts session spawn to select harness and model based on task attributes (complexity, file paths, keywords, task type). A second use case: a plugin decides where a session restarts after a usage limit (`agent.fail`).
@@ -120,14 +122,13 @@ export default Plugin.define({
     ctx.agent.hook("start.before", (e) =>
       Effect.sync(() => {
         if (e.model) return // Don't override if already selected by coordinator or earlier plugin (convention)
-        if (/^(research|investigate)\b/i.test(e.prompt)) {
-          e.harness = "claude"
-          e.model = "claude-haiku-5-5"
-        } else if (/refactor|migrat/i.test(e.prompt)) {
-          e.harness = "claude"
-          e.model = "claude-opus-5-5"
-          e.prompt += "\n\nRun the full test suite before reporting."
-        }
+        if (/^(research|investigate)\b/i.test(e.prompt)) return { harness: "claude", model: "claude-haiku-5-5" }
+        if (/refactor|migrat/i.test(e.prompt))
+          return {
+            harness: "claude",
+            model: "claude-opus-5-5",
+            prompt: `${e.prompt}\n\nRun the full test suite before reporting.`,
+          }
       }),
     ),
 })
@@ -153,11 +154,7 @@ import { Plugin } from "@omac/plugin"
 export default Plugin.define({
   id: "cheap-second",
   effect: (ctx) =>
-    ctx.agent.hook("fail", (e) =>
-      Effect.sync(() => {
-        if (e.reason === "limited" && e.move === undefined) e.move = { harness: "cursor" }
-      }),
-    ),
+    ctx.agent.hook("fail", (e) => Effect.succeed(e.reason === "limited" ? { harness: "cursor" } : undefined)),
 })
 ```
 

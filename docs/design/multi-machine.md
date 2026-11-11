@@ -180,7 +180,7 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
   session, or "" when B's vibestd reached its core through HC_SOCKET>}`). A keeps the last list per machine in memory
   with its time.
 - **The hooks.** `machine.connect` ("make sure your runtime has this machine") and `machine.remove` ("make sure it
-  does not") carry `{name, target, vibestd, runtimes, notes}`. `connect` fires inside `Machine.Add` after the row is
+  does not") carry `{name, target, vibestd, runtimes}` and return notes. `connect` fires inside `Machine.Add` after the row is
   stored (its notes go into the answer), at every reconnect and every connect after vibestd starts, after each plugin
   commit of the runtime registry for every connected machine (only to the hooks scoped to a runtime that commit added or
   replaced, plus unscoped ones), and at the moment of use (below, only to the hooks scoped to that runtime, plus

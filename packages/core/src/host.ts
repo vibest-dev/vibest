@@ -1,11 +1,17 @@
-import type { AgentFail, Harness as PluginHarness, Runtime as PluginRuntime, SubscriptionReport } from "@vibest/plugin"
+import type {
+  AgentMove,
+  Harness as PluginHarness,
+  MachineEvent,
+  Runtime as PluginRuntime,
+  SubscriptionReport,
+} from "@vibest/plugin"
 import type { HookFailed, PluginInfo, TraceEntry } from "@vibest/schema/plugin"
 import type { AgentRefused } from "@vibest/schema/plugin"
 import type { HarnessUnavailable, NoRuntime } from "@vibest/schema/session"
 import type { Subscription } from "@vibest/schema/subscription"
 import type { Effect, Stream } from "effect"
 
-import type { FailInput, MachineEventInput, MachineHook, PluginNote, SpawnDecision, StartInput } from "./plugins.ts"
+import type { FailInput, MachineHook, PluginNote, SpawnDecision, StartInput } from "./plugins.ts"
 
 export type RuntimeDefinition = PluginRuntime.RuntimeDefinition
 export type HarnessDefinition = PluginHarness.HarnessDefinition
@@ -34,12 +40,12 @@ export interface PluginsShape {
   readonly start: (input: StartInput) => Effect.Effect<SpawnDecision, AgentRefused>
   readonly fail: (
     input: FailInput,
-  ) => Effect.Effect<{ readonly move: AgentFail["move"]; readonly trace: ReadonlyArray<TraceEntry> }, HookFailed>
+  ) => Effect.Effect<{ readonly move: AgentMove | undefined; readonly trace: ReadonlyArray<TraceEntry> }, HookFailed>
   readonly list: Effect.Effect<ReadonlyArray<PluginInfo>>
   readonly settled: Effect.Effect<boolean>
   readonly machine: (
     hook: MachineHook,
-    event: MachineEventInput,
+    event: MachineEvent,
     runtime?: string,
   ) => Effect.Effect<{ readonly plugins: ReadonlyArray<string>; readonly notes: ReadonlyArray<PluginNote> }>
 }
