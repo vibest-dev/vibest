@@ -290,26 +290,25 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S48",
     title:
-      "when the sibling's pane is killed before a vibest send reaches it, the row ends failed and one notice row goes to the sender (recipient_session_id = the sender), which is typed into the sender and seen by its model",
+      "when the main agent's pane is killed before a subagent's vibest send reaches it, the row ends failed and one notice row goes to the sender (recipient_session_id = the sender), which is typed into the sender and seen by its model",
     run: async (w) => {
       needs()
-      const main = recordingModel(() => reply("ok"))
-      const held = heldModel()
-      let siblingId = ""
-      const sender = sendingModel(() => siblingId, "never-delivered")
+      const main = heldModel()
+      let mainId = ""
+      const sender = sendingModel(() => mainId, "never-delivered")
       let session = ""
       try {
         const m = await piMain(w, "send-killed", main.url)
         session = m.session
+        mainId = mainOf(w)
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-        siblingId = await runSub(w, m.repo, session, held.url, "pi-send-killed-b", ask("held"))
-        await until("the sibling's turn held", () => held.held() > 0, 60_000)
-        const id = await runSub(w, m.repo, session, sender.url, "pi-send-killed-a", "send to the sibling")
-        await until("the send pending", () => sendsFrom(w, id, siblingId).some((r) => r.status === "pending"), 60_000)
-        const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, siblingId)!.r
+        await until("the main agent's turn held", () => main.held() > 0, 60_000)
+        const id = await runSub(w, m.repo, session, sender.url, "pi-send-killed-a", "send to the main agent")
+        await until("the send pending", () => sendsFrom(w, id, mainId).some((r) => r.status === "pending"), 60_000)
+        const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, mainId)!.r
         const pane = ((JSON.parse(runtime) as { id?: string }).id ?? "").split("/")[1] ?? ""
         await herdr(socket, "pane.close", { pane_id: pane })
-        await until("the send failed", () => sendsFrom(w, id, siblingId).some((r) => r.status === "failed"), 60_000)
+        await until("the send failed", () => sendsFrom(w, id, mainId).some((r) => r.status === "failed"), 60_000)
         const notices = () =>
           rows<{ status: string; sender: string | null }>(
             w,
@@ -324,9 +323,8 @@ const sendChecks: ReadonlyArray<Check> = [
         expect(notices().length === 1, `${notices().length} notices to the sender: ${JSON.stringify(notices())}`)
         await until("the sender's model saw the notice", () => seen(sender).includes("was not delivered"), 60_000)
       } finally {
+        main.release()
         main.stop()
-        held.release()
-        held.stop()
         sender.stop()
         await dropHerdrSession(w, session)
       }
