@@ -244,24 +244,17 @@ const make = Effect.gen(function* () {
       }),
 
     creatorOf: (id: string) =>
-      sql<{
-        creator: string | null
-        origin: string | null
-        entry: string | null
-        name: string | null
-      }>`SELECT s.parent_session_id AS creator, s.origin_session AS origin, p.entry_session_id AS entry,
-          c.name AS name
-        FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = s.parent_session_id
-        WHERE s.id = ${id}`.pipe(
-        Effect.map(([row]) => {
-          const creator = row?.creator ?? row?.origin ?? row?.entry
-          if (creator === null || creator === undefined) return undefined
-          const label =
-            creator === row?.entry ? "the main agent" : row?.name ? `agent ${row.name}` : "the agent that started you"
-          return { id: creator, label }
-        }),
-        Effect.orDie,
-      ),
+      Effect.gen(function* () {
+        const creator = yield* addressedCreator(id)
+        if (creator === undefined) return undefined
+        const [row] = yield* sql<{ entry: string | null; name: string | null }>`SELECT
+            p.entry_session_id AS entry, c.name AS name
+          FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = ${creator}
+          WHERE s.id = ${id}`
+        const label =
+          creator === row?.entry ? "the main agent" : row?.name ? `agent ${row.name}` : "the agent that started you"
+        return { id: creator, label }
+      }).pipe(Effect.orDie),
 
     insertSession: (
       row: Omit<SessionRow, "projectId">,

@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
+import { sessionSystemPrompt } from "@vibest/core/system-prompt"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -60,6 +61,18 @@ describe("sends from sessions", () => {
         yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
         assert.isDefined(yield* db.insertSend(main, "to the entry", undefined, B))
         assert.isUndefined(yield* db.insertSend(A, "to the ended parent", undefined, B))
+        const creator = yield* db.creatorOf(B)
+        assert.deepStrictEqual(creator, { id: main, label: "the main agent" })
+        const prompt = sessionSystemPrompt({
+          id: B,
+          projectDir: "/w",
+          vibest: ["vibest"],
+          preferences: "",
+          memories: "",
+          creator,
+        })
+        assert.include(prompt, `send ${main} --`)
+        assert.notInclude(prompt, `send ${A} --`)
       }),
     ),
   )
