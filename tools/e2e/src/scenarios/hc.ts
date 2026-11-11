@@ -74,7 +74,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S33",
     title:
-      "herdr-core runtime: a Pi main agent started with --runtime hc runs `vibest run`, the subagent starts in hc as its child (no notes, outlives it), results and a send go both ways; the main terminal carries herdr.space=<project> and herdr.tab=<main session>, with readable project and task names",
+      "herdr-core runtime: a Pi entry session started with --runtime hc runs `vibest run`, the subagent starts in hc as its child (no notes, outlives it), results and a send go both ways; the main terminal carries herdr.space=<project> and herdr.tab=<main session>, with readable project and task names",
     run: async (w) => {
       for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi", { heldMs: 3_000 })
@@ -85,7 +85,7 @@ const checks: ReadonlyArray<Check> = [
       const core = await isolatedCore(w, piAgentDir, "hc")
       try {
         const repo = await project(w, "hc")
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           runtime: "hc",
           cwd: repo,
@@ -98,7 +98,7 @@ const checks: ReadonlyArray<Check> = [
         })
         let main = ""
         await until(
-          "the main agent in vibest ls",
+          "the entry session in vibest ls",
           async () => {
             main =
               (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
@@ -138,11 +138,11 @@ const checks: ReadonlyArray<Check> = [
           cwd: repo,
           timeoutMs: 60_000,
         })
-        await reached("the main agent's execution on the first result", "done-zero")
-        await reached("the main agent's execution on the result of the subagent it started", "done-one")
-        await reached("the main agent's execution on the result after its vibest send", "done-two")
+        await reached("the entry session's execution on the first result", "done-zero")
+        await reached("the entry session's execution on the result of the subagent it started", "done-one")
+        await reached("the entry session's execution on the result after its vibest send", "done-two")
         await until(
-          "the main agent idle after its last execution",
+          "the entry session idle after its last execution",
           () => samples.get(main)?.at(-1)?.status === "idle",
           60_000,
         )
@@ -158,7 +158,7 @@ const checks: ReadonlyArray<Check> = [
           }
         const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, main)?.p
         const mainAt = runtimeOf(main)
-        expect(mainAt.kind === "hc", `the main agent runs in ${JSON.stringify(mainAt)}, not hc`)
+        expect(mainAt.kind === "hc", `the entry session runs in ${JSON.stringify(mainAt)}, not hc`)
         const mainTerminal = await core.get(addressOf(mainAt.id!))
         expect(mainTerminal.name === "hc-main", `the main terminal name: ${mainTerminal.name}`)
         expect(mainAt.id === `${mainTerminal.address}@${w.hcSocket}`, `the main identity changed: ${mainAt.id}`)
@@ -198,7 +198,7 @@ const checks: ReadonlyArray<Check> = [
         const mainWorking = mainSeen.findIndex((x) => x.status === "working")
         expect(
           mainWorking >= 0 && mainSeen.slice(mainWorking).some((x) => x.status === "idle"),
-          `the main agent was not seen working, then idle: ${shown(main)}`,
+          `the entry session was not seen working, then idle: ${shown(main)}`,
         )
         const subSeen = samples.get(sub) ?? []
         for (const marker of ["one", "two"]) {
@@ -235,7 +235,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S34",
     title:
-      "herdr-core runtime: `vibest --runtime hc` typed into a terminal of the user's own core starts the main agent in place, in that terminal on that core, and labels it for herdr-app",
+      "herdr-core runtime: `vibest --runtime hc` typed into a terminal of the user's own core starts the entry session in place, in that terminal on that core, and labels it for herdr-app",
     run: async (w) => {
       for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -248,7 +248,7 @@ const checks: ReadonlyArray<Check> = [
         const opened = await core.hc("run", "--bg", "--keep", "--name", "users-own", "--json")
         expect(opened.code === 0, `hc run: ${opened.stderr}${opened.stdout}`)
         const users = await core.get("users-own")
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           runtime: "hc",
           cwd: repo,
@@ -259,7 +259,7 @@ const checks: ReadonlyArray<Check> = [
         })
         let main = ""
         await until(
-          "the main agent in vibest ls",
+          "the entry session in vibest ls",
           async () => {
             main =
               (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
@@ -276,7 +276,7 @@ const checks: ReadonlyArray<Check> = [
         ) as { kind?: string; id?: string }
         expect(
           at.kind === "hc" && at.id === `${users.address}@${w.hcSocket}`,
-          `the main agent runs in ${JSON.stringify(at)}, not in ${users.address} on ${w.hcSocket}`,
+          `the entry session runs in ${JSON.stringify(at)}, not in ${users.address} on ${w.hcSocket}`,
         )
         const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, main)?.p
         await until(
@@ -304,7 +304,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S35",
     title:
-      "herdr-core runtime: vibest typed into an isolated hc terminal with no --runtime starts the main agent there; the subagent it starts inherits hc; vibest run --runtime herdr places a subagent in this run's herdr",
+      "herdr-core runtime: vibest typed into an isolated hc terminal with no --runtime starts the entry session there; the subagent it starts inherits hc; vibest run --runtime herdr places a subagent in this run's herdr",
     run: async (w) => {
       for (const bin of ["pi", "hc", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -330,7 +330,7 @@ const checks: ReadonlyArray<Check> = [
             `${e.message}; command -v vibest wrote ${JSON.stringify(await fs.readFile(which, "utf8").catch(() => ""))}; screen:\n${await core.screens()}`,
           )
         })
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           runtime: "hc",
           cwd: repo,
@@ -347,7 +347,7 @@ const checks: ReadonlyArray<Check> = [
           }
         let main = ""
         await until(
-          "the main agent in vibest ls",
+          "the entry session in vibest ls",
           async () => {
             main =
               (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
@@ -362,13 +362,13 @@ const checks: ReadonlyArray<Check> = [
         const mainAt = runtimeOf(main)
         expect(
           mainAt.kind === "hc" && mainAt.id === `${caller.address}@${w.hcSocket}`,
-          `the main agent runs in ${JSON.stringify(mainAt)}, not in ${caller.address} on ${w.hcSocket}`,
+          `the entry session runs in ${JSON.stringify(mainAt)}, not in ${caller.address} on ${w.hcSocket}`,
         )
         await w.okViaEntry(["run", "pi", "--runtime", "hc", "--env", env, "--title", "Wake parent", ask("zero")], {
           cwd: repo,
           timeoutMs: 60_000,
         })
-        await until("the main agent starts a subagent", () => model.sessionId() !== "", 180_000).catch(
+        await until("the entry session starts a subagent", () => model.sessionId() !== "", 180_000).catch(
           async (e: Error) => {
             throw new Error(
               `${e.message}; the model saw: ${JSON.stringify(model.seen, null, 1)}\nterminals:\n${await core.screens()}`,
@@ -434,7 +434,7 @@ const checks: ReadonlyArray<Check> = [
       const restore = await configureRuntime(w, "hc")
       try {
         const repo = await project(w, "hc-seen")
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           runtime: "hc",
           cwd: repo,
@@ -445,7 +445,7 @@ const checks: ReadonlyArray<Check> = [
           timeoutMs: 60_000,
         })
         await until(
-          "the main agent in vibest ls",
+          "the entry session in vibest ls",
           async () =>
             (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).some(
               (e) => e.agent === "main",

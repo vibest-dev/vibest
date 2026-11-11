@@ -159,13 +159,13 @@ What the checks that drive real herdr panes rely on:
 - A pane gets the environment of its herdr server, which gets vibestd's. A check that needs something in its panes
   (`PI_CODING_AGENT_DIR`, or `CLAUDE_CONFIG_DIR` unset for the user's Claude login) starts vibestd and a herdr session
   of its own, and drops only that session at the end.
-- Claude asks whether to trust a new folder and loads hooks only once it is trusted. For a main agent the check answers
+- Claude asks whether to trust a new folder and loads hooks only once it is trusted. For an entry session the check answers
   as the person does (down to Yes, then enter, `drivers/claude.ts`); vibest answers it for subagents.
 - A Claude agent on a fake model gets `disableAutoMode` in its shadow settings: with auto mode on, the fake model cannot
   answer the auto-mode classifier's side requests.
 - An enter typed right behind text in Claude's input box is sometimes swallowed; a check waiting for that line presses
   enter again.
-- Claude refuses a standalone `sleep`: to keep a main agent busy, the check has its execution wait in a Bash call for a file
+- Claude refuses a standalone `sleep`: to keep an entry session busy, the check has its execution wait in a Bash call for a file
   the check creates.
 - herdr drops a started agent's name when it is not marked ready within `agent.start`'s 120 s, and refuses
   `agent.prompt` until the agent is ready; it marks an agent ready only once the agent is read (S18, S19). S18 proves in
@@ -275,7 +275,7 @@ Notes on particular checks:
 - The guard rules themselves are `guard.test.ts`; without a vibest agent, or when vibestd cannot check the call,
   `vibest integration guard` fails with no answer (`cli.test.ts`). Cursor's deny and allow answers through vibestd are
   `guard.test.ts`; a stop refused with each unsettled daemon operation or delivery named (D7, and D8, whose handoff
-  drains the same way) is `stop.test.ts`; which installer U1 runs is `update.test.ts`; a main agent restarting through
+  drains the same way) is `stop.test.ts`; which installer U1 runs is `update.test.ts`; an entry session restarting through
   `VIBEST_COMMAND` (I11) is `restart.test.ts`.
 - The machines checks run two vibest homes on one host: A's vibestd dials B through a fake `ssh` first on its PATH,
   which runs the line with B's environment; agents on both sides run in isolated hc cores on fake models.

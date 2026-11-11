@@ -70,10 +70,10 @@ const runId = async (w: World, args: ReadonlyArray<string>) => {
 const resultOf = (w: World, id: string, marker: string) =>
   until(`the answer of ${marker}`, async () => (await replyOf(w, id)).includes(`done-${marker}`), 90_000)
 
-const mainSession = async (w: World) => {
+const entrySession = async (w: World) => {
   let main: Entry | undefined
   await until(
-    "the main agent in vibest ls",
+    "the entry session in vibest ls",
     async () => {
       main = (await sessions(w)).find((e) => e.agent === "main")
       return main !== undefined
@@ -187,7 +187,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H5",
     title:
-      "`vibest run` without a harness takes the harness, provider and model of the main agent that runs it; a named harness drops provider and model; with nothing to inherit it fails `no harness to inherit`",
+      "`vibest run` without a harness takes the harness, provider and model of the entry session that runs it; a named harness drops provider and model; with nothing to inherit it fails `no harness to inherit`",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "inherit")
@@ -198,16 +198,16 @@ const checks: ReadonlyArray<Check> = [
           nothing.code !== 0 && nothing.stderr.includes("no harness to inherit"),
           `run with nothing to inherit: ${nothing.code} ${nothing.stderr}`,
         )
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           extra: ["--provider", "second", "--model", "m2"],
           env: { PI_CODING_AGENT_DIR: dir },
           timeoutMs: 90_000,
         })
-        const main = await mainSession(w)
+        const main = await entrySession(w)
         expect(
           main.harness === "pi" && main.provider === "second" && main.model === "m2",
-          `main agent: ${JSON.stringify(main)}`,
+          `entry session: ${JSON.stringify(main)}`,
         )
         const inherited = await entry(w, await runId(w, ["--", ask("frommain")]))
         expect(
@@ -227,7 +227,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H6",
     title:
-      "`vibest` without `--harness`: a project's first start fails asking for it; after the Pi main agent exits, it restarts that harness",
+      "`vibest` without `--harness`: a project's first start fails asking for it; after the Pi entry session exits, it restarts that harness",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "reuse")
@@ -238,8 +238,8 @@ const checks: ReadonlyArray<Check> = [
           first.code !== 0 && /no harness to inherit: pass --harness/.test(first.stderr + first.stdout),
           `first start without --harness: ${first.code} ${first.stderr}${first.stdout}`,
         )
-        await w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
-        const main = await mainSession(w)
+        await w.startEntry({ harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
+        const main = await entrySession(w)
         const processes = () => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
@@ -252,10 +252,10 @@ const checks: ReadonlyArray<Check> = [
             db.close()
           }
         }
-        await until("the main agent ready", () => processes().some((p) => p.readyAt !== null), 60_000)
+        await until("the entry session ready", () => processes().some((p) => p.readyAt !== null), 60_000)
         const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
         await herdr(socket, "pane.close", { pane_id: main.address.id.split("/").pop() })
-        await until("the main agent's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
+        await until("the entry session's exit recorded", () => processes().some((p) => p.endedAt !== null), 30_000)
         const again = await w.vibest(["--headless"], { env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 60_000 })
         expect(again.code === 0, `restart without --harness: ${again.code} ${again.stderr}${again.stdout}`)
         await until("a second start", () => processes().length === 2, 30_000)

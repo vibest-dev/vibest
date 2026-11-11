@@ -19,7 +19,7 @@ export const piProject = async (w: World, name: string) => {
   const startDaemon = () => w.ok(["daemon"], { env })
   await w.stopDaemon()
   await startDaemon()
-  await w.startMain({
+  await w.startEntry({
     harness: "pi",
     session,
     cwd: repo,
@@ -30,7 +30,7 @@ export const piProject = async (w: World, name: string) => {
   const q = <A>(sql: string, ...args: Array<string | number>) => row<A>(w, sql, ...args)
   const directory = await fs.realpath(repo)
   await until(
-    "the main agent's conversation",
+    "the entry session's conversation",
     () =>
       q<{ c: string | null }>(
         `SELECT s.harness_session_id AS c FROM ${SESSIONS} s JOIN project p ON p.entry_session_id = s.id

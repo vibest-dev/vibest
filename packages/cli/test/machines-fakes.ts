@@ -201,7 +201,7 @@ export const twoMachines = (options: { readonly a?: TestOptions; readonly b?: Te
     const a = yield* repoStack(net, options.a)
     const b = yield* repoStack(net, options.b)
     net.route("b-host", b.layout.socket)
-    const main = yield* a.db.coordinatorLaunch(a.project, "pi", false, {
+    const main = yield* a.db.startEntry(a.project, "pi", false, {
       runtime: "fake",
       address: { machine: "local", id: "main-pane" },
     })

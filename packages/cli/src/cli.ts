@@ -158,7 +158,7 @@ const run = Command.make(
       Argument.between(1, 2),
       Argument.withMetavar("[<harness>] <prompt>"),
       Argument.withDescription(
-        "The harness (leave it out to use the caller's harness, provider and model: yours, or the main agent's from a plain terminal; name one to switch), then the prompt: literal text, or - to read it from stdin. Put -- before the prompt so text starting with - is not read as an option",
+        "The harness (leave it out to use the caller's harness, provider and model: yours, or the entry session's from a plain terminal; name one to switch), then the prompt: literal text, or - to read it from stdin. Put -- before the prompt so text starting with - is not read as an option",
       ),
     ),
     title: Flag.String("title").pipe(
@@ -198,7 +198,7 @@ const run = Command.make(
     ),
     machine: Flag.String("machine").pipe(
       Flag.withDescription(
-        "Run it on another machine (vibest machine ls), in that machine's checkout of this repository at this HEAD; its address is <machine>/<id>, and its results come to this project's main agent, or stay there for vibest result <machine>/<id> when there is none",
+        "Run it on another machine (vibest machine ls), in that machine's checkout of this repository at this HEAD; its address is <machine>/<id>, and its results come to this project's entry session, or stay there for vibest result <machine>/<id> when there is none",
       ),
       Flag.optional,
     ),
@@ -243,27 +243,27 @@ const run = Command.make(
     }),
 ).pipe(
   Command.withDescription(
-    'Start a session on a task and print {"id":"<session id>"} at once; the routing that plugins decided is in the routing field of vibest ls and vibest result. An execution end sends nothing: the session sends a message with vibest send when it decides to, and its latest reply is read with vibest result. vibest makes each session its own worktree (detached, no branch); in a project of several repositories (a directory of git repositories) that is one worktree of every repository, side by side. The main agent may run it from anywhere in its project, also from inside one repository. Never tell the session to make its own worktree, clone or copy',
+    'Start a session on a task and print {"id":"<session id>"} at once; the routing that plugins decided is in the routing field of vibest ls and vibest result. An execution end sends nothing: the session sends a message with vibest send when it decides to, and its latest reply is read with vibest result. vibest makes each session its own worktree (detached, no branch); in a project of several repositories (a directory of git repositories) that is one worktree of every repository, side by side. The entry session may run it from anywhere in its project, also from inside one repository. Never tell the session to make its own worktree, clone or copy',
   ),
 )
 
-export const soleMainAgent = <A, E, R>(
-  client: Pick<VibestClient, "Project.RunningCoordinator" | "Project.StopCoordinator">,
+export const soleEntry = <A, E, R>(
+  client: Pick<VibestClient, "Project.RunningEntry" | "Project.StopEntry">,
   terminal: string,
   start: Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
-    const running = yield* client["Project.RunningCoordinator"]({ terminal })
+    const running = yield* client["Project.RunningEntry"]({ terminal })
     if (running) {
-      const where = `the main agent (${running.harness}) runs in ${running.place}`
-      const question = `The main agent (${running.harness}) runs in ${running.place}. Move it here and continue? [y/N]: `
+      const where = `the entry session (${running.harness}) runs in ${running.place}`
+      const question = `The entry session (${running.harness}) runs in ${running.place}. Move it here and continue? [y/N]: `
       if (!((yield* interactive) && (yield* askYesNo(question))))
         return yield* new LaunchFailed({
-          message: `not starting: ${where}, and a project has one main agent. Exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
+          message: `not starting: ${where}, and a project has one entry session. Exit it there first, or run vibest here on an interactive terminal and answer y to move it here`,
         })
-      const stopped = yield* client["Project.StopCoordinator"]({ runtime: running.runtime, address: running.address })
+      const stopped = yield* client["Project.StopEntry"]({ runtime: running.runtime, address: running.address })
       if (stopped.result === "moved")
-        return yield* new LaunchFailed({ message: "not starting: the main agent moved meanwhile; run vibest again" })
+        return yield* new LaunchFailed({ message: "not starting: the entry session moved meanwhile; run vibest again" })
       if (stopped.result === "unsupported")
         return yield* new LaunchFailed({
           message: `not starting: ${where} and cannot be moved from here: ${stopped.reason}. Exit it there first`,
@@ -308,11 +308,11 @@ export type Exec = (file: string, args: ReadonlyArray<string>, env: Record<strin
 
 const mainFlags = {
   fresh: Flag.Boolean("new").pipe(
-    Flag.withDescription("Start a new conversation with the main agent instead of reopening the current one"),
+    Flag.withDescription("Start a new conversation with the entry session instead of reopening the current one"),
     Flag.withDefault(false),
   ),
   harness: Flag.String("harness").pipe(
-    Flag.withDescription("Leave out for the harness the main agent last used; a project's first start needs it"),
+    Flag.withDescription("Leave out for the harness the entry session last used; a project's first start needs it"),
     Flag.optional,
   ),
   provider: Flag.String("provider").pipe(Flag.optional),
@@ -324,7 +324,7 @@ const mainFlags = {
   ),
   runtime: Flag.String("runtime").pipe(
     Flag.withDescription(
-      "The terminal runtime the main agent runs in. Overrides the runtime this terminal's environment detects; required when none is detected",
+      "The terminal runtime the entry session runs in. Overrides the runtime this terminal's environment detects; required when none is detected",
     ),
     Flag.optional,
   ),
@@ -333,7 +333,7 @@ const mainFlags = {
 const callerEnvOf = (): Record<string, string> =>
   Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
 
-const startMain =
+const startEntry =
   (exec: Exec) =>
   (o: {
     readonly fresh: boolean
@@ -364,7 +364,7 @@ const startMain =
       const fs = yield* FileSystem.FileSystem
       yield* withVibest(claim, openProject)
       const placed = yield* withVibest(claim, (client) =>
-        client["Project.MainPlace"]({
+        client["Project.EntryPlace"]({
           callerEnv: callerEnvOf(),
           ...(runtimeKind === undefined ? {} : { runtime: runtimeKind }),
         }),
@@ -386,8 +386,8 @@ const startMain =
             ...(Option.isNone(o.session) ? {} : { runtimeSession: o.session.value }),
           }),
         )
-        if (opened.routing !== undefined) yield* Console.error(`main agent: ${opened.routing}`)
-        yield* Console.log(`the main agent is starting in ${opened.place}`)
+        if (opened.routing !== undefined) yield* Console.error(`entry session: ${opened.routing}`)
+        yield* Console.log(`the entry session is starting in ${opened.place}`)
         if (o.headless || !opened.attach) return
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const [file, ...args] = opened.attach
@@ -401,19 +401,19 @@ const startMain =
         yield* Effect.sync(() => process.chdir(placed.directory))
       const terminal = placed.place.terminal
       const chosen = yield* withVibest(claim, (client) =>
-        client["Project.StartMain"]({
+        client["Project.StartEntry"]({
           harness,
           provider,
           model,
           runtime: placed.place.runtime,
         }),
       )
-      if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`main agent: ${describeSpawn(chosen)}`)
+      if (Object.keys(chosen.decidedBy).length > 0) yield* Console.error(`entry session: ${describeSpawn(chosen)}`)
       const started = yield* withVibest(claim, (client) =>
-        soleMainAgent(
+        soleEntry(
           client,
           terminal,
-          client["Project.CoordinatorSession"]({
+          client["Project.EntrySession"]({
             harness: chosen.harness,
             fresh: o.fresh,
             terminal,
@@ -658,7 +658,7 @@ const project = Command.make("project").pipe(
         }),
     ).pipe(
       Command.withDescription(
-        "Only for working on several repositories together; a single git repository is already a project (cd into it and run vibest). Copies them into a new project directory, one folder each: `vibest project create ~/work/combo --from ~/code/shop --from ~/code/admin` makes ~/work/combo/shop and ~/work/combo/admin (your originals are untouched); ~/work/combo itself must not be inside a git repository. Then `cd ~/work/combo && vibest`: the main agent works there, and each subagent gets its own copy with the same folders. An agent may not run it",
+        "Only for working on several repositories together; a single git repository is already a project (cd into it and run vibest). Copies them into a new project directory, one folder each: `vibest project create ~/work/combo --from ~/code/shop --from ~/code/admin` makes ~/work/combo/shop and ~/work/combo/admin (your originals are untouched); ~/work/combo itself must not be inside a git repository. Then `cd ~/work/combo && vibest`: the entry session works there, and each subagent gets its own copy with the same folders. An agent may not run it",
       ),
     ),
     projectAdd(openProject),
@@ -799,9 +799,9 @@ const integration = () =>
   )
 
 export const command = (host: Daemon.Host, replacements: LayerNode.Replacements, exec: Exec) =>
-  Command.make("vibest", mainFlags, startMain(exec)).pipe(
+  Command.make("vibest", mainFlags, startEntry(exec)).pipe(
     Command.withDescription(
-      "vibest: in a project directory, open its main agent here (--new: a new conversation); the main agent runs subagents in herdr panes",
+      "vibest: in a project directory, open its entry session here (--new: a new conversation); the entry session runs subagents in herdr panes",
     ),
     Command.withSubcommands([
       daemon(host, replacements),

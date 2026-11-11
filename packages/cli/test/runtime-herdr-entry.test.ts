@@ -22,7 +22,7 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
   afterAll(() => stopStartedSessions(), 30_000)
 
   it.live.skipIf(!piOnPath)(
-    "the main agent in place, a harness a shell ran that herdr detected and no open named, is still ours: state reads it, and send submits (Enter included)",
+    "the entry session in place, a harness a shell ran that herdr detected and no open named, is still ours: state reads it, and send submits (Enter included)",
     () =>
       withSession(({ name }) =>
         withRuntime((runtime) =>

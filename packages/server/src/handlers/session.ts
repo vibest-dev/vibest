@@ -45,7 +45,7 @@ export const make = (
                 : identity.projectId
             return yield* new NoSuchSession({
               id,
-              message: `${id} is the main agent of project ${name}. Stop it in its terminal.`,
+              message: `${id} is the session you opened in a terminal (project ${name}); stop it in that terminal.`,
             })
           }
           return yield* new NoSuchSession({ id, message: `no session ${id}` })
@@ -93,16 +93,16 @@ export const make = (
           if (!row)
             return yield* new NoSuchSession({
               id,
-              message: `${id} is the main agent of this project and is not running`,
+              message: `${id} is the entry session of this project and is not running`,
             })
           return { id }
         }
         const session = yield* db.getSession(id)
         if (!session || session.metadata.archived || session.metadata.removed) {
-          const entry = (yield* db.coordinatorOf(caller.projectId))?.id
+          const entry = (yield* db.entryOf(caller.projectId))?.id
           return yield* new NoSuchSession({
             id,
-            message: `${id} was archived${entry === undefined ? "" : `; the main agent of this project is ${entry}`}`,
+            message: `${id} was archived${entry === undefined ? "" : `; the entry session of this project is ${entry}`}`,
           })
         }
         yield* allowed
@@ -117,7 +117,7 @@ export const make = (
           if (input.agent === "coordinator" || input.agent === "main")
             return yield* new Forbidden({
               method: "Spawn",
-              message: `${input.agent} is reserved for the main agent (vibest)`,
+              message: `${input.agent} is reserved for the entry session (vibest)`,
             })
           const project = yield* projectOf(c, "Spawn")
           if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c, project.id)
@@ -154,7 +154,7 @@ export const make = (
               if (!(yield* db.insertSend(target, p.message, p.request)))
                 return yield* new NoSuchSession({
                   id: target,
-                  message: `${target} is the main agent of this project and is not running`,
+                  message: `${target} is the entry session of this project and is not running`,
                 })
               return { id: target }
             }
@@ -249,8 +249,7 @@ export const make = (
           yield* cliOnly("Session.Seen")
           const identity = yield* db.sessionIdentity(id)
           if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
-          const at =
-            identity.agent === "coordinator" ? yield* db.coordinatorOf(identity.projectId) : yield* db.getSession(id)
+          const at = identity.agent === "coordinator" ? yield* db.entryOf(identity.projectId) : yield* db.getSession(id)
           if (at?.id !== id || !at.runtime || !at.address || at.address.id === "") return
           const address = at.address
           const rt = runtimes.find(at.runtime)
@@ -265,10 +264,14 @@ export const make = (
           }).pipe(seenLocked.withLock(`${at.runtime}\n${address.machine}\n${address.id}`))
         }),
 
-      "Session.Ready": ({ id, pid }, { headers }) =>
+      "Session.Ready": ({ id, pid, conversation }, { headers }) =>
         Effect.gen(function* () {
           yield* self("Session.Ready", id)
           const read = reader(headers)
+          if (conversation !== undefined) {
+            yield* integration.conversation(id, conversation, processOf(read))
+            return {}
+          }
           const current = yield* integration.ready(id, pid, integrationOf(read), processOf(read))
           return current === undefined ? {} : { process: current }
         }),

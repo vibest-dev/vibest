@@ -190,12 +190,12 @@ const make = Effect.gen(function* () {
             ),
           )
         const identity = yield* repositoryIdentity(remote)
-        const main = yield* db.coordinatorOf(from.project)
-        const reportTo = from.coordinator ?? main?.id
+        const entry = yield* db.entryOf(from.project)
+        const reportTo = from.coordinator ?? entry?.id
         const runtime =
           input.runtime ??
           callerKind(yield* plugins.settled.pipe(Effect.andThen(runtimes.callers)), input.callerEnv) ??
-          (main?.runtime || undefined)
+          (entry?.runtime || undefined)
         const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.id === runtime)
         const ready =
           viewer?.locate === undefined || runtime === undefined

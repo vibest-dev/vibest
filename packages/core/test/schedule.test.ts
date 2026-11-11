@@ -228,7 +228,7 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
         }),
     ))
 
-  it("glm-only: subagents run on Pi with its provider and model; the main agent keeps its harness", () =>
+  it("glm-only: subagents run on Pi with its provider and model; the entry session keeps its harness", () =>
     run([candidate("glm-only", glmOnly, { provider: "zai", model: "glm-5.3" })], (p) =>
       Effect.gen(function* () {
         const s = yield* p.start({ ...start, harness: "claude" })

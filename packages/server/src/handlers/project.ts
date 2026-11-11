@@ -1,4 +1,4 @@
-import { mainPlace, specHits, filterCallerEnv } from "@vibest/core/caller"
+import { entryPlace, specHits, filterCallerEnv } from "@vibest/core/caller"
 import { Db } from "@vibest/core/db"
 import { Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
@@ -29,14 +29,14 @@ export const make = ({ scope, cliOnly, atProject, resolveAt }: Checks) =>
           }
         }),
 
-      "Project.MainPlace": ({ callerEnv, runtime }) =>
+      "Project.EntryPlace": ({ callerEnv, runtime }) =>
         Effect.gen(function* () {
-          const c = yield* cliOnly("Project.MainPlace")
+          const c = yield* cliOnly("Project.EntryPlace")
           const project = yield* resolveAt(c.repositoryRoot)
           const specs = yield* plugins.settled.pipe(Effect.andThen(runtimes.callers))
           const env = filterCallerEnv(specs, callerEnv)
           const hits = yield* specHits(specs, env, runtime).pipe(Effect.orDie)
-          const place = mainPlace({ runtime, hits })
+          const place = entryPlace({ runtime, hits })
           if (place.in === "refused") return yield* new LaunchFailed({ message: place.message })
           if (place.in === "terminal") {
             const spec = specs.find((item) => item.id === place.runtime)

@@ -31,7 +31,7 @@ appending facts.
 - `--env` values are never stored: not in the database, logs or telemetry. They reach the terminal only when it
   opens. An in-place restart or a harness change in the same pane keeps them (the pane's shell has them); a new
   terminal does not (a subagent resumed in a new terminal starts without them), and the user passes `--env` again. A
-  main agent's `vibest --env` values go to the harness it execs. Outside herdr they travel as the pane's
+  entry session's `vibest --env` values go to the harness it execs. Outside herdr they travel as the pane's
   `VIBEST_MAIN_ENV`, not on the command herdr types and not as names a shell rc can override. Only the command
   Launch typed reads it; a later `vibest` in that pane ignores it. That command passes the pairs on as its own `--env`. Inside herdr below the root, that same process continues at the root and types
   nothing (typing `cd && vibest --env …` would leave the values in the shell history). vibestd keeps them in its
@@ -224,7 +224,7 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | session.renamed                     | name                                                                                                                 |
 | session.directory_changed           | directory                                                                                                            |
 | session.ended                       | reason: archived, replaced (vibest --new)                                                                            |
-| process.started                     | harness, provider?, model?, routing?, resume?, runtime, terminal?, pid? (a main agent's launch)                      |
+| process.started                     | harness, provider?, model?, routing?, resume?, runtime, terminal?, pid? (an entry session's launch)                  |
 | process.placed                      | process, terminal, pid?: the terminal of a process started before its terminal opened                                |
 | process.ready                       | process, pid?, integration? {version, protocol}; may repeat after a plugin reload                                    |
 | process.pid                         | process, pid: a pid report that is not a ready report                                                                |
@@ -292,7 +292,7 @@ type or key changes or removes rows, in the same pull request.
   first requests can both miss a lookup made outside it.
 - `insertSend` and `archiveIfNoPending` each run in one transaction: a Send accepted before an archive wins, one after
   it is refused. A repeat of a request id returns the row it queued, checked before the archive (it was accepted).
-- A main agent moving to another terminal has no place, but its rows wait for it. Rows for an absent main agent are
+- An entry session moving to another terminal has no place, but its rows wait for it. Rows for an absent entry session are
   dropped only while it still has no place, so a launch that landed in between keeps them.
 - A usage-limit move resends the open execution's input (its typed text or the rows it consumed); when that is empty, the
   trailing run of delivered `task` and `send` rows from one sender that no execution consumed, oldest first, joined with a
@@ -351,13 +351,13 @@ E2E runs it on every world's database at the end of each check.
 
 ## Memory
 
-- One-shot timers (engine): a session's execution-end grace and missed-execution check, a polling main agent's away timer, and
+- One-shot timers (engine): a session's execution-end grace and missed-execution check, a polling entry session's away timer, and
   one lease timer per row a poll handed out. Lost with the process; the start-up reconcile and `recoverDelivering`
   stand in for them.
 - Live status: from the integration's events (working between `execution.started` and `execution.ended`, plus `blocked`), and
   from the runtime only for a harness with no integration.
-- Poll leases: on start, `recoverDelivering` (one transaction) moves `delivering` rows of polling main agents back
-  to `pending` and the other main-agent rows to `failed`, each with an `inbox.moved`; the plugin acks by row id and
+- Poll leases: on start, `recoverDelivering` (one transaction) moves `delivering` rows of polling entry sessions back
+  to `pending` and the other entry session rows to `failed`, each with an `inbox.moved`; the plugin acks by row id and
   skips rows it showed. A session may see one message twice after a vibestd restart. A subagent's `delivering` rows
   fail with one notice ("may or may not have arrived") and are not delivered again.
 - Restarting mark: the end events are written after SIGTERM, so a crash before it leaves the old process running,
@@ -370,7 +370,7 @@ E2E runs it on every world's database at the end of each check.
   is its acceptance or its typed text; an inbox row linked into it is not, since a task is linked before the runtime
   gets it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
-- A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.
+- An entry session moving to another terminal (`vibest` answered y): its rows keep waiting for it.
 - `vibest run --archive-on-idle`: the flag is kept only in the memory of the vibestd that started the session (set at
   the spawn, cleared when the session ends), never in a fact or the read model. A session started with it is archived
   the first time it is idle after a completed execution with nothing waiting; once that vibestd stops (a restart,

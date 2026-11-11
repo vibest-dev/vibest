@@ -82,9 +82,9 @@ const piReady = async (socket: string, what: string) => {
 const execution = async (w: World, socket: string, pane: string, prompt: string, answer: string) => {
   await herdr(socket, "agent.prompt", { target: pane, text: prompt })
   await until(`the answer ${answer} on screen`, async () => (await screen(socket, pane)).includes(answer), 60_000)
-  await until("the main agent's conversation", () => (liveMain(w)?.conversation ?? null) !== null, 30_000)
+  await until("the entry session's conversation", () => (liveMain(w)?.conversation ?? null) !== null, 30_000)
   await until(
-    "the main agent idle after its execution",
+    "the entry session idle after its execution",
     async () => ["idle", "done"].includes(await status(socket, pane)),
     60_000,
   )
@@ -93,7 +93,7 @@ const execution = async (w: World, socket: string, pane: string, prompt: string,
 const exitMain = async (w: World, socket: string, pane: string, id: string) => {
   await herdr(socket, "pane.close", { pane_id: pane })
   await until(
-    "the main agent's process.end",
+    "the entry session's process.end",
     () => row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, id)?.e != null,
     30_000,
   )
@@ -127,7 +127,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S10-launch",
     title:
-      "`vibest` from a plain terminal in a subdirectory opens the main agent in this run's herdr session at the repository root (the parent workspace), and its system prompt is $TMPDIR/vibest/<id>/system-prompt.md naming the project folder",
+      "`vibest` from a plain terminal in a subdirectory opens the entry session in this run's herdr session at the repository root (the parent workspace), and its system prompt is $TMPDIR/vibest/<id>/system-prompt.md naming the project folder",
     run: async (w) => {
       needs("pi", "herdr")
       const model = heldModel()
@@ -138,15 +138,15 @@ const checks: ReadonlyArray<Check> = [
         const sub = path.join(w.repository, "src")
         await fs.mkdir(sub)
         const out = await w.ok(["--harness", "pi", "--headless"], { cwd: sub, env, timeoutMs: 60_000 })
-        expect(out.includes("the main agent is starting in"), `vibest printed: ${out}`)
+        expect(out.includes("the entry session is starting in"), `vibest printed: ${out}`)
         const socket = socketOf(w, w.herdrSession)
-        const { argv } = await piReady(socket, "the launched main agent")
-        await until("the main agent's row", () => liveMain(w) !== undefined, 30_000)
+        const { argv } = await piReady(socket, "the launched entry session")
+        await until("the entry session's row", () => liveMain(w) !== undefined, 30_000)
         const main = liveMain(w)!
         const root = await fs.realpath(w.repository)
-        expect(main.directory === root, `main agent directory ${main.directory}, not ${root}`)
+        expect(main.directory === root, `entry session directory ${main.directory}, not ${root}`)
         const terminal = (JSON.parse(main.runtime ?? "{}") as { id?: string }).id ?? ""
-        expect(terminal.startsWith(`${w.herdrSession}/`), `main agent terminal ${terminal}`)
+        expect(terminal.startsWith(`${w.herdrSession}/`), `entry session terminal ${terminal}`)
         const file = path.join(w.root, "tmp", "vibest", main.id, "system-prompt.md")
         expect(flag(argv, "--system-prompt") === file, `pi argv: ${JSON.stringify(argv)}`)
         const info = await w.json<{ directory: string }>(["project", "info"])
@@ -159,7 +159,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S10-resume",
     title:
-      "a Pi main agent whose pane closed after an execution: `vibest` reopens the same session and conversation (pi --session-id, the earlier prompt on screen); `vibest --new` starts a new session and conversation (no --session-id, the earlier prompt not on screen)",
+      "a Pi entry session whose pane closed after an execution: `vibest` reopens the same session and conversation (pi --session-id, the earlier prompt on screen); `vibest --new` starts a new session and conversation (no --session-id, the earlier prompt not on screen)",
     run: async (w) => {
       needs("pi", "herdr")
       const model = heldModel()
@@ -171,17 +171,17 @@ const checks: ReadonlyArray<Check> = [
         await w.daemon({ env })
         const start = async (extra: ReadonlyArray<string>, what: string) => {
           const before = processStarts(w)
-          await w.startMain({ harness: "pi", session, env, extra, timeoutMs: 60_000 })
+          await w.startEntry({ harness: "pi", session, env, extra, timeoutMs: 60_000 })
           await until(`${what}: a new process`, () => processStarts(w) > before, 60_000)
           return piReady(socket, what)
         }
-        const first = await start([], "the first main agent")
+        const first = await start([], "the first entry session")
         const prompt = ask("first")
         await execution(w, socket, first.pane, prompt, "done-first")
         const one = liveMain(w)!
         await exitMain(w, socket, first.pane, one.id)
 
-        const again = await start([], "the reopened main agent")
+        const again = await start([], "the reopened entry session")
         expect(liveMain(w)?.id === one.id, `reopened ${liveMain(w)?.id}, not ${one.id}`)
         expect(
           flag(again.argv, "--session-id") === one.conversation,
@@ -194,7 +194,7 @@ const checks: ReadonlyArray<Check> = [
         )
         await exitMain(w, socket, again.pane, one.id)
 
-        const fresh = await start(["--new"], "the --new main agent")
+        const fresh = await start(["--new"], "the --new entry session")
         const two = liveMain(w)!
         expect(two.id !== one.id, `--new kept session ${one.id}`)
         expect(
@@ -212,7 +212,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S12-tools",
     title:
-      "a Pi main agent's execution of two bash calls and a read (fake model) renders as one collapsed tool group: `Read 1 file · Ran 2 shell commands`",
+      "a Pi entry session's execution of two bash calls and a read (fake model) renders as one collapsed tool group: `Read 1 file · Ran 2 shell commands`",
     run: async (w) => {
       needs("pi", "herdr")
       const model = toolsModel(path.join(w.repository, "README.md"))
@@ -221,8 +221,8 @@ const checks: ReadonlyArray<Check> = [
       try {
         const env = { PI_CODING_AGENT_DIR: await piDir(w, "pi-tools", model.url) }
         await w.daemon({ env })
-        await w.startMain({ harness: "pi", session, env, timeoutMs: 60_000 })
-        const { pane } = await piReady(socket, "the main agent")
+        await w.startEntry({ harness: "pi", session, env, timeoutMs: 60_000 })
+        const { pane } = await piReady(socket, "the entry session")
         await herdr(socket, "agent.prompt", { target: pane, text: "group-tools" })
         await until("the execution's reply", async () => (await screen(socket, pane)).includes("tools-done"), 60_000)
         await until(

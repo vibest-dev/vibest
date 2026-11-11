@@ -108,7 +108,7 @@ const setup = async (w: World, evidence: string) => {
   await w.stopDaemon()
   const daemonA = await w.run(w.repository, [binary, "daemon"], { env: aEnv })
   expect(daemonA.code === 0, `A: vibest daemon: ${daemonA.stderr}`)
-  await w.startMain({
+  await w.startEntry({
     harness: "pi",
     session: sessions.a,
     socket: socketA,

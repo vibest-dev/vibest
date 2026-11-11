@@ -65,7 +65,7 @@ const project = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
-  const main = yield* db.coordinatorLaunch(key, "claude", false, {
+  const main = yield* db.startEntry(key, "claude", false, {
     runtime: RUNTIME,
     address: { machine: "local", id: "test/coord" },
   })
@@ -139,14 +139,14 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: worker })).status, 403)
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main })).status, 200)
       assert.strictEqual((yield* call("/nope", { sessionId: main })).status, 404)
-      yield* db.coordinatorLaunch(projectId, "pi", false, {
+      yield* db.startEntry(projectId, "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
       yield* db.noteConversation(main, "pi-conversation")
       const old = yield* call("/inbox/poll", { sessionId: main, harnessSessionId: "claude-conversation" })
       assert.strictEqual(old.status, 403)
-      assert.strictEqual((yield* db.coordinatorOf(projectId))?.harnessSessionId, "pi-conversation")
+      assert.strictEqual((yield* db.entryOf(projectId))?.harnessSessionId, "pi-conversation")
       assert.strictEqual((yield* call("/inbox/poll", { sessionId: main, harness: "pi" })).status, 403)
     }),
   )
@@ -157,7 +157,7 @@ describe("vibestd's HTTP API", () => {
       const { call, db, main, worker, projectId } = yield* project
       const integration = (id: string) =>
         id === main
-          ? Effect.map(db.coordinatorOf(projectId), (m) => m?.integration)
+          ? Effect.map(db.entryOf(projectId), (m) => m?.integration)
           : Effect.map(db.getSession(id), (s) => s?.metadata.integration)
       for (const id of [main, worker]) {
         assert.isUndefined(yield* integration(id))
@@ -228,7 +228,7 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "a vibestd restart puts a polling main agent's handed-out rows back to pending",
+    "a vibestd restart puts a polling entry session's handed-out rows back to pending",
     Effect.gen(function* () {
       const { db, inbox, worker, projectId } = yield* project
       yield* inbox.enqueue({ sessionId: worker, message: "hello" })

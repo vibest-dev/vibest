@@ -489,7 +489,7 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
     )
 
     it.effect(
-      "vibest: the main checkout from anywhere inside, linked worktrees included; the main agent's command and env; a refused launch never asks for the session",
+      "vibest: the main checkout from anywhere inside, linked worktrees included; the entry session's command and env; a refused launch never asks for the session",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem

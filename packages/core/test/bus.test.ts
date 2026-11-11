@@ -77,7 +77,7 @@ describe("bus", () => {
         const db = yield* Db
         const bus = yield* Bus
         const project = yield* projectOf("r")
-        yield* db.coordinatorLaunch(project, "pi", false, {
+        yield* db.startEntry(project, "pi", false, {
           runtime: "bench",
           address: { machine: "bench", id: "main" },
         })

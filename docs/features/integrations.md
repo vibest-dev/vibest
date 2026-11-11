@@ -56,8 +56,8 @@ terminal.
 
 ## I11. Another vibest first on PATH
 
-When another `vibest` comes first on PATH, the integrations still reach the vibest that started them: a Pi main agent
-reports ready, Pi and Claude subagents deliver their messages, a main agent restarts, and the other vibest never runs.
+When another `vibest` comes first on PATH, the integrations still reach the vibest that started them: a Pi entry session
+reports ready, Pi and Claude subagents deliver their messages, an entry session restarts, and the other vibest never runs.
 
 ## R6. Pi's guard
 

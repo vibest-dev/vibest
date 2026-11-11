@@ -131,15 +131,15 @@ their case; either gives `NoProject`.
 
 ## A: remote sessions
 
-`vibest run --machine <name>` (the user or the main agent) sends `Peer.Spawn` over the machine's connection with
+`vibest run --machine <name>` (the user or the entry session) sends `Peer.Spawn` over the machine's connection with
 the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`) and the
-main agent as `reportTo`; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. With no main agent there is no `report_to`, as in `hc run --on`
+entry session as `reportTo`; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. With no entry session there is no `report_to`, as in `hc run --on`
 with no parent: nothing is sent back, the answer stays on B and `vibest result <name>/<id>` reads it there.
 `--env`, `--peer`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
 path), which means nothing on B. A sends a runtime kind instead. With `--runtime` it is that one; without it, the
-runtime of the caller's terminal when the caller runs in one, else the runtime of A's main agent. B starts the session
+runtime of the caller's terminal when the caller runs in one, else the runtime of A's entry session. B starts the session
 in that runtime and fails with `NoRuntime` (`<B>: the runtime "x" is not
 loaded; loaded: …`) when it does not have it. With none of the three, B's own hooks choose, as for a local run.
 An address `<name>/<id>` is resolved once, at the entry of each method, into a local id or a machine and an id; a
@@ -198,7 +198,7 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
   --machine` always tries, and still starts the agent, answering the note in `notes`. The pause starts when the
   repair gives up, so a hook that hangs to its 30 s bound is not run again by the next `ls`.
 - **Which runtime B uses.** The forwarding rule of `run --machine` is unchanged by the view (A: remote sessions):
-  `--runtime`, else the caller's terminal runtime, else A's main agent's, also when A's runtime of that kind has no
+  `--runtime`, else the caller's terminal runtime, else A's entry session's, also when A's runtime of that kind has no
   `locate`. So when A runs in the herdr TUI or Rex and B does not have that runtime, `run --machine` fails with B's
   `NoRuntime`; pass `--runtime <kind B has>` to run it there (its rows then say they cannot be shown here). `ensure`
   runs before `Peer.Spawn` only when A's runtime of the forwarded kind has `locate`.
@@ -210,7 +210,7 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
 - **`machine ls`** gives per machine the runtimes of its last Hello (`runtimes`, `runtimesAt`), each with `here:
   {visible, as?, note?}` from `ensure`, and the last hook notes per plugin with their time (`notes`).
 - **Stepping in.** Keys typed into the terminal on A go through the runtime's own link (A's hc core, B's hc core) to
-  the harness on B. B records the typed execution as any local one, and what the session sends to A's main agent reaches it once as the
+  the harness on B. B records the typed execution as any local one, and what the session sends to A's entry session reaches it once as the
   `<name>/<id8>: …` notice through B's outbox.
 
 The hc plugin (`runtime-herdr-core/src/machines.ts`) finds its mirror row by the link's core id under any name:

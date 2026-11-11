@@ -23,7 +23,7 @@ describe.concurrent("Sessions", () => {
   const withMain = (repo: string) =>
     Effect.gen(function* () {
       const db = yield* Db
-      return yield* db.coordinatorLaunch(
+      return yield* db.startEntry(
         yield* projectOf(repo),
         "pi",
         false,
@@ -38,7 +38,7 @@ describe.concurrent("Sessions", () => {
     })
 
   test(
-    "spawn without a harness from the main agent inherits its harness, provider and model",
+    "spawn without a harness from the entry session inherits its harness, provider and model",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const main = yield* withMain(repo)
@@ -49,7 +49,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "spawn without a harness from a plain terminal inherits the project's main agent; an explicit harness drops its provider and model; a model alone keeps the rest",
+    "spawn without a harness from a plain terminal inherits the project's entry session; an explicit harness drops its provider and model; a model alone keeps the rest",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       yield* withMain(repo)
@@ -277,7 +277,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
-      assert.deepStrictEqual(yield* db.coordinatorPending((yield* db.getSession(id))!.projectId), [])
+      assert.deepStrictEqual(yield* db.entryPending((yield* db.getSession(id))!.projectId), [])
       yield* TestClock.adjust("11 seconds")
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { executionState: "lost", exitedAt: null })
@@ -297,7 +297,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })

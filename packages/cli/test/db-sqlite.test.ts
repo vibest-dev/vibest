@@ -136,37 +136,39 @@ describe("SQLite", () => {
 })
 
 describe("a vibestd restart", () => {
-  it.effect("rows cut off in delivery to a polling main agent go back to pending; any other main agent's failed", () =>
-    Effect.gen(function* () {
-      const file = `${yield* tempDirectory("vibest-sqlite-recover-")}/vibest.db`
-      const ids = yield* Effect.gen(function* () {
-        const db = yield* Db
-        const place = (id: string) => ({ runtime: "fake", address: { machine: "local", id } })
-        const ids: Array<number> = []
-        for (const [key, harness] of [
-          ["a", "claude"],
-          ["b", "pi"],
-        ] as const) {
-          const { sessionId } = yield* db.coordinatorLaunch(yield* projectOf(key), harness, false, place(key))
-          const row = yield* db.insertInbox({ sessionId, message: key })
-          assert.deepStrictEqual(yield* db.claim(sessionId, [row.id]), [row.id])
-          ids.push(row.id)
-        }
-        return ids
-      }).pipe(Effect.provide(database(file)))
-      const statuses = yield* Effect.gen(function* () {
-        const pollingHarnesses = ["claude"] as const
-        yield* (yield* Db).recoverDelivering(pollingHarnesses, () => "")
-        const sql = yield* SqlClient.SqlClient
-        return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox ORDER BY id`
-      }).pipe(Effect.provide(database(file)))
-      assert.deepStrictEqual(
-        statuses.map((r) => [r.id, r.status]),
-        [
-          [ids[0], "pending"],
-          [ids[1], "failed"],
-        ],
-      )
-    }).pipe(Effect.provide(Platform.services)),
+  it.effect(
+    "rows cut off in delivery to a polling entry session go back to pending; any other entry session's failed",
+    () =>
+      Effect.gen(function* () {
+        const file = `${yield* tempDirectory("vibest-sqlite-recover-")}/vibest.db`
+        const ids = yield* Effect.gen(function* () {
+          const db = yield* Db
+          const place = (id: string) => ({ runtime: "fake", address: { machine: "local", id } })
+          const ids: Array<number> = []
+          for (const [key, harness] of [
+            ["a", "claude"],
+            ["b", "pi"],
+          ] as const) {
+            const { sessionId } = yield* db.startEntry(yield* projectOf(key), harness, false, place(key))
+            const row = yield* db.insertInbox({ sessionId, message: key })
+            assert.deepStrictEqual(yield* db.claim(sessionId, [row.id]), [row.id])
+            ids.push(row.id)
+          }
+          return ids
+        }).pipe(Effect.provide(database(file)))
+        const statuses = yield* Effect.gen(function* () {
+          const pollingHarnesses = ["claude"] as const
+          yield* (yield* Db).recoverDelivering(pollingHarnesses, () => "")
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<{ id: number; status: string }>`SELECT id, status FROM inbox ORDER BY id`
+        }).pipe(Effect.provide(database(file)))
+        assert.deepStrictEqual(
+          statuses.map((r) => [r.id, r.status]),
+          [
+            [ids[0], "pending"],
+            [ids[1], "failed"],
+          ],
+        )
+      }).pipe(Effect.provide(Platform.services)),
   )
 })

@@ -29,7 +29,7 @@ export const make = Effect.gen(function* () {
       if (c._tag === "Cli" || c._tag === "Coordinator") return c
       return yield* new Forbidden({
         method,
-        message: `only the user or a main agent calls ${method}; sessions only message other agents (vibest send)`,
+        message: `only the user or an entry session calls ${method}; sessions only message other agents (vibest send)`,
       })
     })
 
@@ -54,7 +54,7 @@ export const make = Effect.gen(function* () {
         return yield* new Forbidden({
           method,
           message:
-            "a main agent only works in its own project: cd into the directory where vibest was started and run it again",
+            "an entry session only works in its own project: cd into the directory where vibest was started and run it again",
         })
       return here
     })

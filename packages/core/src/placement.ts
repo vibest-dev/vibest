@@ -15,7 +15,7 @@ import {
 } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 
-import type { CoordinatorRow, ProcessEndReason, SessionPatch, SessionRow } from "./db.ts"
+import type { EntryRow, ProcessEndReason, SessionPatch, SessionRow } from "./db.ts"
 import type { HarnessUnavailable } from "./harness.ts"
 import type { LimitMove } from "./move.ts"
 import { messageOf } from "./plugin-sources.ts"
@@ -48,7 +48,7 @@ export type LaunchOptions = {
 
 export const sessionPlacement = (deps: {
   readonly db: {
-    readonly coordinatorOf: (projectId: string) => Effect.Effect<CoordinatorRow | undefined>
+    readonly entryOf: (projectId: string) => Effect.Effect<EntryRow | undefined>
     readonly listSessions: (filter?: { readonly projectId?: string }) => Effect.Effect<ReadonlyArray<SessionRow>>
     readonly openExecution: (id: string) => Effect.Effect<number | undefined>
     readonly closeExecution: (id: string, execution: number, status: "failed") => Effect.Effect<boolean>
@@ -132,10 +132,10 @@ export const sessionPlacement = (deps: {
 
   const nearMain = (session: SessionRow, kind: string) =>
     db
-      .coordinatorOf(session.projectId)
+      .entryOf(session.projectId)
       .pipe(
-        Effect.map((main) =>
-          main?.runtime === kind && main.address !== null && main.address.id !== "" ? main.address : undefined,
+        Effect.map((entry) =>
+          entry?.runtime === kind && entry.address !== null && entry.address.id !== "" ? entry.address : undefined,
         ),
       )
 
@@ -289,7 +289,7 @@ export const sessionPlacement = (deps: {
     )
 
   const storedDirectory = (projectId: string) =>
-    db.coordinatorOf(projectId).pipe(Effect.map((main) => main?.projectDirectory))
+    db.entryOf(projectId).pipe(Effect.map((entry) => entry?.projectDirectory))
 
   const recount = Effect.fn("Sessions.recount")(function* (kind: string, projectId: string) {
     const h = runtimes.find(kind)
@@ -305,11 +305,11 @@ export const sessionPlacement = (deps: {
       shown = true
     }
     if (shown) return
-    const main = yield* db.coordinatorOf(projectId)
-    if (main?.runtime !== kind || !main.address || main.address.id === "" || stored === undefined) return
+    const entry = yield* db.entryOf(projectId)
+    if (entry?.runtime !== kind || !entry.address || entry.address.id === "" || stored === undefined) return
     if (h.present === undefined) return
     yield* h
-      .present(main.address, {
+      .present(entry.address, {
         agent: "",
         harness: "",
         title: "",

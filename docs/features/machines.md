@@ -6,12 +6,12 @@ One machine's vibestd (A) can run agents on another machine (B) over ssh. Design
 ## M1. Adding a machine and running on it
 
 `vibest machine add` records B, B records A as a peer, and a second name for the same B is refused. `vibest run
---machine`, run by A's main agent, starts a session on B and none on A; A's main agent gets one notice with the message the session sent, and nothing stays
+--machine`, run by A's entry session, starts a session on B and none on A; A's entry session gets one notice with the message the session sent, and nothing stays
 waiting on B. `send`, `result`, `peek`, `ls` and `archive` reach the session on B.
 
 ## M8. A remote execution end sends nothing
 
-When an execution ends on B without the session sending anything, B queues nothing for A, A's main agent gets no notice, and
+When an execution ends on B without the session sending anything, B queues nothing for A, A's entry session gets no notice, and
 `vibest result <machine>/<id>` on A returns the execution's reply.
 
 ## M2. Messages survive a lost connection
@@ -41,6 +41,6 @@ next `vibest ls`; `vibest machine rm` removes them.
 
 ## M7. B's herdr sessions on A
 
-`vibest run --machine`, run by A's main agent, opens in B's default herdr session (`default`), which `vibest machine add` saves on A and which
+`vibest run --machine`, run by A's entry session, opens in B's default herdr session (`default`), which `vibest machine add` saves on A and which
 still works after B's vibestd restarts it; a plain herdr server on B is refused with a note to restart it; a prompt
 typed there gives one message notice; `vibest ls` adds a removed entry back and `vibest machine rm` removes it.

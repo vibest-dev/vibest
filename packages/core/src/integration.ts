@@ -82,7 +82,10 @@ const make = Effect.gen(function* () {
       Effect.withSpan("Integration.guard"),
     )
 
-  return { executionEnd, prompt, ready, guard }
+  const conversation = (id: string, conversation: string, process: number | undefined) =>
+    db.noteConversation(id, conversation, process)
+
+  return { executionEnd, prompt, ready, conversation, guard }
 })
 
 export class Integration extends Context.Service<Integration, Effect.Success<typeof make>>()("vibest/Integration") {

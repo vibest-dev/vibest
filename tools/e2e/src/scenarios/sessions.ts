@@ -139,7 +139,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S5",
     title:
-      "vibest result has no reply before a subagent's first execution ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the main agent and the subagent with its latest reply; after archive only vibest ls --all lists it, exited",
+      "vibest result has no reply before a subagent's first execution ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the entry session and the subagent with its latest reply; after archive only vibest ls --all lists it, exited",
     run: async (w) => {
       const p = await piProject(w, "s5")
       try {
@@ -306,7 +306,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S9",
     title:
-      "with VIBEST_MAX_SESSIONS=2 in vibestd, the main agent is not counted: two subagents start, the third vibest run fails LimitReached naming the limit, and starts once one is archived",
+      "with VIBEST_MAX_SESSIONS=2 in vibestd, the entry session is not counted: two subagents start, the third vibest run fails LimitReached naming the limit, and starts once one is archived",
     run: async (w) => {
       const p = await piProject(w, "s9")
       try {

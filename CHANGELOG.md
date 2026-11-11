@@ -16,6 +16,15 @@ release. Each release lists what broke, who is affected and how to migrate under
   `{ process }`; an execution start or end from an earlier process of the session is dropped. A usage-limit move
   vibestd stopped part way through is finished by the next check, and sessions ended at a limit are checked at start.
   An older vibest cannot read a log that holds `execution.accepted`.
+- **The coordinator and main-agent names become entry** (RPC clients, `vibest` JSON readers, harness integration
+  authors): the project's entry session is what `vibest` opens in a terminal. RPCs `Project.CoordinatorSession`,
+  `Project.StartMain`, `Project.MainPlace`, `Project.FocusCoordinator`, `Project.RunningCoordinator` and
+  `Project.StopCoordinator` are `Project.EntrySession`, `Project.StartEntry`, `Project.EntryPlace`,
+  `Project.FocusEntry`, `Project.RunningEntry` and `Project.StopEntry`; `CoordinatorSessionReady` is gone, the
+  integration reports the conversation with `Session.Ready` and a new optional `conversation`. The herdr action
+  `open-main` is `open-entry` (rebind a key set to `vibest.open-main`), the runtime `present` info key `mainSession`
+  is `entrySession`, and CLI help and errors say "entry session" where they said "main agent". The protocol number
+  is unchanged.
 - **Handoff database copies** (users): a handing-over vibestd no longer writes `vibest.db.before-<version>` (a copy of
   `vibest.db` and its `-wal`). Copies already in the home are left where they are. Copy the database yourself before
   `vibest update` if you want one.

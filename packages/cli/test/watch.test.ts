@@ -42,7 +42,7 @@ const withMain = Effect.gen(function* () {
   const project = yield* projectOf(repo)
   yield* herdr.addPane("w1:p8", "ws", repo)
   yield* herdr.seedAgent("w1:p8")
-  const main = yield* db.coordinatorLaunch(
+  const main = yield* db.startEntry(
     project,
     "pi",
     false,
@@ -75,7 +75,7 @@ const isSnapshot = (e: WatchEvent): e is Extract<WatchEvent, { _tag: "Snapshot" 
 
 describe("Watch", () => {
   test(
-    "a Snapshot of projects and sessions, then each change as it commits: subagents name their main agent",
+    "a Snapshot of projects and sessions, then each change as it commits: subagents name their entry session",
     Effect.gen(function* () {
       const { repo, project, main, coordinator } = yield* withMain
       const { next, c } = yield* watching(repo)
@@ -208,7 +208,7 @@ describe("Watch", () => {
   )
 
   test(
-    "Watch is the user's: a main agent is refused",
+    "Watch is the user's: an entry session is refused",
     Effect.gen(function* () {
       const { coordinator } = yield* withMain
       const refused = yield* Effect.flip(Stream.runDrain(coordinator.Watch(undefined)))

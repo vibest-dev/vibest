@@ -40,7 +40,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const db = yield* Db
-      const coord = yield* db.coordinatorLaunch(yield* projectOf(repo), coordinator, false, {
+      const coord = yield* db.startEntry(yield* projectOf(repo), coordinator, false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -78,7 +78,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   const latestNotice = (id: string) => sqlNotices(id).pipe(Effect.map((n) => n.at(-1) ?? ""))
 
   test(
-    "a message to the main agent that it acked, after a completed execution, archives the session; a clean archive sends no notice (nothing to do); the answer stays",
+    "a message to the entry session that it acked, after a completed execution, archives the session; a clean archive sends no notice (nothing to do); the answer stays",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const sql = yield* SqlClient.SqlClient
@@ -140,11 +140,11 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
-      const coord = yield* db.coordinatorLaunch(yield* projectOf(repo), "claude", false, {
+      const coord = yield* db.startEntry(yield* projectOf(repo), "claude", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
-      yield* db.reportCoordinatorSession(coord.sessionId, "claude", "claude-1")
+      yield* db.noteConversation(coord.sessionId, "claude-1")
       yield* herdr.seedAgent("test/coord")
       const projectId = yield* projectOf(repo)
       const sessions = yield* Sessions

@@ -41,7 +41,7 @@ describe("vibest.sock", () => {
       yield* db.insertSession({ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", ...general }, yield* projectOf("r"))
       yield* herdr.addPane("w1:p8", "ws", "/")
       yield* herdr.seedAgent("w1:p8")
-      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+      const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p8" },
       })
@@ -54,11 +54,11 @@ describe("vibest.sock", () => {
         (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p8"),
         [],
       )
-      assert.lengthOf(yield* db.coordinatorPending(project), 3)
+      assert.lengthOf(yield* db.entryPending(project), 3)
 
       const c = yield* asSession(yield* client, coord.sessionId)
       const received = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.take(3), Stream.runCollect, Effect.forkChild)
-      yield* until(db.coordinatorPending(project), (rows) => rows.length === 0)
+      yield* until(db.entryPending(project), (rows) => rows.length === 0)
       yield* send("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "four")
       const said = (sender: string, message: string) =>
         `<agent-message>\n<agent-id>${sender}</agent-id>\n<title>n</title>\n<message>\n${message}\n</message>\n</agent-message>`
@@ -68,7 +68,7 @@ describe("vibest.sock", () => {
         said("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "three"),
         said("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "four"),
       ])
-      assert.deepStrictEqual(yield* db.coordinatorPending(project), [])
+      assert.deepStrictEqual(yield* db.entryPending(project), [])
       assert.deepStrictEqual(
         (yield* herdr.callsTo("send")).filter((p) => p.terminal === "w1:p8"),
         [],
@@ -77,7 +77,7 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "a Pi subscription wakes when a row for its main agent goes back to pending (a released lease)",
+    "a Pi subscription wakes when a row for its entry session goes back to pending (a released lease)",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const inbox = yield* Inbox
@@ -105,7 +105,7 @@ describe("vibest.sock", () => {
         yield* projectOf("r"),
       )
       yield* herdr.seedAgent("w1:p8")
-      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+      const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p8" },
       })
@@ -158,7 +158,7 @@ describe("vibest.sock", () => {
       yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...general }, yield* projectOf("r"))
       yield* herdr.addPane("w1:p7", "ws", "/")
       yield* herdr.seedAgent("w1:p7")
-      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+      const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
@@ -229,7 +229,7 @@ describe("vibest.sock", () => {
       yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...general }, yield* projectOf("r"))
       yield* herdr.addPane("w1:p6", "ws", "/")
       yield* herdr.seedAgent("w1:p6")
-      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+      const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p6" },
       })

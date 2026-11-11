@@ -30,7 +30,7 @@ const working = Effect.gen(function* () {
   const db = yield* Db
   const repo = yield* makeRepository
   const projectId = yield* projectOf(repo)
-  yield* db.coordinatorLaunch(projectId, "pi", false, {
+  yield* db.startEntry(projectId, "pi", false, {
     runtime: RUNTIME,
     address: { machine: "local", id: "test/coord" },
   })
@@ -127,7 +127,7 @@ describe("session handlers", () => {
         const herdr = yield* FakeRuntime
         const repo = yield* makeRepository
         const projectId = yield* projectOf(repo)
-        yield* db.coordinatorLaunch(projectId, "pi", false, {
+        yield* db.startEntry(projectId, "pi", false, {
           runtime: RUNTIME,
           address: { machine: "local", id: "test/coord" },
         })

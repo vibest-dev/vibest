@@ -1,5 +1,4 @@
 import {
-  ProcessConversation,
   ProcessEnded,
   type ProcessEndReason,
   ProcessPid,
@@ -44,7 +43,7 @@ export {
   SessionRow,
   NewSession,
   type SessionPatch,
-  CoordinatorRow,
+  EntryRow,
   type NewInboxRow,
   type SpawnedBefore,
   type RepositoryRow,
@@ -76,13 +75,13 @@ const make = Effect.gen(function* () {
     projectPrefixTaken,
     repositoriesOf,
     changedRepositories,
-    notMain,
+    notEntry,
     running,
     selectRaw,
     selectSessions,
     readSession,
     currentProcess,
-    findCoordinators,
+    findEntrySessions,
     queueInbox,
     linkTask,
     endProcess,
@@ -91,8 +90,8 @@ const make = Effect.gen(function* () {
     updateSession,
     dropWaiting,
     sessionAt,
-    mainsAt,
-    clearMainAt,
+    entrySessionsAt,
+    clearEntryAt,
     unusedId,
     conversationOf,
     addressedCreator,
@@ -272,7 +271,7 @@ const make = Effect.gen(function* () {
           FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = ${creator}
           WHERE s.id = ${id}`
         const label =
-          creator === row?.entry ? "the main agent" : row?.name ? `agent ${row.name}` : "the agent that started you"
+          creator === row?.entry ? "the entry session" : row?.name ? `agent ${row.name}` : "the agent that started you"
         return { id: creator, label }
       }).pipe(Effect.orDie),
 
@@ -304,7 +303,7 @@ const make = Effect.gen(function* () {
             if (before !== undefined) return before
           }
           if (max !== undefined) {
-            const n = (yield* selectRaw([notMain, sql`s.ended_at IS NULL`], running)).length
+            const n = (yield* selectRaw([notEntry, sql`s.ended_at IS NULL`], running)).length
             if (n >= max) return false
           }
           const stopped = row.metadata.archived || row.metadata.removed
@@ -434,25 +433,25 @@ const make = Effect.gen(function* () {
 
     sessionBriefs: (ids: ReadonlyArray<string>) => reads.briefs(ids).pipe(Effect.orDie),
 
-    coordinators: findCoordinators().pipe(Effect.orDie),
+    entrySessions: findEntrySessions().pipe(Effect.orDie),
 
     allocateSessionId: () => unusedId,
 
-    coordinatorOf: (projectIdValue: string) =>
-      findCoordinators(projectIdValue).pipe(
+    entryOf: (projectIdValue: string) =>
+      findEntrySessions(projectIdValue).pipe(
         Effect.map((rows) => rows[0]),
         Effect.orDie,
       ),
 
-    coordinatorAt: (runtime: string, address: RuntimeAddress) =>
-      mainsAt(runtime, address).pipe(
+    entryAt: (runtime: string, address: RuntimeAddress) =>
+      entrySessionsAt(runtime, address).pipe(
         Effect.map((rows) => rows[0]?.project),
         Effect.orDie,
       ),
 
     sessionAt: (runtime: string, address: RuntimeAddress) => sessionAt(runtime, address).pipe(Effect.orDie),
 
-    coordinatorLaunch: (
+    startEntry: (
       project: string,
       harness: HarnessId,
       fresh: boolean,
@@ -470,16 +469,16 @@ const make = Effect.gen(function* () {
         const id = start.sessionId ?? (yield* unusedId)
         return yield* tx(
           Effect.gen(function* () {
-            yield* clearMainAt(location.runtime, location.address, project)
+            yield* clearEntryAt(location.runtime, location.address, project)
             const movingHere = moving.has(project)
             const [existing] = yield* sql<{
-              main: string | null
-            }>`SELECT entry_session_id AS main FROM project WHERE id = ${project}`
+              entry: string | null
+            }>`SELECT entry_session_id AS entry FROM project WHERE id = ${project}`
             const at = yield* now
-            if (!existing?.main || fresh) {
-              if (existing?.main) {
-                yield* endProcess(existing.main, "archived", at)
-                yield* emit(SessionEnded, { sessionId: existing.main, at, data: { reason: "replaced" } })
+            if (!existing?.entry || fresh) {
+              if (existing?.entry) {
+                yield* endProcess(existing.entry, "archived", at)
+                yield* emit(SessionEnded, { sessionId: existing.entry, at, data: { reason: "replaced" } })
               }
               yield* emit(SessionCreated, {
                 sessionId: id,
@@ -489,28 +488,28 @@ const make = Effect.gen(function* () {
               yield* emit(ProjectEntryChanged, { projectId: project, at, data: { session: id } })
               yield* notify({ type: "live.project", projectId: project })
             }
-            const mainId = !existing?.main || fresh ? id : existing.main
+            const entryId = !existing?.entry || fresh ? id : existing.entry
             if (start.projectDirectory) {
-              const [own] = yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${mainId}`
+              const [own] = yield* sql<{ directory: string }>`SELECT directory FROM session WHERE id = ${entryId}`
               if (own?.directory === "")
                 yield* emit(SessionDirectoryChanged, {
-                  sessionId: mainId,
+                  sessionId: entryId,
                   at,
                   data: { directory: start.projectDirectory },
                 })
             }
-            const { current, conversation } = yield* conversationOf(mainId)
+            const { current, conversation } = yield* conversationOf(entryId)
             if (current !== undefined && current.ended === null)
-              yield* endProcess(mainId, movingHere ? "move" : "exited", at)
+              yield* endProcess(entryId, movingHere ? "move" : "exited", at)
             const resume =
               !fresh &&
               current?.start.harness === harness &&
               conversation !== null &&
-              (yield* canResumeConversation(mainId, conversation))
+              (yield* canResumeConversation(entryId, conversation))
                 ? conversation
                 : undefined
             yield* startProcess(
-              mainId,
+              entryId,
               {
                 harness,
                 ...(start.provider ? { provider: start.provider } : {}),
@@ -525,7 +524,7 @@ const make = Effect.gen(function* () {
             )
             moving.delete(project)
             if (!movingHere || fresh) yield* dropWaiting(project)
-            return { sessionId: mainId, harnessSessionId: resume ?? null, projectId: project }
+            return { sessionId: entryId, harnessSessionId: resume ?? null, projectId: project }
           }),
         )
       }).pipe(Effect.orDie),
@@ -613,37 +612,20 @@ const make = Effect.gen(function* () {
 
     endProcess: (id: string, reason: ProcessEndReason) => tx(endProcess(id, reason)).pipe(Effect.orDie),
 
-    reportCoordinatorSession: (sessionId: string, harness: HarnessId, harnessSessionId: string) =>
-      tx(
-        Effect.gen(function* () {
-          const [main] = yield* sql<{
-            id: string
-          }>`SELECT entry_session_id AS id FROM project WHERE entry_session_id = ${sessionId}`
-          const { current, conversation } = yield* conversationOf(sessionId)
-          if (main === undefined || current === undefined || current.start.harness !== harness)
-            return yield* Effect.logDebug(`main agent session report ignored for ${sessionId}`)
-          if (conversation === harnessSessionId) return
-          yield* emit(ProcessConversation, {
-            sessionId,
-            data: { process: current.id, conversation: harnessSessionId },
-          })
-        }),
-      ).pipe(Effect.orDie),
-
-    detachCoordinator: (projectIdValue: string, runtime: string, address: RuntimeAddress) =>
+    detachEntry: (projectIdValue: string, runtime: string, address: RuntimeAddress) =>
       Effect.gen(function* () {
-        const here = (yield* mainsAt(runtime, address)).some((m) => m.project === projectIdValue)
+        const here = (yield* entrySessionsAt(runtime, address)).some((m) => m.project === projectIdValue)
         if (here) moving.add(projectIdValue)
         return here
       }).pipe(Effect.orDie),
 
-    reattachCoordinator: (projectIdValue: string, _runtime: string, _address: RuntimeAddress) =>
+    reattachEntry: (projectIdValue: string, _runtime: string, _address: RuntimeAddress) =>
       Effect.sync(() => {
         moving.delete(projectIdValue)
       }),
 
-    clearCoordinator: (runtime: string, address: RuntimeAddress) =>
-      tx(clearMainAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
+    clearEntry: (runtime: string, address: RuntimeAddress) =>
+      tx(clearEntryAt(runtime, address)).pipe(Effect.asVoid, Effect.orDie),
 
     canResumeConversation,
     ...inboxMethods(store),

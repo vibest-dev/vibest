@@ -35,7 +35,7 @@ const main = Effect.gen(function* () {
   const db = yield* Db
   const repo = yield* makeRepository
   const projectId = yield* projectOf(repo)
-  const coordinator = yield* db.coordinatorLaunch(projectId, "pi", false, {
+  const coordinator = yield* db.startEntry(projectId, "pi", false, {
     runtime: "herdr",
     address: { machine: "local", id: "test/coord" },
   })
@@ -44,7 +44,7 @@ const main = Effect.gen(function* () {
 
 describe("subagent runtime", () => {
   test(
-    "a subagent of the main agent inherits the coordinator runtime",
+    "a subagent of the entry session inherits the coordinator runtime",
     Effect.gen(function* () {
       const { db, repo, projectId, sessions, parent } = yield* main
       assert.strictEqual(yield* db.getSession(parent), undefined)
@@ -60,7 +60,7 @@ describe("subagent runtime", () => {
       const db = yield* Db
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      const coordinator = yield* db.coordinatorLaunch(projectId, "pi", false, {
+      const coordinator = yield* db.startEntry(projectId, "pi", false, {
         runtime: "hc",
         address: { machine: "local", id: "test/coord" },
       })

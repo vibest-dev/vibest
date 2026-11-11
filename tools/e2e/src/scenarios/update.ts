@@ -114,7 +114,7 @@ const olderAgents = async (
   await w.stopDaemon()
   const started = await vibest(["daemon"])
   expect(started.code === 0, `the older vibest daemon exited ${started.code}: ${out(started)}`)
-  await w.startMain({
+  await w.startEntry({
     harness: "pi",
     session,
     cwd: repo,
@@ -151,7 +151,7 @@ const olderAgents = async (
     )
     for (const [name, row, now] of [
       ["subagent", before.sub, () => read("s.id = ?", sub)],
-      ["main agent", before.main, main],
+      ["entry session", before.main, main],
     ] as const) {
       await until(
         `the ${name} restarted on this integration`,

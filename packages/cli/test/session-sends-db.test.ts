@@ -20,20 +20,20 @@ const X = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 const setup = Effect.gen(function* () {
   const db = yield* Db
   const project = yield* projectOf("r")
-  const main = yield* db.coordinatorLaunch(project, "pi", false, place)
+  const main = yield* db.startEntry(project, "pi", false, place)
   yield* db.insertSession(session(A), project, { cwd: "/w", task: "a", parentSessionId: main.sessionId })
   return { db, project, main: main.sessionId }
 })
 
 describe("sends from sessions", () => {
-  it.effect("a send to the main agent is for its poll or subscribe path, never for typing", () =>
+  it.effect("a send to the entry session is for its poll or subscribe path, never for typing", () =>
     memory(
       Effect.gen(function* () {
         const { db, project, main } = yield* setup
         assert.isDefined(yield* db.insertSend(main, "hello", undefined, A))
         assert.deepStrictEqual(yield* db.pendingInbox(main), [])
         assert.deepStrictEqual(
-          (yield* db.coordinatorPending(project)).map((r) => [r.kind, r.sender, r.recipient]),
+          (yield* db.entryPending(project)).map((r) => [r.kind, r.sender, r.recipient]),
           [["send", A, main]],
         )
       }),
@@ -62,7 +62,7 @@ describe("sends from sessions", () => {
         assert.isDefined(yield* db.insertSend(main, "to the entry", undefined, B))
         assert.isUndefined(yield* db.insertSend(A, "to the ended parent", undefined, B))
         const creator = yield* db.creatorOf(B)
-        assert.deepStrictEqual(creator, { id: main, label: "the main agent" })
+        assert.deepStrictEqual(creator, { id: main, label: "the entry session" })
         const prompt = sessionSystemPrompt({
           id: B,
           projectDir: "/w",
@@ -77,7 +77,7 @@ describe("sends from sessions", () => {
     ),
   )
 
-  it.effect("a send dropped because the main agent is gone ends with one notice to its sender", () =>
+  it.effect("a send dropped because the entry session is gone ends with one notice to its sender", () =>
     memory(
       Effect.gen(function* () {
         const { db, project, main } = yield* setup
@@ -93,7 +93,7 @@ describe("sends from sessions", () => {
     ),
   )
 
-  it.effect("a send in flight to a main agent that does not poll ends failed with one notice to its sender", () =>
+  it.effect("a send in flight to an entry session that does not poll ends failed with one notice to its sender", () =>
     memory(
       Effect.gen(function* () {
         const { db, main } = yield* setup
@@ -130,7 +130,7 @@ describe("sends from sessions", () => {
         yield* db.recoverDelivering([], () => "cut")
         assert.deepStrictEqual(yield* db.pendingInbox(X), [])
         assert.deepStrictEqual(
-          (yield* db.coordinatorPending(project)).map((r) => [r.kind, r.sender, r.message]),
+          (yield* db.entryPending(project)).map((r) => [r.kind, r.sender, r.message]),
           [["notice", A, "cut"]],
         )
       }),
@@ -186,13 +186,13 @@ describe("sends from sessions", () => {
         yield* db.claim(main, [first.id])
         yield* db.recoverDelivering([], () => "")
         assert.deepStrictEqual(
-          (yield* db.coordinatorPending(project)).map((r) => r.message),
+          (yield* db.entryPending(project)).map((r) => r.message),
           ["one"],
         )
         yield* db.claim(main, [first.id])
         yield* db.failLeased(main, [first.id])
         assert.deepStrictEqual(
-          (yield* db.coordinatorPending(project)).map((r) => r.message),
+          (yield* db.entryPending(project)).map((r) => r.message),
           ["one"],
         )
       }),

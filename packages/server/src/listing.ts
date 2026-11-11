@@ -1,7 +1,7 @@
 import { projectActivity, unseenDone } from "@vibest/core/activity"
 import { type EngineEvent } from "@vibest/core/bus"
-import { type CoordinatorRow, Db, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
-import { coordinatorIdle } from "@vibest/core/inbox"
+import { type EntryRow, Db, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
+import { entryIdle } from "@vibest/core/inbox"
 import type { ListScope } from "@vibest/core/remote"
 import { agentState, Runtimes, type Runtime, type Terminal } from "@vibest/core/runtimes"
 import { type SessionView, Sessions } from "@vibest/core/sessions"
@@ -37,7 +37,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
   latest: brief?.latest ?? null,
 })
 
-const mainInfo = (m: CoordinatorRow, status: AgentStatus): SessionInfo => ({
+const entryInfo = (m: EntryRow, status: AgentStatus): SessionInfo => ({
   id: m.id,
   name: "main",
   agent: "main",
@@ -61,11 +61,11 @@ const mainInfo = (m: CoordinatorRow, status: AgentStatus): SessionInfo => ({
   latest: null,
 })
 
-const mainStatus = (h: Runtime, terminal: Terminal): Effect.Effect<AgentStatus> =>
+const entryStatus = (h: Runtime, terminal: Terminal): Effect.Effect<AgentStatus> =>
   Effect.gen(function* () {
     const seen = yield* agentState(h, terminal).pipe(Effect.option)
     if (Option.isSome(seen) && seen.value !== "absent") return seen.value
-    return yield* coordinatorIdle(h, terminal).pipe(
+    return yield* entryIdle(h, terminal).pipe(
       Effect.map((presence) => (presence === "busy" ? "working" : presence === "idle" ? "idle" : "unknown")),
       Effect.catchTag("RuntimeError", () => Effect.succeed("unknown" as AgentStatus)),
     )
@@ -77,12 +77,12 @@ export const sessionListing = (deps: {
   readonly runtimes: Runtimes["Service"]
 }) => {
   const { db, sessions, runtimes } = deps
-  const listedMain = (m: CoordinatorRow | undefined) =>
+  const listedEntry = (m: EntryRow | undefined) =>
     Effect.gen(function* () {
       if (!m?.runtime || !m.address || m.address.id === "") return undefined
       const h = runtimes.find(m.runtime)
-      const status = h === undefined ? "unknown" : yield* mainStatus(h, m.address)
-      return mainInfo(m, status)
+      const status = h === undefined ? "unknown" : yield* entryStatus(h, m.address)
+      return entryInfo(m, status)
     })
 
   const listedRows = (rows: ReadonlyArray<SessionView>) =>
@@ -99,9 +99,9 @@ export const sessionListing = (deps: {
       if (scope._tag === "Peer") return yield* listedRows(yield* sessions.list({ peer: scope, stopped }))
       const projectId = scope._tag === "Project" ? scope.id : undefined
       const rows = yield* sessions.list({ ...(projectId === undefined ? {} : { projectId }), stopped })
-      const mains = projectId === undefined ? yield* db.coordinators : [yield* db.coordinatorOf(projectId)]
+      const entries = projectId === undefined ? yield* db.entrySessions : [yield* db.entryOf(projectId)]
       return [
-        ...(yield* Effect.forEach(mains, listedMain)).flatMap((m) => (m ? [m] : [])),
+        ...(yield* Effect.forEach(entries, listedEntry)).flatMap((m) => (m ? [m] : [])),
         ...(yield* listedRows(rows)),
       ]
     })
@@ -140,9 +140,9 @@ export const sessionListing = (deps: {
 
   const projectStatuses = (id: string) =>
     Effect.gen(function* () {
-      const main = yield* listedMain(yield* db.coordinatorOf(id))
+      const entry = yield* listedEntry(yield* db.entryOf(id))
       const live = [
-        ...(main === undefined ? [] : [main]),
+        ...(entry === undefined ? [] : [entry]),
         ...(yield* db.listSessions({ projectId: id, stopped: false })),
       ]
       return yield* Effect.forEach(
@@ -159,7 +159,7 @@ export const sessionListing = (deps: {
       const ended: WatchEvent = { _tag: "SessionEnded", id, projectId: identity.projectId }
       const info =
         identity.agent === "coordinator"
-          ? yield* listedMain(yield* db.coordinatorOf(identity.projectId))
+          ? yield* listedEntry(yield* db.entryOf(identity.projectId))
           : yield* Effect.gen(function* () {
               const row = yield* db.getSession(id)
               if (row === undefined || row.agent === "main" || row.exitedAt !== null) return undefined
@@ -187,11 +187,11 @@ export const sessionListing = (deps: {
 
   const sessionsAt = (runtime: string, terminal: RuntimeAddress) =>
     Effect.gen(function* () {
-      const project = yield* db.coordinatorAt(runtime, terminal)
-      const main = project === undefined ? undefined : yield* db.coordinatorOf(project)
+      const project = yield* db.entryAt(runtime, terminal)
+      const entry = project === undefined ? undefined : yield* db.entryOf(project)
       const rows = yield* db.listSessions()
       return [
-        ...(main === undefined ? [] : [main.id]),
+        ...(entry === undefined ? [] : [entry.id]),
         ...rows
           .filter(
             (row) =>
@@ -211,9 +211,9 @@ export const sessionListing = (deps: {
         } else if (event.type === "live.session") sessionIds.add(event.sessionId)
         else if (event.type === "live.project") projectIds.add(event.projectId)
         else if (event.type === "live.state" || event.type === "live.exited") {
-          const project = yield* db.coordinatorAt(event.runtime, event.terminal)
-          const main = project === undefined ? undefined : yield* db.coordinatorOf(project)
-          if (main !== undefined) sessionIds.add(main.id)
+          const project = yield* db.entryAt(event.runtime, event.terminal)
+          const entry = project === undefined ? undefined : yield* db.entryOf(project)
+          if (entry !== undefined) sessionIds.add(entry.id)
         } else if (event.type === "live.seen")
           for (const id of yield* sessionsAt(event.runtime, event.terminal)) sessionIds.add(id)
         else if (event.type === "live.reset")

@@ -80,16 +80,16 @@ const workingPiMain = Effect.gen(function* () {
   yield* herdr.seedAgent(paneId)
   yield* herdr.updateAgent(paneId, (a) => ({ ...a, status: "working" }))
   yield* processes.set(HARNESS, "alive")
-  const started = yield* c["Project.CoordinatorSession"]({
+  const started = yield* c["Project.EntrySession"]({
     harness: "pi",
     fresh: false,
     terminal: paneId,
     runtime: TEST_HERDR,
     pid: HARNESS,
   })
-  yield* db.reportCoordinatorSession(started.sessionId, "pi", "conversation-1")
+  yield* db.noteConversation(started.sessionId, "conversation-1")
   const projectId = yield* projectOf(repo)
-  const coord = (yield* db.coordinatorOf(projectId))!
+  const coord = (yield* db.entryOf(projectId))!
   const origin = { runtime: coord.runtime!, address: coord.address! }
   const address = encodeAddress(origin.address)
   yield* db.insertSession(
@@ -116,16 +116,16 @@ const workingPiMain = Effect.gen(function* () {
   )
   yield* db.insertInbox({
     sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-    message: "waiting for the main agent",
+    message: "waiting for the entry session",
   })
-  const stop = c["Project.StopCoordinator"]({ runtime: origin.runtime, address })
+  const stop = c["Project.StopEntry"]({ runtime: origin.runtime, address })
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
-    c["Project.CoordinatorSession"]({ harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })
-  const pending = Effect.map(db.coordinatorPending(projectId), (rows) => rows.map((r) => r.message))
+    c["Project.EntrySession"]({ harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })
+  const pending = Effect.map(db.entryPending(projectId), (rows) => rows.map((r) => r.message))
   return { db, herdr, processes, c, paneId, origin, projectId, started, stop, startAt, pending }
 })
 
-describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded harness PID only, never a group or the terminal; what waits is kept for the next launch", () => {
+describe("Project.StopEntry moves the entry session: SIGTERM to the recorded harness PID only, never a group or the terminal; what waits is kept for the next launch", () => {
   it.effect(
     "terminate signals one valid PID: ESRCH is sent; EPERM or anything else, or an invalid PID, is denied",
     () =>
@@ -173,13 +173,13 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
       yield* (yield* Inbox).deliver(s.projectId)
       yield* untilVirtual(s.pending, (rows) => rows.length === 1)
-      assert.deepStrictEqual(yield* s.pending, ["waiting for the main agent"])
+      assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
       const moved = yield* s.startAt("test/p2")
       assert.deepInclude(moved, { sessionId: s.started.sessionId, harnessSessionId: "conversation-1" })
-      const row = (yield* s.db.coordinatorOf(s.projectId))!
+      const row = (yield* s.db.entryOf(s.projectId))!
       assert.strictEqual(row.address?.id, "test/p2")
       assert.strictEqual(row.pid, 5151)
-      assert.deepStrictEqual(yield* s.pending, ["waiting for the main agent"])
+      assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
     }),
     { statusEvents: true },
   )
@@ -193,7 +193,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
         sessionId: s.started.sessionId,
         harnessSessionId: null,
       })
-      assert.strictEqual((yield* s.db.coordinatorOf(s.projectId))!.harnessId, "claude")
+      assert.strictEqual((yield* s.db.entryOf(s.projectId))!.harnessId, "claude")
     }),
   )
 
@@ -208,7 +208,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
       assert.deepInclude(yield* s.stop, { result: "unsupported" })
       assert.deepStrictEqual(yield* s.processes.signaled, [])
-      assert.strictEqual((yield* s.db.coordinatorOf(s.projectId))!.address?.id, s.paneId)
+      assert.strictEqual((yield* s.db.entryOf(s.projectId))!.address?.id, s.paneId)
     }),
   )
 
@@ -224,10 +224,10 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
       )
       assert.deepStrictEqual(yield* Fiber.join(stopping), { result: "running" })
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
-      const row = (yield* s.db.coordinatorOf(s.projectId))!
+      const row = (yield* s.db.entryOf(s.projectId))!
       assert.strictEqual(row.address?.id, s.paneId)
       assert.strictEqual(row.harnessSessionId, "conversation-1")
-      assert.deepStrictEqual(yield* s.pending, ["waiting for the main agent"])
+      assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
       const refused = yield* Effect.exit(s.startAt("test/p2"))
       assert.isTrue(Exit.isFailure(refused))
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
@@ -269,11 +269,11 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
       const s = yield* workingPiMain
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
-      yield* untilVirtual(s.db.coordinatorOf(s.projectId), (row) => row?.runtime === null)
+      yield* untilVirtual(s.db.entryOf(s.projectId), (row) => row?.runtime === null)
       yield* Fiber.interrupt(stopping)
-      yield* untilVirtual(s.db.coordinatorOf(s.projectId), (row) => row?.address?.id === s.paneId)
+      yield* untilVirtual(s.db.entryOf(s.projectId), (row) => row?.address?.id === s.paneId)
       assert.deepStrictEqual(yield* s.processes.signaled, [HARNESS])
-      assert.deepStrictEqual(yield* s.pending, ["waiting for the main agent"])
+      assert.deepStrictEqual(yield* s.pending, ["waiting for the entry session"])
       const refused = yield* Effect.exit(s.startAt("test/p2"))
       assert.isTrue(Exit.isFailure(refused))
       assert.include(String(Cause.squash((refused as Exit.Failure<unknown, unknown>).cause)), "still running in")
@@ -284,13 +284,13 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
     "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded (an older vibest), or no agent seen but a live (reused) PID; an exited PID moves without a signal",
     Effect.gen(function* () {
       const s = yield* workingPiMain
-      const restore = s.db.coordinatorLaunch(s.projectId, "pi", false, s.origin, { pid: HARNESS })
-      yield* s.db.coordinatorLaunch(s.projectId, "pi", false, {
+      const restore = s.db.startEntry(s.projectId, "pi", false, s.origin, { pid: HARNESS })
+      yield* s.db.startEntry(s.projectId, "pi", false, {
         ...s.origin,
         address: { machine: "local", id: "test/p9" },
       })
       assert.deepStrictEqual(yield* s.stop, { result: "moved" })
-      yield* s.db.coordinatorLaunch(s.projectId, "pi", false, s.origin)
+      yield* s.db.startEntry(s.projectId, "pi", false, s.origin)
       const old = yield* s.stop
       assert.strictEqual(old.result, "unsupported")
       assert.include(old.reason, "started by an older vibest")
@@ -304,7 +304,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
       assert.strictEqual(unseen.result, "unsupported")
       assert.include(unseen.reason, "does not see its harness")
       assert.deepStrictEqual(yield* s.processes.signaled, [])
-      assert.strictEqual((yield* s.db.coordinatorOf(s.projectId))!.address?.id, s.paneId)
+      assert.strictEqual((yield* s.db.entryOf(s.projectId))!.address?.id, s.paneId)
       yield* s.processes.set(HARNESS, "exited")
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
       assert.deepStrictEqual(yield* s.processes.signaled, [])
@@ -320,7 +320,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
       for (const pane of ["test/p1", "test/p2"]) yield* herdr.seedAgent(pane)
       const exits = yield* Effect.all(
         ["test/p1", "test/p2"].map((terminal) =>
-          Effect.exit(c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal, runtime: TEST_HERDR })),
+          Effect.exit(c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal, runtime: TEST_HERDR })),
         ),
         { concurrency: "unbounded" },
       )

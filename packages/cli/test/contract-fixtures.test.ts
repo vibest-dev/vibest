@@ -194,7 +194,7 @@ describe("contract", () => {
       const project = yield* projectOf(repo)
       yield* herdr.addPane("w1:p8", "ws", repo)
       yield* herdr.seedAgent("w1:p8")
-      const main = yield* db.coordinatorLaunch(
+      const entry = yield* db.startEntry(
         project,
         "pi",
         false,
@@ -203,7 +203,7 @@ describe("contract", () => {
       )
       const coordinator = authed(
         yield* connect(layout.socket),
-        sessionHeaders({ sessionId: main.sessionId, projectId: project }),
+        sessionHeaders({ sessionId: entry.sessionId, projectId: project }),
       )
       const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => row?.executionState === "open")

@@ -17,7 +17,8 @@ type Entry = {
 
 const mains = async (w: World) =>
   (await w.json<{ sessions: Array<Entry> }>(["ls"]).then((l) => l.sessions)).filter((e) => e.agent === "main")
-const start = (w: World) => w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi }, timeoutMs: 60_000 })
+const start = (w: World) =>
+  w.startEntry({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi }, timeoutMs: 60_000 })
 
 const herdr = (socket: string, method: string, params: Record<string, unknown>) =>
   new Promise<any>((resolve, reject) => {
@@ -75,7 +76,7 @@ const piWrote = async (agentDir: string, cwd: string) => {
 
 const move = (harness: "claude" | "pi"): Check => ({
   id: harness === "claude" ? "S10" : "S10-pi",
-  title: `a ${harness === "claude" ? "Claude" : "Pi"} main agent in terminal A; \`vibest\` in terminal B answered y: A's harness ends and A keeps its shell, B resumes the same conversation`,
+  title: `a ${harness === "claude" ? "Claude" : "Pi"} entry session in terminal A; \`vibest\` in terminal B answered y: A's harness ends and A keeps its shell, B resumes the same conversation`,
   run: async (w) => {
     for (const bin of ["herdr", harness]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
     const pi = heldModel()
@@ -89,7 +90,7 @@ const move = (harness: "claude" | "pi"): Check => ({
     const env = {}
     await w.daemon({ env })
     try {
-      await w.startMain({
+      await w.startEntry({
         harness,
         session,
         env: harness === "claude" ? claudeVars : { PI_CODING_AGENT_DIR: piAgentDir },
@@ -177,7 +178,7 @@ const move = (harness: "claude" | "pi"): Check => ({
       await until("B's shell", async () => /\S/.test(await screen(socket, b)), 30_000)
       await type(socket, b, `vibest --harness ${harness}`)
       await until(
-        "B asks to move the main agent",
+        "B asks to move the entry session",
         async () => (await screen(socket, b)).includes("Move it here and continue? [y/N]"),
         60_000,
       )
@@ -213,7 +214,7 @@ const move = (harness: "claude" | "pi"): Check => ({
       const mains = (
         await w.json<{ sessions: Array<{ agent: string; address: { id: string } }> }>(["ls"]).then((l) => l.sessions)
       ).filter((e) => e.agent === "main")
-      expect(mains.length === 1 && mains[0]!.address.id.endsWith(b), `main agents: ${JSON.stringify(mains)}`)
+      expect(mains.length === 1 && mains[0]!.address.id.endsWith(b), `entry sessions: ${JSON.stringify(mains)}`)
     } finally {
       pi.stop()
       claude.stop()
@@ -235,14 +236,14 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S10-start",
     title:
-      "in a project directory, `vibest` starts its main agent in this run's herdr session; `vibest ls` shows it first",
+      "in a project directory, `vibest` starts its entry session in this run's herdr session; `vibest ls` shows it first",
     run: async (w) => {
       if (!Bun.which("pi")) throw new Skip("pi not on PATH")
       if (!Bun.which("herdr")) throw new Skip("herdr not on PATH")
       await start(w)
-      await until("the main agent in vibest ls", async () => (await mains(w)).length === 1, 30_000)
+      await until("the entry session in vibest ls", async () => (await mains(w)).length === 1, 30_000)
       const [main] = await mains(w)
-      expect(main!.harness === "pi", `main agent: ${JSON.stringify(main)}`)
+      expect(main!.harness === "pi", `entry session: ${JSON.stringify(main)}`)
       expect(
         main!.routing === undefined || main!.routing.trace.every((t) => typeof t.hook === "string"),
         `routing: ${JSON.stringify(main)}`,
@@ -250,7 +251,7 @@ const checks: ReadonlyArray<Check> = [
       const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
       await herdr(socket, "pane.close", { pane_id: main!.address.id.split("/").pop() })
       await until(
-        "the main agent's exit recorded",
+        "the entry session's exit recorded",
         () =>
           row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, main!.id)?.e != null,
         30_000,

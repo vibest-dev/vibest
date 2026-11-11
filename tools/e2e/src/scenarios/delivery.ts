@@ -41,7 +41,7 @@ const piMain = async (w: World, name: string, url: string) => {
   const repo = await project(w, name)
   const dir = await piDir(w, `pi-${name}`, url)
   await w.daemon()
-  await w.startMain({ harness: "pi", session, cwd: repo, env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
+  await w.startEntry({ harness: "pi", session, cwd: repo, env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
   return { session, repo }
 }
 
@@ -112,7 +112,7 @@ const executionErrorChecks: ReadonlyArray<Check> = [
   {
     id: "S50",
     title:
-      "an execution that ends in an error fails with its failure and sends the creator one notice carrying it, typed into the main agent once",
+      "an execution that ends in an error fails with its failure and sends the creator one notice carrying it, typed into the entry session once",
     run: async (w) => {
       needs()
       const main = recordingModel(() => reply("ok"))
@@ -130,7 +130,7 @@ const executionErrorChecks: ReadonlyArray<Check> = [
           )
         await until("the execution failed", () => lastExecution(w, id)?.status === "failed", 120_000)
         await until(
-          "the notice typed into the main agent",
+          "the notice typed into the entry session",
           () => notices().some((n) => n.status === "delivered"),
           60_000,
         )
@@ -145,7 +145,7 @@ const executionErrorChecks: ReadonlyArray<Check> = [
             notices()[0]!.content.includes("model exploded"),
           `notices from ${id}: ${JSON.stringify(notices())}`,
         )
-        await until("the main agent's model saw it", () => seen(main).includes("model exploded"), 60_000)
+        await until("the entry session's model saw it", () => seen(main).includes("model exploded"), 60_000)
       } finally {
         main.stop()
         broken.stop()
@@ -159,7 +159,7 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S45",
     title:
-      "a Pi subagent's vibest send to the Pi main agent is one send row from the subagent to the main agent, delivered, with one inbox.queued and one inbox.moved to delivered, and the main agent's model request holds <agent-message> with the subagent's id",
+      "a Pi subagent's vibest send to the Pi entry session is one send row from the subagent to the entry session, delivered, with one inbox.queued and one inbox.moved to delivered, and the entry session's model request holds <agent-message> with the subagent's id",
     run: async (w) => {
       needs()
       const main = recordingModel(() => reply("ok"))
@@ -170,10 +170,10 @@ const sendChecks: ReadonlyArray<Check> = [
         const m = await piMain(w, "send-main", main.url)
         session = m.session
         mainId = mainOf(w)
-        const id = await runSub(w, m.repo, session, sub.url, "pi-send-main-sub", "send to the main agent")
+        const id = await runSub(w, m.repo, session, sub.url, "pi-send-main-sub", "send to the entry session")
         await until("the send delivered", () => sendsFrom(w, id, mainId).some((r) => r.status === "delivered"), 60_000)
         const sent = sendsFrom(w, id, mainId)
-        expect(sent.length === 1, `${sent.length} sends from ${id} to the main agent: ${JSON.stringify(sent)}`)
+        expect(sent.length === 1, `${sent.length} sends from ${id} to the entry session: ${JSON.stringify(sent)}`)
         expect(
           countFacts(w, "aggregate = ? AND type = 'inbox.queued' AND seq = ?", mainId, sent[0]!.id) === 1 &&
             countFacts(
@@ -184,10 +184,10 @@ const sendChecks: ReadonlyArray<Check> = [
             ) === 1,
           `the send ${sent[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
         )
-        await until("the main agent's model saw the send", () => seen(main).includes("hello-main"), 60_000)
+        await until("the entry session's model saw the send", () => seen(main).includes("hello-main"), 60_000)
         expect(
           seen(main).includes("<agent-message>") && seen(main).includes(id),
-          `the main agent's model saw ${seen(main)}`,
+          `the entry session's model saw ${seen(main)}`,
         )
       } finally {
         main.stop()
@@ -253,7 +253,7 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S47",
     title:
-      "a Pi subagent's vibest send to a session of another project is Forbidden, and to an archived session NoSuchSession naming the project's main agent; neither appends an inbox.queued",
+      "a Pi subagent's vibest send to a session of another project is Forbidden, and to an archived session NoSuchSession naming the project's entry session; neither appends an inbox.queued",
     run: async (w) => {
       needs()
       const main = recordingModel(() => reply("ok"))
@@ -290,7 +290,7 @@ const sendChecks: ReadonlyArray<Check> = [
           written.includes("Forbidden") && written.includes("belongs to another coordinator"),
           `no Forbidden for the other project's session: ${written}`,
         )
-        expect(written.includes(mainOf(w)), `the archived refusal does not name the main agent: ${written}`)
+        expect(written.includes(mainOf(w)), `the archived refusal does not name the entry session: ${written}`)
         expect(
           countFacts(
             w,
@@ -311,7 +311,7 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S48",
     title:
-      "when a subagent's pane is killed before the main agent's vibest send reaches it, the row ends failed and one notice row goes to the sender (session_id = the sender), which is typed into the sender and seen by its model",
+      "when a subagent's pane is killed before the entry session's vibest send reaches it, the row ends failed and one notice row goes to the sender (session_id = the sender), which is typed into the sender and seen by its model",
     run: async (w) => {
       needs()
       let target = ""
@@ -424,7 +424,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S3",
     title:
-      "an execution end sends nothing: a Pi subagent ends its execution without sending; the execution completes with its reply, no inbox row has the subagent as sender, no inbox.queued names it as sender, and the main agent's model gets no request after the subagent went idle",
+      "an execution end sends nothing: a Pi subagent ends its execution without sending; the execution completes with its reply, no inbox row has the subagent as sender, no inbox.queued names it as sender, and the entry session's model gets no request after the subagent went idle",
     run: async (w) => {
       needs()
       const main = recordingModel(() => reply("ok"))
@@ -440,7 +440,7 @@ const checks: ReadonlyArray<Check> = [
         await Bun.sleep(5_000)
         expect(
           main.requests.length === asked,
-          `the main agent's model got ${main.requests.length - asked} more requests`,
+          `the entry session's model got ${main.requests.length - asked} more requests`,
         )
         expect(inboxRows(w, "sender_session_id = ?", id) === 0, `rows sent by ${id}`)
         expect(

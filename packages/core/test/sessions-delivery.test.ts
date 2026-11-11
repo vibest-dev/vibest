@@ -269,7 +269,7 @@ describe.concurrent("Sessions", () => {
       const sessions = yield* Sessions
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -621,7 +621,7 @@ describe.concurrent("Sessions", () => {
       yield* settled
       const prompts = (yield* herdr.callsTo("send")).length
       const notices = db
-        .coordinatorPending((yield* db.getSession(id))!.projectId)
+        .entryPending((yield* db.getSession(id))!.projectId)
         .pipe(Effect.map((rows) => rows.filter((r) => r.kind === "notice")))
 
       const held = yield* herdr.hold("state", id)

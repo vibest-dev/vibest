@@ -517,23 +517,25 @@ describe("vibest run --machine and remote sessions", () => {
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
-  it.effect("run --machine without a main agent: no report-to, the result stays on B and Get mb/<id> reads it", () =>
-    Effect.gen(function* () {
-      const net = new Net()
-      const a = yield* repoStack(net)
-      const b = yield* repoStack(net)
-      net.route("b-host", b.layout.socket)
-      yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
-      yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
-      const checkout = yield* a.run(makeRepository)
-      yield* (yield* a.run(FakeGit)).update(checkout, REPOSITORY)
-      const here = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(checkout))
-      const spawned = yield* here(a.raw.Spawn({ machine: "mb", prompt: "alone", callerEnv: {} }))
-      yield* finish(b.db, onB(spawned.id), "kept on B")
-      assert.deepStrictEqual(yield* b.run(outboxRows), [], "nothing to send back")
-      const got = yield* here(a.raw.Get({ id: spawned.id.slice(0, 11) }))
-      assert.strictEqual(got.id, spawned.id)
-    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  it.effect(
+    "run --machine without an entry session: no report-to, the result stays on B and Get mb/<id> reads it",
+    () =>
+      Effect.gen(function* () {
+        const net = new Net()
+        const a = yield* repoStack(net)
+        const b = yield* repoStack(net)
+        net.route("b-host", b.layout.socket)
+        yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
+        yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
+        const checkout = yield* a.run(makeRepository)
+        yield* (yield* a.run(FakeGit)).update(checkout, REPOSITORY)
+        const here = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(checkout))
+        const spawned = yield* here(a.raw.Spawn({ machine: "mb", prompt: "alone", callerEnv: {} }))
+        yield* finish(b.db, onB(spawned.id), "kept on B")
+        assert.deepStrictEqual(yield* b.run(outboxRows), [], "nothing to send back")
+        const got = yield* here(a.raw.Get({ id: spawned.id.slice(0, 11) }))
+        assert.strictEqual(got.id, spawned.id)
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
   it.effect(
@@ -626,7 +628,7 @@ describe("vibest run --machine and remote sessions", () => {
   )
 
   it.effect(
-    "without --runtime A sends the caller's terminal runtime, else its main agent's; --runtime wins; B lacking it fails clearly",
+    "without --runtime A sends the caller's terminal runtime, else its entry session's; --runtime wins; B lacking it fails clearly",
     () =>
       Effect.gen(function* () {
         const term = callerPlugin("term", { env: ["TERM_PANE"], terminal: () => Effect.succeed("p1") })
@@ -662,7 +664,7 @@ describe("vibest run --machine and remote sessions", () => {
       assert.include((yield* run({ runtimeSession: "s1" })).message, "--session is not sent to another machine")
       const reserved = yield* run({ agent: "main" })
       assert.strictEqual(reserved._tag, "Forbidden", "the reserved name is refused before the machine is asked")
-      assert.include(reserved.message, "reserved for the main agent")
+      assert.include(reserved.message, "reserved for the entry session")
       assert.include((yield* run({ prompt: "x".repeat(PROMPT_MAX + 1) })).message, "at most 1048576 bytes (1 MiB)")
       const big = yield* run({ prompt: "x".repeat(PROMPT_MAX + 1) })
       assert.strictEqual(big._tag, "PromptTooLarge", "B's error comes through unchanged")

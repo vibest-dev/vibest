@@ -161,7 +161,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean } = {}) =>
   await w.stopDaemon()
   const daemonA = await w.run(w.repository, [binary, "daemon"], { env: aEnv })
   expect(daemonA.code === 0, `A: vibest daemon: ${daemonA.stderr}`)
-  await w.startMain({
+  await w.startEntry({
     harness: "pi",
     runtime: "hc",
     env: { PI_CODING_AGENT_DIR: piA },
@@ -221,7 +221,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M1",
     title:
-      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's main agent and none on A, A's main agent gets one notice with B's message, which the session sent itself, B's outbox empties; send, result, peek and archive forward to B",
+      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's entry session and none on A, A's entry session gets one notice with B's message, which the session sent itself, B's outbox empties; send, result, peek and archive forward to B",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -253,12 +253,12 @@ const checks: ReadonlyArray<Check> = [
         const bRows = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions
         expect(
           bRows.some((r) => r.id?.startsWith(id8) && r.runtime === "hc"),
-          `B's ls (no --runtime: A sends its main agent's hc): ${JSON.stringify(bRows)}`,
+          `B's ls (no --runtime: A sends its entry session's hc): ${JSON.stringify(bRows)}`,
         )
         expect(row(w, "SELECT id FROM session WHERE id LIKE ?", `${id8}%`) === undefined, "A has a session row")
         await until("the notice on A", () => s!.notices(address, "mone") === 1, 120_000)
         await until(
-          "A's main agent saw it",
+          "A's entry session saw it",
           () => s!.main.seen.some((m) => m.includes(address) && m.includes("done-mone")),
           120_000,
         )
@@ -309,7 +309,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M8",
     title:
-      "an execution that ends on B without a send queues nothing in B's outbox and gives A's main agent no notice; vibest result on A returns the execution's reply",
+      "an execution that ends on B without a send queues nothing in B's outbox and gives A's entry session no notice; vibest result on A returns the execution's reply",
     run: async (w) => {
       let s: Setup | undefined
       try {

@@ -125,7 +125,7 @@ export const sessionToStop = (
 }
 
 export const ACTIONS = [
-  ["open-main", "Open or focus the main agent"],
+  ["open-entry", "Open or focus the entry session"],
   ["run", "Run a subagent"],
   ["stop", "Stop the session in the focused pane"],
   ["runs", "List live sessions"],
@@ -134,7 +134,7 @@ export const ACTIONS = [
 
 export const paletteMenu = () => ACTIONS.map(([id, title], index) => `${index + 1}  ${id}  ${title}`).join("\n")
 
-export const VERBS = ["startup", "open-main", "run", "stop", "runs", "subscriptions", "palette"] as const
+export const VERBS = ["startup", "open-entry", "run", "stop", "runs", "subscriptions", "palette"] as const
 export type Verb = (typeof VERBS)[number]
 
 const actionAt = (choice: string) => {
@@ -155,7 +155,7 @@ export const perform = <E, R>(
       switch (current) {
         case "startup":
           return `republished ${yield* daemon.republish(projectDirectory(context))}`
-        case "open-main": {
+        case "open-entry": {
           const opened = yield* daemon.openMain(yield* requireDirectory(context))
           return `${opened.action} ${opened.place}`
         }
@@ -211,7 +211,7 @@ const theDaemon = {
   republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
   openMain: (directory: string) =>
     Effect.gen(function* () {
-      const focused = yield* ask(directory, (client) => client["Project.FocusCoordinator"]({}))
+      const focused = yield* ask(directory, (client) => client["Project.FocusEntry"]({}))
       if (focused)
         return { action: focused.focused ? ("focused" as const) : ("runs in" as const), place: focused.place }
       const self = yield* VibestCommand
@@ -277,7 +277,7 @@ const stdinLines = () => {
 
 const DESCRIPTIONS: Record<Verb, string> = {
   startup: "Ask vibestd for live sessions and republish their pane metadata",
-  "open-main": "Open or focus the main agent of the project in the herdr context",
+  "open-entry": "Open or focus the entry session of the project in the herdr context",
   run: "Read a prompt from this pane and start a subagent in that project",
   stop: "Stop the session in the focused pane",
   runs: "Print live sessions for the project in the herdr context",
