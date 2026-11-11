@@ -1,6 +1,6 @@
 import path from "node:path"
 
-import { binary, type World } from "./world.ts"
+import type { World } from "./world.ts"
 import { claudeShadow, FAKE_ANTHROPIC_KEY, piShadow } from "./world/shadow.ts"
 
 export type Message = { role: string; content: unknown }
@@ -43,17 +43,19 @@ export const toolCall = (id: string, name: string, input: object) =>
 
 export const creatorIn = (system: string) => /started by ([0-9a-f-]{36})/.exec(system)?.[1]
 
+const sendToCreatorIn = (system: string) => /run `([^`]+ send [0-9a-f-]{36}) -- '<message>'`/.exec(system)?.[1]
+
 export const sendOrReply = (messages: ReadonlyArray<Message>, done: string) => {
-  const creator = creatorIn(text(messages.find((m) => m.role === "system" || m.role === "developer")))
-  return creator && messages.at(-1)?.role !== "tool"
-    ? toolCall("call-send", "bash", { command: `${binary} send ${creator} -- '${done}'` })
+  const send = sendToCreatorIn(text(messages.find((m) => m.role === "system" || m.role === "developer")))
+  return send && messages.at(-1)?.role !== "tool"
+    ? toolCall("call-send", "bash", { command: `${send} -- '${done}'` })
     : reply(done)
 }
 
 export const claudeSendOrReply = (r: AnthropicRequest, done: string): Step => {
-  const creator = creatorIn(r.system)
-  return creator && !text(lastUser(r)).includes('"tool_result"')
-    ? { tool: "Bash", input: { command: `${binary} send ${creator} -- '${done}'` } }
+  const send = sendToCreatorIn(r.system)
+  return send && !text(lastUser(r)).includes('"tool_result"')
+    ? { tool: "Bash", input: { command: `${send} -- '${done}'` } }
     : done
 }
 
