@@ -290,30 +290,36 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S48",
     title:
-      "when the main agent's pane is killed before a subagent's vibest send reaches it, the row ends failed and one notice row goes to the sender (recipient_session_id = the sender), which is typed into the sender and seen by its model",
+      "when a subagent's pane is killed before the main agent's vibest send reaches it, the row ends failed and one notice row goes to the sender (recipient_session_id = the sender), which is typed into the sender and seen by its model",
     run: async (w) => {
       needs()
-      const main = heldModel()
-      let mainId = ""
-      const sender = sendingModel(() => mainId, "never-delivered")
+      let target = ""
+      const main = recordingModel((messages) => {
+        if (messages.some((m) => m.role === "tool")) return reply("done-main\nstatus: completed")
+        return text(messages.at(-1)).includes("send-now")
+          ? toolCall("call1", "bash", { command: `${binary} send ${target} -- never-delivered` })
+          : reply("ok")
+      })
+      const held = heldModel()
       let session = ""
       try {
         const m = await piMain(w, "send-killed", main.url)
         session = m.session
-        mainId = mainOf(w)
+        const mainId = mainOf(w)
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-        await until("the main agent's turn held", () => main.held() > 0, 60_000)
-        const id = await runSub(w, m.repo, session, sender.url, "pi-send-killed-a", "send to the main agent")
-        await until("the send pending", () => sendsFrom(w, id, mainId).some((r) => r.status === "pending"), 60_000)
-        const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, mainId)!.r
+        target = await runSub(w, m.repo, session, held.url, "pi-send-killed-b", ask("held"))
+        await until("the subagent's turn held", () => held.held() > 0, 60_000)
+        await w.ok(["send", mainId, "--", "send-now"], { cwd: m.repo })
+        await until("the send pending", () => sendsFrom(w, mainId, target).some((r) => r.status === "pending"), 60_000)
+        const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, target)!.r
         const pane = ((JSON.parse(runtime) as { id?: string }).id ?? "").split("/")[1] ?? ""
         await herdr(socket, "pane.close", { pane_id: pane })
-        await until("the send failed", () => sendsFrom(w, id, mainId).some((r) => r.status === "failed"), 60_000)
+        await until("the send failed", () => sendsFrom(w, mainId, target).some((r) => r.status === "failed"), 60_000)
         const notices = () =>
           rows<{ status: string; sender: string | null }>(
             w,
             "SELECT status, sender_session_id AS sender FROM inbox WHERE recipient_session_id = ? AND kind = 'notice' AND instr(content, 'was not delivered') > 0",
-            id,
+            mainId,
           )
         await until(
           "one notice to the sender, typed into it",
@@ -321,11 +327,11 @@ const sendChecks: ReadonlyArray<Check> = [
           60_000,
         )
         expect(notices().length === 1, `${notices().length} notices to the sender: ${JSON.stringify(notices())}`)
-        await until("the sender's model saw the notice", () => seen(sender).includes("was not delivered"), 60_000)
+        await until("the sender's model saw the notice", () => seen(main).includes("was not delivered"), 60_000)
       } finally {
-        main.release()
         main.stop()
-        sender.stop()
+        held.release()
+        held.stop()
         await dropHerdrSession(w, session)
       }
     },
