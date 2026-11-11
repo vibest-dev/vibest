@@ -9,7 +9,8 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 - **`vibest run` runs only inside a session** (users, scripts): a `vibest run` in a plain terminal is refused with a
   pointer to bare `vibest`, which opens a session. Every session `vibest run` starts, here or on another machine, records
-  the session that ran it as its creator; `NoCallingSession` is the new error.
+  the session that ran it as its creator; `NoCallingSession` is the new error. Any session, not only the entry
+  session, can now run `vibest run`.
 - **An execution opens when its input is sent and is accepted once the harness takes it up** (anyone reading
   `vibest.db`, harness and runtime plugin authors): a send that never sees the harness ready leaves no execution (no
   `not_started` row); the catalog adds `execution.accepted` and an optional `failure.kind` (`limit`) on
