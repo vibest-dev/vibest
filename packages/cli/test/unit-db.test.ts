@@ -382,7 +382,6 @@ describe("Db", () => {
         yield* db.endExecution(
           "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           { outcome: "completed", failure: { message: "late" } },
-          { executionState: "completed" },
           undefined,
         )
         assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.executionState, "completed")
@@ -427,7 +426,6 @@ describe("Db", () => {
             yield* db.endExecution(
               "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
               { outcome: "failed", failure: { message: summary } },
-              { executionState: "failed" },
               summary,
             )
           })
@@ -564,7 +562,6 @@ describe("Db", () => {
         yield* db.endExecution(
           "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           { outcome: "failed", failure: { message: "m" } },
-          { executionState: "failed", status: "idle" },
           "m",
         )
         assert.strictEqual(yield* noticeStatus("m"), "dropped")

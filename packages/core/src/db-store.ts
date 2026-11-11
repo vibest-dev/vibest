@@ -13,7 +13,7 @@ import {
   ExecutionStarted,
 } from "@vibest/schema/event"
 import { newId, randomId } from "@vibest/schema/id"
-import { InboxStatus, RuntimeAddress } from "@vibest/schema/session"
+import { type AgentStatus, InboxStatus, RuntimeAddress } from "@vibest/schema/session"
 import { Clock, Effect, Schema } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 
@@ -575,6 +575,14 @@ export const makeStore = Effect.gen(function* () {
       }
     })
 
+  const setStatus = (id: string, status: AgentStatus) =>
+    Effect.gen(function* () {
+      const current = yield* findSession(id)
+      if (current === undefined) return
+      yield* remember({ ...current, status })
+      yield* notify({ type: "live.session", sessionId: id })
+    })
+
   const dropWaiting = (
     projectIdValue: string,
     guard?: { readonly runtime: string; readonly address: string } | "absent",
@@ -694,6 +702,7 @@ export const makeStore = Effect.gen(function* () {
     endExecution,
     insertInboxRow,
     updateSession,
+    setStatus,
     dropWaiting,
     sessionAt,
     entrySessionsAt,

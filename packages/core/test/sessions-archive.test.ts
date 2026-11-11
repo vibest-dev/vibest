@@ -344,12 +344,8 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* ackPolled(w)
       assert.strictEqual((yield* lastSentBy(w.id))!.status, "delivered")
       yield* looked
-      yield* w.db.endExecution(
-        w.id,
-        { outcome: "completed" },
-        { executionState: "completed", status: "idle" },
-        undefined,
-      )
+      yield* w.db.setStatus(w.id, "idle")
+      yield* w.db.endExecution(w.id, { outcome: "completed" }, undefined)
       return { release: check.release().pipe(Effect.andThen(Fiber.join(checking))) }
     })
 

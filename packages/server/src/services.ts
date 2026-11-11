@@ -14,6 +14,7 @@ import { Remote } from "@vibest/core/remote"
 import { SshHosts } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
 import { EntrySession } from "@vibest/core/session/entry"
+import { Executions } from "@vibest/core/session/executions"
 import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
@@ -34,6 +35,7 @@ export const services = LayerNode.group([
   SshHosts.node,
   Git.node,
   SessionLocks.node,
+  Executions.node,
   Sessions.node,
   Integration.node,
   Peers.node,
