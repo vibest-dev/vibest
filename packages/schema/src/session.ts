@@ -1,11 +1,11 @@
 import { Schema } from "effect"
 
+import { InboxKind } from "./event.ts"
+
 export const AgentStatus = Schema.Literals(["idle", "working", "blocked", "done", "unknown"])
 export type AgentStatus = typeof AgentStatus.Type
 export const TurnState = Schema.Literals(["none", "open", "completed", "failed", "interrupted", "lost", "not_started"])
 export type TurnState = typeof TurnState.Type
-export const InboxKind = Schema.Literals(["send", "report", "result", "notice"])
-export type InboxKind = typeof InboxKind.Type
 export const InboxStatus = Schema.Literals(["pending", "sending", "delivered", "failed", "dropped"])
 export type InboxStatus = typeof InboxStatus.Type
 
@@ -33,9 +33,7 @@ export const InboxRow = Schema.Struct({
   recipient: Schema.NullOr(Schema.String),
   kind: InboxKind,
   message: Schema.String,
-  details: Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
   status: InboxStatus,
-  createdAt: Schema.Number,
 })
 export type InboxRow = typeof InboxRow.Type
 

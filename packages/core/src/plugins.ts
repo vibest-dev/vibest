@@ -10,20 +10,20 @@ import { Harnesses } from "./harness.ts"
 import * as Hooks from "./hooks.ts"
 import { errorMessage } from "./hooks.ts"
 import type { PluginsShape } from "./host.ts"
-import { type Candidate, makeSources, makeWatcher, messageOf, PluginLoader } from "./plugin-sources.ts"
+import { type Candidate, makeSources, messageOf, PluginLoader } from "./plugin-sources.ts"
+import { supervise } from "./plugin-supervisor.ts"
 import * as Registry from "./registry.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 export { AgentRefused, Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 
 export { type Candidate, pluginEntries, PluginLoader } from "./plugin-sources.ts"
+export { DEBOUNCE, RECHECK } from "./plugin-supervisor.ts"
 export { errorMessage }
 
 export const DEFAULT_TIMEOUT = Duration.seconds(5)
 export const MACHINE_TIMEOUT = Duration.seconds(30)
 const ACTIVATION_WAIT = Duration.seconds(10)
-export const DEBOUNCE = Duration.millis(100)
-export const RECHECK = Duration.seconds(1)
 
 type Short = keyof VibestPlugin.AgentHooks
 type AgentHook = `agent.${Short}`
@@ -196,7 +196,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         Queue.offerUnsafe(broken, { running, refresh })
       }
       const exit = yield* timeoutWithoutWaiting(
-        plugin.effect(context).pipe(Scope.provide(scope), Registry.group(report)),
+        Effect.suspend(() => plugin.effect(context)).pipe(Scope.provide(scope), Registry.group(report)),
         scope,
         timeout,
       )
@@ -238,6 +238,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       const plugin = candidate.plugin
       if (!("error" in plugin) && ids.has(plugin.id)) return { ...base, failure: `Duplicate plugin ID: ${plugin.id}` }
       const unchanged = previous !== undefined && keyOf(previous.candidate) === keyOf(candidate)
+      const disabled = unchanged ? previous.running?.broken : undefined
+      if (disabled !== undefined) return { ...base, failure: disabled, setupFailed: true }
       const outcome =
         "error" in plugin
           ? plugin.error
@@ -437,41 +439,7 @@ export class Plugins extends Context.Service<Plugins, PluginsShape>()("vibest/Pl
       const sources = yield* makeSources(DEFAULT_TIMEOUT)
       const builtins = yield* Builtins
       yield* host.activate(builtins)
-      const triggers = yield* Queue.sliding<void>(1)
-      const changed = new Set<string>()
-      let observed = 0
-      host.ready.closeUnsafe()
-      const notify = (file?: string) => {
-        if (file !== undefined) changed.add(file)
-        observed++
-        host.ready.closeUnsafe()
-        Queue.offerUnsafe(triggers, undefined)
-      }
-      const watcher = yield* makeWatcher(notify)
-      const scope = yield* Effect.scope
-      const reload = Effect.gen(function* () {
-        if (changed.size > 0) yield* Effect.log(`plugins: reloading after changes to ${[...changed].join(", ")}`)
-        changed.clear()
-        let read = yield* sources.read
-        let rewatched = false
-        while (yield* watcher.update(read.watched)) {
-          rewatched = true
-          read = yield* sources.read
-        }
-        yield* host.activate([...builtins, ...read.candidates])
-        if (rewatched)
-          yield* Effect.sleep(RECHECK).pipe(Effect.andThen(Effect.sync(() => notify())), Effect.forkIn(scope))
-      }).pipe(logFailure("plugins: reload failed"))
-      yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
-        Stream.runForEach(() =>
-          Effect.gen(function* () {
-            const target = observed
-            yield* reload
-            if (observed === target) host.ready.openUnsafe()
-          }),
-        ),
-        Effect.forkScoped,
-      )
+      yield* supervise(host, builtins, sources)
       return host.service
     }),
   )

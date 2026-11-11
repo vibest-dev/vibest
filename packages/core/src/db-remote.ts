@@ -15,7 +15,6 @@ export type MachineRow = {
 export type PeerStart = {
   readonly peer: string
   readonly project: string
-  readonly parent?: string | undefined
   readonly reportTo?: string | undefined
 }
 

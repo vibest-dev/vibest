@@ -92,8 +92,8 @@ refused), checks that the checkout has `commit`
 (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
 and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
 `vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
-started it is the `origin` of its `session.created` fact (peer, project, parent?, reportTo?), kept in the session's
-`origin_*` columns; it has no `reportTo` when A's project had no main agent. The forwarded `request` finds the session
+started it is the `origin` of its `session.created` fact (peer, project, reportTo?), kept in the session's
+`origin_*` columns (`reportTo` as `origin_session`); it has no `reportTo` when A's project had no entry session. The forwarded `request` finds the session
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
 notices go to B's own inbox delivery and no outbox row is written for it.
 
@@ -132,7 +132,7 @@ their case; either gives `NoProject`.
 ## A: remote sessions
 
 `vibest run --machine <name>` (the user or the main agent) sends `Peer.Spawn` over the machine's connection with
-the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`), the caller as `parent` and the
+the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`) and the
 main agent as `reportTo`; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. With no main agent there is no `report_to`, as in `hc run --on`
 with no parent: nothing is sent back, the answer stays on B and `vibest result <name>/<id>` reads it there.
 `--env`, `--peer`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the

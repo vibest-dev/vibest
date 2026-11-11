@@ -207,14 +207,12 @@ describe("journal projectors", () => {
   it.effect("project facts: created, repositories, entry, move", () =>
     Effect.gen(function* () {
       const { sql } = yield* story
-      const [project] = yield* rowsOf<{ directory: string; entrySessionId: string; seq: number }>(
+      const [project] = yield* rowsOf<{ directory: string; entrySessionId: string }>(
         sql,
-        "SELECT directory, entry_session_id, seq FROM project",
+        "SELECT directory, entry_session_id FROM project",
       )
       assert.strictEqual(project!.directory, "/src/app")
       assert.strictEqual(project!.entrySessionId, MAIN)
-      const [moved] = yield* sql<{ seq: number }>`SELECT seq FROM event WHERE type = 'project.moved'`
-      assert.strictEqual(project!.seq, moved!.seq)
       assert.deepStrictEqual(
         yield* rowsOf(sql, "SELECT project_id, path, remote_url FROM project_repository ORDER BY path"),
         [{ projectId: P, path: "/src/app", remoteUrl: "git@x:app.git" }],
@@ -258,8 +256,8 @@ describe("journal projectors", () => {
       const { sql, subProcess, turn, typed, mainProcess } = yield* story
       const rows = yield* rowsOf<Record<string, unknown>>(
         sql,
-        `SELECT id, name, role, parent_session_id, report_to_session_id, archive_on_completion, origin_peer,
-          origin_project, origin_parent, origin_report_to, created_at, ended_at, process_id, turn_id, active_at
+        `SELECT id, name, role, parent_session_id, archive_on_idle, origin_peer,
+          origin_project, origin_session, created_at, ended_at, process_id, turn_id, active_at
         FROM session ORDER BY created_at`,
       )
       assert.deepStrictEqual(rows, [
@@ -268,12 +266,10 @@ describe("journal projectors", () => {
           name: "main",
           role: "main",
           parentSessionId: null,
-          reportToSessionId: null,
-          archiveOnCompletion: 0,
+          archiveOnIdle: 0,
           originPeer: null,
           originProject: null,
-          originParent: null,
-          originReportTo: null,
+          originSession: null,
           createdAt: 210,
           endedAt: null,
           processId: mainProcess,
@@ -285,12 +281,10 @@ describe("journal projectors", () => {
           name: "fix-tests",
           role: "subagent",
           parentSessionId: MAIN,
-          reportToSessionId: MAIN,
-          archiveOnCompletion: 1,
+          archiveOnIdle: 1,
           originPeer: null,
           originProject: null,
-          originParent: null,
-          originReportTo: null,
+          originSession: null,
           createdAt: 300,
           endedAt: null,
           processId: subProcess,
@@ -302,12 +296,10 @@ describe("journal projectors", () => {
           name: "remote",
           role: "subagent",
           parentSessionId: null,
-          reportToSessionId: null,
-          archiveOnCompletion: 0,
+          archiveOnIdle: 0,
           originPeer: PEER,
           originProject: OTHER_PROJECT,
-          originParent: null,
-          originReportTo: MAIN,
+          originSession: MAIN,
           createdAt: 500,
           endedAt: null,
           processId: null,
@@ -497,7 +489,7 @@ describe("journal projectors", () => {
         yield* rowsOf(
           sql,
           `SELECT id, recipient_session_id, sender_session_id, kind, content, request, peer_item,
-            status, turn_id, queued_at, seq FROM inbox ORDER BY id`,
+            status, turn_id, seq FROM inbox ORDER BY id`,
         ),
         [
           {
@@ -510,7 +502,6 @@ describe("journal projectors", () => {
             peerItem: null,
             status: "delivered",
             turnId: turn,
-            queuedAt: 301,
             seq: task + 3,
           },
           {
@@ -523,7 +514,6 @@ describe("journal projectors", () => {
             peerItem: null,
             status: "delivered",
             turnId: null,
-            queuedAt: 322,
             seq: moved!.seq,
           },
           {
@@ -536,7 +526,6 @@ describe("journal projectors", () => {
             peerItem: ITEM,
             status: "pending",
             turnId: null,
-            queuedAt: 530,
             seq: notice,
           },
         ],

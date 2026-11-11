@@ -1,5 +1,6 @@
+import { type InboxKind, type ProcessEndReason, type TurnStatus } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
-import { AgentStatus, InboxKind, InboxStatus, RuntimeAddress, TurnState } from "@vibest/schema/session"
+import { AgentStatus, InboxStatus, RuntimeAddress, TurnState } from "@vibest/schema/session"
 import { Schema } from "effect"
 
 import { Routing } from "./plugins.ts"
@@ -53,10 +54,8 @@ export const SessionRow = Schema.Struct({
 })
 export type SessionRow = typeof SessionRow.Type
 
-export type EndReason = "exited" | "limited" | "restart" | "move" | "archived" | "launch_failed"
-
 export type SessionPatch = Partial<Omit<SessionRow, "id" | "projectId" | "agent" | "createdAt" | "runtime">> & {
-  readonly end?: EndReason
+  readonly end?: ProcessEndReason
 }
 
 export const CoordinatorRow = Schema.Struct({
@@ -77,9 +76,7 @@ export type CoordinatorRow = typeof CoordinatorRow.Type
 
 export type NewInboxRow = {
   readonly sessionId: string
-  readonly kind: "notice"
   readonly message: string
-  readonly details: Record<string, unknown>
 }
 
 export type SpawnedBefore = {
@@ -127,10 +124,8 @@ export type InboxSql = {
   readonly status: string
 }
 
-export const ROUND_STATUS = ["completed", "failed", "interrupted", "lost", "not_started"] as const
-
 export type TurnEnd = {
-  readonly status: (typeof ROUND_STATUS)[number]
+  readonly status: typeof TurnStatus.Type
   readonly report?: number
   readonly failure?: { readonly message: string }
 }
@@ -148,9 +143,7 @@ export const toInbox = (row: InboxSql) => {
     recipient: row.recipientSessionId,
     kind,
     message: row.content,
-    details: "{}",
     status: row.status === "delivering" ? "sending" : row.status,
-    createdAt: 0,
   }
 }
 
@@ -165,8 +158,3 @@ export type SessionBrief = {
     readonly endedAt: number | null
   } | null
 }
-
-export const roundStatus = (status: unknown): TurnEnd["status"] =>
-  typeof status === "string" && (ROUND_STATUS as readonly string[]).includes(status)
-    ? (status as TurnEnd["status"])
-    : "completed"
