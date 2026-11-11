@@ -80,9 +80,10 @@ export const make = (
           })
         const allowed = Effect.gen(function* () {
           if (yield* db.maySend(caller.sessionId, id)) return true
+          const creator = yield* db.addressedCreator(caller.sessionId)
           return yield* new Forbidden({
             method: "Send",
-            message: `${id} is not the agent that started you, and you did not start it`,
+            message: `${id} is not the agent that started you, and you did not start it${creator === undefined ? "" : `; you may send to ${creator}`}`,
           })
         })
         if (target.agent === "coordinator") {

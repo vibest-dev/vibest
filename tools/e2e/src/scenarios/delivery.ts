@@ -207,7 +207,10 @@ const sendChecks: ReadonlyArray<Check> = [
         const id = await runSub(w, m.repo, session, sender.url, "pi-send-sibling-a", "send to the sibling")
         await until("the sender answered", async () => (await answerOf(w, id, m.repo)).includes("done-send"), 90_000)
         const out = await fs.readFile(refused, "utf8")
-        expect(out.includes(siblingId) && out.includes("did not start"), `vibest send printed: ${out}`)
+        expect(
+          out.includes(siblingId) && out.includes("did not start") && out.includes(mainOf(w)),
+          `vibest send printed: ${out}`,
+        )
         expect(
           sendsFrom(w, id, siblingId).length === 0,
           `a send row was written: ${JSON.stringify(sendsFrom(w, id, siblingId))}`,

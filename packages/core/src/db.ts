@@ -234,6 +234,8 @@ const make = Effect.gen(function* () {
         Effect.orDie,
       ),
 
+    addressedCreator,
+
     maySend: (sender: string, recipient: string) =>
       Effect.gen(function* () {
         const from = yield* addressedCreator(sender)
