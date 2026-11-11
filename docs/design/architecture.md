@@ -730,9 +730,8 @@ layers are built, before it listens, so a request that routes to a builtin runti
 (user plugins activate afterwards, in the background; a runtime a user plugin registers can still be missing for
 a request admitted before that). A builtin plugin's setup must not do I/O (it connects lazily, as `runtime-herdr`
 does), because every builtin setup runs before vibestd listens and a slow one would push startup past the
-client's `DAEMON_START_TIMEOUT` of 10 s; triggers are configuration changes, module
-file changes, and a daily update tick, debounced by 100 ms; npm plugins install into the vibest home and
-activate after local ones.
+client's `DAEMON_START_TIMEOUT` of 10 s; triggers are configuration changes and module file changes, debounced by
+100 ms.
 
 **Loading and watching:** local plugin changes reload without repeating unchanged imports; failed revisions keep
 the previous one. See [loading and watching](plugin-loading.md#loading-and-watching) for watch and reload details.
@@ -745,8 +744,7 @@ See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module
 ```
 builtin plugins         `@vibest/builtins` `pre`: harness-pi, harness-claude, harness-cursor,
                         runtime-herdr-core, runtime-herdr, runtime-choice
-user plugins            configuration `plugins` and plugin directories, in order
-configuration plugins   configuration files into catalogs (definitions, machines, skills)
+user plugins            the plugins directory (sorted by name), then `vibest.json` `plugins`, in order
 ```
 
 **Where plugins live**: only in the vibest home (`VIBEST_HOME`, by default `~/.vibest`), in `vibest.json` and the
@@ -754,12 +752,12 @@ configuration plugins   configuration files into catalogs (definitions, machines
 
 **Plugin entries** (as OpenCode's `plugins`): the ordered `plugins` list of `vibest.json`.
 
-| Entry                                  | Meaning                                                                       |
-| -------------------------------------- | ----------------------------------------------------------------------------- |
-| `"@scope/vibest-plugin-x"`             | add an npm plugin                                                             |
-| `"./plugins/x.ts"`                     | add a local plugin; relative to the file that names it                        |
-| `{ "package": "…", "options": { … } }` | add, or configure, a plugin with options; a builtin plugin is named by its id |
-| `"-check"`                             | remove a plugin, builtin ones included                                        |
+| Entry                                  | Meaning                                                                                                                                                                                         |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"./plugins/x.ts"`                     | add a local plugin: a `.ts`/`.js` file or a directory, by a path starting with `/`, `./`, `../` or `file://`, relative to the vibest home                                                       |
+| `{ "package": "…", "options": { … } }` | add a local plugin with options                                                                                                                                                                 |
+| `"@scope/vibest-plugin-x"`             | any other name is a package: not supported yet, listed as failed with `npm plugins are not supported yet`                                                                                       |
+| `"-check"`                             | remove the user plugins added before it (the plugins directory, earlier entries) whose id matches: an exact id, `prefix.*`, or `*` (which also removes failed ones); builtins cannot be removed |
 
 Files and directories in `~/.vibest/plugins/` are added without an entry, before the entries. A plugin reads its
 options from `context.options` (V2's `PluginOptions`) and they reload live:

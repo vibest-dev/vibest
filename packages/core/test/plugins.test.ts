@@ -13,7 +13,7 @@ import {
   type Registration,
 } from "@vibest/plugin"
 import type { Fact } from "@vibest/schema/event"
-import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope, Stream } from "effect"
+import { Context, Effect, Fiber, FileSystem, Layer, Option, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "../../cli/src/platform/bun.ts"
@@ -264,6 +264,36 @@ describe("plugins: spawn hook", () => {
           ["hang", "failed", "setup timed out"],
           ["ok", "active", undefined],
         ],
+      )
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(subscriptionsLayer),
+      Effect.provide(harnessesLayer()),
+      Effect.provide(runtimesLayer),
+      Effect.provide(Bus.layer),
+    ),
+  )
+
+  it.effect("a Promise setup that never resolves is torn down within the one setup timeout", () =>
+    Effect.gen(function* () {
+      const building = yield* Effect.forkChild(
+        Plugins.make([
+          {
+            source: "pro",
+            revision: "-",
+            options: {},
+            plugin: Plugin.define({ id: "pro", setup: () => new Promise(() => {}) }),
+          },
+        ]),
+      )
+      yield* TestClock.adjust("5 seconds")
+      const joined = yield* Effect.forkChild(Fiber.join(building).pipe(Effect.timeoutOption("4 seconds")))
+      yield* TestClock.adjust("4 seconds")
+      const plugins = yield* Fiber.join(joined)
+      assert.isTrue(Option.isSome(plugins), "the setup's teardown waited past the setup timeout")
+      assert.deepStrictEqual(
+        (yield* Option.getOrThrow(plugins).list).map((p) => [p.id, p.status, p.error]),
+        [["pro", "failed", "setup timed out"]],
       )
     }).pipe(
       Effect.scoped,

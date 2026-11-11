@@ -101,5 +101,6 @@ export const fromPromise =
       yield* Effect.acquireRelease(
         settle(() => plugin.setup(context)),
         (cleanup: Cleanup | void) => (cleanup === undefined ? Effect.void : settle(cleanup)),
+        { interruptible: true },
       )
     })
