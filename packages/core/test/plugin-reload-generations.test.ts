@@ -3,7 +3,8 @@ import { Bus } from "@vibest/core/bus"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, type Candidate, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Plugin } from "@vibest/plugin"
-import { Context, Effect, FileSystem, Layer, Path, Schedule } from "effect"
+import { Context, Effect, Fiber, FileSystem, Layer, Path } from "effect"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "../../cli/src/platform/bun.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
@@ -30,15 +31,33 @@ import { Effect } from "effect"
 export default Plugin.define({ id: "${id}", effect: () => Effect.void })
 `
 
-const until = (what: string, done: () => boolean) =>
-  Effect.void.pipe(
-    Effect.repeat({ while: () => !done(), schedule: Schedule.spaced("20 millis"), times: 250 }),
-    Effect.filterOrElse(done, () => Effect.die(`gave up waiting for ${what}`)),
-  )
+const event = {
+  project: "/r",
+  agentType: "general",
+  parentSessionId: undefined,
+  prompt: "p",
+  harness: undefined,
+  provider: undefined,
+  model: undefined,
+  machine: { id: "local" },
+  runtime: undefined,
+  parentRuntime: undefined,
+  machines: [],
+  attempts: [],
+  harnesses: [],
+}
 
-describe("plugins: config generations", () => {
-  it.live(
-    "overlapping config edits during slow imports: only the newest config is in force, so a removed builtin never shows through the 10s fallback",
+const until = Effect.fn("until")(function* (what: string, done: () => boolean) {
+  for (let i = 0; i < 250 && !done(); i++) {
+    yield* TestClock.withLive(Effect.sleep("20 millis"))
+    yield* TestClock.adjust("150 millis")
+  }
+  if (!done()) return yield* Effect.die(`gave up waiting for ${what}`)
+})
+
+describe("plugins: builtins follow the latest config", () => {
+  it.effect(
+    "a removal that arrives while user plugins are still importing takes the builtin off at once, so the 10s fallback does not run it",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -48,11 +67,8 @@ describe("plugins: config generations", () => {
         )
         yield* fs.makeDirectory(path.join(dir, "plugins"))
         const config = path.join(dir, "vibest.json")
-        const gates = new Map<string, { promise: Promise<void>; open: () => void }>()
-        for (const name of ["first", "second"]) {
-          let open!: () => void
-          gates.set(name, { promise: new Promise<void>((resolve) => (open = resolve)), open })
-        }
+        let release!: () => void
+        const gate = new Promise<void>((resolve) => (release = resolve))
         const entered = new Set<string>()
         const loader: PluginLoader["Service"] = {
           ...Platform.plugins,
@@ -61,13 +77,13 @@ describe("plugins: config generations", () => {
             const name = /gate:(\w+)/.exec(await Bun.file(entry).text())?.[1]
             if (name !== undefined) {
               entered.add(name)
-              await gates.get(name)?.promise
+              await gate
             }
             return Platform.plugins.load(entry, files)
           },
         }
         yield* fs.writeFileString(config, `{ "plugins": ["-harness-x"] }`)
-        yield* Plugins.layer.pipe(
+        const plugins = yield* Plugins.layer.pipe(
           Layer.provide(Layer.succeed(PluginLoader, loader)),
           Layer.provide(Layer.succeed(Builtins, [builtin])),
           Layer.provide(subscriptionsLayer),
@@ -81,18 +97,22 @@ describe("plugins: config generations", () => {
         assert.deepStrictEqual(events, [])
 
         yield* fs.writeFileString(config, `{ "plugins": [] }`)
-        yield* fs.writeFileString(path.join(dir, "plugins", "first.ts"), plugin("first"))
-        yield* until("the first slow import", () => entered.has("first"))
-        yield* until("the builtin restored", () => events.at(-1) === "setup")
+        yield* fs.writeFileString(path.join(dir, "plugins", "slow.ts"), plugin("slow"))
+        yield* until("the slow import", () => entered.has("slow"))
+        yield* until("the restored builtin", () => events.at(-1) === "setup")
 
         yield* fs.writeFileString(config, `{ "plugins": ["-harness-x"] }`)
-        yield* fs.writeFileString(path.join(dir, "plugins", "second.ts"), plugin("second"))
-        yield* Effect.sleep("300 millis")
-        gates.get("first")?.open()
-        yield* until("the second slow import", () => entered.has("second"))
+        yield* until("the removal", () => events.at(-1) === "close")
 
-        assert.strictEqual(events.at(-1), "close", `the removed builtin runs while the newest config loads: ${events}`)
-        gates.get("second")?.open()
+        const spawning = yield* Effect.forkChild(plugins.start(event))
+        yield* TestClock.adjust("10 seconds")
+        const decision = yield* Fiber.join(spawning)
+        assert.deepStrictEqual(
+          decision.trace.map((t) => t.plugin),
+          ["vibest"],
+          "the fallback ran with the removed builtin off",
+        )
+        release()
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
     { timeout: 20_000 },
   )

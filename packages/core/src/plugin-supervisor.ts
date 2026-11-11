@@ -1,4 +1,4 @@
-import { Duration, Effect, type Latch, Queue, Stream } from "effect"
+import { Duration, Effect, type Latch, Queue, Semaphore, Stream } from "effect"
 
 import { logFailure } from "./engine.ts"
 import { type Candidate, makeSources, makeWatcher, type Operation } from "./plugin-sources.ts"
@@ -57,6 +57,7 @@ export const supervise = Effect.fnUntraced(function* (
   sources: Sources,
 ) {
   const triggers = yield* Queue.sliding<void>(1)
+  const builtinTriggers = yield* Queue.sliding<void>(1)
   const changed = new Set<string>()
   let observed = 0
   host.ready.closeUnsafe()
@@ -65,31 +66,35 @@ export const supervise = Effect.fnUntraced(function* (
     observed++
     host.ready.closeUnsafe()
     Queue.offerUnsafe(triggers, undefined)
+    Queue.offerUnsafe(builtinTriggers, undefined)
   }
-  let active: ReadonlyArray<Candidate> = []
   const watcher = yield* makeWatcher(notify)
   const scope = yield* Effect.scope
-  const activate = (candidates: ReadonlyArray<Candidate>) =>
-    host.activate(candidates).pipe(Effect.tap(() => Effect.sync(() => (active = candidates))))
-  const applyBuiltinRemovals = Effect.gen(function* () {
-    const { operations } = yield* sources.operations
-    yield* activate([...keptBuiltins(builtins, operations), ...active.filter((c) => !isBuiltin(c))])
-  })
-  yield* applyBuiltinRemovals
+  const lock = yield* Semaphore.make(1)
+  let users: ReadonlyArray<Candidate> = []
+  const publish = (next?: ReadonlyArray<Candidate>) =>
+    lock.withPermits(1)(
+      Effect.gen(function* () {
+        if (next !== undefined) users = next
+        const { operations } = yield* sources.operations
+        yield* host.activate([...keptBuiltins(builtins, operations), ...users])
+      }),
+    )
+  yield* publish()
+  yield* Stream.fromQueue(builtinTriggers).pipe(
+    Stream.runForEach(() => publish().pipe(logFailure("plugins: builtin update failed"))),
+    Effect.forkScoped,
+  )
   const reload = Effect.gen(function* () {
-    const generation = observed
     if (changed.size > 0) yield* Effect.log(`plugins: reloading after changes to ${[...changed].join(", ")}`)
     changed.clear()
-    yield* applyBuiltinRemovals
     let resolved = yield* resolve(sources, builtins)
     let rewatched = false
     while (yield* watcher.update(resolved.watched)) {
       rewatched = true
-      yield* applyBuiltinRemovals
       resolved = yield* resolve(sources, builtins)
     }
-    if (observed !== generation) return
-    yield* activate(resolved.candidates)
+    yield* publish(resolved.candidates.filter((c) => !isBuiltin(c)))
     if (rewatched) yield* Effect.sleep(RECHECK).pipe(Effect.andThen(Effect.sync(() => notify())), Effect.forkIn(scope))
   }).pipe(logFailure("plugins: reload failed"))
   yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
