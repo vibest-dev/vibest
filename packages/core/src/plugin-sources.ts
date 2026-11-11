@@ -46,12 +46,7 @@ const ConfigEntry = Schema.Union([
 ])
 const ConfigFile = Schema.Struct({ plugins: Schema.optional(Schema.Array(ConfigEntry)) })
 type ConfigFile = typeof ConfigFile.Type
-const PackageManifest = Schema.fromJsonString(
-  Schema.Struct({
-    name: Schema.String,
-    exports: Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Unknown)]),
-  }),
-)
+const PackageManifest = Schema.fromJsonString(Schema.Struct({ name: Schema.String, exports: Schema.Unknown }))
 const isPlugin = (u: unknown): u is VibestPlugin.Plugin.Plugin =>
   typeof u === "object" &&
   u !== null &&
@@ -72,10 +67,14 @@ const exportTarget = (value: unknown): string | undefined => {
   }
   return undefined
 }
-const exportedEntry = (exports: string | Readonly<Record<string, unknown>>) =>
-  typeof exports !== "string" && Object.keys(exports).some((key) => key.startsWith("."))
-    ? (exportTarget(exports["./server"]) ?? exportTarget(exports["."]))
-    : exportTarget(exports)
+const exportedEntries = (exports: unknown) =>
+  (typeof exports === "object" && exports !== null && Object.keys(exports).some((key) => key.startsWith("."))
+    ? [exportTarget((exports as Record<string, unknown>)["./server"]), exportTarget((exports as Record<string, unknown>)["."])]
+    : [exportTarget(exports)]
+  ).filter((entry) => entry !== undefined)
+const CONVENTIONAL_ENTRIES = ["server", "index"].flatMap((name) =>
+  [".ts", ".js", ".mts", ".mjs"].map((ext) => name + ext),
+)
 
 export type Operation =
   | { readonly type: "add"; readonly target: string; readonly options: Readonly<Record<string, unknown>> }
@@ -134,24 +133,19 @@ export const makeSources = Effect.fnUntraced(function* (
       Effect.map((hex) => hex.slice(0, 12)),
     )
 
-  const packageEntry = (target: string) =>
+  const entryCandidates = (target: string) =>
     fs.readFileString(path.join(target, "package.json")).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(PackageManifest)),
-      Effect.map(({ exports }) => exportedEntry(exports)),
-      Effect.map((entry) => (entry === undefined ? undefined : path.resolve(target, entry))),
-      Effect.orElseSucceed(() => undefined),
+      Effect.map(({ exports }) => exportedEntries(exports)),
+      Effect.orElseSucceed(() => CONVENTIONAL_ENTRIES),
+      Effect.map((entries) => entries.map((entry) => path.resolve(target, entry))),
     )
 
-  const entry = Effect.fn(function* (target: string) {
+  const entry = Effect.fn(function* (target: string, paths: Set<string>) {
     if (!(yield* isDirectory(target))) return target
-    const exported = yield* packageEntry(target)
-    if (exported !== undefined) return exported
-    for (const name of ["server", "index"]) {
-      for (const ext of [".ts", ".js", ".mts", ".mjs"]) {
-        const file = path.join(target, name + ext)
-        if (yield* fs.exists(file)) return file
-      }
-    }
+    const candidates = yield* entryCandidates(target)
+    for (const file of candidates) paths.add(file)
+    for (const file of candidates) if (yield* fs.exists(file)) return file
     return undefined
   })
 
@@ -205,7 +199,7 @@ export const makeSources = Effect.fnUntraced(function* (
         plugin: { error },
       })
       if (!isLocal(target)) return failed("npm plugins are not supported yet")
-      const file = yield* entry(target).pipe(Effect.orElseSucceed(() => undefined))
+      const file = yield* entry(target, paths).pipe(Effect.orElseSucceed(() => undefined))
       if (file !== target) listings.add(target)
       if (file === undefined) {
         yield* warn(`plugin ${target} has no package.json exports, server.* or index.* entry; skipped`)

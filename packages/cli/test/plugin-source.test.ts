@@ -13,17 +13,23 @@ const write = async (file: string, text: string) => {
 
 const folder = async () => fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "vibest-plugin-source-")))
 
-it("a dependency installed after a failed lookup is watched while missing and resolves once installed", async () => {
+it("a dependency is watched in the plugin package until it resolves, even while its folder is half installed", async () => {
   const dir = await folder()
   const entry = path.join(dir, "src", "main.ts")
   const installed = path.join(dir, "node_modules", "e2e-dep")
-  await write(entry, 'import dep from "e2e-dep"\nimport { Effect } from "effect"\nexport default [dep, Effect]\n')
+  await write(path.join(dir, "package.json"), JSON.stringify({ name: "e2e-packaged", exports: "./src/main.ts" }))
+  await write(
+    entry,
+    'import dep from "e2e-dep"\nimport { Effect } from "effect"\nimport { ChildProcess } from "effect/process"\nimport { Plugin } from "@vibest/plugin"\nexport default [dep, Effect, ChildProcess, Plugin]\n',
+  )
   assert.throws(() => Bun.resolveSync("e2e-dep", path.dirname(entry)))
-  const missing = Platform.plugins.graph(entry).unresolved
-  assert.include(missing, installed)
-  assert.notInclude(missing.join("\n"), "effect")
+  assert.deepStrictEqual(Platform.plugins.graph(entry).unresolved.toSorted(), [
+    installed,
+    path.join(dir, "src", "node_modules", "e2e-dep"),
+  ])
 
   await write(path.join(installed, "package.json"), JSON.stringify({ name: "e2e-dep", exports: "./index.js" }))
+  assert.deepStrictEqual(Platform.plugins.graph(entry).unresolved, [installed])
   await write(path.join(installed, "index.js"), "export default 1\n")
   assert.deepStrictEqual(Platform.plugins.graph(entry).unresolved, [])
   assert.strictEqual(Bun.resolveSync("e2e-dep", path.dirname(entry)), path.join(installed, "index.js"))

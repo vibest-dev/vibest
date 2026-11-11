@@ -30,7 +30,7 @@ import * as HerdrBun from "effect-herdr-sdk/bun"
 import { FetchHttpClient } from "effect/http"
 import { SqlClient } from "effect/sql"
 
-import { graph, keyLocalImports, load, watch } from "./plugin-source.ts"
+import { graph, keyLocalImports, load, packageName, watch } from "./plugin-source.ts"
 
 const unrefStdio = Layer.effect(
   Stdio.Stdio,
@@ -143,6 +143,8 @@ const provided: Readonly<Record<string, object>> = {
   ),
 }
 
+const providedPackages: ReadonlySet<string> = new Set(Object.keys(provided).map(packageName))
+
 export const plugins: PluginLoader["Service"] = {
   prepare: Effect.sync(() => {
     if (mapped) return
@@ -160,7 +162,7 @@ export const plugins: PluginLoader["Service"] = {
     })
   }),
   parseJsonc: (text) => Bun.JSONC.parse(text),
-  graph: (entry) => graph(entry, (specifier) => Object.hasOwn(provided, specifier)),
+  graph: (entry) => graph(entry, providedPackages),
   load,
   watch,
 }
