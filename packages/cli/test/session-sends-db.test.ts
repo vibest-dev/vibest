@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
+import { sessionSystemPrompt } from "@vibest/core/system-prompt"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -35,6 +36,43 @@ describe("sends from sessions", () => {
           (yield* db.coordinatorPending(project)).map((r) => [r.kind, r.sender, r.recipient]),
           [["send", A, main]],
         )
+      }),
+    ),
+  )
+
+  it.effect("a send to a sibling writes nothing", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project, main } = yield* setup
+        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: main })
+        const sql = yield* SqlClient.SqlClient
+        assert.isUndefined(yield* db.insertSend(B, "hello", undefined, A))
+        assert.deepStrictEqual(yield* sql`SELECT 1 FROM inbox WHERE kind = 'send' AND sender_session_id = ${A}`, [])
+        assert.isDefined(yield* db.insertSend(B, "from its creator", undefined, main))
+      }),
+    ),
+  )
+
+  it.effect("a session whose parent has ended sends to the entry session, not to that parent", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project, main } = yield* setup
+        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: A })
+        yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
+        assert.isDefined(yield* db.insertSend(main, "to the entry", undefined, B))
+        assert.isUndefined(yield* db.insertSend(A, "to the ended parent", undefined, B))
+        const creator = yield* db.creatorOf(B)
+        assert.deepStrictEqual(creator, { id: main, label: "the main agent" })
+        const prompt = sessionSystemPrompt({
+          id: B,
+          projectDir: "/w",
+          vibest: ["vibest"],
+          preferences: "",
+          memories: "",
+          creator,
+        })
+        assert.include(prompt, `send ${main} --`)
+        assert.notInclude(prompt, `send ${A} --`)
       }),
     ),
   )
@@ -85,7 +123,7 @@ describe("sends from sessions", () => {
       Effect.gen(function* () {
         const { db, project, main } = yield* setup
         yield* db.insertSession(session(X), project, { cwd: "/w", task: "x", parentSessionId: main })
-        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: X })
+        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: A })
         const sent = (yield* db.insertSend(B, "hello", undefined, A))!
         yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
         yield* db.claim([sent.id])

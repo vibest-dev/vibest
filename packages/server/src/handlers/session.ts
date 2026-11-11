@@ -78,7 +78,16 @@ export const make = (
             method: "Send",
             message: `${id} belongs to another coordinator's project; a message goes only to an agent of your own project`,
           })
+        const allowed = Effect.gen(function* () {
+          if (yield* db.maySend(caller.sessionId, id)) return true
+          const creator = yield* db.addressedCreator(caller.sessionId)
+          return yield* new Forbidden({
+            method: "Send",
+            message: `${id} is not the agent that started you, and you did not start it${creator === undefined ? "" : `; you may send to ${creator}`}`,
+          })
+        })
         if (target.agent === "coordinator") {
+          yield* allowed
           const row = yield* db.insertSend(id, p.message, p.request, caller.sessionId)
           if (!row)
             return yield* new NoSuchSession({
@@ -95,6 +104,7 @@ export const make = (
             message: `${id} was archived${entry === undefined ? "" : `; the main agent of this project is ${entry}`}`,
           })
         }
+        yield* allowed
         yield* sessions.send(id, p.message, p.request, caller.sessionId)
         return { id }
       })

@@ -142,10 +142,13 @@ describe("placement: every session is a tab beside the project's main agent, in 
       for (const id of [here.id, there.id])
         yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
       const opened = yield* herdr.callsTo("open")
-      assert.deepStrictEqual(
-        opened.map((c) => c.remote),
-        [undefined, true],
-      )
+      const openOf = (id: string) => opened.find((call) => call.env.VIBEST_SESSION_ID === id)
+      const hereOpen = openOf(here.id)
+      const thereOpen = openOf(there.id)
+      assert.isDefined(hereOpen)
+      assert.isDefined(thereOpen)
+      assert.strictEqual(hereOpen.remote, undefined)
+      assert.strictEqual(thereOpen.remote, true)
     }),
   )
 })
