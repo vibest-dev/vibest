@@ -49,6 +49,9 @@ describe("Db session rows", () => {
           failure: { message: "rate_limit", kind: "limit" },
         })
         assert.isNull((yield* row()).openExecution)
+        const second = (yield* db.startExecution(child, 12)).execution
+        assert.strictEqual((yield* row()).openExecution!.id, second)
+        assert.strictEqual((yield* row()).lastExecution!.id, execution)
         yield* db.endProcess(child, "limited")
         assert.deepStrictEqual(
           (yield* db.attempts(child)).map((a) => [a.harness, a.outcome]),
