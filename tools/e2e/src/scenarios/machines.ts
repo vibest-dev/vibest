@@ -195,7 +195,11 @@ const setup = async (w: World, options: { readonly bSession?: boolean } = {}) =>
       `%done-${marker}%`,
     )?.n ?? 0
   const run = async (marker: string, machine = "mb") => {
-    const printed = (JSON.parse(await okA(["run", "--machine", machine, "pi", "--", ask(marker)])) as { id: string }).id
+    const printed = (
+      JSON.parse(
+        await w.okViaEntry(["run", "--machine", machine, "pi", "--", ask(marker)], { env: aEnv, asIs: true }),
+      ) as { id: string }
+    ).id
     expect(printed.startsWith(`${machine}/`) && /^[0-9a-f-]{36}$/.test(printed.slice(machine.length + 1)), printed)
     return printed.slice(0, machine.length + 9)
   }
@@ -438,7 +442,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         s = await setup(w)
         const failed = async (args: ReadonlyArray<string>, text: string) => {
-          const r = await s!.onA(args)
+          const r = args[0] === "run" ? await w.viaEntry(args, { env: s!.aEnv, asIs: true }) : await s!.onA(args)
           expect(r.code !== 0 && r.stderr.includes(text), `vibest ${args.join(" ")}: ${r.code} ${r.stderr}${r.stdout}`)
         }
         await failed(["run", "--machine", "nosuch", "pi", "--", "x"], `unknown machine "nosuch"`)

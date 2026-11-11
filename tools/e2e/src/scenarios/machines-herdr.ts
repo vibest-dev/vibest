@@ -212,7 +212,9 @@ const checks: ReadonlyArray<Check> = [
         expect(herdr?.here.visible === true && herdr.here.as === label, `machine ls: ${JSON.stringify(machines)}`)
 
         const printed = (
-          JSON.parse(await s.okA(["run", "--machine", "mb", "pi", "--", ask("hseven")])) as { id: string }
+          JSON.parse(
+            await w.okViaEntry(["run", "--machine", "mb", "pi", "--", ask("hseven")], { env: s.aEnv, asIs: true }),
+          ) as { id: string }
         ).id
         const id = printed.slice(3)
         const bRow = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>
@@ -265,8 +267,11 @@ const checks: ReadonlyArray<Check> = [
 
         const kept = (await s.profiles()).map((p) => p.id)
         await s.stopB()
-        const again = (JSON.parse(await s.okA(["run", "--machine", "mb", "pi", "--", ask("hnine")])) as { id: string })
-          .id
+        const again = (
+          JSON.parse(
+            await w.okViaEntry(["run", "--machine", "mb", "pi", "--", ask("hnine")], { env: s.aEnv, asIs: true }),
+          ) as { id: string }
+        ).id
         await until(
           "A's row of the agent after B's herdr session restarted has its terminal",
           async () => {

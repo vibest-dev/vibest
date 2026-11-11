@@ -126,7 +126,7 @@ const checks: ReadonlyArray<Check> = [
         const run = async (args: ReadonlyArray<string>) =>
           (
             JSON.parse(
-              await w.ok(["run", ...args, "--session", session, "--", "Work in the project folder."], {
+              await w.okViaEntry(["run", ...args, "--session", session, "--", "Work in the project folder."], {
                 cwd: repo,
                 timeoutMs: 60_000,
               }),
@@ -207,9 +207,10 @@ const checks: ReadonlyArray<Check> = [
       let vibestOwnWorktree = ""
       try {
         await w.daemon()
+        await w.entry({ cwd: old, session })
         const pi = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-p7", model.url)}`
         const { id } = JSON.parse(
-          await w.ok(["run", "pi", "--session", session, "--env", pi, "--", ask("p7")], {
+          await w.okViaEntry(["run", "pi", "--session", session, "--env", pi, "--", ask("p7")], {
             cwd: old,
             timeoutMs: 90_000,
           }),

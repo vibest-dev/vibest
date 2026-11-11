@@ -42,7 +42,7 @@ export const piProject = async (w: World, name: string) => {
   const runSub = async (task: string, ...flags: Array<string>) =>
     (
       JSON.parse(
-        await w.ok(["run", "pi", "--session", session, "--env", pi, ...flags, "--", ask(task)], {
+        await w.okViaEntry(["run", "pi", "--session", session, "--env", pi, ...flags, "--", ask(task)], {
           cwd: repo,
           env,
           timeoutMs: 90_000,

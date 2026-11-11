@@ -123,17 +123,10 @@ const olderAgents = async (
     bin: link,
     timeoutMs: 60_000,
   })
-  const ran = await vibest([
-    "run",
-    "--runtime",
-    "herdr",
-    "pi",
-    "--session",
-    session,
-    "--env",
-    `PI_CODING_AGENT_DIR=${agentDir}`,
-    ask("zero"),
-  ])
+  const ran = await w.viaEntry(
+    ["run", "--runtime", "herdr", "pi", "--session", session, "--env", `PI_CODING_AGENT_DIR=${agentDir}`, ask("zero")],
+    { cwd: repo, env, bin: link, timeoutMs: 120_000 },
+  )
   expect(ran.code === 0, `vibest run exited ${ran.code}: ${out(ran)}`)
   const sub = (JSON.parse(ran.stdout) as { id: string }).id
   await until(

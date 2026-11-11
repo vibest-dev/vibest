@@ -132,7 +132,10 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
   {
     id: "G4",
     title: "a refusing agent.start.before blocks run with its reason, before any worktree",
+    entry: true,
     run: async (w) => {
+      const sessions = () => w.json<{ sessions: Array<unknown> }>(["ls", "--all"]).then((l) => l.sessions.length)
+      const sessionsBefore = await sessions()
       await write(
         path.join(w.vibestHome, "plugins", "refuse.ts"),
         plugin("refuse", `() => Effect.fail(new AgentRefused({ reason: "e2e says no" }))`),
@@ -142,12 +145,11 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       )
       const worktrees = path.join(w.vibestHome, "worktrees")
       const before = await fs.readdir(worktrees).catch(() => [])
-      const r = await w.vibest(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], { timeoutMs: 60_000 })
+      const r = await w.viaEntry(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], { timeoutMs: 60_000 })
       expect(r.code !== 0, `run exited 0: ${r.stdout}`)
       expect(r.stderr.includes("e2e says no"), `reason not shown: ${r.stderr}`)
       expect((await fs.readdir(worktrees).catch(() => [])).length === before.length, "a worktree was created")
-      const { length } = await w.json<{ sessions: Array<unknown> }>(["ls", "--all"]).then((l) => l.sessions)
-      expect(length === 0, "a session row was written")
+      expect((await sessions()) === sessionsBefore, "a session row was written")
       expect(
         (await list(w)).some((p) => p.id === "refuse" && p.refused === 1),
         "the refusal was not counted",
@@ -160,7 +162,7 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       await until("the throwing plugin active", async () =>
         (await list(w)).some((p) => p.id === "throw" && p.status === "active"),
       )
-      const thrown = await w.vibest(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], {
+      const thrown = await w.viaEntry(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], {
         timeoutMs: 60_000,
       })
       expect(thrown.code !== 0, `run exited 0: ${thrown.stdout}`)
@@ -178,7 +180,7 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       await until("the mutating plugin active", async () =>
         (await list(w)).some((p) => p.id === "mutate" && p.status === "active"),
       )
-      const mutated = await w.vibest(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], {
+      const mutated = await w.viaEntry(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], {
         timeoutMs: 60_000,
       })
       expect(mutated.code !== 0, `run exited 0: ${mutated.stdout}`)
