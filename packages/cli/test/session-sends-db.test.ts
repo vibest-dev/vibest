@@ -39,6 +39,19 @@ describe("sends from sessions", () => {
     ),
   )
 
+  it.effect("a send to a sibling writes nothing", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project, main } = yield* setup
+        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: main })
+        const sql = yield* SqlClient.SqlClient
+        assert.isUndefined(yield* db.insertSend(B, "hello", undefined, A))
+        assert.deepStrictEqual(yield* sql`SELECT 1 FROM inbox WHERE kind = 'send' AND sender_session_id = ${A}`, [])
+        assert.isDefined(yield* db.insertSend(B, "from its creator", undefined, main))
+      }),
+    ),
+  )
+
   it.effect("a send dropped because the main agent is gone ends with one notice to its sender", () =>
     memory(
       Effect.gen(function* () {
@@ -85,7 +98,7 @@ describe("sends from sessions", () => {
       Effect.gen(function* () {
         const { db, project, main } = yield* setup
         yield* db.insertSession(session(X), project, { cwd: "/w", task: "x", parentSessionId: main })
-        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: X })
+        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: A })
         const sent = (yield* db.insertSend(B, "hello", undefined, A))!
         yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
         yield* db.claim([sent.id])

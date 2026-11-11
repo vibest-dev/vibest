@@ -42,6 +42,17 @@ export const inboxMethods = (store: Store) => {
     insertSend: (recipient: string, message: string, request?: string, sender?: string) =>
       tx(
         Effect.gen(function* () {
+          if (sender !== undefined) {
+            const creator = (id: string) =>
+              sql<{ creator: string | null; origin: string | null; entry: string | null }>`SELECT
+                  s.parent_session_id AS creator, s.origin_session AS origin, p.entry_session_id AS entry
+                FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${id}`.pipe(
+                Effect.map(([row]) => row?.creator ?? row?.origin ?? row?.entry),
+              )
+            const from = yield* creator(sender)
+            const to = yield* creator(recipient)
+            if (from !== recipient && to !== sender) return undefined
+          }
           const before = request === undefined ? undefined : yield* queuedBy(recipient, request)
           if (before !== undefined) return (yield* inboxIn([before]))[0]
           if (!(yield* liveRecipient(recipient))) return undefined

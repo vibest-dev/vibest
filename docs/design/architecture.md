@@ -95,8 +95,7 @@ subagents. Everything else in this list is planned; each item says what runs tod
   is kept and read with `vibest inbox`. Today a main agent is never typed into: only a harness that polls (Claude)
   or subscribes (Pi) can be one, and a subagent-only harness (Cursor) has no inbox mode. Subagents are typed into,
   and a row with no session to go to is dropped.
-- **Delivery is by recipient.** `vibest send <id>` from the user, the main agent or any session reaches any unfinished
-  session of the same project, the main agent included. A turn end writes only `turn.ended`; the reply text stays in
+- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the main agent included. A session reaches only the agent that started it, and sessions it started. A turn end writes only `turn.ended`; the reply text stays in
   `turn.reported` and is read as `turn.answer` with `vibest result`. vibest's own notices say only what an agent could
   not say itself, and go to its creator (its living parent, else the entry session, else `origin_session` through the
   outbox): its harness exited, its turn ended in an error, it never started, it waits on a permission. An
