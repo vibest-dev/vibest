@@ -79,9 +79,7 @@ export const make = (
             message: `${id} belongs to another coordinator's project; a message goes only to an agent of your own project`,
           })
         const allowed = Effect.gen(function* () {
-          const from = yield* db.creatorOf(caller.sessionId)
-          const to = yield* db.creatorOf(id)
-          if (from?.id === id || to?.id === caller.sessionId) return true
+          if (yield* db.maySend(caller.sessionId, id)) return true
           return yield* new Forbidden({
             method: "Send",
             message: `${id} is not the agent that started you, and you did not start it`,

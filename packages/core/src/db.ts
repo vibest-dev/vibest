@@ -88,6 +88,7 @@ const make = Effect.gen(function* () {
     clearMainAt,
     unusedId,
     conversationOf,
+    addressedCreator,
   } = store
   const remote = remoteQueries(store)
   const canResumeConversation = (sessionId: string, harnessSessionId: string) =>
@@ -232,6 +233,13 @@ const make = Effect.gen(function* () {
         Effect.map((rows) => rows[0]?.id),
         Effect.orDie,
       ),
+
+    maySend: (sender: string, recipient: string) =>
+      Effect.gen(function* () {
+        const from = yield* addressedCreator(sender)
+        const to = yield* addressedCreator(recipient)
+        return from === recipient || to === sender
+      }),
 
     creatorOf: (id: string) =>
       sql<{

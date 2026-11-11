@@ -52,6 +52,18 @@ describe("sends from sessions", () => {
     ),
   )
 
+  it.effect("a session whose parent has ended sends to the entry session, not to that parent", () =>
+    memory(
+      Effect.gen(function* () {
+        const { db, project, main } = yield* setup
+        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: A })
+        yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
+        assert.isDefined(yield* db.insertSend(main, "to the entry", undefined, B))
+        assert.isUndefined(yield* db.insertSend(A, "to the ended parent", undefined, B))
+      }),
+    ),
+  )
+
   it.effect("a send dropped because the main agent is gone ends with one notice to its sender", () =>
     memory(
       Effect.gen(function* () {

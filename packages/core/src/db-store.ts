@@ -604,9 +604,19 @@ export const makeStore = Effect.gen(function* () {
       })),
     )
 
+  const addressedCreator = (id: string) =>
+    sql<{ id: string | null }>`SELECT
+        CASE WHEN s.origin_peer IS NOT NULL THEN s.origin_session
+          WHEN r.id IS NOT NULL AND r.ended_at IS NULL THEN r.id
+          ELSE p.entry_session_id END AS id
+      FROM session s JOIN project p ON p.id = s.project_id
+      LEFT JOIN session r ON r.id = s.parent_session_id
+      WHERE s.id = ${id}`.pipe(Effect.map((rows) => rows[0]?.id ?? undefined))
+
   return {
     sql,
     reads,
+    addressedCreator,
     now,
     statuses,
     integrations,
