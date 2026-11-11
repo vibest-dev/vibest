@@ -1068,7 +1068,10 @@ id a harness made for a coordinator; the last report wins). Of the rest:
 - A restart in place types the main agent's harness command into its shell with the identity variables as an env prefix, so the shell does not keep them.
   `Session.Ready` is the integration saying the harness takes input, with the harness's own `pid`; vibestd hands over a
   first or restarted execution only after it, and answers with the session's current process id, which the
-  integration sends with its later reports.
+  integration sends with its later reports. A Ready is taken only from the current process: one that names an
+  earlier process counts only when that process ran in the same terminal and the pid is new (a harness an in-place
+  restart or move ran with the terminal's first environment); a pid an earlier process reported is a late report
+  from it and changes nothing.
 - `Agents.Outdated` lists live agents whose integration is not this vibestd's (`blocked`: why one cannot restart in
   place). `Agents.Restart` returns at once and, once process `after` exited, restarts them in place: subagents
   first (at most 4 at a time), then main agents; SIGTERM to the harness alone, then the runtime runs it again on

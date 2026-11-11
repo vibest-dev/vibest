@@ -91,6 +91,18 @@ const make = Effect.gen(function* () {
     archiveOnIdle,
   } = store
   const remote = remoteQueries(store)
+  const fromCurrentHarness = (sessionId: string, current: number, reporter?: number, pid?: number) =>
+    Effect.gen(function* () {
+      const processes = yield* sql<{
+        id: number
+        pid: number | null
+        terminal: string | null
+      }>`SELECT id, pid, terminal FROM process WHERE session_id = ${sessionId}`
+      if (pid !== undefined && processes.some((p) => p.id !== current && p.pid === pid)) return false
+      if (reporter === undefined || reporter === current) return true
+      const terminalOf = (id: number) => processes.find((p) => p.id === id)?.terminal ?? null
+      return pid !== undefined && terminalOf(reporter) !== null && terminalOf(reporter) === terminalOf(current)
+    })
   const canResumeConversation = (sessionId: string, harnessSessionId: string) =>
     sql<{ ok: number }>`SELECT (
       EXISTS (
@@ -542,18 +554,21 @@ const make = Effect.gen(function* () {
         readonly pid?: number | null
         readonly ready?: number | null
         readonly integration?: Integration
+        readonly reporter?: number | undefined
       },
     ) =>
       tx(
         Effect.gen(function* () {
           const ready = typeof patch.ready === "number"
-          if (!ready && typeof patch.pid !== "number") return
+          if (!ready && typeof patch.pid !== "number") return undefined
           const current = yield* currentProcess(id)
-          if (current === undefined) return
+          if (current === undefined) return undefined
+          if (ready && !(yield* fromCurrentHarness(id, current.id, patch.reporter, patch.pid ?? undefined)))
+            return undefined
           const integration = patch.integration ?? integrations.get(id)
           if (!ready) {
             yield* emit(ProcessPid, { sessionId: id, data: { process: current.id, pid: patch.pid as number } })
-            return
+            return current.id
           }
           if (integration !== undefined) integrations.set(id, integration)
           yield* emit(ProcessReady, {
@@ -565,6 +580,7 @@ const make = Effect.gen(function* () {
               ...(integration === undefined ? {} : { integration }),
             },
           })
+          return current.id
         }),
       ).pipe(Effect.orDie),
 

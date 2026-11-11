@@ -97,6 +97,7 @@ export const make = Effect.gen(function* () {
           who.id,
           pid,
           version === undefined ? undefined : { version, protocol: Number.isFinite(protocol) ? protocol : 0 },
+          who.process,
         )
         return ok(current === undefined ? undefined : { process: current })
       }

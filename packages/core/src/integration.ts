@@ -55,13 +55,14 @@ const make = Effect.gen(function* () {
     id: string,
     pid: number | undefined,
     reported?: { readonly version: string; readonly protocol: number },
+    reporter?: number,
   ) {
-    yield* db.patchLive(id, {
+    return yield* db.patchLive(id, {
       ready: yield* Clock.currentTimeMillis,
+      reporter,
       ...(pid === undefined ? {} : { pid }),
       ...(reported === undefined ? {} : { integration: reported }),
     })
-    return yield* db.currentProcessId(id)
   })
 
   const guard = (agent: string, raw: string, projectId: string | undefined) =>

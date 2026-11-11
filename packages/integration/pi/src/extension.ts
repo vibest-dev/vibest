@@ -204,11 +204,19 @@ const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role 
       yield* pi.handle("session_start", (_e, ctx) =>
         ctx.mode !== "tui"
           ? Effect.void
-          : withVibest(
-              { _tag: "session", sessionId, pluginVersion: VERSION },
-              (client) => client["Session.Ready"]({ id: sessionId, pid: process.pid }),
-              { start: false },
-            ).pipe(
+          : Ref.get(processId).pipe(
+              Effect.flatMap((current) =>
+                withVibest(
+                  {
+                    _tag: "session",
+                    sessionId,
+                    pluginVersion: VERSION,
+                    ...(current === undefined ? {} : { process: current }),
+                  },
+                  (client) => client["Session.Ready"]({ id: sessionId, pid: process.pid }),
+                  { start: false },
+                ),
+              ),
               Effect.tap((answer) =>
                 answer.process === undefined ? Effect.void : Ref.set(processId, String(answer.process)),
               ),

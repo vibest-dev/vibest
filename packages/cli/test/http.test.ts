@@ -316,6 +316,28 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
+    "a late Ready from the process a restart replaced changes nothing; the restarted harness's Ready is taken",
+    Effect.gen(function* () {
+      const { call, db, worker } = yield* project
+      yield* until(db.getSession(worker), (s) => s?.startedAt != null)
+      const first = (yield* db.currentProcessId(worker))!
+      const ready = (process: number, pid: number) =>
+        call("/session/ready", { sessionId: worker, process: String(process) }, JSON.stringify({ pid }))
+      assert.deepStrictEqual((yield* ready(first, 111)).body, { process: first })
+      yield* db.restartProcess(worker)
+      const second = (yield* db.currentProcessId(worker))!
+      assert.notStrictEqual(second, first)
+      const late = yield* ready(first, 111)
+      assert.strictEqual(late.status, 204)
+      assert.isUndefined(yield* db.readyAt(worker))
+      assert.isUndefined((yield* db.getSession(worker))!.metadata.pid)
+      assert.deepStrictEqual((yield* ready(first, 222)).body, { process: second })
+      assert.isNumber(yield* db.readyAt(worker))
+      assert.strictEqual((yield* db.getSession(worker))!.metadata.pid, 222)
+    }),
+  )
+
+  test(
     "execution-end, prompt and guard hooks: vibestd keeps the execution start and end",
     Effect.gen(function* () {
       const { call, db, worker, main } = yield* project
