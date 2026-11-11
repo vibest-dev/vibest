@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { note } from "../../../reap.ts"
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, piDir } from "../fake-model.ts"
 import { agentName, binary, expect, readDb, redact, row, Skip, until, writeEvidence, type World } from "../world.ts"
@@ -56,6 +57,7 @@ const setup = async (w: World, evidence: string) => {
     })
     server.unref()
     servers.push(server)
+    note(server.pid, `herdr server --session ${sessions[side]}`, w.root)
     let socket = ""
     await until(
       `herdr session ${sessions[side]}`,
@@ -150,7 +152,7 @@ const setup = async (w: World, evidence: string) => {
       await herdrOn(side)("session", "stop", sessions[side])
       await herdrOn(side)("session", "delete", sessions[side])
     }
-    for (const server of servers) if (server.exitCode === null) server.kill()
+    for (const server of servers) if (server.exitCode === null) server.kill("SIGKILL")
   }
   const herdrB = herdrOn("b")
   const serverB = async (name: string) => {

@@ -67,11 +67,10 @@ Two sends from the same session that are waiting together reach the main agent a
 `vibest send` from a session to the main agent of its project queues one message from that session; the main agent gets
 it as an `<agent-message>` naming the session, once, whichever way its harness takes messages (a Claude main agent polls for it, a Pi main agent is pushed it).
 
-## S46. A session sends to a sibling
+## S46. A session cannot send to a sibling
 
-`vibest send` from a session to another session of the same project is typed into that session once it is idle, as
-the input of its next turn; it reads as an `<agent-message>` naming the sender, unless the sender gave the session its
-task.
+`vibest send` from a session to another session of the same project is refused when that session is not the one that
+started it and not one it started. Nothing is queued.
 
 ## S47. A send stays inside its project
 

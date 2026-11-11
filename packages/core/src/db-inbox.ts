@@ -10,6 +10,7 @@ export const inboxMethods = (store: Store) => {
   const {
     sql,
     reads,
+    addressedCreator,
     now,
     tx,
     findSession,
@@ -48,6 +49,11 @@ export const inboxMethods = (store: Store) => {
     insertSend: (recipient: string, message: string, request?: string, sender?: string) =>
       tx(
         Effect.gen(function* () {
+          if (sender !== undefined) {
+            const from = yield* addressedCreator(sender)
+            const to = yield* addressedCreator(recipient)
+            if (from !== recipient && to !== sender) return undefined
+          }
           const before = request === undefined ? undefined : yield* queuedBy(recipient, request)
           if (before !== undefined) return (yield* inboxIn([before]))[0]
           if (!(yield* liveRecipient(recipient))) return undefined

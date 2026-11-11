@@ -9,6 +9,8 @@ import { Effect } from "effect"
 
 import * as Platform from "#platform"
 
+import { note } from "../../../tools/reap.ts"
+
 const pkg = path.join(import.meta.dirname, "..")
 const binary = path.join(pkg, "dist", "vibest")
 
@@ -54,6 +56,7 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
     stdout: "ignore",
     stderr: Bun.file(log),
   })
+  note(daemon.pid, `${binary} daemon --foreground`)
   try {
     for (const deadline = Date.now() + 10_000; !(await rpc(probe(socket))); await Bun.sleep(100)) {
       if (daemon.exitCode !== null || Date.now() > deadline)
@@ -69,7 +72,9 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
       ),
     )
   } finally {
-    daemon.kill()
+    if (daemon.exitCode === null) daemon.kill()
+    for (const deadline = Date.now() + 2_000; daemon.exitCode === null && Date.now() < deadline;) await Bun.sleep(50)
+    if (daemon.exitCode === null) daemon.kill("SIGKILL")
     await daemon.exited
   }
 }
@@ -120,7 +125,7 @@ const listUntilAtMost15s = async (
 }
 
 it(
-  "P16/P17: the running binary reloads changed async imports, loads a plugin added under a symlinked tmpdir, keeps the last good one while broken or hung (import gives up after 5s), sets it up again for each failed revision, recovers",
+  "P16/P17: the running binary reloads changed async imports, loads a plugin added under a symlinked tmpdir, keeps running the last good one while broken or hung (import gives up after 5s) without setting it up again, recovers",
   { timeout: 90_000 },
   async () => {
     build()
@@ -190,7 +195,7 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
           "live",
         )!
         assert.strictEqual(fixed!.status, "active")
-        assert.deepStrictEqual(await log(), ["v1", "v2", "v2", "v2", "v3"])
+        assert.deepStrictEqual(await log(), ["v1", "v2", "v3"])
       })
     } finally {
       await fs.rm(home, { recursive: true, force: true })

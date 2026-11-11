@@ -37,7 +37,6 @@ import * as PlatformNode from "./effect/platform.ts"
 import * as Engine from "./engine.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox } from "./inbox.ts"
-import { keyedLock } from "./keyed-lock.ts"
 import { coordinatorCommand, restartArgv } from "./launch.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import { Layout, VibestCommand } from "./paths.ts"
@@ -63,6 +62,7 @@ import {
   type Terminal,
 } from "./runtimes.ts"
 import type { Platform, Tracked } from "./session-types.ts"
+import { SessionLocks } from "./session/locks.ts"
 import { sessionSpawn, type SpawnInput, type Spawned } from "./spawn.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
@@ -101,6 +101,7 @@ const SESSION_DEPS = [
   Processes.node,
   Restarting.node,
   Runtimes.node,
+  SessionLocks.node,
   Subscriptions.node,
   PlatformNode.childProcessSpawner,
   PlatformNode.crypto,
@@ -196,7 +197,7 @@ export class Sessions extends Context.Service<
             onNone: () => newTracked.pipe(Effect.map((r) => [r, HashMap.set(map, id, r)] as const)),
           }),
         )
-      const locks = keyedLock<string>()
+      const locks = yield* SessionLocks
       const stop = (id: string) =>
         SynchronizedRef.modifyEffect(tracked, (map) =>
           Effect.gen(function* () {
@@ -220,10 +221,7 @@ export class Sessions extends Context.Service<
             }),
           ),
         )
-      const locked =
-        (id: string, settlement = false) =>
-        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-          drain.work(`session ${id}`, locks.withLock(id)(effect), settlement)
+      const locked = locks.locked
       const logged = Engine.logFailure
 
       const notice = (session: SessionRow, message: string) => inbox.enqueue({ sessionId: session.id, message })

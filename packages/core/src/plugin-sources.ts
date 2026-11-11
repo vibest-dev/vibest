@@ -46,6 +46,7 @@ const ConfigEntry = Schema.Union([
 ])
 const ConfigFile = Schema.Struct({ plugins: Schema.optional(Schema.Array(ConfigEntry)) })
 type ConfigFile = typeof ConfigFile.Type
+const PackageManifest = Schema.fromJsonString(Schema.Struct({ name: Schema.String, exports: Schema.Unknown }))
 const isPlugin = (u: unknown): u is VibestPlugin.Plugin.Plugin =>
   typeof u === "object" &&
   u !== null &&
@@ -55,6 +56,28 @@ const isPlugin = (u: unknown): u is VibestPlugin.Plugin.Plugin =>
 const PluginModule = Schema.Struct({
   default: Schema.declare(isPlugin),
 })
+
+const EXPORT_CONDITIONS = new Set(["bun", "import", "default"])
+const exportTarget = (value: unknown): string | undefined => {
+  if (typeof value === "string") return value
+  if (typeof value !== "object" || value === null) return undefined
+  for (const [condition, target] of Object.entries(value)) {
+    const found = EXPORT_CONDITIONS.has(condition) ? exportTarget(target) : undefined
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+const exportedEntries = (exports: unknown) =>
+  (typeof exports === "object" && exports !== null && Object.keys(exports).some((key) => key.startsWith("."))
+    ? [
+        exportTarget((exports as Record<string, unknown>)["./server"]),
+        exportTarget((exports as Record<string, unknown>)["."]),
+      ]
+    : [exportTarget(exports)]
+  ).filter((entry) => entry !== undefined)
+const CONVENTIONAL_ENTRIES = ["server", "index"].flatMap((name) =>
+  [".ts", ".js", ".mts", ".mjs"].map((ext) => name + ext),
+)
 
 export type Operation =
   | { readonly type: "add"; readonly target: string; readonly options: Readonly<Record<string, unknown>> }
@@ -113,14 +136,19 @@ export const makeSources = Effect.fnUntraced(function* (
       Effect.map((hex) => hex.slice(0, 12)),
     )
 
-  const entry = Effect.fn(function* (target: string) {
+  const entryCandidates = (target: string) =>
+    fs.readFileString(path.join(target, "package.json")).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(PackageManifest)),
+      Effect.map(({ exports }) => exportedEntries(exports)),
+      Effect.orElseSucceed(() => CONVENTIONAL_ENTRIES),
+      Effect.map((entries) => entries.map((entry) => path.resolve(target, entry))),
+    )
+
+  const entry = Effect.fn(function* (target: string, paths: Set<string>) {
     if (!(yield* isDirectory(target))) return target
-    for (const name of ["server", "index"]) {
-      for (const ext of [".ts", ".js", ".mts", ".mjs"]) {
-        const file = path.join(target, name + ext)
-        if (yield* fs.exists(file)) return file
-      }
-    }
+    const candidates = yield* entryCandidates(target)
+    for (const file of candidates) paths.add(file)
+    for (const file of candidates) if (yield* fs.exists(file)) return file
     return undefined
   })
 
@@ -174,10 +202,10 @@ export const makeSources = Effect.fnUntraced(function* (
         plugin: { error },
       })
       if (!isLocal(target)) return failed("npm plugins are not supported yet")
-      const file = yield* entry(target).pipe(Effect.orElseSucceed(() => undefined))
+      const file = yield* entry(target, paths).pipe(Effect.orElseSucceed(() => undefined))
       if (file !== target) listings.add(target)
       if (file === undefined) {
-        yield* warn(`plugin ${target} has no server.* or index.* entry; skipped`)
+        yield* warn(`plugin ${target} has no package.json exports, server.* or index.* entry; skipped`)
         return undefined
       }
       const { graph, revision, plugin } = yield* importEntry(file)

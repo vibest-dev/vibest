@@ -39,6 +39,21 @@ const lines = (file: string) =>
     () => 0,
   )
 
+const counting = (id: string, file: string) => `import fs from "node:fs"
+import { Plugin } from "@vibest/plugin"
+import { Effect } from "effect"
+export default Plugin.define({
+  id: ${JSON.stringify(id)},
+  effect: (ctx) => Effect.sync(() => fs.appendFileSync(${JSON.stringify(file)}, JSON.stringify(ctx.options) + "\\n")),
+})
+`
+
+const setups = (file: string) =>
+  fs.readFile(file, "utf8").then(
+    (text) => text.split("\n").filter(Boolean),
+    () => [],
+  )
+
 const write = async (file: string, text: string) => {
   await fs.mkdir(path.dirname(file), { recursive: true })
   await fs.writeFile(`${file}.tmp`, text)
@@ -147,6 +162,24 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
         "the crash was not counted",
       )
       await fs.rm(path.join(w.vibestHome, "plugins", "throw.ts"))
+      await write(
+        path.join(w.vibestHome, "plugins", "mutate.ts"),
+        plugin("mutate", `(e) => Effect.sync(() => { e.harness = "pi" })`),
+      )
+      await until("the mutating plugin active", async () =>
+        (await list(w)).some((p) => p.id === "mutate" && p.status === "active"),
+      )
+      const mutated = await w.vibest(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], {
+        timeoutMs: 60_000,
+      })
+      expect(mutated.code !== 0, `run exited 0: ${mutated.stdout}`)
+      expect(mutated.stderr.includes("plugin mutate crashed: "), `crash not shown: ${mutated.stderr}`)
+      expect((await fs.readdir(worktrees).catch(() => [])).length === before.length, "a worktree was created")
+      expect(
+        (await list(w)).some((p) => p.id === "mutate" && p.crashed === 1),
+        "the crash was not counted",
+      )
+      await fs.rm(path.join(w.vibestHome, "plugins", "mutate.ts"))
     },
   },
   {
@@ -173,6 +206,86 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
       await until("b retried after it changed", async () => (await lines(counter)) === 2)
       await fs.rm(first)
       await fs.rm(second)
+    },
+  },
+  {
+    id: "G8",
+    title: "a plugin edited into one that fails to import keeps running its last revision; nothing is set up again",
+    run: async (w) => {
+      const keep = path.join(w.root, "keep.log")
+      const after = path.join(w.root, "after.log")
+      const source = path.join(w.vibestHome, "plugins", "a-keep.ts")
+      await write(source, counting("keep", keep))
+      await write(path.join(w.vibestHome, "plugins", "b-after.ts"), counting("after", after))
+      await until("both plugins active", async () => {
+        const all = await list(w)
+        return ["keep", "after"].every((id) => all.some((p) => p.id === id && p.status === "active"))
+      })
+      await write(source, `throw new Error("broken on purpose")\n`)
+      await until("the failed revision reported beside the running one", async () =>
+        (await list(w)).some(
+          (p) => p.id === "keep" && p.status === "active" && (p.error ?? "").includes("broken on purpose"),
+        ),
+      )
+      const all = await list(w)
+      expect(
+        all.some((p) => p.id === "after" && p.status === "active"),
+        `after is not active: ${JSON.stringify(all)}`,
+      )
+      expect((await lines(keep)) === 1, `keep was set up again: ${await lines(keep)} setups`)
+      expect((await lines(after)) === 1, `after was set up again: ${await lines(after)} setups`)
+    },
+  },
+  {
+    id: "G9",
+    title: "a plugin folder found in plugins and named in vibest.json is one plugin, with the configured options",
+    run: async (w) => {
+      const seen = path.join(w.root, "foo.log")
+      await write(path.join(w.vibestHome, "plugins", "foo", "index.ts"), counting("foo", seen))
+      await write(
+        path.join(w.vibestHome, "vibest.json"),
+        JSON.stringify({ plugins: [{ package: "./plugins/foo", options: { tag: "e2e" } }] }),
+      )
+      await until("foo active with the configured options", async () => {
+        const active = (await list(w)).some((p) => p.id === "foo" && p.status === "active")
+        return active && (await setups(seen)).at(-1) === JSON.stringify({ tag: "e2e" })
+      })
+      const foo = (await list(w)).filter((p) => p.source.includes(`${path.sep}foo${path.sep}`))
+      expect(foo.length === 1, `foo is listed ${foo.length} times: ${JSON.stringify(foo)}`)
+    },
+  },
+  {
+    id: "G10",
+    title:
+      "a plugin folder loads the existing package.json exports entry (./server, else .), never an unexported index.ts, and recovers once its missing dependency is installed",
+    run: async (w) => {
+      const folder = path.join(w.vibestHome, "plugins", "packaged")
+      await write(
+        path.join(folder, "package.json"),
+        JSON.stringify({
+          name: "e2e-packaged",
+          type: "module",
+          exports: { "./server": "./dist/server.js", ".": { import: "./src/main.ts" } },
+        }),
+      )
+      await write(path.join(folder, "index.ts"), plugin("unexported"))
+      await write(
+        path.join(folder, "src", "main.ts"),
+        `import id from "e2e-dep"\n${plugin("packaged").replace('id: "packaged"', "id")}`,
+      )
+      await until("the missing dependency reported", async () =>
+        (await list(w)).some(
+          (p) => p.status === "failed" && p.source.endsWith("main.ts") && (p.error ?? "").includes("e2e-dep"),
+        ),
+      )
+      const dependency = path.join(folder, "node_modules", "e2e-dep")
+      await write(path.join(dependency, "package.json"), JSON.stringify({ name: "e2e-dep", exports: "./index.js" }))
+      await write(path.join(dependency, "index.js"), `export default "packaged"\n`)
+      await until("the plugin active after the install", async () =>
+        (await list(w)).some((p) => p.id === "packaged" && p.status === "active" && p.source.endsWith("main.ts")),
+      )
+      expect(!(await list(w)).some((p) => p.id === "unexported"), "the folder's unexported index.ts was loaded")
+      await fs.rm(folder, { recursive: true })
     },
   },
 ]

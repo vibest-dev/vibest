@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
-import type { MachineEvent } from "@vibest/plugin"
+import type { MachineEvent, MachineNote } from "@vibest/plugin"
 import { type Cli, link, locate, type Profile } from "@vibest/runtime-herdr/machines"
-import { connect, remove } from "@vibest/runtime-herdr/mirror"
+import * as Mirror from "@vibest/runtime-herdr/mirror"
 import { HerdrPool } from "@vibest/runtime-herdr/pool"
 import { agentName, fromPool, parseTerminal } from "@vibest/runtime-herdr/terminal-runtime"
 import { RuntimeUnreachable } from "@vibest/schema/session"
@@ -59,7 +59,14 @@ const profile = (extra: Partial<Profile> = {}): Profile => ({
   ...extra,
 })
 
-const event = (link?: Record<string, string>, extra: Partial<MachineEvent> = {}): MachineEvent => ({
+type Noted = MachineEvent & { readonly notes: Array<MachineNote> }
+
+const noting = (hook: typeof Mirror.connect) => (cli: Cli, event: Noted) =>
+  hook(cli, event).pipe(Effect.map((notes) => void event.notes.push(...notes)))
+const connect = noting(Mirror.connect)
+const remove = noting(Mirror.remove)
+
+const event = (link?: Record<string, string>, extra: Partial<Noted> = {}): Noted => ({
   name: "racknerd",
   target: "b-host",
   vibestd: "v",

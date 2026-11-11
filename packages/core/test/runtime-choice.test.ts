@@ -95,12 +95,7 @@ describe("subagent runtime", () => {
     pluginsHost([
       Plugin.define({
         id: "pick",
-        effect: (ctx) =>
-          ctx.agent.hook("start.before", (event) =>
-            Effect.sync(() => {
-              event.runtime = "herdr"
-            }),
-          ),
+        effect: (ctx) => ctx.agent.hook("start.before", () => Effect.succeed({ runtime: "herdr" })),
       }),
     ]),
   )

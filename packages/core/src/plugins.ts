@@ -1,5 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin"
-import { AgentRefused, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
+import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 import { Cause, Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
 
 import { timeoutWithoutWaiting } from "./bounded.ts"
@@ -29,7 +29,6 @@ type Short = keyof VibestPlugin.AgentHooks
 type AgentHook = `agent.${Short}`
 
 export type MachineHook = keyof VibestPlugin.MachineHooks
-export type MachineEventInput = Omit<VibestPlugin.MachineEvent, "notes">
 export interface PluginNote extends VibestPlugin.MachineNote {
   readonly plugin?: string
 }
@@ -47,7 +46,7 @@ export const describeSpawn = (s: {
 
 export type StartInput = Omit<VibestPlugin.AgentStartBefore, "subscriptions">
 
-export type FailInput = Omit<VibestPlugin.AgentFail, "subscriptions" | "move">
+export type FailInput = Omit<VibestPlugin.AgentFail, "subscriptions">
 
 export interface SpawnDecision extends Routing {
   readonly prompt: string
@@ -71,11 +70,13 @@ type Running = {
   readonly hooks: Hooks.Hooks
   broken: string | undefined
 }
+type ImportFailure = { readonly revision: string; readonly error: string }
 type Slot = {
   readonly candidate: Candidate
   readonly running: Running | undefined
   readonly failure: string | undefined
   readonly rollback?: string
+  readonly importFailed?: ImportFailure | undefined
   readonly setupFailed: boolean
   readonly loadedAt: number
   readonly stats: Stats
@@ -86,7 +87,8 @@ const keyOf = (c: Candidate) => JSON.stringify([c.source, c.revision, c.options]
 const info = (slot: Slot): PluginInfo => {
   const { candidate } = slot
   const running = slot.running?.broken === undefined ? slot.running : undefined
-  const failure = slot.running?.broken ?? slot.failure
+  const failure = slot.running?.broken ?? slot.importFailed?.error ?? slot.failure
+  const failedRevision = slot.importFailed?.revision ?? candidate.revision
   const shown = slot.running?.candidate ?? candidate
   return {
     id: slot.running?.candidate.plugin.id ?? ("error" in candidate.plugin ? candidate.source : candidate.plugin.id),
@@ -98,26 +100,46 @@ const info = (slot: Slot): PluginInfo => {
       ? {}
       : {
           error: running
-            ? `revision ${candidate.revision} failed, still running ${shown.revision}: ${failure}`
+            ? `revision ${failedRevision} failed, still running ${shown.revision}: ${failure}`
             : [failure, slot.rollback].filter(Boolean).join("; "),
         }),
     ...slot.stats,
   }
 }
 
-const diff = (before: object, after: object, plugin: string, decidedBy: Record<string, string>) => {
-  const [from, to] = [before as Record<string, unknown>, after as Record<string, unknown>]
-  return [...new Set([...Object.keys(from), ...Object.keys(to)])].flatMap((field) => {
-    if (JSON.stringify(from[field]) === JSON.stringify(to[field])) return []
-    const change = {
-      field,
-      ...(from[field] !== undefined ? { from: from[field] } : {}),
-      ...(to[field] !== undefined ? { to: to[field] } : {}),
-      ...(decidedBy[field] ? { overwrote: decidedBy[field] } : {}),
-    }
-    decidedBy[field] = plugin
-    return [change]
-  })
+const ROUTE = ["prompt", "harness", "provider", "model", "machine", "runtime"] as const
+const REQUIRED: ReadonlyArray<(typeof ROUTE)[number]> = ["prompt", "machine"]
+
+const routed = (patch: VibestPlugin.AgentRoute) =>
+  ROUTE.filter((field) => Object.hasOwn(patch, field) && (patch[field] !== undefined || !REQUIRED.includes(field)))
+
+const readOnly = <T extends object>(event: T): T =>
+  Object.freeze(
+    Object.fromEntries(
+      Object.entries(event).map(([field, value]) => [
+        field,
+        value !== null && typeof value === "object"
+          ? Object.freeze(Array.isArray(value) ? [...value] : { ...value })
+          : value,
+      ]),
+    ),
+  ) as T
+
+const decide = (
+  field: string,
+  from: unknown,
+  to: unknown,
+  plugin: string,
+  decidedBy: Record<string, string>,
+): typeof Change.Type => {
+  const change = {
+    field,
+    ...(from !== undefined ? { from } : {}),
+    ...(to !== undefined ? { to } : {}),
+    ...(decidedBy[field] ? { overwrote: decidedBy[field] } : {}),
+  }
+  decidedBy[field] = plugin
+  return change
 }
 
 type Stopped = { readonly plugin: string; readonly reason: string }
@@ -248,7 +270,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             : yield* setUp({ ...candidate, plugin }, stats)
       if (typeof outcome !== "string") return { ...base, running: outcome }
       const failed: Slot = { ...base, failure: outcome, setupFailed: !("error" in plugin) }
-      const last = previous?.running?.candidate
+      const last = "error" in plugin ? undefined : previous?.running?.candidate
       if (last === undefined) {
         return unchanged && previous.rollback !== undefined ? { ...failed, rollback: previous.rollback } : failed
       }
@@ -258,9 +280,28 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         : { ...failed, running: restored }
     })
 
-    const activate = (candidates: ReadonlyArray<Candidate>) =>
+    const keepRunning = (incoming: ReadonlyArray<Candidate>) => {
+      const failures = new Map<string, ImportFailure>()
+      const candidates = incoming.map((candidate) => {
+        if (!("error" in candidate.plugin)) return candidate
+        const kept = slots.find(
+          (s) =>
+            s.running !== undefined &&
+            s.candidate.source === candidate.source &&
+            JSON.stringify(s.candidate.options) === JSON.stringify(candidate.options),
+        )
+        if (kept === undefined) return candidate
+        failures.set(candidate.source, { revision: candidate.revision, error: candidate.plugin.error })
+        return kept.candidate
+      })
+      return { candidates, failures }
+    }
+
+    const activate = (incoming: ReadonlyArray<Candidate>) =>
       Registry.batch(
         Effect.gen(function* () {
+          const { candidates, failures } = keepRunning(incoming)
+          slots = slots.map((slot) => ({ ...slot, importFailed: failures.get(slot.candidate.source) }))
           let prefix = 0
           while (
             prefix < candidates.length &&
@@ -281,7 +322,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
               ids,
             )
             if (slot.running) ids.add(slot.running.candidate.plugin.id)
-            slots = [...slots, slot]
+            slots = [...slots, { ...slot, importFailed: failures.get(candidate.source) }]
           }
         }),
       )
@@ -300,13 +341,12 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
 
     const runHook = Effect.fnUntraced(function* <N extends AgentHook>(
       name: N,
-      event: Hooks.Events[N],
+      event: () => Hooks.Events[N],
+      apply: (value: Hooks.Results[N], plugin: string) => ReadonlyArray<typeof Change.Type>,
       trace: Array<TraceEntry>,
-      decidedBy: Record<string, string> = {},
     ) {
       for (const hook of hooksOf(name)) {
-        const before = { ...event }
-        const ran = yield* Hooks.run(name, hook, event, root, timeout)
+        const ran = yield* Hooks.run(name, hook, readOnly(event()), root, timeout)
         const entry = { plugin: hook.plugin, hook: name, ms: ran.ms, changes: [] }
         if (ran.outcome === "timeout") {
           trace.push({ ...entry, outcome: "timeout", error: ran.error })
@@ -323,7 +363,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           yield* Effect.logWarning(`plugin ${hook.plugin} ${name} crashed: ${Cause.pretty(ran.cause)}`)
           return { plugin: hook.plugin, reason: `plugin ${hook.plugin} crashed: ${ran.error}` } satisfies Stopped
         }
-        const changes = diff(before, event, hook.plugin, decidedBy)
+        const changes = ran.value === undefined ? [] : apply(ran.value, hook.plugin)
         if (changes.length > 0) hook.stats.changed++
         trace.push({ ...entry, outcome: "ok", changes })
         const summary =
@@ -365,9 +405,15 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         Effect.gen(function* () {
           const current = yield* subscriptions.list
           const machines = yield* machinesListing(runtimes, input.machines[0]?.harnesses ?? [])
-          const event: VibestPlugin.AgentStartBefore = { ...input, machines, subscriptions: current }
+          let event: VibestPlugin.AgentStartBefore = { ...input, machines, subscriptions: current }
           const decidedBy: Record<string, string> = {}
-          const stopped = yield* runHook("agent.start.before", event, trace, decidedBy)
+          const route = (patch: VibestPlugin.AgentRoute, plugin: string) => {
+            const fields = routed(patch)
+            const changes = fields.map((field) => decide(field, event[field], patch[field], plugin, decidedBy))
+            event = { ...event, ...Object.fromEntries(fields.map((field) => [field, patch[field]])) }
+            return changes
+          }
+          const stopped = yield* runHook("agent.start.before", () => event, route, trace)
           if (stopped !== undefined) return yield* refusal(stopped)
           return {
             prompt: event.prompt,
@@ -386,17 +432,24 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
     const fail = Effect.fn("Plugins.fail")(function* (input: FailInput) {
       return yield* withHooks("agent.fail", (trace) =>
         Effect.gen(function* () {
-          const event: VibestPlugin.AgentFail = { ...input, subscriptions: yield* subscriptions.list, move: undefined }
-          const stopped = yield* runHook("agent.fail", event, trace)
+          const event: VibestPlugin.AgentFail = { ...input, subscriptions: yield* subscriptions.list }
+          const decidedBy: Record<string, string> = {}
+          let move: VibestPlugin.AgentMove | undefined
+          const moveTo = (next: VibestPlugin.AgentMove, plugin: string) => {
+            const change = decide("move", move, next, plugin, decidedBy)
+            move = next
+            return [change]
+          }
+          const stopped = yield* runHook("agent.fail", () => event, moveTo, trace)
           if (stopped !== undefined) return yield* failure(stopped)
-          return { move: event.move, trace }
+          return { move, trace }
         }),
       )
     })
 
     const machine = Effect.fn("Plugins.machine")(function* (
       short: MachineHook,
-      input: MachineEventInput,
+      input: VibestPlugin.MachineEvent,
       runtime?: string,
     ) {
       const name = `machine.${short}` as const
@@ -405,10 +458,10 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           const notes: Array<PluginNote> = []
           const ran: Array<string> = []
           for (const hook of hooksOf(name, runtime)) {
-            const own: Array<VibestPlugin.MachineNote> = []
-            const result = yield* Hooks.run(name, hook, { ...input, notes: own }, root, MACHINE_TIMEOUT)
+            const result = yield* Hooks.run(name, hook, readOnly(input), root, MACHINE_TIMEOUT)
             if (!ran.includes(hook.plugin)) ran.push(hook.plugin)
-            notes.push(...own.map((note) => ({ plugin: hook.plugin, ...note })))
+            if (result.outcome === "ok" && Array.isArray(result.value))
+              notes.push(...result.value.map((note) => ({ plugin: hook.plugin, ...note })))
             if (result.outcome !== "timeout" && result.outcome !== "crashed") continue
             const problem =
               result.outcome === "timeout" ? result.error : `plugin ${hook.plugin} crashed: ${result.error}`

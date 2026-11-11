@@ -11,6 +11,13 @@ export interface Events {
   readonly "machine.remove": VibestPlugin.MachineEvent
 }
 
+export interface Results extends Record<keyof Events, unknown> {
+  readonly "agent.start.before": VibestPlugin.AgentRoute
+  readonly "agent.fail": VibestPlugin.AgentMove
+  readonly "machine.connect": ReadonlyArray<VibestPlugin.MachineNote>
+  readonly "machine.remove": ReadonlyArray<VibestPlugin.MachineNote>
+}
+
 interface Failures extends Record<keyof Events, unknown> {
   readonly "agent.start.before": VibestPlugin.AgentRefused
   readonly "agent.fail": never
@@ -33,13 +40,13 @@ export type Entry<N extends Name> = {
   readonly plugin: string
   readonly stats: Stats
   readonly runtime: string | undefined
-  readonly callback: (event: Events[N]) => Effect.Effect<void, Failures[N]>
+  readonly callback: (event: Events[N]) => Effect.Effect<Results[N] | void, Failures[N]>
 }
 
 type Table = { readonly [N in Name]: ReadonlyArray<Entry<N>> }
 
-export type Outcome = { readonly ms: number } & (
-  | { readonly outcome: "ok" }
+export type Outcome<N extends Name> = { readonly ms: number } & (
+  | { readonly outcome: "ok"; readonly value: Results[N] | undefined }
   | { readonly outcome: "refused"; readonly reason: string }
   | { readonly outcome: "timeout"; readonly error: string }
   | { readonly outcome: "crashed"; readonly error: string; readonly cause: Cause.Cause<unknown> }
@@ -49,6 +56,8 @@ export const errorMessage = (cause: Cause.Cause<unknown>) => messageOf(Cause.squ
 
 const isAgentRefused = (e: unknown): e is VibestPlugin.AgentRefused =>
   (e as { _tag?: unknown } | undefined)?._tag === "AgentRefused"
+
+const decision = <A>(value: A | void) => (typeof value === "object" && value !== null ? value : undefined)
 
 export const make = () => {
   let table: Table = { "agent.start.before": [], "agent.fail": [], "machine.connect": [], "machine.remove": [] }
@@ -90,17 +99,17 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
     const error = `plugin ${entry.plugin} timed out after ${Duration.format(Duration.fromInputUnsafe(timeout))}`
     stats.timedOut++
     stats.lastError = error
-    return { ms, outcome: "timeout", error } satisfies Outcome
+    return { ms, outcome: "timeout", error } satisfies Outcome<N>
   }
-  if (Exit.isSuccess(exit.value)) return { ms, outcome: "ok" } satisfies Outcome
+  if (Exit.isSuccess(exit.value)) return { ms, outcome: "ok", value: decision(exit.value.value) } satisfies Outcome<N>
   const cause = exit.value.cause
   const refused = Option.filter(Cause.findErrorOption(cause), isAgentRefused)
   if (name === "agent.start.before" && Option.isSome(refused)) {
     stats.refused++
-    return { ms, outcome: "refused", reason: refused.value.reason } satisfies Outcome
+    return { ms, outcome: "refused", reason: refused.value.reason } satisfies Outcome<N>
   }
   const error = errorMessage(cause)
   stats.crashed++
   stats.lastError = error
-  return { ms, outcome: "crashed", error, cause } satisfies Outcome
+  return { ms, outcome: "crashed", error, cause } satisfies Outcome<N>
 })

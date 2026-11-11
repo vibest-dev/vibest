@@ -9,12 +9,15 @@ export default Plugin.define({
       const model = typeof context.options.model === "string" ? context.options.model : undefined
       if (provider === undefined && model === undefined) return
       yield* context.agent.hook("start.before", (event) =>
-        Effect.sync(() => {
-          if (event.agentType === "main") return
-          event.harness = "pi"
-          if (provider !== undefined) event.provider = provider
-          if (model !== undefined) event.model = model
-        }),
+        Effect.succeed(
+          event.agentType === "main"
+            ? undefined
+            : {
+                harness: "pi",
+                ...(provider === undefined ? {} : { provider }),
+                ...(model === undefined ? {} : { model }),
+              },
+        ),
       )
     }),
 })

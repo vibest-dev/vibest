@@ -1,10 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
-import { type MachineEvent, Plugin } from "@vibest/plugin"
+import { type MachineEvent, type MachineNote, Plugin } from "@vibest/plugin"
 import { machineHooks } from "@vibest/plugin/testing"
 import { Effect, Queue, Stream } from "effect"
 import { type api, HcError, type HcShape, HcTransportError } from "effect-herdr-core-sdk"
 
-import { connect, locate, mirror, remove } from "../src/machines.ts"
+import * as Mirror from "../src/machines.ts"
+import { locate, mirror } from "../src/machines.ts"
 
 type Row = api.MachineView
 
@@ -64,7 +65,14 @@ const fake = (rows: Array<Row>, options: { offline?: boolean; addFails?: string;
   return { hc, calls, rows, added: () => calls.filter(([m]) => m === "machine.add").length }
 }
 
-const event = (link?: Record<string, string>, extra: Partial<MachineEvent> = {}): MachineEvent => ({
+type Noted = MachineEvent & { readonly notes: Array<MachineNote> }
+
+const noting = (hook: typeof Mirror.connect) => (hc: Parameters<typeof Mirror.connect>[0], event: Noted) =>
+  hook(hc, event).pipe(Effect.map((notes) => void event.notes.push(...notes)))
+const connect = noting(Mirror.connect)
+const remove = noting(Mirror.remove)
+
+const event = (link?: Record<string, string>, extra: Partial<Noted> = {}): Noted => ({
   name: "mb",
   target: "b-host",
   vibestd: "b-id",

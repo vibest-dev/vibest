@@ -6,7 +6,7 @@ import { Harnesses } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
 import { Builtins, type Candidate, DEBOUNCE, makeHost, PluginLoader, Plugins, RECHECK } from "@vibest/core/plugins"
 import { Runtimes } from "@vibest/core/runtimes"
-import { Plugin, type AgentStartBefore, type Harness, type Runtime } from "@vibest/plugin"
+import { Plugin, type Harness, type Runtime } from "@vibest/plugin"
 import {
   Clock,
   Context,
@@ -37,7 +37,7 @@ const logged = (id: string, tag: string, setup: Effect.Effect<void> = Effect.voi
       Effect.gen(function* () {
         events.push(`setup ${tag}`)
         yield* Effect.addFinalizer(() => Effect.sync(() => events.push(`close ${tag}`)))
-        yield* ctx.agent.hook("start.before", (e) => Effect.sync(() => void (e.model = tag)))
+        yield* ctx.agent.hook("start.before", () => Effect.succeed({ model: tag }))
         yield* setup
       }),
   })
@@ -263,12 +263,29 @@ describe("plugins: activation", () => {
         yield* h.activate([a1, b1])
         yield* takeEvents
         yield* h.activate([a1, candidate("b", "2", { error: "import failed: SyntaxError" })])
-        assert.deepStrictEqual(yield* takeEvents, ["close b1", "setup b1"])
+        assert.deepStrictEqual(yield* takeEvents, [], "the running b1 is neither closed nor set up again")
         const [, b] = yield* h.service.list
         assert.deepInclude(b, { id: "b", status: "active", revision: "1" })
-        assert.include(b!.error, "import failed: SyntaxError")
+        assert.include(b!.error, "revision 2 failed, still running 1: import failed: SyntaxError")
       }),
     ),
+  )
+
+  it.effect(
+    "P17: a revision that fails to import with changed options is failed; the old one is not kept or restored",
+    () =>
+      host((h) =>
+        Effect.gen(function* () {
+          yield* h.activate([a1, b1])
+          yield* takeEvents
+          yield* h.activate([candidate("a", "2", { error: "import failed: SyntaxError" }, { level: 2 }), b1])
+          assert.deepStrictEqual(yield* takeEvents, ["close b1", "close a1", "setup b1"])
+          const [a, b] = yield* h.service.list
+          assert.deepInclude(a, { status: "failed", revision: "2" })
+          assert.strictEqual(a!.error, "import failed: SyntaxError")
+          assert.deepInclude(b, { id: "b", status: "active" })
+        }),
+      ),
   )
 
   it.effect(
@@ -380,10 +397,10 @@ describe("plugins: activation", () => {
           effect: (ctx) =>
             Effect.gen(function* () {
               yield* Effect.addFinalizer(() => Effect.sync(() => events.push("close slow")))
-              yield* ctx.agent.hook("start.before", (e: AgentStartBefore) =>
+              yield* ctx.agent.hook("start.before", () =>
                 Deferred.succeed(entered, undefined).pipe(
                   Effect.andThen(Deferred.await(gate)),
-                  Effect.andThen(Effect.sync(() => void (e.model = "slow"))),
+                  Effect.as({ model: "slow" }),
                 ),
               )
             }),
@@ -410,10 +427,10 @@ describe("plugins: activation", () => {
           const slow = Plugin.define({
             id: "slow",
             effect: (ctx) =>
-              ctx.machine.hook("connect", (e) =>
+              ctx.machine.hook("connect", () =>
                 Deferred.succeed(entered, undefined).pipe(
                   Effect.andThen(Deferred.await(gate)),
-                  Effect.andThen(Effect.sync(() => void e.notes.push({ message: "finished" }))),
+                  Effect.as([{ message: "finished" }]),
                 ),
               ),
           })
@@ -440,7 +457,7 @@ const c = (globalThis.__vibestReload ??= {})
 c["import:${key}"] = (c["import:${key}"] ?? 0) + 1
 export default Plugin.define({
   id: ${JSON.stringify(id)},
-  effect: (ctx) => Effect.sync(() => { c["setup:${key}"] = (c["setup:${key}"] ?? 0) + 1 }).pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = ${model} })))),
+  effect: (ctx) => Effect.sync(() => { c["setup:${key}"] = (c["setup:${key}"] ?? 0) + 1 }).pipe(Effect.andThen(ctx.agent.hook("start.before", (e) => Effect.succeed({ model: ${model} })))),
 })
 `
 

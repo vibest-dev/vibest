@@ -182,10 +182,11 @@ describe.concurrent("Sessions", () => {
           id: "rewrite",
           effect: (ctx) =>
             ctx.agent.hook("start.before", (e) =>
-              Effect.sync(() => {
-                if (e.harness === "pi" && e.subscriptions.some((row) => row.harness === "pi" && isLimited(row)))
-                  e.harness = "claude"
-              }),
+              Effect.succeed(
+                e.harness === "pi" && e.subscriptions.some((row) => row.harness === "pi" && isLimited(row))
+                  ? { harness: "claude" }
+                  : undefined,
+              ),
             ),
         }),
       ],
@@ -245,11 +246,7 @@ describe.concurrent("Sessions", () => {
         Plugin.define({
           id: "cheap-second",
           effect: (ctx) =>
-            ctx.agent.hook("fail", (e) =>
-              Effect.sync(() => {
-                e.move = { harness: "pi", provider: "openai", model: "fake-strong" }
-              }),
-            ),
+            ctx.agent.hook("fail", () => Effect.succeed({ harness: "pi", provider: "openai", model: "fake-strong" })),
         }),
       ],
     },
@@ -337,13 +334,9 @@ describe.concurrent("Sessions", () => {
           id: "zai-only",
           effect: (ctx) =>
             ctx.agent.hook("start.before", (e) =>
-              Effect.sync(() => {
-                if (e.attempts.length > 0) {
-                  e.harness = "pi"
-                  e.provider = "zai"
-                  e.model = "fake-strong"
-                }
-              }),
+              Effect.succeed(
+                e.attempts.length > 0 ? { harness: "pi", provider: "zai", model: "fake-strong" } : undefined,
+              ),
             ),
         }),
       ],
@@ -411,9 +404,7 @@ describe.concurrent("Sessions", () => {
           id: "two-logins",
           effect: (ctx) =>
             ctx.agent.hook("fail", (e) =>
-              Effect.sync(() => {
-                e.move = e.harness === "pi" ? { harness: "claude" } : { harness: "pi", provider: "openai" }
-              }),
+              Effect.succeed(e.harness === "pi" ? { harness: "claude" } : { harness: "pi", provider: "openai" }),
             ),
         }),
       ],
@@ -444,9 +435,7 @@ describe.concurrent("Sessions", () => {
           id: "cursor-only",
           effect: (ctx) =>
             ctx.agent.hook("start.before", (e) =>
-              Effect.sync(() => {
-                if (e.attempts.length > 0) e.harness = "cursor"
-              }),
+              Effect.succeed(e.attempts.length > 0 ? { harness: "cursor" } : undefined),
             ),
         }),
       ],

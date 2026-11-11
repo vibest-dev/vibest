@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { commandOf } from "../../../reap.ts"
 import type { Check } from "../check.ts"
 import { ask, delegatingModel, type Message, piDir, sendOrReply, text } from "../fake-model.ts"
 import { alive, binary, expect, fail, readDb, row, Skip, until, type World } from "../world.ts"
@@ -78,10 +79,17 @@ export const subModel = () => {
 
 export const stopVibestd = async (home: string) => {
   const text = await fs.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "{}")
-  const pid = (JSON.parse(text) as { pid?: number }).pid
+  const parsed = JSON.parse(text) as { pid?: number; socket?: string; command?: Array<string> }
+  const pid = parsed.pid
   if (pid === undefined || !alive(pid)) return
+  if (parsed.socket !== path.join(home, "vibest.sock")) return
+  const command = commandOf(pid)
+  if (!command.includes("daemon --foreground")) return
+  if (parsed.command?.some((part) => !command.includes(part))) return
   process.kill(pid, "SIGTERM")
-  await until(`vibestd ${pid} gone`, () => !alive(pid), 15_000)
+  for (const deadline = Date.now() + 2_000; alive(pid) && Date.now() < deadline;) await Bun.sleep(50)
+  if (alive(pid)) process.kill(pid, "SIGKILL")
+  await until(`vibestd ${pid} gone`, () => !alive(pid), 5_000)
 }
 
 const hcCore = async (w: World, tag: string, env: Record<string, string | undefined>) => {

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { note } from "../../../reap.ts"
 import type { Check } from "../check.ts"
 import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
 import {
@@ -180,40 +181,49 @@ const sendChecks: ReadonlyArray<Check> = [
   },
   {
     id: "S46",
-    title:
-      "a Pi subagent's vibest send to a sibling is typed at the sibling's idle: the send row is delivered on the sibling's next turn, and the sibling's model sees the text and the sender's id",
+    title: "a Pi subagent's vibest send to a sibling is refused, and no inbox.queued row is written",
     run: async (w) => {
       needs()
       const main = recordingModel(() => reply("ok"))
       const sibling = recordingModel(() => reply("done-sibling\nstatus: completed"))
       let siblingId = ""
-      const sender = sendingModel(() => siblingId, "hello-sibling")
+      const refused = path.join(w.root, "s46-refused.txt")
+      const sender = recordingModel((messages) =>
+        messages.some((m) => m.role === "tool")
+          ? reply("done-send\nstatus: completed")
+          : toolCall("call1", "bash", {
+              command: `${binary} send ${siblingId} -- hello-sibling > ${refused} 2>&1`,
+            }),
+      )
       let session = ""
       try {
         const m = await piMain(w, "send-sibling", main.url)
         session = m.session
-        siblingId = await runSub(w, m.repo, session, sibling.url, "pi-send-sibling-b", "wait for a message")
+        siblingId = await runSub(w, m.repo, session, sibling.url, "pi-send-sibling-b", "wait")
         await until(
-          "the sibling's first turn",
-          () => turnStarts(w, siblingId) === 1 && sibling.requests.length > 0,
-          60_000,
+          "the sibling answered",
+          async () => (await answerOf(w, siblingId, m.repo)).includes("done-sibling"),
+          90_000,
         )
         const id = await runSub(w, m.repo, session, sender.url, "pi-send-sibling-a", "send to the sibling")
-        await until(
-          "the send delivered",
-          () => sendsFrom(w, id, siblingId).some((r) => r.status === "delivered"),
-          60_000,
-        )
-        const sent = sendsFrom(w, id, siblingId)[0]!
-        const last = row<{ id: number }>(w, "SELECT max(id) AS id FROM turn WHERE session_id = ?", siblingId)!.id
+        await until("the sender answered", async () => (await answerOf(w, id, m.repo)).includes("done-send"), 90_000)
+        const out = await fs.readFile(refused, "utf8")
         expect(
-          turnStarts(w, siblingId) === 2 && sent.turn === last,
-          `the send is on turn ${sent.turn}; the sibling's turns ${turnStarts(w, siblingId)}, last ${last}`,
+          out.includes(siblingId) && out.includes("did not start") && out.includes(mainOf(w)),
+          `vibest send printed: ${out}`,
         )
-        await until("the sibling's model saw the send", () => seen(sibling).includes("hello-sibling"), 60_000)
         expect(
-          seen(sibling).includes("<agent-id>" + id + "</agent-id>"),
-          `the sibling's model did not see the sender ${id}: ${seen(sibling)}`,
+          sendsFrom(w, id, siblingId).length === 0,
+          `a send row was written: ${JSON.stringify(sendsFrom(w, id, siblingId))}`,
+        )
+        expect(
+          countFacts(
+            w,
+            "type = 'inbox.queued' AND json_extract(data, '$.sender') = ? AND json_extract(data, '$.recipient') = ?",
+            id,
+            siblingId,
+          ) === 0,
+          "inbox.queued was written for the refused send",
         )
       } finally {
         main.stop()
@@ -284,31 +294,36 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S48",
     title:
-      "when the sibling's pane is killed before a vibest send reaches it, the row ends failed and one notice row goes to the sender (recipient_session_id = the sender), which is typed into the sender and seen by its model",
+      "when a subagent's pane is killed before the main agent's vibest send reaches it, the row ends failed and one notice row goes to the sender (recipient_session_id = the sender), which is typed into the sender and seen by its model",
     run: async (w) => {
       needs()
-      const main = recordingModel(() => reply("ok"))
+      let target = ""
+      const main = recordingModel((messages) => {
+        if (messages.some((m) => m.role === "tool")) return reply("done-main\nstatus: completed")
+        return text(messages.at(-1)).includes("send-now")
+          ? toolCall("call1", "bash", { command: `${binary} send ${target} -- never-delivered` })
+          : reply("ok")
+      })
       const held = heldModel()
-      let siblingId = ""
-      const sender = sendingModel(() => siblingId, "never-delivered")
       let session = ""
       try {
         const m = await piMain(w, "send-killed", main.url)
         session = m.session
+        const mainId = mainOf(w)
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
-        siblingId = await runSub(w, m.repo, session, held.url, "pi-send-killed-b", ask("held"))
-        await until("the sibling's turn held", () => held.held() > 0, 60_000)
-        const id = await runSub(w, m.repo, session, sender.url, "pi-send-killed-a", "send to the sibling")
-        await until("the send pending", () => sendsFrom(w, id, siblingId).some((r) => r.status === "pending"), 60_000)
-        const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, siblingId)!.r
+        target = await runSub(w, m.repo, session, held.url, "pi-send-killed-b", ask("held"))
+        await until("the subagent's turn held", () => held.held() > 0, 60_000)
+        await w.ok(["send", mainId, "--", "send-now"], { cwd: m.repo })
+        await until("the send pending", () => sendsFrom(w, mainId, target).some((r) => r.status === "pending"), 60_000)
+        const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, target)!.r
         const pane = ((JSON.parse(runtime) as { id?: string }).id ?? "").split("/")[1] ?? ""
         await herdr(socket, "pane.close", { pane_id: pane })
-        await until("the send failed", () => sendsFrom(w, id, siblingId).some((r) => r.status === "failed"), 60_000)
+        await until("the send failed", () => sendsFrom(w, mainId, target).some((r) => r.status === "failed"), 60_000)
         const notices = () =>
           rows<{ status: string; sender: string | null }>(
             w,
             "SELECT status, sender_session_id AS sender FROM inbox WHERE recipient_session_id = ? AND kind = 'notice' AND instr(content, 'was not delivered') > 0",
-            id,
+            mainId,
           )
         await until(
           "one notice to the sender, typed into it",
@@ -316,12 +331,11 @@ const sendChecks: ReadonlyArray<Check> = [
           60_000,
         )
         expect(notices().length === 1, `${notices().length} notices to the sender: ${JSON.stringify(notices())}`)
-        await until("the sender's model saw the notice", () => seen(sender).includes("was not delivered"), 60_000)
+        await until("the sender's model saw the notice", () => seen(main).includes("was not delivered"), 60_000)
       } finally {
         main.stop()
         held.release()
         held.stop()
-        sender.stop()
         await dropHerdrSession(w, session)
       }
     },
@@ -540,6 +554,7 @@ const checks: ReadonlyArray<Check> = [
           stdout: "ignore",
           stderr: "pipe",
         })
+        note(server.pid, `herdr server --session ${stale}`, w.root)
         const socket = path.join(w.home, ".config", "herdr", "sessions", stale, "herdr.sock")
         await until(
           "the inherited herdr server",
@@ -597,7 +612,12 @@ const checks: ReadonlyArray<Check> = [
         const ran = await typed(wayOut.replace(/ vibest /, ` ${binary} `), asUser)
         expect(ran.includes("exit=0") && !ran.includes("Forbidden"), `the hinted command failed: ${ran}`)
       } finally {
-        server?.kill()
+        if (server !== undefined && server.exitCode === null) {
+          server.kill()
+          for (const deadline = Date.now() + 2_000; server.exitCode === null && Date.now() < deadline;)
+            await Bun.sleep(50)
+          if (server.exitCode === null) server.kill("SIGKILL")
+        }
         await server?.exited
         main.stop()
         sub.stop()

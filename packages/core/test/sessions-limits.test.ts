@@ -334,12 +334,7 @@ describe.concurrent("Sessions", () => {
       plugins: [
         Plugin.define({
           id: "pick",
-          effect: (ctx) =>
-            ctx.agent.hook("fail", (e) =>
-              Effect.sync(() => {
-                e.move = { harness: "cursor" }
-              }),
-            ),
+          effect: (ctx) => ctx.agent.hook("fail", () => Effect.succeed({ harness: "cursor" })),
         }),
       ],
     },
@@ -366,12 +361,7 @@ describe.concurrent("Sessions", () => {
       plugins: [
         Plugin.define({
           id: "stuck",
-          effect: (ctx) =>
-            ctx.agent.hook("fail", (e) =>
-              Effect.sync(() => {
-                e.move = { harness: "pi" }
-              }),
-            ),
+          effect: (ctx) => ctx.agent.hook("fail", () => Effect.succeed({ harness: "pi" })),
         }),
       ],
     },
@@ -405,8 +395,8 @@ describe.concurrent("Sessions", () => {
               )
               yield* ctx.agent.hook("fail", (event) =>
                 Effect.sync(() => {
-                  if (!event.attempts.some((attempt) => attempt.harness === "claude"))
-                    event.move = { harness: "claude" }
+                  if (!event.attempts.some((attempt) => attempt.harness === "claude")) return { harness: "claude" }
+                  return undefined
                 }),
               )
             }),
@@ -416,7 +406,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a plugin that unsets the move keeps the still-running agent listed with one failed result",
+    "a plugin that returns no move keeps the still-running agent listed with one failed result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
@@ -446,12 +436,7 @@ describe.concurrent("Sessions", () => {
       plugins: [
         Plugin.define({
           id: "end-now",
-          effect: (ctx) =>
-            ctx.agent.hook("fail", (e) =>
-              Effect.sync(() => {
-                e.move = undefined
-              }),
-            ),
+          effect: (ctx) => ctx.agent.hook("fail", () => Effect.void),
         }),
       ],
     },
@@ -511,10 +496,11 @@ describe.concurrent("Sessions", () => {
           id: "once",
           effect: (ctx) => {
             let first = true
-            return ctx.agent.hook("fail", (e) =>
+            return ctx.agent.hook("fail", () =>
               Effect.sync(() => {
-                e.move = first ? { harness: "claude" } : undefined
+                const move = first ? { harness: "claude" } : undefined
                 first = false
+                return move
               }),
             )
           },
@@ -577,10 +563,11 @@ describe.concurrent("Sessions", () => {
           id: "close-fails",
           effect: (ctx) => {
             let first = true
-            return ctx.agent.hook("fail", (e) =>
+            return ctx.agent.hook("fail", () =>
               Effect.sync(() => {
-                e.move = first ? { harness: "claude" } : undefined
+                const move = first ? { harness: "claude" } : undefined
                 first = false
+                return move
               }),
             )
           },

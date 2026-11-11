@@ -101,7 +101,7 @@ const checks: ReadonlyArray<Check> = [
         await writePlugin(
           w,
           "router",
-          `ctx.agent.hook("start.before", (e) => Effect.sync(() => { if (e.prompt.includes("done-routed")) e.harness = "pi" }))`,
+          `ctx.agent.hook("start.before", (e) => Effect.succeed(e.prompt.includes("done-routed") ? { harness: "pi" } : undefined))`,
         )
         const id = await runId(w, ["--", ask("routed")])
         const e = await entry(w, id)

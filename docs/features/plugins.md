@@ -21,7 +21,8 @@ error, and the other plugins, those after it included, stay active.
 
 A plugin hook that refuses a run blocks `vibest run` with its reason before any pane or worktree exists: the command
 fails and prints the reason. A hook that throws instead of returning an Effect blocks the run the same way, printing
-`plugin <id> crashed: <error>`, and counts as a crash of that plugin.
+`plugin <id> crashed: <error>`, and counts as a crash of that plugin; so does a hook written in the old style that
+assigns to the event it is given instead of returning its decision.
 
 ## G5. A routing plugin picks the harness
 
@@ -40,6 +41,23 @@ builtin harness.
 
 A user plugin can add a terminal runtime and route an agent to it; the agent starts there and reports its status from
 it.
+
+## G8. A broken edit keeps the running plugin
+
+Editing a plugin into one that fails to import leaves the running revision as it is: `vibest plugins` shows it active
+with the failed revision and its error, and neither it nor the plugins after it are set up again.
+
+## G9. One plugin per target
+
+A plugin folder found in the plugins folder and also named in `vibest.json` is one plugin: `vibest plugins` lists it
+once, active, and it runs with the options from `vibest.json`.
+
+## G10. A plugin folder with a package.json
+
+A plugin folder whose `package.json` maps `exports` loads the file the map names for `./server`, else for `.`, skipping a
+file that does not exist, and never a file the map does not export. While a package it imports is not
+installed it is listed as failed with the missing package; installing the package into its `node_modules` makes it
+active without editing the plugin or restarting vibestd.
 
 ## G11. A plugin disabled by a failing transform
 

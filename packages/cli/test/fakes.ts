@@ -22,6 +22,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
+import { commandOf, note } from "../../../tools/reap.ts"
 import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime } from "./fake-runtime.ts"
 
@@ -104,6 +105,18 @@ export const PATH_WITHOUT_HARNESS_CLIS = "/usr/bin:/bin"
 
 const mainTs = `${import.meta.dirname}/../src/main.ts`
 
+export const noteRecorded = (daemonInfo: string) =>
+  Effect.gen(function* () {
+    const running = Option.getOrUndefined(yield* readDaemonInfo(daemonInfo))
+    if (!running) return
+    const live = commandOf(running.pid).trim()
+    if (!live.includes("daemon --foreground")) return
+    const recorded = running.command ?? []
+    const marker = recorded.length > 0 && recorded.every((part) => live.includes(part)) ? recorded.join(" ") : live
+    if (marker === "" || /[\t\n]/.test(marker)) return
+    note(running.pid, marker)
+  }).pipe(Effect.ignore)
+
 export const runVibest = (cwd: string, env: Record<string, string>, args: ReadonlyArray<string>, stdin = "") =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -115,10 +128,12 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
         stdin: "ignore",
       }),
     )
+    if (args[0] === "daemon") note(Number(handle.pid), mainTs)
     const text = (s: Stream.Stream<Uint8Array, unknown>) => Stream.mkString(Stream.decodeText(s))
     const [stdout, stderr, code] = yield* Effect.all([text(handle.stdout), text(handle.stderr), handle.exitCode], {
       concurrency: 3,
     })
+    if (env.VIBEST_HOME !== undefined) yield* noteRecorded(`${env.VIBEST_HOME}/vibestd.pid`)
     return { stdout, stderr, code }
   }).pipe(Effect.scoped, Effect.orDie)
 
@@ -168,14 +183,36 @@ export const recordedInfo = (daemonInfo: string, instance: string | undefined) =
     return yield* Effect.die(new Error(`${daemonInfo} never recorded vibestd ${instance}`))
   })
 
+const endDaemonPid = async (pid: number) => {
+  try {
+    process.kill(pid, "SIGTERM")
+  } catch (e) {
+    if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+    return
+  }
+  for (const deadline = Date.now() + 2_000; Platform.liveness(pid) !== "exited" && Date.now() < deadline;)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  if (Platform.liveness(pid) === "exited") return
+  try {
+    process.kill(pid, "SIGKILL")
+  } catch (e) {
+    if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+  }
+}
+
+const ours = (pid: number, recorded: ReadonlyArray<string> | undefined) => {
+  const live = commandOf(pid)
+  if (!live.includes("daemon --foreground")) return false
+  if (recorded !== undefined && recorded.every((part) => live.includes(part))) return true
+  return live.includes(mainTs)
+}
+
 export const stopRecorded = (daemonInfo: string) =>
   Effect.gen(function* () {
+    yield* noteRecorded(daemonInfo)
     const running = Option.getOrUndefined(yield* readDaemonInfo(daemonInfo))
-    if (!running) return
-    yield* Effect.try(() => process.kill(running.pid, "SIGTERM")).pipe(Effect.ignore)
-    yield* Effect.sleep("100 millis").pipe(
-      Effect.repeat({ until: () => Platform.liveness(running.pid) === "exited", times: 100 }),
-    )
+    if (!running || !ours(running.pid, running.command)) return
+    yield* Effect.promise(() => endDaemonPid(running.pid))
   }).pipe(Effect.ignore)
 
 export type Line = Record<string, unknown>
