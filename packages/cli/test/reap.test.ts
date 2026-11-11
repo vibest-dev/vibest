@@ -17,9 +17,13 @@ it("a process this run noted is still alive afterwards: the run reports it and i
   try {
     note(owned.pid, "sleep 30")
     note(other.pid, "not-this-command")
+    fs.appendFileSync(file, `${owned.pid}\tsleep 30\t\tnot-the-start-time\n`)
     const left = survivors(file)
     assert.strictEqual(left.length, 1)
     assert.include(left[0], "sleep 30")
+    fs.writeFileSync(file, `${owned.pid}\tsleep 30\t\tnot-the-start-time\n`)
+    assert.deepStrictEqual(survivors(file), [])
+    note(owned.pid, "sleep 30")
     await endNoted(file)
     assert.deepStrictEqual(survivors(file), [])
     assert.isTrue(owned.pid !== undefined && !alive(owned.pid))

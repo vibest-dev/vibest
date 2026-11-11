@@ -284,7 +284,7 @@ export const spawnDaemon = (
           "sh",
           [
             "-c",
-            'mkdir -p "$1" && log=$2 && shift 2 && { "$@" >>"$log" 2>&1 & pid=$!; if [ -n "${VIBEST_REAP_FILE:-}" ]; then printf "%s\\t%s\\n" "$pid" "$*" >> "$VIBEST_REAP_FILE"; fi; }',
+            'mkdir -p "$1" && log=$2 && shift 2 && { "$@" >>"$log" 2>&1 & }',
             "sh",
             layout.home,
             log,

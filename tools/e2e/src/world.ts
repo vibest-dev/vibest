@@ -295,14 +295,6 @@ export class World {
     expect(r.code === 0, `${argv.join(" ")}: ${r.stderr}`)
   }
 
-  spawn(argv: ReadonlyArray<string>, log: string) {
-    const p = Bun.spawn([...argv], { cwd: this.repository, env: this.env(), stdout: "ignore", stderr: Bun.file(log) })
-    this.started.push(p)
-    const marker = argv.join(" ")
-    if (marker.includes("herdr") || marker.includes("daemon --foreground")) note(p.pid, marker, this.root)
-    return p
-  }
-
   async daemonPid(): Promise<number | undefined> {
     const text = await fsPromises.readFile(path.join(this.vibestHome, "vibestd.pid"), "utf8").catch(() => "")
     try {

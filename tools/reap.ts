@@ -9,6 +9,9 @@ export const reapFile = (pid = process.pid) => path.join(os.tmpdir(), `vibest-re
 export const commandOf = (pid: number) =>
   childProcess.spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).stdout ?? ""
 
+const startedAt = (pid: number) =>
+  childProcess.spawnSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8" }).stdout.trim()
+
 export const alive = (pid: number) => {
   try {
     process.kill(pid, 0)
@@ -31,7 +34,9 @@ export const note = (pid: number | undefined, marker: string, scope = "") => {
   const file = process.env.VIBEST_REAP_FILE
   if (file === undefined || pid === undefined || !Number.isInteger(pid) || pid <= 1) return
   if (marker === "" || /[\t\n]/.test(marker) || /[\t\n]/.test(scope)) return
-  fs.appendFileSync(file, `${pid}\t${marker}\t${scope}\n`)
+  const started = startedAt(pid)
+  if (started === "" || started.includes("\t") || started.includes("\n")) return
+  fs.appendFileSync(file, `${pid}\t${marker}\t${scope}\t${started}\n`)
 }
 
 const rows = (file: string, scope?: string) => {
@@ -41,14 +46,14 @@ const rows = (file: string, scope?: string) => {
   } catch {
     return []
   }
-  const found: Array<{ pid: number; marker: string }> = []
+  const found: Array<{ pid: number; marker: string; started: string }> = []
   for (const line of text.split("\n")) {
     if (line === "") continue
-    const [pidText, marker, rowScope = ""] = line.split("\t")
+    const [pidText, marker, rowScope = "", started = ""] = line.split("\t")
     const pid = Number(pidText)
     if (marker === undefined || marker === "" || !Number.isInteger(pid) || pid <= 1) continue
     if (scope !== undefined && rowScope !== scope) continue
-    found.push({ pid, marker })
+    found.push({ pid, marker, started })
   }
   return found
 }
@@ -58,9 +63,10 @@ const owned = (file: string, scope?: string) => {
   const found: Array<{ pid: number; command: string }> = []
   for (const row of rows(file, scope)) {
     if (seen.has(row.pid)) continue
-    seen.add(row.pid)
     const command = commandOf(row.pid)
     if (command === "" || !command.includes(row.marker) || !alive(row.pid)) continue
+    if (row.started !== "" && startedAt(row.pid) !== row.started) continue
+    seen.add(row.pid)
     found.push({ pid: row.pid, command: command.trim() })
   }
   return found
