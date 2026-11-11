@@ -511,9 +511,7 @@ const loader: PluginLoader["Service"] = {
 const packageHome = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const base = path.join(import.meta.dirname, ".tmp")
-  yield* fs.makeDirectory(base, { recursive: true })
-  const dir = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ directory: base }))
+  const dir = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ directory: import.meta.dirname, prefix: ".tmp-" }))
   yield* fs.makeDirectory(path.join(dir, "plugins"))
   return dir
 })

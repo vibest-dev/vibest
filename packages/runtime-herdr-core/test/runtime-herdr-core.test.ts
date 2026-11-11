@@ -8,6 +8,7 @@ import { Effect, Ref, type Scope, Stream } from "effect"
 import { Hc, SocketConnector } from "effect-herdr-core-sdk"
 import * as HcBun from "effect-herdr-core-sdk/bun"
 
+import { commandOf, note } from "../../../tools/reap.ts"
 import {
   KIND,
   LABEL,
@@ -71,6 +72,8 @@ describe.skipIf(!hcOnPath)("runtime-herdr-core against an isolated herdr-core", 
     for (const dir of ["r", "s", "c", "z"]) fs.mkdirSync(path.join(root, dir), { recursive: true })
     const started = hcCli("server", "start")
     if (started.status !== 0) throw new Error(`hc server start: ${started.stderr}${started.stdout}`)
+    const core = (JSON.parse(started.stdout) as { pid?: number }).pid
+    if (core !== undefined) note(core, commandOf(core).trim(), "", root)
   })
   afterAll(() => {
     hcCli("server", "stop")

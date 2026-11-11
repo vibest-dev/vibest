@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { endNoted, startWatch, survivors } from "../../reap.ts"
+import { endNoted, reapEndedRuns, startWatch, survivors } from "../../reap.ts"
 import type { Check } from "./check.ts"
 import { cached, cacheKeys, rememberPasses } from "./runner/cache.ts"
 import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
@@ -131,6 +131,7 @@ for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
   }
 }
 
+await reapEndedRuns()
 const tracked = path.join(os.tmpdir(), `vibest-reap-e2e-${process.pid}`)
 await fs.writeFile(tracked, "")
 process.env.VIBEST_REAP_FILE = tracked

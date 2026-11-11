@@ -115,6 +115,8 @@ export class World {
   readonly shellDir: string
   readonly ownRuntimes = new Set<string>()
   private readonly entryModels: Array<{ readonly stop: () => void }> = []
+  private readonly hcCores = new Map<string, number>()
+  private readonly daemons = new Map<string, number>()
 
   private constructor(
     readonly root: string,
@@ -217,7 +219,8 @@ export class World {
         ? { code, stdout: `<${stdout.length} bytes not kept>`, stderr: `<${stderr.length} bytes not kept>` }
         : result,
     })
-    if (argv.includes("daemon") && !argv.includes("import-check")) await this.noteDaemon(env.VIBEST_HOME)
+    if (!argv.includes("import-check")) await this.noteDaemon(env.VIBEST_HOME)
+    if (path.basename(argv[0]!) === "hc") this.noteHcCore(env)
     return result
   }
 
@@ -428,6 +431,29 @@ export class World {
     }
   }
 
+  private noteHcCore(env: Record<string, string | undefined>) {
+    const runtimeDir = env.XDG_RUNTIME_DIR
+    const socket =
+      env.HC_SOCKET ??
+      (runtimeDir === undefined
+        ? undefined
+        : path.join(runtimeDir, "herdr-core", `${env.HC_SESSION ?? "default"}.sock`))
+    if (socket === undefined || !socket.startsWith(`${this.root}/`) || !fs.existsSync(socket)) return
+    const known = this.hcCores.get(socket)
+    if (known !== undefined && alive(known)) return
+    const pids = Bun.spawnSync(["lsof", "-t", socket], { stdout: "pipe", stderr: "ignore" })
+      .stdout.toString()
+      .split(/\s+/)
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 1)
+    for (const pid of new Set(pids)) {
+      const command = commandOf(pid).trim()
+      if (!/^\S*\bhc\s/.test(command)) continue
+      note(pid, command, this.root, this.root)
+      this.hcCores.set(socket, pid)
+    }
+  }
+
   private async noteDaemon(home: string | undefined) {
     if (home === undefined) return
     const text = await fsPromises.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "")
@@ -437,9 +463,12 @@ export class World {
     } catch {
       return
     }
-    if (typeof parsed.pid !== "number" || !Array.isArray(parsed.command)) return
+    if (typeof parsed.pid !== "number" || !Array.isArray(parsed.command) || this.daemons.get(home) === parsed.pid)
+      return
     const marker = parsed.command.filter((part): part is string => typeof part === "string").join(" ")
-    if (marker !== "" && commandOf(parsed.pid).includes("daemon --foreground")) note(parsed.pid, marker, this.root)
+    if (marker === "" || !commandOf(parsed.pid).includes("daemon --foreground")) return
+    note(parsed.pid, marker, this.root)
+    this.daemons.set(home, parsed.pid)
   }
 
   private async ensureHerdr(session: string, env: Record<string, string>) {

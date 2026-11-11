@@ -83,7 +83,7 @@ const mainSession = async (w: World) => {
   return main!
 }
 
-const factLines = (file: string) =>
+const factLines = (file: string): Promise<Array<string>> =>
   fs.readFile(file, "utf8").then(
     (text) => text.split("\n").filter(Boolean),
     () => [],
