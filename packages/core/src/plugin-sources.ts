@@ -33,6 +33,11 @@ export interface Watched {
   readonly listings: ReadonlySet<string>
 }
 
+interface Collected {
+  readonly paths: Set<string>
+  readonly listings: Set<string>
+}
+
 export const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 const ConfigEntry = Schema.Union([
@@ -51,15 +56,13 @@ const PluginModule = Schema.Struct({
   default: Schema.declare(isPlugin),
 })
 
-type Operation =
+export type Operation =
   | { readonly type: "add"; readonly target: string; readonly options: Readonly<Record<string, unknown>> }
   | { readonly type: "remove"; readonly target: string }
 
 const SOURCE = /\.[cm]?[jt]s$/
 const isLocal = (target: string) =>
   target.startsWith("/") || target.startsWith("./") || target.startsWith("../") || target.startsWith("file://")
-const matches = (selector: string, id: string) =>
-  selector === "*" || (selector.endsWith(".*") ? id.startsWith(selector.slice(0, -1)) : selector === id)
 
 export const pluginEntries = (names: ReadonlyArray<string>) =>
   names.filter((n) => n !== "node_modules" && !n.startsWith(".") && !n.endsWith(".d.ts")).sort()
@@ -162,12 +165,7 @@ export const makeSources = Effect.fnUntraced(function* (
     return result
   })
 
-  const load = (
-    target: string,
-    options: Readonly<Record<string, unknown>>,
-    paths: Set<string>,
-    listings: Set<string>,
-  ) =>
+  const load = ({ target, options }: Extract<Operation, { readonly type: "add" }>, { paths, listings }: Collected) =>
     Effect.gen(function* () {
       const failed = (error: string, revision = "-"): Candidate => ({
         source: target,
@@ -221,7 +219,7 @@ export const makeSources = Effect.fnUntraced(function* (
     )
   })
 
-  const read = Effect.gen(function* () {
+  const operations = Effect.gen(function* () {
     const paths = new Set([layout.config, layout.plugins])
     const listings = new Set([layout.plugins])
     const listed = yield* fs.readDirectory(layout.plugins).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
@@ -253,23 +251,18 @@ export const makeSources = Effect.fnUntraced(function* (
       configured.push({ type: "add", target: resolved, options })
     }
 
-    const candidates: Array<Candidate> = []
-    for (const op of [...discovered, ...configured]) {
-      if (op.type === "remove") {
-        for (let i = candidates.length - 1; i >= 0; i--) {
-          const p = candidates[i]!.plugin
-          if ("error" in p ? op.target === "*" : matches(op.target, p.id)) candidates.splice(i, 1)
-        }
-        continue
-      }
-      const candidate = yield* load(op.target, op.options, paths, listings)
-      if (candidate) candidates.push(candidate)
+    return {
+      operations: [...discovered, ...configured],
+      watched: { paths, listings } satisfies Collected,
     }
-    for (const file of imported.keys()) if (!paths.has(file)) imported.delete(file)
-    return { candidates, watched: { paths, listings } satisfies Watched }
   })
 
-  return { read }
+  const retain = (paths: ReadonlySet<string>) =>
+    Effect.sync(() => {
+      for (const file of imported.keys()) if (!paths.has(file)) imported.delete(file)
+    })
+
+  return { operations, load, retain }
 })
 
 export const makeWatcher = (changed: (path: string) => void) =>
