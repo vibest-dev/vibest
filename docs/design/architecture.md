@@ -693,8 +693,11 @@ callback is bounded by a 5 s timeout (waiting on its fiber, so an uninterruptibl
 time).
 
 **Registry and supervisor:** identity `(id, revision)`; reactivation keeps the longest unchanged prefix and
-rebuilds the rest in order inside a batch; a failing new revision falls back to the previous one and is not
-retried until it changes; an activation latch gates entry points; builtin plugins activate while vibestd's
+rebuilds the rest in order inside a batch; a new revision that fails to import leaves the running one as it is (not
+torn down or set up again, and neither are the plugins after it) and `vibest plugins` shows both revisions; one whose
+setup fails falls back to the previous one; neither is retried until it changes; a plugin file found in the plugins
+directory and named in `vibest.json`, or named there twice, is one plugin, at its first place with the options of its
+last mention; an activation latch gates entry points; builtin plugins activate while vibestd's
 layers are built, before it listens, so a request that routes to a builtin runtime never finds it unregistered
 (user plugins activate afterwards, in the background; a runtime a user plugin registers can still be missing for
 a request admitted before that). A builtin plugin's setup must not do I/O (it connects lazily, as `runtime-herdr`

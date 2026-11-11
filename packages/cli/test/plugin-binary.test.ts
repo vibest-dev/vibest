@@ -120,7 +120,7 @@ const listUntilAtMost15s = async (
 }
 
 it(
-  "P16/P17: the running binary reloads changed async imports, loads a plugin added under a symlinked tmpdir, keeps the last good one while broken or hung (import gives up after 5s), sets it up again for each failed revision, recovers",
+  "P16/P17: the running binary reloads changed async imports, loads a plugin added under a symlinked tmpdir, keeps running the last good one while broken or hung (import gives up after 5s) without setting it up again, recovers",
   { timeout: 90_000 },
   async () => {
     build()
@@ -190,7 +190,7 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
           "live",
         )!
         assert.strictEqual(fixed!.status, "active")
-        assert.deepStrictEqual(await log(), ["v1", "v2", "v2", "v2", "v3"])
+        assert.deepStrictEqual(await log(), ["v1", "v2", "v3"])
       })
     } finally {
       await fs.rm(home, { recursive: true, force: true })

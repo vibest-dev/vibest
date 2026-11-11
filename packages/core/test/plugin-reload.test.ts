@@ -263,10 +263,10 @@ describe("plugins: activation", () => {
         yield* h.activate([a1, b1])
         yield* takeEvents
         yield* h.activate([a1, candidate("b", "2", { error: "import failed: SyntaxError" })])
-        assert.deepStrictEqual(yield* takeEvents, ["close b1", "setup b1"])
+        assert.deepStrictEqual(yield* takeEvents, [], "the running b1 is neither closed nor set up again")
         const [, b] = yield* h.service.list
         assert.deepInclude(b, { id: "b", status: "active", revision: "1" })
-        assert.include(b!.error, "import failed: SyntaxError")
+        assert.include(b!.error, "revision 2 failed, still running 1: import failed: SyntaxError")
       }),
     ),
   )
