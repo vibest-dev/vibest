@@ -39,39 +39,32 @@ describe("Db", () => {
   const fresh = <A, E>(program: Effect.Effect<A, E, Db>) => program.pipe(Effect.provide(database(":memory:")))
 
   it.effect(
-    "one coordinator row per project; fresh starts a new main session and ends the old one; a harness switch clears the conversation; reports match id and harness",
+    "one entry session per project; fresh starts a new one and ends the old one; a harness switch clears the conversation; a conversation report names an existing session",
     () =>
       Effect.gen(function* () {
         const db = yield* Db
-        const first = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+        const first = yield* db.startEntry(yield* projectOf("r"), "pi", false, place)
         assert.isNull(first.harnessSessionId)
-        yield* db.reportCoordinatorSession(first.sessionId, "pi", "s1")
-        const again = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+        yield* db.noteConversation(first.sessionId, "s1")
+        const again = yield* db.startEntry(yield* projectOf("r"), "pi", false, place)
         assert.strictEqual(again.sessionId, first.sessionId)
         assert.strictEqual(again.harnessSessionId, "s1")
-        yield* db.reportCoordinatorSession(first.sessionId, "cursor", "nested")
-        yield* db.reportCoordinatorSession("0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", "pi", "x")
-        assert.strictEqual(
-          (yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).harnessSessionId,
-          "s1",
-        )
-        const renewed = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", true, place)
+        yield* db.noteConversation("0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", "x")
+        assert.strictEqual((yield* db.startEntry(yield* projectOf("r"), "pi", false, place)).harnessSessionId, "s1")
+        const renewed = yield* db.startEntry(yield* projectOf("r"), "pi", true, place)
         assert.notStrictEqual(renewed.sessionId, first.sessionId)
         assert.isNull(renewed.harnessSessionId)
-        yield* db.reportCoordinatorSession(renewed.sessionId, "pi", "s4")
-        assert.isNull((yield* db.coordinatorLaunch(yield* projectOf("r"), "claude", false, place)).harnessSessionId)
-        yield* db.reportCoordinatorSession(renewed.sessionId, "claude", "c1")
+        yield* db.noteConversation(renewed.sessionId, "s4")
+        assert.isNull((yield* db.startEntry(yield* projectOf("r"), "claude", false, place)).harnessSessionId)
+        yield* db.noteConversation(renewed.sessionId, "c1")
         assert.strictEqual(
-          (yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).sessionId,
+          (yield* db.startEntry(yield* projectOf("r"), "pi", false, place)).sessionId,
           renewed.sessionId,
         )
-        assert.isNull((yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).harnessSessionId)
-        yield* db.reportCoordinatorSession(renewed.sessionId, "pi", "s6")
-        yield* db.reportCoordinatorSession(renewed.sessionId, "pi", "s7")
-        assert.strictEqual(
-          (yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).harnessSessionId,
-          "s7",
-        )
+        assert.isNull((yield* db.startEntry(yield* projectOf("r"), "pi", false, place)).harnessSessionId)
+        yield* db.noteConversation(renewed.sessionId, "s6")
+        yield* db.noteConversation(renewed.sessionId, "s7")
+        assert.strictEqual((yield* db.startEntry(yield* projectOf("r"), "pi", false, place)).harnessSessionId, "s7")
         const sql = yield* SqlClient.SqlClient
         const [old] = yield* sql<{
           endedAt: number | null
@@ -83,9 +76,9 @@ describe("Db", () => {
           ORDER BY ended_at, id`
         assert.strictEqual(ends.at(-1)?.reason, "archived")
         const [project] = yield* sql<{
-          main: string
-        }>`SELECT entry_session_id AS main FROM project WHERE id = ${yield* projectOf("r")}`
-        assert.strictEqual(project!.main, renewed.sessionId)
+          entryId: string
+        }>`SELECT entry_session_id AS entryId FROM project WHERE id = ${yield* projectOf("r")}`
+        assert.strictEqual(project!.entryId, renewed.sessionId)
       }).pipe(Effect.provide(memoryDb())),
   )
 
@@ -98,7 +91,7 @@ describe("Db", () => {
       memory(
         Effect.gen(function* () {
           const db = yield* Db
-          const parent = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+          const parent = yield* db.startEntry(yield* projectOf("r"), "pi", false, place)
           yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
             cwd: "/w",
             task: "do it",
@@ -404,7 +397,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a execution-error notice goes to the parent while it has not ended, then to the project's current main session",
+    "a execution-error notice goes to the parent while it has not ended, then to the project's current entry session",
     () =>
       Effect.gen(function* () {
         const db = yield* Db
@@ -553,7 +546,7 @@ describe("Db", () => {
       assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
     }).pipe(Effect.provide(memoryDb())),
   )
-  it.effect("a notice with no coordinator is dropped; a claim takes a pending row once", () =>
+  it.effect("a notice with no entry session is dropped; a claim takes a pending row once", () =>
     memory(
       Effect.gen(function* () {
         const db = yield* Db
@@ -575,7 +568,7 @@ describe("Db", () => {
           "m",
         )
         assert.strictEqual(yield* noticeStatus("m"), "dropped")
-        yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
+        yield* db.startEntry(yield* projectOf("r"), "pi", false, place)
         const row = yield* db.insertInbox({
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           message: "hi",
@@ -594,7 +587,7 @@ describe("Db", () => {
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           message: "n",
         })
-        yield* db.clearCoordinator(RUNTIME, place.address)
+        yield* db.clearEntry(RUNTIME, place.address)
         assert.strictEqual(yield* noticeStatus("n"), "dropped")
       }),
     ),
@@ -663,7 +656,7 @@ describe("Db", () => {
         yield* Effect.gen(function* () {
           const db = yield* Db
           assert.isTrue(yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r")))
-          assert.match((yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)).sessionId, ID)
+          assert.match((yield* db.startEntry(yield* projectOf("r"), "pi", false, place)).sessionId, ID)
         }).pipe(Effect.provide(database(file)))
         assert.strictEqual((yield* header(file)).applicationId, APPLICATION_ID)
         assert.deepStrictEqual(
@@ -973,7 +966,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a subagent resumes only after its execution ends; the main agent resumes a conversation the harness reported",
+    "a subagent resumes only after its execution ends; the entry session resumes a conversation the harness reported",
     () =>
       memory(
         Effect.gen(function* () {
@@ -984,12 +977,12 @@ describe("Db", () => {
           yield* db.updateSession(id, { executionState: "open", executionPromptedAt: 1 })
           yield* db.updateSession(id, { executionState: "completed" })
           assert.isTrue(yield* db.canResumeConversation(id, "pre"))
-          const main = yield* db.coordinatorLaunch(yield* projectOf("r"), "claude", false, place)
-          assert.isFalse(yield* db.canResumeConversation(main.sessionId, "c1"))
-          yield* db.reportCoordinatorSession(main.sessionId, "claude", "c1")
-          assert.isTrue(yield* db.canResumeConversation(main.sessionId, "c1"))
+          const entry = yield* db.startEntry(yield* projectOf("r"), "claude", false, place)
+          assert.isFalse(yield* db.canResumeConversation(entry.sessionId, "c1"))
+          yield* db.noteConversation(entry.sessionId, "c1")
+          assert.isTrue(yield* db.canResumeConversation(entry.sessionId, "c1"))
           assert.strictEqual(
-            (yield* db.coordinatorLaunch(yield* projectOf("r"), "claude", false, place)).harnessSessionId,
+            (yield* db.startEntry(yield* projectOf("r"), "claude", false, place)).harnessSessionId,
             "c1",
           )
         }),

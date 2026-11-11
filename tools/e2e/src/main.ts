@@ -10,6 +10,7 @@ import { lastMs, pool, saveMs } from "./runner/pool.ts"
 import { parseShard, shardOf } from "./runner/shard.ts"
 import daemon from "./scenarios/daemon.ts"
 import delivery from "./scenarios/delivery.ts"
+import entrySession from "./scenarios/entry.ts"
 import exits from "./scenarios/exits.ts"
 import harness from "./scenarios/harness.ts"
 import hc from "./scenarios/hc.ts"
@@ -17,7 +18,6 @@ import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
 import machinesHerdr from "./scenarios/machines-herdr.ts"
 import machines from "./scenarios/machines.ts"
-import mainAgent from "./scenarios/main-agent.ts"
 import plugins from "./scenarios/plugins.ts"
 import project from "./scenarios/project.ts"
 import restart from "./scenarios/restart.ts"
@@ -57,7 +57,7 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   sessions,
   delivery,
   routing,
-  "main-agent": mainAgent,
+  entry: entrySession,
   machines: [...machines, ...machinesHerdr],
   "terminal-status": terminalStatus,
 }

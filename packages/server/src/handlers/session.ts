@@ -37,7 +37,7 @@ export const make = (
         const session = yield* db.getSession(id)
         if (!session) {
           const identity = yield* db.sessionIdentity(id)
-          if (identity?.agent === "coordinator") {
+          if (identity?.entry) {
             const directory = yield* db.projectDirectory(identity.projectId)
             const name =
               directory !== undefined && directory !== ""
@@ -45,21 +45,21 @@ export const make = (
                 : identity.projectId
             return yield* new NoSuchSession({
               id,
-              message: `${id} is the main agent of project ${name}. Stop it in its terminal.`,
+              message: `${id} is the session you opened in a terminal (project ${name}); stop it in that terminal.`,
             })
           }
           return yield* new NoSuchSession({ id, message: `no session ${id}` })
         }
-        if (c._tag === "Coordinator" && session.projectId !== c.projectId)
+        if (c._tag === "Entry" && session.projectId !== c.projectId)
           return yield* new Forbidden({
             method,
-            message: `${id} belongs to another coordinator; only it or the user may manage it`,
+            message: `${id} belongs to another entry session; only it or the user may manage it`,
           })
         return id
       })
 
     const sendWithinProject = (
-      caller: Extract<CallerShape, { readonly _tag: "Session" | "Coordinator" }>,
+      caller: Extract<CallerShape, { readonly _tag: "Session" | "Entry" }>,
       input: string,
       p: PayloadOf<"Send">,
     ) =>
@@ -77,7 +77,7 @@ export const make = (
         if (target?.projectId !== caller.projectId)
           return yield* new Forbidden({
             method: "Send",
-            message: `${id} belongs to another coordinator's project; a message goes only to an agent of your own project`,
+            message: `${id} belongs to another entry session's project; a message goes only to an agent of your own project`,
           })
         const allowed = Effect.gen(function* () {
           if (yield* db.maySend(caller.sessionId, id)) return true
@@ -87,22 +87,22 @@ export const make = (
             message: `${id} is not the agent that started you, and you did not start it${creator === undefined ? "" : `; you may send to ${creator}`}`,
           })
         })
-        if (target.agent === "coordinator") {
+        if (target.entry) {
           yield* allowed
           const row = yield* db.insertSend(id, p.message, p.request, caller.sessionId)
           if (!row)
             return yield* new NoSuchSession({
               id,
-              message: `${id} is the main agent of this project and is not running`,
+              message: `${id} is the entry session of this project and is not running`,
             })
           return { id }
         }
         const session = yield* db.getSession(id)
         if (!session || session.metadata.archived || session.metadata.removed) {
-          const entry = (yield* db.coordinatorOf(caller.projectId))?.id
+          const entry = (yield* db.entryOf(caller.projectId))?.id
           return yield* new NoSuchSession({
             id,
-            message: `${id} was archived${entry === undefined ? "" : `; the main agent of this project is ${entry}`}`,
+            message: `${id} was archived${entry === undefined ? "" : `; the entry session of this project is ${entry}`}`,
           })
         }
         yield* allowed
@@ -117,7 +117,7 @@ export const make = (
           if (input.agent === "coordinator" || input.agent === "main")
             return yield* new Forbidden({
               method: "Spawn",
-              message: `${input.agent} is reserved for the main agent (vibest)`,
+              message: `${input.agent} is reserved for the entry session (vibest)`,
             })
           const project = yield* projectOf(c, "Spawn")
           if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c, project.id)
@@ -135,7 +135,7 @@ export const make = (
             peer: input.peer === undefined ? undefined : yield* db.resolveSession(input.peer),
             archive: input.archive,
             runtime: input.runtime,
-            parentSessionId: c._tag === "Coordinator" ? c.sessionId : undefined,
+            parentSessionId: c._tag === "Entry" ? c.sessionId : undefined,
             request: input.request,
           })
         }),
@@ -146,15 +146,14 @@ export const make = (
         routed.Send(p, (input) =>
           Effect.gen(function* () {
             const caller = yield* Caller
-            if (caller._tag === "Session" || caller._tag === "Coordinator")
-              return yield* sendWithinProject(caller, input, p)
+            if (caller._tag === "Session" || caller._tag === "Entry") return yield* sendWithinProject(caller, input, p)
             const { scope } = yield* reach("Send")
             const target = yield* db.resolveSession(input, scope)
-            if ((yield* db.sessionIdentity(target))?.agent === "coordinator") {
+            if ((yield* db.sessionIdentity(target))?.entry) {
               if (!(yield* db.insertSend(target, p.message, p.request)))
                 return yield* new NoSuchSession({
                   id: target,
-                  message: `${target} is the main agent of this project and is not running`,
+                  message: `${target} is the entry session of this project and is not running`,
                 })
               return { id: target }
             }
@@ -249,8 +248,7 @@ export const make = (
           yield* cliOnly("Session.Seen")
           const identity = yield* db.sessionIdentity(id)
           if (identity === undefined) return yield* new NoSuchSession({ id, message: `no session ${id}` })
-          const at =
-            identity.agent === "coordinator" ? yield* db.coordinatorOf(identity.projectId) : yield* db.getSession(id)
+          const at = identity.entry ? yield* db.entryOf(identity.projectId) : yield* db.getSession(id)
           if (at?.id !== id || !at.runtime || !at.address || at.address.id === "") return
           const address = at.address
           const rt = runtimes.find(at.runtime)
@@ -265,10 +263,16 @@ export const make = (
           }).pipe(seenLocked.withLock(`${at.runtime}\n${address.machine}\n${address.id}`))
         }),
 
-      "Session.Ready": ({ id, pid }, { headers }) =>
+      "Session.Ready": ({ id, pid, conversation }, { headers }) =>
         Effect.gen(function* () {
           yield* self("Session.Ready", id)
           const read = reader(headers)
+          if (conversation !== undefined) {
+            const row = yield* db.sessionIdentity(id)
+            if (row?.entry === true && conversation.harness === row.harness)
+              yield* integration.conversation(id, conversation.id, processOf(read))
+            return {}
+          }
           const current = yield* integration.ready(id, pid, integrationOf(read), processOf(read))
           return current === undefined ? {} : { process: current }
         }),

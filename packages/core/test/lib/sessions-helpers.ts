@@ -48,14 +48,14 @@ export const spawnWorking = (
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const db = yield* Db
-    const main = yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+    const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
       runtime: RUNTIME,
       address: { machine: "local", id: "test/coord" },
     })
     const { id } = yield* sessions.spawn({
       ...(yield* spawnInput(repo, harness)),
       ...(extra.archive ? { archive: true } : {}),
-      ...(extra.underMain ? { parentSessionId: main.sessionId } : {}),
+      ...(extra.underMain ? { parentSessionId: entry.sessionId } : {}),
     })
     yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
     yield* sessions.check(id)

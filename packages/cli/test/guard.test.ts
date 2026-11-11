@@ -721,7 +721,7 @@ describe("vibest --session inside herdr", () => {
           Effect.exit,
           Effect.ensuring(Effect.sync(() => process.chdir(back))),
         )
-        assert.strictEqual(Exit.isFailure(exit), true, "vibest started the main agent")
+        assert.strictEqual(Exit.isFailure(exit), true, "vibest started the entry session")
         assert.strictEqual(touched.exec, false)
         assert.strictEqual(touched.host, false)
       }),

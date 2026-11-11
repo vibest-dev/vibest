@@ -1,6 +1,7 @@
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
+import { COORDINATOR } from "@vibest/core/guard"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
@@ -66,7 +67,7 @@ export const make = Effect.gen(function* () {
       const who = yield* caller(request.headers)
       if ("status" in who) return who
       if (request.path === POLL_ROUTE || request.path === ACK_ROUTE) {
-        if (who.agent !== "coordinator") return failure(403, `session ${who.id} is not its project's main agent`)
+        if (!who.entry) return failure(403, `session ${who.id} is not its project's entry session`)
         if (harnesses.find(who.harness)?.inbox !== "poll")
           return failure(403, `session ${who.id} runs ${who.harness}, which does not poll`)
         if (request.path === POLL_ROUTE) return ok(yield* inbox.poll(who.projectId))
@@ -98,7 +99,7 @@ export const make = Effect.gen(function* () {
         )
       if (hook.hook === "prompt")
         return yield* admitted("hook prompt", true, integration.prompt(who, request.body).pipe(Effect.as(ok())))
-      return yield* integration.guard(who.agent, request.body, who.projectId).pipe(
+      return yield* integration.guard(who.entry ? COORDINATOR : who.agent, request.body, who.projectId).pipe(
         Effect.map((reason) => ok(reason === undefined ? {} : { deny: reason })),
         Effect.catch((e) =>
           Effect.succeed(ok({ deny: `vibest could not check this tool call (${String(e)}); it is refused.` })),

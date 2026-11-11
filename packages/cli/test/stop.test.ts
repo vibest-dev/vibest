@@ -79,12 +79,12 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
     const herdr = yield* FakeRuntime
     yield* herdr.seedAgent("wC:p1")
     const raw = yield* client
-    const { sessionId, projectId } = yield* authed(raw, cliHeaders(repo))["Project.CoordinatorSession"]({
+    const { sessionId, projectId } = yield* authed(raw, cliHeaders(repo))["Project.EntrySession"]({
       harness,
       fresh: true,
       terminal: "wC:p1",
     })
-    if (harness === "claude") yield* db.reportCoordinatorSession(sessionId, "claude", "claude-session")
+    if (harness === "claude") yield* db.noteConversation(sessionId, "claude-session")
     const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
     const { id: worker } = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "work" })
     yield* until(db.getSession(worker), (w) => w?.executionState === "open")
@@ -118,9 +118,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       )
       assert.strictEqual(
         tagOf(
-          yield* Effect.exit(
-            user["Project.CoordinatorSession"]({ harness: "claude", fresh: true, terminal: "test/late" }),
-          ),
+          yield* Effect.exit(user["Project.EntrySession"]({ harness: "claude", fresh: true, terminal: "test/late" })),
         ),
         "DaemonStopping",
       )
@@ -138,7 +136,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
   )
 
   test(
-    "working agents, a busy main agent, an open subscription and queued messages neither block nor change",
+    "working agents, a busy entry session, an open subscription and queued messages neither block nor change",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const { db, herdr, c, worker } = yield* idleMainWithWorker(repo, "pi")

@@ -152,20 +152,18 @@ export const sessionSpawn = (deps: {
     const root = input.root
     const agent = input.agent ?? "general"
     const worker = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
-    const main =
-      worker === undefined && input.parentSessionId !== undefined ? yield* db.coordinatorOf(input.projectId) : undefined
+    const entry =
+      worker === undefined && input.parentSessionId !== undefined ? yield* db.entryOf(input.projectId) : undefined
     const parentRuntime =
       worker !== undefined
         ? worker.runtime || undefined
-        : main !== undefined && main.id === input.parentSessionId
-          ? main.runtime || undefined
+        : entry !== undefined && entry.id === input.parentSessionId
+          ? entry.runtime || undefined
           : undefined
     const from =
       input.harness !== undefined
         ? undefined
-        : (worker ??
-          main ??
-          (input.parentSessionId === undefined ? yield* db.coordinatorOf(input.projectId) : undefined))
+        : (worker ?? entry ?? (input.parentSessionId === undefined ? yield* db.entryOf(input.projectId) : undefined))
     const namedPeer =
       input.runtime === undefined && input.peer !== undefined ? yield* db.getSession(input.peer) : undefined
     const followedPeer =

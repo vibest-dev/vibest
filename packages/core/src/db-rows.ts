@@ -108,8 +108,9 @@ export type SessionPatch = Partial<Omit<SessionRow, "id" | "projectId" | "agent"
   readonly end?: ProcessEndReason
 }
 
-export const CoordinatorRow = Schema.Struct({
+export const EntryRow = Schema.Struct({
   id: Schema.String,
+  agent: Schema.String,
   projectId: Schema.String,
   harnessId: Schema.String,
   harnessSessionId: Schema.NullOr(Schema.String),
@@ -122,7 +123,7 @@ export const CoordinatorRow = Schema.Struct({
   routing: Schema.optional(Routing),
   ...Live,
 })
-export type CoordinatorRow = typeof CoordinatorRow.Type
+export type EntryRow = typeof EntryRow.Type
 
 export type NewInboxRow = {
   readonly sessionId: string

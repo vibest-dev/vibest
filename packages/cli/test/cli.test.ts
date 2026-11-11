@@ -48,12 +48,12 @@ const coordinatorUpdate = (agent: string, args: ReadonlyArray<string>) =>
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 describe("vibest CLI", () => {
   test(
-    "vibest run without a harness starts on the main agent's harness; auto is an unknown harness; a harness name alone is a missing prompt",
+    "vibest run without a harness starts on the entry session's harness; auto is an unknown harness; a harness name alone is a missing prompt",
     Effect.gen(function* () {
       const db = yield* Db
       const layout = yield* Layout
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "claude", false, {
+      yield* db.startEntry(yield* projectOf(repo), "claude", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p1" },
       })
@@ -214,7 +214,7 @@ describe("vibest CLI", () => {
   )
 
   test(
-    "archive: the Coordinator archives its own session through vibestd and git; rm does the same; a session, or another Coordinator, is refused",
+    "archive: the entry session archives its own session through vibestd and git; rm does the same; a session, or another entry session, is refused",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
@@ -223,7 +223,7 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const coord = yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p1" },
       })
@@ -233,13 +233,13 @@ describe("vibest CLI", () => {
           {
             ...cli,
             VIBEST_AGENT: "coordinator",
-            VIBEST_SESSION_ID: coord.sessionId,
-            VIBEST_PROJECT_ID: String(coord.projectId),
+            VIBEST_SESSION_ID: entry.sessionId,
+            VIBEST_PROJECT_ID: String(entry.projectId),
           },
           args,
         )
       const otherRepo = yield* makeRepository
-      const other = yield* db.coordinatorLaunch(yield* projectOf(otherRepo), "pi", false, {
+      const other = yield* db.startEntry(yield* projectOf(otherRepo), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w9:p9" },
       })
@@ -257,7 +257,7 @@ describe("vibest CLI", () => {
         for (const r of [
           yield* vibest(
             repo,
-            { ...cli, VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_PROJECT_ID: String(coord.projectId) },
+            { ...cli, VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_PROJECT_ID: String(entry.projectId) },
             [command, id],
           ),
           yield* vibest(
@@ -349,7 +349,7 @@ describe("vibest CLI", () => {
 
 describe("vibest CLI without vibestd", () => {
   it.effect(
-    "an agent's vibest does not start vibestd (it would run in the agent's sandbox); it says to ask the user; the main agent may still run update from its own shell",
+    "an agent's vibest does not start vibestd (it would run in the agent's sandbox); it says to ask the user; the entry session may still run update from its own shell",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem

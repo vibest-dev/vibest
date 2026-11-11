@@ -113,7 +113,10 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
       const headers = yield* piHeaders(sessionId, ctx)
       yield* connect(layout.socket).pipe(
         Effect.flatMap((client) =>
-          client.CoordinatorSessionReady({ sessionId, harness: "pi", harnessSessionId }, { headers }),
+          client["Session.Ready"](
+            { id: sessionId, conversation: { harness: "pi", id: harnessSessionId } },
+            { headers },
+          ),
         ),
         Effect.scoped,
         Effect.timeout("1 second"),
@@ -123,7 +126,7 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
             ? Effect.void
             : Effect.sync(() =>
                 ctx.ui.notify(
-                  `vibest: the coordinator's conversation may not have been saved: ${Cause.pretty(cause)}`,
+                  `vibest: the entry session's conversation may not have been saved: ${Cause.pretty(cause)}`,
                   "warning",
                 ),
               ),

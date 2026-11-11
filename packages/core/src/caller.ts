@@ -10,15 +10,15 @@ export interface CallerHit {
 
 const shown = (id: string, name: string | undefined) => name ?? id
 
-export type MainPlace =
+export type EntryPlace =
   | { readonly in: "terminal"; readonly runtime: string; readonly terminal: string }
   | { readonly in: "launch"; readonly runtime: string }
   | { readonly in: "refused"; readonly message: string }
 
-export const mainPlace = (o: {
+export const entryPlace = (o: {
   readonly runtime: string | undefined
   readonly hits: ReadonlyArray<CallerHit>
-}): MainPlace => {
+}): EntryPlace => {
   const named = (id: string) => o.hits.find((hit) => hit.id === id)
   if (o.runtime !== undefined) {
     const hit = named(o.runtime)

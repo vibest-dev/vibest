@@ -88,7 +88,7 @@ describe.concurrent("Sessions", () => {
       const moved = (yield* db.getSession(id))!
       assert.strictEqual(moved.harnessId, "claude")
       assert.strictEqual(moved.executionState, "open")
-      assert.deepStrictEqual(yield* db.coordinatorPending(project), [])
+      assert.deepStrictEqual(yield* db.entryPending(project), [])
       assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
       assert.strictEqual((yield* herdr.callsTo("open")).at(-1)!.cwd, yield* sessionWorktree(id))
       assert.lengthOf(yield* herdr.callsTo("close"), 1)

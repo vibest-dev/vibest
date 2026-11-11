@@ -16,7 +16,7 @@ import {
 const unsafeOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.catch((e) => (e instanceof SystemPromptDirUnsafe ? Effect.fail(e) : Effect.die(e))))
 
-export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, R>(input: {
+export const entryCommand = Effect.fn("entryCommand")(function* <E, R>(input: {
   readonly harness: HarnessId
   readonly root: string
   readonly provider: string | null
@@ -38,7 +38,7 @@ export const coordinatorCommand = Effect.fn("coordinatorCommand")(function* <E, 
   const vibest = yield* VibestCommand
   const unavailable = (message: string) => new HarnessUnavailable({ harness: input.harness, message })
   if (!adapter.coordinatorArgs)
-    return yield* unavailable(`${input.harness} is not currently supported as the coordinator`)
+    return yield* unavailable(`${input.harness} is not currently supported as the entry session`)
   const providerError = adapter.checkProvider?.(input.provider)
   if (providerError) return yield* unavailable(providerError)
   if (!(yield* harness.available(input.harness))) return yield* unavailable(`${adapter.binary} is not on PATH`)

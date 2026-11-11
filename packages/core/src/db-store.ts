@@ -29,7 +29,7 @@ import {
   type ExecutionEnd,
 } from "./db-rows.ts"
 import { makeJournal } from "./journal.ts"
-import { coordinatorOf, decodeCoordinators, decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
+import { entryRow, decodeEntrySessions, decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
 import { Routing } from "./plugins.ts"
 import { envelope } from "./replies.ts"
 import { SessionLive } from "./session/live.ts"
@@ -123,12 +123,16 @@ export const makeStore = Effect.gen(function* () {
       return repositoriesOf(changed)
     })
 
-  const notMain = sql`s.agent != 'main'`
-  const endedMain = sql`s.agent = 'main' AND NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id)`
+  const notEntry = sql`s.agent != 'main'`
+  const endedEntry = sql`s.agent = 'main' AND NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id)`
   const running = sql`p_ended IS NULL`
   const selectRaw = reads.sessionRows
-  const selectSessions = (where: ReadonlyArray<Statement.Fragment>, endedMains = false, filter?: Statement.Fragment) =>
-    selectRaw([endedMains ? sql`(${notMain} OR ${endedMain})` : notMain, ...where], filter).pipe(
+  const selectSessions = (
+    where: ReadonlyArray<Statement.Fragment>,
+    endedEntries = false,
+    filter?: Statement.Fragment,
+  ) =>
+    selectRaw([endedEntries ? sql`(${notEntry} OR ${endedEntry})` : notEntry, ...where], filter).pipe(
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
@@ -158,16 +162,16 @@ export const makeStore = Effect.gen(function* () {
   const placed = (projectIdValue: string, current: Current | undefined) =>
     current !== undefined && current.ended === null && current.terminal !== null && !moving.has(projectIdValue)
 
-  const findCoordinators = (project?: string) =>
-    reads.coordinatorRows(project).pipe(
+  const findEntrySessions = (project?: string) =>
+    reads.entryRows(project).pipe(
       Effect.flatMap((rows) =>
         Effect.forEach(rows, (row) =>
           sessionLive
             .integration(row.id)
-            .pipe(Effect.map((integration) => coordinatorOf(row, { integration, moving: moving.has(row.project) }))),
+            .pipe(Effect.map((integration) => entryRow(row, { integration, moving: moving.has(row.project) }))),
         ),
       ),
-      Effect.flatMap(decodeCoordinators),
+      Effect.flatMap(decodeEntrySessions),
     )
 
   const inbox = reads.inboxWhere
@@ -178,7 +182,7 @@ export const makeStore = Effect.gen(function* () {
   const findSend = (sessionId: string, status: InboxStatus) =>
     inbox(sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = ${status}
         AND NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = m.session_id)`)
-  const entryOf = (projectIdValue: string) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
+  const entryIdOf = (projectIdValue: string) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
 
   const openExecution = (sessionId: string) =>
     sql<{ id: number }>`SELECT id FROM execution WHERE session_id = ${sessionId} AND outcome IS NULL`.pipe(
@@ -577,19 +581,19 @@ export const makeStore = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       if (guard !== undefined) {
-        const [main] = yield* findCoordinators(projectIdValue)
+        const [entry] = yield* findEntrySessions(projectIdValue)
         if (guard === "absent") {
-          if (main?.runtime || moving.has(projectIdValue)) return
+          if (entry?.runtime || moving.has(projectIdValue)) return
         } else if (
-          !main?.runtime ||
-          !main.address ||
-          main.runtime !== guard.runtime ||
-          encodeAddress(main.address) !== guard.address
+          !entry?.runtime ||
+          !entry.address ||
+          entry.runtime !== guard.runtime ||
+          encodeAddress(entry.address) !== guard.address
         )
           return
       }
-      const dropped = yield* moveInbox(sql`status = 'pending' AND session_id = ${entryOf(projectIdValue)}`, "dropped")
-      yield* tellSendersOf(dropped, "the main agent is not running")
+      const dropped = yield* moveInbox(sql`status = 'pending' AND session_id = ${entryIdOf(projectIdValue)}`, "dropped")
+      yield* tellSendersOf(dropped, "the entry session is not running")
     })
 
   const sessionAt = (runtime: string, address: RuntimeAddress) =>
@@ -598,7 +602,7 @@ export const makeStore = Effect.gen(function* () {
       ORDER BY s.created_at, s.id
       LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
 
-  const mainsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
+  const entrySessionsAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
       const rows = yield* sql<{ id: string; project: string }>`SELECT s.id, s.project_id AS project FROM session s
         JOIN project q ON q.entry_session_id = s.id
@@ -608,11 +612,11 @@ export const makeStore = Effect.gen(function* () {
       return rows.filter((r) => !moving.has(r.project))
     })
 
-  const clearMainAt = (runtime: string, address: RuntimeAddress, except?: string) =>
+  const clearEntryAt = (runtime: string, address: RuntimeAddress, except?: string) =>
     Effect.gen(function* () {
-      for (const main of yield* mainsAt(runtime, address, except)) {
-        yield* endProcess(main.id, "exited")
-        yield* dropWaiting(main.project)
+      for (const entry of yield* entrySessionsAt(runtime, address, except)) {
+        yield* endProcess(entry.id, "exited")
+        yield* dropWaiting(entry.project)
       }
     })
 
@@ -660,7 +664,7 @@ export const makeStore = Effect.gen(function* () {
     projectPrefixTaken,
     repositoriesOf,
     changedRepositories,
-    notMain,
+    notEntry,
     running,
     selectRaw,
     selectSessions,
@@ -668,11 +672,11 @@ export const makeStore = Effect.gen(function* () {
     readSession,
     currentProcess,
     currentProcessId,
-    findCoordinators,
+    findEntrySessions,
     inbox,
     inboxIn,
     findSend,
-    entryOf,
+    entryIdOf,
     openExecution,
     startExecution,
     moveInbox,
@@ -692,8 +696,8 @@ export const makeStore = Effect.gen(function* () {
     updateSession,
     dropWaiting,
     sessionAt,
-    mainsAt,
-    clearMainAt,
+    entrySessionsAt,
+    clearEntryAt,
     unusedId,
     conversationOf,
     placed,

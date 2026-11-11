@@ -8,7 +8,7 @@
 #   [[keys.command]]
 #   key = "prefix+v"
 #   type = "plugin_action"
-#   command = "vibest.open-main"
+#   command = "vibest.open-entry"
 
 id = "vibest"
 name = "vibest"
@@ -22,11 +22,11 @@ platforms = ["linux", "macos"]
 command = ["sh", "bin/vibest.sh", "herdr", "startup"]
 
 [[actions]]
-id = "open-main"
-title = "vibest: open main Agent"
-description = "Open or focus the main Agent of the Project for the focused pane's directory."
+id = "open-entry"
+title = "vibest: open entry session"
+description = "Open or focus the entry session of the Project for the focused pane's directory."
 contexts = ["global", "workspace", "pane"]
-command = ["sh", "bin/vibest.sh", "herdr", "open-main"]
+command = ["sh", "bin/vibest.sh", "herdr", "open-entry"]
 
 [[actions]]
 id = "run"

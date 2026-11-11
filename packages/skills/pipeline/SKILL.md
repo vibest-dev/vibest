@@ -1,6 +1,6 @@
 ---
 name: pipeline
-description: Plan, implement, review, then open a pull request, with the user approving the plan first. Only vibest's main agent (the coordinator) starts agents; a subagent must not use this skill. Use when the user wants a plan or design before code, a review before merging, or a pull request at the end ("plan it first, then build it", "write a design, then implement", "implement it and have someone review it", "先出方案再写，写完找人 review 后提 PR", "do it as a pipeline", "/pipeline").
+description: Plan, implement, review, then open a pull request, with the user approving the plan first. Only vibest's entry session starts agents; a subagent must not use this skill. Use when the user wants a plan or design before code, a review before merging, or a pull request at the end ("plan it first, then build it", "write a design, then implement", "implement it and have someone review it", "先出方案再写，写完找人 review 后提 PR", "do it as a pipeline", "/pipeline").
 ---
 
 # Pipeline

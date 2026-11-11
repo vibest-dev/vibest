@@ -53,10 +53,7 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
           typeof input === "object" &&
           !Array.isArray(input) &&
           !("runtime" in input) &&
-          (prop === "Spawn" ||
-            prop === "Launch" ||
-            prop === "Project.CoordinatorSession" ||
-            prop === "Project.RunningCoordinator")
+          (prop === "Spawn" || prop === "Launch" || prop === "Project.EntrySession" || prop === "Project.RunningEntry")
             ? { ...input, runtime: TEST_HERDR }
             : input
         return (value as (payload: unknown, options?: { headers?: Record<string, string> }) => unknown).call(
@@ -73,8 +70,8 @@ export const savedSession = (sessionId: string) =>
     const db = yield* Db
     const projectId = yield* db.projectOfSession(sessionId)
     if (projectId === undefined) return null
-    const main = yield* db.coordinatorOf(projectId)
-    return main?.id === sessionId ? main.harnessSessionId : null
+    const entry = yield* db.entryOf(projectId)
+    return entry?.id === sessionId ? entry.harnessSessionId : null
   })
 
 const STDIN_FROM_FILE = 'f=$1; shift; exec "$@" <"$f"'

@@ -111,15 +111,15 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   variable they declare from its own environment (the platform's `HostEnv.drop`), so a process it starts does not
   inherit a runtime's variables. A plugin cannot read its own caller variables inside vibestd, because those are
   removed; it connects through another variable, as hc uses `HC_SOCKET` rather than `HC_TERMINAL_SOCKET`.
-- The main agent (`vibest`) starts in that terminal. `vibest --runtime <id>` overrides the detection and, when this
+- The entry session (`vibest`) starts in that terminal. `vibest --runtime <id>` overrides the detection and, when this
   terminal is not that runtime's, opens one there. None detected and no `--runtime`: refused, saying to pass
   `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over
   another runtime's variables the shell inherited.
 - A subagent (`vibest run`) takes `--runtime <id>` on `Spawn`. Without it, it runs in its parent's runtime. With
   `--peer` and no `--runtime`, it runs in the peer's runtime on the peer's machine instead: it shares that session's
   worktree and splits a pane off it, so the default choice must not replace the peer. An explicit `--runtime` is kept,
-  and a peer on another runtime or machine is still refused. The parent lookup includes the coordinator, because
-  `getSession` leaves the live main row out. If the runtime that was chosen is not online, the start fails with the
+  and a peer on another runtime or machine is still refused. The parent lookup includes the entry session, because
+  `getSession` leaves the live entry row out. If the runtime that was chosen is not online, the start fails with the
   runtime's reason. No other fallback. A user plugin on `agent.start.before` may still return a `runtime`. A runtime
   already set stands.
 - vibest.json's `runtime` key is not a choice. The first time vibestd reads a file that still has it, it warns once
@@ -173,7 +173,7 @@ evidence files, never the runner terminal. Claude ignores keys at its first dial
 visible dialog text, pauses, reads it again, then answers only the scratch action.
 
 Caller detection is the environment keys in §4. Do not forge a herdr identity in E2E. Still open: launch a real
-Claude and Pi coordinator with built `vibest --harness <harness>` inside an isolated hc terminal; hold its fake model
+Claude and Pi entry session with built `vibest --harness <harness>` inside an isolated hc terminal; hold its fake model
 and assert native working, complete it and assert native done, then start another execution and interrupt it to assert
 idle, with the loaded vibest integration and no competing OSC writer. This is independent of worker result coverage.
 In the same follow-up, remove Cursor's coordinator exclusion from terminal status reporting and verify working/idle
@@ -202,15 +202,15 @@ machine, and vibest never installs, prepares or reaches another machine through 
 
 ## 7. Running an Agent on another machine
 
-- `vibest run --machine <name>` (the user or the main agent) sends `Peer.Spawn` to B's vibestd with the project's
+- `vibest run --machine <name>` (the user or the entry session) sends `Peer.Spawn` to B's vibestd with the project's
   repository identity, its `HEAD`, and a runtime kind: `--runtime`, else the runtime of the caller's terminal, else
-  that of A's main agent. The caller's environment is not sent; it names a terminal on A. A stores nothing for the
+  that of A's entry session. The caller's environment is not sent; it names a terminal on A. A stores nothing for the
   session.
 - B starts the agent as a local start in its own runtime of that kind (`NoRuntime` when it has none), with its own
   `agent.start.before` hooks. B finds its checkout of the project by repository identity, needs the `HEAD` commit
   there ("push first"), and makes the worktree as for a local agent; work comes back by the agent pushing its branch.
   herdr opens an agent another machine started in its default session `default` (`open`'s `remote`).
-- B reports the agent's results to A's main agent through B's outbox; `vibest result|send|interrupt|archive|peek
+- B reports the agent's results to A's entry session through B's outbox; `vibest result|send|interrupt|archive|peek
   <name>/<id>` are forwarded to B. A call to a machine that is not connected fails at once; nothing is queued.
 - `agent.start.before` on A lists only this machine in `machines[]`, with its runtimes and their `status()`; a hook
   that returns another `machine` does not move the start there. Core checks after the chain that the chosen runtime is

@@ -221,13 +221,13 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "Project.CoordinatorSession answers and frees the project when the runtime's present never returns",
+    "Project.EntrySession answers and frees the project when the runtime's present never returns",
     Effect.gen(function* () {
       const runtime = yield* FakeRuntime
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const held = yield* runtime.hold("present")
-      const launch = yield* c["Project.CoordinatorSession"]({
+      const launch = yield* c["Project.EntrySession"]({
         harness: "claude",
         fresh: false,
         terminal: "test/p1",
@@ -236,7 +236,7 @@ describe("vibest.sock", () => {
       yield* TestClock.adjust(Server.PRESENT_TIMEOUT)
       const saved = yield* Fiber.join(launch)
       assert.isString(saved.sessionId)
-      const again = yield* c["Project.CoordinatorSession"]({
+      const again = yield* c["Project.EntrySession"]({
         harness: "claude",
         fresh: false,
         terminal: "test/p1",
@@ -255,10 +255,16 @@ describe("vibest.sock", () => {
       const c = asCli(raw, repo)
       const { id } = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
-      const launch = yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
-      yield* raw.CoordinatorSessionReady(
-        { sessionId: launch.sessionId, harness: "claude", harnessSessionId: "s1" },
-        { headers: protocolHeaders() },
+      const launch = yield* c["Project.EntrySession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
+      yield* raw["Session.Ready"](
+        { id: launch.sessionId, conversation: { harness: "claude", id: "s1" } },
+        {
+          headers: sessionHeaders({
+            sessionId: launch.sessionId,
+            projectId: launch.projectId,
+            pluginVersion: "1.2.3",
+          }),
+        },
       )
 
       const bare = yield* client
@@ -323,39 +329,89 @@ describe("vibest.sock", () => {
       })
       const fromUser = yield* db.latestInbox(launch.sessionId, "send")
       assert.deepInclude(fromUser, { message: "from the user", sender: null })
-      yield* raw.CoordinatorSessionReady(
-        { sessionId: launch.sessionId, harness: "claude", harnessSessionId: "stale" },
-        { headers: protocolHeaders() },
+      yield* raw["Session.Ready"](
+        { id: launch.sessionId, conversation: { harness: "claude", id: "stale" } },
+        {
+          headers: sessionHeaders({
+            sessionId: launch.sessionId,
+            projectId: launch.projectId,
+            pluginVersion: "1.2.3",
+          }),
+        },
       )
-      yield* raw.CoordinatorSessionReady(
-        { sessionId: launch.sessionId, harness: "claude", harnessSessionId: "s2" },
-        { headers: protocolHeaders() },
+      yield* raw["Session.Ready"](
+        { id: launch.sessionId, conversation: { harness: "claude", id: "s2" } },
+        {
+          headers: sessionHeaders({
+            sessionId: launch.sessionId,
+            projectId: launch.projectId,
+            pluginVersion: "1.2.3",
+          }),
+        },
+      )
+      yield* raw["Session.Ready"](
+        { id: launch.sessionId, conversation: { harness: "pi", id: "late-pi-report" } },
+        {
+          headers: sessionHeaders({
+            sessionId: launch.sessionId,
+            projectId: launch.projectId,
+            pluginVersion: "1.2.3",
+          }),
+        },
       )
       assert.strictEqual(
-        (yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" }))
-          .harnessSessionId,
+        (yield* c["Project.EntrySession"]({ harness: "claude", fresh: false, terminal: "test/p1" })).harnessSessionId,
         "s2",
+        "a conversation reported by another harness than the session's is ignored",
+      )
+      const worker = (yield* db.getSession(id))!
+      yield* raw["Session.Ready"](
+        { id, conversation: { harness: "pi", id: "worker-report" } },
+        { headers: sessionHeaders({ sessionId: id, projectId: worker.projectId, pluginVersion: "1.2.3" }) },
+      )
+      assert.notStrictEqual(
+        (yield* db.getSession(id))!.harnessSessionId,
+        "worker-report",
+        "a conversation reported by a session that is not its project's entry is ignored",
       )
     }),
   )
 
   test(
-    "a Coordinator manages only the sessions it spawned, and another project's reads them but does not list them; the command line (the user) manages any",
+    "an ordinary session whose agent is named entry is not an entry caller: the entry's calls are refused and its conversation payload is ignored",
     Effect.gen(function* () {
       const db = yield* Db
       const repo = yield* makeRepository
-      const asCoordinator = (root: string, paneId: string) =>
+      const raw = yield* client
+      const { id } = yield* asCli(raw, repo).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it", agent: "entry" })
+      const headers = sessionHeaders({
+        sessionId: id,
+        projectId: (yield* db.getSession(id))!.projectId,
+        pluginVersion: "1.2.3",
+      })
+      assert.strictEqual(failureTag(yield* Effect.exit(raw.List({}, { headers }))), "Forbidden")
+      yield* raw["Session.Ready"]({ id, conversation: { harness: "pi", id: "named-entry" } }, { headers })
+      assert.notStrictEqual((yield* db.getSession(id))!.harnessSessionId, "named-entry")
+    }),
+  )
+
+  test(
+    "an entry session manages only the sessions it spawned, and another project's reads them but does not list them; the command line (the user) manages any",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const repo = yield* makeRepository
+      const asEntry = (root: string, paneId: string) =>
         Effect.gen(function* () {
           const raw = yield* client
-          const launched = yield* asCli(raw, root)["Project.CoordinatorSession"]({
+          const launched = yield* asCli(raw, root)["Project.EntrySession"]({
             harness: "pi",
             fresh: false,
             terminal: `test/${paneId}`,
           })
           return yield* asSession(raw, launched.sessionId, root)
         })
-      const a = yield* asCoordinator(repo, "p1")
-      const b = yield* asCoordinator(yield* makeRepository, "p2")
+      const a = yield* asEntry(repo, "p1")
+      const b = yield* asEntry(yield* makeRepository, "p2")
       const { id } = yield* a.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const others: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
@@ -367,7 +423,7 @@ describe("vibest.sock", () => {
       for (const call of others) {
         const exit = yield* Effect.exit(call)
         assert.strictEqual(failureTag(exit), "Forbidden")
-        assert.match(String(Exit.isFailure(exit) && Cause.pretty(exit.cause)), /belongs to another coordinator/)
+        assert.match(String(Exit.isFailure(exit) && Cause.pretty(exit.cause)), /belongs to another entry session/)
       }
       assert.deepInclude(yield* b.Get({ id }), { id, agent: "general" })
       assert.strictEqual((yield* b.List({})).sessions[0]?.agent, "main")
@@ -385,12 +441,12 @@ describe("vibest.sock", () => {
       )
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
       assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
-      yield* a.Send({ id, message: "from its own Coordinator" })
+      yield* a.Send({ id, message: "from its own entry session" })
       const user = asCli(yield* client, repo)
       yield* user.Send({ id, message: "from the user" })
       assert.deepStrictEqual(
         (yield* db.pendingInbox(id)).map((r) => r.message),
-        ["from its own Coordinator", "from the user"],
+        ["from its own entry session", "from the user"],
       )
       assert.strictEqual(
         failureTag(yield* Effect.exit(user.Remove({ id }))),
@@ -405,17 +461,17 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const repo = yield* makeRepository
-      const asCoordinator = (root: string, paneId: string) =>
+      const asEntry = (root: string, paneId: string) =>
         Effect.gen(function* () {
           const raw = yield* client
-          const launched = yield* asCli(raw, root)["Project.CoordinatorSession"]({
+          const launched = yield* asCli(raw, root)["Project.EntrySession"]({
             harness: "pi",
             fresh: false,
             terminal: `test/${paneId}`,
           })
           return yield* asSession(raw, launched.sessionId, root)
         })
-      const a = yield* asCoordinator(repo, "p1")
+      const a = yield* asEntry(repo, "p1")
       const { id } = yield* a.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       type Client = Effect.Success<typeof client>
@@ -424,22 +480,19 @@ describe("vibest.sock", () => {
       ): ReadonlyArray<readonly [string, Effect.Effect<unknown, { readonly _tag: string }>]> => [
         ["Spawn", c.Spawn({ callerEnv: {}, harness: "pi", prompt: "more" })],
         ["Launch", c.Launch({ callerEnv: {}, argv: [], focus: false })],
-        ["Project.StartMain", c["Project.StartMain"]({ runtime: "herdr" })],
+        ["Project.StartEntry", c["Project.StartEntry"]({ runtime: "herdr" })],
         ["Project.Open", c["Project.Open"]({})],
-        ["Project.MainPlace", c["Project.MainPlace"]({ callerEnv: {} })],
+        ["Project.EntryPlace", c["Project.EntryPlace"]({ callerEnv: {} })],
         ["List", c.List({ stopped: true })],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
         ["Watch", Stream.runDrain(c.Watch(undefined))],
         ["Session.Seen", c["Session.Seen"]({ id: "x", finished: 0 })],
-        [
-          "Project.CoordinatorSession",
-          c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" }),
-        ],
+        ["Project.EntrySession", c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })],
         ["Project.Create", c["Project.Create"]({ directory: "x", from: ["y"] })],
-        ["Project.FocusCoordinator", c["Project.FocusCoordinator"]({})],
-        ["Project.RunningCoordinator", c["Project.RunningCoordinator"]({ terminal: "test/p1" })],
-        ["Project.StopCoordinator", c["Project.StopCoordinator"]({ runtime: "herdr", address: "{}" })],
+        ["Project.FocusEntry", c["Project.FocusEntry"]({})],
+        ["Project.RunningEntry", c["Project.RunningEntry"]({ terminal: "test/p1" })],
+        ["Project.StopEntry", c["Project.StopEntry"]({ runtime: "herdr", address: "{}" })],
         ["Project.Info", c["Project.Info"]()],
         ["Project.Search", c["Project.Search"]({ query: "x" })],
         ["Send", c.Send({ id, message: "x" })],
@@ -470,7 +523,7 @@ describe("vibest.sock", () => {
       for (const [method, call] of protectedCalls(w).filter(([m]) => m !== "Send" && m !== "Integration.Guard"))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
 
-      yield* a["Session.Ready"]({ id: (yield* db.coordinatorOf((yield* db.getSession(id))!.projectId))!.id })
+      yield* a["Session.Ready"]({ id: (yield* db.entryOf((yield* db.getSession(id))!.projectId))!.id })
       yield* w["Session.Ready"]({ id, pid: 4242 })
       assert.isDefined(yield* db.readyAt(id))
       assert.strictEqual((yield* db.getSession(id))!.metadata.pid, 4242)
@@ -480,10 +533,6 @@ describe("vibest.sock", () => {
       yield* bare.Subscriptions(undefined, { headers: protocolHeaders() })
       yield* bare.Republish(undefined, { headers: protocolHeaders() })
       yield* bare.ExecutionEnd({ sessionId: id, harness: "pi", event: "{}" }, { headers: protocolHeaders() })
-      yield* bare.CoordinatorSessionReady(
-        { sessionId: "unknown", harness: "pi", harnessSessionId: "s1" },
-        { headers: protocolHeaders() },
-      )
       assert.strictEqual(
         failureTag(
           yield* Effect.exit(
@@ -503,7 +552,6 @@ describe("vibest.sock", () => {
         "Republish",
         "ExecutionEnd",
         "Prompt",
-        "CoordinatorSessionReady",
       ]
       assert.sameMembers(covered, [...VibestRpcs.requests.keys()])
     }),
@@ -519,7 +567,7 @@ describe("vibest.sock", () => {
       const { id } = yield* cli.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const session = yield* asSession(raw, id)
-      const entry = (yield* cli["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" }))
+      const entry = (yield* cli["Project.EntrySession"]({ harness: "claude", fresh: false, terminal: "test/p1" }))
         .sessionId
       yield* session.Send({ id: entry, message: "first" })
       assert.match((yield* db.latestInbox(entry, "send"))!.message, /first/)
@@ -657,18 +705,18 @@ describe("vibest.sock", () => {
 
   const seenDirectory = { project: "" }
   test(
-    "Project.StartMain schedules with the project directory, not its key; with no harness it fails until a main agent exists, then takes its harness",
+    "Project.StartEntry schedules with the project directory, not its key; with no harness it fails until an entry session exists, then takes its harness",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
-      const first = yield* Effect.flip(c["Project.StartMain"]({ runtime: "herdr" }))
+      const first = yield* Effect.flip(c["Project.StartEntry"]({ runtime: "herdr" }))
       assert.strictEqual(first._tag, "LaunchFailed")
       assert.match(first.message, /no harness to inherit/)
-      assert.strictEqual((yield* c["Project.StartMain"]({ runtime: "herdr", harness: "pi" })).harness, "pi")
+      assert.strictEqual((yield* c["Project.StartEntry"]({ runtime: "herdr", harness: "pi" })).harness, "pi")
       assert.strictEqual(seenDirectory.project, (yield* projectRoot(repo)).root)
       assert.notStrictEqual(seenDirectory.project, yield* projectOf(repo))
-      yield* c["Project.CoordinatorSession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
-      assert.strictEqual((yield* c["Project.StartMain"]({ runtime: "herdr" })).harness, "claude")
+      yield* c["Project.EntrySession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
+      assert.strictEqual((yield* c["Project.StartEntry"]({ runtime: "herdr" })).harness, "claude")
     }),
     {
       plugins: [
@@ -686,14 +734,14 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "List shows the main agent's live status from its pane, not a stored unknown",
+    "List shows the entry session's live status from its pane, not a stored unknown",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const pane = "w1:coord"
       yield* herdr.seedAgent(pane)
-      yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: pane })
+      yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: pane })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "working" }))
       assert.deepInclude((yield* c.List({})).sessions[0], { agent: "main", status: "working" })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "idle" }))
@@ -718,60 +766,60 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "archive refuses a main agent and names its project",
+    "archive refuses an entry session and names its project",
     Effect.gen(function* () {
       const db = yield* Db
       const path = yield* Path.Path
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      yield* db.coordinatorLaunch(projectId, "pi", false, {
+      yield* db.startEntry(projectId, "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "test/main" },
       })
-      const main = (yield* db.coordinatorOf(projectId))!
-      const failed = yield* Effect.flip(asCli(yield* client, repo).Remove({ id: main.id }))
+      const entry = (yield* db.entryOf(projectId))!
+      const failed = yield* Effect.flip(asCli(yield* client, repo).Remove({ id: entry.id }))
       assert.strictEqual(failed._tag, "NoSuchSession")
       assert.strictEqual(
         "message" in failed ? failed.message : "",
-        `${main.id} is the main agent of project ${path.basename(repo)}. Stop it in its terminal.`,
+        `${entry.id} is the session you opened in a terminal (project ${path.basename(repo)}); stop it in that terminal.`,
       )
     }),
   )
 
   test(
-    "FocusCoordinator is null without a running main, and focuses one that is running",
+    "FocusEntry is null without a running entry session, and focuses one that is running",
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
-      assert.strictEqual(yield* c["Project.FocusCoordinator"]({}), null)
+      assert.strictEqual(yield* c["Project.FocusEntry"]({}), null)
       const projectId = yield* projectOf(repo)
-      yield* db.coordinatorLaunch(projectId, "pi", false, {
+      yield* db.startEntry(projectId, "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "test/main" },
       })
-      assert.strictEqual(yield* c["Project.FocusCoordinator"]({}), null)
+      assert.strictEqual(yield* c["Project.FocusEntry"]({}), null)
       yield* herdr.seedAgent("test/main")
-      const focused = yield* c["Project.FocusCoordinator"]({})
+      const focused = yield* c["Project.FocusEntry"]({})
       assert.strictEqual(focused?.focused, true)
       assert.strictEqual((yield* herdr.callsTo("focus"))[0]?.terminal, "test/main")
     }),
   )
 
   test(
-    "FocusCoordinator reports a runtime that cannot focus",
+    "FocusEntry reports a runtime that cannot focus",
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      yield* db.coordinatorLaunch(projectId, "pi", false, {
+      yield* db.startEntry(projectId, "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "test/main" },
       })
       yield* herdr.seedAgent("test/main")
-      const focused = yield* asCli(yield* client, repo)["Project.FocusCoordinator"]({})
+      const focused = yield* asCli(yield* client, repo)["Project.FocusEntry"]({})
       assert.strictEqual(focused?.focused, false)
       assert.strictEqual((yield* herdr.callsTo("focus")).length, 0)
     }),
@@ -796,16 +844,16 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "--new with a missing harness does not archive the current main agent",
+    "--new with a missing harness does not archive the current entry session",
     Effect.gen(function* () {
       const db = yield* Db
       const repo = yield* makeRepository
       const projectId = yield* projectOf(repo)
-      yield* db.coordinatorLaunch(projectId, "pi", false, {
+      yield* db.startEntry(projectId, "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "test/main" },
       })
-      const before = (yield* db.coordinatorOf(projectId))!.id
+      const before = (yield* db.entryOf(projectId))!.id
       const failed = yield* Effect.flip(
         asCli(yield* client, repo).Launch({
           callerEnv: {},
@@ -815,7 +863,7 @@ describe("vibest.sock", () => {
         }),
       )
       assert.ok(failed._tag === "LaunchFailed" || failed._tag === "AgentRefused", failed._tag)
-      assert.strictEqual((yield* db.coordinatorOf(projectId))!.id, before)
+      assert.strictEqual((yield* db.entryOf(projectId))!.id, before)
     }),
     { missingBinary: ["cursor"] },
   )

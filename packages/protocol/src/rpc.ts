@@ -125,7 +125,7 @@ export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>
 export type CallerShape =
   | { readonly _tag: "Cli"; readonly repositoryRoot: string }
   | {
-      readonly _tag: "Coordinator"
+      readonly _tag: "Entry"
       readonly sessionId: string
       readonly projectId: string
       readonly repositoryRoot?: string
@@ -502,7 +502,7 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(
     admitted(
-      Rpc.make("Project.CoordinatorSession", {
+      Rpc.make("Project.EntrySession", {
         payload: {
           harness: Schema.String,
           fresh: Schema.Boolean,
@@ -538,7 +538,7 @@ export class VibestRpcs extends RpcGroup.make(
     ),
   ),
   scoped(
-    Rpc.make("Project.StartMain", {
+    Rpc.make("Project.StartEntry", {
       payload: {
         harness: Schema.optional(Schema.String),
         provider: Schema.optional(Schema.String),
@@ -584,7 +584,7 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
-    Rpc.make("Project.MainPlace", {
+    Rpc.make("Project.EntryPlace", {
       payload: {
         callerEnv: Schema.Record(Schema.String, Schema.String),
         runtime: Schema.optional(Schema.String),
@@ -607,14 +607,14 @@ export class VibestRpcs extends RpcGroup.make(
     }),
   ),
   scoped(
-    Rpc.make("Project.FocusCoordinator", {
+    Rpc.make("Project.FocusEntry", {
       payload: {},
       success: Schema.NullOr(Schema.Struct({ place: Schema.String, focused: Schema.Boolean })),
       error: Schema.Union([Forbidden, NotInRepository, ProjectMoved]),
     }),
   ),
   scoped(
-    Rpc.make("Project.RunningCoordinator", {
+    Rpc.make("Project.RunningEntry", {
       payload: { terminal: Schema.String },
       success: Schema.NullOr(
         Schema.Struct({
@@ -636,20 +636,13 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(
     admitted(
-      Rpc.make("Project.StopCoordinator", {
+      Rpc.make("Project.StopEntry", {
         payload: { runtime: Schema.String, address: Schema.String },
         success: Schema.Struct({
           result: Schema.Literals(["stopped", "running", "moved", "unsupported"]),
           reason: Schema.optional(Schema.String),
         }),
         error: Schema.Union([Forbidden, NotInRepository, ProjectMoved, RuntimeUnreachable, NoRuntime, InvalidCaller]),
-      }),
-    ),
-  ),
-  protocol(
-    admitted(
-      Rpc.make("CoordinatorSessionReady", {
-        payload: { sessionId: Schema.String, harness: Schema.String, harnessSessionId: Schema.String },
       }),
     ),
   ),
@@ -703,7 +696,11 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(
     Rpc.make("Session.Ready", {
-      payload: { id: Schema.String, pid: Schema.optional(Schema.Number) },
+      payload: {
+        id: Schema.String,
+        pid: Schema.optional(Schema.Number),
+        conversation: Schema.optional(Schema.Struct({ harness: Schema.String, id: Schema.String })),
+      },
       success: Schema.Struct({ process: Schema.optional(Schema.Number) }),
       error: Schema.Union([Forbidden, NoSuchSession]),
     }),
@@ -821,7 +818,6 @@ export const ACCESS = {
   Republish: "open",
   ExecutionEnd: "open",
   Prompt: "open",
-  CoordinatorSessionReady: "open",
   Spawn: "agent",
   Launch: "agent",
   List: ["agent", "peer"],
@@ -830,12 +826,12 @@ export const ACCESS = {
   Watch: "cli",
   "Session.Seen": "cli",
   "Project.Open": "cli",
-  "Project.MainPlace": "cli",
-  "Project.CoordinatorSession": "agent",
-  "Project.StartMain": "agent",
-  "Project.FocusCoordinator": "cli",
-  "Project.RunningCoordinator": "agent",
-  "Project.StopCoordinator": "agent",
+  "Project.EntryPlace": "cli",
+  "Project.EntrySession": "agent",
+  "Project.StartEntry": "agent",
+  "Project.FocusEntry": "cli",
+  "Project.RunningEntry": "agent",
+  "Project.StopEntry": "agent",
   "Project.Create": "cli",
   "Project.Info": "agent",
   "Project.Search": "agent",

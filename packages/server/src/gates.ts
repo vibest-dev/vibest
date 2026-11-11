@@ -156,9 +156,9 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
           `${method} claims project ${who.project}; session ${who.row.id} is in project ${who.row.projectId}`,
         )
       const row = who.row
-      if (row.agent === "coordinator") {
+      if (row.entry) {
         return {
-          _tag: "Coordinator",
+          _tag: "Entry",
           sessionId: row.id,
           projectId: row.projectId,
           ...(repository._tag === "Some" ? { repositoryRoot: repository.value } : {}),

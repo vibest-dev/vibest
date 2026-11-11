@@ -272,7 +272,7 @@ export class World {
     }
   }
 
-  async entry(options: Omit<Parameters<World["startMain"]>[0], "harness" | "env" | "timeoutMs"> = {}) {
+  async entry(options: Omit<Parameters<World["startEntry"]>[0], "harness" | "env" | "timeoutMs"> = {}) {
     if ((await this.entryOf(options.cwd ?? this.repository)) !== undefined) return
     await this.ok(["daemon"], {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
@@ -285,7 +285,7 @@ export class World {
     })
     if (options.runtime !== "hc" && options.socket === undefined)
       await this.ensureHerdr(options.session ?? this.herdrSession, this.env(options.processEnv))
-    await this.startMain({ ...options, harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
+    await this.startEntry({ ...options, harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
     const cwd = options.cwd ?? this.repository
     await until("the entry session", async () => (await this.entryOf(cwd)) !== undefined, 90_000)
   }
@@ -491,7 +491,7 @@ export class World {
     return socket
   }
 
-  async startMain(input: {
+  async startEntry(input: {
     readonly harness: string
     readonly env?: Record<string, string>
     readonly cwd?: string
@@ -512,7 +512,7 @@ export class World {
     const timeoutMs = input.timeoutMs ?? 60_000
     const vars = input.env ?? {}
     if (input.runtime === "hc") {
-      if (input.hc === undefined) throw new Error("startMain on hc needs the check's hc runner")
+      if (input.hc === undefined) throw new Error("startEntry on hc needs the check's hc runner")
       const name = input.hc.terminal ?? input.name ?? `main-${Date.now()}`
       if (input.hc.terminal === undefined) {
         const opened = await input.hc.run("run", "--bg", "--keep", "--name", name)
@@ -559,7 +559,7 @@ export class World {
       await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
     }
     await until(
-      "the main agent",
+      "the entry session",
       () => {
         const file = path.join(this.vibestHome, "vibest.db")
         if (!fs.existsSync(file)) return false

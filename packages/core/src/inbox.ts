@@ -18,7 +18,7 @@ export const AWAY = Duration.seconds(5)
 
 export type Presence = "idle" | "busy" | "gone" | "unknown"
 
-export const coordinatorIdle = (h: Runtime, terminal: RuntimeAddress): Effect.Effect<Presence, RuntimeError> =>
+export const entryIdle = (h: Runtime, terminal: RuntimeAddress): Effect.Effect<Presence, RuntimeError> =>
   Effect.gen(function* () {
     const seen = yield* agentState(h, terminal)
     if (seen === "unknown" || seen === "absent") return (yield* alive(h, terminal)) ? "busy" : "gone"
@@ -100,26 +100,28 @@ export class Inbox extends Context.Service<
           `deliver project ${projectId}`,
           projectId,
           Effect.gen(function* () {
-            const coord = yield* db.coordinatorOf(projectId)
-            if (!coord?.address || coord.address.id === "" || !coord.runtime)
+            const entry = yield* db.entryOf(projectId)
+            if (!entry?.address || entry.address.id === "" || !entry.runtime)
               return yield* db.dropWaiting(projectId, "absent")
-            if (yield* restarting.has(coord.id)) return
-            const address = encodeAddress(coord.address)
-            const guard = { projectId, runtime: coord.runtime, address }
-            const h = runtimes.find(coord.runtime)
+            if (yield* restarting.has(entry.id)) return
+            const address = encodeAddress(entry.address)
+            const guard = { projectId, runtime: entry.runtime, address }
+            const h = runtimes.find(entry.runtime)
             if (h === undefined) return
-            const presence = yield* coordinatorIdle(h, coord.address)
+            const presence = yield* entryIdle(h, entry.address)
             if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
           }).pipe(Engine.logFailure(`deliver to project ${projectId}`)),
         )
 
-      const mainOf = (id: string) =>
+      const entryProjectOf = (id: string) =>
         Effect.gen(function* () {
           const projectId = yield* db.projectOfSession(id)
-          return projectId !== undefined && (yield* db.coordinatorOf(projectId))?.id === id ? projectId : undefined
+          return projectId !== undefined && (yield* db.entryOf(projectId))?.id === id ? projectId : undefined
         })
-      const ifMain = (id: string, then: (projectId: string) => Effect.Effect<void>) =>
-        mainOf(id).pipe(Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : then(projectId))))
+      const ifEntry = (id: string, then: (projectId: string) => Effect.Effect<void>) =>
+        entryProjectOf(id).pipe(
+          Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : then(projectId))),
+        )
 
       const engine = yield* Engine.make
       const leases = yield* Leases.make
@@ -132,17 +134,17 @@ export class Inbox extends Context.Service<
       yield* engine.on((event) => {
         switch (event.type) {
           case "inbox.queued":
-            return wake(event.sessionId!).pipe(Effect.andThen(ifMain(event.sessionId!, deliver)))
+            return wake(event.sessionId!).pipe(Effect.andThen(ifEntry(event.sessionId!, deliver)))
           case "inbox.moved":
             return event.data.to === "pending"
-              ? wake(event.sessionId!).pipe(Effect.andThen(ifMain(event.sessionId!, deliver)))
+              ? wake(event.sessionId!).pipe(Effect.andThen(ifEntry(event.sessionId!, deliver)))
               : Effect.void
           case "live.state":
             return db
-              .coordinatorAt(event.runtime, event.terminal)
+              .entryAt(event.runtime, event.terminal)
               .pipe(Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : deliver(projectId))))
           case "live.exited":
-            return drain.work("main agent exited", db.clearCoordinator(event.runtime, event.terminal))
+            return drain.work("entry session exited", db.clearEntry(event.runtime, event.terminal))
           default:
             return Effect.void
         }
@@ -159,7 +161,7 @@ export class Inbox extends Context.Service<
           projectId,
           Effect.uninterruptible(
             Effect.gen(function* () {
-              const current = yield* db.coordinatorOf(projectId)
+              const current = yield* db.entryOf(projectId)
               if (!current || inboxOf(current.harnessId) !== mode || !current.address || !current.runtime)
                 return undefined
               const address = encodeAddress(current.address)
@@ -170,7 +172,7 @@ export class Inbox extends Context.Service<
                   address !== origin.address)
               )
                 return undefined
-              const pending = yield* db.coordinatorPending(projectId)
+              const pending = yield* db.entryPending(projectId)
               if (pending.length === 0) return undefined
               const batch = nextBatch(pending)
               const claimed = yield* db.claim(
@@ -188,7 +190,7 @@ export class Inbox extends Context.Service<
       const stream = (projectId: string) =>
         Stream.unwrap(
           Effect.gen(function* () {
-            const subscribed = yield* db.coordinatorOf(projectId)
+            const subscribed = yield* db.entryOf(projectId)
             const origin =
               subscribed?.address && subscribed.runtime
                 ? {
@@ -198,29 +200,31 @@ export class Inbox extends Context.Service<
                   }
                 : undefined
             const signal = yield* Queue.sliding<void>(1)
-            const main = subscribed?.id
-            if (main !== undefined)
+            const entry = subscribed?.id
+            if (entry !== undefined)
               yield* Effect.acquireRelease(
-                Effect.sync(() => waiting.set(main, (waiting.get(main) ?? new Set()).add(signal))),
+                Effect.sync(() => waiting.set(entry, (waiting.get(entry) ?? new Set()).add(signal))),
                 () =>
                   Effect.sync(() => {
-                    const open = waiting.get(main)
+                    const open = waiting.get(entry)
                     open?.delete(signal)
-                    if (open?.size === 0) waiting.delete(main)
+                    if (open?.size === 0) waiting.delete(entry)
                   }),
               )
             const recipient = `${projectId} subscription ${++subscriptions}`
             const claimOne = () =>
-              origin === undefined || main === undefined
+              origin === undefined || entry === undefined
                 ? Effect.succeed(undefined)
                 : claimNext(projectId, "subscribe", origin, (session, ids) =>
-                    leases.hold(recipient, session, ids, undefined, (ended) => db.failLeased(main, ended)),
+                    leases.hold(recipient, session, ids, undefined, (ended) => db.failLeased(entry, ended)),
                   ).pipe(Effect.map((rows) => (rows === undefined ? undefined : text(rows))))
             return Stream.unfold(0, () =>
               Effect.gen(function* () {
                 const ids = leases.held(recipient)
-                if (ids.length > 0 && main !== undefined)
-                  yield* Effect.uninterruptible(markDelivered(main, ids).pipe(Effect.andThen(leases.settle(main, ids))))
+                if (ids.length > 0 && entry !== undefined)
+                  yield* Effect.uninterruptible(
+                    markDelivered(entry, ids).pipe(Effect.andThen(leases.settle(entry, ids))),
+                  )
                 while (true) {
                   const batch = yield* claimOne()
                   if (batch !== undefined) return [batch, 0] as const
@@ -260,9 +264,9 @@ export class Inbox extends Context.Service<
           projectId,
           Effect.uninterruptible(
             Effect.gen(function* () {
-              const main = yield* db.coordinatorOf(projectId)
+              const entry = yield* db.entryOf(projectId)
               const rows = yield* db.settleLeased(projectId, ids, release)
-              if (main !== undefined) yield* leases.settle(main.id, [...ids, ...release])
+              if (entry !== undefined) yield* leases.settle(entry.id, [...ids, ...release])
               return rows.map((r) => r.id)
             }),
           ),
