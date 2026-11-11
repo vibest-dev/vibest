@@ -7,6 +7,15 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **An execution opens when its input is sent and is accepted once the harness takes it up** (anyone reading
+  `vibest.db`, harness and runtime plugin authors): a send that never sees the harness ready leaves no execution (no
+  `not_started` row); the catalog adds `execution.accepted` and an optional `failure.kind` (`limit`) on
+  `execution.ended`, and the read model (projection 6) adds `execution.accepted_at` and `execution.failure_kind`.
+  An execution end reported before its execution was accepted is ignored. vibestd starts each harness with
+  `VIBEST_PROCESS` (its process id), integrations send it as the `vibest-process` header, and `Session.Ready` answers
+  `{ process }`; an execution start or end from an earlier process of the session is dropped. A usage-limit move
+  vibestd stopped part way through is finished by the next check, and sessions ended at a limit are checked at start.
+  An older vibest cannot read a log that holds `execution.accepted`.
 - **The event log is per aggregate** (everyone upgrading, and anyone reading `vibest.db`): every fact belongs to one
   aggregate (a session, a project, or the file's ledger in `meta.ledger`) and is numbered within it; `event` has
   `position`, `aggregate`, `seq`, `at`, `type`, `data` and no `project_id` or `session_id`. The catalog is version 2:

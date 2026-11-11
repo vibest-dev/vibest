@@ -10,7 +10,12 @@ import { Layout } from "./paths.ts"
 import { jsonObject, promptOf, executionEndOf } from "./replies.ts"
 import { Sessions } from "./sessions.ts"
 
-export type HookCaller = { readonly id: string; readonly agent: string; readonly harness: string }
+export type HookCaller = {
+  readonly id: string
+  readonly agent: string
+  readonly harness: string
+  readonly process?: number | undefined
+}
 
 const make = Effect.gen(function* () {
   const db = yield* Db
@@ -33,7 +38,7 @@ const make = Effect.gen(function* () {
     if (definition === undefined) return
     const end = executionEndOf(definition, who.agent, raw, yield* Clock.currentTimeMillis)
     if (!end) return yield* noteConversation(definition, who, raw)
-    const written = yield* db.endObserved(who.id, end)
+    const written = yield* db.endObserved(who.id, end, who.process)
     yield* Effect.log(`execution end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)
   })
 
@@ -43,7 +48,7 @@ const make = Effect.gen(function* () {
     yield* noteConversation(definition, who, raw)
     const text = promptOf(definition, who.agent, raw)
     if (text === undefined) return
-    yield* sessions.userPrompt(who.id, text, yield* Clock.currentTimeMillis)
+    yield* sessions.userPrompt(who.id, text, yield* Clock.currentTimeMillis, who.process)
   })
 
   const ready = Effect.fn("Integration.ready")(function* (
@@ -56,6 +61,7 @@ const make = Effect.gen(function* () {
       ...(pid === undefined ? {} : { pid }),
       ...(reported === undefined ? {} : { integration: reported }),
     })
+    return yield* db.currentProcessId(id)
   })
 
   const guard = (agent: string, raw: string, projectId: string | undefined) =>

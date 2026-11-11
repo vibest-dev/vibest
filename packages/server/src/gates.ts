@@ -10,6 +10,7 @@ import {
   PEER_HEADER,
   PEER_PROJECT_HEADER,
   PLUGIN_VERSION_HEADER,
+  PROCESS_HEADER,
   PROJECT_HEADER,
   PROTOCOL,
   PROTOCOL_HEADER,
@@ -42,6 +43,11 @@ export const reader =
   (headers: Headers.Headers): Read =>
   (name) =>
     Option.getOrUndefined(Headers.get(headers, name))
+
+export const processOf = (read: Read) => {
+  const process = Number(read(PROCESS_HEADER))
+  return Number.isSafeInteger(process) && process > 0 ? process : undefined
+}
 
 export const admit = <A, E, R, A2, E2>(
   drain: Drain["Service"],

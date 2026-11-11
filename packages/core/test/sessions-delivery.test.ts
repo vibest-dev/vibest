@@ -81,47 +81,34 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a typed prompt during resume sees the send's execution already open",
+    "a prompt typed while a send waits for ready is its own execution; the send waits for it to end",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* idleSession(yield* makeRepository)
-      const name = id
-      const first = yield* herdr.hold("state", name)
+      const first = yield* herdr.hold("state", id)
       const sending = yield* Effect.forkChild(sessions.send(id, "queued text"))
       yield* first.reached
-      const second = yield* herdr.hold("state", name)
+      const second = yield* herdr.hold("state", id)
       yield* first.release()
       yield* second.reached
-      assert.strictEqual((yield* (yield* Db).getSession(id))!.executionState, "open")
-      const typing = yield* Effect.forkChild(sessions.userPrompt(id, "typed during resume"))
-      for (let i = 0; i < 30; i++) yield* Effect.yieldNow
-      const during = yield* sql<{
+      assert.notStrictEqual((yield* (yield* Db).getSession(id))!.executionState, "open")
+      yield* sessions.userPrompt(id, "typed during the ready wait")
+      const working = sql<{
         input: string
-      }>`SELECT input FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`
+      }>`SELECT input FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(
+        Effect.orDie,
+      )
       assert.deepStrictEqual(
-        during.map((row) => row.input),
-        [""],
+        (yield* working).map((row) => row.input),
+        ["typed during the ready wait"],
       )
       yield* second.release()
       yield* Fiber.join(sending)
-      yield* Fiber.join(typing)
-      assert.deepStrictEqual(
-        yield* sql<{
-          input: string
-        }>`SELECT input FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND input = 'typed during resume'`,
-        [],
-      )
-      const [execution] = yield* until(
-        sql<{
-          input: string
-          inbox: number | null
-        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(
-          Effect.orDie,
-        ),
-        (rows) => rows[0]?.input === "queued text",
-      )
-      assert.notStrictEqual(execution!.inbox, null)
+      assert.isFalse((yield* herdr.callsTo("send")).some((call) => call.text === "queued text"))
+      yield* writeEnd(id, "pi", { text: "done" })
+      yield* herdr.endExecution(id)
+      yield* until(working, (rows) => rows[0]?.input === "queued text")
     }),
     { hooked: ["pi"] },
   )
@@ -214,7 +201,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a result written while confirm gives up is delivered, and the batch stays delivered",
+    "a reply after a late start report while confirm gives up is delivered, and the batch stays delivered",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const sessions = yield* Sessions
@@ -228,6 +215,7 @@ describe.concurrent("Sessions", () => {
       yield* untilVirtual(db.getSession(id), (w) => w?.executionState === "not_started")
       yield* sessions.send(id, "next")
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
+      yield* sessions.userPrompt(id, "next")
       yield* writeEnd(id, "pi", { text: "status: completed\nsummary: landed" }, 120_000)
       yield* untilVirtual(db.getSession(id), (w) => w?.executionState === "completed")
       yield* untilVirtual(
@@ -244,7 +232,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a result written before a refused prompt is delivered, and the batch stays delivered",
+    "a reply after a start report before a refused prompt is delivered, and the batch stays delivered",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -252,6 +240,7 @@ describe.concurrent("Sessions", () => {
       const held = yield* herdr.hold("send", id)
       yield* sessions.send(id, "next")
       yield* held.reached
+      yield* sessions.userPrompt(id, "next")
       yield* writeEnd(id, "pi", { text: "status: completed\nsummary: landed" }, 5_000)
       yield* held.release("busy")
       const done = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "completed")

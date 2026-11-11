@@ -63,7 +63,6 @@ export const sessionMove = (deps: {
   readonly subscriptions: Subscriptions["Service"]
   readonly harness: Harness["Service"]
   readonly harnesses: Harnesses["Service"]
-  readonly track: (id: string) => Effect.Effect<{ readonly sawWorking: import("effect").Ref.Ref<boolean> }>
   readonly prompt: (
     h: Runtime,
     session: SessionRow,

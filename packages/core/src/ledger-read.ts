@@ -78,15 +78,13 @@ const addressOf = (terminal: string | null) => JSON.stringify({ machine: LOCAL_M
 export type Live = {
   readonly status: AgentStatus
   readonly integration: Integration | undefined
-  readonly promptedAt: number | undefined
 }
 
-const NOT_LIVE: Live = { status: "unknown", integration: undefined, promptedAt: undefined }
+const NOT_LIVE: Live = { status: "unknown", integration: undefined }
 
 export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
   const integration = live.integration ?? integrationOf(row)
   const attempts = attemptsOf(row.attempts)
-  const open = row.tId !== null && row.tStatus === null
   const metadata = {
     ...(integration === undefined ? {} : { integration }),
     ...(row.pid === null ? {} : { pid: row.pid }),
@@ -110,7 +108,7 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
     startedAt: row.placedAt,
     exitedAt: row.agent === "main" ? row.endedAt : row.pEnded,
     executionState: row.tId === null ? "none" : (row.tStatus ?? "open"),
-    executionPromptedAt: (open ? live.promptedAt : undefined) ?? row.tAt ?? 0,
+    executionPromptedAt: row.tAt ?? 0,
     metadata: JSON.stringify(metadata),
     createdAt: row.createdAt,
     lastActive: row.activeAt ?? row.createdAt,

@@ -47,7 +47,6 @@ import { Processes } from "./processes.ts"
 import { projectRoot, workspaceGit } from "./project-create.ts"
 import { CONFIRM_TIMEOUT, sessionPrompting, STOP_WAIT } from "./prompting.ts"
 import * as Remove from "./remove.ts"
-import { isUsageLimitError } from "./replies.ts"
 import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
 import { Restarting } from "./restarting.ts"
 import {
@@ -111,7 +110,6 @@ const SESSION_DEPS = [
 ] as const
 
 const newTracked: Effect.Effect<Tracked> = Effect.all({
-  sawWorking: Ref.make(false),
   endedAt: Ref.make<number | undefined>(undefined),
   blockedNotified: Ref.make(false),
   prompting: Ref.make(false),
@@ -155,7 +153,7 @@ export class Sessions extends Context.Service<
     readonly peek: (id: string, lines: number) => Effect.Effect<string, NoSuchSession | NoRuntime | RuntimeUnreachable>
     readonly list: (filter?: SessionFilter) => Effect.Effect<ReadonlyArray<SessionView>>
     readonly check: (id: string) => Effect.Effect<void>
-    readonly userPrompt: (id: string, text: string, at?: number) => Effect.Effect<void>
+    readonly userPrompt: (id: string, text: string, at?: number, process?: number) => Effect.Effect<void>
     readonly republish: Effect.Effect<number>
     readonly inMemory: Effect.Effect<{
       readonly tracked: number
@@ -305,10 +303,15 @@ export class Sessions extends Context.Service<
           )
         })
 
-      const { awaitReady, sawExecutionStart, busy, busyOf, settleAfterInterrupt, interruptAgent, prompt } =
-        sessionPrompting({ db, harnesses, bus, track })
+      const { awaitReady, busy, busyOf, settleAfterInterrupt, interruptAgent, prompt } = sessionPrompting({
+        db,
+        harnesses,
+        bus,
+        track,
+      })
 
-      const vibestEnv = (session: SessionRow) => ({
+      const vibestEnv = (session: SessionRow, process?: number) => ({
+        ...(process === undefined ? {} : { VIBEST_PROCESS: String(process) }),
         VIBEST_SESSION_ID: session.id,
         VIBEST_PROJECT_ID: session.projectId,
         VIBEST_PROJECT_DIR: layout.project(session.projectId),
@@ -396,7 +399,6 @@ export class Sessions extends Context.Service<
         subscriptions: yield* Subscriptions,
         harness,
         harnesses,
-        track,
         prompt,
         open: openTerminal,
         show,
@@ -432,13 +434,15 @@ export class Sessions extends Context.Service<
 
       const check = Effect.fn("Sessions.check")(function* (id: string) {
         const session = yield* db.getSession(id)
-        if (!session) return
+        if (!session || session.metadata.archived || session.metadata.removed) return
         const open = session.executionState === "open"
-        if ((!open && session.exitedAt !== null) || session.metadata.archived || session.metadata.removed) return
+        const limited = session.executionState === "failed" ? yield* db.limitedExecution(id) : undefined
+        if (!open && session.exitedAt !== null && limited === undefined) return
         if (restarting.has(id)) return
         const routed = yield* live(session).pipe(Effect.option)
         if (Option.isNone(routed)) return yield* live(session)
         const h = routed.value
+        if (limited !== undefined && session.exitedAt !== null) return yield* afterLimit(h, session, limited, true)
         const terminal = session.address
         const execution = open ? yield* db.openExecution(id) : undefined
         const r = yield* track(id)
@@ -447,7 +451,8 @@ export class Sessions extends Context.Service<
         const seen = maybe.value
         const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
         if (state !== undefined && session.status !== state) yield* db.updateSession(session.id, { status: state })
-        if (state === "working" || state === "blocked") yield* Ref.set(r.sawWorking, true)
+        if ((state === "working" || state === "blocked") && execution !== undefined)
+          yield* db.acceptExecution(id, execution)
         const exited =
           state === undefined &&
           (yield* Effect.gen(function* () {
@@ -458,7 +463,7 @@ export class Sessions extends Context.Service<
               (typeof reportedPid === "number" && (yield* processes.liveness(reportedPid)) === "exited")
             )
           }))
-        if (!open && (yield* rerunLimited(h, session))) return
+        if (limited !== undefined && (yield* afterLimit(h, session, limited, exited))) return
         if (state === undefined) {
           if (exited) {
             const cutOff = session.startedAt === null
@@ -507,7 +512,7 @@ export class Sessions extends Context.Service<
           return
         }
         yield* Ref.set(r.blockedNotified, false)
-        const worked = (yield* Ref.get(r.sawWorking)) || (yield* db.executionTaken(id))
+        const worked = yield* db.executionTaken(id)
         const idle = s === "idle"
         const ended = idle && worked
         const now = yield* Clock.currentTimeMillis
@@ -535,21 +540,22 @@ export class Sessions extends Context.Service<
         })
       })
 
-      const rerunLimited = (h: Runtime, session: SessionRow) =>
+      const afterLimit = (
+        h: Runtime,
+        session: SessionRow,
+        limited: { readonly execution: number; readonly process: number | null; readonly failure: string },
+        exited: boolean,
+      ) =>
         Effect.gen(function* () {
-          const last = yield* db.latestReply(session.id)
-          const reported = last?.text !== null && last?.text !== undefined
-          if (!reported || last.status !== "failed" || !isUsageLimitError(last.failure ?? undefined)) return false
-          const terminal = session.address
-          yield* limit.move.rerun(
-            h,
-            session,
-            terminal.id === "" ? undefined : terminal,
-            "",
-            false,
-            last.failure!,
-            last.execution,
-          )
+          const rerun = (terminal: Terminal | undefined) =>
+            limit.move.rerun(h, session, terminal, "", false, limited.failure, limited.execution)
+          if (session.exitedAt !== null) return yield* rerun(undefined)
+          const successor = (yield* db.currentProcessId(session.id)) !== limited.process
+          if (!successor || exited) return yield* rerun(session.address.id === "" ? undefined : session.address)
+          const source = yield* db.limitSource(session.id, limited.execution)
+          const task = source === undefined ? "" : source.working || source.delivered
+          if (task === "") return false
+          yield* handTask(h, session, session.address, task)
           return true
         })
 
@@ -677,7 +683,7 @@ export class Sessions extends Context.Service<
                   }
                 const state = stateOf(yield* agentState(h, terminal))
                 const runtimeKnows = state !== undefined && state !== "unknown"
-                const started = yield* Ref.get((yield* track(id)).sawWorking)
+                const started = yield* db.executionAccepted(id)
                 if (!started && runtimeKnows && !busy(state))
                   return { message: `${id} is not working; nothing to interrupt` }
                 if (!(yield* interruptAgent(h, session, terminal)))
@@ -765,14 +771,9 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const id = yield* db.sessionAt(runtime, terminal)
           if (id === undefined) return
-          if (working) yield* Ref.set((yield* track(id)).sawWorking, true)
+          const execution = working ? yield* db.openExecution(id) : undefined
+          if (execution !== undefined) yield* db.acceptExecution(id, execution)
           yield* checkSession(id)
-        })
-
-      const executionStarted = (id: string, at: number) =>
-        Effect.gen(function* () {
-          const session = yield* db.getSession(id)
-          if (session?.executionState === "open" && at >= session.executionPromptedAt) yield* sawExecutionStart(id)
         })
 
       const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
@@ -800,8 +801,6 @@ export class Sessions extends Context.Service<
               Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine })),
               Effect.provideContext(platform),
             )
-          case "live.execution_start":
-            return executionStarted(event.sessionId, event.at)
           default:
             return Effect.void
         }
@@ -821,6 +820,9 @@ export class Sessions extends Context.Service<
               !row.metadata.removed &&
               (row.exitedAt === null || row.executionState === "open"),
           )
+          const ended = (yield* db.endedAtLimit)
+            .filter((row) => where === "all" || row.runtime === where.runtime)
+            .map((row) => row.id)
           const archiving = here.filter(
             (row) => (row.metadata.archived || row.metadata.removed) && row.exitedAt === null && row.address.id !== "",
           )
@@ -828,7 +830,10 @@ export class Sessions extends Context.Service<
           yield* Effect.log(
             `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,
           )
-          yield* Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: 8, discard: true })
+          yield* Effect.forEach([...rows.map((row) => row.id), ...ended], checkLocked, {
+            concurrency: 8,
+            discard: true,
+          })
           for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
           reconciles++
         })
@@ -919,12 +924,11 @@ export class Sessions extends Context.Service<
         get,
         list,
         check: checkLocked,
-        userPrompt: (id: string, text: string, at?: number) =>
+        userPrompt: (id: string, text: string, at?: number, process?: number) =>
           Effect.gen(function* () {
             const now = at ?? (yield* Clock.currentTimeMillis)
-            yield* bus.observe({ type: "live.execution_start", sessionId: id, at: now })
             const prompting = yield* Ref.get((yield* track(id)).prompting)
-            yield* db.startObserved(id, prompting || text.trim() === "" ? undefined : text, now)
+            yield* db.startObserved(id, prompting || text.trim() === "" ? undefined : text, now, process)
           }),
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: Effect.gen(function* () {

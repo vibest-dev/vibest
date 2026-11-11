@@ -27,7 +27,6 @@ import {
   until,
   untilVirtual,
   writeEnd,
-  replyText,
 } from "./fakes.ts"
 
 const INSTANCE = "00000000-0000-4000-8000-000000000001"
@@ -202,7 +201,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
   )
 
   test(
-    "a spawn's execution start and end from its harness hook settle while draining (a fast execution the runtime never shows working): the end first keeps the drain open for the unconfirmed launch, then the launch confirms and the Stop is accepted",
+    "a spawn's start report from its harness hook settles while draining (a fast execution the runtime never shows working): it confirms the launch and the Stop is accepted",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
@@ -211,23 +210,16 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text?.includes("work") === true))
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
-      const piExtensionHook = (call: "Prompt" | "ExecutionEnd", event: object) =>
+      const piExtensionHook = (call: "Prompt", event: object) =>
         Effect.forkScoped(
           Effect.exit(
             raw[call]({ sessionId: id, harness: "pi", event: JSON.stringify(event) }, { headers: protocolHeaders() }),
           ),
         )
-      const ended = yield* piExtensionHook("ExecutionEnd", {
-        type: "agent_settled",
-        text: "done",
-        error: "",
-        aborted: false,
-      })
-      assert.strictEqual(tagOf(yield* Fiber.join(ended)), "success")
       const prompted = yield* piExtensionHook("Prompt", { type: "input", text: "work", source: "interactive" })
-      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
       assert.strictEqual(tagOf(yield* Fiber.join(prompted)), "success")
-      assert.include(yield* replyText(id), "done")
+      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
+      assert.isTrue(yield* (yield* Db).executionAccepted(id))
     }),
     { promptsIgnored: true },
   )

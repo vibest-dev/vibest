@@ -8,7 +8,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
-import { Clock, Duration, Effect, Fiber, type Scope } from "effect"
+import { Duration, Effect, Fiber, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
 
@@ -20,8 +20,6 @@ import {
   type TestServices,
   until,
   replyText,
-  busEvents,
-  nextExecutionStart,
   projectOf,
 } from "./fakes.ts"
 
@@ -278,7 +276,7 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "the prompt hook notes its execution start at once, while the session's lock is held, with the execution's stamp",
+    "the prompt hook is answered while the session's lock is held",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
       const herdr = yield* FakeRuntime
@@ -287,20 +285,14 @@ describe("vibestd's HTTP API", () => {
       const held = yield* herdr.hold("state", worker)
       const checking = yield* Effect.forkChild(sessions.check(worker))
       yield* held.reached
-      yield* TestClock.adjust("3 seconds")
-      const stamp = yield* Clock.currentTimeMillis
-      const events = yield* busEvents
-      const hook = yield* Effect.forkChild(
-        call(
-          "/hooks/claude/prompt",
-          { sessionId: worker },
-          JSON.stringify({ hook_event_name: "PromptSubmit", text: "do it", origin: "composer" }),
-        ),
+      const hook = yield* call(
+        "/hooks/claude/prompt",
+        { sessionId: worker },
+        JSON.stringify({ hook_event_name: "PromptSubmit", text: "do it", origin: "composer" }),
       )
-      assert.strictEqual(yield* nextExecutionStart(events, worker), stamp)
+      assert.strictEqual(hook.status, 204)
       yield* held.release()
       yield* Fiber.join(checking)
-      assert.strictEqual((yield* Fiber.join(hook)).status, 204)
     }),
   )
 
@@ -309,15 +301,15 @@ describe("vibestd's HTTP API", () => {
     Effect.gen(function* () {
       const { call, db, worker, main } = yield* project
       const layout = yield* Layout
-      const events = yield* busEvents
-      assert.strictEqual((yield* call("/session/ready", { sessionId: worker })).status, 204)
+      const ready = yield* call("/session/ready", { sessionId: worker })
+      assert.strictEqual(ready.status, 200)
+      assert.isNumber((ready.body as { process?: unknown }).process)
       const prompt = yield* call(
         "/hooks/claude/prompt",
         { sessionId: worker },
         JSON.stringify({ hook_event_name: "PromptSubmit", text: "next step", origin: "composer" }),
       )
       assert.strictEqual(prompt.status, 204)
-      yield* nextExecutionStart(events, worker)
       const end = yield* call(
         "/hooks/claude/execution-end",
         { sessionId: worker },

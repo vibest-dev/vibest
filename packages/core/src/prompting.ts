@@ -1,5 +1,5 @@
 import { NotReady } from "@vibest/schema/session"
-import { Clock, Duration, Effect, Exit, Option, PubSub, Ref, Schedule } from "effect"
+import { Clock, Duration, Effect, Option, PubSub, Ref, Schedule } from "effect"
 
 import { awaitEvent, awaitOn, Bus, type EngineEvent } from "./bus.ts"
 import type { Db, SessionRow } from "./db.ts"
@@ -25,7 +25,13 @@ const STARTUP_DIALOG_POLL = Schedule.spaced("500 millis")
 export const sessionPrompting = (deps: {
   readonly db: Pick<
     Db["Service"],
-    "readyAt" | "updateSession" | "openExecution" | "beginExecution" | "stampExecution" | "closeExecution"
+    | "readyAt"
+    | "updateSession"
+    | "openExecution"
+    | "beginExecution"
+    | "closeExecution"
+    | "acceptExecution"
+    | "executionAccepted"
   >
   readonly harnesses: Pick<Harnesses["Service"], "get" | "find">
   readonly bus: Bus["Service"]
@@ -73,43 +79,43 @@ export const sessionPrompting = (deps: {
     })
 
   const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
-  const sawExecutionStart = (id: string) => Effect.flatMap(track(id), (r) => Ref.set(r.sawWorking, true))
 
-  const pickedUp = (session: SessionRow, state: "working" | "blocked") =>
+  const pickedUp = (session: SessionRow, execution: number, state: "working" | "blocked") =>
     Effect.gen(function* () {
-      yield* Ref.set((yield* track(session.id)).sawWorking, true)
+      yield* db.acceptExecution(session.id, execution)
       yield* db.updateSession(session.id, { status: state })
       return true
     })
 
-  const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal) =>
+  const pickupNow = (h: Runtime, session: SessionRow, terminal: Terminal, execution: number) =>
     Effect.gen(function* () {
       const state = stateOf(yield* agentState(h, terminal))
-      if (state === "working" || state === "blocked") return yield* pickedUp(session, state)
-      return yield* Ref.get((yield* track(session.id)).sawWorking)
+      if (state === "working" || state === "blocked") return yield* pickedUp(session, execution, state)
+      return yield* db.executionAccepted(session.id)
     })
 
   const confirmed = (
     h: Runtime,
     session: SessionRow,
     terminal: Terminal,
+    execution: number,
     subscription: PubSub.Subscription<EngineEvent>,
   ) =>
     awaitOn(
       subscription,
-      pickupNow(h, session, terminal).pipe(Effect.map((picked) => (picked ? Option.some(true) : Option.none()))),
+      pickupNow(h, session, terminal, execution).pipe(
+        Effect.map((picked) => (picked ? Option.some(true) : Option.none())),
+      ),
       (event) =>
-        event.type === "live.execution_start" &&
-        event.sessionId === session.id &&
-        event.at >= session.executionPromptedAt
-          ? Effect.as(sawExecutionStart(session.id), Option.some(true))
+        event.type === "execution.accepted" && event.sessionId === session.id && event.data.execution === execution
+          ? Effect.succeed(Option.some(true))
           : event.type === "live.state" &&
               sameTerminal(event.terminal, terminal) &&
               (event.state === "working" || event.state === "blocked")
-            ? Effect.map(pickedUp(session, event.state), Option.some)
+            ? Effect.map(pickedUp(session, execution, event.state), Option.some)
             : Effect.succeed(Option.none()),
       CONFIRM_TIMEOUT,
-      pickupNow(h, session, terminal),
+      pickupNow(h, session, terminal, execution),
     )
 
   const busy = (state: AgentState) => state === "working" || state === "blocked"
@@ -167,46 +173,30 @@ export const sessionPrompting = (deps: {
     onHandover: Effect.Effect<void> = Effect.void,
   ) {
     const kept = yield* db.openExecution(session.id)
-    const begin = Effect.flatMap(Clock.currentTimeMillis, (at) => db.beginExecution(session.id, at))
-    let execution = kept
-    if (execution === undefined) {
-      const begun = yield* begin
-      if (!begun.opened) return undefined
-      execution = begun.execution
-    }
-    const standing = Effect.suspend(() =>
-      Effect.map(db.openExecution(session.id), (open) =>
-        open === execution ? ("mine" as const) : open === undefined ? ("closed" as const) : ("busy" as const),
-      ),
-    )
     const adapter = yield* harnesses.get(session.harnessId)
-    const state = yield* awaitReady(h, terminal, adapter, session.id).pipe(
-      Effect.onExit((exit) =>
-        kept === undefined && !Exit.isSuccess(exit)
-          ? Effect.uninterruptible(db.closeExecution(session.id, execution!, "not_started"))
-          : Effect.void,
-      ),
+    const state = yield* awaitReady(h, terminal, adapter, session.id)
+    const open = yield* db.openExecution(session.id)
+    if (open !== undefined && open !== kept) return undefined
+    const begun =
+      open === undefined
+        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.beginExecution(session.id, at))
+        : { execution: open, opened: true }
+    if (!begun.opened) return undefined
+    const execution = begun.execution
+    const standing = Effect.map(db.openExecution(session.id), (now) =>
+      now === execution ? ("mine" as const) : now === undefined ? ("closed" as const) : ("busy" as const),
     )
-    const before = yield* standing
-    if (before === "busy") return undefined
-    if (before === "closed") {
-      const begun = yield* begin
-      if (!begun.opened) return undefined
-      execution = begun.execution
-    }
     const now = yield* Clock.currentTimeMillis
     yield* onHandover
     const r = yield* track(session.id)
     yield* Ref.set(r.endedAt, undefined)
     yield* Ref.set(r.blockedNotified, false)
-    yield* Ref.set(r.sawWorking, false)
-    yield* db.stampExecution(session.id, execution, now)
     yield* db.updateSession(session.id, { status: state, lastActive: now })
     const send = Ref.set(r.prompting, true).pipe(
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
     )
-    const missed = Effect.suspend(() => db.closeExecution(session.id, execution!, "not_started"))
+    const missed = db.closeExecution(session.id, execution, "not_started")
     const subscription = yield* bus.subscribe
     const delivered = yield* send.pipe(
       Effect.as(false),
@@ -222,24 +212,24 @@ export const sessionPrompting = (deps: {
     )
     if (delivered) return undefined
     if (state === "unknown" && adapter.ready === "runtime") {
-      yield* sawExecutionStart(session.id)
+      yield* db.acceptExecution(session.id, execution)
       yield* db.updateSession(session.id, { status: "working" })
       return undefined
     }
-    const stamped = { ...session, executionPromptedAt: now }
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
-    if (yield* confirmed(h, stamped, terminal, subscription)) return undefined
+    const confirm = confirmed(h, session, terminal, execution, subscription)
+    if (yield* confirm) return undefined
     if (yield* settledElsewhere) return undefined
     yield* h.send(terminal, { keys: ["enter"] }).pipe(Effect.ignore)
-    if (yield* confirmed(h, stamped, terminal, subscription)) return undefined
+    if (yield* confirm) return undefined
     if (yield* settledElsewhere) return undefined
     yield* send.pipe(Effect.ignore)
-    if (yield* confirmed(h, stamped, terminal, subscription)) return undefined
+    if (yield* confirm) return undefined
     if (yield* settledElsewhere) return undefined
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* missed
     return `task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`
   }, Effect.scoped)
 
-  return { awaitReady, sawExecutionStart, busy, busyOf, settleAfterInterrupt, interruptAgent, prompt }
+  return { awaitReady, busy, busyOf, settleAfterInterrupt, interruptAgent, prompt }
 }

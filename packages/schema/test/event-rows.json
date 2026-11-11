@@ -218,6 +218,20 @@
   },
   {
     "aggregate": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "seq": 32,
+    "at": 1793000032000,
+    "type": "execution.accepted",
+    "data": "{\"execution\":30}"
+  },
+  {
+    "aggregate": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
+    "seq": 33,
+    "at": 1793000033000,
+    "type": "execution.ended",
+    "data": "{\"execution\":31,\"outcome\":\"failed\",\"failure\":{\"message\":\"rate_limit: usage limit reached\",\"kind\":\"limit\"},\"reply\":\"\"}"
+  },
+  {
+    "aggregate": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
     "seq": 34,
     "at": 1793000034000,
     "type": "execution.ended",

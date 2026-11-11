@@ -301,7 +301,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I5",
     tier: "agent",
     title:
-      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks; asked to run herdr, herdr does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the execution's reply",
+      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks, which run with the session's process id; asked to run herdr, herdr does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the execution's reply",
     run: async (w, evidence) => {
       for (const bin of ["cursor-agent", "herdr"])
         if (!Bun.which(bin, { PATH: w.env().PATH! })) throw new Skip(`${bin} not on PATH`)
@@ -315,7 +315,7 @@ const checks: ReadonlyArray<Check> = [
         path.join(repo, ".cursor/hooks.json"),
         JSON.stringify({
           version: 1,
-          hooks: { sessionStart: [{ command: `echo ran >> '${projectHookLog}'; echo {}` }] },
+          hooks: { sessionStart: [{ command: `echo "ran $VIBEST_PROCESS" >> '${projectHookLog}'; echo {}` }] },
         }),
       )
       for (const argv of [
@@ -351,6 +351,12 @@ const checks: ReadonlyArray<Check> = [
           await writeEvidence(path.join(evidence, "I5-herdr-call.json"), `${JSON.stringify({ tried, transcripts })}\n`)
           expect(/\bpong\b/.test(message), message)
           expect(await Bun.file(projectHookLog).exists(), "the project's own sessionStart hook did not run")
+          const current = row<{ id: number }>(w, "SELECT process_id AS id FROM session WHERE id = ?", id)?.id
+          const hookRan = await Bun.file(projectHookLog).text()
+          expect(
+            current !== undefined && hookRan.includes(`ran ${current}\n`),
+            `the hooks did not get the session's process ${current}: ${hookRan}`,
+          )
         },
         { cwd: repo },
       )

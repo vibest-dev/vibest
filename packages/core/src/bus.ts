@@ -15,7 +15,6 @@ export type LiveEvent =
   | { readonly type: "live.exited"; readonly runtime: string; readonly terminal: RuntimeAddress }
   | { readonly type: "live.seen"; readonly runtime: string; readonly terminal: RuntimeAddress }
   | { readonly type: "live.reset"; readonly runtime: string; readonly machine: string }
-  | { readonly type: "live.execution_start"; readonly sessionId: string; readonly at: number }
   | { readonly type: "live.drain" }
   | { readonly type: "live.session"; readonly sessionId: string }
   | { readonly type: "live.project"; readonly projectId: string }

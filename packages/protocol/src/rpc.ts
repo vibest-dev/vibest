@@ -704,6 +704,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     Rpc.make("Session.Ready", {
       payload: { id: Schema.String, pid: Schema.optional(Schema.Number) },
+      success: Schema.Struct({ process: Schema.optional(Schema.Number) }),
       error: Schema.Union([Forbidden, NoSuchSession]),
     }),
   ),

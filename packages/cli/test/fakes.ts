@@ -1,7 +1,6 @@
 import net from "node:net"
 
 import { readPing } from "@vibest/client/client"
-import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { ProcessPlatform, Processes } from "@vibest/core/processes"
@@ -17,7 +16,7 @@ import {
   subscriptionsLayer,
 } from "@vibest/core/test/lib/harnesses"
 import { readDaemonInfo } from "@vibest/server/daemon"
-import { Effect, FileSystem, Layer, Option, PubSub, Stream } from "effect"
+import { Effect, FileSystem, Layer, Option, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
@@ -68,19 +67,6 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
       }
     },
   })
-
-export const busEvents = Effect.gen(function* () {
-  return yield* (yield* Bus).subscribe
-})
-
-export const nextExecutionStart = (subscription: PubSub.Subscription<EngineEvent>, id: string): Effect.Effect<number> =>
-  PubSub.take(subscription).pipe(
-    Effect.flatMap((event) =>
-      event.type === "live.execution_start" && event.sessionId === id
-        ? Effect.succeed(event.at)
-        : nextExecutionStart(subscription, id),
-    ),
-  )
 
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {

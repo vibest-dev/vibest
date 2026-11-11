@@ -35,6 +35,7 @@ export const HARNESS_HEADER = "vibest-harness"
 export const CWD_HEADER = "vibest-cwd"
 export const RUNTIME_HEADER = "vibest-runtime"
 export const PLUGIN_VERSION_HEADER = "vibest-plugin-version"
+export const PROCESS_HEADER = "vibest-process"
 export const PEER_HEADER = "vibest-peer"
 export const PEER_PROJECT_HEADER = "vibest-peer-project"
 
@@ -73,6 +74,7 @@ export type SessionIdentity = {
   readonly cwd?: string | undefined
   readonly runtime?: string | undefined
   readonly pluginVersion?: string | undefined
+  readonly process?: string | undefined
   readonly repositoryRoot?: string | undefined
 }
 
@@ -92,6 +94,7 @@ export const sessionHeaders = (who: SessionIdentity): Record<string, string> => 
   put(CWD_HEADER, who.cwd === undefined ? undefined : encodeURIComponent(who.cwd))
   put(RUNTIME_HEADER, who.runtime)
   put(PLUGIN_VERSION_HEADER, who.pluginVersion)
+  put(PROCESS_HEADER, who.process)
   if (who.repositoryRoot !== undefined) headers[REPOSITORY_HEADER] = who.repositoryRoot
   return headers
 }

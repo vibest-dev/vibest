@@ -12158,7 +12158,32 @@
       },
       "success": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "null"
+        "type": "object",
+        "properties": {
+          "process": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Infinity",
+                      "-Infinity",
+                      "NaN"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
       },
       "error": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",

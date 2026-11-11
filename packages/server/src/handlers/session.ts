@@ -267,7 +267,8 @@ export const make = (
       "Session.Ready": ({ id, pid }) =>
         Effect.gen(function* () {
           yield* self("Session.Ready", id)
-          yield* integration.ready(id, pid)
+          const current = yield* integration.ready(id, pid)
+          return current === undefined ? {} : { process: current }
         }),
 
       "Agents.Outdated": () => cliOnly("Agents.Outdated").pipe(Effect.andThen(sessions.outdated)),

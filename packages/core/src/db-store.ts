@@ -99,11 +99,6 @@ export const makeStore = Effect.gen(function* () {
   const now = Clock.currentTimeMillis
   const statuses = new Map<string, AgentStatus>()
   const integrations = new Map<string, Integration>()
-  const prompted = new Map<string, { readonly execution: number; readonly at: number }>()
-  const promptedAt = (session: string, execution: number | null) => {
-    const stamp = prompted.get(session)
-    return stamp !== undefined && stamp.execution === execution ? stamp.at : undefined
-  }
   const archiveOnIdle = new Set<string>()
   const moving = new Set<string>()
   const remember = (row: Pick<SessionRow, "id" | "status" | "metadata">) => {
@@ -146,7 +141,6 @@ export const makeStore = Effect.gen(function* () {
             sessionOf(row, {
               status: statuses.get(row.id) ?? "unknown",
               integration: integrations.get(row.id),
-              promptedAt: promptedAt(row.id, row.tId),
             }),
           ),
         ),
@@ -332,7 +326,6 @@ export const makeStore = Effect.gen(function* () {
     Effect.gen(function* () {
       const t = at ?? (yield* now)
       const execution = (yield* openExecution(id)) ?? (yield* startExecution(id, t))
-      prompted.delete(id)
       yield* emit(ExecutionEnded, {
         sessionId: id,
         at: t,
@@ -544,11 +537,8 @@ export const makeStore = Effect.gen(function* () {
       if (patch.exitedAt !== undefined && patch.exitedAt !== null && current.exitedAt === null)
         yield* endProcess(id, patch.end ?? "exited", patch.exitedAt)
       if (patch.executionState === "open") {
-        const open = yield* openExecution(id)
-        const at = next.executionPromptedAt || (yield* now)
-        if (open !== undefined) {
-          if (patch.executionPromptedAt !== undefined) prompted.set(id, { execution: open, at })
-        } else yield* startExecution(id, at)
+        if ((yield* openExecution(id)) === undefined)
+          yield* startExecution(id, next.executionPromptedAt || (yield* now))
       } else if (
         patch.executionState !== undefined &&
         patch.executionState !== "none" &&
@@ -556,7 +546,6 @@ export const makeStore = Effect.gen(function* () {
       ) {
         const open = yield* openExecution(id)
         if (open !== undefined) {
-          prompted.delete(id)
           yield* emit(ExecutionEnded, { sessionId: id, data: { execution: open, outcome: patch.executionState } })
         }
       }
@@ -685,7 +674,6 @@ export const makeStore = Effect.gen(function* () {
     unusedId,
     conversationOf,
     placed,
-    prompted,
     archiveOnIdle,
   }
 })

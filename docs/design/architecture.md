@@ -346,10 +346,11 @@ How `packages/core/src/sessions.ts` keeps these:
   harness starting, or a startup dialog such as Claude's folder trust) the harness's startup step answers it, polled
   every 500 ms because a drawn dialog has no event. A runtime without `state` and a harness without a report are
   ready when `open` returned. What the terminal showed goes to vibestd.log only.
-- Handing over an execution: the execution opens before the wait for ready, so a prompt typed during a resume sees it; rows
-  are claimed after ready, so a session that never gets ready does not take them. The execution is open, and the
+- Handing over an execution: the execution opens after the wait for ready, right before the text goes, so a session
+  that never gets ready leaves no execution and takes no rows; one already open when the lock was taken is reused, and
+  one a prompt typed during the wait opened is not, so the text waits for it to end. The execution is open, and the
   subscription to its state taken, before the runtime gets the text, so the paste's own prompt hook is ignored and
-  no execution start can come before the wait on it. Only a start of this execution confirms pickup: the previous
+  no execution start can come before the wait on it. Only this execution's acceptance confirms pickup: the previous
   execution's start would confirm a text whose Enter was swallowed. The text is pasted again once only, so a task never
   runs twice. A refused text undoes the execution unless the integration wrote a result anyway or a usage-limit move
   will try the next harness; a broken connection is not a refusal (the text may have arrived), so the execution stays.
@@ -363,8 +364,7 @@ How `packages/core/src/sessions.ts` keeps these:
   pid has died is an exit even when that report still says the terminal is running: a launch herdr has not finished
   keeps saying so after the process was killed. A terminal the runtime cannot
   find is. An execution counts
-  as worked when it was seen
-  working, a start of this execution was reported, or after a restart when it was typed or a row was delivered into
+  as worked when it was accepted (seen working, or a start of it was reported), typed, or a row was delivered into
   it. Idle and never seen working: look again after the confirm timeout. Idle after working with no report: lost
   after the hook grace. A prompt that failed part way closes the execution so the queue moves again.
 - A Message stays queued only for what a retry can fix (the runtime unreachable, vibestd stopping); a refused start
@@ -401,8 +401,15 @@ How an execution ends:
   start was missed). vibestd's own closes (`lost`, `not_started`, `interrupted`, an exit) are conditional on the
   execution they decided about still being open (`Db.closeExecution`), so an observed end that came first wins and the close
   writes nothing, notice included. A reply that arrives after vibestd closed the execution as `lost` is a new execution; it
-  is not attached back. A usage-limit end closes its execution `failed`; check then moves the session to the next harness,
-  which resends the input in a new execution, so a limit is two executions.
+  is not attached back. A usage-limit end closes its execution `failed` with failure kind `limit`; check then moves the session to the
+  next harness, which resends the input in a new execution, so a limit is two executions. A move vibestd stopped part
+  way through is finished by the next check, from the limited execution's process and the current one: the limited
+  process still current is moved; a next process that runs gets the input handed to it, with no other started; a
+  next process that ended, or a limited process that ended with none after it, is moved again (a session whose process
+  ended this way is checked at start too); a move that finds no harness tells the parent.
+- Reports from a harness carry the process id vibestd started it as, and an execution end or start from an earlier
+  process of the session is dropped (schema.md). An end that arrives while the open execution is not accepted yet is
+  earlier activity and changes nothing.
 - Queued Messages: one wake is one delivery; the batch goes pending, sending, delivered, or failed with the owner
   told. A broken connection before the handover leaves it pending for the next check; after it, the text may have
   arrived, so it is not sent again and the owner decides.
@@ -1061,7 +1068,8 @@ id a harness made for a coordinator; the last report wins). Of the rest:
   failure before that leaves it serving. `spawnDaemon`'s `env` reaches only the new vibestd's environment.
 - A restart in place types the main agent's harness command into its shell with the identity variables as an env prefix, so the shell does not keep them.
   `Session.Ready` is the integration saying the harness takes input, with the harness's own `pid`; vibestd hands over a
-  first or restarted execution only after it.
+  first or restarted execution only after it, and answers with the session's current process id, which the
+  integration sends with its later reports.
 - `Agents.Outdated` lists live agents whose integration is not this vibestd's (`blocked`: why one cannot restart in
   place). `Agents.Restart` returns at once and, once process `after` exited, restarts them in place: subagents
   first (at most 4 at a time), then main agents; SIGTERM to the harness alone, then the runtime runs it again on

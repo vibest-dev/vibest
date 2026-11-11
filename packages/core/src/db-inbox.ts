@@ -1,4 +1,4 @@
-import { type InboxKind } from "@vibest/schema/event"
+import { ExecutionAccepted, type InboxKind } from "@vibest/schema/event"
 import { InboxRow, InboxStatus, type ExecutionState } from "@vibest/schema/session"
 import { Effect } from "effect"
 
@@ -41,7 +41,8 @@ export const inboxMethods = (store: Store) => {
     endExecution,
     updateSession,
     dropWaiting,
-    prompted,
+    emit,
+    currentProcessId,
   } = store
   const queuedBy = reads.queuedBy
   const observable = (id: string) =>
@@ -50,6 +51,18 @@ export const inboxMethods = (store: Store) => {
         AND NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id)`.pipe(
       Effect.map((rows) => rows.length > 0),
     )
+  const acceptedAt = (id: string, execution: number) =>
+    sql<{ at: number | null }>`SELECT accepted_at AS at FROM execution
+      WHERE session_id = ${id} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]?.at ?? null))
+  const accept = (id: string, execution: number) =>
+    Effect.gen(function* () {
+      if ((yield* openExecution(id)) !== execution) return false
+      if ((yield* acceptedAt(id, execution)) === null)
+        yield* emit(ExecutionAccepted, { sessionId: id, data: { execution } })
+      return true
+    })
+  const fromOldProcess = (id: string, process: number | undefined) =>
+    Effect.map(currentProcessId(id), (current) => process !== undefined && process !== current)
   return {
     insertInbox: (row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie),
 
@@ -159,12 +172,15 @@ export const inboxMethods = (store: Store) => {
         }),
       ).pipe(Effect.orDie),
 
-    stampExecution: (id: string, execution: number, at: number) =>
+    acceptExecution: (id: string, execution: number) => tx(accept(id, execution)).pipe(Effect.orDie),
+
+    executionAccepted: (id: string) =>
       Effect.gen(function* () {
-        if ((yield* openExecution(id)) !== execution) return false
-        prompted.set(id, { execution: execution, at })
-        return true
+        const execution = yield* openExecution(id)
+        return execution !== undefined && (yield* acceptedAt(id, execution)) !== null
       }).pipe(Effect.orDie),
+
+    currentProcessId: (id: string) => currentProcessId(id).pipe(Effect.orDie),
 
     closeExecution: (
       id: string,
@@ -196,7 +212,7 @@ export const inboxMethods = (store: Store) => {
       Effect.gen(function* () {
         const execution = yield* openExecution(id)
         if (execution === undefined) return false
-        const [row] = yield* sql<{ taken: number }>`SELECT (t.typed IS NOT NULL
+        const [row] = yield* sql<{ taken: number }>`SELECT (t.accepted_at IS NOT NULL OR t.typed IS NOT NULL
             OR EXISTS (SELECT 1 FROM inbox i WHERE i.session_id = t.session_id AND i.execution_id = t.id)) AS taken
           FROM execution t WHERE t.session_id = ${id} AND t.id = ${execution}`
         return row?.taken === 1
@@ -221,24 +237,28 @@ export const inboxMethods = (store: Store) => {
         }),
       ).pipe(Effect.orDie),
 
-    startObserved: (id: string, typed: string | undefined, at: number) =>
+    startObserved: (id: string, typed: string | undefined, at: number, process?: number) =>
       tx(
         Effect.gen(function* () {
-          if (!(yield* observable(id))) return
+          if (!(yield* observable(id)) || (yield* fromOldProcess(id, process))) return
           const open = (yield* openExecution(id)) ?? (typed ? yield* startExecution(id, at, typed) : undefined)
-          if (open !== undefined) yield* updateSession(id, { status: "working" })
+          if (open === undefined) return
+          yield* accept(id, open)
+          yield* updateSession(id, { status: "working" })
         }),
       ).pipe(Effect.orDie),
 
-    endObserved: (id: string, end: ObservedEnd) =>
+    endObserved: (id: string, end: ObservedEnd, process?: number) =>
       tx(
         Effect.gen(function* () {
-          if (!(yield* observable(id))) return undefined
+          if (!(yield* observable(id)) || (yield* fromOldProcess(id, process))) return undefined
           const current = yield* currentProcess(id)
           if (current === undefined || current.start.harness !== end.harness) return undefined
           if (end.needsReady && current.readyAt === null) return undefined
-          if ((yield* openExecution(id)) === undefined && end.status === "interrupted") return undefined
-          const failure = failureOf(end.failure)
+          const open = yield* openExecution(id)
+          if (open === undefined && end.status === "interrupted") return undefined
+          if (open !== undefined && (yield* acceptedAt(id, open)) === null) return "unaccepted" as const
+          const failure = end.limited ? { message: end.failure ?? "", kind: "limit" as const } : failureOf(end.failure)
           yield* endExecution(
             id,
             {
@@ -452,6 +472,26 @@ export const inboxMethods = (store: Store) => {
         endedAt: number
       }>`SELECT id AS execution, outcome AS status, reply AS text, failure, ended_at FROM execution
         WHERE session_id = ${sessionId} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]),
+        Effect.orDie,
+      ),
+
+    endedAtLimit: sql<{
+      id: string
+      runtime: string
+    }>`SELECT s.id, p.runtime FROM session s
+      JOIN process p ON p.session_id = s.id AND p.id = s.process_id
+      JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
+      WHERE s.ended_at IS NULL AND p.ended_at IS NOT NULL AND t.failure_kind = 'limit'`.pipe(Effect.orDie),
+
+    limitedExecution: (sessionId: string) =>
+      sql<{
+        execution: number
+        process: number | null
+        failure: string
+      }>`SELECT id AS execution, process_id AS process, failure FROM execution
+        WHERE session_id = ${sessionId} AND failure_kind = 'limit'
+          AND id = (SELECT max(id) FROM execution WHERE session_id = ${sessionId})`.pipe(
         Effect.map((rows) => rows[0]),
         Effect.orDie,
       ),

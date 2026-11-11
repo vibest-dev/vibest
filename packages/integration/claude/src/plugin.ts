@@ -20,6 +20,7 @@ type Env =
   | "VIBEST_HARNESS"
   | "VIBEST_RUNTIME"
   | "VIBEST_HOME"
+  | "VIBEST_PROCESS"
   | "HOME"
 
 function nativeHost($: EngineInterface) {
@@ -38,6 +39,8 @@ function nativeHost($: EngineInterface) {
           return $.env.get("VIBEST_RUNTIME")
         case "VIBEST_HOME":
           return $.env.get("VIBEST_HOME")
+        case "VIBEST_PROCESS":
+          return $.env.get("VIBEST_PROCESS")
         case "HOME":
           return $.env.get("HOME")
       }
@@ -109,6 +112,7 @@ export function register(on: On, _options?: unknown) {
   let failures = 0
   let mismatched = false
   let timer: { cancel: () => void } | undefined
+  let processId: string | undefined
 
   const identity = async (host: Host) => {
     const agent = await host.env("VIBEST_AGENT")
@@ -130,6 +134,7 @@ export function register(on: On, _options?: unknown) {
       cwd: await host.cwd().catch(() => undefined),
       runtime: await host.env("VIBEST_RUNTIME"),
       pluginVersion: VIBEST_PLUGIN_VERSION,
+      process: processId ?? (await host.env("VIBEST_PROCESS")),
     })
     const r = await timeout(
       host.fetch(who.socket, path, { ...headers, "content-type": "application/json" }, JSON.stringify(body)),
@@ -147,12 +152,13 @@ export function register(on: On, _options?: unknown) {
     return reply
   }
 
-  const report = async (host: Host, path: string, body: unknown) => {
+  const report = async (host: Host, path: string, body: unknown, answered?: (body: unknown) => void) => {
     const attempt = async (n: number): Promise<void> => {
       let retry = true
       try {
         const r = await post(host, path, body, REPORT_TRY_MS)
         retry = r.status >= 500
+        if (r.status === 200) answered?.(r.body)
       } catch {}
       const pause = REPORT_BACKOFF_MS[n]
       if (retry && pause !== undefined) host.after(pause, () => void attempt(n + 1))
@@ -214,7 +220,10 @@ export function register(on: On, _options?: unknown) {
     const host = nativeHost($)
     if (await identity(host).catch(() => undefined)) {
       const pid = await host.claudeCodePid().catch(() => undefined)
-      void report(host, "/session/ready", pid === undefined ? {} : { pid })
+      void report(host, "/session/ready", pid === undefined ? {} : { pid }, (body) => {
+        const current = (body as { process?: unknown } | undefined)?.process
+        if (typeof current === "number") processId = String(current)
+      })
     }
     if (timer === undefined && (await identity(host))?.agent === "coordinator") {
       timer = host.every(POLL_MS, () => void tick(host))

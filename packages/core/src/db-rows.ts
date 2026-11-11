@@ -124,7 +124,7 @@ export type InboxSql = {
 
 export type ExecutionEnd = {
   readonly outcome: typeof ExecutionOutcome.Type
-  readonly failure?: { readonly message: string }
+  readonly failure?: { readonly message: string; readonly kind?: "limit" }
   readonly conversation?: string
   readonly reply?: string
 }
