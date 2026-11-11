@@ -28,7 +28,10 @@ export const resolve = Effect.fnUntraced(function* (sources: Sources) {
       continue
     }
     const candidate = yield* sources.load(op, watched)
-    if (candidate) candidates.push(candidate)
+    if (candidate === undefined) continue
+    const same = candidates.findIndex((c) => c.source === candidate.source)
+    if (same === -1) candidates.push(candidate)
+    else candidates[same] = candidate
   }
   yield* sources.retain(watched.paths)
   return { candidates, watched }

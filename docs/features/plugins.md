@@ -41,6 +41,16 @@ builtin harness.
 A user plugin can add a terminal runtime and route an agent to it; the agent starts there and reports its status from
 it.
 
+## G8. A broken edit keeps the running plugin
+
+Editing a plugin into one that fails to import leaves the running revision as it is: `vibest plugins` shows it active
+with the failed revision and its error, and neither it nor the plugins after it are set up again.
+
+## G9. One plugin per target
+
+A plugin folder found in the plugins folder and also named in `vibest.json` is one plugin: `vibest plugins` lists it
+once, active, and it runs with the options from `vibest.json`.
+
 ## G10. A plugin folder with a package.json
 
 A plugin folder whose `package.json` maps `exports` loads the file the map names for `./server`, else for `.`, skipping a
