@@ -113,13 +113,6 @@ export const run = (host: Host, replacements: LayerNode.Replacements, options: {
       })
     yield* fs.remove(layout.socket, { force: true })
     yield* fs.remove(layout.httpSocket, { force: true })
-    if (options.handoff) {
-      const backup = `${layout.database}.before-${VERSION}`
-      for (const suffix of ["", "-wal"])
-        if (yield* fs.exists(`${layout.database}${suffix}`))
-          yield* fs.copyFile(`${layout.database}${suffix}`, `${backup}${suffix}`)
-      yield* Effect.log(`vibestd took over from the previous one; its database is backed up at ${backup}`)
-    }
     const facts = yield* HostFacts.pipe(Effect.provide(LayerNode.compile(HostFacts.node, { replacements })))
     const identity = {
       pid: facts.pid,
