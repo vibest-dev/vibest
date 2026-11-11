@@ -548,11 +548,6 @@ describe.concurrent("Sessions", () => {
       const results = yield* sql<{
         n: number
       }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${id} AND kind = 'notice'`.pipe(Effect.orDie)
-      console.log(
-        "DEBUG",
-        JSON.stringify(yield* sql`SELECT kind, content FROM inbox WHERE sender_session_id = ${id}`),
-        JSON.stringify(yield* sql`SELECT * FROM execution`),
-      )
       assert.strictEqual(results[0]!.n, 1)
       assert.lengthOf(yield* sqlNotices(id), 1)
     }),
