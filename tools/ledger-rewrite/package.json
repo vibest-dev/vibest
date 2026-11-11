@@ -1,0 +1,20 @@
+{
+  "name": "@vibest/ledger-rewrite",
+  "version": "0.0.1-dev",
+  "private": true,
+  "description": "Rewrites a stopped vibestd's database from the old event shape (catalog 1) to the per-aggregate ledger (catalog 2). Run from a checkout; not published.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast -p tsconfig.json",
+    "test": "cd ../.. && bun ./node_modules/vitest/vitest.mjs run tools/ledger-rewrite"
+  },
+  "dependencies": {
+    "@effect/sql-sqlite-bun": "catalog:",
+    "@vibest/core": "workspace:*",
+    "@vibest/schema": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:"
+  }
+}

@@ -83,10 +83,10 @@ export class Inbox extends Context.Service<
       const harnesses = yield* Harnesses
       const restarting = yield* Restarting
       const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.inbox
-      const markDelivered = (ids: ReadonlyArray<number>) =>
+      const markDelivered = (sessionId: string, ids: ReadonlyArray<number>) =>
         drain.work(
           `settle inbox ${ids.join(",")}`,
-          Effect.uninterruptible(db.setInboxStatus(ids, "delivered", "sending")),
+          Effect.uninterruptible(db.setInboxStatus(sessionId, ids, "delivered", "sending")),
           true,
         )
 
@@ -174,6 +174,7 @@ export class Inbox extends Context.Service<
               if (pending.length === 0) return undefined
               const batch = nextBatch(pending)
               const claimed = yield* db.claim(
+                current.id,
                 batch.map((r) => r.id),
                 { projectId, runtime: current.runtime, address, harnessId: current.harnessId },
               )
@@ -210,16 +211,16 @@ export class Inbox extends Context.Service<
               )
             const recipient = `${projectId} subscription ${++subscriptions}`
             const claimOne = () =>
-              origin === undefined
+              origin === undefined || main === undefined
                 ? Effect.succeed(undefined)
                 : claimNext(projectId, "subscribe", origin, (ids) =>
-                    leases.hold(recipient, ids, undefined, (ended) => db.failLeased(ended)),
+                    leases.hold(recipient, ids, undefined, (ended) => db.failLeased(main, ended)),
                   ).pipe(Effect.map((rows) => (rows === undefined ? undefined : text(rows))))
             return Stream.unfold(0, () =>
               Effect.gen(function* () {
                 const ids = leases.held(recipient)
-                if (ids.length > 0)
-                  yield* Effect.uninterruptible(markDelivered(ids).pipe(Effect.andThen(leases.settle(ids))))
+                if (ids.length > 0 && main !== undefined)
+                  yield* Effect.uninterruptible(markDelivered(main, ids).pipe(Effect.andThen(leases.settle(ids))))
                 while (true) {
                   const batch = yield* claimOne()
                   if (batch !== undefined) return [batch, 0] as const

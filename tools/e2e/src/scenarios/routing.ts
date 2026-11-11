@@ -257,7 +257,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G12",
     title:
-      "a plugin's ctx.event.subscribe sees the ledger facts of a real Pi subagent in order (session.created, process.started, turn.started, turn.ended) and no live events; a new revision of the plugin gets the next agent's facts and the old one stops",
+      "a plugin's ctx.event.subscribe sees the ledger facts of a real Pi subagent in order (session.created, process.started, execution.started, execution.ended) and no live events; a new revision of the plugin gets the next agent's facts and the old one stops",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "observe")
@@ -269,7 +269,7 @@ const checks: ReadonlyArray<Check> = [
         await fs.writeFile(`${file}.tmp`, text)
         await fs.rename(`${file}.tmp`, file)
       }
-      const ordered = ["session.created", "process.started", "turn.started", "turn.ended"]
+      const ordered = ["session.created", "process.started", "execution.started", "execution.ended"]
       const of = (lines: ReadonlyArray<string>, id: string) =>
         lines.filter((line) => line.endsWith(` ${id}`)).map((line) => line.split(" ")[0]!)
       const inOrder = (types: ReadonlyArray<string>) => {

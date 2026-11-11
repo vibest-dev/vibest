@@ -96,7 +96,7 @@ describe.concurrent("Sessions", () => {
         inbox: number | null
         task: number
       }>`SELECT m.id, m.status AS status, m.inbox_id AS inbox,
-        (SELECT id FROM inbox WHERE recipient_session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
+        (SELECT id FROM inbox WHERE session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
         FROM ${sql.literal(TURNS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
       assert.deepStrictEqual(
         rounds.map((round) => [round.id === roundId, round.status, round.inbox === round.task]),

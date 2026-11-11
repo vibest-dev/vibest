@@ -11,7 +11,7 @@ import {
   SessionCreated,
   SessionDirectoryChanged,
   SessionEnded,
-  TurnEnded,
+  ExecutionEnded,
 } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
 import { AmbiguousSession, NoSuchSession, RuntimeAddress } from "@vibest/schema/session"
@@ -40,7 +40,7 @@ export {
   type NewInboxRow,
   type SpawnedBefore,
   type RepositoryRow,
-  type TurnEnd,
+  type ExecutionEnd,
   failureOf,
   type SessionBrief,
 } from "./db-rows.ts"
@@ -79,7 +79,7 @@ const make = Effect.gen(function* () {
     linkTask,
     endProcess,
     startProcess,
-    startTurn,
+    startExecution,
     updateSession,
     dropWaiting,
     sessionAt,
@@ -88,13 +88,14 @@ const make = Effect.gen(function* () {
     unusedId,
     conversationOf,
     addressedCreator,
+    archiveOnIdle,
   } = store
   const remote = remoteQueries(store)
   const canResumeConversation = (sessionId: string, harnessSessionId: string) =>
     sql<{ ok: number }>`SELECT (
       EXISTS (
-        SELECT 1 FROM turn t JOIN process p ON p.id = t.process_id
-        WHERE t.session_id = ${sessionId} AND t.status IS NOT NULL
+        SELECT 1 FROM execution t JOIN process p ON p.session_id = t.session_id AND p.id = t.process_id
+        WHERE t.session_id = ${sessionId} AND t.outcome IS NOT NULL
           AND p.conversation = ${harnessSessionId}
       )
       OR (
@@ -265,6 +266,7 @@ const make = Effect.gen(function* () {
         parentSessionId,
         request,
         origin,
+        archiveOnIdle: archives = false,
       }: {
         readonly max?: number | undefined
         readonly cwd?: string
@@ -272,6 +274,7 @@ const make = Effect.gen(function* () {
         readonly parentSessionId?: string | undefined
         readonly request?: string | undefined
         readonly origin?: PeerStart | undefined
+        readonly archiveOnIdle?: boolean
       } = {},
     ): Effect.Effect<boolean | SpawnedBefore> =>
       tx(
@@ -287,25 +290,25 @@ const make = Effect.gen(function* () {
           const stopped = row.metadata.archived || row.metadata.removed
           yield* emit(SessionCreated, {
             sessionId: row.id,
-            projectId: project,
             at: row.createdAt,
             data: {
-              role: row.agent,
+              project,
+              agent: row.agent,
               name: row.name,
               directory: cwd,
               ...(parentSessionId === undefined ? {} : { parent: parentSessionId }),
-              archiveOnCompletion: row.metadata.archive === true,
               ...(origin === undefined
                 ? {}
                 : {
                     origin: {
                       peer: origin.peer,
                       project: origin.project,
-                      ...(origin.reportTo === undefined ? {} : { reportTo: origin.reportTo }),
+                      ...(origin.reportTo === undefined ? {} : { session: origin.reportTo }),
                     },
                   }),
             },
           })
+          if (archives) archiveOnIdle.add(row.id)
           const processAt = row.startedAt ?? row.createdAt
           const process = yield* startProcess(
             row.id,
@@ -342,13 +345,13 @@ const make = Effect.gen(function* () {
               request,
             })
           if (row.turnState !== "none") {
-            const turn = yield* startTurn(row.id, row.turnPromptedAt)
-            yield* linkTask(row.id, turn, row.turnPromptedAt)
+            const execution = yield* startExecution(row.id, row.turnPromptedAt)
+            yield* linkTask(row.id, execution, row.turnPromptedAt)
             if (row.turnState !== "open")
-              yield* emit(TurnEnded, {
+              yield* emit(ExecutionEnded, {
                 sessionId: row.id,
                 at: row.turnPromptedAt,
-                data: { turn, status: row.turnState },
+                data: { execution, outcome: row.turnState },
               })
           }
           if (stopped)
@@ -383,15 +386,17 @@ const make = Effect.gen(function* () {
     sessionIdentity: (id: string) =>
       sql<{ id: string; projectId: string; agent: string; harness: string }>`SELECT a.id, a.project_id,
           coalesce(p.harness, '') AS harness,
-          CASE WHEN q.entry_session_id = a.id THEN 'coordinator' ELSE a.role END AS agent
+          CASE WHEN q.entry_session_id = a.id THEN 'coordinator' ELSE a.agent END AS agent
         FROM session a JOIN project q ON q.id = a.project_id
-        LEFT JOIN process p ON p.id = a.process_id
+        LEFT JOIN process p ON p.session_id = a.id AND p.id = a.process_id
         WHERE a.id = ${id}`.pipe(
         Effect.map((rows) => rows[0]),
         Effect.orDie,
       ),
 
     getSession: (id: string) => readSession(id).pipe(Effect.orDie),
+
+    archivesOnIdle: (id: string) => Effect.sync(() => archiveOnIdle.has(id)),
 
     liveStatuses: Effect.sync(() => statuses.size),
 
@@ -458,14 +463,8 @@ const make = Effect.gen(function* () {
               }
               yield* emit(SessionCreated, {
                 sessionId: id,
-                projectId: project,
                 at,
-                data: {
-                  role: "main",
-                  name: "main",
-                  directory: start.projectDirectory ?? "",
-                  archiveOnCompletion: false,
-                },
+                data: { project, agent: "main", name: "main", directory: start.projectDirectory ?? "" },
               })
               yield* emit(ProjectEntryChanged, { projectId: project, at, data: { session: id } })
               yield* notify({ type: "live.project", projectId: project })

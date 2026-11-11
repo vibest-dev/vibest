@@ -47,10 +47,9 @@ const story = Effect.gen(function* () {
         data: { directory: "/w/app", repositories: [{ path: "/w/app", remote: "git@x:app.git" }] },
       })
       yield* emit(Catalog["session.created"], {
-        projectId: P,
         sessionId: MAIN,
         at: 210,
-        data: { role: "main", name: "main", directory: "", archiveOnCompletion: false },
+        data: { project: P, agent: "main", name: "main", directory: "" },
       })
       yield* emit(Catalog["project.entry_changed"], { projectId: P, at: 211, data: { session: MAIN } })
       yield* emit(Catalog["session.directory_changed"], { sessionId: MAIN, at: 212, data: { directory: "/w/app" } })
@@ -64,7 +63,7 @@ const story = Effect.gen(function* () {
         at: 225,
         data: { process: mainProcess, terminal: "w1:p1", pid: 10 },
       })
-      const firstReady = yield* emit(Catalog["process.ready"], {
+      yield* emit(Catalog["process.ready"], {
         sessionId: MAIN,
         at: 230,
         data: { process: mainProcess, pid: 11, integration: { version: "0.0.1", protocol: 8 } },
@@ -78,17 +77,9 @@ const story = Effect.gen(function* () {
       })
 
       yield* emit(Catalog["session.created"], {
-        projectId: P,
         sessionId: SUB,
         at: 300,
-        data: {
-          role: "subagent",
-          name: "tests",
-          directory: "/w/app/wt",
-          parent: MAIN,
-          reportTo: MAIN,
-          archiveOnCompletion: true,
-        },
+        data: { project: P, agent: "subagent", name: "tests", directory: "/w/app/wt", parent: MAIN },
       })
       const task = yield* emit(Catalog["inbox.queued"], {
         sessionId: SUB,
@@ -108,18 +99,25 @@ const story = Effect.gen(function* () {
           pid: 20,
         },
       })
-      const turn = yield* emit(Catalog["turn.started"], { sessionId: SUB, at: 310, data: { process: subProcess } })
-      yield* emit(Catalog["inbox.moved"], { sessionId: SUB, at: 311, data: { inbox: task, to: "delivered", turn } })
-      const report = yield* emit(Catalog["turn.reported"], {
+      const turn = yield* emit(Catalog["execution.started"], {
         sessionId: SUB,
-        at: 320,
-        data: { process: subProcess, harness: "pi", text: "All tests pass." },
+        at: 310,
+        data: { process: subProcess },
       })
-      yield* emit(Catalog["turn.ended"], { sessionId: SUB, at: 321, data: { turn, status: "completed", report } })
+      yield* emit(Catalog["inbox.moved"], {
+        sessionId: SUB,
+        at: 311,
+        data: { inbox: task, to: "delivered", execution: turn },
+      })
+      yield* emit(Catalog["execution.ended"], {
+        sessionId: SUB,
+        at: 321,
+        data: { execution: turn, outcome: "completed", reply: "All tests pass." },
+      })
       const result = yield* emit(Catalog["inbox.queued"], {
         sessionId: MAIN,
         at: 322,
-        data: { kind: "result", recipient: MAIN, sender: SUB, content: "", status: "pending", turn },
+        data: { kind: "notice", recipient: MAIN, sender: SUB, content: "", status: "pending" },
       })
       yield* emit(Catalog["inbox.moved"], { sessionId: MAIN, at: 323, data: { inbox: result, to: "delivering" } })
       yield* emit(Catalog["inbox.moved"], { sessionId: MAIN, at: 324, data: { inbox: result, to: "delivered" } })
@@ -153,26 +151,23 @@ const story = Effect.gen(function* () {
       })
 
       yield* emit(Catalog["session.created"], {
-        projectId: P,
         sessionId: REMOTE,
         at: 500,
         data: {
-          role: "subagent",
+          project: P,
+          agent: "subagent",
           name: "remote",
           directory: "/src/app",
-          archiveOnCompletion: false,
-          origin: { peer: PEER, project: OTHER_PROJECT, reportTo: MAIN },
+          origin: { peer: PEER, project: OTHER_PROJECT, session: MAIN },
         },
       })
       yield* emit(Catalog["outbox.queued"], {
-        sessionId: REMOTE,
         at: 510,
-        data: { id: ITEM, peer: PEER, kind: "result", content: "done" },
+        data: { id: ITEM, peer: PEER, session: REMOTE, kind: "notice", content: "done" },
       })
       yield* emit(Catalog["outbox.queued"], {
-        sessionId: REMOTE,
         at: 511,
-        data: { id: ITEM_2, peer: PEER, kind: "notice", content: "archived" },
+        data: { id: ITEM_2, peer: PEER, session: REMOTE, kind: "notice", content: "archived" },
       })
       yield* emit(Catalog["outbox.acked"], { at: 520, data: { peer: PEER, ids: [ITEM] } })
       const notice = yield* emit(Catalog["inbox.queued"], {
@@ -180,18 +175,18 @@ const story = Effect.gen(function* () {
         at: 530,
         data: { kind: "notice", recipient: MAIN, content: "remote done", status: "pending", peerItem: ITEM },
       })
-      const typed = yield* emit(Catalog["turn.started"], {
+      const typed = yield* emit(Catalog["execution.started"], {
         sessionId: MAIN,
         at: 540,
         data: { process: mainProcess, typed: "hello" },
       })
-      yield* emit(Catalog["turn.ended"], {
+      yield* emit(Catalog["execution.ended"], {
         sessionId: MAIN,
         at: 541,
-        data: { turn: typed, status: "failed", failure: { message: "model overloaded" } },
+        data: { execution: typed, outcome: "failed", failure: { message: "model overloaded" } },
       })
       yield* emit(Catalog["machine.removed"], { at: 600, data: { name: "mb" } })
-      return { mainProcess, firstReady, task, subProcess, turn, report, result, placeholder, notice, typed }
+      return { mainProcess, task, subProcess, turn, result, placeholder, notice, typed }
     }),
   )
   return { ...ids, sql, journal }
@@ -251,59 +246,56 @@ describe("journal projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("session facts: created, renamed, origin, ended, current process and turn", () =>
+  it.effect("session facts: created, renamed, origin, ended, current process and execution", () =>
     Effect.gen(function* () {
       const { sql, subProcess, turn, typed, mainProcess } = yield* story
       const rows = yield* rowsOf<Record<string, unknown>>(
         sql,
-        `SELECT id, name, role, parent_session_id, archive_on_idle, origin_peer,
-          origin_project, origin_session, created_at, ended_at, process_id, turn_id, active_at
+        `SELECT id, name, agent, parent_session_id, origin_peer,
+          origin_project, origin_session, created_at, ended_at, process_id, execution_id, active_at
         FROM session ORDER BY created_at`,
       )
       assert.deepStrictEqual(rows, [
         {
           id: MAIN,
           name: "main",
-          role: "main",
+          agent: "main",
           parentSessionId: null,
-          archiveOnIdle: 0,
           originPeer: null,
           originProject: null,
           originSession: null,
           createdAt: 210,
           endedAt: null,
           processId: mainProcess,
-          turnId: typed,
+          executionId: typed,
           activeAt: 541,
         },
         {
           id: SUB,
           name: "fix-tests",
-          role: "subagent",
+          agent: "subagent",
           parentSessionId: MAIN,
-          archiveOnIdle: 1,
           originPeer: null,
           originProject: null,
           originSession: null,
           createdAt: 300,
           endedAt: null,
           processId: subProcess,
-          turnId: turn,
+          executionId: turn,
           activeAt: 332,
         },
         {
           id: REMOTE,
           name: "remote",
-          role: "subagent",
+          agent: "subagent",
           parentSessionId: null,
-          archiveOnIdle: 0,
           originPeer: PEER,
           originProject: OTHER_PROJECT,
           originSession: MAIN,
           createdAt: 500,
           endedAt: null,
           processId: null,
-          turnId: null,
+          executionId: null,
           activeAt: 500,
         },
       ])
@@ -326,14 +318,14 @@ describe("journal projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("process facts: placed, ready keeps its first seq, pid, conversation, ended", () =>
+  it.effect("process facts: placed, ready, pid, conversation, ended", () =>
     Effect.gen(function* () {
-      const { sql, mainProcess, firstReady, subProcess } = yield* story
+      const { sql, mainProcess, subProcess } = yield* story
       const rows = yield* rowsOf<Record<string, unknown>>(
         sql,
         `SELECT id, harness, provider, model, routing, runtime, terminal, pid, integration_version,
-          integration_protocol, conversation, started_at, placed_at, ready_at, ready_seq, ended_at, end_reason
-        FROM process ORDER BY id`,
+          integration_protocol, conversation, started_at, placed_at, ready_at, ended_at, end_reason
+        FROM process ORDER BY started_at`,
       )
       assert.deepStrictEqual(rows[0], {
         id: mainProcess,
@@ -350,7 +342,6 @@ describe("journal projectors", () => {
         startedAt: 220,
         placedAt: 225,
         readyAt: 235,
-        readySeq: firstReady,
         endedAt: null,
         endReason: null,
       })
@@ -369,7 +360,6 @@ describe("journal projectors", () => {
         startedAt: 302,
         placedAt: 302,
         readyAt: null,
-        readySeq: null,
         endedAt: 330,
         endReason: "limited",
       })
@@ -407,9 +397,8 @@ describe("journal projectors", () => {
         Effect.gen(function* () {
           yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
           yield* journal.emit(Catalog["session.created"], {
-            projectId: P,
             sessionId: SUB,
-            data: { role: "subagent", name: "s", directory: "", archiveOnCompletion: false },
+            data: { project: P, agent: "subagent", name: "s", directory: "" },
           })
           const id = yield* journal.emit(Catalog["process.started"], {
             sessionId: SUB,
@@ -442,38 +431,42 @@ describe("journal projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("turn facts: started, reported leaves the read model alone, ended once", () =>
+  it.effect("execution facts: started, ended once with its reply", () =>
     Effect.gen(function* () {
-      const { sql, journal, turn, report, typed, subProcess, mainProcess } = yield* story
+      const { sql, journal, turn, typed, subProcess, mainProcess } = yield* story
       yield* journal.commit(
-        journal.emit(Catalog["turn.ended"], { sessionId: SUB, at: 999, data: { turn, status: "lost" } }),
+        journal.emit(Catalog["execution.ended"], {
+          sessionId: SUB,
+          at: 999,
+          data: { execution: turn, outcome: "lost" },
+        }),
       )
       assert.deepStrictEqual(
         yield* rowsOf(
           sql,
-          "SELECT id, session_id, process_id, typed, started_at, status, report_seq, failure, ended_at FROM turn ORDER BY id",
+          "SELECT session_id, id, process_id, typed, started_at, outcome, failure, reply, ended_at FROM execution ORDER BY started_at",
         ),
         [
           {
-            id: turn,
             sessionId: SUB,
+            id: turn,
             processId: subProcess,
             typed: null,
             startedAt: 310,
-            status: "completed",
-            reportSeq: report,
+            outcome: "completed",
             failure: null,
+            reply: "All tests pass.",
             endedAt: 321,
           },
           {
-            id: typed,
             sessionId: MAIN,
+            id: typed,
             processId: mainProcess,
             typed: "hello",
             startedAt: 540,
-            status: "failed",
-            reportSeq: null,
+            outcome: "failed",
             failure: "model overloaded",
+            reply: null,
             endedAt: 541,
           },
         ],
@@ -481,51 +474,52 @@ describe("journal projectors", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("inbox facts: queued and moved, with the turn that took a row", () =>
+  it.effect("inbox facts: queued and moved, with the execution that took a row", () =>
     Effect.gen(function* () {
       const { sql, task, turn, result, notice } = yield* story
-      const [moved] = yield* sql<{ seq: number }>`SELECT max(seq) AS seq FROM event WHERE type = 'inbox.moved'`
+      const [moved] = yield* sql<{ seq: number }>`SELECT max(seq) AS seq FROM event
+        WHERE type = 'inbox.moved' AND aggregate = ${MAIN}`
       assert.deepStrictEqual(
         yield* rowsOf(
           sql,
-          `SELECT id, recipient_session_id, sender_session_id, kind, content, request, peer_item,
-            status, turn_id, seq FROM inbox ORDER BY id`,
+          `SELECT id, session_id, sender_session_id, kind, content, request, peer_item,
+            status, execution_id, seq FROM inbox ORDER BY session_id = '${SUB}' DESC, id`,
         ),
         [
           {
             id: task,
-            recipientSessionId: SUB,
+            sessionId: SUB,
             senderSessionId: MAIN,
             kind: "task",
             content: "fix it",
             request: "r-1",
             peerItem: null,
             status: "delivered",
-            turnId: turn,
+            executionId: turn,
             seq: task + 3,
           },
           {
             id: result,
-            recipientSessionId: MAIN,
+            sessionId: MAIN,
             senderSessionId: SUB,
-            kind: "result",
+            kind: "notice",
             content: "",
             request: null,
             peerItem: null,
             status: "delivered",
-            turnId: null,
+            executionId: null,
             seq: moved!.seq,
           },
           {
             id: notice,
-            recipientSessionId: MAIN,
+            sessionId: MAIN,
             senderSessionId: null,
             kind: "notice",
             content: "remote done",
             request: null,
             peerItem: ITEM,
             status: "pending",
-            turnId: null,
+            executionId: null,
             seq: notice,
           },
         ],
@@ -657,32 +651,32 @@ describe("journal", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("a session fact takes its project from the session; an inbox fact without recipient uses the sender", () =>
+  it.effect("each fact numbers on in its own aggregate: a session, a project, or the ledger", () =>
     Effect.gen(function* () {
       const { journal, sql } = yield* ledger
       yield* journal.commit(
         Effect.gen(function* () {
           yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
           yield* journal.emit(Catalog["session.created"], {
-            projectId: P,
             sessionId: MAIN,
-            data: { role: "main", name: "main", directory: "", archiveOnCompletion: false },
+            data: { project: P, agent: "main", name: "main", directory: "" },
           })
           yield* journal.emit(Catalog["inbox.queued"], {
             sessionId: MAIN,
             data: { kind: "send", sender: MAIN, content: "hi", status: "pending" },
           })
-          const [row] = yield* sql<{ status: string }>`SELECT status FROM inbox`
-          assert.strictEqual(row!.status, "pending")
+          yield* journal.emit(Catalog["peer.seen"], { data: { id: PEER, name: "a", callsMe: "b" } })
+          yield* journal.emit(Catalog["project.entry_changed"], { projectId: P, data: { session: MAIN } })
         }),
       )
-      assert.deepStrictEqual(
-        yield* rowsOf(sql, "SELECT type, project_id, session_id FROM event WHERE session_id IS NOT NULL ORDER BY seq"),
-        [
-          { type: "session.created", projectId: P, sessionId: MAIN },
-          { type: "inbox.queued", projectId: P, sessionId: MAIN },
-        ],
-      )
+      const [ledgerId] = yield* sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT position, aggregate, seq, type FROM event ORDER BY position"), [
+        { position: 1, aggregate: P, seq: 1, type: "project.created" },
+        { position: 2, aggregate: MAIN, seq: 1, type: "session.created" },
+        { position: 3, aggregate: MAIN, seq: 2, type: "inbox.queued" },
+        { position: 4, aggregate: ledgerId!.value, seq: 1, type: "peer.seen" },
+        { position: 5, aggregate: P, seq: 2, type: "project.entry_changed" },
+      ])
     }).pipe(Effect.provide(memory())),
   )
 
@@ -697,9 +691,8 @@ describe("journal", () => {
         Effect.gen(function* () {
           yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
           yield* journal.emit(Catalog["session.created"], {
-            projectId: P,
             sessionId: MAIN,
-            data: { role: "main", name: "main", directory: "", archiveOnCompletion: false },
+            data: { project: P, agent: "main", name: "main", directory: "" },
           })
           yield* journal.emit(Catalog["process.started"], {
             sessionId: MAIN,
@@ -716,7 +709,7 @@ describe("journal", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("a fact that takes its project from its session dies when the caller gives one", () =>
+  it.effect("a session fact given a project too dies and writes nothing", () =>
     Effect.gen(function* () {
       const { journal, sql } = yield* ledger
       const exit = yield* journal
@@ -724,9 +717,8 @@ describe("journal", () => {
           Effect.gen(function* () {
             yield* journal.emit(Catalog["project.created"], { projectId: P, data: { repositories: [] } })
             yield* journal.emit(Catalog["session.created"], {
-              projectId: P,
               sessionId: MAIN,
-              data: { role: "main", name: "main", directory: "", archiveOnCompletion: false },
+              data: { project: P, agent: "main", name: "main", directory: "" },
             })
             yield* journal.emit(Catalog["session.renamed"], {
               projectId: OTHER_PROJECT,
@@ -757,7 +749,7 @@ describe("journal", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("the log refuses updates and never reuses a seq", () =>
+  it.effect("the log refuses updates and never reuses a position", () =>
     Effect.gen(function* () {
       const { journal, sql } = yield* ledger
       const emitConnected = journal.commit(journal.emit(Catalog["machine.connected"], { data: { name: "mb" } }))
@@ -766,7 +758,11 @@ describe("journal", () => {
       const update = yield* sql`UPDATE event SET at = 0 WHERE seq = ${first}`.pipe(Effect.exit)
       assert.isTrue(Exit.isFailure(update))
       yield* sql`DELETE FROM event WHERE seq = ${second}`
-      assert.strictEqual(yield* emitConnected, second + 1)
+      assert.strictEqual(yield* emitConnected, second)
+      assert.deepStrictEqual(yield* rowsOf(sql, "SELECT position FROM event ORDER BY position"), [
+        { position: 1 },
+        { position: 3 },
+      ])
     }).pipe(Effect.provide(memory())),
   )
 })
@@ -789,14 +785,13 @@ describe("journal rebuild", () => {
     }).pipe(Effect.provide(memory())),
   )
 
-  it.effect("a log row of a type outside the catalog fails the rebuild, names its seq and changes nothing", () =>
+  it.effect("a log row of a type outside the catalog fails the rebuild, names it and changes nothing", () =>
     Effect.gen(function* () {
       const { sql } = yield* story
-      const [row] = yield* sql<{ seq: number }>`INSERT INTO event (at, type, project_id, session_id, data)
-        VALUES (1, 'session.purged', ${P}, ${SUB}, '{}') RETURNING seq`
+      yield* sql`INSERT INTO event (aggregate, seq, at, type, data) VALUES (${SUB}, 99, 1, 'session.purged', '{}')`
       const error = yield* rebuild.pipe(Effect.flip)
       assert.strictEqual(error._tag, "UnknownFact")
-      assert.include(error.message, `event ${row!.seq}`)
+      assert.include(error.message, `event ${SUB} 99`)
       const [sessions] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM session`
       assert.strictEqual(sessions!.n, 3)
     }).pipe(Effect.provide(memory())),

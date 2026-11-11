@@ -37,7 +37,7 @@ describe.concurrent("Sessions", () => {
       }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`
       const sent = yield* sql<{
         id: number
-      }>`SELECT id FROM inbox WHERE recipient_session_id = ${id} AND content IN ('one', 'two') ORDER BY id`
+      }>`SELECT id FROM inbox WHERE session_id = ${id} AND content IN ('one', 'two') ORDER BY id`
       assert.strictEqual(round!.input, "one\n\ntwo")
       assert.strictEqual(round!.inbox, sent[1]!.id)
     }),
@@ -233,9 +233,7 @@ describe.concurrent("Sessions", () => {
       yield* untilVirtual(
         sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
-          Effect.orDie,
-        ),
+        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         (rows) => rows[0]?.status === "delivered",
       )
       assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
@@ -261,9 +259,7 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(
         yield* sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
-          Effect.orDie,
-        ),
+        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         [{ status: "delivered" }],
       )
       assert.include(yield* answerOf(id), "landed")
@@ -291,9 +287,7 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(
         yield* sql<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(
-          Effect.orDie,
-        ),
+        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         [{ status: "failed" }],
       )
       assert.include((yield* sqlNotices(id)).at(-1)!, "send: busy")
@@ -323,7 +317,7 @@ describe.concurrent("Sessions", () => {
       const [sent] = yield* sql<{
         id: number
         status: string
-      }>`SELECT id, status AS status FROM inbox WHERE recipient_session_id = ${id} AND content = 'fix the tests'`.pipe(
+      }>`SELECT id, status AS status FROM inbox WHERE session_id = ${id} AND content = 'fix the tests'`.pipe(
         Effect.orDie,
       )
       assert.strictEqual(round[0]!.inbox, sent!.id)
@@ -346,7 +340,7 @@ describe.concurrent("Sessions", () => {
         sql<{
           id: number
           status: string
-        }>`SELECT id, status AS status FROM inbox WHERE recipient_session_id = ${receiverId} AND kind IN ('task', 'send') AND id > (SELECT min(id) FROM inbox WHERE recipient_session_id = ${receiverId} AND kind IN ('task', 'send')) ORDER BY id`.pipe(
+        }>`SELECT id, status AS status FROM inbox WHERE session_id = ${receiverId} AND kind IN ('task', 'send') AND id > (SELECT min(id) FROM inbox WHERE session_id = ${receiverId} AND kind IN ('task', 'send')) ORDER BY id`.pipe(
           Effect.orDie,
         )
 

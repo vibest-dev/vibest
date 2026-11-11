@@ -484,7 +484,7 @@ const inboxOf = (recipient: string) =>
       sql<{
         content: string
         kind: string
-      }>`SELECT content, kind FROM inbox WHERE recipient_session_id = ${recipient} ORDER BY id`,
+      }>`SELECT content, kind FROM inbox WHERE session_id = ${recipient} ORDER BY id`,
   )
 
 describe("vibest run --machine and remote sessions", () => {

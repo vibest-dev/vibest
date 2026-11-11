@@ -336,7 +336,7 @@ const checks: ReadonlyArray<Check> = [
           const completed = () =>
             row<{ n: number }>(
               w,
-              "SELECT count(*) AS n FROM turn WHERE session_id = ? AND status IS NOT NULL",
+              "SELECT count(*) AS n FROM execution WHERE session_id = ? AND outcome IS NOT NULL",
               launched.id,
             )!.n
           expect(completed() === 0, "blocked published a completed result")

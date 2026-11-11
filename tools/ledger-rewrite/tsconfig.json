@@ -1,0 +1,5 @@
+{
+  "extends": "@vibest/tsconfig/base.json",
+  "compilerOptions": { "types": ["bun"], "customConditions": [] },
+  "include": ["src", "test"]
+}

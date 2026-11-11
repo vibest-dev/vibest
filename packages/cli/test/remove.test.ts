@@ -168,7 +168,7 @@ describe.concurrent("vibest rm: process proof", () => {
         })
 
       const reportedTurnEndEvent = (id: string) =>
-        eventsOf(id, "turn.ended").pipe(Effect.map((rows) => rows.at(-1)?.data.reply))
+        eventsOf(id, "execution.ended").pipe(Effect.map((rows) => rows.at(-1)?.data.reply))
       const a = yield* idleSession
       yield* a.herdr.runtime.close({ id: a.pane })
       yield* worktreeDeletedOutsideVibest(a)

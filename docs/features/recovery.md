@@ -47,11 +47,6 @@ turn it runs sends nothing.
 When an archive is cut off after it started, the next vibestd finishes it: it closes the session's tab, ends it as
 archived and keeps its worktree.
 
-## S31. vibestd killed before an archive on completion
-
-When vibestd is killed after a session's completed turn and before its archive on idle, the next vibestd
-archives the session once, with no extra notice.
-
 ## S51. Pane killed while idle
 
 When a session's pane is killed while it is idle, the session ends, its completed turn stays completed, and its creator

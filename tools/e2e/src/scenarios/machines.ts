@@ -99,7 +99,8 @@ const hcCore = async (w: World, tag: string, env: Record<string, string | undefi
   return hc
 }
 
-const setup = async (w: World, options: { readonly bSession?: boolean } = {}) => {
+export const setup = async (w: World, options: { readonly bSession?: boolean; readonly bin?: string } = {}) => {
+  const vibest = options.bin ?? binary
   for (const bin of ["pi", "hc", "git"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   w.ownRuntimes.add("hc")
   const bin = path.join(w.root, "bin")
@@ -140,7 +141,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean } = {}) =>
     expect(set.code === 0, `git remote set-url: ${set.stderr}`)
   }
   const hcB = await hcCore(w, "b", bEnv)
-  const onB = (args: ReadonlyArray<string>, cwd = bRepo) => w.run(cwd, [binary, ...args], { env: bEnv })
+  const onB = (args: ReadonlyArray<string>, cwd = bRepo) => w.run(cwd, [vibest, ...args], { env: bEnv })
   const okB = async (args: ReadonlyArray<string>) => {
     const r = await onB(args)
     expect(r.code === 0, `B: vibest ${args.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
@@ -159,7 +160,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean } = {}) =>
   for (const dir of ["a-r", "a-s", "a-c"]) await fs.mkdir(path.join(w.root, dir), { recursive: true })
   const hcA = await hcCore(w, "a", aEnv)
   await w.stopDaemon()
-  const daemonA = await w.run(w.repository, [binary, "daemon"], { env: aEnv })
+  const daemonA = await w.run(w.repository, [vibest, "daemon"], { env: aEnv })
   expect(daemonA.code === 0, `A: vibest daemon: ${daemonA.stderr}`)
   await w.startMain({
     harness: "pi",
@@ -170,8 +171,9 @@ const setup = async (w: World, options: { readonly bSession?: boolean } = {}) =>
     name: "a-main",
     hc: { run: hcA },
     timeoutMs: 60_000,
+    ...(options.bin === undefined ? {} : { bin: options.bin }),
   })
-  const onA = (args: ReadonlyArray<string>) => w.run(w.repository, [binary, ...args], { env: aEnv })
+  const onA = (args: ReadonlyArray<string>) => w.run(w.repository, [vibest, ...args], { env: aEnv })
   const okA = async (args: ReadonlyArray<string>) => {
     const r = await onA(args)
     expect(r.code === 0, `A: vibest ${args.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
@@ -208,10 +210,30 @@ const setup = async (w: World, options: { readonly bSession?: boolean } = {}) =>
   }
   const aSocket = w.hcSocket
   const log = path.join(w.root, "ssh.log")
-  return { b, bEnv, aEnv, aSocket, onA, okA, onB, okB, bDb, identity, notices, run, subs, main, log, stop, hcA, hcB }
+  return {
+    b,
+    bRepo,
+    bEnv,
+    aEnv,
+    aSocket,
+    onA,
+    okA,
+    onB,
+    okB,
+    bDb,
+    identity,
+    notices,
+    run,
+    subs,
+    main,
+    log,
+    stop,
+    hcA,
+    hcB,
+  }
 }
 
-type Setup = Awaited<ReturnType<typeof setup>>
+export type Setup = Awaited<ReturnType<typeof setup>>
 
 const checks: ReadonlyArray<Check> = [
   {
@@ -279,13 +301,15 @@ const checks: ReadonlyArray<Check> = [
         await s.okA(["archive", address])
         const started = s.bDb<{ peer: string | null; facts: string }>(
           `SELECT origin_peer AS peer, (SELECT group_concat(type, ' ') FROM
-            (SELECT type FROM event WHERE session_id = session.id ORDER BY seq)) AS facts
+            (SELECT type FROM event WHERE aggregate = session.id ORDER BY seq)) AS facts
           FROM session WHERE id LIKE ?`,
           `${id8}%`,
         )
         expect(
           started?.peer === a.id &&
-            /session\.created .*process\.started .*turn\.started .*turn\.ended .*session\.ended/.test(started.facts),
+            /session\.created .*process\.started .*execution\.started .*execution\.ended .*session\.ended/.test(
+              started.facts,
+            ),
           `B's session started for A: ${JSON.stringify(started)}`,
         )
         const outbox = () =>
@@ -317,7 +341,7 @@ const checks: ReadonlyArray<Check> = [
           "B's turn completed",
           () =>
             s!.bDb<{ n: number }>(
-              "SELECT count(*) AS n FROM turn WHERE session_id LIKE ? AND status = 'completed'",
+              "SELECT count(*) AS n FROM execution WHERE session_id LIKE ? AND outcome = 'completed'",
               `${id8}%`,
             )?.n === 1,
           120_000,
@@ -551,7 +575,7 @@ const checks: ReadonlyArray<Check> = [
           "B recorded a typed turn",
           () =>
             (s!.bDb<{ n: number }>(
-              "SELECT count(*) AS n FROM turn WHERE session_id = ? AND typed IS NOT NULL",
+              "SELECT count(*) AS n FROM execution WHERE session_id = ? AND typed IS NOT NULL",
               bRow!.id!,
             )?.n ?? 0) === 1,
           60_000,

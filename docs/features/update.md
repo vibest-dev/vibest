@@ -63,3 +63,15 @@ One `vibest update` run by this vibest, while vibestd is an older vibest on an o
 even when an agent's turn end lands while it drains, and restarts the agents on the old integration: the main agent and
 the subagent keep their session and conversation with a new harness process, and the new vibestd is no child of a
 vibest process.
+
+## U13. A database from before per-aggregate events
+
+vibestd and `vibest daemon import-check` refuse a database written by v0.0.1-beta.19 or an earlier ledger release,
+change nothing in it, and name the one-time rewrite: stop vibestd and run `bun tools/ledger-rewrite/src/main.ts <file>`
+from a vibest checkout. After the rewrite, the sessions that release started are listed and `vibest result` returns
+their replies; once `vibest daemon restart` has restarted them on this integration, a send reaches them.
+
+## U14. Notices waiting between two machines across the rewrite
+
+A notice that a session on B queued for A while A's vibestd was stopped, both on v0.0.1-beta.19, reaches A exactly once
+after both databases are rewritten and A's vibestd starts, and B's outbox empties.

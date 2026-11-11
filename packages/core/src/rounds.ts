@@ -2,28 +2,29 @@ import type { HarnessUnavailable, NotReady } from "@vibest/schema/session"
 import { Clock, Effect, Exit } from "effect"
 import type { FileSystem } from "effect"
 
-import { type InboxRow, type InboxStatus, type SessionPatch, type SessionRow, type TurnEnd } from "./db.ts"
+import { type InboxRow, type InboxStatus, type SessionPatch, type SessionRow, type ExecutionEnd } from "./db.ts"
 import { nextBatch } from "./inbox.ts"
 import { type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
 
 export const sessionRounds = (deps: {
   readonly db: {
-    readonly endTurn: (
+    readonly endExecution: (
       id: string,
-      end: TurnEnd,
+      end: ExecutionEnd,
       patch: SessionPatch,
       notice: string | undefined,
       at?: number,
     ) => Effect.Effect<void>
     readonly pendingInbox: (sessionId: string) => Effect.Effect<ReadonlyArray<InboxRow>>
-    readonly claim: (ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<number>>
+    readonly claim: (sessionId: string, ids: ReadonlyArray<number>) => Effect.Effect<ReadonlyArray<number>>
     readonly setInboxStatus: (
+      sessionId: string,
       ids: ReadonlyArray<number>,
       status: InboxStatus,
       from?: InboxStatus,
       into?: number,
     ) => Effect.Effect<ReadonlyArray<InboxRow>>
-    readonly openTurn: (sessionId: string) => Effect.Effect<number | undefined>
+    readonly openExecution: (sessionId: string) => Effect.Effect<number | undefined>
   }
   readonly undelivered: (
     session: SessionRow,
@@ -46,9 +47,9 @@ export const sessionRounds = (deps: {
   const { db } = deps
 
   const finish = Effect.fn("Sessions.finish")(function* (session: SessionRow, end: "failed", error: string) {
-    yield* db.endTurn(
+    yield* db.endExecution(
       session.id,
-      { status: end, failure: { message: error } },
+      { outcome: end, failure: { message: error } },
       { turnState: end, lastActive: yield* Clock.currentTimeMillis },
       `${session.id}'s turn ended with an error: ${error}`,
     )
@@ -71,8 +72,8 @@ export const sessionRounds = (deps: {
         session,
         terminal,
         batch.map((r) => r.message).join("\n\n"),
-        Effect.flatMap(db.openTurn(session.id), (turn) =>
-          db.claim(ids).pipe(
+        Effect.flatMap(db.openExecution(session.id), (turn) =>
+          db.claim(session.id, ids).pipe(
             Effect.tap((got) =>
               Effect.sync(() => {
                 claimed.push(...got)
@@ -88,10 +89,12 @@ export const sessionRounds = (deps: {
           if (rows.length === 0) return Effect.void
           return notStarted
             ? deps.undelivered(session, rows, notStarted)
-            : db.setInboxStatus(claimed, "delivered", "sending", handedInto)
+            : db.setInboxStatus(session.id, claimed, "delivered", "sending", handedInto)
         }),
         Effect.onExit((exit) =>
-          Exit.isSuccess(exit) || claimed.length === 0 ? Effect.void : db.setInboxStatus(claimed, "failed", "sending"),
+          Exit.isSuccess(exit) || claimed.length === 0
+            ? Effect.void
+            : db.setInboxStatus(session.id, claimed, "failed", "sending"),
         ),
         Effect.catchTags({
           RuntimeError: (e) =>

@@ -95,6 +95,7 @@ const inspectFile = (filename: string) =>
             ...(e.detail === undefined ? {} : { detail: e.detail }),
             ...(e.older === undefined ? {} : { older: e.older }),
             ...(e.catalog === undefined ? {} : { catalog: e.catalog }),
+            ...(e.rewrite === undefined ? {} : { rewrite: e.rewrite }),
             file: filename,
           })
         : new DatabaseOpenFailed({ file: filename, message: e.message }),

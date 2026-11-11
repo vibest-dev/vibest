@@ -83,7 +83,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const fs = yield* FileSystem.FileSystem
       const sql = yield* SqlClient.SqlClient
       const w = yield* archiveSession(yield* makeRepository)
-      assert.isTrue((yield* w.db.getSession(w.id))!.metadata.archive)
+      assert.isTrue(yield* w.db.archivesOnIdle(w.id))
       yield* askMain(w)
       yield* finishTurn(w, "status: completed\nsummary: found it")
       yield* ackResult(w)
@@ -343,7 +343,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* ackResult(w)
       assert.strictEqual((yield* lastSentBy(w.id))!.status, "delivered")
       yield* looked
-      yield* w.db.endTurn(w.id, { status: "completed" }, { turnState: "completed", status: "idle" }, undefined)
+      yield* w.db.endExecution(w.id, { outcome: "completed" }, { turnState: "completed", status: "idle" }, undefined)
       return { release: check.release().pipe(Effect.andThen(Fiber.join(checking))) }
     })
 

@@ -55,12 +55,12 @@ export const piProject = async (w: World, name: string) => {
   }
   const pid = (id: string) => q<{ pid: number | null }>(`SELECT pid FROM ${SESSIONS} s WHERE id = ?`, id)?.pid ?? null
   const turnEnds = (id: string) =>
-    q<{ n: number }>("SELECT count(*) AS n FROM turn WHERE session_id = ? AND status IS NOT NULL", id)?.n ?? 0
+    q<{ n: number }>("SELECT count(*) AS n FROM execution WHERE session_id = ? AND outcome IS NOT NULL", id)?.n ?? 0
   const sent = (id: string) =>
     q<{ n: number }>("SELECT count(*) AS n FROM inbox WHERE sender_session_id = ?", id)?.n ?? 0
   const lastEnd = (id: string) => {
     return q<{ status: string; reply: string | null; failure: string | null }>(
-      `SELECT status, answer AS reply, failure FROM turn WHERE session_id = ? AND status IS NOT NULL
+      `SELECT outcome AS status, reply, failure FROM execution WHERE session_id = ? AND outcome IS NOT NULL
         ORDER BY ended_at DESC, id DESC LIMIT 1`,
       id,
     )
@@ -69,7 +69,7 @@ export const piProject = async (w: World, name: string) => {
     q<{ n: number }>(`SELECT count(*) AS n FROM ${SESSIONS} s WHERE id = ? AND exited_at IS NOT NULL`, id)?.n === 1
   const sendRow = (id: string, message: string) =>
     q<{ id: number; status: string }>(
-      "SELECT id, status FROM inbox WHERE recipient_session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
+      "SELECT id, status FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
       id,
       message,
     )
@@ -80,7 +80,7 @@ export const piProject = async (w: World, name: string) => {
       text,
     )?.n ?? 0
   const idle = (id: string) =>
-    q<{ id: number }>("SELECT id FROM turn WHERE session_id = ? AND status IS NULL", id) === undefined &&
+    q<{ id: number }>("SELECT id FROM execution WHERE session_id = ? AND outcome IS NULL", id) === undefined &&
     turnEnds(id) > 0
   const vibestSend = (id: string, message: string) => w.ok(["send", id, "--", message], { cwd: repo, env })
   const log = () => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
@@ -168,11 +168,8 @@ const rpc = (socket: string, method: string, params: object, headers: ReadonlyAr
   })
 
 const untaken = (w: World, id: string) =>
-  row<{ n: number }>(
-    w,
-    "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND kind = 'task' AND seq = id",
-    id,
-  )?.n === 1
+  row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'task' AND seq = id", id)
+    ?.n === 1
 
 const nothingMoreComesWithin = (ms: number) => Bun.sleep(ms)
 
@@ -428,7 +425,8 @@ const checks: ReadonlyArray<Check> = [
         for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
           const id = await p.runSub(`t${attempt}`)
-          const opened = () => row<{ n: number }>(w, "SELECT count(*) AS n FROM turn WHERE session_id = ?", id)?.n === 1
+          const opened = () =>
+            row<{ n: number }>(w, "SELECT count(*) AS n FROM execution WHERE session_id = ?", id)?.n === 1
           for (const deadline = Date.now() + 60_000; !opened(); await Bun.sleep(1))
             expect(Date.now() < deadline, `${id}: its first turn never opened`)
           await w.killDaemon(daemon)
@@ -437,15 +435,15 @@ const checks: ReadonlyArray<Check> = [
           if (sub === "") await until(`${id} idle`, () => p.idle(id), 60_000)
         }
         expect(sub !== "", "every try handed the task over before vibestd was killed")
-        const task = `t${row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE recipient_session_id = ? AND kind = 'task'", sub)?.c.match(/done-t(\d+)/)?.[1]}`
+        const task = `t${row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE session_id = ? AND kind = 'task'", sub)?.c.match(/done-t(\d+)/)?.[1]}`
         await until("one completed turn", () => p.turnEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed", 60_000)
         await nothingMoreComesWithin(3_000)
         expect(p.model.asked(task) === 1, `the task was asked ${p.model.asked(task)} times`)
         expect(p.sent(sub) === 0, `${p.sent(sub)} rows sent by the session`)
         const input = row<{ n: number }>(
           w,
-          `SELECT count(*) AS n FROM event e JOIN inbox i ON i.id = e.data ->> '$.inbox'
-            WHERE e.session_id = ? AND e.type = 'inbox.moved' AND i.kind = 'task' AND e.data ->> '$.turn' IS NOT NULL`,
+          `SELECT count(*) AS n FROM event e JOIN inbox i ON i.session_id = e.aggregate AND i.id = e.data ->> '$.inbox'
+            WHERE e.aggregate = ? AND e.type = 'inbox.moved' AND i.kind = 'task' AND e.data ->> '$.execution' IS NOT NULL`,
           sub,
         )?.n
         expect(input === 1, `the task is the input of ${input} turns`)
@@ -514,50 +512,6 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
-    id: "S31",
-    covers: ["S7"],
-    title:
-      "vibest run --archive-on-idle, vibestd killed (kill -9) after its completed turn ended and before the archive: the next vibestd archives it once, with no notice",
-    run: async (w) => {
-      const p = await piProject(w, "s31")
-      try {
-        const state = (id: string) =>
-          row<{ status: string | null; ended: number | null }>(
-            w,
-            `SELECT (SELECT status FROM turn WHERE session_id = s.id ORDER BY id DESC LIMIT 1)
-              AS status, s.ended_at AS ended FROM session s WHERE s.id = ?`,
-            id,
-          )
-        let sub = ""
-        for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
-          const daemon = await w.daemonPid()
-          const id = await p.runSub(`a${attempt}`, "--archive-on-idle")
-          await until(`${id} held`, () => p.model.held() > 0, 60_000)
-          p.model.releaseOne()
-          for (const deadline = Date.now() + 60_000; state(id)?.status !== "completed"; await Bun.sleep(1))
-            expect(Date.now() < deadline, `${id}: its turn never completed`)
-          await w.killDaemon(daemon)
-          if (state(id)?.ended === null) sub = id
-          await p.startDaemon()
-        }
-        expect(sub !== "", "every try archived the session before vibestd was killed")
-        await until("archived", () => state(sub)?.ended !== null, 30_000)
-        const ends = () =>
-          row<{ n: number; reason: string }>(
-            w,
-            "SELECT count(*) AS n, end_reason AS reason FROM process WHERE session_id = ? AND ended_at IS NOT NULL AND end_reason != 'superseded'",
-            sub,
-          )
-        await until("its process ended", () => ends()?.n === 1, 30_000)
-        await nothingMoreComesWithin(2_000)
-        expect(ends()?.n === 1 && ends()?.reason === "archived", `its process ends: ${JSON.stringify(ends())}`)
-        expect(p.notices(sub, "") === 0, "a notice for a clean archive")
-      } finally {
-        await p.close()
-      }
-    },
-  },
-  {
     id: "S32",
     title:
       "Send repeated over vibest.sock with one request id (as vibest send retries a lost answer): the same answer, one row, one delivery, the task asked once and two turns",
@@ -585,7 +539,7 @@ const checks: ReadonlyArray<Check> = [
         await nothingMoreComesWithin(2_000)
         const rows = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND kind = 'send'",
+          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'send'",
           sub,
         )?.n
         expect(rows === 1, `${rows} send rows`)

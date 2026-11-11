@@ -12,11 +12,23 @@ const topLevelKeys = (type: FactType) => {
 }
 
 describe("event catalog", () => {
+  it.effect("session and project facts name their aggregate as their session or project", () =>
+    Effect.gen(function* () {
+      for (const row of rows) {
+        const fact = yield* decodeRow(row)
+        const kind = Catalog[fact.type].aggregate
+        assert.strictEqual(fact.sessionId, kind === "session" ? row.aggregate : undefined)
+        assert.strictEqual(fact.projectId, kind === "project" ? row.aggregate : undefined)
+      }
+    }),
+  )
+
   it.effect("every sample row decodes and encodes back to the same bytes", () =>
     Effect.gen(function* () {
       for (const row of rows) {
         const fact = yield* decodeRow(row)
         assert.strictEqual(fact.seq, row.seq)
+        assert.strictEqual(fact.aggregate, row.aggregate)
         assert.strictEqual(yield* encodeData(Catalog[fact.type], fact.data as never), row.data, `event ${row.seq}`)
       }
     }),
@@ -79,7 +91,7 @@ describe("event catalog", () => {
 
   it.effect("encoding refuses an empty string where a key must be absent or non-empty", () =>
     Effect.gen(function* () {
-      const exit = yield* encodeData(Catalog["turn.started"], { typed: "" }).pipe(Effect.exit)
+      const exit = yield* encodeData(Catalog["execution.started"], { typed: "" }).pipe(Effect.exit)
       assert.isTrue(Exit.isFailure(exit))
     }),
   )
@@ -89,15 +101,6 @@ describe("event catalog", () => {
     ["a type outside the catalog", { ...base, type: "session.purged" }],
     ["a key the definition does not have", { ...base, data: '{"name":"x","extra":1}' }],
     ["data that is not JSON", { ...base, data: "{" }],
-    ["a session fact without a session", { ...base, session_id: null }],
-    [
-      "a machine fact with a project",
-      { ...rows.find((row) => row.type === "machine.added")!, project_id: base.project_id },
-    ],
-    [
-      "a project fact with a session",
-      { ...rows.find((row) => row.type === "project.moved")!, session_id: base.session_id },
-    ],
   ]
   for (const [what, row] of refused)
     it.effect(`decoding refuses ${what} and names the event`, () =>
@@ -105,7 +108,7 @@ describe("event catalog", () => {
         const error = yield* decodeRow(row).pipe(Effect.flip)
         assert.strictEqual(error._tag, "UnknownFact")
         assert.strictEqual(error.seq, row.seq)
-        assert.include(error.message, `event ${row.seq}`)
+        assert.include(error.message, `event ${row.aggregate} ${row.seq}`)
       }),
     )
 })

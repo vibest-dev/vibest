@@ -21,7 +21,7 @@ export type PeerStart = {
 export type OutboxRow = {
   readonly id: string
   readonly sessionId: string
-  readonly kind: "result" | "notice"
+  readonly kind: "notice"
   readonly content: string
   readonly createdAt: number
   readonly reportTo: string

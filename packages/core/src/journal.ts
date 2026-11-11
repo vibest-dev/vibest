@@ -8,10 +8,11 @@ import {
   type Row,
   UnknownFact,
 } from "@vibest/schema/event"
+import { randomId } from "@vibest/schema/id"
 import { Clock, Context, Effect, Schema } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 
-import { LOG_SCHEMA, MIGRATION_TABLE } from "./db-schema.ts"
+import { LOG_SCHEMA, ledgerOf, MIGRATION_TABLE } from "./db-schema.ts"
 import { project, PROJECTION_SCHEMA, PROJECTION_TABLES, PROJECTION_VERSION } from "./projectors.ts"
 
 type Definition = (typeof Catalog)[FactType]
@@ -36,32 +37,23 @@ export const installLedger = Effect.gen(function* () {
   for (const statement of [...LOG_SCHEMA, ...PROJECTION_SCHEMA]) yield* sql.unsafe(statement)
   yield* setMeta(sql, "catalog", CATALOG_VERSION)
   yield* setMeta(sql, "projection", PROJECTION_VERSION)
+  yield* sql`INSERT INTO meta (key, value) VALUES ('ledger', ${randomId()})`
 })
 
 const REPLAY_PAGE = 1000
 
+type Logged = Row & { readonly position: number }
+
 const readLog = (sql: SqlClient.SqlClient, after: number) =>
-  sql<{ seq: number; at: number; type: string; project: string | null; session: string | null; data: string }>`SELECT
-      seq, at, type, project_id AS project, session_id AS session, data
-    FROM event WHERE seq > ${after} ORDER BY seq LIMIT ${REPLAY_PAGE}`.pipe(
-    Effect.map((rows) =>
-      rows.map((row): Row => ({
-        seq: row.seq,
-        at: row.at,
-        type: row.type,
-        project_id: row.project,
-        session_id: row.session,
-        data: row.data,
-      })),
-    ),
-  )
+  sql<Logged>`SELECT position, aggregate, seq, at, type, data
+    FROM event WHERE position > ${after} ORDER BY position LIMIT ${REPLAY_PAGE}`
 
 const replayFrom = (sql: SqlClient.SqlClient, after: number): Effect.Effect<void, SqlError.SqlError | UnknownFact> =>
   readLog(sql, after).pipe(
     Effect.flatMap((rows) =>
       Effect.gen(function* () {
         for (const row of rows) yield* project(yield* decodeRow(row), sql)
-        if (rows.length === REPLAY_PAGE) yield* replayFrom(sql, rows[rows.length - 1]!.seq)
+        if (rows.length === REPLAY_PAGE) yield* replayFrom(sql, rows[rows.length - 1]!.position)
       }),
     ),
   )
@@ -99,9 +91,9 @@ const copyLog = (
     Effect.flatMap((rows) =>
       Effect.gen(function* () {
         for (const row of rows)
-          yield* to`INSERT INTO event (seq, at, type, project_id, session_id, data)
-            VALUES (${row.seq}, ${row.at}, ${row.type}, ${row.project_id}, ${row.session_id}, ${row.data})`
-        if (rows.length === REPLAY_PAGE) yield* copyLog(from, to, rows[rows.length - 1]!.seq)
+          yield* to`INSERT INTO event (position, aggregate, seq, at, type, data)
+            VALUES (${row.position}, ${row.aggregate}, ${row.seq}, ${row.at}, ${row.type}, ${row.data})`
+        if (rows.length === REPLAY_PAGE) yield* copyLog(from, to, rows[rows.length - 1]!.position)
       }),
     ),
   )
@@ -162,45 +154,14 @@ export const checkReplay = (stored: SqlClient.SqlClient) =>
       return yield* new ReplayDiffers({ message: `the read model differs from a replay of its log: ${difference}` })
   })
 
-type Envelope = {
-  readonly seq?: number
-  readonly at: number
-  readonly type: FactType
-  readonly projectId?: string | undefined
-  readonly sessionId?: string | undefined
-}
-
-const write = (sql: SqlClient.SqlClient, envelope: Envelope, data: string) =>
+const write = (sql: SqlClient.SqlClient, aggregate: string, at: number, type: FactType, data: string) =>
   Effect.gen(function* () {
-    const [row] = yield* sql<{ seq: number }>`INSERT INTO event (seq, at, type, project_id, session_id, data)
-      VALUES (${envelope.seq ?? null}, ${envelope.at}, ${envelope.type}, ${envelope.projectId ?? null},
-        ${envelope.sessionId ?? null}, ${data}) RETURNING seq`
-    const fact = yield* decodeRow({
-      seq: row!.seq,
-      at: envelope.at,
-      type: envelope.type,
-      project_id: envelope.projectId ?? null,
-      session_id: envelope.sessionId ?? null,
-      data,
-    })
+    const [row] = yield* sql<{ seq: number }>`INSERT INTO event (aggregate, seq, at, type, data)
+      VALUES (${aggregate}, (SELECT coalesce(max(seq), 0) + 1 FROM event WHERE aggregate = ${aggregate}), ${at},
+        ${type}, ${data}) RETURNING seq`
+    const fact = yield* decodeRow({ aggregate, seq: row!.seq, at, type, data })
     yield* project(fact, sql)
     return fact
-  })
-
-export const append = (fact: Fact) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const data = yield* encodeData(Catalog[fact.type], fact.data as never).pipe(
-      Effect.mapError(
-        (cause) =>
-          new UnknownFact({
-            seq: fact.seq,
-            type: fact.type,
-            message: `event ${fact.seq}: ${fact.type} does not encode: ${cause.message}`,
-          }),
-      ),
-    )
-    return yield* write(sql, fact, data)
   })
 
 export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fact | Signal>) => Effect.Effect<void>) =>
@@ -222,22 +183,21 @@ export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fa
         )
       })
 
-    const projectOf = (definition: Definition, input: Emit<Definition>) =>
+    let ledger: string | undefined
+    const ledgerId = Effect.gen(function* () {
+      ledger ??= yield* ledgerOf(sql)
+      if (ledger === undefined) return yield* Effect.die(new Error("the database has no ledger id"))
+      return ledger
+    })
+
+    const aggregateOf = (definition: Definition, input: Emit<Definition>) =>
       Effect.gen(function* () {
-        const takesProject = definition.envelope === "project" || definition.type === "session.created"
-        if (!takesProject && input.projectId !== undefined)
-          return yield* Effect.die(
-            new Error(`${definition.type} takes its project from its session, not from the caller`),
-          )
-        if (definition.envelope === "none") return undefined
-        if (takesProject) {
-          if (input.projectId === undefined) return yield* Effect.die(new Error(`${definition.type} needs a project`))
-          return input.projectId
-        }
-        const [row] = yield* sql<{ project: string }>`SELECT project_id AS project FROM session
-          WHERE id = ${input.sessionId!}`
-        if (row === undefined) return yield* Effect.die(new Error(`${definition.type}: no session ${input.sessionId}`))
-        return row.project
+        const { sessionId, projectId } = input
+        if (definition.aggregate === "session" && sessionId !== undefined && projectId === undefined) return sessionId
+        if (definition.aggregate === "project" && projectId !== undefined && sessionId === undefined) return projectId
+        if (definition.aggregate === "ledger" && sessionId === undefined && projectId === undefined)
+          return yield* ledgerId
+        return yield* Effect.die(new Error(`${definition.type} belongs to a ${definition.aggregate} aggregate`))
       })
 
     const emit = <D extends Definition>(definition: D, input: Emit<D>) =>
@@ -246,14 +206,10 @@ export const makeJournal = <Signal = never>(published: (events: ReadonlyArray<Fa
         if (buffer === undefined) return yield* Effect.die(new Error("emit outside a transaction"))
         if (buffer.closed || (yield* Effect.fiberId) !== buffer.fiberId)
           return yield* Effect.die(new Error("emit not from the transaction fiber"))
-        if ((definition.envelope === "session") !== (input.sessionId !== undefined))
-          return yield* Effect.die(new Error(`${definition.type} takes a session only with a session envelope`))
-        const projectId = yield* projectOf(definition, input)
+        const aggregate = yield* aggregateOf(definition, input)
         const at = input.at ?? (yield* Clock.currentTimeMillis)
         const data = yield* encodeData(definition, input.data as never).pipe(Effect.orDie)
-        const fact = yield* write(sql, { at, type: definition.type, projectId, sessionId: input.sessionId }, data).pipe(
-          Effect.orDie,
-        )
+        const fact = yield* write(sql, aggregate, at, definition.type, data).pipe(Effect.orDie)
         buffer.events.push(fact)
         return fact.seq
       })

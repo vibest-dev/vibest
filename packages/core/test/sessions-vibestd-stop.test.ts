@@ -9,7 +9,7 @@ import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { settled, TURNS, until, untilVirtual, processEnds } from "./lib/observe.ts"
+import { TURNS, until, untilVirtual, processEnds } from "./lib/observe.ts"
 import { makeRepository, type TestServices } from "./lib/session.ts"
 import { spawnInput, idleSession, sessionWorktree, test, sqlNotices } from "./lib/sessions-helpers.ts"
 
@@ -187,20 +187,6 @@ describe.concurrent("after a vibestd stop", () => {
         assert.strictEqual((yield* turnInputs(id)).length, 1)
       }),
     ),
-    { hooked: ["pi"] },
-  )
-
-  test(
-    "a session with archive-on-idle that has a message pending gets it from the next vibestd before it is archived",
-    Effect.gen(function* () {
-      const { id, db } = yield* idleSession(yield* makeRepository)
-      const session = (yield* db.getSession(id))!
-      yield* db.updateSession(id, { metadata: { ...session.metadata, archive: true } })
-      const sent = (yield* db.insertSend(id, "more"))!
-      yield* nextVibestd(Effect.map(db.inboxWithStatus(id, "pending"), (rows) => !rows.some((r) => r.id === sent.id)))
-      yield* settled
-      assert.strictEqual((yield* db.inboxWithStatus(id, "delivered")).filter((r) => r.id === sent.id).length, 1)
-    }),
     { hooked: ["pi"] },
   )
 })

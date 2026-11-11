@@ -179,11 +179,10 @@ What the checks that drive real herdr panes rely on:
 
 ### Kill windows
 
-S24, S28, S29 and S31 kill vibestd inside a window. S24: while the row is `delivering`, from its claim until the session
+S24, S28 and S29 kill vibestd inside a window. S24: while the row is `delivering`, from its claim until the session
 is seen to start the turn. S28: after `vibest run` answers, which it does once the row is stored; the start then makes
-the worktree and opens the terminal. S29: at the first look for the harness's ready report. S31: between the result's
-delivery and the archive's mark. A try that misses its window (the task linked, or the session archived, before the
-kill) is not the case, so S24, S28, S29, S30 and S31 try again, up to five times. S30 kills vibestd once `vibest archive`
+the worktree and opens the terminal. S29: at the first look for the harness's ready report. A try that misses its window (the task linked, or the session archived, before
+the kill) is not the case, so S24, S28, S29 and S30 try again, up to five times. S30 kills vibestd once `vibest archive`
 has stored its mark, before it closes anything. S27's process outside the pane works in the worktree: closing the pane does not
 end it.
 

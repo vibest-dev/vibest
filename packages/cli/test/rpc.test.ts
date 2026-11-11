@@ -154,7 +154,9 @@ describe("vibest.sock", () => {
       )
       yield* herdr.endTurn(id)
       yield* until(sessions.check(id).pipe(Effect.andThen(db.getSession(id))), (w) => w?.turnState === "completed")
-      const [turn] = yield* sql<{ answer: string | null }>`SELECT answer FROM turn WHERE session_id = ${id}`
+      const [turn] = yield* sql<{
+        answer: string | null
+      }>`SELECT reply AS answer FROM execution WHERE session_id = ${id}`
       assert.strictEqual(turn?.answer, "cursor said this")
       const answer = (yield* c.Get({ id })).answer
       assert.deepInclude(answer, { status: "completed", text: "cursor said this", failure: null })
