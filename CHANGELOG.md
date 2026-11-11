@@ -7,6 +7,9 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Handoff database copies** (users): a handing-over vibestd no longer writes `vibest.db.before-<version>` (a copy of
+  `vibest.db` and its `-wal`). Copies already in the home are left where they are. Copy the database yourself before
+  `vibest update` if you want one.
 - **The event log is per aggregate** (everyone upgrading, and anyone reading `vibest.db`): every fact belongs to one
   aggregate (a session, a project, or the file's ledger in `meta.ledger`) and is numbered within it; `event` has
   `position`, `aggregate`, `seq`, `at`, `type`, `data` and no `project_id` or `session_id`. The catalog is version 2:

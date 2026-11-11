@@ -1121,7 +1121,6 @@ npm in its prefix. Its own entries:
   vibest.json                the plugin list (§7), read only
   plugins/                   plugin files and directories (§7), read only
   vibest.db                  the ledger and read model (with its -wal and -shm files)
-  vibest.db.before-<version>   copy of vibest.db (and its -wal) a handing-over vibestd of <version> makes at start
   identity.json              this machine's id, name and machine_id; created or rewritten at every vibestd start
   vibest.sock  vibest-http.sock   vibestd's RPC socket, and the HTTP socket the Claude plugin reports to
   vibestd.pid  vibestd.log   vibestd's start lock and record, and its log
