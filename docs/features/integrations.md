@@ -38,8 +38,8 @@ behind.
 ## I7. Every Claude turn end reaches vibest
 
 Every end of a Claude main-loop turn reaches vibest: an answer is a completed turn; the person pressing Esc in the
-pane gives exactly one failed turn and one notice saying the turn was stopped in its terminal; after `vibest interrupt` the aborted
-turn's end reaches vibest and gives an interrupted turn and no notice, also while a background shell keeps the terminal busy.
+pane gives exactly one interrupted turn and no notice, the same as `vibest interrupt`, whose aborted turn's end reaches
+vibest too, also while a background shell keeps the terminal busy.
 
 ## I9. Claude's guard without settings
 

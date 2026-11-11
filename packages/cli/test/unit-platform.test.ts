@@ -381,7 +381,7 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
           })
           assert.deepInclude(
             turnEndFrom(yield* harnesses.get("pi"), { text: "so far", error: "aborted", aborted: true }, 1),
-            { status: "interrupted", reply: "so far", failure: "aborted" },
+            { status: "interrupted", reply: "so far", failure: undefined },
           )
           assert.deepInclude(turnEndFrom(yield* harnesses.get("cursor"), { text: "x", conversation_id: "c-1" }, 1), {
             conversation: "c-1",

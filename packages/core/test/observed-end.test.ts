@@ -168,6 +168,29 @@ describe("observed turn end", () => {
   )
 
   test(
+    "a message is delivered into the turn it was handed to, even when that turn ended before the delivery was recorded",
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* idleSession(yield* makeRepository)
+      const held = yield* herdr.hold("send", id)
+      yield* sessions.send(id, "next")
+      yield* held.reached
+      const handed = yield* db.openTurn(id)
+      yield* writeResult(id, "pi", { text: "done fast" })
+      yield* held.release()
+      const [row] = yield* until(
+        sql<{ status: string; turn: number | null }>`SELECT status, turn_id AS turn FROM inbox
+          WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
+        (rows) => rows[0]?.status === "delivered",
+      )
+      assert.isDefined(handed)
+      assert.strictEqual(row!.turn, handed)
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
     "an interrupt that loses to the turn end reports the turn finished and keeps its reply",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

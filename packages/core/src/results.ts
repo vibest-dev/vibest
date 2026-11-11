@@ -75,11 +75,12 @@ export const turnEndFrom = (
 ): TurnEnded => {
   const text = payload[adapter.resultField]
   const conversation = payload.conversation_id
-  const error = errorOf(payload)
+  const interrupted = payload.aborted === true
+  const error = interrupted ? undefined : errorOf(payload)
   return {
     harness: adapter.id,
     at,
-    status: payload.aborted === true ? "interrupted" : error ? "failed" : "completed",
+    status: interrupted ? "interrupted" : error ? "failed" : "completed",
     reply: typeof text === "string" ? text : "",
     failure: error,
     limited: isUsageLimitError(error),

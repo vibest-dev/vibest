@@ -199,7 +199,11 @@ export const makeStore = Effect.gen(function* () {
       })
     })
 
-  const moveInbox = (where: Statement.Fragment, to: "pending" | "delivering" | "delivered" | "failed" | "dropped") =>
+  const moveInbox = (
+    where: Statement.Fragment,
+    to: "pending" | "delivering" | "delivered" | "failed" | "dropped",
+    into?: number,
+  ) =>
     tx(
       Effect.gen(function* () {
         const rows = yield* sql<{
@@ -211,7 +215,7 @@ export const makeStore = Effect.gen(function* () {
         const moved = rows.filter((r) => r.status !== to)
         const at = yield* now
         for (const r of moved) {
-          const turn = to === "delivered" && r.recipient !== null ? yield* openTurn(r.recipient) : undefined
+          const turn = to === "delivered" && r.recipient !== null ? (into ?? (yield* openTurn(r.recipient))) : undefined
           yield* emit(InboxMoved, {
             sessionId: r.recipient ?? r.sender!,
             at,

@@ -21,7 +21,9 @@ export const sessionRounds = (deps: {
       ids: ReadonlyArray<number>,
       status: InboxStatus,
       from?: InboxStatus,
+      into?: number,
     ) => Effect.Effect<ReadonlyArray<InboxRow>>
+    readonly openTurn: (sessionId: string) => Effect.Effect<number | undefined>
   }
   readonly undelivered: (
     session: SessionRow,
@@ -62,13 +64,23 @@ export const sessionRounds = (deps: {
     const batch = nextBatch(pending)
     const ids = batch.map((r) => r.id)
     const claimed: Array<number> = []
+    let handedInto: number | undefined
     yield* deps
       .prompt(
         h,
         session,
         terminal,
         batch.map((r) => r.message).join("\n\n"),
-        db.claim(ids).pipe(Effect.tap((got) => Effect.sync(() => claimed.push(...got)))),
+        Effect.flatMap(db.openTurn(session.id), (turn) =>
+          db.claim(ids).pipe(
+            Effect.tap((got) =>
+              Effect.sync(() => {
+                claimed.push(...got)
+                handedInto = turn
+              }),
+            ),
+          ),
+        ),
       )
       .pipe(
         Effect.flatMap((notStarted) => {
@@ -76,7 +88,7 @@ export const sessionRounds = (deps: {
           if (rows.length === 0) return Effect.void
           return notStarted
             ? deps.undelivered(session, rows, notStarted)
-            : db.setInboxStatus(claimed, "delivered", "sending")
+            : db.setInboxStatus(claimed, "delivered", "sending", handedInto)
         }),
         Effect.onExit((exit) =>
           Exit.isSuccess(exit) || claimed.length === 0 ? Effect.void : db.setInboxStatus(claimed, "failed", "sending"),

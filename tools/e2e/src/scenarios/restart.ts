@@ -662,7 +662,7 @@ export default Plugin.define({
   {
     id: "U8",
     title:
-      "a usage-limit move tries each login at most once for one input: both Pi logins answer a usage limit while their usage rows read free; each login's turn fails, the last with no harness left, and no third start",
+      "a usage-limit move tries each login at most once for one input: both Pi logins answer a usage limit while their usage rows read free; each login's turn fails, then one failed turn says no harness is left, and no third start",
     run: (w) =>
       usageLimitMove(
         w,
@@ -721,8 +721,8 @@ export default Plugin.define({
           ).catch(fail)
           const moved = row()
           expect(
-            status().length === 2 && status().every((m) => m.status === "failed"),
-            `one failed turn per login: ${JSON.stringify(status())}`,
+            status().length === 3 && status().every((m) => m.status === "failed"),
+            `one failed turn per login and the no-harness-left one: ${JSON.stringify(status())}`,
           )
           const said = notices()
           expect(said.length === 1 && said[0]!.includes("no harness left"), `notices: ${JSON.stringify(said)}`)

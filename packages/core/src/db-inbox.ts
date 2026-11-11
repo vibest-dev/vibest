@@ -363,12 +363,13 @@ export const inboxMethods = (store: Store) => {
         return yield* moveInbox(sql`${sql.in("id", ids)} AND status = 'pending'`, "delivering")
       }).pipe(Effect.orDie),
 
-    setInboxStatus: (ids: ReadonlyArray<number>, status: InboxStatus, from?: InboxStatus) =>
+    setInboxStatus: (ids: ReadonlyArray<number>, status: InboxStatus, from?: InboxStatus, into?: number) =>
       Effect.gen(function* () {
         if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
         const moved = yield* moveInbox(
           sql`${sql.in("id", ids)}${from ? sql` AND status = ${storedStatus(from)}` : sql``}`,
           storedStatus(status),
+          into,
         )
         return moved.length === 0 ? [] : yield* inboxIn(moved)
       }).pipe(Effect.orDie),
