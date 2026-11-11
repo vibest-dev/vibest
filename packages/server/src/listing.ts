@@ -124,7 +124,7 @@ export const sessionListing = (deps: {
             ...info,
             status: unseenDone(info.status, seen),
             parentId: parents.get(info.id) ?? null,
-            execution: seen?.execution ?? null,
+            finished: seen?.finished ?? null,
           })),
         { concurrency: "unbounded" },
       )

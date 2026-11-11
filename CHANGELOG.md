@@ -26,11 +26,11 @@ release. Each release lists what broke, who is affected and how to migrate under
 - **turn is execution, and an execution's answer or result is its reply** (protocol 10: scripts reading CLI JSON,
   RPC clients, harness and runtime plugin authors): session rows in `vibest ls`, `vibest result` and Watch have
   `executionState` instead of `turnState`; `vibest result` (RPC `Get`) has `reply` instead of `answer`, and its
-  `turn` is `execution`; a Watch session's `turn` is `execution`, and `Session.Seen` takes `{ id, execution }`. The
+  `turn` is `execution`; a Watch session's `turn` is `finished`, and `Session.Seen` takes `{ id, finished }`. The
   RPC `TurnEnd` is `ExecutionEnd`, the hook route `/hooks/<harness>/turn-end` is `/hooks/<harness>/execution-end`,
   and the Claude plugin's end event is `ExecutionComplete`. A `HarnessDefinition` has `executionEnd` (returning
   `{ end }`, was `turnEnd` returning `{ result }`) and `replyField` (was `resultField`); a runtime's `Seen` has
-  `execution` (was `turn`) and `see(terminal, execution)`; `agent.fail` gets the limited execution's `input` (was
+  `finished` (was `turn`) and `see(terminal, finished)`; `agent.fail` gets the limited execution's `input` (was
   `turn`). Migrate: rename the fields; a vibest of another protocol is refused, so update every vibest together
   (`vibest update`).
 - **`vibest run --archive-on-idle`** (users): the flag is no longer stored. A session started with it is still

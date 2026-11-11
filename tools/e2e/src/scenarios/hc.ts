@@ -11,7 +11,7 @@ type Sample = { at: number; end: number; status: string; executionState: string 
 type Watched = {
   _tag: string
   projects: Array<{ id: string; activity: string }>
-  sessions: Array<{ id: string; projectId: string; status: string; execution: number | null }>
+  sessions: Array<{ id: string; projectId: string; status: string; finished: number | null }>
 }
 type HcListed = { address: string; name?: string | null; state: string }
 type HcTerminal = {
@@ -473,18 +473,18 @@ const checks: ReadonlyArray<Check> = [
           "the subagent done in Watch after its execution",
           async () => {
             const s = subOf(await snapshot())
-            return s?.status === "done" && (s.execution ?? 0) >= 1
+            return s?.status === "done" && (s.finished ?? 0) >= 1
           },
           180_000,
         ).catch(async (e: Error) => {
           throw new Error(`${e.message}; last Watch: ${JSON.stringify(last)}\nterminals:\n${await core.screens()}`)
         })
-        const { execution, projectId } = subOf(last!)!
+        const { finished, projectId } = subOf(last!)!
         expect(
           last!.projects.find((p) => p.id === projectId)?.activity === "done",
           `the project is not done: ${JSON.stringify(last!.projects)}`,
         )
-        const marked = await vibestd(w, repo, "Session.Seen", { id: sub, execution })
+        const marked = await vibestd(w, repo, "Session.Seen", { id: sub, finished })
         expect(marked.error === undefined, `Session.Seen: ${JSON.stringify(marked)}`)
         await until(
           "the subagent idle after Session.Seen",
@@ -497,7 +497,7 @@ const checks: ReadonlyArray<Check> = [
           row<{ runtime: string }>(w, `SELECT runtime FROM ${SESSIONS} s WHERE id = ?`, sub)?.runtime ?? "{}",
         ) as { id?: string }
         const labels = (await core.get(addressOf(at.id!))).labels
-        expect(labels["herdr.seen"] === String(execution), `herdr.seen ${labels["herdr.seen"]}, execution ${execution}`)
+        expect(labels["herdr.seen"] === String(finished), `herdr.seen ${labels["herdr.seen"]}, finished ${finished}`)
       } finally {
         model.stop()
         await w.stopDaemon()

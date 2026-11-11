@@ -12337,7 +12337,7 @@
           "id": {
             "type": "string"
           },
-          "execution": {
+          "finished": {
             "anyOf": [
               {
                 "type": "number"
@@ -12355,7 +12355,7 @@
         },
         "required": [
           "id",
-          "execution"
+          "finished"
         ],
         "additionalProperties": true
       },
@@ -14303,7 +14303,7 @@
                         }
                       ]
                     },
-                    "execution": {
+                    "finished": {
                       "anyOf": [
                         {
                           "anyOf": [
@@ -14348,7 +14348,7 @@
                     "task",
                     "latest",
                     "parentId",
-                    "execution"
+                    "finished"
                   ],
                   "additionalProperties": true
                 }
@@ -14851,7 +14851,7 @@
                       }
                     ]
                   },
-                  "execution": {
+                  "finished": {
                     "anyOf": [
                       {
                         "anyOf": [
@@ -14896,7 +14896,7 @@
                   "task",
                   "latest",
                   "parentId",
-                  "execution"
+                  "finished"
                 ],
                 "additionalProperties": true
               }

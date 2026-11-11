@@ -257,24 +257,24 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
       assert.strictEqual(projectActivity([]), "idle")
     })
 
-    it("an idle session is done only while its execution is past the mark; no mark (or no runtime support) is never done", () => {
-      assert.strictEqual(unseenDone("idle", { execution: 3, seen: 2 }), "done")
-      assert.strictEqual(unseenDone("idle", { execution: 3, seen: 3 }), "idle")
-      assert.strictEqual(unseenDone("idle", { execution: 3, seen: null }), "idle")
+    it("an idle session is done only while its finished count is past the mark; no mark (or no runtime support) is never done", () => {
+      assert.strictEqual(unseenDone("idle", { finished: 3, seen: 2 }), "done")
+      assert.strictEqual(unseenDone("idle", { finished: 3, seen: 3 }), "idle")
+      assert.strictEqual(unseenDone("idle", { finished: 3, seen: null }), "idle")
       assert.strictEqual(unseenDone("idle", undefined), "idle")
-      assert.strictEqual(unseenDone("working", { execution: 3, seen: 0 }), "working")
-      assert.strictEqual(unseenDone("blocked", { execution: 3, seen: 0 }), "blocked")
+      assert.strictEqual(unseenDone("working", { finished: 3, seen: 0 }), "working")
+      assert.strictEqual(unseenDone("blocked", { finished: 3, seen: 0 }), "blocked")
     })
 
-    it("the seen mark only rises, never past the execution the runtime counted; a missing mark may be set", () => {
-      assert.isTrue(raisesSeen({ execution: 3, seen: 2 }, 3))
-      assert.isFalse(raisesSeen({ execution: 3, seen: 3 }, 3))
-      assert.isFalse(raisesSeen({ execution: 3, seen: 2 }, 1))
-      assert.isFalse(raisesSeen({ execution: 3, seen: 2 }, 4))
-      assert.isFalse(raisesSeen({ execution: 3, seen: 2 }, 2.5))
-      assert.isTrue(raisesSeen({ execution: 3, seen: null }, 0))
-      assert.isFalse(raisesSeen({ execution: 3, seen: null }, -1))
-      assert.isFalse(raisesSeen({ execution: 3, seen: null }, 1.5))
+    it("the seen mark only rises, never past the count the runtime finished; a missing mark may be set", () => {
+      assert.isTrue(raisesSeen({ finished: 3, seen: 2 }, 3))
+      assert.isFalse(raisesSeen({ finished: 3, seen: 3 }, 3))
+      assert.isFalse(raisesSeen({ finished: 3, seen: 2 }, 1))
+      assert.isFalse(raisesSeen({ finished: 3, seen: 2 }, 4))
+      assert.isFalse(raisesSeen({ finished: 3, seen: 2 }, 2.5))
+      assert.isTrue(raisesSeen({ finished: 3, seen: null }, 0))
+      assert.isFalse(raisesSeen({ finished: 3, seen: null }, -1))
+      assert.isFalse(raisesSeen({ finished: 3, seen: null }, 1.5))
     })
 
     it("models --provider: only Pi filters by provider; Claude and Cursor refuse any provider and keep provider null", () => {

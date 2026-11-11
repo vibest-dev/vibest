@@ -243,7 +243,7 @@ export const make = (
           }),
         ),
 
-      "Session.Seen": ({ id, execution }) =>
+      "Session.Seen": ({ id, finished }) =>
         Effect.gen(function* () {
           yield* cliOnly("Session.Seen")
           const identity = yield* db.sessionIdentity(id)
@@ -260,7 +260,7 @@ export const make = (
           const seen = rt.seen
           yield* Effect.gen(function* () {
             const now = yield* seen(address).pipe(Effect.mapError(unreachable))
-            if (raisesSeen(now, execution)) yield* see(address, execution).pipe(Effect.mapError(unreachable))
+            if (raisesSeen(now, finished)) yield* see(address, finished).pipe(Effect.mapError(unreachable))
           }).pipe(seenLocked.withLock(`${at.runtime}\n${address.machine}\n${address.id}`))
         }),
 
