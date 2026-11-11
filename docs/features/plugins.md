@@ -66,8 +66,8 @@ does not set it up again; editing the plugin itself does.
 
 ## G12. A plugin observes the ledger's facts
 
-A plugin that subscribes with `ctx.event.subscribe` to `session.created`, `process.started`, `turn.started` and
-`turn.ended` gets those facts of a real Pi subagent, in that order, and none it did not ask for. A plugin that
+A plugin that subscribes with `ctx.event.subscribe` to `session.created`, `process.started`, `execution.started` and
+`execution.ended` gets those facts of a real Pi subagent, in that order, and none it did not ask for. A plugin that
 subscribes to every fact gets no `live.*` event. After the plugin is edited, the new revision gets the next agent's
 facts and the old one gets nothing more.
 
@@ -75,5 +75,5 @@ facts and the old one gets nothing more.
 
 A plugin defined as `{ id, setup }` with Promises loads like an Effect plugin: its `agent.start.before` callback routes
 `vibest run -- <task>` to a real Pi and `vibest ls` names it as the decider, its `event.subscribe` iterator gets the
-agent's `turn.ended`, and deleting its file unloads it and runs the cleanup its `setup` returned. Editing an Effect
+agent's `execution.ended`, and deleting its file unloads it and runs the cleanup its `setup` returned. Editing an Effect
 plugin into the `setup` form reloads it like any edit (G2).

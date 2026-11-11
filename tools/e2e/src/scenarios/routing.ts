@@ -110,7 +110,7 @@ export default Plugin.define({
   setup: async (ctx) => {
     await ctx.agent.hook("start.before", async (e) => (e.prompt.includes("done-promised") ? { harness: "pi" } : undefined))
     void (async () => {
-      for await (const fact of ctx.event.subscribe({ types: ["turn.ended"] }))
+      for await (const fact of ctx.event.subscribe({ types: ["execution.ended"] }))
         fs.appendFileSync(${JSON.stringify(facts)}, \`\${fact.type} \${fact.sessionId}\\n\`)
     })()
     return () => fs.appendFileSync(${JSON.stringify(cleanup)}, "cleanup\\n")
@@ -272,7 +272,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G12",
     title:
-      "a plugin's ctx.event.subscribe sees the ledger facts of a real Pi subagent in order (session.created, process.started, turn.started, turn.ended) and no live events; a new revision of the plugin gets the next agent's facts and the old one stops",
+      "a plugin's ctx.event.subscribe sees the ledger facts of a real Pi subagent in order (session.created, process.started, execution.started, execution.ended) and no live events; a new revision of the plugin gets the next agent's facts and the old one stops",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "observe")
@@ -284,7 +284,7 @@ const checks: ReadonlyArray<Check> = [
         await fs.writeFile(`${file}.tmp`, text)
         await fs.rename(`${file}.tmp`, file)
       }
-      const ordered = ["session.created", "process.started", "turn.started", "turn.ended"]
+      const ordered = ["session.created", "process.started", "execution.started", "execution.ended"]
       const of = (lines: ReadonlyArray<string>, id: string) =>
         lines.filter((line) => line.endsWith(` ${id}`)).map((line) => line.split(" ")[0]!)
       const inOrder = (types: ReadonlyArray<string>) => {
@@ -335,7 +335,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "G13",
     title:
-      "a plugin written as { id, setup } with Promises routes `vibest run -- <task>` to a real Pi, ls names it as the decider, its event.subscribe iterator gets the agent's turn.ended, and deleting the file runs its cleanup",
+      "a plugin written as { id, setup } with Promises routes `vibest run -- <task>` to a real Pi, ls names it as the decider, its event.subscribe iterator gets the agent's execution.ended, and deleting the file runs its cleanup",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "promised")
@@ -359,7 +359,11 @@ const checks: ReadonlyArray<Check> = [
           `routed session: ${JSON.stringify(e)}`,
         )
         await resultOf(w, id, "promised")
-        await until("the agent's turn.ended", async () => (await factLines(facts)).includes(`turn.ended ${id}`), 60_000)
+        await until(
+          "the agent's execution.ended",
+          async () => (await factLines(facts)).includes(`execution.ended ${id}`),
+          60_000,
+        )
         expect((await factLines(cleanup)).length === 0, "cleanup ran while the plugin was loaded")
         await fs.rm(file)
         await until("the plugin unloaded", async () =>

@@ -119,7 +119,7 @@ const claudeMain = async (
   const delivered = (from: string) =>
     row<{ n: number }>(
       w,
-      "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_session_id = ? AND status = 'delivered'",
+      "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_session_id = ? AND status = 'delivered'",
       main,
       from,
     )?.n ?? 0
@@ -369,7 +369,7 @@ const checks: ReadonlyArray<Check> = [
         const results = () =>
           row<{ n: number }>(
             w,
-            "SELECT count(*) AS n FROM inbox WHERE recipient_session_id = ? AND sender_session_id = ?",
+            "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_session_id = ?",
             c!.main,
             a,
           )?.n ?? 0
@@ -504,11 +504,9 @@ const checks: ReadonlyArray<Check> = [
         const main = (await mains())[0]!.id
         await expectAnswered(w, model.sessionId())
         const toMain = () =>
-          rows<{ status: string }>(
-            w,
-            "SELECT status FROM inbox WHERE recipient_session_id = ? AND kind = 'send'",
-            main,
-          ).map((r) => r.status)
+          rows<{ status: string }>(w, "SELECT status FROM inbox WHERE session_id = ? AND kind = 'send'", main).map(
+            (r) => r.status,
+          )
         await until(
           "the main agent's four sends delivered",
           () => JSON.stringify(toMain()) === JSON.stringify(Array(4).fill("delivered")),
@@ -559,14 +557,15 @@ const checks: ReadonlyArray<Check> = [
         const sent = () =>
           rows<{ id: number; status: string }>(
             w,
-            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND recipient_session_id = ? AND kind = 'send'",
+            "SELECT id, status FROM inbox WHERE sender_session_id = ? AND session_id = ? AND kind = 'send'",
             sub,
             mainId,
           )
         await until("the send delivered", () => sent().some((r) => r.status === "delivered"), 180_000)
         expect(sent().length === 1, `${sent().length} sends from ${sub}: ${JSON.stringify(sent())}`)
         const fact = (sql: string) =>
-          row<{ n: number }>(w, `SELECT count(*) AS n FROM event WHERE ${sql}`, sent()[0]!.id)?.n
+          row<{ n: number }>(w, `SELECT count(*) AS n FROM event WHERE aggregate = ? AND ${sql}`, mainId, sent()[0]!.id)
+            ?.n
         expect(
           fact("type = 'inbox.queued' AND seq = ?") === 1 &&
             fact(
@@ -780,7 +779,7 @@ const checks: ReadonlyArray<Check> = [
         for (let i = 0; i < 3; i++) {
           const beforeEnd =
             q<{ id: number }>(
-              "SELECT id FROM turn WHERE session_id = ? AND status IS NOT NULL ORDER BY id DESC LIMIT 1",
+              "SELECT id FROM execution WHERE session_id = ? AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1",
               sub,
             )?.id ?? 0
           const message = ask(`r${i}`)
@@ -789,14 +788,14 @@ const checks: ReadonlyArray<Check> = [
             `round ${i} queued`,
             () =>
               q<{ status: string }>(
-                "SELECT status FROM inbox WHERE recipient_session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
+                "SELECT status FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
                 sub,
                 message,
               )?.status === "pending",
             15_000,
           )
           const sent = q<{ id: number }>(
-            "SELECT id FROM inbox WHERE recipient_session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
+            "SELECT id FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
             sub,
             message,
           )
@@ -820,12 +819,13 @@ const checks: ReadonlyArray<Check> = [
                 else if (line !== undefined) receipt = Date.now()
               }
               const end = q<{ at: number }>(
-                "SELECT ended_at AS at FROM turn WHERE session_id = ? AND status IS NOT NULL AND id > ? ORDER BY id LIMIT 1",
+                "SELECT ended_at AS at FROM execution WHERE session_id = ? AND outcome IS NOT NULL AND id > ? ORDER BY id LIMIT 1",
                 sub,
                 beforeEnd,
               )
               const delivered = q<{ at: number }>(
-                "SELECT at FROM event WHERE type = 'inbox.moved' AND data ->> '$.inbox' = ? AND data ->> '$.to' = 'delivering' ORDER BY seq LIMIT 1",
+                "SELECT at FROM event WHERE aggregate = ? AND type = 'inbox.moved' AND data ->> '$.inbox' = ? AND data ->> '$.to' = 'delivering' ORDER BY seq LIMIT 1",
+                sub,
                 sent!.id,
               )
               if (!Number.isFinite(receipt) || receipt === 0 || end === undefined || delivered === undefined)
@@ -847,9 +847,9 @@ const checks: ReadonlyArray<Check> = [
           await until(
             `subagent ${i} idle`,
             () => {
-              const open = q<{ id: number }>("SELECT id FROM turn WHERE session_id = ? AND status IS NULL", id)
+              const open = q<{ id: number }>("SELECT id FROM execution WHERE session_id = ? AND outcome IS NULL", id)
               const ended = q<{ id: number }>(
-                "SELECT id FROM turn WHERE session_id = ? AND status IS NOT NULL LIMIT 1",
+                "SELECT id FROM execution WHERE session_id = ? AND outcome IS NOT NULL LIMIT 1",
                 id,
               )
               return open === undefined && ended !== undefined

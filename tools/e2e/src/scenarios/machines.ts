@@ -238,10 +238,8 @@ const checks: ReadonlyArray<Check> = [
           30_000,
         )
         expect(m?.state === "connected" && m.id === b.id, `machine ls: ${JSON.stringify(m)}`)
-        const peer = s.bDb<{ id: string; callsMe: string; n: number }>(
-          "SELECT id, calls_me AS callsMe, (SELECT count(*) FROM peer) AS n FROM peer",
-        )
-        expect(peer?.n === 1 && peer.id === a.id && peer.callsMe === "mb", `B's peer rows: ${JSON.stringify(peer)}`)
+        const peer = s.bDb<{ id: string; n: number }>("SELECT id, (SELECT count(*) FROM peer) AS n FROM peer")
+        expect(peer?.n === 1 && peer.id === a.id, `B's peer rows: ${JSON.stringify(peer)}`)
         const again = await s.onA(["machine", "add", "mb-again", "b-host"])
         expect(again.code !== 0 && again.stderr.includes("already added as mb"), `second add: ${again.stderr}`)
 
@@ -279,13 +277,15 @@ const checks: ReadonlyArray<Check> = [
         await s.okA(["archive", address])
         const started = s.bDb<{ peer: string | null; facts: string }>(
           `SELECT origin_peer AS peer, (SELECT group_concat(type, ' ') FROM
-            (SELECT type FROM event WHERE session_id = session.id ORDER BY seq)) AS facts
+            (SELECT type FROM event WHERE aggregate = session.id ORDER BY seq)) AS facts
           FROM session WHERE id LIKE ?`,
           `${id8}%`,
         )
         expect(
           started?.peer === a.id &&
-            /session\.created .*process\.started .*turn\.started .*turn\.ended .*session\.ended/.test(started.facts),
+            /session\.created .*process\.started .*execution\.started .*execution\.ended .*session\.ended/.test(
+              started.facts,
+            ),
           `B's session started for A: ${JSON.stringify(started)}`,
         )
         const outbox = () =>
@@ -317,7 +317,7 @@ const checks: ReadonlyArray<Check> = [
           "B's turn completed",
           () =>
             s!.bDb<{ n: number }>(
-              "SELECT count(*) AS n FROM turn WHERE session_id LIKE ? AND status = 'completed'",
+              "SELECT count(*) AS n FROM execution WHERE session_id LIKE ? AND outcome = 'completed'",
               `${id8}%`,
             )?.n === 1,
           120_000,
@@ -551,7 +551,7 @@ const checks: ReadonlyArray<Check> = [
           "B recorded a typed turn",
           () =>
             (s!.bDb<{ n: number }>(
-              "SELECT count(*) AS n FROM turn WHERE session_id = ? AND typed IS NOT NULL",
+              "SELECT count(*) AS n FROM execution WHERE session_id = ? AND typed IS NOT NULL",
               bRow!.id!,
             )?.n ?? 0) === 1,
           60_000,

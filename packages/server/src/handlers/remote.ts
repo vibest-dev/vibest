@@ -117,14 +117,14 @@ export const remoteHandlers = (
             return { sessions: [...local, ...away.sessions], machines: away.machines }
           }),
 
-        "Peer.Hello": ({ id, name, callsMe }: PayloadOf<"Peer.Hello">) =>
+        "Peer.Hello": ({ id, name }: PayloadOf<"Peer.Hello">) =>
           Effect.gen(function* () {
             if ((yield* peerOf("Peer.Hello")) !== id)
               return yield* new Forbidden({
                 method: "Peer.Hello",
                 message: "Peer.Hello names the vibestd that calls it",
               })
-            if (id !== self.id) yield* db.notePeer({ id, name, callsMe })
+            if (id !== self.id) yield* db.notePeer({ id, name })
             return { id: self.id, name: self.name, version: VERSION, runtimes: yield* runtimesHere(runtimes) }
           }),
 

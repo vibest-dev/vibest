@@ -252,6 +252,7 @@ export class Sessions extends Context.Service<
       ) =>
         db
           .setInboxStatus(
+            session.id,
             rows.map((r) => r.id),
             "failed",
           )
@@ -282,6 +283,7 @@ export class Sessions extends Context.Service<
           const unsigned = queued.filter((r) => !signed.includes(r))
           if (signed.length > 0) yield* undelivered(session, signed, `${session.id} exited before it was delivered`)
           yield* db.setInboxStatus(
+            session.id,
             unsigned.map((r) => r.id),
             "failed",
           )
@@ -290,7 +292,7 @@ export class Sessions extends Context.Service<
             `${session.id} (${session.harnessId}) exited${how}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
           if (
             turn !== undefined &&
-            (yield* db.closeTurn(session.id, turn, "failed", {
+            (yield* db.closeExecution(session.id, turn, "failed", {
               failure: "the harness exited",
               notice: text(" during a turn"),
             }))
@@ -439,7 +441,7 @@ export class Sessions extends Context.Service<
         if (Option.isNone(routed)) return yield* live(session)
         const h = routed.value
         const terminal = session.address
-        const turn = open ? yield* db.openTurn(id) : undefined
+        const turn = open ? yield* db.openExecution(id) : undefined
         const r = yield* track(id)
         const maybe = yield* agentState(h, terminal).pipe(Effect.option)
         if (Option.isNone(maybe)) return
@@ -506,7 +508,7 @@ export class Sessions extends Context.Service<
           return
         }
         yield* Ref.set(r.blockedNotified, false)
-        const worked = (yield* Ref.get(r.sawWorking)) || (yield* db.turnTaken(id))
+        const worked = (yield* Ref.get(r.sawWorking)) || (yield* db.executionTaken(id))
         const idle = s === "idle"
         const ended = idle && worked
         const now = yield* Clock.currentTimeMillis
@@ -514,7 +516,7 @@ export class Sessions extends Context.Service<
         if (idle && !ended && unconfirmed <= 0) {
           const closed =
             turn !== undefined &&
-            (yield* db.closeTurn(id, turn, "not_started", {
+            (yield* db.closeExecution(id, turn, "not_started", {
               notice: `task_not_started: vibest did not see ${id} start the turn it was sent (if it starts it late, that turn's result is not collected); it is idle and takes queued messages again.`,
             }))
           if (closed) yield* deliverQueued(h, { ...session, turnState: "not_started" }, terminal)
@@ -528,7 +530,7 @@ export class Sessions extends Context.Service<
         if (turn === undefined) return
         yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
         const failure = `the turn ended without a report: the harness stopped without firing its turn-end hook (an error it has no hook for, such as a usage limit?); ${peekHint(id)}`
-        yield* db.closeTurn(id, turn, "lost", { failure, notice: `${id}'s turn ended with an error: ${failure}` })
+        yield* db.closeExecution(id, turn, "lost", { failure, notice: `${id}'s turn ended with an error: ${failure}` })
       })
 
       const rerunLimited = (h: Runtime, session: SessionRow) =>
@@ -666,7 +668,7 @@ export class Sessions extends Context.Service<
                 const session = yield* getRow(id)
                 const h = yield* live(session)
                 const terminal = session.address
-                const turn = yield* db.openTurn(id)
+                const turn = yield* db.openExecution(id)
                 if (turn === undefined)
                   return { message: `${id} is not working; its turn had already finished and its reply is recorded` }
                 const state = stateOf(yield* agentState(h, terminal))
@@ -679,7 +681,7 @@ export class Sessions extends Context.Service<
                     id,
                     message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
                   })
-                const closed = yield* db.closeTurn(id, turn, "interrupted")
+                const closed = yield* db.closeExecution(id, turn, "interrupted")
                 if (closed && !runtimeKnows) yield* db.updateSession(id, { status: "idle" })
                 const last = closed ? undefined : yield* db.latestAnswer(id)
                 if (!closed && !(last?.turn === turn && last.status === "interrupted"))
@@ -769,16 +771,16 @@ export class Sessions extends Context.Service<
 
       const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
         switch (event.type) {
-          case "turn.ended":
-            return event.data.status === "failed"
+          case "execution.ended":
+            return event.data.outcome === "failed"
               ? resultReady(event.sessionId!)
               : deliverNext(event.sessionId!).pipe(
-                  Effect.andThen(event.data.status === "completed" ? archiveSoon([event.sessionId!]) : Effect.void),
+                  Effect.andThen(event.data.outcome === "completed" ? archiveSoon([event.sessionId!]) : Effect.void),
                 )
           case "inbox.moved":
             return event.data.to === "pending" || event.data.to === "delivering"
               ? Effect.void
-              : db.inboxParties(event.data.inbox).pipe(Effect.flatMap(archiveSoon))
+              : db.inboxParties(event.sessionId!, event.data.inbox).pipe(Effect.flatMap(archiveSoon))
           case "inbox.queued":
             return queued(event.sessionId!, event.seq)
           case "live.state":
@@ -819,17 +821,6 @@ export class Sessions extends Context.Service<
             `reconcile ${where === "all" ? "all" : `${where.runtime}${where.machine ? ` on ${where.machine}` : ""}`}: ${rows.length} live sessions`,
           )
           yield* Effect.forEach(rows, (row) => checkLocked(row.id), { concurrency: 8, discard: true })
-          yield* Effect.forEach(
-            rows.filter((row) => row.metadata.archive),
-            (row) =>
-              live(row).pipe(
-                Effect.option,
-                Effect.flatMap((routed) => (Option.isNone(routed) ? Effect.void : archiveIfIdle(row.id))),
-                logged(`archive ${row.id}`),
-                Effect.provideContext(platform),
-              ),
-            { concurrency: 8, discard: true },
-          )
           for (const project of yield* db.pendingProjects) yield* inbox.deliver(project)
           reconciles++
         })

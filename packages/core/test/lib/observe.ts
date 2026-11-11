@@ -59,7 +59,7 @@ export const eventsOf = (sessionId: string, type?: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<{ seq: number; type: string; at: number; data: string }>`SELECT seq, type, at, data
-      FROM event WHERE session_id = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY seq`
+      FROM event WHERE aggregate = ${sessionId} ${type === undefined ? sql`` : sql`AND type = ${type}`} ORDER BY seq`
     return rows.map((r) => ({ id: r.seq, type: r.type, at: r.at, data: JSON.parse(r.data) as Record<string, unknown> }))
   }).pipe(Effect.orDie)
 
@@ -68,8 +68,8 @@ export const resultText = (id: string) => answerOf(id).pipe(Effect.map((answer) 
 export const answerOf = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [row] = yield* sql<{ answer: string | null }>`SELECT answer FROM turn
-      WHERE session_id = ${id} AND status IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
+    const [row] = yield* sql<{ answer: string | null }>`SELECT reply AS answer FROM execution
+      WHERE session_id = ${id} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(Effect.orDie)
     return row?.answer ?? undefined
   })
 
@@ -91,12 +91,12 @@ export const lastSentBy = (id: string) =>
   })
 
 export const TURNS = `(SELECT t.id, t.session_id, t.started_at, t.ended_at,
-    (SELECT max(i.id) FROM inbox i WHERE i.turn_id = t.id) AS inbox_id,
+    (SELECT max(i.id) FROM inbox i WHERE i.session_id = t.session_id AND i.execution_id = t.id) AS inbox_id,
     coalesce(t.typed, (SELECT group_concat(c, char(10) || char(10)) FROM (SELECT i.content AS c
-      FROM inbox i WHERE i.turn_id = t.id ORDER BY i.id)), '') AS input,
-    coalesce(t.status, 'working') AS status,
-    t.answer AS output
-  FROM turn t)`
+      FROM inbox i WHERE i.session_id = t.session_id AND i.execution_id = t.id ORDER BY i.id)), '') AS input,
+    coalesce(t.outcome, 'working') AS status,
+    t.reply AS output
+  FROM execution t)`
 
 export const processEnds = (sessionId: string) =>
   eventsOf(sessionId, "process.ended").pipe(

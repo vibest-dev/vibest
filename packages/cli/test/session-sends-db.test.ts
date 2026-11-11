@@ -88,7 +88,7 @@ describe("sends from sessions", () => {
         assert.include(note!.message, "was not delivered")
         assert.include(note!.message, "hello")
         assert.strictEqual(note!.recipient, A)
-        assert.strictEqual((yield* db.setInboxStatus([sent.id], "dropped")).length, 0)
+        assert.strictEqual((yield* db.setInboxStatus(main, [sent.id], "dropped")).length, 0)
       }),
     ),
   )
@@ -98,7 +98,7 @@ describe("sends from sessions", () => {
       Effect.gen(function* () {
         const { db, main } = yield* setup
         const sent = (yield* db.insertSend(main, "hello", undefined, A))!
-        yield* db.claim([sent.id])
+        yield* db.claim(main, [sent.id])
         yield* db.recoverDelivering([], () => "")
         assert.strictEqual((yield* db.inboxWithStatus(A, "pending")).length, 1)
         assert.include((yield* db.pendingInbox(A))[0]!.message, "hello")
@@ -111,8 +111,8 @@ describe("sends from sessions", () => {
       Effect.gen(function* () {
         const { db, main } = yield* setup
         const sent = (yield* db.insertSend(main, "hello", undefined, A))!
-        yield* db.claim([sent.id])
-        yield* db.failLeased([sent.id])
+        yield* db.claim(main, [sent.id])
+        yield* db.failLeased(main, [sent.id])
         assert.strictEqual((yield* db.pendingInbox(A)).length, 1)
       }),
     ),
@@ -126,7 +126,7 @@ describe("sends from sessions", () => {
         yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: A })
         const sent = (yield* db.insertSend(B, "hello", undefined, A))!
         yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
-        yield* db.claim([sent.id])
+        yield* db.claim(B, [sent.id])
         yield* db.recoverDelivering([], () => "cut")
         assert.deepStrictEqual(yield* db.pendingInbox(X), [])
         assert.deepStrictEqual(
@@ -142,7 +142,7 @@ describe("sends from sessions", () => {
       Effect.gen(function* () {
         const { db, project } = yield* setup
         const sql = yield* SqlClient.SqlClient
-        yield* db.notePeer({ id: "11111111-1111-4111-8111-111111111111", name: "other", callsMe: "x" })
+        yield* db.notePeer({ id: "11111111-1111-4111-8111-111111111111", name: "other" })
         yield* db.insertSession(session(B), project, {
           cwd: "/w",
           task: "b",
@@ -154,11 +154,8 @@ describe("sends from sessions", () => {
         })
         assert.isUndefined(yield* db.sendToOrigin(B, "eeeeeeee", "hi"))
         assert.isTrue(yield* db.sendToOrigin(B, "dddddddd", "hi"))
-        const out = yield* sql<{ kind: string; content: string }>`SELECT kind, content FROM outbox`
-        assert.deepStrictEqual(
-          out.map((o) => o.kind),
-          ["notice"],
-        )
+        const out = yield* sql<{ content: string }>`SELECT content FROM outbox`
+        assert.lengthOf(out, 1)
         assert.include(out[0]!.content, "<agent-message>")
         assert.include(out[0]!.content, "hi")
       }),
@@ -186,14 +183,14 @@ describe("sends from sessions", () => {
       Effect.gen(function* () {
         const { db, project, main } = yield* setup
         const first = (yield* db.insertSend(main, "one"))!
-        yield* db.claim([first.id])
+        yield* db.claim(main, [first.id])
         yield* db.recoverDelivering([], () => "")
         assert.deepStrictEqual(
           (yield* db.coordinatorPending(project)).map((r) => r.message),
           ["one"],
         )
-        yield* db.claim([first.id])
-        yield* db.failLeased([first.id])
+        yield* db.claim(main, [first.id])
+        yield* db.failLeased(main, [first.id])
         assert.deepStrictEqual(
           (yield* db.coordinatorPending(project)).map((r) => r.message),
           ["one"],

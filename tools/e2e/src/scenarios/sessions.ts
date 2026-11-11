@@ -152,9 +152,9 @@ const checks: ReadonlyArray<Check> = [
         const after = await resultOf(w, p, a)
         const projected = row<{ answer: string | null; reported: string | null }>(
           w,
-          `SELECT t.answer, e.data ->> '$.reply' AS reported FROM turn t
-            JOIN event e ON e.type = 'turn.ended' AND e.data ->> '$.turn' = t.id
-            WHERE t.session_id = ? AND t.status = 'completed'`,
+          `SELECT t.reply AS answer, e.data ->> '$.reply' AS reported FROM execution t
+            JOIN event e ON e.aggregate = t.session_id AND e.type = 'execution.ended' AND e.data ->> '$.execution' = t.id
+            WHERE t.session_id = ? AND t.outcome = 'completed'`,
           a,
         )
         expect(
@@ -226,14 +226,14 @@ const checks: ReadonlyArray<Check> = [
         expect(p.notices(auto, "") === 0, "a notice for a clean archive")
         const waiting = row<{ n: number }>(
           w,
-          "SELECT count(*) AS n FROM inbox WHERE (sender_session_id = ?1 OR recipient_session_id = ?1) AND status IN ('pending', 'delivering')",
+          "SELECT count(*) AS n FROM inbox WHERE (sender_session_id = ?1 OR session_id = ?1) AND status IN ('pending', 'delivering')",
           auto,
         )
         expect(waiting?.n === 0, `rows still waiting for the archived session: ${waiting?.n}`)
         const ended = (type: string) =>
           row<{ n: number }>(
             w,
-            "SELECT count(*) AS n FROM event WHERE session_id = ? AND type = ? AND data ->> '$.reason' = 'archived'",
+            "SELECT count(*) AS n FROM event WHERE aggregate = ? AND type = ? AND data ->> '$.reason' = 'archived'",
             auto,
             type,
           )?.n

@@ -114,7 +114,7 @@ describe("vibest.sock", () => {
         sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         message: "back",
       })
-      const claimedElsewhereBeforeSubscribe = yield* db.claim([row.id])
+      const claimedElsewhereBeforeSubscribe = yield* db.claim(row.recipient!, [row.id])
       assert.deepStrictEqual(claimedElsewhereBeforeSubscribe, [row.id])
       const c = yield* asSession(yield* client, coord.sessionId)
       const received = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.take(1), Stream.runCollect, Effect.forkChild)

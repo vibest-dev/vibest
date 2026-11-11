@@ -24,7 +24,8 @@ export type RescheduleSource = {
   readonly since: number
 }
 
-const retried = (turn: { readonly status: string | null }) => turn.status === "failed" || turn.status === "not_started"
+const retried = (execution: { readonly outcome: string | null }) =>
+  execution.outcome === "failed" || execution.outcome === "not_started"
 
 export const latestRun = (rows: ReadonlyArray<{ readonly content: string; readonly sender: string | null }>) => {
   const last = rows.at(-1)
@@ -42,9 +43,8 @@ export const latestRun = (rows: ReadonlyArray<{ readonly content: string; readon
 export type SessionColumns = {
   readonly id: string
   readonly project: string
-  readonly role: string
+  readonly agent: string
   readonly name: string
-  readonly archive: number
   readonly createdAt: number
   readonly endedAt: number | null
   readonly activeAt: number | null
@@ -92,14 +92,13 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
     ...(row.pid === null ? {} : { pid: row.pid }),
     ...(row.readyAt === null ? {} : { ready: row.readyAt }),
     ...(row.routing === null ? {} : { routing: JSON.parse(row.routing) as unknown }),
-    ...(row.archive === 1 ? { archive: true } : {}),
-    ...(row.endedAt !== null && row.role !== "main" ? { archived: true, removed: true } : {}),
+    ...(row.endedAt !== null && row.agent !== "main" ? { archived: true, removed: true } : {}),
     ...(attempts.length > 0 ? { attempts } : {}),
   }
   return {
     id: row.id,
     projectId: row.project,
-    agent: row.role,
+    agent: row.agent,
     harnessId: row.harness ?? "",
     harnessSessionId: row.conversation,
     runtime: row.runtime ?? "",
@@ -109,7 +108,7 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
     model: row.model,
     status: live.status,
     startedAt: row.placedAt,
-    exitedAt: row.role === "main" ? row.endedAt : row.pEnded,
+    exitedAt: row.agent === "main" ? row.endedAt : row.pEnded,
     turnState: row.tId === null ? "none" : (row.tStatus ?? "open"),
     turnPromptedAt: (open ? live.promptedAt : undefined) ?? row.tAt ?? 0,
     metadata: JSON.stringify(metadata),
@@ -157,7 +156,7 @@ export const decodeCoordinators = Schema.decodeUnknownEffect(Schema.Array(Coordi
 
 type InboxColumns = {
   readonly id: number
-  readonly recipientSessionId: string | null
+  readonly sessionId: string
   readonly senderSessionId: string | null
   readonly kind: string
   readonly content: string
@@ -166,14 +165,15 @@ type InboxColumns = {
 
 export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
-    sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.role, s.name,
-        s.archive_on_idle AS archive, s.created_at, s.ended_at, s.active_at,
+    sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.agent, s.name,
+        s.created_at, s.ended_at, s.active_at,
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.placed_at, p.ready_at,
-        p.ended_at AS p_ended, t.id AS t_id, t.started_at AS t_at, t.status AS t_status,
+        p.ended_at AS p_ended, t.id AS t_id, t.started_at AS t_at, t.outcome AS t_status,
         (SELECT json_group_array(json_object('harness', l.harness, 'provider', l.provider, 'at', l.ended_at))
           FROM (SELECT * FROM process WHERE session_id = s.id AND end_reason = 'limited' ORDER BY id) l) AS attempts
-      FROM session s LEFT JOIN process p ON p.id = s.process_id LEFT JOIN turn t ON t.id = s.turn_id
+      FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id
+        LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
       ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
@@ -182,12 +182,13 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         q.directory AS project_directory,
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.ready_at, p.ended_at AS p_ended
-      FROM project q JOIN session s ON s.id = q.entry_session_id LEFT JOIN process p ON p.id = s.process_id
+      FROM project q JOIN session s ON s.id = q.entry_session_id
+        LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id
       ${project === undefined ? sql`` : sql`WHERE q.id = ${project}`}
       ORDER BY s.created_at, s.id`
 
   const inboxWhere = (where: Statement.Fragment, order: Statement.Fragment = sql`m.id`) =>
-    sql<InboxColumns>`SELECT m.id, m.recipient_session_id, m.sender_session_id, m.kind, m.content, m.status
+    sql<InboxColumns>`SELECT m.id, m.session_id, m.sender_session_id, m.kind, m.content, m.status
       FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(toInbox))))
 
   const briefs = (ids: ReadonlyArray<string>) =>
@@ -196,26 +197,26 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       const rows = yield* sql<{
         id: string
         task: string | null
-        turnId: number | null
-        status: string | null
+        executionId: number | null
+        outcome: string | null
         endedAt: number | null
-        answer: string | null
+        reply: string | null
       }>`SELECT s.id,
-          (SELECT i.content FROM inbox i WHERE i.recipient_session_id = s.id AND i.kind = 'task'
+          (SELECT i.content FROM inbox i WHERE i.session_id = s.id AND i.kind = 'task'
             ORDER BY i.id LIMIT 1) AS task,
-          t.id AS turn_id, t.status, t.ended_at, t.answer
-        FROM session s LEFT JOIN turn t ON t.id = s.turn_id
+          t.id AS execution_id, t.outcome, t.ended_at, t.reply
+        FROM session s LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
         WHERE ${sql.in("s.id", ids)}`
       const found = new Map<string, SessionBrief>()
       for (const row of rows) {
-        const raw = row.turnId === null ? undefined : (row.status ?? "working")
+        const raw = row.executionId === null ? undefined : (row.outcome ?? "working")
         const status = raw !== undefined && MESSAGE_STATUSES.has(raw) ? (raw as MessageStatusName) : undefined
         found.set(row.id, {
           task: row.task ?? null,
           latest:
             status === undefined
               ? null
-              : { status, summary: row.answer?.trim().split("\n")[0] ?? "", endedAt: row.endedAt ?? null },
+              : { status, summary: row.reply?.trim().split("\n")[0] ?? "", endedAt: row.endedAt ?? null },
         })
       }
       return found as ReadonlyMap<string, SessionBrief>
@@ -228,14 +229,15 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
 
   const untakenTask = (id: string) =>
     sql<{ content: string }>`SELECT i.content FROM inbox i
-      WHERE i.recipient_session_id = ${id} AND i.kind = 'task' AND i.seq = i.id
-        AND NOT EXISTS (SELECT 1 FROM turn t WHERE t.session_id = ${id} AND t.status IS NOT NULL
-          AND (t.typed IS NOT NULL OR EXISTS (SELECT 1 FROM inbox x WHERE x.turn_id = t.id)))
+      WHERE i.session_id = ${id} AND i.kind = 'task' AND i.execution_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM execution t WHERE t.session_id = ${id} AND t.outcome IS NOT NULL
+          AND (t.typed IS NOT NULL
+            OR EXISTS (SELECT 1 FROM inbox x WHERE x.session_id = t.session_id AND x.execution_id = t.id)))
       ORDER BY i.id LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.content))
 
   const queuedBy = (session: string, request: string) =>
     sql<{ id: number }>`SELECT id FROM inbox
-      WHERE request = ${request} AND coalesce(recipient_session_id, sender_session_id) = ${session}
+      WHERE request = ${request} AND session_id = ${session}
       ORDER BY id LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.id))
 
   const spawnedBy = (project: string, request: string) =>
@@ -247,10 +249,10 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       runtime: string
       routing: string | null
     }>`SELECT s.id, p.harness, p.provider, p.model, p.runtime, p.routing FROM inbox i
-        JOIN session s ON s.id = coalesce(i.recipient_session_id, i.sender_session_id)
-        JOIN process p ON p.id = (SELECT min(id) FROM process WHERE session_id = s.id)
+        JOIN session s ON s.id = i.session_id
+        JOIN process p ON p.session_id = s.id AND p.id = (SELECT min(id) FROM process WHERE session_id = s.id)
       WHERE i.kind = 'task' AND i.request = ${request} AND s.project_id = ${project}
-      ORDER BY i.id LIMIT 1`.pipe(
+      ORDER BY s.created_at, s.id LIMIT 1`.pipe(
       Effect.map((rows): SpawnedBefore | undefined => {
         const found = rows[0]
         if (found === undefined) return undefined
@@ -266,7 +268,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     )
 
   const outboxOf = (peer: string) =>
-    sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.kind, o.content, o.created_at,
+    sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.content, o.created_at,
         s.origin_session AS report_to
       FROM outbox o JOIN session s ON s.id = o.session_id WHERE o.peer_id = ${peer} ORDER BY o.seq`.pipe(
       Effect.map((rows) => rows.filter((row): row is OutboxRow => row.reportTo !== null)),
@@ -279,32 +281,35 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       }>`SELECT parent_session_id FROM session WHERE id = ${id}`
       if (head === undefined)
         return { working: "", delivered: "", parentSessionId: undefined, since: 0 } as RescheduleSource
-      const turns = yield* sql<{
+      const executions = yield* sql<{
         id: number
         typed: string | null
-        status: string | null
+        outcome: string | null
         startedAt: number
         taken: number
-      }>`SELECT t.id, t.typed, t.status, t.started_at,
-          EXISTS (SELECT 1 FROM inbox i WHERE i.turn_id = t.id) AS taken
-        FROM turn t WHERE session_id = ${id} ORDER BY id DESC`
-      const turn = turns.find((t, i) => (t.typed !== null || t.taken === 1) && turns.slice(0, i).every(retried))
+      }>`SELECT t.id, t.typed, t.outcome, t.started_at,
+          EXISTS (SELECT 1 FROM inbox i WHERE i.session_id = t.session_id AND i.execution_id = t.id) AS taken
+        FROM execution t WHERE session_id = ${id} ORDER BY id DESC`
+      const execution = executions.find(
+        (t, i) => (t.typed !== null || t.taken === 1) && executions.slice(0, i).every(retried),
+      )
       let working = ""
-      if (turn !== undefined) {
-        const taken = yield* sql<{ content: string }>`SELECT content FROM inbox WHERE turn_id = ${turn.id} ORDER BY id`
-        working = turn.typed ?? taken.map((row) => row.content).join("\n\n")
+      if (execution !== undefined) {
+        const taken = yield* sql<{ content: string }>`SELECT content FROM inbox
+          WHERE session_id = ${id} AND execution_id = ${execution.id} ORDER BY id`
+        working = execution.typed ?? taken.map((row) => row.content).join("\n\n")
       }
       const [linked] = yield* sql<{ id: number | null }>`SELECT max(id) AS id FROM inbox
-        WHERE recipient_session_id = ${id} AND turn_id IS NOT NULL`
+        WHERE session_id = ${id} AND execution_id IS NOT NULL`
       const rows = yield* sql<{ content: string; sender: string | null }>`SELECT content, sender_session_id AS sender
-        FROM inbox WHERE recipient_session_id = ${id} AND status = 'delivered'
+        FROM inbox WHERE session_id = ${id} AND status = 'delivered'
           AND id > ${linked?.id ?? 0}
         ORDER BY id`
       return {
         working,
         delivered: latestRun(rows),
         parentSessionId: head.parentSessionId ?? undefined,
-        since: (turn ?? turns[0])?.startedAt ?? 0,
+        since: (execution ?? executions[0])?.startedAt ?? 0,
       } as RescheduleSource
     })
 

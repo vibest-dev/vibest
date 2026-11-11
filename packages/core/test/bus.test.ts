@@ -84,7 +84,10 @@ describe("bus", () => {
         yield* db.insertSession(session, project)
         const notice = (text: string) => db.insertInbox({ sessionId: session.id, message: text })
         const rows = [yield* notice("one"), yield* notice("two")]
-        yield* db.claim(rows.map((row) => row.id))
+        yield* db.claim(
+          rows[0]!.recipient!,
+          rows.map((row) => row.id),
+        )
         const sub = yield* bus.subscribe
         yield* db.recoverDelivering([], () => "")
         const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)

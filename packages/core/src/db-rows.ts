@@ -1,4 +1,4 @@
-import { type InboxKind, type ProcessEndReason, type TurnStatus } from "@vibest/schema/event"
+import { type ExecutionOutcome, type InboxKind, type ProcessEndReason } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
 import { AgentStatus, InboxStatus, RuntimeAddress, TurnState } from "@vibest/schema/session"
 import { Schema } from "effect"
@@ -17,7 +17,6 @@ const Live = {
 const Metadata = Schema.Struct({
   ...Live,
   routing: Schema.optional(Routing),
-  archive: Schema.optional(Schema.Boolean),
   archived: Schema.optional(Schema.Boolean),
   removed: Schema.optional(Schema.Boolean),
   attempts: Schema.optional(
@@ -116,21 +115,21 @@ export const storedStatus = (status: InboxStatus) => (status === "sending" ? "de
 
 export type InboxSql = {
   readonly id: number
-  readonly recipientSessionId: string | null
+  readonly sessionId: string
   readonly kind: string
   readonly senderSessionId: string | null
   readonly content: string
   readonly status: string
 }
 
-export type TurnEnd = {
-  readonly status: typeof TurnStatus.Type
+export type ExecutionEnd = {
+  readonly outcome: typeof ExecutionOutcome.Type
   readonly failure?: { readonly message: string }
   readonly conversation?: string
   readonly reply?: string
 }
 
-export const failureOf = (error: string | undefined): TurnEnd["failure"] =>
+export const failureOf = (error: string | undefined): ExecutionEnd["failure"] =>
   error === undefined || error === "" ? undefined : { message: error }
 
 export const toInbox = (row: InboxSql) => {
@@ -138,7 +137,7 @@ export const toInbox = (row: InboxSql) => {
   return {
     id: row.id,
     sender: row.senderSessionId,
-    recipient: row.recipientSessionId,
+    recipient: row.sessionId,
     kind,
     message: row.content,
     status: row.status === "delivering" ? "sending" : row.status,

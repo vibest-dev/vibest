@@ -7,6 +7,25 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **The event log is per aggregate** (everyone upgrading, and anyone reading `vibest.db`): every fact belongs to one
+  aggregate (a session, a project, or the file's ledger in `meta.ledger`) and is numbered within it; `event` has
+  `position`, `aggregate`, `seq`, `at`, `type`, `data` and no `project_id` or `session_id`. The catalog is version 2:
+  `turn.started`/`turn.ended` are `execution.started`/`execution.ended` (`turn` → `execution`, `status` → `outcome`),
+  `turn.reported` is gone, `session.created` has `project` and `agent` (was `role`) and no `archiveOnCompletion` or
+  `reportTo`, `origin.reportTo` is `origin.session`, `inbox.queued` has no `turn`, `inbox.moved` has `execution`,
+  inbox kinds are `task`, `send` and `notice` only, `outbox.queued` names its `session` and has no `kind` (it is
+  always a notice), and `peer.seen` has no `callsMe`. The read model (projection 5) has table `execution` (`outcome`,
+  `reply`) instead of `turn` (`status`, `answer`), `session.agent` instead of `role`, no `session.turn_id` (a session's
+  latest execution is its highest `execution.id`), no `session.archive_on_idle`, `process.ready_seq`, `inbox.seq`
+  (a task with no `execution_id` was never handed over), `outbox.kind` or `peer.calls_me`, and `process`, `execution`
+  and `inbox` keyed by `(session_id, id)`, with `inbox.session_id` (the recipient, never null) instead of
+  `recipient_session_id` and `inbox.execution_id` instead of `turn_id`.
+  vibestd and `vibest daemon import-check` refuse a database in the old shape as one from an older vibest and change
+  nothing in it; there is no automatic conversion. Migrate: with vibestd stopped, move `vibest.db` aside with its
+  `-wal` and `-shm` files to start empty (the message gives the command).
+- **`vibest run --archive-on-idle`** (users): the flag is no longer stored. A session started with it is still
+  archived when it is idle after a completed turn, but only by the vibestd that started it: after a vibestd restart
+  or `vibest update` it stays until archived by hand.
 - **Turn ends** (anyone reading `vibest.db`, and anyone counting turns): a turn end the harness reports is written at
   once as `turn.ended`, carrying `reply` and `conversation`; vibestd no longer writes `turn.reported` (older ones still
   decode and project), so `turn.report_seq` stays null for new turns. An older vibest cannot read a log with the new
