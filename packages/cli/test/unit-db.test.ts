@@ -5,7 +5,6 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { applyOnly, type Migration, migrations } from "@vibest/core/database/migration"
 import { APPLICATION_ID, Db, encodeAddress } from "@vibest/core/db"
-import { LEDGER_REWRITE } from "@vibest/core/db-schema"
 import { makeJournal } from "@vibest/core/journal"
 import { PROJECTION_VERSION } from "@vibest/core/projectors"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -794,7 +793,7 @@ describe("Db", () => {
       }).pipe(Effect.provide(Platform.services)),
   )
 
-  it.effect("vibestd and import-check refuse a database in the old event shape and name the rewrite script", () =>
+  it.effect("vibestd and import-check refuse a database in the old event shape and point to the CHANGELOG", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const file = yield* fileAt(yield* tempDirectory("vibest-schema-old-shape-"), "vibest.db")
@@ -806,9 +805,11 @@ describe("Db", () => {
         "INSERT INTO meta VALUES ('catalog', '1'), ('projection', '4')",
       ])
       const before = yield* fs.readFile(file)
-      const said = `${file} is in the old event shape: stop vibestd and run ${LEDGER_REWRITE} ${file} from a vibest checkout`
+      const said = `${file} is from an older vibest (its event log is the shape from before per-aggregate events): see "The event log is per aggregate" in the vibest CHANGELOG.`
       assert.include(yield* refusal(file), said)
-      assert.strictEqual((yield* Effect.flip(Platform.daemon.checkDatabase(file))).message, said)
+      const checked = (yield* Effect.flip(Platform.daemon.checkDatabase(file))).message
+      assert.include(checked, said)
+      assert.notInclude(checked, "tools/")
       assert.deepStrictEqual(yield* fs.readFile(file), before)
     }).pipe(Effect.provide(Platform.services)),
   )

@@ -253,7 +253,6 @@ export class World {
     if (!fs.existsSync(file)) return []
     const db = readDb(file)
     try {
-      if (!inCurrentShape(db)) return []
       const rows = db.query(`SELECT id, runtime FROM ${SESSIONS} s`).all() as Array<{
         id: string
         runtime: string | null
@@ -352,7 +351,7 @@ export class World {
     if (marker !== "" && commandOf(parsed.pid).includes("daemon --foreground")) note(parsed.pid, marker, this.root)
   }
 
-  async ensureHerdr(session: string) {
+  private async ensureHerdr(session: string) {
     const socket = path.join(this.home, ".config", "herdr", "sessions", session, "herdr.sock")
     if (fs.existsSync(socket)) {
       this.noteHerdr(session, socket)
@@ -446,8 +445,7 @@ export class World {
         if (!fs.existsSync(file)) return false
         const db = readDb(file)
         try {
-          const agent = inCurrentShape(db) ? "agent" : "role"
-          return db.query(`SELECT id FROM session WHERE ${agent} = 'main' AND ended_at IS NULL`).get() !== null
+          return db.query("SELECT id FROM session WHERE agent = 'main' AND ended_at IS NULL").get() !== null
         } catch {
           return false
         } finally {
@@ -750,8 +748,6 @@ export const SESSIONS = `(SELECT s.id, s.project_id, s.agent AS agent_type, s.di
 
 export const TURNS = `(SELECT id, session_id, coalesce(outcome, 'working') AS status FROM execution)`
 
-const inCurrentShape = (db: Database) => db.query("SELECT 1 FROM meta WHERE key = 'ledger'").get() !== null
-
 export const readDb = (file: string) => {
   const db = new Database(file, { readonly: true })
   db.run("PRAGMA busy_timeout = 5000")
@@ -821,7 +817,6 @@ export const ledgerSnapshot = (home: string) => {
   if (!fs.existsSync(file)) return undefined
   const db = readDb(file)
   try {
-    if (!inCurrentShape(db)) return undefined
     const facts = (
       db.query("SELECT aggregate, seq, at, type, data FROM event ORDER BY position").all() as Array<{
         data: string

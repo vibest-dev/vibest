@@ -511,25 +511,6 @@ importers:
         specifier: 4.0.2
         version: 4.0.2
 
-  tools/ledger-rewrite:
-    dependencies:
-      '@effect/sql-sqlite-bun':
-        specifier: 'catalog:'
-        version: 4.0.2(effect@4.0.2)
-      '@vibest/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@vibest/schema':
-        specifier: workspace:*
-        version: link:../../packages/schema
-      effect:
-        specifier: 4.0.2
-        version: 4.0.2
-    devDependencies:
-      '@effect/vitest':
-        specifier: 'catalog:'
-        version: 4.0.2(effect@4.0.2)(vitest@5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.0)))
-
   tools/tsconfig: {}
 
   tools/verify:

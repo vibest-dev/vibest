@@ -15,7 +15,6 @@ import harness from "./scenarios/harness.ts"
 import hc from "./scenarios/hc.ts"
 import inbox from "./scenarios/inbox.ts"
 import integration from "./scenarios/integration.ts"
-import ledgerRewrite from "./scenarios/ledger-rewrite.ts"
 import machinesHerdr from "./scenarios/machines-herdr.ts"
 import machines from "./scenarios/machines.ts"
 import mainAgent from "./scenarios/main-agent.ts"
@@ -49,7 +48,7 @@ const areas: Record<string, ReadonlyArray<Check>> = {
   plugins,
   harness,
   integration,
-  update: [...update, ...ledgerRewrite],
+  update,
   start,
   inbox,
   exits,

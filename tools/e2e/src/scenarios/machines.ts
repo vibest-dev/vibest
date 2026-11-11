@@ -99,8 +99,7 @@ const hcCore = async (w: World, tag: string, env: Record<string, string | undefi
   return hc
 }
 
-export const setup = async (w: World, options: { readonly bSession?: boolean; readonly bin?: string } = {}) => {
-  const vibest = options.bin ?? binary
+const setup = async (w: World, options: { readonly bSession?: boolean } = {}) => {
   for (const bin of ["pi", "hc", "git"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
   w.ownRuntimes.add("hc")
   const bin = path.join(w.root, "bin")
@@ -141,7 +140,7 @@ export const setup = async (w: World, options: { readonly bSession?: boolean; re
     expect(set.code === 0, `git remote set-url: ${set.stderr}`)
   }
   const hcB = await hcCore(w, "b", bEnv)
-  const onB = (args: ReadonlyArray<string>, cwd = bRepo) => w.run(cwd, [vibest, ...args], { env: bEnv })
+  const onB = (args: ReadonlyArray<string>, cwd = bRepo) => w.run(cwd, [binary, ...args], { env: bEnv })
   const okB = async (args: ReadonlyArray<string>) => {
     const r = await onB(args)
     expect(r.code === 0, `B: vibest ${args.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
@@ -160,7 +159,7 @@ export const setup = async (w: World, options: { readonly bSession?: boolean; re
   for (const dir of ["a-r", "a-s", "a-c"]) await fs.mkdir(path.join(w.root, dir), { recursive: true })
   const hcA = await hcCore(w, "a", aEnv)
   await w.stopDaemon()
-  const daemonA = await w.run(w.repository, [vibest, "daemon"], { env: aEnv })
+  const daemonA = await w.run(w.repository, [binary, "daemon"], { env: aEnv })
   expect(daemonA.code === 0, `A: vibest daemon: ${daemonA.stderr}`)
   await w.startMain({
     harness: "pi",
@@ -171,9 +170,8 @@ export const setup = async (w: World, options: { readonly bSession?: boolean; re
     name: "a-main",
     hc: { run: hcA },
     timeoutMs: 60_000,
-    ...(options.bin === undefined ? {} : { bin: options.bin }),
   })
-  const onA = (args: ReadonlyArray<string>) => w.run(w.repository, [vibest, ...args], { env: aEnv })
+  const onA = (args: ReadonlyArray<string>) => w.run(w.repository, [binary, ...args], { env: aEnv })
   const okA = async (args: ReadonlyArray<string>) => {
     const r = await onA(args)
     expect(r.code === 0, `A: vibest ${args.join(" ")} exited ${r.code}: ${r.stderr}${r.stdout}`)
@@ -210,30 +208,10 @@ export const setup = async (w: World, options: { readonly bSession?: boolean; re
   }
   const aSocket = w.hcSocket
   const log = path.join(w.root, "ssh.log")
-  return {
-    b,
-    bRepo,
-    bEnv,
-    aEnv,
-    aSocket,
-    onA,
-    okA,
-    onB,
-    okB,
-    bDb,
-    identity,
-    notices,
-    run,
-    subs,
-    main,
-    log,
-    stop,
-    hcA,
-    hcB,
-  }
+  return { b, bEnv, aEnv, aSocket, onA, okA, onB, okB, bDb, identity, notices, run, subs, main, log, stop, hcA, hcB }
 }
 
-export type Setup = Awaited<ReturnType<typeof setup>>
+type Setup = Awaited<ReturnType<typeof setup>>
 
 const checks: ReadonlyArray<Check> = [
   {

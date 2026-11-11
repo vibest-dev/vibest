@@ -257,13 +257,14 @@ started while the old harness may still report, and that end is dropped. vibestd
 round they decided about is still open, so an end the harness reported first is the one that stands.
 
 Changing the catalog: the catalog holds only the types and keys vibestd writes now. Adding an optional key raises
-`CATALOG_VERSION` by one. A type or key that changes meaning or structure, or is no longer written, is retired in the
-same pull request by a one-time rewrite of existing ledgers (like `tools/ledger-rewrite`), and vibestd refuses a file of
-the older catalog with a message that names it; no old definition stays in the catalog and no projector reads one. Changing the read model (a column, table, index or
-projector rule) raises `PROJECTION_VERSION` instead; a database with another projection version is rebuilt by replaying
+`CATALOG_VERSION` by one. A type or key that changes meaning or structure, or is no longer written, is retired: it
+leaves the catalog, vibestd refuses a file of the older catalog as one from an older vibest and points to the
+CHANGELOG, and no old definition stays in the catalog and no projector reads one. A one-time rewrite of existing
+ledgers is a manual script kept outside this repository, never part of it. Changing the read model (a column, table,
+index or projector rule) raises `PROJECTION_VERSION` instead; a database with another projection version is rebuilt by replaying
 its log when it opens, so the read model needs no migration. `packages/schema/test/event-rows.json` holds fixed sample
-rows that must keep decoding and re-encoding to the same bytes: add rows to it; a rewrite changes them only together
-with its test, which turns the previous samples (`tools/ledger-rewrite/test/event-rows.json` for catalog 1) into them.
+rows that must keep decoding and re-encoding to the same bytes: add rows to it; only a catalog change that retires a
+type or key changes or removes rows, in the same pull request.
 
 ## The Db service
 
@@ -300,8 +301,7 @@ with its test, which turns the previous samples (`tools/ledger-rewrite/test/even
    stopped. A file whose `meta.catalog` is newer than this vibest's catalog is refused with "was written by a newer
    vibest …: run vibest update"; this vibest never skips a fact type it does not know. A file of an older catalog, or
    one with no `meta.ledger` (the event shape before aggregates: one global `seq`, `project_id` and `session_id`
-   columns), is refused with a message that names the one-time rewrite: stop vibestd and run
-   `bun tools/ledger-rewrite/src/main.ts <file>` from a vibest checkout.
+   columns), is refused as a file from an older vibest, with a pointer to the CHANGELOG and the way to start empty.
 2. An empty file gets the current schema in one write transaction that checks again under the write lock (so of two
    empty opens at once one installs and the other sees it), with every migration marked applied.
 3. Each migration in `migrations` that the `migration` table does not list runs in its own transaction, in order, and
@@ -320,15 +320,6 @@ match, compares every read-model table with the replay; a difference or a fact t
 the first differing row or the fact's aggregate and `seq`. A database from before the ledger, or in the old event
 shape, is refused with the same message vibestd gives.
 E2E runs it on every world's database at the end of each check.
-
-`tools/ledger-rewrite` turns a catalog-1 ledger into this shape, on a stopped vibestd's file (it takes vibestd's start
-lock), in one transaction: it strictly decodes every old row with the frozen catalog-1 code, rewrites it (types and
-keys renamed, `outbox.queued` `kind` and `peer.seen` `callsMe` dropped, `turn.reported` folded into the
-`execution.ended` that consumed it or the open execution it ended, or dropped when nothing read it), keeps each row's
-`seq` as its new `seq` and `position`, strictly decodes every new row, rebuilds the read model and compares it with the
-old read model replayed by the frozen code (without the columns this shape dropped; an old `task` row counts as handed
-over by `seq` exactly when it has an execution). Any difference it did not expect, or any row that does not decode,
-rolls everything back and names all of them at once.
 
 ## Hot paths
 

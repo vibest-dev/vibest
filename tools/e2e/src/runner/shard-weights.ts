@@ -78,6 +78,4 @@ export const shardWeights: Readonly<Record<string, number>> = {
   U10: 4,
   U11: 24,
   U12: 20,
-  U13: 20,
-  U14: 30,
 }

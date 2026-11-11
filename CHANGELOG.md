@@ -20,11 +20,9 @@ release. Each release lists what broke, who is affected and how to migrate under
   (a task with no `execution_id` was never handed over), `outbox.kind` or `peer.calls_me`, and `process`, `execution`
   and `inbox` keyed by `(session_id, id)`, with `inbox.session_id` (the recipient, never null) instead of
   `recipient_session_id` and `inbox.execution_id` instead of `turn_id`.
-  vibestd and `vibest daemon import-check` refuse a database in the old shape and change nothing in it. Migrate: stop
-  vibestd, run `bun tools/ledger-rewrite/src/main.ts ~/.vibest/vibest.db` from a vibest checkout (after `pnpm
-  install`), start vibestd, then run `vibest daemon restart` to restart the agents still on the old integration. The
-  rewrite runs in one transaction, refuses while vibestd runs, drops only replies nothing ever read, and rolls back
-  naming every difference if the rebuilt read model is not the old one.
+  vibestd and `vibest daemon import-check` refuse a database in the old shape as one from an older vibest and change
+  nothing in it; there is no automatic conversion. Migrate: with vibestd stopped, move `vibest.db` aside with its
+  `-wal` and `-shm` files to start empty (the message gives the command).
 - **`vibest run --archive-on-idle`** (users): the flag is no longer stored. A session started with it is still
   archived when it is idle after a completed turn, but only by the vibestd that started it: after a vibestd restart
   or `vibest update` it stays until archived by hand.

@@ -36,24 +36,22 @@ export class DatabaseOpenFailed extends Schema.TaggedError<DatabaseOpenFailed>()
   message: Schema.String,
 }) {}
 
-export const LEDGER_REWRITE = "bun tools/ledger-rewrite/src/main.ts"
-
 export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("SchemaMismatch", {
   version: Schema.Number,
   applicationId: Schema.Number,
   detail: Schema.optional(Schema.String),
   older: Schema.optional(Schema.Boolean),
   catalog: Schema.optional(Schema.Number),
-  rewrite: Schema.optional(Schema.Boolean),
+  oldEvents: Schema.optional(Schema.Boolean),
   file: Schema.optional(Schema.String),
 }) {
   override get message() {
     const file = this.file ?? "vibest.db"
-    if (this.rewrite)
-      return `${file} is in the old event shape: stop vibestd and run ${LEDGER_REWRITE} ${shellQuote(file)} from a vibest checkout`
     if (this.catalog !== undefined)
       return `${file} was written by a newer vibest (event catalog ${this.catalog}, this vibest knows ${CATALOG_VERSION}): run vibest update`
     const aside = `To start empty, with vibestd stopped, move it aside with its -wal and -shm files: for f in ${["", "-wal", "-shm"].map((suffix) => shellQuote(file + suffix)).join(" ")}; do [ -e "$f" ] && mv "$f" "$f.old"; done (the sessions, results and queued messages it holds are lost; agents still running keep running, but vibest no longer knows them)`
+    if (this.oldEvents)
+      return `${file} is from an older vibest (its event log is the shape from before per-aggregate events): see "The event log is per aggregate" in the vibest CHANGELOG. ${aside}`
     if (this.older)
       return `${file} is from an older vibest (its tables are the shape from before this release). ${aside}`
     const id = `0x${(this.applicationId >>> 0).toString(16)}`
@@ -87,7 +85,7 @@ export const inspectSchema = Effect.gen(function* () {
   if (catalog === undefined) return yield* mismatch(userVersion, applicationId, "no event catalog version")
   if (catalog > CATALOG_VERSION) return yield* new SchemaMismatch({ version: userVersion, applicationId, catalog })
   if (catalog < CATALOG_VERSION || (yield* ledgerOf(sql)) === undefined)
-    return yield* new SchemaMismatch({ version: userVersion, applicationId, rewrite: true })
+    return yield* new SchemaMismatch({ version: userVersion, applicationId, oldEvents: true })
   const rebuilt = (yield* metaOf(sql, "projection")) !== PROJECTION_VERSION
   const absent = objectsOf(rebuilt ? LOG_SCHEMA : [...LOG_SCHEMA, ...PROJECTION_SCHEMA]).find(
     (object) => !has(object.type, object.name),
