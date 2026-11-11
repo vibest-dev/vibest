@@ -251,7 +251,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             : yield* setUp({ ...candidate, plugin }, stats)
       if (typeof outcome !== "string") return { ...base, running: outcome }
       const failed: Slot = { ...base, failure: outcome, setupFailed: !("error" in plugin) }
-      const last = previous?.running?.candidate
+      const last = "error" in plugin ? undefined : previous?.running?.candidate
       if (last === undefined) {
         return unchanged && previous.rollback !== undefined ? { ...failed, rollback: previous.rollback } : failed
       }
@@ -265,7 +265,12 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       const failures = new Map<string, ImportFailure>()
       const candidates = incoming.map((candidate) => {
         if (!("error" in candidate.plugin)) return candidate
-        const kept = slots.find((s) => s.running !== undefined && s.candidate.source === candidate.source)
+        const kept = slots.find(
+          (s) =>
+            s.running !== undefined &&
+            s.candidate.source === candidate.source &&
+            JSON.stringify(s.candidate.options) === JSON.stringify(candidate.options),
+        )
         if (kept === undefined) return candidate
         failures.set(candidate.source, { revision: candidate.revision, error: candidate.plugin.error })
         return kept.candidate

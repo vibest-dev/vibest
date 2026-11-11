@@ -272,6 +272,23 @@ describe("plugins: activation", () => {
   )
 
   it.effect(
+    "P17: a revision that fails to import with changed options is failed; the old one is not kept or restored",
+    () =>
+      host((h) =>
+        Effect.gen(function* () {
+          yield* h.activate([a1, b1])
+          yield* takeEvents
+          yield* h.activate([candidate("a", "2", { error: "import failed: SyntaxError" }, { level: 2 }), b1])
+          assert.deepStrictEqual(yield* takeEvents, ["close b1", "close a1", "setup b1"])
+          const [a, b] = yield* h.service.list
+          assert.deepInclude(a, { status: "failed", revision: "2" })
+          assert.strictEqual(a!.error, "import failed: SyntaxError")
+          assert.deepInclude(b, { id: "b", status: "active" })
+        }),
+      ),
+  )
+
+  it.effect(
     "L5: the last working revision is restored only under the same rules, and why it was not stays visible",
     () =>
       host((h) =>
