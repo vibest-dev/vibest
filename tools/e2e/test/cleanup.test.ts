@@ -119,6 +119,6 @@ test("the sweep removes an old world with its herdr sessions, and leaves a live 
     ).toBe(false)
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))
-    await fs.rm(tmp, { recursive: true, force: true }, 30_000)
+    await fs.rm(tmp, { recursive: true, force: true })
   }
 }, 30_000)
