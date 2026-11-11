@@ -1,8 +1,9 @@
 import fs from "node:fs"
 
-import { endNoted, reapFile, startWatch, survivors } from "./tools/reap.ts"
+import { endNoted, reapEndedRuns, reapFile, startWatch, survivors } from "./tools/reap.ts"
 
-export default function setup() {
+export default async function setup() {
+  await reapEndedRuns()
   const file = reapFile()
   fs.writeFileSync(file, "")
   process.env.VIBEST_REAP_FILE = file
