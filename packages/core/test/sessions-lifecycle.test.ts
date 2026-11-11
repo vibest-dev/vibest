@@ -77,7 +77,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a later send whose Enter is swallowed gets Enter again: the previous round's start is no pickup",
+    "a later send whose Enter is swallowed gets Enter again: the previous execution's start is no pickup",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* spawnWorking(yield* makeRepository)
@@ -522,7 +522,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "vibest interrupt (pi): the aborted execution end its Esc makes is no result, no inbox row and no new round",
+    "vibest interrupt (pi): the aborted execution end its Esc makes is no result, no inbox row and no new execution",
     Effect.gen(function* () {
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "pi")
       assert.include((yield* sessions.interrupt(id)).message, "interrupted")
@@ -613,7 +613,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "interrupt that does not take: SessionBusy, the round stays open, so the late aborted turn.complete is delivered as an interrupted result",
+    "interrupt that does not take: SessionBusy, the execution stays open, so the late aborted turn.complete is delivered as an interrupted result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
@@ -634,7 +634,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "vibest interrupt while background work keeps the terminal working: an aborted execution end that lands before the Esc send returns closes the round as interrupted, with no result",
+    "vibest interrupt while background work keeps the terminal working: an aborted execution end that lands before the Esc send returns closes the execution as interrupted, with no result",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")

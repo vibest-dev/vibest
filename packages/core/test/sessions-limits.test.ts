@@ -93,11 +93,11 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual((yield* herdr.callsTo("open")).at(-1)!.cwd, yield* sessionWorktree(id))
       assert.lengthOf(yield* herdr.callsTo("close"), 1)
       assert.isTrue((yield* herdr.callsTo("open")).at(-1)!.argv.includes("--plugin-dir"))
-      const rounds = () =>
+      const executions = () =>
         sql<{ status: string; inbox: number | null; task: number }>`SELECT m.status AS status, m.inbox_id AS inbox,
         (SELECT id FROM inbox WHERE session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
         FROM ${sql.literal(EXECUTIONS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
-      const moved2 = yield* rounds()
+      const moved2 = yield* executions()
       assert.deepStrictEqual(
         moved2.map((row) => [row.status, row.inbox === row.task]),
         [
@@ -119,7 +119,7 @@ describe.concurrent("Sessions", () => {
       yield* writeEnd(id, "claude", { last_assistant_message: "status: completed\nsummary: moved" })
       yield* sessions.check(id)
       assert.deepStrictEqual(
-        (yield* rounds()).map((row) => row.status),
+        (yield* executions()).map((row) => row.status),
         ["failed", "completed"],
       )
       const [reply] = yield* sql<{
@@ -291,12 +291,12 @@ describe.concurrent("Sessions", () => {
       yield* held.release("failed to start claude")
       yield* Fiber.join(checking)
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "cursor")
-      const rounds = () =>
+      const executions = () =>
         sql<{ status: string; inbox: number | null; task: number }>`SELECT m.status AS status, m.inbox_id AS inbox,
         (SELECT id FROM inbox WHERE session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
         FROM ${sql.literal(EXECUTIONS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
       assert.deepStrictEqual(
-        (yield* rounds()).map((row) => [row.status, row.inbox === row.task]),
+        (yield* executions()).map((row) => [row.status, row.inbox === row.task]),
         [
           ["failed", true],
           ["not_started", false],
@@ -307,7 +307,7 @@ describe.concurrent("Sessions", () => {
       yield* writeEnd(id, "cursor", { text: "status: completed\nsummary: moved" })
       yield* sessions.check(id)
       assert.deepStrictEqual(
-        (yield* rounds()).map((row) => row.status),
+        (yield* executions()).map((row) => row.status),
         ["failed", "not_started", "completed"],
       )
     }),
@@ -443,7 +443,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a limit with every harness limited fails the round naming each",
+    "a limit with every harness limited fails the execution naming each",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, db } = yield* spawnWorking(yield* makeRepository)

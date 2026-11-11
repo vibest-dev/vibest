@@ -35,6 +35,7 @@ import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import * as Engine from "./engine.ts"
+import { sessionExecutions } from "./executions.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox } from "./inbox.ts"
 import { coordinatorCommand, restartArgv } from "./launch.ts"
@@ -49,7 +50,6 @@ import * as Remove from "./remove.ts"
 import { isUsageLimitError } from "./replies.ts"
 import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
 import { Restarting } from "./restarting.ts"
-import { sessionRounds } from "./rounds.ts"
 import {
   agentState,
   alive,
@@ -358,7 +358,7 @@ export class Sessions extends Context.Service<
       })
 
       const limit = limitMoveBox()
-      const { finish, deliverQueued } = sessionRounds({ db, undelivered, prompt })
+      const { finish, deliverQueued } = sessionExecutions({ db, undelivered, prompt })
 
       const handTask = (h: Runtime, session: SessionRow, terminal: Terminal, task: string) =>
         Effect.gen(function* () {

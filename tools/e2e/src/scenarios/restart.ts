@@ -635,7 +635,7 @@ export default Plugin.define({
             120_000,
           ).catch(async (e: Error) => {
             throw new Error(
-              `${e.message}; rounds ${JSON.stringify(status())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
+              `${e.message}; executions ${JSON.stringify(status())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
             )
           })
           expect(
@@ -705,7 +705,7 @@ export default Plugin.define({
           }
           const fail = async (e: Error) => {
             throw new Error(
-              `${e.message}; row ${JSON.stringify(row())}; rounds ${JSON.stringify(status())}; notices ${JSON.stringify(notices())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
+              `${e.message}; row ${JSON.stringify(row())}; executions ${JSON.stringify(status())}; notices ${JSON.stringify(notices())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
             )
           }
           await until("the move to the second login", () => row().provider === "second", 120_000).catch(fail)

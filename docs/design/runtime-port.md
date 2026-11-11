@@ -139,7 +139,7 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   idle after working, or the process exited), core takes the reported execution end and delivers the result. An execution end
   vibestd had not written when it stopped is lost; reconciliation records that execution lost.
 - Ready for input: `state` idle, else the adapter's ready pattern on `read()`. A process that exits before its execution
-  ends loses the round, as today.
+  ends loses the execution, as today.
 
 ### Terminal status ownership
 

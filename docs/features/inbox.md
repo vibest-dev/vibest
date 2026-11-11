@@ -51,7 +51,7 @@ A Pi session with herdr's own Pi hook installed gets its first prompt within sec
 
 ## S26. Delivery stays prompt
 
-Over repeated rounds, every queued send to a busy session goes out once the session is idle, and every closed pane's
+Over repeated executions, every queued send to a busy session goes out once the session is idle, and every closed pane's
 process ends; how long each takes is recorded.
 
 ## S32. A send repeated with one request id

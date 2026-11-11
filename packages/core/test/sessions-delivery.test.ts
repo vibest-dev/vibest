@@ -31,21 +31,21 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
       assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
       const sql = yield* SqlClient.SqlClient
-      const [round] = yield* sql<{
+      const [execution] = yield* sql<{
         input: string
         inbox: number
       }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`
       const sent = yield* sql<{
         id: number
       }>`SELECT id FROM inbox WHERE session_id = ${id} AND content IN ('one', 'two') ORDER BY id`
-      assert.strictEqual(round!.input, "one\n\ntwo")
-      assert.strictEqual(round!.inbox, sent[1]!.id)
+      assert.strictEqual(execution!.input, "one\n\ntwo")
+      assert.strictEqual(execution!.inbox, sent[1]!.id)
     }),
     { hooked: ["pi"] },
   )
 
   test(
-    "a report newer than the last round, with none open, ends one more execution once",
+    "a report newer than the last execution, with none open, ends one more execution once",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -81,7 +81,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a typed prompt during resume sees the send's round already open",
+    "a typed prompt during resume sees the send's execution already open",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -112,7 +112,7 @@ describe.concurrent("Sessions", () => {
         }>`SELECT input FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND input = 'typed during resume'`,
         [],
       )
-      const [round] = yield* until(
+      const [execution] = yield* until(
         sql<{
           input: string
           inbox: number | null
@@ -121,13 +121,13 @@ describe.concurrent("Sessions", () => {
         ),
         (rows) => rows[0]?.input === "queued text",
       )
-      assert.notStrictEqual(round!.inbox, null)
+      assert.notStrictEqual(execution!.inbox, null)
     }),
     { hooked: ["pi"] },
   )
 
   test(
-    "an echo during the runtime prompt returns without waiting and is not a round",
+    "an echo during the runtime prompt returns without waiting and is not an execution",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -184,7 +184,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a typed round is recorded at hook receipt, not after the lock wait",
+    "a typed execution is recorded at hook receipt, not after the lock wait",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -203,12 +203,12 @@ describe.concurrent("Sessions", () => {
       yield* held.release()
       yield* Fiber.join(checking)
       yield* Fiber.join(typing)
-      const [round] = yield* sql<{
+      const [execution] = yield* sql<{
         startedAt: number
       }>`SELECT started_at AS startedAt FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND input = 'typed'`.pipe(
         Effect.orDie,
       )
-      assert.strictEqual(round!.startedAt, at)
+      assert.strictEqual(execution!.startedAt, at)
     }),
     { hooked: ["pi"] },
   )
@@ -273,7 +273,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a refused prompt with no result file still closes the round and fails the batch",
+    "a refused prompt with no result file still closes the execution and fails the batch",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -299,7 +299,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a follow-up send opens its round on that message and its inbox row",
+    "a follow-up send opens its execution on that message and its inbox row",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
@@ -308,7 +308,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       yield* sessions.send(id, "fix the tests")
-      const round = yield* until(
+      const execution = yield* until(
         sql<{
           input: string
           inbox: number | null
@@ -323,7 +323,7 @@ describe.concurrent("Sessions", () => {
       }>`SELECT id, status AS status FROM inbox WHERE session_id = ${id} AND content = 'fix the tests'`.pipe(
         Effect.orDie,
       )
-      assert.strictEqual(round[0]!.inbox, sent!.id)
+      assert.strictEqual(execution[0]!.inbox, sent!.id)
       assert.strictEqual(sent!.status, "delivered")
       assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
     }),

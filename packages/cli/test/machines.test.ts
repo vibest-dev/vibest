@@ -239,19 +239,19 @@ describe("machine add, ls and rm", () => {
       net.route("b-host", b.layout.socket)
       yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
       yield* until(a.cli(a.raw["Machine.List"]()), (r) => r[0]?.state === "connected")
-      const refused = (round: number) => `ssh: connect to host b-host port 22: Connection refused ${round}`
+      const refused = (attempt: number) => `ssh: connect to host b-host port 22: Connection refused ${attempt}`
       net.fail("b-host", 255, refused(0))
       yield* net.cutAll("b-host")
       yield* until(a.cli(a.raw["Machine.List"]()), (r) => r[0]?.state === "unreachable")
       let wait = Duration.toMillis(RETRY_FIRST)
-      for (let round = 1; round <= 5; round++) {
+      for (let attempt = 1; attempt <= 5; attempt++) {
         const dials = net.argv.length
-        net.fail("b-host", 255, refused(round))
+        net.fail("b-host", 255, refused(attempt))
         yield* TestClock.adjust(wait - 1)
         yield* yieldToIo
         assert.strictEqual(net.argv.length, dials, `no dial before ${wait} ms`)
         yield* TestClock.adjust(1)
-        yield* until(a.cli(a.raw["Machine.List"]()), (r) => r[0]?.reason?.includes(refused(round)) === true)
+        yield* until(a.cli(a.raw["Machine.List"]()), (r) => r[0]?.reason?.includes(refused(attempt)) === true)
         assert.strictEqual(net.argv.length, dials + 1, `one dial at ${wait} ms`)
         wait *= 2
       }

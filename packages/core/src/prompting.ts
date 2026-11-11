@@ -226,15 +226,15 @@ export const sessionPrompting = (deps: {
       yield* db.updateSession(session.id, { status: "working" })
       return undefined
     }
-    const round = { ...session, executionPromptedAt: now }
+    const stamped = { ...session, executionPromptedAt: now }
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
-    if (yield* confirmed(h, round, terminal, subscription)) return undefined
+    if (yield* confirmed(h, stamped, terminal, subscription)) return undefined
     if (yield* settledElsewhere) return undefined
     yield* h.send(terminal, { keys: ["enter"] }).pipe(Effect.ignore)
-    if (yield* confirmed(h, round, terminal, subscription)) return undefined
+    if (yield* confirmed(h, stamped, terminal, subscription)) return undefined
     if (yield* settledElsewhere) return undefined
     yield* send.pipe(Effect.ignore)
-    if (yield* confirmed(h, round, terminal, subscription)) return undefined
+    if (yield* confirmed(h, stamped, terminal, subscription)) return undefined
     if (yield* settledElsewhere) return undefined
     yield* Effect.logInfo(`task_not_started ${session.id}: terminal tail\n${yield* paneTail(h, terminal)}`)
     yield* missed

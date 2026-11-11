@@ -207,7 +207,7 @@ export const sessionMove = (deps: {
       Effect.provideService(Harness, harness),
       Effect.provideService(Harnesses, harnesses),
     )
-    const thisRound = [
+    const thisExecution = [
       ...(yield* db.limitedSince(session.id, source.since)).map((l) => ({
         harness: l.harness,
         provider: l.provider ?? "",
@@ -220,7 +220,7 @@ export const sessionMove = (deps: {
     ) => {
       if (move === undefined || harnesses.find(move.harness) === undefined) return true
       const provider = move.provider ?? ""
-      if (thisRound.some((l) => l.harness === move.harness && l.provider === provider)) return true
+      if (thisExecution.some((l) => l.harness === move.harness && l.provider === provider)) return true
       return attempts().some(
         (a) =>
           a.harness === move.harness &&

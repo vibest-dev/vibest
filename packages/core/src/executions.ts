@@ -6,7 +6,7 @@ import { type InboxRow, type InboxStatus, type SessionPatch, type SessionRow, ty
 import { nextBatch } from "./inbox.ts"
 import { type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
 
-export const sessionRounds = (deps: {
+export const sessionExecutions = (deps: {
   readonly db: {
     readonly endExecution: (
       id: string,

@@ -278,7 +278,7 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "the prompt hook notes its execution start at once, while the session's lock is held, with the round's stamp",
+    "the prompt hook notes its execution start at once, while the session's lock is held, with the execution's stamp",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
       const herdr = yield* FakeRuntime

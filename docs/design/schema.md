@@ -254,7 +254,7 @@ decided (`lost`, `not_started`, an exit, an interrupt it closed) has no `reply`.
 A reported end is written only for the harness the session's current process runs, and, for a harness whose
 integration reports ready, only after that process's ready report: in a restart's window the new process is already
 started while the old harness may still report, and that end is dropped. vibestd's own closes write only while the
-round they decided about is still open, so an end the harness reported first is the one that stands.
+execution they decided about is still open, so an end the harness reported first is the one that stands.
 
 Changing the catalog: the catalog holds only the types and keys vibestd writes now. Adding an optional key raises
 `CATALOG_VERSION` by one. A type or key that changes meaning or structure, or is no longer written, is retired: it

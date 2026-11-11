@@ -38,15 +38,15 @@ Read-only here is the prompt you pass, plus the peer git rule the session alread
 vibest run [<harness>] --title 'Review <topic>' --peer <implementer id> -- 'Review the change on this branch against the plan at <absolute plan path>. Run git diff main...HEAD. Do not modify files, commit, or move HEAD. Look for bugs, missing tests, and departures from the plan; run the tests. Send me a message that starts with "verdict: approve" or "verdict: changes requested", then each comment with file and line.'
 ```
 
-Its id is <reviewer id>. Do not pass `--archive-on-idle`: later rounds go to this reviewer with `vibest send`.
+Its id is <reviewer id>. Do not pass `--archive-on-idle`: later reviews go to this reviewer with `vibest send`.
 
 ## 5. Until approval
 
 - `changes requested` → `vibest send <implementer id> -- '<the comments, verbatim. Fix them, run the tests, commit, push, and send me the hash.>'` When it sends its message, `vibest send <reviewer id> -- 'The implementer pushed <hash>. Review again. Same message format.'`
 - `approve` → open the pull request.
-- After 3 rounds without approval, or a judgment call, stop and show the open comments. The user decides: another round, accept, or change the plan.
+- After 3 reviews without approval, or a judgment call, stop and show the open comments. The user decides: another review, accept, or change the plan.
 
-One line to the user per round: the number, the verdict, what is being fixed.
+One line to the user per review: the number, the verdict, what is being fixed.
 
 ## 6. Pull request
 
