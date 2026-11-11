@@ -188,7 +188,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a typed round ends like any round: its reply is kept and nothing is sent; typing during an open round records nothing",
+    "a typed execution ends like any execution: its reply is kept and nothing is sent; typing during an open execution records nothing",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const repo = yield* makeRepository

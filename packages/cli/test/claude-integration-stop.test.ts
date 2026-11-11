@@ -30,14 +30,15 @@ const listen = (sock: string, lines: string[], answer: (n: number) => true | "dr
       const how = answer(lines.length)
       if (how === "drop") return socket.destroy()
       if (how === "hang") return
-      let id: unknown
+      let request: { id?: unknown; method?: unknown }
       try {
-        id = (JSON.parse(line) as { id?: unknown }).id
+        request = JSON.parse(line) as { id?: unknown; method?: unknown }
       } catch {
         socket.end()
         return
       }
-      socket.end(JSON.stringify({ jsonrpc: "2.0", id, result: null }) + "\n")
+      const result = request.method === "Session.Ready" ? {} : null
+      socket.end(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\n")
     })
   })
   return Effect.acquireRelease(
@@ -212,14 +213,14 @@ layer(Platform.services)("claude integration stop", (it) => {
   )
 
   it.effect(
-    "Cursor: session start is Session.Ready, its prompt and stop hooks send the raw event, conversation id included",
+    "Cursor: session start is Session.Ready, its prompt and stop hooks send the raw event, conversation id included, with the process vibestd started it as",
     () =>
       Effect.gen(function* () {
         const path = yield* Path.Path
         const home = yield* tempDirectory("c-")
         const lines: Array<string> = []
         yield* listen(path.join(home, "vibest.sock"), lines)
-        const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1" }
+        const worker = { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "w1", VIBEST_PROCESS: "7" }
         const invoke = (report: typeof integrationStop, event: unknown, env: Record<string, string> = worker) =>
           report("cursor", JSON.stringify(event)).pipe(
             Effect.provideServiceEffect(Layout, Layout.make(home)),
@@ -235,6 +236,8 @@ layer(Platform.services)("claude integration stop", (it) => {
           ["Session.Ready", "Prompt", "ExecutionEnd"],
         )
         assert.deepStrictEqual(rpc(lines)[0]?.params, { id: "w1" })
+        for (const request of rpc(lines))
+          assert.deepInclude(Object.fromEntries(request.headers as Array<[string, string]>), { "vibest-process": "7" })
         assert.deepStrictEqual(rpc(lines)[1]?.params, {
           sessionId: "w1",
           harness: "cursor",

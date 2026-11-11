@@ -87,6 +87,7 @@ export type Claim =
       readonly repositoryRoot?: string
       readonly harnessSessionId?: string
       readonly pluginVersion?: string
+      readonly process?: string
     }
 
 export const protocolHeaders = () => ({ [PROTOCOL_HEADER]: String(PROTOCOL) })
@@ -105,6 +106,7 @@ const fromEnv = Effect.gen(function* () {
     agent: yield* read("VIBEST_AGENT"),
     harness: yield* read("VIBEST_HARNESS"),
     runtime: yield* read("VIBEST_RUNTIME"),
+    process: yield* read("VIBEST_PROCESS"),
     cwd: (yield* Path.Path).resolve("."),
   }
 }).pipe(
@@ -122,6 +124,7 @@ export const claimHeaders = (claim: Claim) =>
           repositoryRoot: claim.repositoryRoot,
           harnessSessionId: claim.harnessSessionId,
           pluginVersion: claim.pluginVersion,
+          ...(claim.process === undefined ? {} : { process: claim.process }),
         }),
       )
 

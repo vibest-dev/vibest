@@ -10,7 +10,12 @@ import { Layout } from "./paths.ts"
 import { jsonObject, promptOf, executionEndOf } from "./replies.ts"
 import { Sessions } from "./sessions.ts"
 
-export type HookCaller = { readonly id: string; readonly agent: string; readonly harness: string }
+export type HookCaller = {
+  readonly id: string
+  readonly agent: string
+  readonly harness: string
+  readonly process?: number | undefined
+}
 
 const make = Effect.gen(function* () {
   const db = yield* Db
@@ -24,7 +29,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const event = definition.conversationOf === undefined ? undefined : jsonObject(raw)
       const conversation = event && definition.conversationOf?.(event)
-      if (conversation && (yield* db.noteHarnessSession(who.id, conversation)))
+      if (conversation && (yield* db.noteConversation(who.id, conversation, who.process)))
         yield* Effect.logInfo(`session ${who.id} is in conversation ${conversation}`)
     })
 
@@ -33,7 +38,7 @@ const make = Effect.gen(function* () {
     if (definition === undefined) return
     const end = executionEndOf(definition, who.agent, raw, yield* Clock.currentTimeMillis)
     if (!end) return yield* noteConversation(definition, who, raw)
-    const written = yield* db.endObserved(who.id, end)
+    const written = yield* db.endObserved(who.id, end, who.process)
     yield* Effect.log(`execution end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)
   })
 
@@ -43,16 +48,18 @@ const make = Effect.gen(function* () {
     yield* noteConversation(definition, who, raw)
     const text = promptOf(definition, who.agent, raw)
     if (text === undefined) return
-    yield* sessions.userPrompt(who.id, text, yield* Clock.currentTimeMillis)
+    yield* sessions.userPrompt(who.id, text, yield* Clock.currentTimeMillis, who.process)
   })
 
   const ready = Effect.fn("Integration.ready")(function* (
     id: string,
     pid: number | undefined,
     reported?: { readonly version: string; readonly protocol: number },
+    reporter?: number,
   ) {
-    yield* db.patchLive(id, {
+    return yield* db.patchLive(id, {
       ready: yield* Clock.currentTimeMillis,
+      reporter,
       ...(pid === undefined ? {} : { pid }),
       ...(reported === undefined ? {} : { integration: reported }),
     })

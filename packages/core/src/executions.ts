@@ -1,12 +1,12 @@
 import type { HarnessUnavailable, NotReady } from "@vibest/schema/session"
 import { Clock, Effect, Exit } from "effect"
-import type { FileSystem } from "effect"
+import type { FileSystem, Path } from "effect"
 
 import { type InboxRow, type InboxStatus, type SessionPatch, type SessionRow, type ExecutionEnd } from "./db.ts"
 import { nextBatch } from "./inbox.ts"
 import { type Runtime, type RuntimeError, type Terminal } from "./runtimes.ts"
 
-export const sessionRounds = (deps: {
+export const sessionExecutions = (deps: {
   readonly db: {
     readonly endExecution: (
       id: string,
@@ -25,6 +25,7 @@ export const sessionRounds = (deps: {
       into?: number,
     ) => Effect.Effect<ReadonlyArray<InboxRow>>
     readonly openExecution: (sessionId: string) => Effect.Effect<number | undefined>
+    readonly untakenTask: (sessionId: string) => Effect.Effect<string | undefined>
   }
   readonly undelivered: (
     session: SessionRow,
@@ -43,6 +44,12 @@ export const sessionRounds = (deps: {
     text: string,
     onHandover?: Effect.Effect<void>,
   ) => Effect.Effect<string | undefined, NotReady | RuntimeError | HarnessUnavailable, FileSystem.FileSystem>
+  readonly handTask: (
+    h: Runtime,
+    session: SessionRow,
+    terminal: Terminal,
+    task: string,
+  ) => Effect.Effect<void, NotReady | RuntimeError | HarnessUnavailable, FileSystem.FileSystem | Path.Path>
 }) => {
   const { db } = deps
 
@@ -60,6 +67,8 @@ export const sessionRounds = (deps: {
     session: SessionRow,
     terminal: Terminal,
   ) {
+    const task = yield* db.untakenTask(session.id)
+    if (task !== undefined) return yield* deps.handTask(h, session, terminal, task)
     const pending = yield* db.pendingInbox(session.id)
     if (pending.length === 0) return
     const batch = nextBatch(pending)
@@ -89,12 +98,12 @@ export const sessionRounds = (deps: {
           if (rows.length === 0) return Effect.void
           return notStarted
             ? deps.undelivered(session, rows, notStarted)
-            : db.setInboxStatus(session.id, claimed, "delivered", "sending", handedInto)
+            : db.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
         }),
         Effect.onExit((exit) =>
           Exit.isSuccess(exit) || claimed.length === 0
             ? Effect.void
-            : db.setInboxStatus(session.id, claimed, "failed", "sending"),
+            : db.setInboxStatus(session.id, claimed, "failed", "delivering"),
         ),
         Effect.catchTags({
           RuntimeError: (e) =>

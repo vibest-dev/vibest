@@ -1,5 +1,5 @@
 import { Bus } from "@vibest/core/bus"
-import { Db, type SessionRow } from "@vibest/core/db"
+import { Db, type NewSession } from "@vibest/core/db"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layer } from "effect"
 
@@ -10,8 +10,8 @@ export const database = (filename: string) =>
 
 export const session = (
   id: string,
-  patch: Partial<Omit<SessionRow, "projectId">> = {},
-): Omit<SessionRow, "projectId"> => ({
+  patch: Partial<Omit<NewSession, "projectId">> = {},
+): Omit<NewSession, "projectId"> => ({
   id,
   agent: "general",
   name: "n",

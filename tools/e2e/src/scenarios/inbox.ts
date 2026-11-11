@@ -347,7 +347,7 @@ const checks: ReadonlyArray<Check> = [
           expect(n === 1, `the line for ${sub} shows ${n} times`)
         }
 
-        const round = async (marker: string) => {
+        const exchange = async (marker: string) => {
           const before = c!.delivered(b)
           await w.ok(["send", b, "--", ask(marker)], { cwd: c!.repo })
           await c!.result(b, "Answer probe beta", marker, before)
@@ -355,7 +355,7 @@ const checks: ReadonlyArray<Check> = [
         const first = c.conversation()
         await c.typeIn("/clear")
         await until("the conversation after /clear", () => c!.conversation() !== first, 60_000)
-        await round("cmcleared")
+        await exchange("cmcleared")
         const cleared = c.conversation()
         const pid = await c.claudePid()
         expect(pid !== undefined, "no claude process in the main agent's pane")
@@ -369,7 +369,7 @@ const checks: ReadonlyArray<Check> = [
         )
         await c.typeInShell([binary, "--harness", "claude"].join(" "))
         await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
-        await round("cmresumed")
+        await exchange("cmresumed")
         expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
 
         await c.typeIn(`Wait for the go file: ${wait}`)
@@ -745,7 +745,7 @@ const checks: ReadonlyArray<Check> = [
     id: "S26",
     covers: ["S2"],
     title:
-      "latency: 3 rounds of a busy Pi subagent, a queued send, then release, and 3 pane closes of idle subagents; every queued send goes out and every closed pane's process ends; the times (execution end to delivering, pane close to process.end) are recorded",
+      "latency: 3 executions of a busy Pi subagent, a queued send, then release, and 3 pane closes of idle subagents; every queued send goes out and every closed pane's process ends; the times (execution end to delivering, pane close to process.end) are recorded",
     run: async (w, evidence) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = heldModel()
@@ -802,7 +802,7 @@ const checks: ReadonlyArray<Check> = [
           const message = ask(`r${i}`)
           await w.ok(["send", sub, "--", message], { cwd: repo, env })
           await until(
-            `round ${i} queued`,
+            `pass ${i} queued`,
             () =>
               q<{ status: string }>(
                 "SELECT status FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ? ORDER BY id DESC LIMIT 1",
@@ -816,16 +816,16 @@ const checks: ReadonlyArray<Check> = [
             sub,
             message,
           )
-          expect(sent !== undefined, `round ${i}: the queued send is not in the database`)
+          expect(sent !== undefined, `pass ${i}: the queued send is not in the database`)
           const logAt = (await fs.readFile(logFile, "utf8").catch(() => "")).length
           const heldStreamsOfThisExecution = model.held()
-          expect(heldStreamsOfThisExecution >= 1, `round ${i}: no held execution`)
+          expect(heldStreamsOfThisExecution >= 1, `pass ${i}: no held execution`)
           for (let k = 0; k < heldStreamsOfThisExecution; k++) model.releaseOne()
           let receipt = 0
           let hookMs = 0
           let deliveryMs = 0
           await until(
-            `round ${i} settled`,
+            `pass ${i} settled`,
             async () => {
               if (receipt === 0) {
                 const fresh = (await fs.readFile(logFile, "utf8").catch(() => "")).slice(logAt)

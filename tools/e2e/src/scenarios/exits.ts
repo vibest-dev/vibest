@@ -423,7 +423,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S29",
     title:
-      "vibestd killed (kill -9) while a subagent's first execution waits for its harness to be ready (the task not handed over): the next vibestd types the task once, as that execution's input, and the one completed execution sends nothing",
+      "vibestd killed (kill -9) while a subagent's terminal waits for its harness to be ready (no execution open, the task not handed over): the next vibestd types the task once, as its first execution's input, and the one completed execution sends nothing",
     run: async (w) => {
       const p = await piProject(w, "s29")
       try {
@@ -432,12 +432,18 @@ const checks: ReadonlyArray<Check> = [
         for (let attempt = 1; sub === "" && attempt <= killWindowTries; attempt++) {
           const daemon = await w.daemonPid()
           const id = await p.runSub(`t${attempt}`)
-          const opened = () =>
-            row<{ n: number }>(w, "SELECT count(*) AS n FROM execution WHERE session_id = ?", id)?.n === 1
-          for (const deadline = Date.now() + 60_000; !opened(); await Bun.sleep(1))
-            expect(Date.now() < deadline, `${id}: its first execution never opened`)
+          const placed = () =>
+            row<{ n: number }>(
+              w,
+              "SELECT count(*) AS n FROM process WHERE session_id = ? AND coalesce(terminal, '') != ''",
+              id,
+            )?.n === 1
+          const executions = () =>
+            row<{ n: number }>(w, "SELECT count(*) AS n FROM execution WHERE session_id = ?", id)?.n
+          for (const deadline = Date.now() + 60_000; !placed(); await Bun.sleep(1))
+            expect(Date.now() < deadline, `${id}: its terminal never opened`)
           await w.killDaemon(daemon)
-          if (untaken(w, id)) sub = id
+          if (untaken(w, id) && executions() === 0) sub = id
           await p.startDaemon()
           if (sub === "") await until(`${id} idle`, () => p.idle(id), 60_000)
         }

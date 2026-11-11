@@ -87,7 +87,7 @@ describe("Db", () => {
     )
 
   it.effect(
-    "rescheduleSource: the open round's input, the trailing delivered user or parent run, and the parent id; an empty open round resends the trailing same-sender batch, not an earlier execution",
+    "rescheduleSource: the open execution's input, the trailing delivered user or parent run, and the parent id; an empty open execution resends the trailing same-sender batch, not an earlier execution",
     () =>
       memory(
         Effect.gen(function* () {
@@ -121,7 +121,7 @@ describe("Db", () => {
             since: 1,
           })
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { executionState: "completed" })
-          yield* db.beginExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 2)
+          yield* db.startExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 2)
           assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).working, "")
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { executionState: "completed" })
           assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
@@ -196,7 +196,7 @@ describe("Db", () => {
         Effect.gen(function* () {
           const db = yield* Db
           const sql = yield* SqlClient.SqlClient
-          const round = (id: string) =>
+          const execution = (id: string) =>
             sql<{
               inboxId: number | null
               input: string
@@ -210,7 +210,7 @@ describe("Db", () => {
             executionPromptedAt: 5,
           })
           assert.strictEqual(
-            (yield* round("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))[0]!.inboxId,
+            (yield* execution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))[0]!.inboxId,
             null,
             "opening the execution does not hand the task over; its handover does",
           )
@@ -218,7 +218,7 @@ describe("Db", () => {
           const [task] = yield* sql<{
             id: number
           }>`SELECT id FROM inbox WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`
-          const [opened] = yield* round("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+          const [opened] = yield* execution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           assert.strictEqual(opened!.inboxId, task!.id)
           assert.strictEqual(opened!.input, "do it")
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { executionState: "completed" })
@@ -226,7 +226,7 @@ describe("Db", () => {
             executionState: "open",
             executionPromptedAt: 9,
           })
-          const [again] = yield* round("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+          const [again] = yield* execution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
           assert.isNull(again!.inboxId)
           assert.strictEqual(again!.input, "")
 
@@ -237,9 +237,9 @@ describe("Db", () => {
             executionPromptedAt: 3,
           })
           yield* db.setInboxStatus("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", [sent!.id], "delivered")
-          const [sendRound] = yield* round("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
-          assert.strictEqual(sendRound!.inboxId, sent!.id)
-          assert.strictEqual(sendRound!.input, "ping")
+          const [sendExecution] = yield* execution("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+          assert.strictEqual(sendExecution!.inboxId, sent!.id)
+          assert.strictEqual(sendExecution!.input, "ping")
 
           yield* db.insertSession(session("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), yield* projectOf("r"))
           const first = yield* db.insertSend("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "add a test")
@@ -249,7 +249,7 @@ describe("Db", () => {
             executionPromptedAt: 4,
           })
           yield* db.setInboxStatus("cccccccc-cccc-4ccc-8ccc-cccccccccccc", [first!.id, second!.id], "delivered")
-          const [merged] = yield* round("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+          const [merged] = yield* execution("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
           assert.strictEqual(merged!.inboxId, second!.id)
           assert.strictEqual(merged!.input, "add a test\n\nalso update the readme")
           yield* db.updateSession("cccccccc-cccc-4ccc-8ccc-cccccccccccc", { executionState: "completed" })
@@ -259,14 +259,14 @@ describe("Db", () => {
             executionPromptedAt: 6,
           })
           yield* db.setInboxStatus("cccccccc-cccc-4ccc-8ccc-cccccccccccc", [third!.id], "delivered")
-          const [next] = yield* round("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+          const [next] = yield* execution("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
           assert.strictEqual(next!.inboxId, third!.id)
           assert.strictEqual(next!.input, "and the docs")
         }),
       ),
   )
 
-  it.effect("startObserved keeps a round that is already open and does not record the typed text", () =>
+  it.effect("startObserved keeps an execution that is already open and does not record the typed text", () =>
     memory(
       Effect.gen(function* () {
         const db = yield* Db
@@ -358,9 +358,15 @@ describe("Db", () => {
         assert.strictEqual(yield* db.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), "do it")
         yield* db.linkTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
         assert.isUndefined(yield* db.untakenTask("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+        assert.isFalse(
+          yield* db.executionTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+          "a task linked to the open execution is not yet proof the harness took it up",
+        )
+        const open = (yield* db.openExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!
+        yield* db.acceptExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", open)
         assert.isTrue(
           yield* db.executionTaken("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-          "the task delivered into the open execution is the stored proof it was taken up",
+          "its acceptance is the stored proof it was taken up",
         )
         assert.strictEqual(
           (yield* sql<{
@@ -413,7 +419,7 @@ describe("Db", () => {
             }>`SELECT session_id AS recipient FROM inbox WHERE kind = 'notice' AND instr(content, ${summary}) > 0`,
             (rows) => rows.map((row) => row.recipient),
           )
-        const round = (summary: string) =>
+        const execution = (summary: string) =>
           Effect.gen(function* () {
             yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
               executionState: "open",
@@ -426,10 +432,10 @@ describe("Db", () => {
               summary,
             )
           })
-        yield* round("one")
+        yield* execution("one")
         assert.deepStrictEqual(yield* recipientOf("one"), ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"])
         yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { metadata: { archived: true, removed: true } })
-        yield* round("two")
+        yield* execution("two")
         assert.deepStrictEqual(yield* recipientOf("two"), ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"])
       }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
   )
@@ -576,7 +582,7 @@ describe("Db", () => {
         }
         assert.deepStrictEqual(yield* db.claim(row.recipient!, [row.id], guard), [row.id])
         assert.deepStrictEqual(yield* db.claim(row.recipient!, [row.id], guard), [])
-        yield* db.setInboxStatus(row.recipient!, [row.id], "delivered", "sending")
+        yield* db.setInboxStatus(row.recipient!, [row.id], "delivered", "delivering")
         assert.strictEqual(yield* noticeStatus("hi"), "delivered")
         yield* db.insertInbox({
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

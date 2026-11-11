@@ -156,8 +156,8 @@ describe("Watch", () => {
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
       const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
-      const isSession = (status: string, execution: number) => (e: WatchEvent) =>
-        e._tag === "Session" && e.session.id === id && e.session.status === status && e.session.execution === execution
+      const isSession = (status: string, finished: number) => (e: WatchEvent) =>
+        e._tag === "Session" && e.session.id === id && e.session.status === status && e.session.finished === finished
       yield* next((e): e is WatchEvent => isSession("working", 0)(e))
       const terminal = (yield* herdr.terminalOf(id))!
       yield* herdr.endExecution(id)
@@ -165,19 +165,19 @@ describe("Watch", () => {
       const isProject = (activity: string) => (e: WatchEvent) =>
         e._tag === "Project" && e.project.id === project && e.project.activity === activity
       yield* next((e): e is WatchEvent => isSession("idle", 0)(e))
-      yield* herdr.finishExecution(terminal.id)
+      yield* herdr.countFinished(terminal.id)
       yield* next((e): e is WatchEvent => isSession("done", 1)(e))
       yield* next((e): e is WatchEvent => isProject("done")(e))
 
-      yield* c["Session.Seen"]({ id, execution: 2 })
-      yield* c["Session.Seen"]({ id, execution: 0 })
-      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { execution: 1, seen: 0 })
-      yield* c["Session.Seen"]({ id, execution: 1 })
+      yield* c["Session.Seen"]({ id, finished: 2 })
+      yield* c["Session.Seen"]({ id, finished: 0 })
+      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { finished: 1, seen: 0 })
+      yield* c["Session.Seen"]({ id, finished: 1 })
       yield* next((e): e is WatchEvent => isSession("idle", 1)(e))
       yield* next((e): e is WatchEvent => isProject("idle")(e))
-      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { execution: 1, seen: 1 })
+      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { finished: 1, seen: 1 })
       assert.strictEqual(
-        (yield* Effect.flip(coordinator["Session.Seen"]({ id, execution: 1 })))._tag,
+        (yield* Effect.flip(coordinator["Session.Seen"]({ id, finished: 1 })))._tag,
         "Forbidden",
         "only the user marks what they saw",
       )
@@ -185,7 +185,7 @@ describe("Watch", () => {
   )
 
   test(
-    "overlapping Session.Seen calls on one terminal run one after another, so the mark ends at the higher execution",
+    "overlapping Session.Seen calls on one terminal run one after another, so the mark ends at the higher finished count",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { repo, coordinator } = yield* withMain
@@ -194,16 +194,16 @@ describe("Watch", () => {
       const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* next((e): e is WatchEvent => e._tag === "Session" && e.session.id === id && e.session.status === "working")
       const terminal = (yield* herdr.terminalOf(id))!
-      yield* Effect.repeat(herdr.finishExecution(terminal.id), { times: 5 })
+      yield* Effect.repeat(herdr.countFinished(terminal.id), { times: 5 })
       const held = yield* herdr.hold("see", terminal.id)
-      const five = yield* c["Session.Seen"]({ id, execution: 5 }).pipe(Effect.forkScoped)
+      const five = yield* c["Session.Seen"]({ id, finished: 5 }).pipe(Effect.forkScoped)
       yield* held.reached
-      const six = yield* c["Session.Seen"]({ id, execution: 6 }).pipe(Effect.forkScoped)
+      const six = yield* c["Session.Seen"]({ id, finished: 6 }).pipe(Effect.forkScoped)
       yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 200)))
       yield* held.release()
       yield* Fiber.join(five)
       yield* Fiber.join(six)
-      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { execution: 6, seen: 6 })
+      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { finished: 6, seen: 6 })
     }),
   )
 

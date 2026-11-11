@@ -50,7 +50,7 @@ _As a tech lead, I want two or three models to argue a design until they agree, 
 | Step                                                                                              | Expect                                                                                                                         |
 | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | ask the main Agent: "committee: should sessions be stored in SQLite or files? Claude, Cursor, Pi" | three read-only members, one per harness, same question                                                                        |
-| rounds                                                                                            | the main Agent forwards each member's argument to the others with `vibest send`; every answer returns to the main conversation |
+| exchanges                                                                                         | the main Agent forwards each member's argument to the others with `vibest send`; every answer returns to the main conversation |
 | end                                                                                               | a summary listing the agreement and the disagreements; no member changed a file (worktrees clean)                              |
 
 Status: now as coordinator behaviour; after refactor as the `committee` skill with all members in one Run (`--in`),

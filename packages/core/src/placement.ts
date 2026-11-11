@@ -56,6 +56,7 @@ export const sessionPlacement = (deps: {
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly endProcess: (id: string, reason: ProcessEndReason) => Effect.Effect<boolean>
     readonly startedByPeer: (id: string) => Effect.Effect<boolean>
+    readonly currentProcessId: (id: string) => Effect.Effect<number | undefined>
   }
   readonly runtimes: RuntimesShape
   readonly layout: {
@@ -74,7 +75,7 @@ export const sessionPlacement = (deps: {
   }
   readonly path: { readonly dirname: (path: string) => string }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
-  readonly vibestEnv: (session: SessionRow) => Readonly<Record<string, string>>
+  readonly vibestEnv: (session: SessionRow, process?: number) => Readonly<Record<string, string>>
   readonly launchArgv: (
     session: SessionRow,
     resume: boolean,
@@ -161,12 +162,13 @@ export const sessionPlacement = (deps: {
       harnessSessionId: session.harnessSessionId,
     }
     yield* db.updateSession(session.id, { ...choice, address: { machine: session.address.machine, id: "" } })
+    const started = yield* db.currentProcessId(session.id)
     const opened = yield* h
       .open({
         project: input.project,
         cwd: input.cwd,
         argv: input.argv,
-        env: { ...input.env, ...deps.vibestEnv(session) },
+        env: { ...input.env, ...deps.vibestEnv(session, started) },
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),

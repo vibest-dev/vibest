@@ -9,7 +9,7 @@ vibest's integration for [Cursor's CLI](https://cursor.com/cli) (`cursor-agent`)
 - **readiness**: `sessionStart` goes to `vibest integration ready --harness cursor`; vibestd types the first task only
   after it.
 - **an execution at work**: `afterAgentThought`, `postToolUse` and `beforeSubmitPrompt` go to
-  `vibest integration prompt --harness cursor`; vibestd shows the session working, and opens a round for a prompt the
+  `vibest integration prompt --harness cursor`; vibestd shows the session working, and opens an execution for a prompt the
   user typed. Cursor runs a plugin's `beforeSubmitPrompt` only when user or project hooks also have one.
 - **the execution end**: `afterAgentResponse` goes to `vibest integration stop --harness cursor`; vibestd writes the session's
   result and shows it idle. Cursor does not run a plugin's `stop` hook.

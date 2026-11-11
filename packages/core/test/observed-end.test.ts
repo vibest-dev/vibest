@@ -50,6 +50,55 @@ describe("observed execution end", () => {
   )
 
   test(
+    "an end before the open execution is accepted belongs to earlier activity: it neither closes it nor opens another",
+    Effect.gen(function* () {
+      const { id, db } = yield* idleSession(yield* makeRepository)
+      const before = yield* ends(id)
+      const { execution } = yield* db.startExecution(id, yield* Clock.currentTimeMillis)
+      assert.strictEqual(yield* db.endObserved(id, yield* observedEnd("pi", { text: "background" })), "unaccepted")
+      assert.deepStrictEqual(yield* ends(id), before)
+      assert.strictEqual(yield* db.openExecution(id), execution)
+      yield* db.acceptExecution(id, execution)
+      yield* writeEnd(id, "pi", { text: "mine" })
+      assert.deepStrictEqual((yield* ends(id)).at(-1), { execution, outcome: "completed", reply: "mine" })
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "an execution the runtime confirms is accepted, and its end report closes it",
+    Effect.gen(function* () {
+      const { id, db, sessions } = yield* idleSession(yield* makeRepository)
+      yield* sessions.send(id, "next")
+      const execution = yield* until(db.openExecution(id), (open) => open !== undefined)
+      yield* until(db.executionAccepted(id), (accepted) => accepted)
+      assert.deepStrictEqual((yield* eventsOf(id, "execution.accepted")).at(-1)?.data, { execution })
+      yield* writeEnd(id, "pi", { text: "confirmed by the runtime" })
+      assert.deepStrictEqual((yield* ends(id)).at(-1), {
+        execution,
+        outcome: "completed",
+        reply: "confirmed by the runtime",
+      })
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "a start or end report from an earlier process of the session is dropped",
+    Effect.gen(function* () {
+      const { id, db } = yield* spawnWorking(yield* makeRepository)
+      const current = (yield* db.currentProcessId(id))!
+      const earlier = current - 1
+      assert.isUndefined(yield* db.endObserved(id, yield* observedEnd("pi", { text: "old" }), earlier))
+      assert.deepStrictEqual(yield* ends(id), [])
+      assert.strictEqual(yield* db.endObserved(id, yield* observedEnd("pi", { text: "new" }), current), "completed")
+      yield* db.startObserved(id, "typed into the old process", yield* Clock.currentTimeMillis, earlier)
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
     "an end is ignored for the entry session and for a harness the session no longer runs",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient

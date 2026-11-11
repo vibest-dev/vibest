@@ -158,8 +158,10 @@ CREATE TABLE execution (                              -- id: the seq of its exec
   process_id INTEGER,
   typed      TEXT,                                    -- the text typed into the pane; none for one a delivery opened
   started_at INTEGER NOT NULL,
+  accepted_at INTEGER,                                -- its execution.accepted: the harness took the input up
   outcome    TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),  -- null: open
   failure    TEXT,
+  failure_kind TEXT CHECK (failure_kind IN ('limit')),  -- limit: the harness hit its usage limit
   reply      TEXT,                                    -- the reply its execution.ended carried; null: none (lost, an exit)
   ended_at   INTEGER,
   PRIMARY KEY (session_id, id)
@@ -229,7 +231,8 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                            |
 | process.ended                       | process, reason: exited, limited, restart, move, archived, launch_failed, superseded                                 |
 | execution.started                   | process?, typed? (the text typed into the pane)                                                                      |
-| execution.ended                     | execution, outcome, failure? {message}, conversation?, reply? (the harness's reply, when it reported the end)        |
+| execution.accepted                  | execution: the harness took the open execution's input up (its start report, or the runtime saw it working)          |
+| execution.ended                     | execution, outcome, failure? {message, kind?: limit}, conversation?, reply? (the harness's reply, when it reported)  |
 | inbox.queued                        | kind: task, send or notice, recipient?, sender?, content, status: pending, delivered or dropped, request?, peerItem? |
 | inbox.moved                         | inbox, to, execution? (on to = delivered: the execution that took it)                                                |
 | machine.added, .connected, .removed | name (added: target, vibestd)                                                                                        |
@@ -251,10 +254,14 @@ An `execution.ended` the harness reported carries its reply (`reply`) and, when 
 projector copies `reply` into the execution's `reply` and the conversation into the current process. An end vibestd
 decided (`lost`, `not_started`, an exit, an interrupt it closed) has no `reply`.
 
-A reported end is written only for the harness the session's current process runs, and, for a harness whose
-integration reports ready, only after that process's ready report: in a restart's window the new process is already
-started while the old harness may still report, and that end is dropped. vibestd's own closes write only while the
-round they decided about is still open, so an end the harness reported first is the one that stands.
+A reported end or start is written only for the session's current process: the harness's integration sends the
+process id vibestd started it as (`VIBEST_PROCESS`, or the one the ready report's answer gave after an in-place
+restart), and a report naming another process is dropped. A reported end is also written only for the harness the
+current process runs, and, for a harness whose integration reports ready, only after that process's ready report.
+A conversation id or integration version a report carries is recorded under the same process check. An
+end that arrives while the open execution is not yet accepted belongs to earlier activity (a Claude background task's
+end, for example): it neither closes that execution nor opens another, and its reply is not kept. vibestd's own closes write only while the
+execution they decided about is still open, so an end the harness reported first is the one that stands.
 
 Changing the catalog: the catalog holds only the types and keys vibestd writes now. Adding an optional key raises
 `CATALOG_VERSION` by one. A type or key that changes meaning or structure, or is no longer written, is retired: it
@@ -270,7 +277,13 @@ type or key changes or removes rows, in the same pull request.
 
 - All SQL is in `packages/core/src/db.ts` and its `db-*.ts` modules, over one SQLite connection. The session row
   callers read (`SessionRow`) is built from the read model plus the memory listed below (`ledger-read.ts` holds the
-  reads the import's referee shares).
+  reads the import's referee shares). Besides its older flat fields it carries `endedAt`, `parentId`, `entry`, the
+  current `process`, the `openExecution` (outcome null) and the `lastExecution` (the most recently ended one); a
+  session with neither never ran an execution. `attempts` lists the harness and provider of each of its processes that
+  ended `limited`, in process order, once per pair.
+- Writes go through intent methods, one per fact: `startProcess` opens a process and `placeProcess` only gives the
+  current one its terminal (never a new process id); `startExecution`, `noteConversation`, `rename` and `archive` each
+  write their fact when it changes something. `updateSession` maps a patch onto them until its callers move.
 - `commit` runs one transaction and publishes the facts it appended after the commit, in the order it appended them. A nested `commit`
   shares the outer buffer, so only the outermost commit publishes; a rollback publishes nothing. Only the body is
   interruptible: once it has finished, the commit's facts are published before an interrupt lands. The buffer closes
@@ -286,7 +299,8 @@ type or key changes or removes rows, in the same pull request.
   blank line.
 - A task is queued `delivered` with no execution; one with no `execution_id` was never handed over: the only move a
   task gets is its handover, which names the execution. An execution that ended before its handover (vibestd stopped while
-  waiting for ready) took nothing, so the task is still handed over.
+  waiting for ready, or one the user typed meanwhile) took nothing, so the task is still handed over: it is the head
+  of the session's queue, an execution end hands it over like a pending row, and an automatic archive waits for it.
 - A conversation can be resumed when a process of the session that resumed it or reported it has an ended execution, or,
   for an entry session, when a process of it reported it. The read model keeps only each process's latest
   conversation, so an earlier one in the same process no longer counts.
@@ -350,10 +364,11 @@ E2E runs it on every world's database at the end of each check.
   and a crash after it leaves an unended process with no harness in the pane, which reconciliation ends.
 - Skipped options within one harness change, per-session locks, paste and ack waits: lost with the process; an
   open execution stays open, and the harness's execution end or reconciliation (idle, no result: lost) ends it.
-- An execution start an integration reports is published (`live.execution_start`), never stored: it marks the open execution as
-  worked in the session's flags, which `forget` clears on its `process.ended` or its archive. An execution end is its
-  `execution.ended` fact, written as the hook is admitted (a settlement, so it still lands while vibestd drains).
-  After a restart the stored proof that an execution was taken up is its typed text or an inbox row delivered into it.
+- An execution start an integration reports, or the runtime showing the session working while an execution is open,
+  is that execution's `execution.accepted`, written once. An execution end is its `execution.ended` fact, written as
+  the hook is admitted (a settlement, so it still lands while vibestd drains). The proof that an execution was taken up
+  is its acceptance or its typed text; an inbox row linked into it is not, since a task is linked before the runtime
+  gets it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.
 - `vibest run --archive-on-idle`: the flag is kept only in the memory of the vibestd that started the session (set at

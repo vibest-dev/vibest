@@ -77,7 +77,7 @@ describe.concurrent("Sessions", () => {
       const herdr = yield* FakeRuntime
       const sql = yield* SqlClient.SqlClient
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      const roundId = (yield* sql<{
+      const executionId = (yield* sql<{
         id: number
       }>`SELECT id FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id}`.pipe(Effect.orDie))[0]!.id
       yield* Ref.set(herdr.skipPromptUpdates, 2)
@@ -90,7 +90,7 @@ describe.concurrent("Sessions", () => {
       )
       const row = (yield* db.getSession(id))!
       assert.deepInclude(row, { harnessId: "cursor", executionState: "open" })
-      const rounds = yield* sql<{
+      const executions = yield* sql<{
         id: number
         status: string
         inbox: number | null
@@ -99,7 +99,11 @@ describe.concurrent("Sessions", () => {
         (SELECT id FROM inbox WHERE session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
         FROM ${sql.literal(EXECUTIONS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
       assert.deepStrictEqual(
-        rounds.map((round) => [round.id === roundId, round.status, round.inbox === round.task]),
+        executions.map((execution) => [
+          execution.id === executionId,
+          execution.status,
+          execution.inbox === execution.task,
+        ]),
         [
           [true, "failed", true],
           [false, "not_started", false],
@@ -124,7 +128,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a limit resends the open round's input, not the original task: a typed execution's text, the newest delivered follow-up, a whole merged batch",
+    "a limit resends the open execution's input, not the original task: a typed execution's text, the newest delivered follow-up, a whole merged batch",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
@@ -215,12 +219,12 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual((yield* herdr.callsTo("send")).at(-1)!.text, "do it")
       assert.strictEqual((yield* db.sessionBriefs([id])).get(id)?.task, "do it")
       const sql = yield* SqlClient.SqlClient
-      const [round] = yield* sql<{
+      const [execution] = yield* sql<{
         input: string
       }>`SELECT input FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(
         Effect.orDie,
       )
-      assert.strictEqual(round!.input, "do it")
+      assert.strictEqual(execution!.input, "do it")
       assert.deepStrictEqual(
         (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
         ["pi", "claude"],
@@ -346,7 +350,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a login limited in this round is not tried again in it, even when its row reads free; a later round may use it",
+    "a login limited in this execution is not tried again in it, even when its row reads free; a later execution may use it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const subs = yield* Subscriptions

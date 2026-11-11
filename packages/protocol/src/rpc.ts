@@ -288,7 +288,7 @@ export type ProjectRow = typeof ProjectRow.Type
 export const WatchSession = Schema.Struct({
   ...SessionInfo.fields,
   parentId: Schema.NullOr(Schema.String),
-  execution: Schema.NullOr(Schema.Number),
+  finished: Schema.NullOr(Schema.Number),
 })
 export type WatchSession = typeof WatchSession.Type
 
@@ -481,7 +481,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Session.Seen", {
-        payload: { id: Schema.String, execution: Schema.Number },
+        payload: { id: Schema.String, finished: Schema.Number },
         error: Schema.Union([Forbidden, NoSuchSession, RuntimeUnreachable]),
       }),
     ),
@@ -704,6 +704,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     Rpc.make("Session.Ready", {
       payload: { id: Schema.String, pid: Schema.optional(Schema.Number) },
+      success: Schema.Struct({ process: Schema.optional(Schema.Number) }),
       error: Schema.Union([Forbidden, NoSuchSession]),
     }),
   ),

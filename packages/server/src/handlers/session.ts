@@ -9,6 +9,7 @@ import { Caller, type CallerShape, Forbidden, type PayloadOf, WatchLagged, type 
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Queue, Stream } from "effect"
 
+import { integrationOf, processOf, reader } from "../gates.ts"
 import { type Listing, toInfo } from "../listing.ts"
 import type { Checks, Handlers, MethodOf } from "./caller.ts"
 import type { RemoteHandlers } from "./remote.ts"
@@ -243,7 +244,7 @@ export const make = (
           }),
         ),
 
-      "Session.Seen": ({ id, execution }) =>
+      "Session.Seen": ({ id, finished }) =>
         Effect.gen(function* () {
           yield* cliOnly("Session.Seen")
           const identity = yield* db.sessionIdentity(id)
@@ -260,14 +261,16 @@ export const make = (
           const seen = rt.seen
           yield* Effect.gen(function* () {
             const now = yield* seen(address).pipe(Effect.mapError(unreachable))
-            if (raisesSeen(now, execution)) yield* see(address, execution).pipe(Effect.mapError(unreachable))
+            if (raisesSeen(now, finished)) yield* see(address, finished).pipe(Effect.mapError(unreachable))
           }).pipe(seenLocked.withLock(`${at.runtime}\n${address.machine}\n${address.id}`))
         }),
 
-      "Session.Ready": ({ id, pid }) =>
+      "Session.Ready": ({ id, pid }, { headers }) =>
         Effect.gen(function* () {
           yield* self("Session.Ready", id)
-          yield* integration.ready(id, pid)
+          const read = reader(headers)
+          const current = yield* integration.ready(id, pid, integrationOf(read), processOf(read))
+          return current === undefined ? {} : { process: current }
         }),
 
       "Agents.Outdated": () => cliOnly("Agents.Outdated").pipe(Effect.andThen(sessions.outdated)),

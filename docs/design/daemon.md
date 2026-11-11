@@ -87,10 +87,9 @@ Changes are counted at the RPC and HTTP entry until they end, failed or interrup
 hook's execution start (`Prompt`) or execution end (`ExecutionEnd`) and an inbox ack. While it drains these are still admitted;
 after the Stop is accepted they are refused too. Refused while draining, a spawn's first execution would never show its
 pickup proof (its launch then holds the drain open) and an execution end would lose its result. An execution end is one
-transaction that writes the round's `execution.ended` with its reply, without the session lock; a write that fails fails the request, so the caller sees a
-failure, not a silent retry. An execution start is stamped once, when the hook arrives: `userPrompt` notes the start before
-it may wait for the session's lock, held through a send's whole confirm, and stamps the round with the same time, so
-the pending send sees its pickup proof while it still waits.
+transaction that writes the execution's `execution.ended` with its reply, without the session lock; a write that fails fails the request, so the caller sees a
+failure, not a silent retry. An execution start is written once, when the hook arrives, without the session's lock (held through a send's whole
+confirm): `userPrompt` accepts the open execution, so the pending send sees its pickup proof while it still waits.
 
 ## Session requests
 

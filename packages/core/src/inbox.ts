@@ -86,7 +86,7 @@ export class Inbox extends Context.Service<
       const markDelivered = (sessionId: string, ids: ReadonlyArray<number>) =>
         drain.work(
           `settle inbox ${ids.join(",")}`,
-          Effect.uninterruptible(db.setInboxStatus(sessionId, ids, "delivered", "sending")),
+          Effect.uninterruptible(db.setInboxStatus(sessionId, ids, "delivered", "delivering")),
           true,
         )
 

@@ -21,7 +21,7 @@ Its id is <id>.
 vibest run [<harness>] --title '<Title>' --archive-on-idle -- '<task>'
 ```
 
-`--archive-on-idle` is only for work whose message you will not answer. It archives the first time the session is idle after a completed execution with nothing it sent or was sent still waiting. The branch is kept. Do not `vibest send` it after that. Any execution that ends normally archives it, a question included, so do not use it for a session that may need an answer. A failed execution has not archived it: send the correction to the id it printed; the flag still archives the completed execution that follows. A reviewer that gets later rounds is the pipeline skill and must stay open, without this flag.
+`--archive-on-idle` is only for work whose message you will not answer. It archives the first time the session is idle after a completed execution with nothing it sent or was sent still waiting. The branch is kept. Do not `vibest send` it after that. Any execution that ends normally archives it, a question included, so do not use it for a session that may need an answer. A failed execution has not archived it: send the correction to the id it printed; the flag still archives the completed execution that follows. A reviewer that gets later executions is the pipeline skill and must stay open, without this flag.
 
 - Leave `<harness>` out to use your own harness, provider and model; name one (`pi`, `claude`, `cursor`, or any harness a plugin adds; `vibest harness list`) to switch.
 - Always pass `--title`: three to six words, verb first, first letter capitalised, no kebab-case, saying what is done rather than how ("Fix login redirect loop"). The user's language is fine.
@@ -63,4 +63,4 @@ Then say what changed, the evidence, and the branch. `<id>` is the id the run pr
 
 ## The user steps into a pane
 
-The user may type into a subagent's pane. If no round is open, that starts one. The only thing you later receive is a message that agent chooses to send, which may not quote the user. Do not treat it as a copy of what they typed. A step-in during an open round is not recorded. Do not act on a step-in, and do not message the subagent about it, unless the user asks.
+The user may type into a subagent's pane. If no execution is open, that starts one. The only thing you later receive is a message that agent chooses to send, which may not quote the user. Do not treat it as a copy of what they typed. A step-in during an open execution is not recorded. Do not act on a step-in, and do not message the subagent about it, unless the user asks.

@@ -11,7 +11,7 @@ import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Option, Path } fr
 import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 
-import type { Db, PeerStart, SessionRow } from "./db.ts"
+import type { Db, NewSession, PeerStart, SessionRow } from "./db.ts"
 import type { Drain } from "./drain.ts"
 import {
   harnessOptions,
@@ -261,7 +261,7 @@ export const sessionSpawn = (deps: {
           if (cwd === undefined)
             return yield* refuse(`no unused 4-hex worktree name under ${repository} after ${attempts} attempts`)
         }
-        const draft: Omit<SessionRow, "projectId"> = {
+        const draft: Omit<NewSession, "projectId"> = {
           id,
           agent,
           name: input.name,

@@ -360,7 +360,7 @@ const checks: ReadonlyArray<Check> = [
     id: "U6",
     covers: ["D7"],
     title:
-      "vibest daemon restart onto another vibest: Yes to both questions replaces vibestd and restarts an old Pi subagent in place, in the same pane on the same conversation",
+      "vibest daemon restart onto another vibest: Yes to both questions replaces vibestd and restarts an old Pi subagent in place, in the same pane on the same conversation, as a new process; a late execution end from the old process is dropped",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "python3"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = holdsSlowMessageModel()
@@ -409,6 +409,9 @@ const checks: ReadonlyArray<Check> = [
           120_000,
         )
         const before = row(id)!
+        const processOf = () =>
+          rows<{ process: number }>(w, "SELECT process_id AS process FROM session WHERE id = ?", id)[0]?.process
+        const oldProcess = processOf()
         const pane = (await listed(id))?.pane_id
         const daemonBefore = await w.daemonPid()
 
@@ -446,6 +449,18 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         expect((await listed(id))?.pane_id === pane, `the subagent's pane changed: ${pane}`)
+        expect(processOf() !== oldProcess, `the restarted subagent is still process ${oldProcess}`)
+        const LATE = "a late reply from the harness the restart replaced"
+        const agent = rows<{ agent: string }>(w, "SELECT agent FROM session WHERE id = ?", id)[0]!.agent
+        const late = await w.run(repo, [wrapper, "integration", "stop", "--harness", "pi"], {
+          env: { ...env, VIBEST_SESSION_ID: id, VIBEST_AGENT: agent, VIBEST_PROCESS: String(oldProcess) },
+          stdin: JSON.stringify({ type: "agent_settled", text: LATE, error: "", aborted: false }),
+        })
+        expect(late.code === 0, `the old process's execution end was not taken: ${late.stderr}`)
+        expect(
+          rows(w, "SELECT id FROM execution WHERE session_id = ? AND reply = ?", id, LATE).length === 0,
+          "the old process's late execution end was recorded",
+        )
       } finally {
         model.stop()
         await dropHerdrSession(w, session)
@@ -634,7 +649,7 @@ export default Plugin.define({
             120_000,
           ).catch(async (e: Error) => {
             throw new Error(
-              `${e.message}; rounds ${JSON.stringify(status())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
+              `${e.message}; executions ${JSON.stringify(status())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
             )
           })
           expect(
@@ -704,7 +719,7 @@ export default Plugin.define({
           }
           const fail = async (e: Error) => {
             throw new Error(
-              `${e.message}; row ${JSON.stringify(row())}; rounds ${JSON.stringify(status())}; notices ${JSON.stringify(notices())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
+              `${e.message}; row ${JSON.stringify(row())}; executions ${JSON.stringify(status())}; notices ${JSON.stringify(notices())}; the model saw ${JSON.stringify(seen)}\n${await log()}`,
             )
           }
           await until("the move to the second login", () => row().provider === "second", 120_000).catch(fail)

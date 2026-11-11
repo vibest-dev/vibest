@@ -37,7 +37,7 @@ export const make = ({ cliOnly }: Checks) =>
     const drain = yield* Drain
     const bus = yield* Bus
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const stopOnce = stopDaemon({ drain, bus, sendingInbox: db.sendingInbox, shutdown })
+    const stopOnce = stopDaemon({ drain, bus, deliveringInbox: db.deliveringInbox, shutdown })
     return {
       Ping: () =>
         machinesListing(runtimes, []).pipe(
