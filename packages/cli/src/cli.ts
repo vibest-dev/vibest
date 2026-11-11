@@ -186,7 +186,7 @@ const run = Command.make(
     ),
     archive: Flag.Boolean("archive-on-idle").pipe(
       Flag.withDescription(
-        "Archive the session the first time it is idle after a completed turn with nothing it sent or was sent still waiting (as vibest archive: branch kept, worktree removed only when git loses nothing)",
+        "Archive the session the first time it is idle after a completed execution with nothing it sent or was sent still waiting (as vibest archive: branch kept, worktree removed only when git loses nothing)",
       ),
       Flag.withDefault(false),
     ),
@@ -243,7 +243,7 @@ const run = Command.make(
     }),
 ).pipe(
   Command.withDescription(
-    'Start a session on a task and print {"id":"<session id>"} at once; the routing that plugins decided is in the routing field of vibest ls and vibest result. The coordinator gets the result as a message when the session\'s turn ends; anyone else reads it with vibest result. vibest makes each session its own worktree (detached, no branch); in a project of several repositories (a directory of git repositories) that is one worktree of every repository, side by side. The main agent may run it from anywhere in its project, also from inside one repository. Never tell the session to make its own worktree, clone or copy',
+    'Start a session on a task and print {"id":"<session id>"} at once; the routing that plugins decided is in the routing field of vibest ls and vibest result. An execution end sends nothing: the session sends a message with vibest send when it decides to, and its latest reply is read with vibest result. vibest makes each session its own worktree (detached, no branch); in a project of several repositories (a directory of git repositories) that is one worktree of every repository, side by side. The main agent may run it from anywhere in its project, also from inside one repository. Never tell the session to make its own worktree, clone or copy',
   ),
 )
 
@@ -438,7 +438,7 @@ const send = Command.make("send", { id, message: text("message") }, (o) =>
   }),
 ).pipe(
   Command.withDescription(
-    "Continue a session: queue a message, delivered once it is idle (never interrupts a turn); prints at once",
+    "Continue a session: queue a message, delivered once it is idle (never interrupts an execution); prints at once",
   ),
 )
 
@@ -485,7 +485,7 @@ const interrupt = Command.make("interrupt", { id }, (o) =>
   vibest((client) => client.Interrupt({ id: o.id })).pipe(Effect.flatMap(json)),
 ).pipe(
   Command.withDescription(
-    "Interrupt a session's running turn; the session stays for follow-ups (no result arrives for that turn)",
+    "Interrupt a session's running execution; the session stays for follow-ups (no reply arrives for that execution)",
   ),
 )
 
@@ -511,7 +511,7 @@ const peek = Command.make(
     ),
 ).pipe(
   Command.withDescription(
-    "Print the last lines on a session's terminal, read now (plain text). Results never carry screen text: look here when one says the turn ended without a report or did not start",
+    "Print the last lines on a session's terminal, read now (plain text). Results never carry screen text: look here when one says the execution ended without a reply or did not start",
   ),
 )
 
@@ -528,7 +528,7 @@ const archive = Command.make(
 ).pipe(
   Command.withAlias("rm"),
   Command.withDescription(
-    "Archive an agent session (a working one is interrupted for up to 10 s, then its pane closed and that turn's result lost; releases terminal pane, workspace, and clean worktree; retains the session row, inbox history, and stored results)",
+    "Archive an agent session (a working one is interrupted for up to 10 s, then its pane closed and that execution's reply lost; releases terminal pane, workspace, and clean worktree; retains the session row, inbox history, and stored replies)",
   ),
 )
 
@@ -722,8 +722,8 @@ export const integrationStop = (harness: string, raw: string) =>
   Effect.gen(function* () {
     const who = yield* hookSession
     if (!who) return
-    yield* notify(harness, who.sessionId, "turn end", (client) =>
-      client.TurnEnd({ sessionId: who.sessionId, harness, event: raw }),
+    yield* notify(harness, who.sessionId, "execution end", (client) =>
+      client.ExecutionEnd({ sessionId: who.sessionId, harness, event: raw }),
     )
   })
 
@@ -731,7 +731,7 @@ export const integrationPrompt = (harness: string, raw: string) =>
   Effect.gen(function* () {
     const who = yield* hookSession
     if (!who) return
-    yield* notify(harness, who.sessionId, "turn start", (client) =>
+    yield* notify(harness, who.sessionId, "execution start", (client) =>
       client.Prompt({ sessionId: who.sessionId, harness, event: raw }),
     )
   })
@@ -759,13 +759,13 @@ const hookCommand = <E, R>(
 const stop = hookCommand(
   "stop",
   integrationStop,
-  "A harness plugin's turn-end bridge: its turn-end event JSON on stdin. Does not start vibestd; exits non-zero when the report did not reach vibestd",
+  "A harness plugin's execution-end bridge: its execution-end event JSON on stdin. Does not start vibestd; exits non-zero when the report did not reach vibestd",
 )
 
 const prompt = hookCommand(
   "prompt",
   integrationPrompt,
-  "A harness plugin's turn-start bridge: its prompt or activity event JSON on stdin. Does not start vibestd; exits non-zero when the report did not reach vibestd",
+  "A harness plugin's execution-start bridge: its prompt or activity event JSON on stdin. Does not start vibestd; exits non-zero when the report did not reach vibestd",
 )
 
 const ready = hookCommand(
@@ -793,7 +793,7 @@ const guard = Command.make("guard", { harness: hookHarness }, (o) =>
 const integration = () =>
   Command.make("integration").pipe(
     Command.withDescription(
-      "Internal: called by vibest's plugin in each harness (user prompt, turn-end result, pre-tool guard); not for direct use",
+      "Internal: called by vibest's plugin in each harness (user prompt, execution end, pre-tool guard); not for direct use",
     ),
     Command.withSubcommands([guard, prompt, stop, ready]),
   )

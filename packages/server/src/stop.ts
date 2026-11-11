@@ -10,14 +10,14 @@ type Blocker = { readonly id: string; readonly reason: string }
 export interface StopDeps {
   readonly drain: Drain["Service"]
   readonly bus: Bus["Service"]
-  readonly sendingInbox: Effect.Effect<
+  readonly deliveringInbox: Effect.Effect<
     ReadonlyArray<{ readonly id: number; readonly kind: string; readonly sessionId: string }>
   >
   readonly shutdown: Deferred.Deferred<void>
 }
 
 export const stopOnce =
-  ({ drain, bus, sendingInbox, shutdown }: StopDeps) =>
+  ({ drain, bus, deliveringInbox, shutdown }: StopDeps) =>
   <E, R>(instance: string, method: string, takeOver: Effect.Effect<void, E, R>) =>
     Effect.gen(function* () {
       if (!(yield* drain.begin)) return yield* new DaemonStopping({ method })
@@ -27,7 +27,7 @@ export const stopOnce =
         last = (yield* drain.pending).map(busy)
         if (last.length > 0) return last
         last = [{ id: "inbox", reason: "checking unsettled delivery" }]
-        last = (yield* sendingInbox).map((row) => ({
+        last = (yield* deliveringInbox).map((row) => ({
           id: `inbox ${row.id}`,
           reason: `${row.kind} for session ${row.sessionId}: delivery not settled`,
         }))

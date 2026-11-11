@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, heldModel } from "../fake-model.ts"
-import { alive, expect, expectAnswered, expectFacts, row, until, type World } from "../world.ts"
+import { alive, expect, expectReplied, expectFacts, row, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 import { piProject } from "./exits.ts"
 
@@ -37,7 +37,7 @@ const resultOf = (w: World, p: Project, id: string) =>
   w.json<{
     id: string
     status: string
-    answer: { turn: number; status: string; text: string | null } | null
+    reply: { execution: number; status: string; text: string | null } | null
   }>(["result", id], {
     cwd: p.repo,
     env: p.env,
@@ -45,8 +45,8 @@ const resultOf = (w: World, p: Project, id: string) =>
 
 const answered = async (w: World, p: Project, id: string, task: string) =>
   until(
-    `the answer of ${task}`,
-    async () => ((await resultOf(w, p, id)).answer?.text ?? "").includes(`done-${task}`),
+    `the reply of ${task}`,
+    async () => ((await resultOf(w, p, id)).reply?.text ?? "").includes(`done-${task}`),
     90_000,
   )
 
@@ -94,7 +94,7 @@ const checks: ReadonlyArray<Check> = [
           ).id
         const a = await run("s1", "--title", "s1 title", "--provider", "second", "--model", "m2")
         await answered(w, p, a, "s1")
-        expect(second.asked("s1") > 0 && p.model.asked("s1") === 0, "the turn did not run on provider second")
+        expect(second.asked("s1") > 0 && p.model.asked("s1") === 0, "the execution did not run on provider second")
         const entry = (await ls(w, p)).find((e) => e.id === a)
         expect(
           entry !== undefined &&
@@ -139,30 +139,30 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S5",
     title:
-      "vibest result has no answer before a subagent's first turn ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the main agent and the subagent with its latest reply; after archive only vibest ls --all lists it, exited",
+      "vibest result has no reply before a subagent's first execution ends and then holds its reply; vibest status names the running vibestd; vibest ls lists the main agent and the subagent with its latest reply; after archive only vibest ls --all lists it, exited",
     run: async (w) => {
       const p = await piProject(w, "s5")
       try {
         const a = await p.runSub("s5")
-        await until("the subagent's turn at the model", () => p.model.held() > 0, 60_000)
+        await until("the subagent's execution at the model", () => p.model.held() > 0, 60_000)
         const before = await resultOf(w, p, a)
-        expect(before.id === a && before.answer === null, `result before the turn ended: ${JSON.stringify(before)}`)
+        expect(before.id === a && before.reply === null, `result before the execution ended: ${JSON.stringify(before)}`)
         p.model.release()
         await answered(w, p, a, "s5")
         const after = await resultOf(w, p, a)
-        const projected = row<{ answer: string | null; reported: string | null }>(
+        const projected = row<{ reply: string | null; reported: string | null }>(
           w,
-          `SELECT t.reply AS answer, e.data ->> '$.reply' AS reported FROM execution t
+          `SELECT t.reply, e.data ->> '$.reply' AS reported FROM execution t
             JOIN event e ON e.aggregate = t.session_id AND e.type = 'execution.ended' AND e.data ->> '$.execution' = t.id
             WHERE t.session_id = ? AND t.outcome = 'completed'`,
           a,
         )
         expect(
-          projected?.answer?.includes("done-s5") === true &&
-            projected.answer === projected.reported &&
-            after.answer?.text === projected.answer &&
-            after.answer.status === "completed",
-          `turn.answer: ${JSON.stringify(projected)}, vibest result: ${JSON.stringify(after.answer)}`,
+          projected?.reply?.includes("done-s5") === true &&
+            projected.reply === projected.reported &&
+            after.reply?.text === projected.reply &&
+            after.reply.status === "completed",
+          `execution.reply: ${JSON.stringify(projected)}, vibest result: ${JSON.stringify(after.reply)}`,
         )
         const status = await w.json<{ daemon: { status: string; pid: number | null } }>(["status"], {
           cwd: p.repo,
@@ -347,7 +347,7 @@ const checks: ReadonlyArray<Check> = [
         )
         const three = await p.runSub("three")
         await answered(w, p, three, "three")
-        await expectAnswered(w, three)
+        await expectReplied(w, three)
       } finally {
         await p.close()
       }

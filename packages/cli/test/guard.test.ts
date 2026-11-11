@@ -176,7 +176,7 @@ describe("Shell denials", () => {
       "bash -c 'vibest integration stop'",
     ])
       for (const reason of both(command))
-        assert.match(reason ?? "", /^vibest integration stop is the harness's turn-end hook/, command)
+        assert.match(reason ?? "", /^vibest integration stop is the harness's execution-end hook/, command)
     for (const reason of both("vibest integration prompt --harness claude"))
       assert.match(reason ?? "", /^vibest integration prompt is the harness's user-prompt hook/)
     for (const reason of both("vibest integration ready --harness cursor"))

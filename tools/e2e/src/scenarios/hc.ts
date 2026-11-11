@@ -6,12 +6,12 @@ import { ask, delegatingModel, piDir } from "../fake-model.ts"
 import { binary, expect, row, SESSIONS, Skip, until, vibestd, type World } from "../world.ts"
 import { project } from "./inbox.ts"
 
-type Entry = { id: string; agent: string; status: string; turnState: string }
-type Sample = { at: number; end: number; status: string; turnState: string }
+type Entry = { id: string; agent: string; status: string; executionState: string }
+type Sample = { at: number; end: number; status: string; executionState: string }
 type Watched = {
   _tag: string
   projects: Array<{ id: string; activity: string }>
-  sessions: Array<{ id: string; projectId: string; status: string; turn: number | null }>
+  sessions: Array<{ id: string; projectId: string; status: string; finished: number | null }>
 }
 type HcListed = { address: string; name?: string | null; state: string }
 type HcTerminal = {
@@ -127,7 +127,10 @@ const checks: ReadonlyArray<Check> = [
               .catch(() => [] as Array<Entry>)
             const end = Date.now()
             for (const e of listed)
-              samples.set(e.id, [...(samples.get(e.id) ?? []), { at, end, status: e.status, turnState: e.turnState }])
+              samples.set(e.id, [
+                ...(samples.get(e.id) ?? []),
+                { at, end, status: e.status, executionState: e.executionState },
+              ])
             await Bun.sleep(100)
           }
         })()
@@ -135,11 +138,11 @@ const checks: ReadonlyArray<Check> = [
           cwd: repo,
           timeoutMs: 60_000,
         })
-        await reached("the main agent's turn on the first result", "done-zero")
-        await reached("the main agent's turn on the result of the subagent it started", "done-one")
-        await reached("the main agent's turn on the result after its vibest send", "done-two")
+        await reached("the main agent's execution on the first result", "done-zero")
+        await reached("the main agent's execution on the result of the subagent it started", "done-one")
+        await reached("the main agent's execution on the result after its vibest send", "done-two")
         await until(
-          "the main agent idle after its last turn",
+          "the main agent idle after its last execution",
           () => samples.get(main)?.at(-1)?.status === "idle",
           60_000,
         )
@@ -190,7 +193,7 @@ const checks: ReadonlyArray<Check> = [
           `the subagent's terminal: ${JSON.stringify(subTerminal)}; main ${mainTerminal.address}`,
         )
         const shown = (id: string) =>
-          JSON.stringify((samples.get(id) ?? []).map((x) => `${x.at % 100_000} ${x.status}/${x.turnState}`))
+          JSON.stringify((samples.get(id) ?? []).map((x) => `${x.at % 100_000} ${x.status}/${x.executionState}`))
         const mainSeen = samples.get(main) ?? []
         const mainWorking = mainSeen.findIndex((x) => x.status === "working")
         expect(
@@ -199,12 +202,12 @@ const checks: ReadonlyArray<Check> = [
         )
         const subSeen = samples.get(sub) ?? []
         for (const marker of ["one", "two"]) {
-          const turn = model.answered.find((t) => t.marker === marker)
-          expect(turn !== undefined, `the model never answered the subagent's ${marker} task`)
-          const during = subSeen.filter((x) => x.at > turn!.from + 500 && x.end < turn!.to)
+          const execution = model.answered.find((t) => t.marker === marker)
+          expect(execution !== undefined, `the model never answered the subagent's ${marker} task`)
+          const during = subSeen.filter((x) => x.at > execution!.from + 500 && x.end < execution!.to)
           expect(
             during.length > 0 && during.every((x) => x.status === "working"),
-            `the subagent was not shown working while the model held its ${marker} answer (${turn!.from % 100_000}-${turn!.to % 100_000}): ${shown(sub)}`,
+            `the subagent was not shown working while the model held its ${marker} answer (${execution!.from % 100_000}-${execution!.to % 100_000}): ${shown(sub)}`,
           )
         }
         const listed = await core.terminals()
@@ -416,7 +419,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S36",
     title:
-      "herdr-core runtime: a subagent turn that ended unwatched is done in Watch, for it and its project; Session.Seen raises herdr.seen to that turn and it is idle",
+      "herdr-core runtime: a subagent execution that ended unwatched is done in Watch, for it and its project; Session.Seen raises herdr.seen to that execution and it is idle",
     run: async (w) => {
       for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
@@ -467,21 +470,21 @@ const checks: ReadonlyArray<Check> = [
         }
         const subOf = (watched: Watched) => watched.sessions.find((s) => s.id === sub)
         await until(
-          "the subagent done in Watch after its turn",
+          "the subagent done in Watch after its execution",
           async () => {
             const s = subOf(await snapshot())
-            return s?.status === "done" && (s.turn ?? 0) >= 1
+            return s?.status === "done" && (s.finished ?? 0) >= 1
           },
           180_000,
         ).catch(async (e: Error) => {
           throw new Error(`${e.message}; last Watch: ${JSON.stringify(last)}\nterminals:\n${await core.screens()}`)
         })
-        const { turn, projectId } = subOf(last!)!
+        const { finished, projectId } = subOf(last!)!
         expect(
           last!.projects.find((p) => p.id === projectId)?.activity === "done",
           `the project is not done: ${JSON.stringify(last!.projects)}`,
         )
-        const marked = await vibestd(w, repo, "Session.Seen", { id: sub, turn })
+        const marked = await vibestd(w, repo, "Session.Seen", { id: sub, finished })
         expect(marked.error === undefined, `Session.Seen: ${JSON.stringify(marked)}`)
         await until(
           "the subagent idle after Session.Seen",
@@ -494,7 +497,7 @@ const checks: ReadonlyArray<Check> = [
           row<{ runtime: string }>(w, `SELECT runtime FROM ${SESSIONS} s WHERE id = ?`, sub)?.runtime ?? "{}",
         ) as { id?: string }
         const labels = (await core.get(addressOf(at.id!))).labels
-        expect(labels["herdr.seen"] === String(turn), `herdr.seen ${labels["herdr.seen"]}, turn ${turn}`)
+        expect(labels["herdr.seen"] === String(finished), `herdr.seen ${labels["herdr.seen"]}, finished ${finished}`)
       } finally {
         model.stop()
         await w.stopDaemon()

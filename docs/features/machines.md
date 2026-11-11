@@ -9,10 +9,10 @@ One machine's vibestd (A) can run agents on another machine (B) over ssh. Design
 --machine` starts a session on B and none on A; A's main agent gets one notice with the message the session sent, and nothing stays
 waiting on B. `send`, `result`, `peek`, `ls` and `archive` reach the session on B.
 
-## M8. A remote turn end sends nothing
+## M8. A remote execution end sends nothing
 
-When a turn ends on B without the session sending anything, B queues nothing for A, A's main agent gets no notice, and
-`vibest result <machine>/<id>` on A returns the turn's answer.
+When an execution ends on B without the session sending anything, B queues nothing for A, A's main agent gets no notice, and
+`vibest result <machine>/<id>` on A returns the execution's reply.
 
 ## M2. Messages survive a lost connection
 
@@ -36,7 +36,7 @@ own message.
 ## M6. B's herdr-core terminals on A
 
 Adding a machine shows B's herdr-core terminals in A's herdr-core: a session on B is addressed by its terminal on A;
-typing there starts a turn on B whose message arrives once; a rename is followed; a removed terminal comes back with the
+typing there starts an execution on B whose message arrives once; a rename is followed; a removed terminal comes back with the
 next `vibest ls`; `vibest machine rm` removes them.
 
 ## M7. B's herdr sessions on A

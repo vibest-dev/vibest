@@ -91,7 +91,7 @@ describe("Watch", () => {
       const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       const spawned = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
-          e._tag === "Session" && e.session.id === id && e.session.turnState === "open",
+          e._tag === "Session" && e.session.id === id && e.session.executionState === "open",
       )
       assert.strictEqual(spawned.session.parentId, main)
       assert.strictEqual(spawned.session.projectId, project)
@@ -148,7 +148,7 @@ describe("Watch", () => {
   )
 
   test(
-    "a turn that ends unwatched is done, for the session and its project, until Session.Seen raises the mark to it",
+    "an execution that ends unwatched is done, for the session and its project, until Session.Seen raises the mark to it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db
@@ -156,28 +156,28 @@ describe("Watch", () => {
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
       const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
-      const isSession = (status: string, turn: number) => (e: WatchEvent) =>
-        e._tag === "Session" && e.session.id === id && e.session.status === status && e.session.turn === turn
+      const isSession = (status: string, finished: number) => (e: WatchEvent) =>
+        e._tag === "Session" && e.session.id === id && e.session.status === status && e.session.finished === finished
       yield* next((e): e is WatchEvent => isSession("working", 0)(e))
       const terminal = (yield* herdr.terminalOf(id))!
-      yield* herdr.endTurn(id)
+      yield* herdr.endExecution(id)
       yield* db.updateSession(id, { status: "idle" })
       const isProject = (activity: string) => (e: WatchEvent) =>
         e._tag === "Project" && e.project.id === project && e.project.activity === activity
       yield* next((e): e is WatchEvent => isSession("idle", 0)(e))
-      yield* herdr.finishTurn(terminal.id)
+      yield* herdr.countFinished(terminal.id)
       yield* next((e): e is WatchEvent => isSession("done", 1)(e))
       yield* next((e): e is WatchEvent => isProject("done")(e))
 
-      yield* c["Session.Seen"]({ id, turn: 2 })
-      yield* c["Session.Seen"]({ id, turn: 0 })
-      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { turn: 1, seen: 0 })
-      yield* c["Session.Seen"]({ id, turn: 1 })
+      yield* c["Session.Seen"]({ id, finished: 2 })
+      yield* c["Session.Seen"]({ id, finished: 0 })
+      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { finished: 1, seen: 0 })
+      yield* c["Session.Seen"]({ id, finished: 1 })
       yield* next((e): e is WatchEvent => isSession("idle", 1)(e))
       yield* next((e): e is WatchEvent => isProject("idle")(e))
-      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { turn: 1, seen: 1 })
+      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { finished: 1, seen: 1 })
       assert.strictEqual(
-        (yield* Effect.flip(coordinator["Session.Seen"]({ id, turn: 1 })))._tag,
+        (yield* Effect.flip(coordinator["Session.Seen"]({ id, finished: 1 })))._tag,
         "Forbidden",
         "only the user marks what they saw",
       )
@@ -185,7 +185,7 @@ describe("Watch", () => {
   )
 
   test(
-    "overlapping Session.Seen calls on one terminal run one after another, so the mark ends at the higher turn",
+    "overlapping Session.Seen calls on one terminal run one after another, so the mark ends at the higher finished count",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { repo, coordinator } = yield* withMain
@@ -194,16 +194,16 @@ describe("Watch", () => {
       const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* next((e): e is WatchEvent => e._tag === "Session" && e.session.id === id && e.session.status === "working")
       const terminal = (yield* herdr.terminalOf(id))!
-      yield* Effect.repeat(herdr.finishTurn(terminal.id), { times: 5 })
+      yield* Effect.repeat(herdr.countFinished(terminal.id), { times: 5 })
       const held = yield* herdr.hold("see", terminal.id)
-      const five = yield* c["Session.Seen"]({ id, turn: 5 }).pipe(Effect.forkScoped)
+      const five = yield* c["Session.Seen"]({ id, finished: 5 }).pipe(Effect.forkScoped)
       yield* held.reached
-      const six = yield* c["Session.Seen"]({ id, turn: 6 }).pipe(Effect.forkScoped)
+      const six = yield* c["Session.Seen"]({ id, finished: 6 }).pipe(Effect.forkScoped)
       yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 200)))
       yield* held.release()
       yield* Fiber.join(five)
       yield* Fiber.join(six)
-      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { turn: 6, seen: 6 })
+      assert.deepStrictEqual(yield* herdr.runtime.seen!(terminal), { finished: 6, seen: 6 })
     }),
   )
 

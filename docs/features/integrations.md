@@ -17,28 +17,28 @@ The vibest binary finds the plugins installed beside it. A vibest with no plugin
 ## I3. Pi runs vibest's extension
 
 A real Pi session started by vibest runs vibest's extension: a herdr command the agent tries is refused with the
-guard's reason and does not run, and the agent's reply is the turn's answer.
+guard's reason and does not run, and the agent's reply is the execution's reply.
 
 ## I4. Claude runs vibest's plugin beside the user's plugins
 
 A real Claude session started by vibest runs vibest's plugin beside plugins installed in its configuration: an
-installed plugin's session-start hook runs too, and the reply is the turn's answer.
+installed plugin's session-start hook runs too, and the reply is the execution's reply.
 
 ## I5. Cursor runs vibest's plugin beside the project's hooks
 
 A real cursor-agent session on the user's own login runs vibest's plugin beside the project's own hooks. Asked to run a
-herdr command, herdr does not run (the model either tries and the guard refuses it, or keeps to its rules); the turn
-completes, its answer carries the reply, and the project's own hook ran.
+herdr command, herdr does not run (the model either tries and the guard refuses it, or keeps to its rules); the execution
+completes with the reply, and the project's own hook ran.
 
 ## I6. The user's harness configuration is untouched
 
 Running agents through vibest never changes the user's own harness configuration files, and leaves no herdr session
 behind.
 
-## I7. Every Claude turn end reaches vibest
+## I7. Every Claude execution end reaches vibest
 
-Every end of a Claude main-loop turn reaches vibest: an answer is a completed turn; the person pressing Esc in the
-pane gives exactly one interrupted turn and no notice, the same as `vibest interrupt`, whose aborted turn's end reaches
+Every end of a Claude main-loop execution reaches vibest: an answer is a completed execution; the person pressing Esc in the
+pane gives exactly one interrupted execution and no notice, the same as `vibest interrupt`, whose aborted execution's end reaches
 vibest too, also while a background shell keeps the terminal busy.
 
 ## I9. Claude's guard without settings
@@ -50,8 +50,8 @@ reaches the model, and reading in its own Project folder is allowed.
 ## I10. Cursor reports to vibestd
 
 A real cursor-agent on the user's login reports to vibestd on herdr and on herdr-core: its first task is typed only
-after its plugin reported ready, `vibest ls` shows it working during a turn and idle after it, `vibest result` carries
-the reply, `vibest interrupt` ends the turn as interrupted with no notice, and the plugin never writes to the
+after its plugin reported ready, `vibest ls` shows it working during an execution and idle after it, `vibest result` carries
+the reply, `vibest interrupt` ends the execution as interrupted with no notice, and the plugin never writes to the
 terminal.
 
 ## I11. Another vibest first on PATH
@@ -65,7 +65,7 @@ Pi applies the same guard rules inside vibest's extension.
 
 ## R7. Claude's hooks reach vibest
 
-In a running Claude, the plugin's tool-call guard and its turn-end report both reach vibest.
+In a running Claude, the plugin's tool-call guard and its execution-end report both reach vibest.
 
 ## R8. Pi and Cursor ask vibestd
 

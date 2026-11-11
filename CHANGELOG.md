@@ -7,6 +7,15 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **An execution opens when its input is sent and is accepted once the harness takes it up** (anyone reading
+  `vibest.db`, harness and runtime plugin authors): a send that never sees the harness ready leaves no execution (no
+  `not_started` row); the catalog adds `execution.accepted` and an optional `failure.kind` (`limit`) on
+  `execution.ended`, and the read model (projection 6) adds `execution.accepted_at` and `execution.failure_kind`.
+  An execution end reported before its execution was accepted is ignored. vibestd starts each harness with
+  `VIBEST_PROCESS` (its process id), integrations send it as the `vibest-process` header, and `Session.Ready` answers
+  `{ process }`; an execution start or end from an earlier process of the session is dropped. A usage-limit move
+  vibestd stopped part way through is finished by the next check, and sessions ended at a limit are checked at start.
+  An older vibest cannot read a log that holds `execution.accepted`.
 - **Handoff database copies** (users): a handing-over vibestd no longer writes `vibest.db.before-<version>` (a copy of
   `vibest.db` and its `-wal`). Copies already in the home are left where they are. Copy the database yourself before
   `vibest update` if you want one.
@@ -26,6 +35,16 @@ release. Each release lists what broke, who is affected and how to migrate under
   vibestd and `vibest daemon import-check` refuse a database in the old shape as one from an older vibest and change
   nothing in it; there is no automatic conversion. Migrate: with vibestd stopped, move `vibest.db` aside with its
   `-wal` and `-shm` files to start empty (the message gives the command).
+- **turn is execution, and an execution's answer or result is its reply** (protocol 10: scripts reading CLI JSON,
+  RPC clients, harness and runtime plugin authors): session rows in `vibest ls`, `vibest result` and Watch have
+  `executionState` instead of `turnState`; `vibest result` (RPC `Get`) has `reply` instead of `answer`, and its
+  `turn` is `execution`; a Watch session's `turn` is `finished`, and `Session.Seen` takes `{ id, finished }`. The
+  RPC `TurnEnd` is `ExecutionEnd`, the hook route `/hooks/<harness>/turn-end` is `/hooks/<harness>/execution-end`,
+  and the Claude plugin's end event is `ExecutionComplete`. A `HarnessDefinition` has `executionEnd` (returning
+  `{ end }`, was `turnEnd` returning `{ result }`) and `replyField` (was `resultField`); a runtime's `Seen` has
+  `finished` (was `turn`) and `see(terminal, finished)`; `agent.fail` gets the limited execution's `input` (was
+  `turn`). Migrate: rename the fields; a vibest of another protocol is refused, so update every vibest together
+  (`vibest update`).
 - **`vibest run --archive-on-idle`** (users): the flag is no longer stored. A session started with it is still
   archived when it is idle after a completed turn, but only by the vibestd that started it: after a vibestd restart
   or `vibest update` it stays until archived by hand.

@@ -33,7 +33,7 @@ import {
   RuntimeIncompatible,
   RuntimeUnreachable,
   SessionBusy,
-  TurnState,
+  ExecutionState,
 } from "@vibest/schema/session"
 import { Subscription } from "@vibest/schema/subscription"
 import { Context, Schema } from "effect"
@@ -221,7 +221,7 @@ export const SessionInfo = Schema.Struct({
   status: AgentStatus,
   startedAt: Schema.NullOr(Schema.Number),
   exitedAt: Schema.NullOr(Schema.Number),
-  turnState: TurnState,
+  executionState: ExecutionState,
   projectId: Schema.String,
   runtime: Schema.String,
   address: RuntimeAddress,
@@ -246,8 +246,8 @@ export type SessionInfo = typeof SessionInfo.Type
 
 const LINE_ERRORS = [UnknownMachine, MachineUnavailable, MachineIncompatible] as const
 
-export const SessionAnswer = Schema.Struct({
-  turn: Schema.Number,
+export const SessionReply = Schema.Struct({
+  execution: Schema.Number,
   status: Schema.String,
   text: Schema.NullOr(Schema.String),
   failure: Schema.NullOr(Schema.String),
@@ -256,7 +256,7 @@ export const SessionAnswer = Schema.Struct({
 
 export const SessionStatusInfo = Schema.Struct({
   ...SessionInfo.fields,
-  answer: Schema.optional(Schema.NullOr(SessionAnswer)),
+  reply: Schema.optional(Schema.NullOr(SessionReply)),
 })
 
 export const HarnessModel = Schema.Struct({
@@ -288,7 +288,7 @@ export type ProjectRow = typeof ProjectRow.Type
 export const WatchSession = Schema.Struct({
   ...SessionInfo.fields,
   parentId: Schema.NullOr(Schema.String),
-  turn: Schema.NullOr(Schema.Number),
+  finished: Schema.NullOr(Schema.Number),
 })
 export type WatchSession = typeof WatchSession.Type
 
@@ -481,14 +481,14 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     admitted(
       Rpc.make("Session.Seen", {
-        payload: { id: Schema.String, turn: Schema.Number },
+        payload: { id: Schema.String, finished: Schema.Number },
         error: Schema.Union([Forbidden, NoSuchSession, RuntimeUnreachable]),
       }),
     ),
   ),
   protocol(
     admitted(
-      Rpc.make("TurnEnd", {
+      Rpc.make("ExecutionEnd", {
         payload: { sessionId: Schema.String, harness: Schema.String, event: Schema.String },
       }),
     ),
@@ -704,6 +704,7 @@ export class VibestRpcs extends RpcGroup.make(
   scoped(
     Rpc.make("Session.Ready", {
       payload: { id: Schema.String, pid: Schema.optional(Schema.Number) },
+      success: Schema.Struct({ process: Schema.optional(Schema.Number) }),
       error: Schema.Union([Forbidden, NoSuchSession]),
     }),
   ),
@@ -818,7 +819,7 @@ export const ACCESS = {
   "Runtimes.Doctor": "open",
   Subscriptions: "open",
   Republish: "open",
-  TurnEnd: "open",
+  ExecutionEnd: "open",
   Prompt: "open",
   CoordinatorSessionReady: "open",
   Spawn: "agent",

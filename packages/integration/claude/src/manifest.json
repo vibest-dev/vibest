@@ -1,6 +1,6 @@
 {
   "name": "vibest",
-  "description": "VIBEST for Claude Code: turn-end reports, prompt reports and the tool guard for VIBEST sessions, and the coordinator inbox that delivers VIBEST messages as prompts, all over HTTP to vibestd",
+  "description": "VIBEST for Claude Code: execution-end reports, prompt reports and the tool guard for VIBEST sessions, and the coordinator inbox that delivers VIBEST messages as prompts, all over HTTP to vibestd",
   "author": { "name": "vibest-dev" },
   "repository": "https://github.com/vibest-dev/vibest",
   "license": "MIT"

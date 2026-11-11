@@ -11,7 +11,7 @@ import { projectOf } from "./lib/directory.ts"
 import { testEffect } from "./lib/effect.ts"
 import { FakeRuntime, type FakeRuntimeOptions } from "./lib/fake-runtime.ts"
 import { harnessLayer } from "./lib/harnesses.ts"
-import { settled, until, writeResult } from "./lib/observe.ts"
+import { settled, until, writeEnd } from "./lib/observe.ts"
 import { makeRepository, runtimeNode, sessionLayer } from "./lib/session.ts"
 
 const OFF_THE_POLL_BEAT = "1 second"
@@ -60,32 +60,32 @@ const notices = (id: string) =>
 
 describe("session handlers", () => {
   test(
-    "a message queued during a turn is delivered right after the turn end, with no clock advance",
+    "a message queued during an execution is delivered right after the execution end, with no clock advance",
     Effect.gen(function* () {
       const { id, sessions, db, herdr } = yield* working
       yield* sessions.send(id, "next")
-      yield* herdr.endTurn(id)
+      yield* herdr.endExecution(id)
       yield* settled
       assert.notInclude(yield* texts(herdr), "next")
-      yield* writeResult(id, "pi", { text: "status: completed" })
+      yield* writeEnd(id, "pi", { text: "status: completed" })
       yield* until(texts(herdr), (sent) => sent.includes("next"))
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
     }),
   )
 
   test(
-    "an idle turn with no report is lost exactly HOOK_GRACE after it went idle",
+    "an idle execution with no report is lost exactly HOOK_GRACE after it went idle",
     Effect.gen(function* () {
       const { id, db, herdr } = yield* working
       yield* TestClock.adjust(OFF_THE_POLL_BEAT)
-      yield* herdr.endTurn(id)
+      yield* herdr.endExecution(id)
       yield* settled
       yield* TestClock.adjust(Duration.subtract(HOOK_GRACE, Duration.millis(1)))
       yield* settled
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
       yield* TestClock.adjust("1 millis")
-      yield* until(db.getSession(id), (row) => row?.turnState === "lost")
+      yield* until(db.getSession(id), (row) => row?.executionState === "lost")
     }),
   )
 
@@ -106,9 +106,9 @@ describe("session handlers", () => {
     "a message to an exited session resumes it",
     Effect.gen(function* () {
       const { id, sessions, db, herdr } = yield* working
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
-      yield* until(db.getSession(id), (row) => row?.turnState === "completed")
+      yield* writeEnd(id, "pi", { text: "status: completed" })
+      yield* herdr.endExecution(id)
+      yield* until(db.getSession(id), (row) => row?.executionState === "completed")
       yield* herdr.runtime.close((yield* db.getSession(id))!.address)
       yield* until(db.getSession(id), (row) => row?.exitedAt !== null)
       yield* settled
@@ -119,7 +119,7 @@ describe("session handlers", () => {
   )
 
   testEffect(withPi({ promptsIgnored: true }))(
-    "a turn start reported while the text is still being handed over confirms the launch, with no clock advance",
+    "an execution start reported while the text is still being handed over confirms the launch, with no clock advance",
     () =>
       Effect.gen(function* () {
         const sessions = yield* Sessions
@@ -145,7 +145,7 @@ describe("session handlers", () => {
         yield* sessions.userPrompt(id, "do it")
         yield* held.release()
         yield* settled
-        assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+        assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
         assert.isFalse(
           (yield* herdr.callsTo("send")).some((call) => call.keys !== undefined),
           "no Enter resent",

@@ -305,7 +305,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M8",
     title:
-      "a turn that ends on B without a send queues nothing in B's outbox and gives A's main agent no notice; vibest result on A returns the turn's answer",
+      "an execution that ends on B without a send queues nothing in B's outbox and gives A's main agent no notice; vibest result on A returns the execution's reply",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -314,7 +314,7 @@ const checks: ReadonlyArray<Check> = [
         const address = await s.run("quietone")
         const id8 = address.slice(3)
         await until(
-          "B's turn completed",
+          "B's execution completed",
           () =>
             s!.bDb<{ n: number }>(
               "SELECT count(*) AS n FROM execution WHERE session_id LIKE ? AND outcome = 'completed'",
@@ -325,9 +325,9 @@ const checks: ReadonlyArray<Check> = [
         await Bun.sleep(3_000)
         const queued = s.bDb<{ n: number }>("SELECT count(*) AS n FROM event WHERE type = 'outbox.queued'")?.n
         expect(queued === 0, `${queued} outbox.queued facts on B`)
-        expect(s.notices(address, "quietone") === 0, "A got a notice for a turn end")
-        const got = JSON.parse(await s.okA(["result", address])) as { answer?: { text?: string | null } | null }
-        expect(got.answer?.text?.includes("done-quietone") === true, `result on A: ${JSON.stringify(got)}`)
+        expect(s.notices(address, "quietone") === 0, "A got a notice for an execution end")
+        const got = JSON.parse(await s.okA(["result", address])) as { reply?: { text?: string | null } | null }
+        expect(got.reply?.text?.includes("done-quietone") === true, `result on A: ${JSON.stringify(got)}`)
       } finally {
         await s?.stop()
       }
@@ -483,7 +483,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M6",
     title:
-      "terminals on another machine: machine add mirrors B's hc core into A's hc; a run --machine row's address is A's hc terminal; typing into it on A starts a typed turn on B whose message arrives once; a rename in hc is followed; a mirror removed in hc is added back by the next ls and result; machine rm removes it from hc whatever its name",
+      "terminals on another machine: machine add mirrors B's hc core into A's hc; a run --machine row's address is A's hc terminal; typing into it on A starts a typed execution on B whose message arrives once; a rename in hc is followed; a mirror removed in hc is added back by the next ls and result; machine rm removes it from hc whatever its name",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -546,9 +546,9 @@ const checks: ReadonlyArray<Check> = [
 
         const typed = await s.hcA("send", terminal, ask("mstep"))
         expect(typed.code === 0, `hc send on A: ${typed.stderr}`)
-        await until("B saw the typed turn", () => s!.subs.asked("mstep"), 120_000)
+        await until("B saw the typed execution", () => s!.subs.asked("mstep"), 120_000)
         await until(
-          "B recorded a typed turn",
+          "B recorded a typed execution",
           () =>
             (s!.bDb<{ n: number }>(
               "SELECT count(*) AS n FROM execution WHERE session_id = ? AND typed IS NOT NULL",
@@ -556,7 +556,7 @@ const checks: ReadonlyArray<Check> = [
             )?.n ?? 0) === 1,
           60_000,
         )
-        await until("the typed turn's notice", () => s!.notices(address, "mstep") === 1, 120_000)
+        await until("the typed execution's notice", () => s!.notices(address, "mstep") === 1, 120_000)
 
         const renamed = await s.hcA("machine", "rename", "mb", "mbx")
         expect(renamed.code === 0, `hc machine rename: ${renamed.stderr}`)

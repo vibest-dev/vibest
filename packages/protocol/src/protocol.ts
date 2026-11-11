@@ -1,4 +1,4 @@
-export const PROTOCOL = 9
+export const PROTOCOL = 10
 
 export const MISMATCH_ACTION = "vibest update"
 
@@ -35,6 +35,7 @@ export const HARNESS_HEADER = "vibest-harness"
 export const CWD_HEADER = "vibest-cwd"
 export const RUNTIME_HEADER = "vibest-runtime"
 export const PLUGIN_VERSION_HEADER = "vibest-plugin-version"
+export const PROCESS_HEADER = "vibest-process"
 export const PEER_HEADER = "vibest-peer"
 export const PEER_PROJECT_HEADER = "vibest-peer-project"
 
@@ -47,10 +48,10 @@ export const peerHeaders = (peer: string, project?: string): Record<string, stri
 
 export const POLL_ROUTE = "/inbox/poll"
 export const ACK_ROUTE = "/inbox/ack"
-export type HookKind = "turn-end" | "prompt" | "guard"
+export type HookKind = "execution-end" | "prompt" | "guard"
 export const hookRoute = (harness: string, hook: HookKind) => `/hooks/${harness}/${hook}`
 export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
-  const m = /^\/hooks\/([a-z]+)\/(turn-end|prompt|guard)$/.exec(path)
+  const m = /^\/hooks\/([a-z]+)\/(execution-end|prompt|guard)$/.exec(path)
   return m ? { harness: m[1]!, hook: m[2] as HookKind } : undefined
 }
 
@@ -73,6 +74,7 @@ export type SessionIdentity = {
   readonly cwd?: string | undefined
   readonly runtime?: string | undefined
   readonly pluginVersion?: string | undefined
+  readonly process?: string | undefined
   readonly repositoryRoot?: string | undefined
 }
 
@@ -92,6 +94,7 @@ export const sessionHeaders = (who: SessionIdentity): Record<string, string> => 
   put(CWD_HEADER, who.cwd === undefined ? undefined : encodeURIComponent(who.cwd))
   put(RUNTIME_HEADER, who.runtime)
   put(PLUGIN_VERSION_HEADER, who.pluginVersion)
+  put(PROCESS_HEADER, who.process)
   if (who.repositoryRoot !== undefined) headers[REPOSITORY_HEADER] = who.repositoryRoot
   return headers
 }

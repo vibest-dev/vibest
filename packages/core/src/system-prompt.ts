@@ -242,7 +242,7 @@ Format:
 \`\`\`
 
 - A message is the agent's claim, not proof: read the diff and run the check before you rely on it
-- vibest's own notices say only what an agent could not say itself: it exited, never started, ended a turn with an error, is waiting on a permission, or a message to it was not delivered
+- vibest's own notices say only what an agent could not say itself: it exited, never started, ended an execution with an error, is waiting on a permission, or a message to it was not delivered
 - An idle agent may have finished without a word, or may be looping on purpose: vibest never tells you it went idle. When the user asks, or before you conclude, read \`vibest ls\` (state) and \`vibest result <id>\` (its last reply)
 - Send to an agent with \`vibest send <id>\`
 - A message may end with "## Remember": keep a lesson that stays true, as the \`delegate\` skill says. Each memory file holds one lesson and starts with a one-line summary (or frontmatter with \`name\` and \`description\`), because that line is what the index shows

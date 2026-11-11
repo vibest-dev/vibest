@@ -21,11 +21,11 @@ Every prompt asks for a nonce in the final reply, so a result can be matched to 
 
 _As a developer, I start one agent on a task from my terminal and read its result when it is done._
 
-| Step                                                                                | Expect                                                                                |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `vibest run claude "add a --verbose flag to the CLI; reply DONE-<nonce>"` in `shop` | a pane in herdr, a new worktree off `HEAD`, row `working`                             |
-| wait                                                                                | row `idle`, turn `completed`; `vibest result <id>` holds `DONE-<nonce>` as its answer |
-| `vibest archive <id>` after the worker pushed its branch                            | pane closed with PID proof, worktree removed, branch kept on `origin`                 |
+| Step                                                                                | Expect                                                                                    |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `vibest run claude "add a --verbose flag to the CLI; reply DONE-<nonce>"` in `shop` | a pane in herdr, a new worktree off `HEAD`, row `working`                                 |
+| wait                                                                                | row `idle`, execution `completed`; `vibest result <id>` holds `DONE-<nonce>` as its reply |
+| `vibest archive <id>` after the worker pushed its branch                            | pane closed with PID proof, worktree removed, branch kept on `origin`                     |
 
 Status: now. Run once per harness (Claude, Pi, Cursor).
 
@@ -34,12 +34,12 @@ Status: now. Run once per harness (Claude, Pi, Cursor).
 _As a developer, I chat with the main Agent; it splits a feature across workers, and their results come back into
 the same conversation without my polling._
 
-| Step                                                                         | Expect                                                                                                                                |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `vibest` in `shop`; ask: "add CSV export and fix the login bug, in parallel" | the main Agent (coordinator) runs two workers on different harnesses; it edits no files itself                                        |
-| workers finish at different times                                            | each result arrives in the main conversation as new input, once, in arrival order; nothing is pasted while the main Agent is mid-turn |
-| a worker calls `vibest send <main id> "blocked on X"`                        | the message reaches the main conversation; the main Agent answers with `vibest send`                                                  |
-| main Agent merges                                                            | it summarises both branches; `pnpm test` is green on each                                                                             |
+| Step                                                                         | Expect                                                                                                                                     |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `vibest` in `shop`; ask: "add CSV export and fix the login bug, in parallel" | the main Agent (coordinator) runs two workers on different harnesses; it edits no files itself                                             |
+| workers finish at different times                                            | each result arrives in the main conversation as new input, once, in arrival order; nothing is pasted while the main Agent is mid-execution |
+| a worker calls `vibest send <main id> "blocked on X"`                        | the message reaches the main conversation; the main Agent answers with `vibest send`                                                       |
+| main Agent merges                                                            | it summarises both branches; `pnpm test` is green on each                                                                                  |
 
 Status: now (Claude main Agent uses the inbox bridge; Pi main Agent uses its extension).
 
@@ -50,7 +50,7 @@ _As a tech lead, I want two or three models to argue a design until they agree, 
 | Step                                                                                              | Expect                                                                                                                         |
 | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | ask the main Agent: "committee: should sessions be stored in SQLite or files? Claude, Cursor, Pi" | three read-only members, one per harness, same question                                                                        |
-| rounds                                                                                            | the main Agent forwards each member's argument to the others with `vibest send`; every answer returns to the main conversation |
+| exchanges                                                                                         | the main Agent forwards each member's argument to the others with `vibest send`; every answer returns to the main conversation |
 | end                                                                                               | a summary listing the agreement and the disagreements; no member changed a file (worktrees clean)                              |
 
 Status: now as coordinator behaviour; after refactor as the `committee` skill with all members in one Run (`--in`),
@@ -123,7 +123,7 @@ _I want some workers to stay for follow-up questions and others to vanish when d
 - Kept (default): after the result, `vibest send <id> "also handle empty files"` gets a second answer in the main
   conversation; the pane stays until `vibest archive`.
 - Once: `--archive-on-idle` now (`--once` after refactor) closes the pane and removes the clean worktree right
-  once the Agent is idle after a completed turn with nothing it sent or was sent still waiting; a dirty or unpushed worktree is kept, and the reason is shown.
+  once the Agent is idle after a completed execution with nothing it sent or was sent still waiting; a dirty or unpushed worktree is kept, and the reason is shown.
 
 Status: now.
 
@@ -134,7 +134,7 @@ _If the daemon or a pane dies, I lose no result and nothing is sent twice._
 | Fault                                  | Expect                                                                            |
 | -------------------------------------- | --------------------------------------------------------------------------------- |
 | kill the daemon while two workers work | next `vibest` command restarts it; both results still reach the main Agent once   |
-| close a worker's pane mid-turn         | turn ends `lost` within about 10 s; the main Agent is told                        |
+| close a worker's pane mid-execution    | execution ends `lost` within about 10 s; the main Agent is told                   |
 | model that does not exist              | a failed result with Claude's error, no screen text; `vibest peek` shows the pane |
 | `vibest update` while workers are busy | the replacement waits or names its blockers; no running worker is cut off         |
 

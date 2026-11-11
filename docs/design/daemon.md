@@ -42,7 +42,7 @@ exit uses it.
 
 `vibest update` sends `Daemon.Handoff` the same way, in the running vibestd's protocol, so a newer vibest hands over
 a vibestd of any older protocol that has the `handoff` capability. A handoff (like a Stop) accepts the stop in the
-same step that finds vibestd idle, and only then starts the new vibestd: from then on no turn end or other work is
+same step that finds vibestd idle, and only then starts the new vibestd: from then on no execution end or other work is
 admitted, so a started new vibestd always takes over, and a refused handoff has started nothing.
 
 After `vibest update` installs another version and vibestd answers Ping with that version, the old process does not
@@ -84,13 +84,12 @@ variable a shell rc does not set, since an rc that exports the names themselves 
 
 Changes are counted at the RPC and HTTP entry until they end, failed or interrupted ones too, and refused once a
 `Daemon.Stop` drains (`DaemonStopping` over RPC, 503 over HTTP), except settlements of work already handed out: a
-hook's turn start (`Prompt`) or turn end (`TurnEnd`) and an inbox ack. While it drains these are still admitted;
-after the Stop is accepted they are refused too. Refused while draining, a spawn's first turn would never show its
-pickup proof (its launch then holds the drain open) and a turn end would lose its result. A turn end is one
-transaction that writes the round's `turn.ended` with its reply, without the session lock; a write that fails fails the request, so the caller sees a
-failure, not a silent retry. A turn start is stamped once, when the hook arrives: `userPrompt` notes the start before
-it may wait for the session's lock, held through a send's whole confirm, and stamps the round with the same time, so
-the pending send sees its pickup proof while it still waits.
+hook's execution start (`Prompt`) or execution end (`ExecutionEnd`) and an inbox ack. While it drains these are still admitted;
+after the Stop is accepted they are refused too. Refused while draining, a spawn's first execution would never show its
+pickup proof (its launch then holds the drain open) and an execution end would lose its result. An execution end is one
+transaction that writes the execution's `execution.ended` with its reply, without the session lock; a write that fails fails the request, so the caller sees a
+failure, not a silent retry. An execution start is written once, when the hook arrives, without the session's lock (held through a send's whole
+confirm): `userPrompt` accepts the open execution, so the pending send sees its pickup proof while it still waits.
 
 ## Session requests
 

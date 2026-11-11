@@ -8,7 +8,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import type { InboxRow } from "@vibest/schema/session"
 import * as Http from "@vibest/server/http"
-import { Clock, Duration, Effect, Fiber, type Scope } from "effect"
+import { Duration, Effect, Fiber, type Scope } from "effect"
 import * as Headers from "effect/http/Headers"
 import { TestClock } from "effect/testing"
 
@@ -19,9 +19,7 @@ import {
   testLayer,
   type TestServices,
   until,
-  resultText,
-  busEvents,
-  nextTurnStart,
+  replyText,
   projectOf,
 } from "./fakes.ts"
 
@@ -145,7 +143,7 @@ describe("vibestd's HTTP API", () => {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
-      yield* db.noteHarnessSession(main, "pi-conversation")
+      yield* db.noteConversation(main, "pi-conversation")
       const old = yield* call("/inbox/poll", { sessionId: main, harnessSessionId: "claude-conversation" })
       assert.strictEqual(old.status, 403)
       assert.strictEqual((yield* db.coordinatorOf(projectId))?.harnessSessionId, "pi-conversation")
@@ -191,7 +189,7 @@ describe("vibestd's HTTP API", () => {
       assert.lengthOf(first.ids, 1)
       assert.strictEqual(first.line, "Notice: hello")
       assert.strictEqual(first.text, "hello")
-      assert.strictEqual(yield* statusOf(db, worker), "sending")
+      assert.strictEqual(yield* statusOf(db, worker), "delivering")
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
       yield* TestClock.adjust(LEASE)
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, first.ids)
@@ -225,7 +223,7 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, old.ids)
       assert.deepStrictEqual(yield* inbox.ack(projectId, old.ids, newer.ids), old.ids)
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, newer.ids)
-      assert.strictEqual(yield* statusOf(db, worker), "sending")
+      assert.strictEqual(yield* statusOf(db, worker), "delivering")
     }),
   )
 
@@ -249,7 +247,7 @@ describe("vibestd's HTTP API", () => {
       const { db, inbox, worker, projectId } = yield* project
       yield* inbox.enqueue({ sessionId: worker, message: "hello" })
       const { ids } = yield* inbox.poll(projectId)
-      assert.strictEqual(yield* statusOf(db, worker), "sending")
+      assert.strictEqual(yield* statusOf(db, worker), "delivering")
       yield* TestClock.adjust(AWAY)
       yield* TestClock.adjust("2 seconds")
       yield* until(statusOf(db, worker), (s) => s === "pending")
@@ -271,70 +269,108 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
       yield* TestClock.adjust("2 seconds")
       yield* settled
-      assert.strictEqual(yield* statusOf(db, worker), "sending")
+      assert.strictEqual(yield* statusOf(db, worker), "delivering")
       yield* TestClock.adjust(AWAY)
       yield* until(statusOf(db, worker), (s) => s === "pending")
     }),
   )
 
   test(
-    "the prompt hook notes its turn start at once, while the session's lock is held, with the round's stamp",
+    "the prompt hook is answered while the session's lock is held",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      yield* until(db.getSession(worker), (s) => s?.turnState === "open")
+      yield* until(db.getSession(worker), (s) => s?.executionState === "open")
       const held = yield* herdr.hold("state", worker)
       const checking = yield* Effect.forkChild(sessions.check(worker))
       yield* held.reached
-      yield* TestClock.adjust("3 seconds")
-      const stamp = yield* Clock.currentTimeMillis
-      const events = yield* busEvents
-      const hook = yield* Effect.forkChild(
-        call(
-          "/hooks/claude/prompt",
-          { sessionId: worker },
-          JSON.stringify({ hook_event_name: "PromptSubmit", text: "do it", origin: "composer" }),
-        ),
+      const hook = yield* call(
+        "/hooks/claude/prompt",
+        { sessionId: worker },
+        JSON.stringify({ hook_event_name: "PromptSubmit", text: "do it", origin: "composer" }),
       )
-      assert.strictEqual(yield* nextTurnStart(events, worker), stamp)
+      assert.strictEqual(hook.status, 204)
       yield* held.release()
       yield* Fiber.join(checking)
-      assert.strictEqual((yield* Fiber.join(hook)).status, 204)
     }),
   )
 
   test(
-    "turn-end, prompt and guard hooks: vibestd keeps the turn start and end",
+    "a request from an earlier process records no conversation from its headers",
+    Effect.gen(function* () {
+      const { call, db, worker } = yield* project
+      const current = (yield* db.currentProcessId(worker))!
+      const before = (yield* db.getSession(worker))!.harnessSessionId
+      const old = String(current - 1)
+      yield* call("/session/ready", { sessionId: worker, process: old, harnessSessionId: "old-by-header" })
+      yield* call(
+        "/hooks/claude/prompt",
+        { sessionId: worker, process: old },
+        JSON.stringify({ hook_event_name: "PromptSubmit", text: "x", origin: "composer" }),
+      )
+      assert.strictEqual((yield* db.getSession(worker))!.harnessSessionId, before)
+      yield* call("/session/ready", { sessionId: worker, process: String(current), harnessSessionId: "current" })
+      assert.strictEqual((yield* db.getSession(worker))!.harnessSessionId, "current")
+    }),
+  )
+
+  test(
+    "a late Ready from the process a restart replaced changes nothing; the restarted harness's Ready is taken",
+    Effect.gen(function* () {
+      const { call, db, worker } = yield* project
+      yield* until(db.getSession(worker), (s) => s?.startedAt != null)
+      const first = (yield* db.currentProcessId(worker))!
+      const ready = (process: number, pid: number, pluginVersion = VERSION) =>
+        call("/session/ready", { sessionId: worker, process: String(process), pluginVersion }, JSON.stringify({ pid }))
+      assert.deepStrictEqual((yield* ready(first, 111)).body, { process: first })
+      yield* db.restartProcess(worker)
+      const second = (yield* db.currentProcessId(worker))!
+      assert.notStrictEqual(second, first)
+      const late = yield* ready(first, 111)
+      assert.strictEqual(late.status, 204)
+      assert.isUndefined(yield* db.readyAt(worker))
+      assert.isUndefined((yield* db.getSession(worker))!.metadata.pid)
+      assert.deepStrictEqual((yield* ready(first, 222, "0.0.2-next")).body, { process: second })
+      assert.isNumber(yield* db.readyAt(worker))
+      assert.deepInclude((yield* db.getSession(worker))!.metadata, {
+        pid: 222,
+        integration: { version: "0.0.2-next", protocol: PROTOCOL },
+      })
+    }),
+  )
+
+  test(
+    "execution-end, prompt and guard hooks: vibestd keeps the execution start and end",
     Effect.gen(function* () {
       const { call, db, worker, main } = yield* project
       const layout = yield* Layout
-      const events = yield* busEvents
-      assert.strictEqual((yield* call("/session/ready", { sessionId: worker })).status, 204)
+      const ready = yield* call("/session/ready", { sessionId: worker })
+      assert.strictEqual(ready.status, 200)
+      assert.isNumber((ready.body as { process?: unknown }).process)
       const prompt = yield* call(
         "/hooks/claude/prompt",
         { sessionId: worker },
         JSON.stringify({ hook_event_name: "PromptSubmit", text: "next step", origin: "composer" }),
       )
       assert.strictEqual(prompt.status, 204)
-      yield* nextTurnStart(events, worker)
       const end = yield* call(
-        "/hooks/claude/turn-end",
+        "/hooks/claude/execution-end",
         { sessionId: worker },
         JSON.stringify({
-          hook_event_name: "TurnComplete",
+          hook_event_name: "ExecutionComplete",
           reason: "answer",
           last_assistant_message: "Fixed the guard.",
         }),
       )
       assert.strictEqual(end.status, 204)
-      assert.include(yield* resultText(worker), "Fixed the guard.")
+      assert.include(yield* replyText(worker), "Fixed the guard.")
       yield* call(
-        "/hooks/claude/turn-end",
+        "/hooks/claude/execution-end",
         { sessionId: main },
-        JSON.stringify({ hook_event_name: "TurnComplete", reason: "answer", last_assistant_message: "x" }),
+        JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "answer", last_assistant_message: "x" }),
       )
-      assert.strictEqual(yield* resultText(main), "")
+      assert.strictEqual(yield* replyText(main), "")
       const key = (yield* db.getSession(worker))!.projectId
       const tool = (file: string) =>
         JSON.stringify({ tool_name: "Write", tool_input: { file_path: file, content: "x" }, cwd: "/tmp" })

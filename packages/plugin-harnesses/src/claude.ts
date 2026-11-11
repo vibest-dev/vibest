@@ -33,21 +33,21 @@ const projectDirRules = (dir: string) => [`Read(/${dir}/**)`, `Edit(/${dir}/**)`
 const vibestSend = (vibest: ReadonlyArray<string>) =>
   [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd} send:*)`).join(",")
 
-const turnComplete = (event: Readonly<Record<string, unknown>>) => {
+const executionComplete = (event: Readonly<Record<string, unknown>>) => {
   if (event.reason === "answer") return event
   if (event.reason === "aborted")
     return {
       ...event,
       aborted: true,
       error: "interrupted",
-      error_details: "the turn was stopped in its terminal (Esc) before it ended",
+      error_details: "the execution was stopped in its terminal (Esc) before it ended",
     }
   if (event.reason === "refusal") {
     const r = (event.refusal ?? {}) as { readonly category?: unknown; readonly explanation?: unknown }
     const why = [r.category, r.explanation].filter((x) => typeof x === "string" && x !== "").join(": ")
     return { ...event, error: "refusal", error_details: why || "the model refused to answer" }
   }
-  return { ...event, error: "error", error_details: "the turn ended on an API error" }
+  return { ...event, error: "error", error_details: "the execution ended on an API error" }
 }
 
 const optionalModel = Schema.optional(Schema.NullOr(Schema.String))
@@ -108,7 +108,7 @@ export const claude: Harness.HarnessDefinition = {
   systemPromptInPrompt: false,
   interruptKey: "esc",
   startup: claudeStartup,
-  resultField: "last_assistant_message",
+  replyField: "last_assistant_message",
   inbox: "poll",
   ready: "integration",
   checkProvider: noProvider("claude"),
@@ -161,7 +161,7 @@ export const claude: Harness.HarnessDefinition = {
     if (event.origin !== "composer" && event.origin !== "bridge") return undefined
     return typeof event.text === "string" && event.text.trim() !== "" ? { text: event.text } : undefined
   },
-  turnEnd: (event, coordinator) =>
-    coordinator || event.hook_event_name !== "TurnComplete" ? undefined : { result: turnComplete(event) },
+  executionEnd: (event, coordinator) =>
+    coordinator || event.hook_event_name !== "ExecutionComplete" ? undefined : { end: executionComplete(event) },
   subscription: (home) => claudeSubscription(home).pipe(Effect.provide(platform)),
 }

@@ -23,7 +23,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
   status: session.status,
   startedAt: session.startedAt,
   exitedAt: session.exitedAt,
-  turnState: session.turnState,
+  executionState: session.executionState,
   projectId: session.projectId,
   runtime: session.runtime,
   address: session.address,
@@ -47,7 +47,7 @@ const mainInfo = (m: CoordinatorRow, status: AgentStatus): SessionInfo => ({
   status,
   startedAt: null,
   exitedAt: null,
-  turnState: "none",
+  executionState: "none",
   projectId: m.projectId,
   runtime: m.runtime ?? "",
   address: m.address ?? { machine: "local", id: "" },
@@ -124,7 +124,7 @@ export const sessionListing = (deps: {
             ...info,
             status: unseenDone(info.status, seen),
             parentId: parents.get(info.id) ?? null,
-            turn: seen?.turn ?? null,
+            finished: seen?.finished ?? null,
           })),
         { concurrency: "unbounded" },
       )
@@ -208,7 +208,7 @@ export const sessionListing = (deps: {
       for (const event of events) {
         if ("seq" in event) {
           if (event.sessionId !== undefined) sessionIds.add(event.sessionId)
-        } else if (event.type === "live.session" || event.type === "live.turn_start") sessionIds.add(event.sessionId)
+        } else if (event.type === "live.session") sessionIds.add(event.sessionId)
         else if (event.type === "live.project") projectIds.add(event.projectId)
         else if (event.type === "live.state" || event.type === "live.exited") {
           const project = yield* db.coordinatorAt(event.runtime, event.terminal)

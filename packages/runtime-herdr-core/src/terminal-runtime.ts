@@ -48,7 +48,7 @@ const SEEN_EVENTS = new Set(["turn", "labels"])
 export const seenOf = (t: api.Terminal): VibestPlugin.Runtime.Seen => {
   const label = t.labels[LABEL.seen]
   const seen = label === undefined || !/^\d+$/.test(label) ? null : Number(label)
-  return { turn: t.turn ?? 0, seen }
+  return { finished: t.turn ?? 0, seen }
 }
 
 export const PRESENT_MAIN_SESSION = "mainSession"
@@ -411,10 +411,10 @@ export const make = (deps: {
 
     const seen: NonNullable<Runtime["seen"]> = (terminal) => get(terminal).pipe(Effect.map(seenOf))
 
-    const see: NonNullable<Runtime["see"]> = (terminal, turn) =>
+    const see: NonNullable<Runtime["see"]> = (terminal, finished) =>
       reach(terminal).pipe(
         Effect.flatMap(({ hc, address }) =>
-          failWith(hc.call("terminal.label", { terminal: address, labels: { [LABEL.seen]: String(turn) } })),
+          failWith(hc.call("terminal.label", { terminal: address, labels: { [LABEL.seen]: String(finished) } })),
         ),
         Effect.asVoid,
       )

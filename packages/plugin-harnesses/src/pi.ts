@@ -64,7 +64,7 @@ export const pi: Harness.HarnessDefinition = {
   ownSessionId: true,
   systemPromptInPrompt: false,
   interruptKey: "esc",
-  resultField: "text",
+  replyField: "text",
   inbox: "subscribe",
   ready: "integration",
   checkProvider: () => undefined,
@@ -102,12 +102,12 @@ export const pi: Harness.HarnessDefinition = {
     if (typeof event.text !== "string" || event.text.trim() === "") return undefined
     return { text: event.text }
   },
-  turnEnd: (event, coordinator) => {
+  executionEnd: (event, coordinator) => {
     if (coordinator || event.type !== "agent_settled") return undefined
     const aborted = event.aborted === true
     const error = typeof event.error === "string" ? event.error : ""
     return {
-      result: {
+      end: {
         text: typeof event.text === "string" ? event.text : "",
         error: error || (aborted ? "aborted" : ""),
         aborted,

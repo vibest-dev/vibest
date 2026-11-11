@@ -16,7 +16,7 @@ export const PI: HarnessDefinition = {
   ownSessionId: true,
   systemPromptInPrompt: false,
   interruptKey: "esc",
-  resultField: "text",
+  replyField: "text",
   inbox: "subscribe",
   ready: "integration",
   launchArgs: (i) => [
@@ -37,10 +37,10 @@ export const PI: HarnessDefinition = {
     ...providerModel(i.provider, i.model),
   ],
   models: { args: () => [], answer: () => undefined },
-  turnEnd: (event, coordinator) =>
+  executionEnd: (event, coordinator) =>
     coordinator || event.type !== "agent_settled"
       ? undefined
-      : { result: { text: typeof event.text === "string" ? event.text : "", error: "", aborted: false } },
+      : { end: { text: typeof event.text === "string" ? event.text : "", error: "", aborted: false } },
   userPrompt: (event, coordinator) =>
     coordinator || event.type !== "input" || typeof event.text !== "string" || event.text.trim() === ""
       ? undefined
@@ -56,7 +56,7 @@ export const CLAUDE: HarnessDefinition = {
   ownSessionId: true,
   systemPromptInPrompt: false,
   interruptKey: "esc",
-  resultField: "last_assistant_message",
+  replyField: "last_assistant_message",
   inbox: "poll",
   ready: "integration",
   checkProvider: noProvider("claude"),
@@ -77,11 +77,11 @@ export const CLAUDE: HarnessDefinition = {
     ...opt("--model", i.model),
   ],
   models: { args: () => [], answer: () => undefined },
-  turnEnd: (event, coordinator) =>
-    coordinator || event.hook_event_name !== "TurnComplete"
+  executionEnd: (event, coordinator) =>
+    coordinator || event.hook_event_name !== "ExecutionComplete"
       ? undefined
       : {
-          result:
+          end:
             event.reason === "answer"
               ? event
               : event.reason === "aborted"
@@ -89,9 +89,9 @@ export const CLAUDE: HarnessDefinition = {
                     ...event,
                     aborted: true,
                     error: "interrupted",
-                    error_details: "the turn was stopped in its terminal (Esc) before it ended",
+                    error_details: "the execution was stopped in its terminal (Esc) before it ended",
                   }
-                : { ...event, error: "error", error_details: "the turn ended on an API error" },
+                : { ...event, error: "error", error_details: "the execution ended on an API error" },
         },
   userPrompt: (event, coordinator) =>
     coordinator || event.hook_event_name !== "PromptSubmit" || typeof event.text !== "string" || !event.text.trim()
@@ -105,7 +105,7 @@ export const CURSOR: HarnessDefinition = {
   ownSessionId: false,
   systemPromptInPrompt: true,
   interruptKey: "ctrl+c",
-  resultField: "text",
+  replyField: "text",
   ready: "runtime",
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [
@@ -118,8 +118,8 @@ export const CURSOR: HarnessDefinition = {
   guardAnswer: (reason) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
   conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),
-  turnEnd: (event, coordinator) =>
-    !coordinator && event.hook_event_name === "afterAgentResponse" ? { result: event } : undefined,
+  executionEnd: (event, coordinator) =>
+    !coordinator && event.hook_event_name === "afterAgentResponse" ? { end: event } : undefined,
   userPrompt: (event, coordinator) => {
     if (coordinator) return undefined
     if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }

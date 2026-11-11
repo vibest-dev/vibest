@@ -1,17 +1,10 @@
-import { type InboxKind } from "@vibest/schema/event"
-import { InboxRow, InboxStatus, type TurnState } from "@vibest/schema/session"
+import { ExecutionAccepted, type InboxKind } from "@vibest/schema/event"
+import { InboxRow, InboxStatus, type ExecutionState } from "@vibest/schema/session"
 import { Effect } from "effect"
 
-import {
-  encodeAddress,
-  failureOf,
-  storedStatus,
-  type SessionPatch,
-  type NewInboxRow,
-  type ExecutionEnd,
-} from "./db-rows.ts"
+import { encodeAddress, failureOf, type SessionPatch, type NewInboxRow, type ExecutionEnd } from "./db-rows.ts"
 import type { Store } from "./db-store.ts"
-import { envelope, type TurnEnded } from "./results.ts"
+import { envelope, type ObservedEnd } from "./replies.ts"
 
 export const inboxMethods = (store: Store) => {
   const {
@@ -41,7 +34,8 @@ export const inboxMethods = (store: Store) => {
     endExecution,
     updateSession,
     dropWaiting,
-    prompted,
+    emit,
+    currentProcessId,
   } = store
   const queuedBy = reads.queuedBy
   const observable = (id: string) =>
@@ -50,6 +44,18 @@ export const inboxMethods = (store: Store) => {
         AND NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id)`.pipe(
       Effect.map((rows) => rows.length > 0),
     )
+  const acceptedAt = (id: string, execution: number) =>
+    sql<{ at: number | null }>`SELECT accepted_at AS at FROM execution
+      WHERE session_id = ${id} AND id = ${execution}`.pipe(Effect.map((rows) => rows[0]?.at ?? null))
+  const accept = (id: string, execution: number) =>
+    Effect.gen(function* () {
+      if ((yield* openExecution(id)) !== execution) return false
+      if ((yield* acceptedAt(id, execution)) === null)
+        yield* emit(ExecutionAccepted, { sessionId: id, data: { execution } })
+      return true
+    })
+  const fromOldProcess = (id: string, process: number | undefined) =>
+    Effect.map(currentProcessId(id), (current) => process !== undefined && process !== current)
   return {
     insertInbox: (row: NewInboxRow) => tx(insertInboxRow(row)).pipe(Effect.orDie),
 
@@ -129,7 +135,8 @@ export const inboxMethods = (store: Store) => {
           const s = yield* findSession(id)
           if (s === undefined) return false
           const waiting = yield* sql<{ id: number }>`SELECT id FROM inbox
-            WHERE (session_id = ${id} OR sender_session_id = ${id}) AND status IN ('pending', 'delivering')
+            WHERE ((session_id = ${id} OR sender_session_id = ${id}) AND status IN ('pending', 'delivering'))
+              OR (session_id = ${id} AND kind = 'task' AND execution_id IS NULL)
             LIMIT 1`
           if (waiting.length > 0) return false
           if ((yield* openExecution(id)) !== undefined) return false
@@ -140,41 +147,42 @@ export const inboxMethods = (store: Store) => {
 
     openExecution: (id: string) => openExecution(id).pipe(Effect.orDie),
 
-    archive: (id: string, at: number) =>
+    archive: (id: string) =>
       tx(
         Effect.gen(function* () {
-          const s = yield* findSession(id)
-          if (s === undefined) return
           if ((yield* openExecution(id)) !== undefined) yield* endExecution(id, { outcome: "interrupted" })
-          yield* updateSession(id, { metadata: { ...s.metadata, archived: true, removed: true }, lastActive: at })
+          yield* store.archive(id)
         }),
       ).pipe(Effect.orDie),
 
-    beginExecution: (id: string, at: number) =>
+    startExecution: (id: string, at: number) =>
       tx(
         Effect.gen(function* () {
           const open = yield* openExecution(id)
-          if (open !== undefined) return { turn: open, opened: false }
-          return { turn: yield* startExecution(id, at), opened: true }
+          if (open !== undefined) return { execution: open, opened: false }
+          return { execution: yield* startExecution(id, at), opened: true }
         }),
       ).pipe(Effect.orDie),
 
-    stampExecution: (id: string, turn: number, at: number) =>
+    acceptExecution: (id: string, execution: number) => tx(accept(id, execution)).pipe(Effect.orDie),
+
+    executionAccepted: (id: string) =>
       Effect.gen(function* () {
-        if ((yield* openExecution(id)) !== turn) return false
-        prompted.set(id, { execution: turn, at })
-        return true
+        const execution = yield* openExecution(id)
+        return execution !== undefined && (yield* acceptedAt(id, execution)) !== null
       }).pipe(Effect.orDie),
+
+    currentProcessId: (id: string) => currentProcessId(id).pipe(Effect.orDie),
 
     closeExecution: (
       id: string,
-      turn: number,
-      status: Exclude<TurnState, "none" | "open">,
+      execution: number,
+      status: Exclude<ExecutionState, "none" | "open">,
       options: { readonly failure?: string; readonly notice?: string } = {},
     ) =>
       tx(
         Effect.gen(function* () {
-          if ((yield* openExecution(id)) !== turn) return false
+          if ((yield* openExecution(id)) !== execution) return false
           const failure = failureOf(options.failure)
           yield* endExecution(id, { outcome: status, ...(failure === undefined ? {} : { failure }) })
           if (options.notice !== undefined) yield* insertInboxRow({ sessionId: id, message: options.notice })
@@ -185,20 +193,27 @@ export const inboxMethods = (store: Store) => {
     linkTask: (id: string) =>
       tx(
         Effect.gen(function* () {
-          const turn = yield* openExecution(id)
-          if (turn !== undefined) yield* linkTask(id, turn, yield* now)
+          const execution = yield* openExecution(id)
+          if (execution !== undefined) yield* linkTask(id, execution, yield* now)
         }),
       ).pipe(Effect.orDie),
 
     untakenTask: (id: string) => reads.untakenTask(id).pipe(Effect.orDie),
 
+    hasQueued: (id: string) =>
+      sql<{ id: number }>`SELECT id FROM inbox WHERE session_id = ${id}
+          AND ((kind != 'task' AND status = 'pending') OR (kind = 'task' AND execution_id IS NULL))
+        LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
+
     executionTaken: (id: string) =>
       Effect.gen(function* () {
-        const turn = yield* openExecution(id)
-        if (turn === undefined) return false
-        const [row] = yield* sql<{ taken: number }>`SELECT (t.typed IS NOT NULL
-            OR EXISTS (SELECT 1 FROM inbox i WHERE i.session_id = t.session_id AND i.execution_id = t.id)) AS taken
-          FROM execution t WHERE t.session_id = ${id} AND t.id = ${turn}`
+        const execution = yield* openExecution(id)
+        if (execution === undefined) return false
+        const [row] = yield* sql<{ taken: number }>`SELECT (t.accepted_at IS NOT NULL OR t.typed IS NOT NULL) AS taken
+          FROM execution t WHERE t.session_id = ${id} AND t.id = ${execution}`
         return row?.taken === 1
       }).pipe(Effect.orDie),
 
@@ -221,24 +236,28 @@ export const inboxMethods = (store: Store) => {
         }),
       ).pipe(Effect.orDie),
 
-    startObserved: (id: string, typed: string | undefined, at: number) =>
+    startObserved: (id: string, typed: string | undefined, at: number, process?: number) =>
       tx(
         Effect.gen(function* () {
-          if (!(yield* observable(id))) return
+          if (!(yield* observable(id)) || (yield* fromOldProcess(id, process))) return
           const open = (yield* openExecution(id)) ?? (typed ? yield* startExecution(id, at, typed) : undefined)
-          if (open !== undefined) yield* updateSession(id, { status: "working" })
+          if (open === undefined) return
+          yield* accept(id, open)
+          yield* updateSession(id, { status: "working" })
         }),
       ).pipe(Effect.orDie),
 
-    endObserved: (id: string, end: TurnEnded) =>
+    endObserved: (id: string, end: ObservedEnd, process?: number) =>
       tx(
         Effect.gen(function* () {
-          if (!(yield* observable(id))) return undefined
+          if (!(yield* observable(id)) || (yield* fromOldProcess(id, process))) return undefined
           const current = yield* currentProcess(id)
           if (current === undefined || current.start.harness !== end.harness) return undefined
           if (end.needsReady && current.readyAt === null) return undefined
-          if ((yield* openExecution(id)) === undefined && end.status === "interrupted") return undefined
-          const failure = failureOf(end.failure)
+          const open = yield* openExecution(id)
+          if (open === undefined && end.status === "interrupted") return undefined
+          if (open !== undefined && (yield* acceptedAt(id, open)) === null) return "unaccepted" as const
+          const failure = end.limited ? { message: end.failure ?? "", kind: "limit" as const } : failureOf(end.failure)
           yield* endExecution(
             id,
             {
@@ -254,7 +273,7 @@ export const inboxMethods = (store: Store) => {
           yield* updateSession(id, { status: "idle" })
           if (end.status === "failed" && !end.limited)
             yield* insertInboxRow(
-              { sessionId: id, message: `${id}'s turn ended with an error: ${end.failure}` },
+              { sessionId: id, message: `${id}'s execution ended with an error: ${end.failure}` },
               end.at,
             )
           return end.status
@@ -266,7 +285,7 @@ export const inboxMethods = (store: Store) => {
         Effect.gen(function* () {
           const stamp = at === undefined ? undefined : Math.max(at, yield* now)
           yield* endExecution(id, end, stamp)
-          const { turnState: _, ...rest } = patch
+          const { executionState: _, ...rest } = patch
           yield* updateSession(id, rest)
           if (notice !== undefined) yield* insertInboxRow({ sessionId: id, message: notice }, stamp)
         }),
@@ -365,7 +384,7 @@ export const inboxMethods = (store: Store) => {
         }),
       ).pipe(Effect.orDie),
 
-    sendingInbox: inbox(sql`m.status = 'delivering'`).pipe(
+    deliveringInbox: inbox(sql`m.status = 'delivering'`).pipe(
       Effect.map((rows) => rows.map((r) => ({ id: r.id, sessionId: r.recipient ?? r.sender ?? "", kind: r.kind }))),
       Effect.orDie,
     ),
@@ -422,8 +441,8 @@ export const inboxMethods = (store: Store) => {
       Effect.gen(function* () {
         if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
         const moved = yield* moveInbox(
-          sql`session_id = ${sessionId} AND ${sql.in("id", ids)}${from ? sql` AND status = ${storedStatus(from)}` : sql``}`,
-          storedStatus(status),
+          sql`session_id = ${sessionId} AND ${sql.in("id", ids)}${from ? sql` AND status = ${from}` : sql``}`,
+          status,
           into,
         )
         return moved.length === 0
@@ -443,15 +462,35 @@ export const inboxMethods = (store: Store) => {
         Effect.orDie,
       ),
 
-    latestAnswer: (sessionId: string) =>
+    latestReply: (sessionId: string) =>
       sql<{
-        turn: number
+        execution: number
         status: string
         text: string | null
         failure: string | null
         endedAt: number
-      }>`SELECT id AS turn, outcome AS status, reply AS text, failure, ended_at FROM execution
+      }>`SELECT id AS execution, outcome AS status, reply AS text, failure, ended_at FROM execution
         WHERE session_id = ${sessionId} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(
+        Effect.map((rows) => rows[0]),
+        Effect.orDie,
+      ),
+
+    endedAtLimit: sql<{
+      id: string
+      runtime: string
+    }>`SELECT s.id, p.runtime FROM session s
+      JOIN process p ON p.session_id = s.id AND p.id = s.process_id
+      JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
+      WHERE s.ended_at IS NULL AND p.ended_at IS NOT NULL AND t.failure_kind = 'limit'`.pipe(Effect.orDie),
+
+    limitedExecution: (sessionId: string) =>
+      sql<{
+        execution: number
+        process: number | null
+        failure: string
+      }>`SELECT id AS execution, process_id AS process, failure FROM execution
+        WHERE session_id = ${sessionId} AND failure_kind = 'limit'
+          AND id = (SELECT max(id) FROM execution WHERE session_id = ${sessionId})`.pipe(
         Effect.map((rows) => rows[0]),
         Effect.orDie,
       ),

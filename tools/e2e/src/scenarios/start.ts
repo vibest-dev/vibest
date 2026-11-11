@@ -156,8 +156,12 @@ const move = (harness: "claude" | "pi"): Check => ({
         },
         120_000,
       )
-      const idleOrUnseenTurnDone = ["idle", "done"]
-      await until("A idle after its turn", async () => idleOrUnseenTurnDone.includes(await status(a)), 120_000)
+      const idleOrUnseenExecutionDone = ["idle", "done"]
+      await until(
+        "A idle after its execution",
+        async () => idleOrUnseenExecutionDone.includes(await status(a)),
+        120_000,
+      )
       const b = (
         (await herdr(socket, "pane.split", {
           target_pane_id: a,

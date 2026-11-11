@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, holdsSlowResultModel, piDir } from "../fake-model.ts"
+import { ask, holdsSlowMessageModel, piDir } from "../fake-model.ts"
 import {
   alive,
   buildVersion,
@@ -51,12 +51,16 @@ const swapOnce = (bytes: Buffer, from: string, to: string) => {
   bytes.write(to, at)
 }
 
+const protocolLine = (protocol: number, width: number) => `PROTOCOL = ${String(protocol).padStart(width)}`
+const olderProtocol = (bytes: Buffer, protocol: number) =>
+  swapOnce(bytes, protocolLine(protocol, 0), protocolLine(protocol - 1, String(protocol).length))
+
 const olderVibest = async (w: World, share: string, version: string, protocol: number) => {
   const dir = path.join(share, "versions", version)
   const bin = path.join(dir, "bin", "vibest")
   await fs.mkdir(path.dirname(bin), { recursive: true })
   const bytes = Buffer.from(await fs.readFile(compiled))
-  swapOnce(bytes, `PROTOCOL = ${protocol}`, `PROTOCOL = ${protocol - 1}`)
+  olderProtocol(bytes, protocol)
   swapOnce(bytes, `version: "${buildVersion}"`, `version: "${version}"`)
   await fs.writeFile(bin, bytes, { mode: 0o755 })
   if (process.platform === "darwin") {
@@ -66,7 +70,7 @@ const olderVibest = async (w: World, share: string, version: string, protocol: n
   await fs.cp(harnesses, path.join(dir, "harnesses"), { recursive: true })
   const extension = path.join(dir, "harnesses", "pi", "extension.mjs")
   const source = Buffer.from(await fs.readFile(extension))
-  swapOnce(source, `PROTOCOL = ${protocol}`, `PROTOCOL = ${protocol - 1}`)
+  olderProtocol(source, protocol)
   const older = source.toString().replace("var VERSION = package_default.version;", `var VERSION = "${version}";`)
   expect(older !== source.toString(), `${extension}: its version was not found`)
   await fs.writeFile(extension, older)
@@ -379,7 +383,7 @@ const checks: ReadonlyArray<Check> = [
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const protocol = await buildProtocol()
       const version = buildVersion.replace(/\d/g, "0")
-      const model = holdsSlowResultModel()
+      const model = holdsSlowMessageModel()
       await fs.mkdir(path.join(w.root, "u11-install"), { recursive: true })
       const root = await fs.realpath(path.join(w.root, "u11-install"))
       const share = path.join(root, "share")
@@ -450,7 +454,7 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const version = buildVersion.replace(/\d/g, "0")
-      const model = holdsSlowResultModel()
+      const model = holdsSlowMessageModel()
       await fs.mkdir(path.join(w.root, "u12-install"), { recursive: true })
       const root = await fs.realpath(path.join(w.root, "u12-install"))
       try {

@@ -43,7 +43,7 @@ const failed = {
   sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   reason: "limited" as const,
   error: "rate_limit",
-  turn: "p",
+  input: "p",
   harness: "pi",
   provider: undefined,
   attempts: [],

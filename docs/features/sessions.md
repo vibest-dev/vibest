@@ -12,9 +12,9 @@ in another pane. `vibest ls` shows the title, harness, provider, model and where
 
 ## S5. Reading sessions
 
-`vibest result` has no `answer` before a session's first turn ends and then holds its reply as `answer` (the latest ended
-turn's status and reply text, kept in the turn row; a turn vibestd ended itself, lost or by an exit, has no text; a
-reply that arrives after vibestd gave its turn up as lost is a turn of its own, not attached back); `vibest status` says vibestd is
+`vibest result` has no `reply` before a session's first execution ends and then holds its reply as `reply` (the latest ended
+execution's status and reply text, kept in the execution row; an execution vibestd ended itself, lost or by an exit, has no text; a
+reply that arrives after vibestd gave up its execution as lost is an execution of its own, not attached back); `vibest status` says vibestd is
 running and which process it is; `vibest ls` lists the main agent and each session with its latest reply; after
 `vibest archive`, only `vibest ls --all` lists the session, as exited.
 
@@ -28,7 +28,7 @@ worktree go and the branch keeps them. `--keep-worktree` keeps a clean worktree 
 
 ## S7. Archive on idle
 
-`vibest run --archive-on-idle` archives the session the first time it is idle after a completed turn with nothing it sent
+`vibest run --archive-on-idle` archives the session the first time it is idle after a completed execution with nothing it sent
 or was sent still waiting, and sends no notice for a clean archive. `--archive-on-completion` is a usage error.
 
 ## S9. A limit on sessions

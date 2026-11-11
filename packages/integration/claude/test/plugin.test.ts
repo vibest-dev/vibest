@@ -124,7 +124,7 @@ const host = (env: Record<string, string> = COORDINATOR) => {
       return r
     },
     prompt: (text: string, origin: object) => hooks["prompt.submit"]!($, { text, origin }, pass),
-    turnComplete: (event: object) => hooks["turn.complete"]!($, event, pass),
+    executionComplete: (event: object) => hooks["turn.complete"]!($, event, pass),
     preTool: (event: object) => hooks["tool.call"]!($, event, pass),
     fire: async (ms: number) => {
       for (const t of after.filter((t) => t.ms === ms && !t.cancelled)) {
@@ -143,23 +143,23 @@ describe("Claude plugin requests", () => {
   it("does nothing outside VIBEST: no poll, no report, tool calls pass", async () => {
     const h = host({})
     await h.start()
-    await h.turnComplete({ reason: "answer", answer: "x" })
+    await h.executionComplete({ reason: "answer", answer: "x" })
     await h.prompt("hi", { kind: "composer" })
     assert.deepStrictEqual(await h.preTool({ tool: "Bash", command: "ls" }), { tool: "Bash", command: "ls" })
     assert.deepStrictEqual([h.requests, h.every], [[], []])
   })
 
-  it("a worker reports its turn end and the person's prompt, and polls nothing", async () => {
+  it("a worker reports its execution end and the person's prompt, and polls nothing", async () => {
     const h = host(WORKER)
     await h.start()
     assert.deepStrictEqual(h.every, [])
-    await h.turnComplete({ reason: "answer", answer: "done" })
-    await h.turnComplete({ reason: "answer", answer: "sub", agentId: "a1" })
+    await h.executionComplete({ reason: "answer", answer: "done" })
+    await h.executionComplete({ reason: "answer", answer: "sub", agentId: "a1" })
     await h.prompt("next", { kind: "composer" })
     await settle()
-    assert.deepStrictEqual(h.paths(), ["/session/ready", "/hooks/claude/turn-end", "/hooks/claude/prompt"])
+    assert.deepStrictEqual(h.paths(), ["/session/ready", "/hooks/claude/execution-end", "/hooks/claude/prompt"])
     assert.deepStrictEqual(h.requests[1]!.body, {
-      hook_event_name: "TurnComplete",
+      hook_event_name: "ExecutionComplete",
       session_id: "c1",
       reason: "answer",
       last_assistant_message: "done",
@@ -167,10 +167,10 @@ describe("Claude plugin requests", () => {
     assert.deepStrictEqual(h.requests[2]!.body, { hook_event_name: "PromptSubmit", text: "next", origin: "composer" })
   })
 
-  it("the main agent's turn end is not reported", async () => {
+  it("the main agent's execution end is not reported", async () => {
     const h = host()
     h.state.answer = (r) => (r.url.endsWith("/poll") ? batch([], "", "") : { status: 204 })
-    await h.turnComplete({ reason: "answer", answer: "x" })
+    await h.executionComplete({ reason: "answer", answer: "x" })
     await settle()
     assert.deepStrictEqual(h.paths(), [])
   })
@@ -179,11 +179,11 @@ describe("Claude plugin requests", () => {
     const h = host(WORKER)
     let down = true
     h.state.answer = () => (down ? new Error("ECONNREFUSED") : { status: 204 })
-    await h.turnComplete({ reason: "answer", answer: "done" })
+    await h.executionComplete({ reason: "answer", answer: "done" })
     await settle()
     down = false
     await h.fire(1000)
-    assert.deepStrictEqual(h.paths(), ["/hooks/claude/turn-end", "/hooks/claude/turn-end"])
+    assert.deepStrictEqual(h.paths(), ["/hooks/claude/execution-end", "/hooks/claude/execution-end"])
     await h.fire(2000)
     assert.lengthOf(h.requests, 2, "taken: no more tries")
   })

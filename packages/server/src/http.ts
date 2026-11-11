@@ -4,15 +4,7 @@ import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
-import {
-  ACK_ROUTE,
-  HARNESS_HEADER,
-  parseHookRoute,
-  PLUGIN_VERSION_HEADER,
-  POLL_ROUTE,
-  PROJECT_HEADER,
-  PROTOCOL_HEADER,
-} from "@vibest/protocol/protocol"
+import { ACK_ROUTE, HARNESS_HEADER, parseHookRoute, POLL_ROUTE, PROJECT_HEADER } from "@vibest/protocol/protocol"
 import { Effect, Layer, Option, Schema } from "effect"
 import * as Headers from "effect/http/Headers"
 import * as HttpServer from "effect/http/HttpServer"
@@ -20,7 +12,7 @@ import type { ServeError } from "effect/http/HttpServerError"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 
-import { admit, checkProtocol, identify, reader } from "./gates.ts"
+import { admit, checkProtocol, identify, integrationOf, processOf, reader } from "./gates.ts"
 import { services } from "./services.ts"
 
 export type Request = {
@@ -63,7 +55,7 @@ export const make = Effect.gen(function* () {
       const harness = read(HARNESS_HEADER)
       if (harness !== who.row.harness)
         return failure(403, `session ${who.row.id} runs ${who.row.harness}, not ${harness ?? "(no vibest-harness)"}`)
-      return who.row
+      return { ...who.row, process: processOf(read) }
     })
 
   const admitted = <R>(label: string, settlement: boolean, body: Effect.Effect<Reply, never, R>) =>
@@ -90,23 +82,20 @@ export const make = Effect.gen(function* () {
         const pid = Option.getOrUndefined(
           yield* Schema.decodeUnknownEffect(ReadyBody)(request.body).pipe(Effect.option),
         )?.pid
-        const read = reader(request.headers)
-        const version = read(PLUGIN_VERSION_HEADER)
-        const protocol = Number(read(PROTOCOL_HEADER) ?? "0")
-        yield* integration.ready(
-          who.id,
-          pid,
-          version === undefined ? undefined : { version, protocol: Number.isFinite(protocol) ? protocol : 0 },
-        )
-        return ok()
+        const current = yield* integration.ready(who.id, pid, integrationOf(reader(request.headers)), who.process)
+        return ok(current === undefined ? undefined : { process: current })
       }
       const hook = parseHookRoute(request.path)
       const adapter = hook && harnesses.find(hook.harness)
       if (!hook || adapter === undefined) return failure(404, `no route ${request.path}`)
       if (hook.harness !== who.harness)
         return failure(403, `session ${who.id} runs ${who.harness}, not ${hook.harness}`)
-      if (hook.hook === "turn-end")
-        return yield* admitted("hook turn-end", true, integration.turnEnd(who, request.body).pipe(Effect.as(ok())))
+      if (hook.hook === "execution-end")
+        return yield* admitted(
+          "hook execution-end",
+          true,
+          integration.executionEnd(who, request.body).pipe(Effect.as(ok())),
+        )
       if (hook.hook === "prompt")
         return yield* admitted("hook prompt", true, integration.prompt(who, request.body).pipe(Effect.as(ok())))
       return yield* integration.guard(who.agent, request.body, who.projectId).pipe(

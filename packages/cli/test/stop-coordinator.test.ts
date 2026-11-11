@@ -106,8 +106,8 @@ const workingPiMain = Effect.gen(function* () {
       status: "idle",
       startedAt: 1,
       exitedAt: null,
-      turnState: "none",
-      turnPromptedAt: 0,
+      executionState: "none",
+      executionPromptedAt: 0,
       metadata: {},
       createdAt: 1,
       lastActive: 1,
@@ -160,7 +160,7 @@ describe("Project.StopCoordinator moves the main agent: SIGTERM to the recorded 
   )
 
   test(
-    "y: SIGTERM to the harness PID only (after a restart in place, the pid it reported ready with), its terminal kept; its exit and a delivery round before the launch drop nothing; the start in another terminal resumes the same conversation and gets what waited",
+    "y: SIGTERM to the harness PID only (after a restart in place, the pid it reported ready with), its terminal kept; its exit and a delivery before the launch drop nothing; the start in another terminal resumes the same conversation and gets what waited",
     Effect.gen(function* () {
       const s = yield* workingPiMain
       yield* s.processes.set(7777, "alive")

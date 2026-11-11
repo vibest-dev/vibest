@@ -61,17 +61,18 @@ const lastReply = (messages: ReadonlyArray<AgentMessage>) => {
   return { text, error: message?.stopReason === "error" ? message.errorMessage || "error" : "" }
 }
 
-const piHeaders = (sessionId: string, ctx: ExtensionContext) =>
+const piHeaders = (sessionId: string, ctx: ExtensionContext, current?: string) =>
   claimHeaders({
     _tag: "session",
     sessionId,
     harnessSessionId: ctx.sessionManager.getSessionId(),
     pluginVersion: VERSION,
+    ...(current === undefined ? {} : { process: current }),
   })
 
 type Role = Layer.Layer<never, Config.ConfigError, Pi | ClientServices | FileSystem.FileSystem>
 
-const session = (sessionId: string): Role =>
+const session = (sessionId: string, processId: Ref.Ref<string | undefined>): Role =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const pi = yield* Pi
@@ -83,7 +84,7 @@ const session = (sessionId: string): Role =>
       yield* pi.handle("input", (e, ctx) =>
         Effect.gen(function* () {
           if (e.source === "extension" || e.text.trim() === "") return
-          const headers = yield* piHeaders(sessionId, ctx)
+          const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
           const event = encodeJson({ type: "input", text: e.text, source: e.source })
           yield* hookCall(layout.socket, headers, (client) => client.Prompt({ sessionId, harness: "pi", event }))
         }),
@@ -92,9 +93,9 @@ const session = (sessionId: string): Role =>
         Effect.gen(function* () {
           if (!(yield* Ref.get(root)) || !ctx.isIdle()) return
           const { text, error } = yield* Ref.get(reply)
-          const headers = yield* piHeaders(sessionId, ctx)
+          const headers = yield* piHeaders(sessionId, ctx, yield* Ref.get(processId))
           const event = encodeJson({ type: "agent_settled", text, error, aborted: e.aborted })
-          yield* hookCall(layout.socket, headers, (client) => client.TurnEnd({ sessionId, harness: "pi", event }))
+          yield* hookCall(layout.socket, headers, (client) => client.ExecutionEnd({ sessionId, harness: "pi", event }))
         }),
       )
     }),
@@ -195,7 +196,7 @@ const coordinator: Role = Layer.effectDiscard(
   }),
 )
 
-const ready = (sessionId: string): Role =>
+const ready = (sessionId: string, processId: Ref.Ref<string | undefined>): Role =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const pi = yield* Pi
@@ -203,11 +204,22 @@ const ready = (sessionId: string): Role =>
       yield* pi.handle("session_start", (_e, ctx) =>
         ctx.mode !== "tui"
           ? Effect.void
-          : withVibest(
-              { _tag: "session", sessionId, pluginVersion: VERSION },
-              (client) => client["Session.Ready"]({ id: sessionId, pid: process.pid }),
-              { start: false },
-            ).pipe(
+          : Ref.get(processId).pipe(
+              Effect.flatMap((current) =>
+                withVibest(
+                  {
+                    _tag: "session",
+                    sessionId,
+                    pluginVersion: VERSION,
+                    ...(current === undefined ? {} : { process: current }),
+                  },
+                  (client) => client["Session.Ready"]({ id: sessionId, pid: process.pid }),
+                  { start: false },
+                ),
+              ),
+              Effect.tap((answer) =>
+                answer.process === undefined ? Effect.void : Ref.set(processId, String(answer.process)),
+              ),
               Effect.timeout("2 seconds"),
               Effect.retry({
                 while: (e) =>
@@ -227,10 +239,11 @@ export const extension = Layer.unwrap(
     const agent = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT")))
     if (!agent) return Layer.empty
     const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID")))
+    const processId = yield* Ref.make(Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_PROCESS"))))
     const guarding: Role = Layer.effectDiscard(guarded(agent, sessionId))
-    const guard = sessionId ? Layer.merge(guarding, ready(sessionId)) : guarding
+    const guard = sessionId ? Layer.merge(guarding, ready(sessionId, processId)) : guarding
     if (agent === COORDINATOR) return coordinator.pipe(Layer.provideMerge(guard))
-    return sessionId ? session(sessionId).pipe(Layer.provideMerge(guard)) : guard
+    return sessionId ? session(sessionId, processId).pipe(Layer.provideMerge(guard)) : guard
   }),
 )
 

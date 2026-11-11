@@ -9,7 +9,7 @@ import { projectOf } from "./lib/directory.ts"
 import { testEffect } from "./lib/effect.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until, writeResult } from "./lib/observe.ts"
+import { until, writeEnd } from "./lib/observe.ts"
 import { makeRepository, sessionLayer } from "./lib/session.ts"
 
 const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) => testEffect(sessionLayer())(name, () => program)
@@ -42,7 +42,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
       })
 
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
       const wt = (yield* sessions.get(id)).worktree
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.deepStrictEqual([placed.near, placed.project, placed.cwd], ["main:coord", repo, wt])
@@ -65,8 +65,8 @@ describe("placement: every session is a tab beside the project's main agent, in 
       yield* PubSub.publish(herdr.events, { type: "reset" })
       yield* until(herdr.callsTo("present"), (calls) => calls.length > 1)
 
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: "status: completed" })
+      yield* herdr.endExecution(id)
       yield* sessions.check(id)
       assert.deepInclude(yield* sessions.remove(id), { pane: "closed", worktree: "removed" })
       assert.isFalse(yield* fs.exists(wt))
@@ -93,8 +93,8 @@ describe("placement: every session is a tab beside the project's main agent, in 
 
       const a = yield* sessions.spawn(yield* spawnInput(repo))
       const b = yield* sessions.spawn({ ...(yield* spawnInput(repo)), name: "second" })
-      yield* until(db.getSession(a.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
-      yield* until(db.getSession(b.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+      yield* until(db.getSession(a.id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
+      yield* until(db.getSession(b.id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
       yield* until(herdr.callsTo("present"), (calls) => calls.at(-1)!.info.live === "2")
 
       yield* herdr.updateAgent(a.id, (agent) => ({ ...agent, alive: false }))
@@ -123,7 +123,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
       })
 
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.strictEqual(placed.near, undefined)
       assert.strictEqual((yield* herdr.agent(id))!.terminal.split(":")[0], "w1")
@@ -140,7 +140,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
       const here = yield* sessions.spawn(yield* spawnInput(repo))
       const there = yield* sessions.spawn({ ...(yield* spawnInput(repo)), origin: { peer: "a", project: "aproj" } })
       for (const id of [here.id, there.id])
-        yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+        yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
       const opened = yield* herdr.callsTo("open")
       const openOf = (id: string) => opened.find((call) => call.env.VIBEST_SESSION_ID === id)
       const hereOpen = openOf(here.id)

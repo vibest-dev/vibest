@@ -280,7 +280,7 @@ describe("vibest.sock", () => {
       const c = asCli(yield* client, yield* makeRepository)
       const before = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "in herdr", runtime: "herdr" })
       const after = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "in hc", runtime: "hc" })
-      for (const id of [before.id, after.id]) yield* until(db.getSession(id), (s) => s?.turnState === "open")
+      for (const id of [before.id, after.id]) yield* until(db.getSession(id), (s) => s?.executionState === "open")
       const rows = (yield* c.List({})).sessions
       assert.deepStrictEqual(
         [before.id, after.id].map((id) => rows.find((row) => row.id === id)?.runtime),

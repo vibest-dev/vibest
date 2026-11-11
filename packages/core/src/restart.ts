@@ -219,7 +219,7 @@ export const sessionRestart = (deps: {
       const session = yield* db.getSession(id)
       if (session === undefined)
         return { id, projectId: "", ok: false, message: `${id} not restarted: no such session` }
-      const interrupted = session.turnState === "open"
+      const interrupted = session.executionState === "open"
       return yield* inPlace({
         id,
         projectId: session.projectId,
@@ -246,7 +246,7 @@ export const sessionRestart = (deps: {
               continueText(VERSION),
             )
             return missed === undefined
-              ? { id, projectId, ok: true, message: `${id} restarted; its interrupted turn continues` }
+              ? { id, projectId, ok: true, message: `${id} restarted; its interrupted execution continues` }
               : { id, projectId, ok: false, message: `${id} restarted, but ${missed}` }
           }),
       })
@@ -288,7 +288,7 @@ export const sessionRestart = (deps: {
               id,
               projectId,
               ok: true,
-              message: `${label} restarted${interrupted ? "; its interrupted turn continues" : ""}`,
+              message: `${label} restarted${interrupted ? "; its interrupted execution continues" : ""}`,
             }
             if (interrupted)
               yield* inbox.enqueue({
@@ -343,7 +343,7 @@ export const sessionRestart = (deps: {
         agent: row.agent,
         harness: row.harnessId,
         integration: row.metadata.integration?.version ?? null,
-        working: row.turnState === "open",
+        working: row.executionState === "open",
         blocked:
           blockedOf(
             harnesses.find(row.harnessId),

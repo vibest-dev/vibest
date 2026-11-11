@@ -31,7 +31,7 @@ import {
   testLayer,
   type TestServices,
   until,
-  writeResult,
+  writeEnd,
   projectOf,
 } from "./fakes.ts"
 
@@ -319,10 +319,10 @@ describe("multi-repository isolated workspace", () => {
       assert.strictEqual(view.git?.pushed, false)
       assert.strictEqual(view.git?.saved, true)
 
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: "status: completed" })
+      yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
 
       yield* fakeGit.checkout(sdkWt, { state: { branch: "feat/sdk", pushed: false, saved: true, why: "" } })
       yield* fakeGit.checkout(appWt, { state: { branch: "", pushed: false, saved: false, why: "uncommitted changes" } })
@@ -427,7 +427,7 @@ describe("multi-repository isolated workspace", () => {
       const cli = authed(raw, cliHeaders(root))
       yield* cli["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "coord" })
       const { id } = yield* authed(raw, cliHeaders(workspace)).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (row) => row?.turnState === "open")
+      yield* until(db.getSession(id), (row) => row?.executionState === "open")
       assert.strictEqual((yield* db.getSession(id))!.projectId, (yield* db.projectAt(root))?.id)
       assert.isUndefined(yield* db.projectAt(workspace))
       assert.strictEqual((yield* herdr.callsTo("open"))[0]!.project, root)
@@ -439,8 +439,8 @@ describe("multi-repository isolated workspace", () => {
         listed.map((session) => session.id).sort(),
       )
 
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: "status: completed" })
+      yield* herdr.endExecution(id)
       yield* sessions.check(id)
       yield* herdr.updateAgent(id, (agent) => ({ ...agent, alive: false }))
       yield* sessions.check(id)

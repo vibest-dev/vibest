@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
-import { answerOf, expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { replyOf, expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type Proc = { name: string; argv?: Array<string> | null }
@@ -79,12 +79,12 @@ const piReady = async (socket: string, what: string) => {
   return found!
 }
 
-const turn = async (w: World, socket: string, pane: string, prompt: string, answer: string) => {
+const execution = async (w: World, socket: string, pane: string, prompt: string, answer: string) => {
   await herdr(socket, "agent.prompt", { target: pane, text: prompt })
   await until(`the answer ${answer} on screen`, async () => (await screen(socket, pane)).includes(answer), 60_000)
   await until("the main agent's conversation", () => (liveMain(w)?.conversation ?? null) !== null, 30_000)
   await until(
-    "the main agent idle after its turn",
+    "the main agent idle after its execution",
     async () => ["idle", "done"].includes(await status(socket, pane)),
     60_000,
   )
@@ -157,7 +157,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S10-resume",
     title:
-      "a Pi main agent whose pane closed after a turn: `vibest` reopens the same session and conversation (pi --session-id, the earlier prompt on screen); `vibest --new` starts a new session and conversation (no --session-id, the earlier prompt not on screen)",
+      "a Pi main agent whose pane closed after an execution: `vibest` reopens the same session and conversation (pi --session-id, the earlier prompt on screen); `vibest --new` starts a new session and conversation (no --session-id, the earlier prompt not on screen)",
     run: async (w) => {
       needs("pi", "herdr")
       const model = heldModel()
@@ -175,7 +175,7 @@ const checks: ReadonlyArray<Check> = [
         }
         const first = await start([], "the first main agent")
         const prompt = ask("first")
-        await turn(w, socket, first.pane, prompt, "done-first")
+        await execution(w, socket, first.pane, prompt, "done-first")
         const one = liveMain(w)!
         await exitMain(w, socket, first.pane, one.id)
 
@@ -210,7 +210,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S12-tools",
     title:
-      "a Pi main agent's turn of two bash calls and a read (fake model) renders as one collapsed tool group: `Read 1 file · Ran 2 shell commands`",
+      "a Pi main agent's execution of two bash calls and a read (fake model) renders as one collapsed tool group: `Read 1 file · Ran 2 shell commands`",
     run: async (w) => {
       needs("pi", "herdr")
       const model = toolsModel(path.join(w.repository, "README.md"))
@@ -222,7 +222,7 @@ const checks: ReadonlyArray<Check> = [
         await w.startMain({ harness: "pi", session, env, timeoutMs: 60_000 })
         const { pane } = await piReady(socket, "the main agent")
         await herdr(socket, "agent.prompt", { target: pane, text: "group-tools" })
-        await until("the turn's reply", async () => (await screen(socket, pane)).includes("tools-done"), 60_000)
+        await until("the execution's reply", async () => (await screen(socket, pane)).includes("tools-done"), 60_000)
         await until(
           "one tool group line",
           async () => (await screen(socket, pane)).includes("Read 1 file · Ran 2 shell commands"),
@@ -289,7 +289,7 @@ const checks: ReadonlyArray<Check> = [
           [inShop!, shop, "shop", shop],
           [inAdmin!, admin, "admin", admin],
         ] as const) {
-          await until(`the ${task} answer`, async () => (await answerOf(w, id, cwd)).includes(`done-${task}`), 90_000)
+          await until(`the ${task} answer`, async () => (await replyOf(w, id, cwd)).includes(`done-${task}`), 90_000)
           const dir = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", id)!.d
           expect(dir !== repo, `${task}'s run works in the checkout itself`)
           const common = await git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")

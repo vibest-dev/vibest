@@ -25,7 +25,7 @@ import {
   listProjectRepositories,
   projectRoot,
 } from "./project-create.ts"
-import { isUsageLimitError } from "./results.ts"
+import { isUsageLimitError } from "./replies.ts"
 import { addressOf, type RuntimesShape, type Runtime, type Terminal } from "./runtimes.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { removeSystemPrompt, type SystemPromptDirUnsafe } from "./system-prompt.ts"
@@ -51,11 +51,12 @@ export const sessionPlacement = (deps: {
     readonly coordinatorOf: (projectId: string) => Effect.Effect<CoordinatorRow | undefined>
     readonly listSessions: (filter?: { readonly projectId?: string }) => Effect.Effect<ReadonlyArray<SessionRow>>
     readonly openExecution: (id: string) => Effect.Effect<number | undefined>
-    readonly closeExecution: (id: string, turn: number, status: "failed") => Effect.Effect<boolean>
+    readonly closeExecution: (id: string, execution: number, status: "failed") => Effect.Effect<boolean>
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly endProcess: (id: string, reason: ProcessEndReason) => Effect.Effect<boolean>
     readonly startedByPeer: (id: string) => Effect.Effect<boolean>
+    readonly currentProcessId: (id: string) => Effect.Effect<number | undefined>
   }
   readonly runtimes: RuntimesShape
   readonly layout: {
@@ -74,7 +75,7 @@ export const sessionPlacement = (deps: {
   }
   readonly path: { readonly dirname: (path: string) => string }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
-  readonly vibestEnv: (session: SessionRow) => Readonly<Record<string, string>>
+  readonly vibestEnv: (session: SessionRow, process?: number) => Readonly<Record<string, string>>
   readonly launchArgv: (
     session: SessionRow,
     resume: boolean,
@@ -161,12 +162,13 @@ export const sessionPlacement = (deps: {
       harnessSessionId: session.harnessSessionId,
     }
     yield* db.updateSession(session.id, { ...choice, address: { machine: session.address.machine, id: "" } })
+    const started = yield* db.currentProcessId(session.id)
     const opened = yield* h
       .open({
         project: input.project,
         cwd: input.cwd,
         argv: input.argv,
-        env: { ...input.env, ...deps.vibestEnv(session) },
+        env: { ...input.env, ...deps.vibestEnv(session, started) },
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),
@@ -273,8 +275,8 @@ export const sessionPlacement = (deps: {
         Effect.gen(function* () {
           const e = Cause.squash(cause)
           const t = yield* Clock.currentTimeMillis
-          const turn = yield* db.openExecution(session.id)
-          if (turn !== undefined) yield* db.closeExecution(session.id, turn, "failed")
+          const execution = yield* db.openExecution(session.id)
+          if (execution !== undefined) yield* db.closeExecution(session.id, execution, "failed")
           yield* db.updateSession(session.id, {
             status: "unknown",
             exitedAt: t,

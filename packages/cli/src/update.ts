@@ -228,7 +228,7 @@ export const restartAgents = (
     }
     yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after }))
     yield* Console.log(
-      `${command} has finished. vibestd restarts ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command has exited, main agents last; one that was working continues its turn (outcomes in ${(yield* Layout).home}/vibestd.log).`,
+      `${command} has finished. vibestd restarts ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command has exited, main agents last; one that was working continues its execution (outcomes in ${(yield* Layout).home}/vibestd.log).`,
     )
   })
 

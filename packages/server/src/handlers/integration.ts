@@ -6,7 +6,7 @@ import { Caller, InvalidCaller } from "@vibest/protocol/rpc"
 import { Effect } from "effect"
 import type * as Headers from "effect/http/Headers"
 
-import { noteOpen, reader } from "../gates.ts"
+import { noteOpen, processOf, reader } from "../gates.ts"
 import type { Handlers } from "./caller.ts"
 
 export const make = Effect.gen(function* () {
@@ -21,10 +21,11 @@ export const make = Effect.gen(function* () {
     run: (who: HookCaller) => Effect.Effect<void>,
   ) =>
     Effect.gen(function* () {
-      yield* noteOpen(db, reader(headers), sessionId)
+      const read = reader(headers)
+      yield* noteOpen(db, read, sessionId)
       const row = yield* db.sessionIdentity(sessionId)
       if (!row || row.harness !== harness) return
-      yield* run({ id: row.id, agent: row.agent, harness })
+      yield* run({ id: row.id, agent: row.agent, harness, process: processOf(read) })
     }).pipe(Effect.orDie)
 
   return {
@@ -53,8 +54,8 @@ export const make = Effect.gen(function* () {
         return answer === undefined ? {} : { answer }
       }),
 
-    TurnEnd: ({ sessionId, harness, event }, { headers }) =>
-      hook(sessionId, harness, headers, (who) => integration.turnEnd(who, event)),
+    ExecutionEnd: ({ sessionId, harness, event }, { headers }) =>
+      hook(sessionId, harness, headers, (who) => integration.executionEnd(who, event)),
 
     Prompt: ({ sessionId, harness, event }, { headers }) =>
       hook(sessionId, harness, headers, (who) => integration.prompt(who, event)),

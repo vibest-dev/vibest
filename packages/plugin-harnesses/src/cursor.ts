@@ -39,7 +39,7 @@ export const cursor: Harness.HarnessDefinition = {
   ownSessionId: false,
   systemPromptInPrompt: true,
   interruptKey: "ctrl+c",
-  resultField: "text",
+  replyField: "text",
   ready: "runtime",
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [
@@ -66,6 +66,6 @@ export const cursor: Harness.HarnessDefinition = {
       return undefined
     return { text: event.prompt }
   },
-  turnEnd: (event, coordinator) =>
-    !coordinator && event.hook_event_name === "afterAgentResponse" ? { result: event } : undefined,
+  executionEnd: (event, coordinator) =>
+    !coordinator && event.hook_event_name === "afterAgentResponse" ? { end: event } : undefined,
 }

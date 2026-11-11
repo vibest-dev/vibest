@@ -1,6 +1,6 @@
-import { type ExecutionOutcome, type InboxKind, type ProcessEndReason } from "@vibest/schema/event"
+import { ExecutionOutcome, type InboxKind, ProcessEndReason } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
-import { AgentStatus, InboxStatus, RuntimeAddress, TurnState } from "@vibest/schema/session"
+import { AgentStatus, RuntimeAddress, ExecutionState } from "@vibest/schema/session"
 import { Schema } from "effect"
 
 import { Routing } from "./plugins.ts"
@@ -30,7 +30,7 @@ const Metadata = Schema.Struct({
     ),
   ),
 })
-export const SessionRow = Schema.Struct({
+const NewSessionFields = {
   id: Schema.String,
   projectId: Schema.String,
   agent: Schema.String,
@@ -44,11 +44,60 @@ export const SessionRow = Schema.Struct({
   status: AgentStatus,
   startedAt: Schema.NullOr(Schema.Number),
   exitedAt: Schema.NullOr(Schema.Number),
-  turnState: TurnState,
-  turnPromptedAt: Schema.Number,
+  executionState: ExecutionState,
+  executionPromptedAt: Schema.Number,
   metadata: Schema.fromJsonString(Metadata),
   createdAt: Schema.Number,
   lastActive: Schema.Number,
+}
+export const NewSession = Schema.Struct(NewSessionFields)
+export type NewSession = typeof NewSession.Type
+
+const IntegrationShape = Schema.Struct({ version: Schema.String, protocol: Schema.Number })
+
+export const SessionProcess = Schema.Struct({
+  id: Schema.Number,
+  harness: Schema.String,
+  provider: Schema.NullOr(Schema.String),
+  model: Schema.NullOr(Schema.String),
+  routing: Schema.NullOr(Routing),
+  runtime: Schema.String,
+  machine: Schema.String,
+  terminal: Schema.NullOr(Schema.String),
+  pid: Schema.NullOr(Schema.Number),
+  conversation: Schema.NullOr(Schema.String),
+  placedAt: Schema.NullOr(Schema.Number),
+  readyAt: Schema.NullOr(Schema.Number),
+  endedAt: Schema.NullOr(Schema.Number),
+  endReason: Schema.NullOr(ProcessEndReason),
+  integration: Schema.NullOr(IntegrationShape),
+})
+
+export const OpenExecution = Schema.Struct({
+  id: Schema.Number,
+  process: Schema.NullOr(Schema.Number),
+  startedAt: Schema.Number,
+  acceptedAt: Schema.NullOr(Schema.Number),
+})
+
+export const LastExecution = Schema.Struct({
+  id: Schema.Number,
+  process: Schema.NullOr(Schema.Number),
+  outcome: ExecutionOutcome,
+  startedAt: Schema.Number,
+  endedAt: Schema.NullOr(Schema.Number),
+  reply: Schema.NullOr(Schema.String),
+  failure: Schema.NullOr(Schema.Struct({ message: Schema.String, kind: Schema.optional(Schema.Literal("limit")) })),
+})
+
+export const SessionRow = Schema.Struct({
+  ...NewSessionFields,
+  endedAt: Schema.NullOr(Schema.Number),
+  parentId: Schema.NullOr(Schema.String),
+  entry: Schema.Boolean,
+  process: Schema.NullOr(SessionProcess),
+  openExecution: Schema.NullOr(OpenExecution),
+  lastExecution: Schema.NullOr(LastExecution),
 })
 export type SessionRow = typeof SessionRow.Type
 
@@ -111,8 +160,6 @@ export const attemptsOf = (raw: string | null) => {
   return seen
 }
 
-export const storedStatus = (status: InboxStatus) => (status === "sending" ? "delivering" : status)
-
 export type InboxSql = {
   readonly id: number
   readonly sessionId: string
@@ -124,7 +171,7 @@ export type InboxSql = {
 
 export type ExecutionEnd = {
   readonly outcome: typeof ExecutionOutcome.Type
-  readonly failure?: { readonly message: string }
+  readonly failure?: { readonly message: string; readonly kind?: "limit" }
   readonly conversation?: string
   readonly reply?: string
 }
@@ -140,7 +187,7 @@ export const toInbox = (row: InboxSql) => {
     recipient: row.sessionId,
     kind,
     message: row.content,
-    status: row.status === "delivering" ? "sending" : row.status,
+    status: row.status,
   }
 }
 

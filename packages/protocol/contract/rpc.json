@@ -1,5 +1,5 @@
 {
-  "protocol": 9,
+  "protocol": 10,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -1163,6 +1163,137 @@
         }
       }
     },
+    "ExecutionEnd": {
+      "access": "open",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "harness",
+          "event"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "null"
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "not": {}
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "DaemonStoppingEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "DaemonStopping"
+                ]
+              },
+              "method": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
     "Get": {
       "access": [
         "agent",
@@ -1272,7 +1403,7 @@
               }
             ]
           },
-          "turnState": {
+          "executionState": {
             "type": "string",
             "enum": [
               "none",
@@ -1594,14 +1725,14 @@
               }
             ]
           },
-          "answer": {
+          "reply": {
             "anyOf": [
               {
                 "anyOf": [
                   {
                     "type": "object",
                     "properties": {
-                      "turn": {
+                      "execution": {
                         "anyOf": [
                           {
                             "type": "number"
@@ -1656,7 +1787,7 @@
                       }
                     },
                     "required": [
-                      "turn",
+                      "execution",
                       "status",
                       "text",
                       "failure",
@@ -1685,7 +1816,7 @@
           "status",
           "startedAt",
           "exitedAt",
-          "turnState",
+          "executionState",
           "projectId",
           "runtime",
           "address",
@@ -3470,7 +3601,7 @@
                     }
                   ]
                 },
-                "turnState": {
+                "executionState": {
                   "type": "string",
                   "enum": [
                     "none",
@@ -3803,7 +3934,7 @@
                 "status",
                 "startedAt",
                 "exitedAt",
-                "turnState",
+                "executionState",
                 "projectId",
                 "runtime",
                 "address",
@@ -12027,7 +12158,32 @@
       },
       "success": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "null"
+        "type": "object",
+        "properties": {
+          "process": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Infinity",
+                      "-Infinity",
+                      "NaN"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
       },
       "error": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12206,7 +12362,7 @@
           "id": {
             "type": "string"
           },
-          "turn": {
+          "finished": {
             "anyOf": [
               {
                 "type": "number"
@@ -12224,7 +12380,7 @@
         },
         "required": [
           "id",
-          "turn"
+          "finished"
         ],
         "additionalProperties": true
       },
@@ -13683,137 +13839,6 @@
         }
       }
     },
-    "TurnEnd": {
-      "access": "open",
-      "stream": false,
-      "payload": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string"
-          },
-          "harness": {
-            "type": "string"
-          },
-          "event": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "sessionId",
-          "harness",
-          "event"
-        ],
-        "additionalProperties": true
-      },
-      "success": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "null"
-      },
-      "error": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "anyOf": [
-          {
-            "not": {}
-          },
-          {
-            "$ref": "#/$defs/DaemonStoppingEncoded"
-          },
-          {
-            "$ref": "#/$defs/ProtocolRejectedEncoded"
-          }
-        ],
-        "$defs": {
-          "DaemonStoppingEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "DaemonStopping"
-                ]
-              },
-              "method": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method"
-            ],
-            "additionalProperties": true
-          },
-          "ProtocolRejectedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProtocolRejected"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "protocol": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "mismatch": {
-                "type": "object",
-                "properties": {
-                  "protocol": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
-                    ]
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "action": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "protocol",
-                  "version",
-                  "message",
-                  "action"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "protocol",
-              "mismatch"
-            ],
-            "additionalProperties": true
-          }
-        }
-      }
-    },
     "Watch": {
       "access": "cli",
       "stream": true,
@@ -13971,7 +13996,7 @@
                         }
                       ]
                     },
-                    "turnState": {
+                    "executionState": {
                       "type": "string",
                       "enum": [
                         "none",
@@ -14303,7 +14328,7 @@
                         }
                       ]
                     },
-                    "turn": {
+                    "finished": {
                       "anyOf": [
                         {
                           "anyOf": [
@@ -14336,7 +14361,7 @@
                     "status",
                     "startedAt",
                     "exitedAt",
-                    "turnState",
+                    "executionState",
                     "projectId",
                     "runtime",
                     "address",
@@ -14348,7 +14373,7 @@
                     "task",
                     "latest",
                     "parentId",
-                    "turn"
+                    "finished"
                   ],
                   "additionalProperties": true
                 }
@@ -14519,7 +14544,7 @@
                       }
                     ]
                   },
-                  "turnState": {
+                  "executionState": {
                     "type": "string",
                     "enum": [
                       "none",
@@ -14851,7 +14876,7 @@
                       }
                     ]
                   },
-                  "turn": {
+                  "finished": {
                     "anyOf": [
                       {
                         "anyOf": [
@@ -14884,7 +14909,7 @@
                   "status",
                   "startedAt",
                   "exitedAt",
-                  "turnState",
+                  "executionState",
                   "projectId",
                   "runtime",
                   "address",
@@ -14896,7 +14921,7 @@
                   "task",
                   "latest",
                   "parentId",
-                  "turn"
+                  "finished"
                 ],
                 "additionalProperties": true
               }

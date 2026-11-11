@@ -1,6 +1,6 @@
 import { assert, describe, it, layer } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
-import { Db, type SessionRow } from "@vibest/core/db"
+import { Db, type NewSession } from "@vibest/core/db"
 import { Git } from "@vibest/core/git"
 import { Layout } from "@vibest/core/paths"
 import {
@@ -103,7 +103,7 @@ const failure = <A, E extends { message: string }, R>(effect: Effect.Effect<A, E
 
 const database = (filename: string) => Db.layer.pipe(Layer.provide(Platform.sqlite(filename)), Layer.provide(Bus.layer))
 
-const session = (id: string): Omit<SessionRow, "projectId"> => ({
+const session = (id: string): Omit<NewSession, "projectId"> => ({
   id,
   agent: "general",
   name: "n",
@@ -116,8 +116,8 @@ const session = (id: string): Omit<SessionRow, "projectId"> => ({
   status: "unknown",
   startedAt: null,
   exitedAt: null,
-  turnState: "none",
-  turnPromptedAt: 0,
+  executionState: "none",
+  executionPromptedAt: 0,
   metadata: {},
   createdAt: 1,
   lastActive: 1,

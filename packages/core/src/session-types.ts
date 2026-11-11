@@ -6,7 +6,6 @@ import type { Git } from "./worktree.ts"
 export type Platform = FileSystem.FileSystem | Path.Path | Crypto.Crypto | ChildProcessSpawner.ChildProcessSpawner | Git
 
 export interface Tracked {
-  readonly sawWorking: Ref.Ref<boolean>
   readonly endedAt: Ref.Ref<number | undefined>
   readonly blockedNotified: Ref.Ref<boolean>
   readonly prompting: Ref.Ref<boolean>
