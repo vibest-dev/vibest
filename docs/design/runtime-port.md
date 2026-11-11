@@ -120,7 +120,7 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   worktree and splits a pane off it, so the default choice must not replace the peer. An explicit `--runtime` is kept,
   and a peer on another runtime or machine is still refused. The parent lookup includes the coordinator, because
   `getSession` leaves the live main row out. If the runtime that was chosen is not online, the start fails with the
-  runtime's reason. No other fallback. A user plugin on `agent.start.before` may still set `event.runtime`. A runtime
+  runtime's reason. No other fallback. A user plugin on `agent.start.before` may still return a `runtime`. A runtime
   already set stands.
 - vibest.json's `runtime` key is not a choice. The first time vibestd reads a file that still has it, it warns once
   and ignores the key.
@@ -213,7 +213,7 @@ machine, and vibest never installs, prepares or reaches another machine through 
 - B reports the agent's results to A's main agent through B's outbox; `vibest result|send|interrupt|archive|peek
   <name>/<id>` are forwarded to B. A call to a machine that is not connected fails at once; nothing is queued.
 - `agent.start.before` on A lists only this machine in `machines[]`, with its runtimes and their `status()`; a hook
-  that sets another `machine` does not move the start there. Core checks after the chain that the chosen runtime is
+  that returns another `machine` does not move the start there. Core checks after the chain that the chosen runtime is
   online here, else refuses with the runtime's reason.
 
 Out of scope now: Agents on another machine starting their own subagents there, load balancing.

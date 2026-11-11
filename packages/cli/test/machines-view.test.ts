@@ -75,12 +75,10 @@ const viewPlugin = (s: Side) =>
               s.connects.push(event)
               if (s.hang) return Effect.never
               const core = coreOf(event)
-              if (s.refuse) event.notes.push({ message: "cannot add", fix: "add by hand" })
-              else if (core !== undefined && !s.mirror.has(core)) {
-                s.mirror.set(core, event.name)
-                event.notes.push({ message: `added ${event.name}` })
-              }
-              return Effect.void
+              if (s.refuse) return Effect.succeed([{ message: "cannot add", fix: "add by hand" }])
+              if (core === undefined || s.mirror.has(core)) return Effect.void
+              s.mirror.set(core, event.name)
+              return Effect.succeed([{ message: `added ${event.name}` }])
             }),
           { runtime: "view" },
         )
@@ -105,7 +103,7 @@ const counting = (seen: Array<string>) =>
   Plugin.define({
     id: "counting",
     effect: (ctx) =>
-      ctx.machine.hook("connect", (event) => Effect.sync(() => seen.push(event.name)), { runtime: "other" }),
+      ctx.machine.hook("connect", (event) => Effect.sync(() => void seen.push(event.name)), { runtime: "other" }),
   })
 
 const pair = (extra: ReadonlyArray<Plugin.Plugin> = [], options: { readonly late?: boolean } = {}) =>

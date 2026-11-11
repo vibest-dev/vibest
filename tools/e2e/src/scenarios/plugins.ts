@@ -147,6 +147,24 @@ export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e
         "the crash was not counted",
       )
       await fs.rm(path.join(w.vibestHome, "plugins", "throw.ts"))
+      await write(
+        path.join(w.vibestHome, "plugins", "mutate.ts"),
+        plugin("mutate", `(e) => Effect.sync(() => { e.harness = "pi" })`),
+      )
+      await until("the mutating plugin active", async () =>
+        (await list(w)).some((p) => p.id === "mutate" && p.status === "active"),
+      )
+      const mutated = await w.vibest(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], {
+        timeoutMs: 60_000,
+      })
+      expect(mutated.code !== 0, `run exited 0: ${mutated.stdout}`)
+      expect(mutated.stderr.includes("plugin mutate crashed: "), `crash not shown: ${mutated.stderr}`)
+      expect((await fs.readdir(worktrees).catch(() => [])).length === before.length, "a worktree was created")
+      expect(
+        (await list(w)).some((p) => p.id === "mutate" && p.crashed === 1),
+        "the crash was not counted",
+      )
+      await fs.rm(path.join(w.vibestHome, "plugins", "mutate.ts"))
     },
   },
   {

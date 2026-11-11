@@ -69,7 +69,7 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
           "A",
           Plugin.define({
             id: "A",
-            effect: (ctx) => ctx.agent.hook("start.before", (e) => Effect.sync(() => (e.model = "a"))),
+            effect: (ctx) => ctx.agent.hook("start.before", () => Effect.succeed({ model: "a" })),
           }),
         ),
         candidate(
@@ -80,7 +80,7 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
               ctx.agent.hook("start.before", (e) =>
                 Effect.sync(() => {
                   seen.push(e.model)
-                  e.model = "b"
+                  return { model: "b" }
                 }),
               ),
           }),
@@ -180,10 +180,7 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
           "mover",
           Plugin.define({
             id: "mover",
-            effect: (ctx) =>
-              ctx.agent.hook("fail", (e) =>
-                Effect.sync(() => (e.move = { harness: "claude" })).pipe(Effect.andThen(Effect.die("moved?"))),
-              ),
+            effect: (ctx) => ctx.agent.hook("fail", () => Effect.die("moved?")),
           }),
         ),
       ],

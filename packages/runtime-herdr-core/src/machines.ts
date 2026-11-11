@@ -34,14 +34,15 @@ const settled = (hc: Hc, core: string) =>
 
 const hcThere = (event: Event) => event.runtimes.find((r) => r.kind === KIND)
 
-export const connect = (hc: Hc, event: Event) =>
-  Effect.gen(function* () {
+export const connect = (hc: Hc, event: Event) => {
+  const notes: Array<VibestPlugin.MachineNote> = []
+  return Effect.gen(function* () {
     const there = hcThere(event)
     if (there === undefined) return
     const core = there.link?.core
     if (core === undefined) {
       if (there.status !== "online")
-        event.notes.push({
+        notes.push({
           message: `${event.name}'s hc is ${there.status}${there.reason ? `: ${there.reason}` : ""}`,
         })
       return
@@ -50,11 +51,11 @@ export const connect = (hc: Hc, event: Event) =>
     const rows = (yield* hc.call("machine.list", {})).machines
     const mine = rows.find((row) => row.id === core)
     if (mine !== undefined) {
-      if (mine.state !== "connected") event.notes.push(stateNote(event.name, mine))
+      if (mine.state !== "connected") notes.push(stateNote(event.name, mine))
       return
     }
     if (session === "") {
-      event.notes.push({
+      notes.push({
         message: `hc: ${event.name}'s hc runs on a socket of no session, so it is not added here; add it by hand`,
         fix: `hc machine add --name ${event.name} --session <its session> ${event.target}`,
       })
@@ -67,17 +68,17 @@ export const connect = (hc: Hc, event: Event) =>
       Effect.catchTag("HcError", (e) => Effect.succeed(e)),
     )
     if (outcome === "added") {
-      event.notes.push(added)
+      notes.push(added)
       return yield* settled(hc, core)
     }
     if (outcome.kind === "already_added") return
     const holder = rows.find((row) => row.name === event.name)
     if (outcome.kind !== "name_taken" || holder === undefined) {
-      event.notes.push({ message: failed(outcome), fix: addCommand(event, session) })
+      notes.push({ message: failed(outcome), fix: addCommand(event, session) })
       return
     }
     if (holder.target !== event.target || (holder.session ?? "") !== session || holder.state === "connected") {
-      event.notes.push({
+      notes.push({
         message: `hc here has a machine ${event.name} that is another one`,
         fix: `hc machine rm ${event.name} (or rename it), then ${addCommand(event, session)}`,
       })
@@ -86,30 +87,33 @@ export const connect = (hc: Hc, event: Event) =>
     yield* hc.call("machine.rm", { machine: holder.name })
     yield* add
     yield* settled(hc, core)
-    event.notes.push({
+    notes.push({
       message: `hc: ${event.name}'s core changed (${holder.id.slice(0, 8)} → ${core.slice(0, 8)}); replaced`,
     })
   }).pipe(
     Effect.catch((e) =>
       Effect.sync(() =>
-        event.notes.push({
+        notes.push({
           message: failed(e),
           fix:
             e._tag === "HcTransportError" ? "hc server start" : addCommand(event, hcThere(event)?.link?.session ?? ""),
         }),
       ),
     ),
+    Effect.as(notes),
   )
+}
 
-export const remove = (hc: Hc, event: Event) =>
-  Effect.gen(function* () {
+export const remove = (hc: Hc, event: Event) => {
+  const notes: Array<VibestPlugin.MachineNote> = []
+  return Effect.gen(function* () {
     const there = hcThere(event)
     const core = there?.link?.core
     if (core === undefined && event.runtimes.length > 0 && there === undefined) return
     const rows = (yield* hc.call("machine.list", {})).machines
     const doomed = rows.filter((row) => (core === undefined ? row.target === event.target : row.id === core))
     if (core === undefined && doomed.length > 1) {
-      event.notes.push({
+      notes.push({
         message: `hc here has ${doomed.length} machines for ${event.target}; remove the right one`,
         fix: "hc machine rm <name>",
       })
@@ -122,19 +126,21 @@ export const remove = (hc: Hc, event: Event) =>
           Effect.catchTag("HcError", (e) =>
             e.kind === "machine_unknown"
               ? Effect.void
-              : Effect.sync(() => event.notes.push({ message: failed(e), fix: `hc machine rm ${row.name}` })),
+              : Effect.sync(() => notes.push({ message: failed(e), fix: `hc machine rm ${row.name}` })),
           ),
         )
   }).pipe(
     Effect.catch((e) =>
       Effect.sync(() =>
-        event.notes.push({
+        notes.push({
           message: `${failed(e)}; it may still have ${event.name}`,
           fix: `hc machine rm ${event.name}`,
         }),
       ),
     ),
+    Effect.as(notes),
   )
+}
 
 const NONE: ReadonlyMap<string, Terminal> = new Map()
 
@@ -203,11 +209,9 @@ export const mirror = (
     )
     yield* resets.pipe(
       Stream.runForEach(() =>
-        Effect.forEach(
-          [...held.values()],
-          (event) => (held.has(event.name) ? connect(hc, { ...event, notes: [] }) : Effect.void),
-          { discard: true },
-        ),
+        Effect.forEach([...held.values()], (event) => (held.has(event.name) ? connect(hc, event) : Effect.void), {
+          discard: true,
+        }),
       ),
       Effect.forkScoped,
     )

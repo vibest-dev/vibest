@@ -656,15 +656,18 @@ part of the API yet.
 
 **Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before" | "fail", ...)`):
 
-| Hook                 | Event (writable fields)                                                                                                      | Runs                                                                                     |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `agent.start.before` | `prompt`, `harness`, `provider`, `model`; read-only: project, agentType, parentSessionId, harnesses, subscriptions, attempts | before every Agent starts, the main Agent included                                       |
-| `agent.fail`         | `move` (`{ harness, provider?, model? }                                                                                      | undefined`); read-only: sessionId, reason, error, turn, harness, provider, attempts, ... | a started Agent's round failed (today a usage limit) |
+| Hook                 | Returns                                                                                      | Runs                                                 |
+| -------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `agent.start.before` | `AgentRoute`: any of `prompt`, `harness`, `provider`, `model`, `machine`, `runtime`, or void | before every Agent starts, the main Agent included   |
+| `agent.fail`         | `AgentMove` (`{ harness, provider?, model? }`) or void                                       | a started Agent's round failed (today a usage limit) |
 
-Every event carries the Project, the caller, the current Subscriptions, and the earlier tries. Callbacks run
-sequentially in plugin order and mutate the one event in place - no per-callback copy - so a later plugin sees
-(and may overwrite) what an earlier one wrote; the trace attributes each changed field to the plugin that wrote
-it last. Only `agent.start.before` may refuse: `Effect.fail(new AgentRefused({ reason }))` stops the chain at
+Every event carries the Project, the caller, the current Subscriptions, and the earlier tries, and is read-only:
+each callback gets a frozen copy (its object fields frozen too), so assigning to it throws and counts as that
+plugin crashing. Callbacks run sequentially in plugin order and return what they decide; core applies each
+returned value before the next callback, so a later plugin sees (and may override) what an earlier one decided. On
+`agent.start.before` the fields a route names replace the event's (a field named with `undefined` unsets it); on
+`agent.fail` the last move returned wins. The trace attributes each field to the plugin that returned it
+last. Only `agent.start.before` may refuse: `Effect.fail(new AgentRefused({ reason }))` stops the chain at
 once, nothing is inserted and nothing starts; a defect or a timeout there is also a refusal (`plugin <id>
 crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin id and the reason. On
 `agent.fail` an `AgentRefused` counts as a crash: a crash or a timeout fails that operation (the round is left
@@ -686,9 +689,10 @@ poll of a harness that reads usage. `agent.fail`'s `reason` is a union with one 
 
 **Counters and traces** (omac `plugins.ts`): per plugin and hook, calls, changes, crashes, timeouts, refusals,
 and the last error, shown by `vibest plugins`; every trace entry is `{ plugin, hook, ms, outcome:
-"ok" | "refused" | "crashed" | "timeout", changes }`, a diff against the event before that callback.
+"ok" | "refused" | "crashed" | "timeout", changes }`, where `changes` is the value that callback returned, field by
+field, with the value it replaced.
 
-**Dispatch:** sequential in plugin order; one mutable event object passes through every callback; every
+**Dispatch:** sequential in plugin order; each callback gets a frozen view of the event as decided so far; every
 callback is bounded by a 5 s timeout (waiting on its fiber, so an uninterruptible region still returns on
 time).
 
@@ -743,13 +747,7 @@ export default Plugin.define({
     Effect.gen(function* () {
       const { provider, model } = context.options
       // every subagent runs on Pi with this provider and model, whatever the main Agent chose
-      yield* context.agent.hook("start.before", (event) =>
-        Effect.sync(() => {
-          event.harness = "pi"
-          event.provider = provider
-          event.model = model
-        }),
-      )
+      yield* context.agent.hook("start.before", () => Effect.succeed({ harness: "pi", provider, model }))
     }),
 })
 ```
@@ -877,13 +875,13 @@ its model list reads, the model is offered) and refuses a start that never settl
 
 A usage limit is the same decision in reverse, on `agent.fail`: the round that failed stays the round that
 finishes, and the session restarts — same id, same worktree, same task (the open round's input, else the text
-the launch was about to send, else the trailing delivered batch) — on the harness the chain writes into
-`event.move`. Before each candidate starts, the move runs the `agent.start.before` chain with the move's
+the launch was about to send, else the trailing delivered batch) — on the harness the chain returns as its
+move. Before each candidate starts, the move runs the `agent.start.before` chain with the move's
 harness/provider/model and the session's real attempts prefilled: a refusal skips that candidate (recorded as a
 `refused` try), and what the chain decides — including a rewritten harness or prompt — is what gets patched and
 started, so a start policy plugin governs a moved Agent exactly like a first start. vibest itself does not
-move: with `move` still unset the round fails, naming that harness and each exhausted limit with its reset time,
-and no other harness starts. A plugin may still set `move`. The pairs that already hit a limit are remembered per (harness, provider) in
+move: when no callback returns a move the round fails, naming that harness and each exhausted limit with its reset time,
+and no other harness starts. A plugin may still return a move. The pairs that already hit a limit are remembered per (harness, provider) in
 `process.end` events with reason `limited` (joined to their `process.start`), so they survive moves and a vibestd
 restart. Within one round (since its turn started; for a launch's own limit, since the last turn ended or the
 session began) vibest never moves to a pair that hit a limit in it, whatever that login's usage reading says now:

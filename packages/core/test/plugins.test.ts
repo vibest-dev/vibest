@@ -5,7 +5,13 @@ import { Layout } from "@vibest/core/paths"
 import { Builtins, PluginLoader, Plugins } from "@vibest/core/plugins"
 import { Sessions } from "@vibest/core/sessions"
 import { mainCheckout } from "@vibest/core/worktree"
-import { AgentRefused as PluginRefused, Plugin, type AgentStartBefore, type Registration } from "@vibest/plugin"
+import {
+  AgentRefused as PluginRefused,
+  Plugin,
+  type AgentRoute,
+  type AgentStartBefore,
+  type Registration,
+} from "@vibest/plugin"
 import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -27,9 +33,9 @@ const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: st
     ...extra,
   }))
 
-const hook = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<void, PluginRefused>) =>
+const hook = (id: string, callback: (e: AgentStartBefore) => Effect.Effect<AgentRoute | void, PluginRefused>) =>
   Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", callback) })
-const write = (id: string, f: (e: AgentStartBefore) => void) => hook(id, (e) => Effect.sync(() => f(e)))
+const write = (id: string, f: (e: AgentStartBefore) => AgentRoute | void) => hook(id, (e) => Effect.sync(() => f(e)))
 
 const HARNESS_MODELS = ["claude-haiku-5-5", "a", "b", "two", "after", "m"]
 
@@ -73,10 +79,7 @@ describe("plugins: spawn hook", () => {
         hook("route", (e) =>
           Effect.sync(() => {
             assert.strictEqual(e.project.endsWith("/sub"), false)
-            if (e.prompt.startsWith("research:")) {
-              e.harness = "claude"
-              e.model = "claude-haiku-5-5"
-            }
+            return e.prompt.startsWith("research:") ? { harness: "claude", model: "claude-haiku-5-5" } : undefined
           }),
         ),
       ],
@@ -124,7 +127,7 @@ describe("plugins: spawn hook", () => {
       yield* until(herdr.callsTo("send"), (c) => c.length > 0)
       assert.include((yield* herdr.callsTo("send"))[0]!.text, "Run the tests first.")
     }),
-    { plugins: [write("rules", (e) => (e.prompt += "\n\nRun the tests first."))] },
+    { plugins: [write("rules", (e) => ({ prompt: `${e.prompt}\n\nRun the tests first.` }))] },
   )
 
   test(
@@ -140,7 +143,7 @@ describe("plugins: spawn hook", () => {
       assert.strictEqual(unset._tag, "NoHarnessChosen")
       assert.include(unset.message, "no harness to inherit")
     }),
-    { plugins: [write("editor", (e) => (e.harness = e.prompt === "unset" ? undefined : "vim"))] },
+    { plugins: [write("editor", (e) => ({ harness: e.prompt === "unset" ? undefined : "vim" }))] },
   )
 
   test(
@@ -169,7 +172,7 @@ describe("plugins: spawn hook", () => {
               .hook("start.before", () => Effect.sync(() => assert.fail("hook of a failed setup ran")))
               .pipe(Effect.andThen(Effect.die("setup boom"))),
         }),
-        write("ok", (e) => (e.model = "m")),
+        write("ok", () => ({ model: "m" })),
         write("ok", () => {}),
       ],
     },
@@ -218,7 +221,7 @@ describe("plugins: spawn hook", () => {
         stale("worker", "worker.spawn"),
         stale("typo", "session.start"),
         stale("proto", "toString"),
-        write("current", (e) => (e.model = "m")),
+        write("current", () => ({ model: "m" })),
       ],
     },
   )
@@ -310,7 +313,7 @@ const packageHome = Effect.gen(function* () {
 
 const source = (id: string, model: string) => `import { Plugin } from "@vibest/plugin"
 import { Effect } from "effect"
-export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", (e) => Effect.sync(() => { e.model = ${JSON.stringify(model)} })) })
+export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.succeed({ model: ${JSON.stringify(model)} })) })
 `
 
 const loaded = (dir: string) =>

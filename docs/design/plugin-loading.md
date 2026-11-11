@@ -38,8 +38,9 @@ running, so an old revision's finalizers can overlap the new setup.
 and returns a `Registration`; `{ runtime: id }` scopes the hook to one runtime (`Plugins.machine(hook, event,
 runtime?)`: with a runtime, the hooks scoped to it plus the unscoped ones run; without one, all of them). Unlike
 `agent.*`, every subscriber runs, one after another, even after one crashed or timed out; each is bounded by 30 s (hc's
-own dial goes over ssh), not the 5 s host default. The event's `notes` come back tagged with the plugin, and a crash or
-a timeout becomes a note of its own (`plugin <id> crashed: …`, `plugin <id> timed out after 30s`). Each commit of the
+own dial goes over ssh), not the 5 s host default. Each callback gets a frozen event and returns its notes (an array of
+`{ message, fix? }`, or void); the notes come back tagged with the plugin, and a crash or a timeout becomes a note of
+its own (`plugin <id> crashed: …`, `plugin <id> timed out after 30s`). Each commit of the
 runtime registry publishes the ids of the runtime definitions it added or replaced (`Runtimes.added`), and `connect`
 fires for each of them on every connected machine, so a runtime plugin loaded later catches up. When they fire:
 [multi-machine.md](multi-machine.md#terminals-on-other-machines). `@vibest/plugin/testing` `machineHooks(plugin)`

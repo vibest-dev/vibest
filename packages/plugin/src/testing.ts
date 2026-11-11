@@ -187,7 +187,7 @@ export const machineHooks = (
     readonly runtimes: ReadonlyArray<Runtime.RuntimeDefinition>
     readonly fire: (
       hook: keyof MachineHooks,
-      event: Omit<MachineEvent, "notes">,
+      event: MachineEvent,
       runtime?: string,
     ) => Effect.Effect<ReadonlyArray<MachineNote>>
   },
@@ -199,7 +199,7 @@ export const machineHooks = (
     const hooks: Array<{
       readonly name: string
       readonly runtime: string | undefined
-      readonly callback: (event: MachineEvent) => Effect.Effect<void>
+      readonly callback: (event: MachineEvent) => Effect.Effect<ReadonlyArray<MachineNote> | void>
     }> = []
     const editor: Runtime.RuntimeEditor = {
       list: () => runtimes,
@@ -242,14 +242,14 @@ export const machineHooks = (
       runtimes,
       fire: (hook, input, runtime) =>
         Effect.gen(function* () {
-          const event: MachineEvent = { ...input, notes: [] }
+          const notes: Array<MachineNote> = []
           for (const entry of hooks)
             if (
               entry.name === hook &&
               (runtime === undefined || entry.runtime === undefined || entry.runtime === runtime)
             )
-              yield* entry.callback(event)
-          return event.notes
+              notes.push(...((yield* entry.callback(Object.freeze({ ...input }))) ?? []))
+          return notes
         }),
     }
   })
