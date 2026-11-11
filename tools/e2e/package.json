@@ -1,0 +1,10 @@
+{
+  "name": "@vibest/e2e",
+  "version": "0.0.1-dev",
+  "private": true,
+  "description": "End-to-end checks: the built binary, real herdr and harnesses, only the model mocked. Not published.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsrs --noEmit --fast -p tsconfig.json"
+  }
+}
