@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
+import { SessionLive } from "@vibest/core/session/live"
 import { sessionSystemPrompt } from "@vibest/core/system-prompt"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -11,7 +12,15 @@ import { projectOf } from "./fakes.ts"
 import { place, session } from "./unit-helpers.ts"
 
 const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
-  program.pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer))))
+  program.pipe(
+    Effect.provide(
+      Db.layer.pipe(
+        Layer.provideMerge(Platform.sqlite(":memory:")),
+        Layer.provide(Bus.layer),
+        Layer.provide(SessionLive.layer),
+      ),
+    ),
+  )
 
 const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"

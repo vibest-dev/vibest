@@ -7,7 +7,7 @@ import { Layout } from "@vibest/core/paths"
 import { Processes } from "@vibest/core/processes"
 import { Project } from "@vibest/core/project"
 import { HARNESS_EXIT_WAIT } from "@vibest/core/remove"
-import { Restarting } from "@vibest/core/restarting"
+import { SessionLive } from "@vibest/core/session/live"
 import * as Server from "@vibest/server/server"
 import { Cause, Effect, Exit, Fiber, HashMap, Layer, type Scope } from "effect"
 import { TestClock } from "effect/testing"
@@ -201,7 +201,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
     "while a restart is between its harnesses: a start elsewhere is refused even with no agent seen, and the move is unsupported",
     Effect.gen(function* () {
       const s = yield* workingPiEntry
-      yield* (yield* Restarting).mark(s.started.sessionId)
+      yield* (yield* SessionLive).restarting.mark(s.started.sessionId)
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
       const refused = yield* Effect.exit(s.startAt("test/p2"))
       assert.isTrue(Exit.isFailure(refused))

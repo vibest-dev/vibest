@@ -7,6 +7,7 @@ import { applyOnly, type Migration, migrations } from "@vibest/core/database/mig
 import { APPLICATION_ID, Db, encodeAddress } from "@vibest/core/db"
 import { makeJournal } from "@vibest/core/journal"
 import { PROJECTION_VERSION } from "@vibest/core/projectors"
+import { SessionLive } from "@vibest/core/session/live"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Catalog, CATALOG_VERSION, type FactType } from "@vibest/schema/event"
 import { ID } from "@vibest/schema/id"
@@ -26,6 +27,13 @@ const fact = (
     const journal = yield* makeJournal(() => Effect.void)
     return yield* journal.commit(journal.emit(Catalog[type] as never, input as never))
   }).pipe(Effect.orDie)
+
+const memoryDb = () =>
+  Db.layer.pipe(
+    Layer.provideMerge(Platform.sqlite(":memory:")),
+    Layer.provide(Bus.layer),
+    Layer.provide(SessionLive.layer),
+  )
 
 describe("Db", () => {
   const fresh = <A, E>(program: Effect.Effect<A, E, Db>) => program.pipe(Effect.provide(database(":memory:")))
@@ -71,13 +79,11 @@ describe("Db", () => {
           entryId: string
         }>`SELECT entry_session_id AS entryId FROM project WHERE id = ${yield* projectOf("r")}`
         assert.strictEqual(project!.entryId, renewed.sessionId)
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
+      }).pipe(Effect.provide(memoryDb())),
   )
 
   const memory = <A, E>(program: Effect.Effect<A, E, Db | SqlClient.SqlClient>) =>
-    program.pipe(
-      Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer))),
-    )
+    program.pipe(Effect.provide(memoryDb()))
 
   it.effect(
     "rescheduleSource: the open execution's input, the trailing delivered user or parent run, and the parent id; an empty open execution resends the trailing same-sender batch, not an earlier execution",
@@ -387,7 +393,7 @@ describe("Db", () => {
           (yield* sql`SELECT * FROM session WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`)[0],
           "status",
         )
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
+      }).pipe(Effect.provide(memoryDb())),
   )
 
   it.effect(
@@ -430,7 +436,7 @@ describe("Db", () => {
         yield* db.updateSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", { metadata: { archived: true, removed: true } })
         yield* execution("two")
         assert.deepStrictEqual(yield* recipientOf("two"), ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"])
-      }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
+      }).pipe(Effect.provide(memoryDb())),
   )
 
   it.effect("a peer item received again after the project's entry changed is a duplicate, not a second notice", () =>
@@ -460,7 +466,7 @@ describe("Db", () => {
         }>`SELECT session_id AS recipient FROM inbox WHERE peer_item = ${item.id}`,
         [{ recipient: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }],
       )
-    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
+    }).pipe(Effect.provide(memoryDb())),
   )
 
   it.effect("sessionBriefs: the task is the session's task row; latest is its newest execution", () =>
@@ -538,7 +544,7 @@ describe("Db", () => {
       })
       assert.isUndefined(briefs.get("00000000-0000-4000-8000-000000000000"))
       assert.strictEqual((yield* db.sessionBriefs([])).size, 0)
-    }).pipe(Effect.provide(Db.layer.pipe(Layer.provideMerge(Platform.sqlite(":memory:")), Layer.provide(Bus.layer)))),
+    }).pipe(Effect.provide(memoryDb())),
   )
   it.effect("a notice with no entry session is dropped; a claim takes a pending row once", () =>
     memory(
@@ -634,6 +640,7 @@ describe("Db", () => {
         ).pipe(Layer.provide(Platform.sqlite(file))),
       ),
       Layer.provide(Bus.layer),
+      Layer.provide(SessionLive.layer),
     )
 
   it.effect("a failed or interrupted install rolls back, then a later open initializes", () =>
@@ -934,15 +941,17 @@ describe("Db", () => {
       const script = yield* fileAt(dir, "open.ts")
       const dbModule = url.fileURLToPath(new URL("../../../packages/core/src/db.ts", import.meta.url))
       const busModule = url.fileURLToPath(new URL("../../../packages/core/src/bus.ts", import.meta.url))
+      const liveModule = url.fileURLToPath(new URL("../../../packages/core/src/session/live.ts", import.meta.url))
       const platformModule = url.fileURLToPath(new URL("../src/platform/bun.ts", import.meta.url))
       yield* fs.writeFileString(
         script,
         [
           'import { Effect, Layer } from "effect"',
           `import { Bus } from ${JSON.stringify(busModule)}`,
+          `import { SessionLive } from ${JSON.stringify(liveModule)}`,
           `import { Db } from ${JSON.stringify(dbModule)}`,
           `import * as Platform from ${JSON.stringify(platformModule)}`,
-          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!)), Layer.provide(Bus.layer)))))",
+          "await Effect.runPromise(Effect.void.pipe(Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(process.argv[2]!)), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer)))))",
           "",
         ].join("\n"),
       )

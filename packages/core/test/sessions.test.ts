@@ -4,6 +4,7 @@ import { Drain } from "@vibest/core/drain"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
+import { SessionLive } from "@vibest/core/session/live"
 import { Sessions } from "@vibest/core/sessions"
 import { ID } from "@vibest/schema/id"
 import { Cause, Clock, Effect, Exit, Fiber, FileSystem, Path } from "effect"
@@ -327,12 +328,12 @@ describe.concurrent("Sessions", () => {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       assert.deepInclude(yield* sessions.inMemory, { tracked: 1, locks: 0 })
-      assert.strictEqual(yield* db.liveStatuses, 1)
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 1)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
       yield* settled
       assert.deepInclude(yield* db.getSession(id), { executionState: "failed" })
-      assert.strictEqual(yield* db.liveStatuses, 0)
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 0)
       yield* until(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
@@ -347,7 +348,7 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual((yield* sessions.inMemory).tracked, 1)
       assert.deepInclude(yield* db.getSession(id), { status: "idle" })
       yield* sessions.remove(id)
-      assert.strictEqual(yield* db.liveStatuses, 0)
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 0)
       yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
       assert.strictEqual(yield* (yield* Inbox).locks, 0)
     }),

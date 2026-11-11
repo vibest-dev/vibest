@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Inbox } from "@vibest/core/inbox"
+import { SessionLive } from "@vibest/core/session/live"
 import { Sessions } from "@vibest/core/sessions"
 import { Deferred, Effect, Fiber, FileSystem, Stream } from "effect"
 import { SqlClient } from "effect/sql"
@@ -83,7 +84,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const fs = yield* FileSystem.FileSystem
       const sql = yield* SqlClient.SqlClient
       const w = yield* archiveSession(yield* makeRepository)
-      assert.isTrue(yield* w.db.archivesOnIdle(w.id))
+      assert.isTrue(yield* (yield* SessionLive).archivesOnIdle(w.id))
       yield* askEntry(w)
       yield* finishExecution(w, "status: completed\nsummary: found it")
       yield* ackPolled(w)

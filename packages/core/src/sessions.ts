@@ -19,18 +19,16 @@ import {
   Effect,
   FiberSet,
   FileSystem,
-  HashMap,
   Layer,
   Option,
   Path,
   Predicate,
   Ref,
-  SynchronizedRef,
 } from "effect"
 
 import { sessionArchive } from "./archive.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
-import { Db, type SessionFilter, type SessionRow } from "./db.ts"
+import { Db, type SessionFilter, type SessionRow, sessionEnded } from "./db.ts"
 import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
@@ -48,7 +46,6 @@ import { projectRoot, workspaceGit } from "./project-create.ts"
 import { CONFIRM_TIMEOUT, sessionPrompting, STOP_WAIT } from "./prompting.ts"
 import * as Remove from "./remove.ts"
 import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
-import { Restarting } from "./restarting.ts"
 import {
   agentState,
   alive,
@@ -60,7 +57,8 @@ import {
   stateOf,
   type Terminal,
 } from "./runtimes.ts"
-import type { Platform, Tracked } from "./session-types.ts"
+import type { Platform } from "./session-types.ts"
+import { SessionLive } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
 import { sessionSpawn, type SpawnInput, type Spawned } from "./spawn.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
@@ -98,8 +96,8 @@ const SESSION_DEPS = [
   Inbox.node,
   Plugins.node,
   Processes.node,
-  Restarting.node,
   Runtimes.node,
+  SessionLive.node,
   SessionLocks.node,
   Subscriptions.node,
   PlatformNode.childProcessSpawner,
@@ -108,15 +106,6 @@ const SESSION_DEPS = [
   PlatformNode.layout,
   PlatformNode.path,
 ] as const
-
-const newTracked: Effect.Effect<Tracked> = Effect.all({
-  endedAt: Ref.make<number | undefined>(undefined),
-  blockedNotified: Ref.make(false),
-  prompting: Ref.make(false),
-  stopping: Ref.make(false),
-  archiveTold: Ref.make(false),
-  launchRechecked: Ref.make(false),
-})
 
 export interface SessionView extends SessionRow {
   readonly worktree: string
@@ -181,43 +170,22 @@ export class Sessions extends Context.Service<
       const plugins = yield* Plugins
       const removal = yield* Remove.make
       const processes = yield* Processes
-      const restarting = yield* Restarting
+      const sessionLive = yield* SessionLive
+      const { restarting, track } = sessionLive
       const bus = yield* Bus
       const platform = yield* Effect.context<Platform>()
       const scope = yield* Effect.scope
       const engine = yield* Engine.make
 
-      const tracked = yield* SynchronizedRef.make(HashMap.empty<string, Tracked>())
-      const track = (id: string) =>
-        SynchronizedRef.modifyEffect(tracked, (map) =>
-          Option.match(HashMap.get(map, id), {
-            onSome: (r) => Effect.succeed([r, map] as const),
-            onNone: () => newTracked.pipe(Effect.map((r) => [r, HashMap.set(map, id, r)] as const)),
-          }),
-        )
       const locks = yield* SessionLocks
-      const stop = (id: string) =>
-        SynchronizedRef.modifyEffect(tracked, (map) =>
-          Effect.gen(function* () {
-            const r = Option.getOrUndefined(HashMap.get(map, id)) ?? (yield* newTracked)
-            const already = yield* Ref.getAndSet(r.stopping, true)
-            return [{ r, already }, HashMap.set(map, id, r)] as const
-          }),
-        )
-      const forget = (id: string) =>
+      const forgetIfDone = (id: string) =>
         locks.withLock(id)(
-          SynchronizedRef.updateEffect(tracked, (map) =>
-            Effect.gen(function* () {
-              const row = yield* db.getSession(id)
-              if (row !== undefined && row.exitedAt === null && !row.metadata.archived && !row.metadata.removed)
-                return map
-              const r = Option.getOrUndefined(HashMap.get(map, id))
-              if (r !== undefined && ((yield* Ref.get(r.stopping)) || (yield* Ref.get(r.prompting)))) return map
-              yield* engine.cancel(`grace:${id}`)
-              yield* engine.cancel(`miss:${id}`)
-              return HashMap.remove(map, id)
-            }),
-          ),
+          Effect.gen(function* () {
+            if (!sessionEnded(yield* db.getSession(id))) return
+            yield* engine.cancel(`grace:${id}`)
+            yield* engine.cancel(`miss:${id}`)
+            yield* sessionLive.forget(id)
+          }),
         )
       const locked = locks.locked
       const logged = Engine.logFailure
@@ -443,7 +411,7 @@ export class Sessions extends Context.Service<
         const open = session.executionState === "open"
         const limited = session.executionState === "failed" ? yield* db.limitedExecution(id) : undefined
         if (!open && session.exitedAt !== null && limited === undefined) return
-        if (restarting.has(id)) return
+        if (yield* restarting.has(id)) return
         const routed = yield* live(session).pipe(Effect.option)
         if (Option.isNone(routed)) return yield* live(session)
         const h = routed.value
@@ -582,16 +550,13 @@ export class Sessions extends Context.Service<
         fs,
         removal,
         locks,
-        scope,
         platform,
         getRow,
         live,
         notice,
         dropQueue,
         recount,
-        track,
-        stop,
-        forget,
+        sessionLive,
         locked,
         logged,
         busyOf,
@@ -607,7 +572,7 @@ export class Sessions extends Context.Service<
           session.executionState === "open" ||
           session.status === "blocked" ||
           (session.startedAt === null && session.exitedAt === null) ||
-          restarting.has(id)
+          (yield* restarting.has(id))
         )
           return
         const h = yield* live(session)
@@ -796,7 +761,7 @@ export class Sessions extends Context.Service<
           case "live.exited":
             return onTerminal(event.runtime, event.terminal, false)
           case "process.ended":
-            return forget(event.sessionId!)
+            return forgetIfDone(event.sessionId!)
           case "live.reset":
             return republish().pipe(
               Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine })),
@@ -933,8 +898,7 @@ export class Sessions extends Context.Service<
           }),
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: Effect.gen(function* () {
-          const map = yield* SynchronizedRef.get(tracked)
-          return { tracked: HashMap.size(map), locks: locks.size(), reconciles }
+          return { tracked: (yield* sessionLive.size).tracked, locks: locks.size(), reconciles }
         }),
         outdated,
         restart,

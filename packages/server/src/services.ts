@@ -12,16 +12,16 @@ import { Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
 import { Remote } from "@vibest/core/remote"
 import { SshHosts } from "@vibest/core/repository-url"
-import { Restarting } from "@vibest/core/restarting"
 import { Runtimes } from "@vibest/core/runtimes"
 import { EntrySession } from "@vibest/core/session/entry"
+import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 
 export const services = LayerNode.group([
   Bus.node,
-  Restarting.node,
+  SessionLive.node,
   Drain.node,
   Harnesses.node,
   Runtimes.node,

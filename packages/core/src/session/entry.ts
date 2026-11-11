@@ -13,9 +13,9 @@ import { Layout, VibestCommand } from "../paths.ts"
 import { describeSpawn, Plugins } from "../plugins.ts"
 import { Processes } from "../processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
-import { Restarting } from "../restarting.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
 import { runtimeEnv } from "../sessions.ts"
+import { SessionLive } from "./live.ts"
 
 export const PRESENT_TIMEOUT = Duration.seconds(5)
 
@@ -52,7 +52,7 @@ const make = Effect.gen(function* () {
   const db = yield* Db
   const bus = yield* Bus
   const runtimes = yield* Runtimes
-  const restarting = yield* Restarting
+  const restarting = (yield* SessionLive).restarting
   const plugins = yield* Plugins
   const harness = yield* Harness
   const harnesses = yield* Harnesses
@@ -108,7 +108,7 @@ const make = Effect.gen(function* () {
     const runtimeId = entry.runtime
     if (entry.address.id === terminal) return null
     const found = runtimes.find(runtimeId)
-    if (!restarting.has(entry.id)) {
+    if (!(yield* restarting.has(entry.id))) {
       if (found === undefined) return null
       const presence = yield* entryIdle(found, entry.address).pipe(Effect.option)
       if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
@@ -364,7 +364,7 @@ const make = Effect.gen(function* () {
         const place = entry?.address
         if (!entry?.runtime || !place || place.id === "" || !sameEntry(entry, runtime, address))
           return { result: "moved" as const }
-        if (restarting.has(entry.id))
+        if (yield* restarting.has(entry.id))
           return {
             result: "unsupported" as const,
             reason: "vibest update is restarting it there; run vibest again once it is ready",
@@ -396,8 +396,8 @@ export class EntrySession extends Context.Service<EntrySession, Effect.Success<t
       Harnesses.node,
       Plugins.node,
       Processes.node,
-      Restarting.node,
       Runtimes.node,
+      SessionLive.node,
       PlatformNode.fileSystem,
       PlatformNode.layout,
       PlatformNode.path,

@@ -10,8 +10,8 @@ import * as Engine from "./engine.ts"
 import { Harnesses } from "./harness.ts"
 import { keyedLock } from "./keyed-lock.ts"
 import * as Leases from "./leases.ts"
-import { Restarting } from "./restarting.ts"
 import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runtimes.ts"
+import { SessionLive } from "./session/live.ts"
 
 export const LEASE = Duration.seconds(30)
 export const AWAY = Duration.seconds(5)
@@ -81,7 +81,7 @@ export class Inbox extends Context.Service<
       const drain = yield* Drain
       const runtimes = yield* Runtimes
       const harnesses = yield* Harnesses
-      const restarting = yield* Restarting
+      const restarting = (yield* SessionLive).restarting
       const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.inbox
       const markDelivered = (sessionId: string, ids: ReadonlyArray<number>) =>
         drain.work(
@@ -103,7 +103,7 @@ export class Inbox extends Context.Service<
             const entry = yield* db.entryOf(projectId)
             if (!entry?.address || entry.address.id === "" || !entry.runtime)
               return yield* db.dropWaiting(projectId, "absent")
-            if (restarting.has(entry.id)) return
+            if (yield* restarting.has(entry.id)) return
             const address = encodeAddress(entry.address)
             const guard = { projectId, runtime: entry.runtime, address }
             const h = runtimes.find(entry.runtime)
@@ -287,6 +287,6 @@ export class Inbox extends Context.Service<
   static readonly node = LayerNode.make({
     service: Inbox,
     layer: Inbox.layer,
-    deps: [Bus.node, Db.node, Drain.node, Harnesses.node, Restarting.node, Runtimes.node],
+    deps: [Bus.node, Db.node, Drain.node, Harnesses.node, Runtimes.node, SessionLive.node],
   })
 }

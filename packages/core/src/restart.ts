@@ -9,7 +9,6 @@ import type { HarnessDefinition, HarnessesShape } from "./host.ts"
 import type { Inbox } from "./inbox.ts"
 import { errorMessage } from "./plugins.ts"
 import type { Processes } from "./processes.ts"
-import type { Restarting } from "./restarting.ts"
 import {
   agentState,
   type AgentSeen,
@@ -19,6 +18,7 @@ import {
   stateOf,
   type Terminal,
 } from "./runtimes.ts"
+import type { SessionLive } from "./session/live.ts"
 
 export interface Outdated {
   readonly id: string
@@ -114,7 +114,7 @@ export const sessionRestart = (deps: {
   readonly runtimes: Runtimes["Service"]
   readonly harnesses: Pick<HarnessesShape, "get" | "find">
   readonly processes: Processes["Service"]
-  readonly restarting: Restarting["Service"]
+  readonly restarting: SessionLive["Service"]["restarting"]
   readonly inbox: Inbox["Service"]
   readonly scope: Scope.Scope
   readonly locked: (id: string) => <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>
