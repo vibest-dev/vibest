@@ -70,7 +70,7 @@ describe("sends from sessions", () => {
         yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
         assert.isDefined(yield* db.insertSend(entryId, "to the entry", undefined, B))
         assert.isUndefined(yield* db.insertSend(A, "to the ended parent", undefined, B))
-        const creator = yield* db.creatorOf(B)
+        const creator = yield* db.creatorLabel(B)
         assert.deepStrictEqual(creator, { id: entryId, label: "the entry session" })
         const prompt = sessionSystemPrompt({
           id: B,

@@ -160,11 +160,7 @@ const make = Effect.gen(function* () {
         }
       }),
 
-    spawn: (
-      machine: string,
-      input: PayloadOf<"Spawn">,
-      from: { readonly project: string; readonly coordinator?: string },
-    ) =>
+    spawn: (machine: string, input: PayloadOf<"Spawn">, from: { readonly project: string; readonly session: string }) =>
       Effect.gen(function* () {
         const refused = REFUSED.filter(([key]) => input[key] !== undefined && input[key] !== false).map(
           ([, flag]) => flag,
@@ -191,7 +187,6 @@ const make = Effect.gen(function* () {
           )
         const identity = yield* repositoryIdentity(remote)
         const entry = yield* db.entryOf(from.project)
-        const reportTo = from.coordinator ?? entry?.id
         const runtime =
           input.runtime ??
           callerKind(yield* plugins.settled.pipe(Effect.andThen(runtimes.callers)), input.callerEnv) ??
@@ -213,7 +208,7 @@ const make = Effect.gen(function* () {
               ...(input.model === undefined ? {} : { model: input.model }),
               ...(input.name === undefined ? {} : { title: input.name }),
               ...(runtime === undefined ? {} : { runtime }),
-              ...(reportTo === undefined ? {} : { reportTo }),
+              reportTo: from.session,
               request: input.request ?? randomId(),
             },
             { headers },

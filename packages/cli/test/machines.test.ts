@@ -22,17 +22,8 @@ import * as Platform from "#platform"
 
 import { teardown } from "../src/cli.ts"
 import { pipeStdio } from "../src/connect.ts"
-import {
-  callerPlugin,
-  FakeGit,
-  makeRepository,
-  runVibest,
-  tempDirectory,
-  until,
-  untilVirtual,
-  yieldToIo,
-} from "./fakes.ts"
-import { COMMIT, Net, onB, REMOTE, REPOSITORY, repoStack, served, twoMachines } from "./machines-fakes.ts"
+import { callerPlugin, FakeGit, runVibest, tempDirectory, until, untilVirtual, yieldToIo } from "./fakes.ts"
+import { COMMIT, entryIn, Net, onB, REMOTE, REPOSITORY, repoStack, served, twoMachines } from "./machines-fakes.ts"
 
 type Stack = Context.Context<Layer.Success<ReturnType<typeof served>>>
 
@@ -518,27 +509,6 @@ describe("vibest run --machine and remote sessions", () => {
   )
 
   it.effect(
-    "run --machine without an entry session: no report-to, the result stays on B and Get mb/<id> reads it",
-    () =>
-      Effect.gen(function* () {
-        const net = new Net()
-        const a = yield* repoStack(net)
-        const b = yield* repoStack(net)
-        net.route("b-host", b.layout.socket)
-        yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
-        yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
-        const checkout = yield* a.run(makeRepository)
-        yield* (yield* a.run(FakeGit)).update(checkout, REPOSITORY)
-        const here = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(checkout))
-        const spawned = yield* here(a.raw.Spawn({ machine: "mb", prompt: "alone", callerEnv: {} }))
-        yield* finish(b.db, onB(spawned.id), "kept on B")
-        assert.deepStrictEqual(yield* b.run(outboxRows), [], "nothing to send back")
-        const got = yield* here(a.raw.Get({ id: spawned.id.slice(0, 11) }))
-        assert.strictEqual(got.id, spawned.id)
-      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
-  )
-
-  it.effect(
     "B finds a checkout cloned with another URL form; A resolves its own ssh alias; NoProject names the URL",
     () =>
       Effect.gen(function* () {
@@ -551,7 +521,7 @@ describe("vibest run --machine and remote sessions", () => {
         yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
         yield* a.cli(a.raw["Machine.Add"]({ name: "mo", target: "o-host" }))
         yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows.every((row) => row.state === "connected"))
-        const here = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(a.directory))
+        const here = yield* entryIn(a)
         yield* here(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
         assert.lengthOf(b.spawns, 1)
         assert.strictEqual(b.spawns[0]!.root, b.directory)
@@ -572,7 +542,7 @@ describe("vibest run --machine and remote sessions", () => {
       net.route("b-host", b.layout.socket)
       yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
       yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
-      const here = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(a.directory))
+      const here = yield* entryIn(a)
       yield* here(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
       assert.deepStrictEqual(
         b.spawns.map((spawn) => spawn.root),
@@ -581,19 +551,17 @@ describe("vibest run --machine and remote sessions", () => {
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
-  it.effect("a session another machine started may not start agents", () =>
+  it.effect("a session another machine started starts agents like any session and is their creator", () =>
     Effect.gen(function* () {
       const b = yield* peerB
       const call = yield* b.as(randomId(), "aproj")
       const { session } = yield* b.spawn(call)
-      const refused = yield* Effect.flip(
-        RpcClient.withHeaders(
-          b.raw.Spawn({ prompt: "more", callerEnv: {} }),
-          sessionHeaders({ sessionId: session, projectId: b.project }),
-        ),
+      yield* RpcClient.withHeaders(
+        b.raw.Spawn({ prompt: "more", callerEnv: {} }),
+        sessionHeaders({ sessionId: session, projectId: b.project }),
       )
-      assert.strictEqual(refused._tag, "Forbidden")
-      assert.lengthOf(b.spawns, 1)
+      assert.lengthOf(b.spawns, 2)
+      assert.strictEqual(b.spawns[1]!.parentSessionId, session)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 

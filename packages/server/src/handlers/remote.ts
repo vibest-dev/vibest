@@ -11,7 +11,7 @@ import type { ProjectMoved } from "@vibest/schema/session"
 import { Effect, Stream } from "effect"
 
 import type { Listing } from "../listing.ts"
-import type { Agent, Checks } from "./caller.ts"
+import type { Checks } from "./caller.ts"
 
 type Routed = "Send" | "Interrupt" | "Remove" | "Get" | "Peek"
 type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
@@ -102,11 +102,8 @@ export const remoteHandlers = (
           routed("Peek", p.id, local, (at, project) => remote.peek(at, project, p)),
       },
 
-      spawnOn: (machine: string, input: PayloadOf<"Spawn">, caller: Agent, project: string) =>
-        remote.spawn(machine, input, {
-          project,
-          ...(caller._tag === "Entry" ? { coordinator: caller.sessionId } : {}),
-        }),
+      spawnOn: (machine: string, input: PayloadOf<"Spawn">, session: string, project: string) =>
+        remote.spawn(machine, input, { project, session }),
 
       methods: {
         List: ({ stopped, all }: PayloadOf<"List">) =>

@@ -193,6 +193,19 @@ export const repoStack = (net?: Net, options: TestOptions = {}, remote = REMOTE)
     return { run, db, raw, cli, as, spawn, spawns, directory, project, layout, id: (yield* run(VibestdIdentity)).id }
   })
 
+export const entryIn = (a: Effect.Success<ReturnType<typeof repoStack>>) =>
+  Effect.gen(function* () {
+    const started = yield* a.db.startEntry(a.project, "pi", false, {
+      runtime: "fake",
+      address: { machine: "local", id: "main-pane" },
+    })
+    return <A, E>(effect: Effect.Effect<A, E>) =>
+      RpcClient.withHeaders(
+        effect,
+        sessionHeaders({ sessionId: started.sessionId, projectId: a.project, repositoryRoot: a.directory }),
+      )
+  })
+
 export const onB = (address: string) => address.slice(address.indexOf("/") + 1)
 
 export const twoMachines = (options: { readonly a?: TestOptions; readonly b?: TestOptions } = {}) =>

@@ -3,6 +3,7 @@ import type { AgentRefused } from "@vibest/schema/plugin"
 import {
   AllocationFailed,
   LimitReached,
+  NoCallingSession,
   NoHarnessChosen,
   NoRuntime,
   NoSuchSession,
@@ -71,6 +72,7 @@ export {
   AllocationFailed,
   LaunchFailed,
   LimitReached,
+  NoCallingSession,
   NoHarnessChosen,
   NoRuntime,
   NoSuchSession,
@@ -120,7 +122,14 @@ export class Sessions extends Context.Service<
       input: SpawnInput,
     ) => Effect.Effect<
       Spawned,
-      AllocationFailed | LimitReached | HarnessUnavailable | NoHarnessChosen | NoRuntime | AgentRefused | NoSuchSession
+      | AllocationFailed
+      | LimitReached
+      | HarnessUnavailable
+      | NoCallingSession
+      | NoHarnessChosen
+      | NoRuntime
+      | AgentRefused
+      | NoSuchSession
     >
     readonly send: (
       id: string,
@@ -295,7 +304,7 @@ export class Sessions extends Context.Service<
           return sessionSystemPrompt({
             id: session.id,
             peer: yield* db.earlierSharer(session.id),
-            creator: yield* db.creatorOf(session.id),
+            creator: yield* db.creatorLabel(session.id),
             projectDir: layout.project(session.projectId),
             vibest,
             ...(yield* projectText(layout.project(session.projectId))),
