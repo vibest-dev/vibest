@@ -62,8 +62,8 @@ vibestd whose socket closed may still run its finalizers, or another starter is 
 connection) and exiting once a vibestd that holds it answers; a handoff's new vibestd waits for the old one's lock,
 not its socket, which answers until the old one has drained. With the lock held, whatever still answers on
 `vibest.sock` took none (an older vibestd or another program): its socket stays and the start fails, after three
-Pings, since one can outlast its 1 s timeout on a loaded machine. Else the socket is unlinked, a handoff backs up the
-database the old vibestd left before this one opens and migrates it, sessions are recovered and the socket served.
+Pings, since one can outlast its 1 s timeout on a loaded machine. Else the socket is unlinked, this vibestd opens and
+migrates the database the old one left, sessions are recovered and the socket served.
 The lock is taken first and released last, after the socket server has closed and removed its path, so a successor's
 socket is never unlinked. The PID line is written into the locked file, and releasing the lock empties it; it is for
 people to read, since a stale file's PID may belong to another process by now, and nothing signals it. An accepted

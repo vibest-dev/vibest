@@ -7,6 +7,9 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Handoff database copies** (users): a handing-over vibestd no longer writes `vibest.db.before-<version>` (a copy of
+  `vibest.db` and its `-wal`). Copies already in the home are left where they are. Copy the database yourself before
+  `vibest update` if you want one.
 - **Turn ends** (anyone reading `vibest.db`, and anyone counting turns): a turn end the harness reports is written at
   once as `turn.ended`, carrying `reply` and `conversation`; vibestd no longer writes `turn.reported` (older ones still
   decode and project), so `turn.report_seq` stays null for new turns. An older vibest cannot read a log with the new

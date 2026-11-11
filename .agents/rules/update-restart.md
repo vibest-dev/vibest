@@ -18,5 +18,4 @@ Known limits:
 - A usage-limit move whose runtime has no `run` or whose harness reported no pid still closes the pane and opens another.
 - `run`'s idle check counts `sh` as a shell, so in a main agent's pane typing can start between the harness exit and `exec $SHELL` (the tty keeps the text).
 - On the first update from a version before this branch, subagents on the old integration have reported no pid and are listed as "restart it yourself".
-- The handoff's database backup is kept per version and never pruned.
 - A subagent result the interrupted turn wrote between `turnPromptedAt` and the restart is overwritten by the continue turn.
