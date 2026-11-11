@@ -21,7 +21,6 @@ export type PeerStart = {
 export type OutboxRow = {
   readonly id: string
   readonly sessionId: string
-  readonly kind: "result" | "notice"
   readonly content: string
   readonly createdAt: number
   readonly reportTo: string
@@ -128,11 +127,8 @@ export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, curren
             )
         ).pipe(Effect.orDie),
 
-      notePeer: (peer: { readonly id: string; readonly name: string; readonly callsMe: string }) =>
-        tx(emit(PeerSeen, { data: { id: peer.id, name: peer.name, callsMe: peer.callsMe } })).pipe(
-          Effect.asVoid,
-          Effect.orDie,
-        ),
+      notePeer: (peer: { readonly id: string; readonly name: string }) =>
+        tx(emit(PeerSeen, { data: { id: peer.id, name: peer.name } })).pipe(Effect.asVoid, Effect.orDie),
 
       peerKnown: (id: string) =>
         sql`SELECT 1 FROM peer WHERE id = ${id}`.pipe(

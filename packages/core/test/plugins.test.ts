@@ -486,12 +486,13 @@ describe("plugins: event.subscribe", () => {
         Effect.sync(() => held),
         (facts) => facts.some((fact) => fact.sessionId === second.id && fact.type === "process.started"),
       )
-      const seqs = held.map((fact) => fact.seq)
-      assert.deepStrictEqual(
-        seqs,
-        [...seqs].sort((a, b) => a - b),
-      )
-      assert.strictEqual(new Set(seqs).size, seqs.length)
+      for (const aggregate of new Set(held.map((fact) => fact.aggregate))) {
+        const seqs = held.filter((fact) => fact.aggregate === aggregate).map((fact) => fact.seq)
+        assert.deepStrictEqual(
+          seqs,
+          seqs.map((_, i) => seqs[0]! + i),
+        )
+      }
       assert.isTrue(held.some((fact) => fact.sessionId === second.id && fact.type === "session.created"))
     }),
     { plugins: [watcher] },

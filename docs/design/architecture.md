@@ -387,7 +387,9 @@ How `packages/core/src/sessions.ts` keeps these:
   environment, so a caller's `--env` cannot point that shell at another vibestd.
 - On start: subscribe before writing anything, settle the deliveries a stop cut off, label terminals again (the
   runtime does not keep labels), then check every live session once. The same reconcile runs when a runtime
-  registers or comes back, and finishes archives and `--archive-on-idle` archives a stop cut off.
+  registers or comes back, and finishes archives a stop cut off. It does not archive `--archive-on-idle` sessions: that
+  flag lives only in the memory of the vibestd that started them, so after a restart they stay until archived by hand
+  (schema.md, Memory).
 
 How a round ends:
 

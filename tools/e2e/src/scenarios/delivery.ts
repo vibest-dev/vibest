@@ -48,7 +48,7 @@ const inboxRows = (w: World, sql: string, ...args: Array<string>) =>
   row<{ n: number }>(w, `SELECT count(*) AS n FROM inbox WHERE ${sql}`, ...args)?.n ?? 0
 
 const turnStarts = (w: World, sub: string) =>
-  row<{ n: number }>(w, "SELECT count(*) AS n FROM turn WHERE session_id = ?", sub)?.n ?? 0
+  row<{ n: number }>(w, "SELECT count(*) AS n FROM execution WHERE session_id = ?", sub)?.n ?? 0
 
 const recordingModel = (answer: (messages: Array<Message>) => string | Promise<string>) => {
   const requests: Array<Array<Message>> = []
@@ -68,17 +68,17 @@ const recordingModel = (answer: (messages: Array<Message>) => string | Promise<s
 const lastTurn = (w: World, sub: string) =>
   row<{ status: string; failure: string | null }>(
     w,
-    "SELECT status, failure FROM turn WHERE session_id = ? AND status IS NOT NULL ORDER BY id DESC LIMIT 1",
+    "SELECT outcome AS status, failure FROM execution WHERE session_id = ? AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1",
     sub,
   )
 
 const mainOf = (w: World) =>
-  row<{ id: string }>(w, "SELECT id FROM session WHERE role = 'main' AND ended_at IS NULL")!.id
+  row<{ id: string }>(w, "SELECT id FROM session WHERE agent = 'main' AND ended_at IS NULL")!.id
 
 const sendsFrom = (w: World, sender: string, recipient: string) =>
   rows<{ id: number; status: string; turn: number | null; content: string }>(
     w,
-    "SELECT id, status, turn_id AS turn, content FROM inbox WHERE sender_session_id = ? AND recipient_session_id = ? AND kind = 'send'",
+    "SELECT id, status, execution_id AS turn, content FROM inbox WHERE sender_session_id = ? AND session_id = ? AND kind = 'send'",
     sender,
     recipient,
   )
@@ -112,7 +112,7 @@ const turnErrorChecks: ReadonlyArray<Check> = [
         const notices = () =>
           rows<{ status: string; recipient: string | null; content: string }>(
             w,
-            "SELECT status, recipient_session_id AS recipient, content FROM inbox WHERE sender_session_id = ? AND kind = 'notice'",
+            "SELECT status, session_id AS recipient, content FROM inbox WHERE sender_session_id = ? AND kind = 'notice'",
             id,
           )
         await until("the turn failed", () => lastTurn(w, id)?.status === "failed", 120_000)
@@ -159,10 +159,11 @@ const sendChecks: ReadonlyArray<Check> = [
         const sent = sendsFrom(w, id, mainId)
         expect(sent.length === 1, `${sent.length} sends from ${id} to the main agent: ${JSON.stringify(sent)}`)
         expect(
-          countFacts(w, "type = 'inbox.queued' AND seq = ?", sent[0]!.id) === 1 &&
+          countFacts(w, "aggregate = ? AND type = 'inbox.queued' AND seq = ?", mainId, sent[0]!.id) === 1 &&
             countFacts(
               w,
-              "type = 'inbox.moved' AND json_extract(data, '$.inbox') = ? AND json_extract(data, '$.to') = 'delivered'",
+              "aggregate = ? AND type = 'inbox.moved' AND json_extract(data, '$.inbox') = ? AND json_extract(data, '$.to') = 'delivered'",
+              mainId,
               sent[0]!.id,
             ) === 1,
           `the send ${sent[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
@@ -294,7 +295,7 @@ const sendChecks: ReadonlyArray<Check> = [
   {
     id: "S48",
     title:
-      "when a subagent's pane is killed before the main agent's vibest send reaches it, the row ends failed and one notice row goes to the sender (recipient_session_id = the sender), which is typed into the sender and seen by its model",
+      "when a subagent's pane is killed before the main agent's vibest send reaches it, the row ends failed and one notice row goes to the sender (session_id = the sender), which is typed into the sender and seen by its model",
     run: async (w) => {
       needs()
       let target = ""
@@ -322,7 +323,7 @@ const sendChecks: ReadonlyArray<Check> = [
         const notices = () =>
           rows<{ status: string; sender: string | null }>(
             w,
-            "SELECT status, sender_session_id AS sender FROM inbox WHERE recipient_session_id = ? AND kind = 'notice' AND instr(content, 'was not delivered') > 0",
+            "SELECT status, sender_session_id AS sender FROM inbox WHERE session_id = ? AND kind = 'notice' AND instr(content, 'was not delivered') > 0",
             mainId,
           )
         await until(
@@ -360,13 +361,13 @@ const checks: ReadonlyArray<Check> = [
         await until("the subagent's turn held", () => model.held() > 0, 60_000)
         for (const task of ["first", "second"]) await w.ok(["send", sub, "--", ask(task)], { cwd: m.repo })
         expect(
-          inboxRows(w, "recipient_session_id = ? AND kind = 'send' AND status = 'pending'", sub) === 2,
+          inboxRows(w, "session_id = ? AND kind = 'send' AND status = 'pending'", sub) === 2,
           "the two sends are not both pending while the subagent is busy",
         )
         model.release()
         await until(
           "both sends delivered",
-          () => inboxRows(w, "recipient_session_id = ? AND kind = 'send' AND status = 'delivered'", sub) === 2,
+          () => inboxRows(w, "session_id = ? AND kind = 'send' AND status = 'delivered'", sub) === 2,
           60_000,
         )
         await until(
@@ -377,12 +378,12 @@ const checks: ReadonlyArray<Check> = [
         expect(turnStarts(w, sub) === 2, `${turnStarts(w, sub)} turns, not the first and one merged turn`)
         const merged = row<{ id: number; status: string }>(
           w,
-          "SELECT id, status FROM turn WHERE session_id = ? ORDER BY id DESC",
+          "SELECT id, outcome AS status FROM execution WHERE session_id = ? ORDER BY id DESC",
           sub,
         )
         const sends = rows<{ turn: number | null }>(
           w,
-          "SELECT turn_id AS turn FROM inbox WHERE recipient_session_id = ? AND kind = 'send'",
+          "SELECT execution_id AS turn FROM inbox WHERE session_id = ? AND kind = 'send'",
           sub,
         )
         expect(
@@ -459,16 +460,27 @@ const checks: ReadonlyArray<Check> = [
         )
         await until(
           "the send after the interrupt delivered",
-          () => inboxRows(w, "recipient_session_id = ? AND kind = 'send' AND status = 'delivered'", sub) === 1,
+          () => inboxRows(w, "session_id = ? AND kind = 'send' AND status = 'delivered'", sub) === 1,
           10_000,
         )
         expect(inboxRows(w, "sender_session_id = ?", sub) === 0, "the subagent sent or notified something")
-        const turns = rows<{ status: string }>(w, "SELECT status FROM turn WHERE session_id = ? ORDER BY id", sub)
+        const turns = rows<{ status: string }>(
+          w,
+          "SELECT outcome AS status FROM execution WHERE session_id = ? ORDER BY id",
+          sub,
+        )
         expect(
           JSON.stringify(turns.map((t) => t.status)) === '["interrupted","completed"]',
           `the subagent's turns: ${JSON.stringify(turns)}`,
         )
-        expectFacts(w, sub, ["turn.started", "turn.ended", "inbox.queued", "turn.started", "inbox.moved", "turn.ended"])
+        expectFacts(w, sub, [
+          "execution.started",
+          "execution.ended",
+          "inbox.queued",
+          "execution.started",
+          "inbox.moved",
+          "execution.ended",
+        ])
       } finally {
         main.stop()
         model.stop()

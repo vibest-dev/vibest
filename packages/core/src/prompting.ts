@@ -23,7 +23,10 @@ export const STOP_WAIT = Duration.seconds(10)
 const STARTUP_DIALOG_POLL = Schedule.spaced("500 millis")
 
 export const sessionPrompting = (deps: {
-  readonly db: Pick<Db["Service"], "readyAt" | "updateSession" | "openTurn" | "beginTurn" | "stampTurn" | "closeTurn">
+  readonly db: Pick<
+    Db["Service"],
+    "readyAt" | "updateSession" | "openExecution" | "beginExecution" | "stampExecution" | "closeExecution"
+  >
   readonly harnesses: Pick<Harnesses["Service"], "get" | "find">
   readonly bus: Bus["Service"]
   readonly track: (id: string) => Effect.Effect<Tracked>
@@ -136,7 +139,7 @@ export const sessionPrompting = (deps: {
             sameTerminal(event.terminal, terminal) &&
             event.state !== "working" &&
             event.state !== "blocked") ||
-            (event.type === "turn.ended" && event.sessionId === session.id)
+            (event.type === "execution.ended" && event.sessionId === session.id)
             ? Option.some(true)
             : Option.none(),
         ),
@@ -161,8 +164,8 @@ export const sessionPrompting = (deps: {
     text: string,
     onHandover: Effect.Effect<void> = Effect.void,
   ) {
-    const kept = yield* db.openTurn(session.id)
-    const begin = Effect.flatMap(Clock.currentTimeMillis, (at) => db.beginTurn(session.id, at))
+    const kept = yield* db.openExecution(session.id)
+    const begin = Effect.flatMap(Clock.currentTimeMillis, (at) => db.beginExecution(session.id, at))
     let turn = kept
     if (turn === undefined) {
       const begun = yield* begin
@@ -170,7 +173,7 @@ export const sessionPrompting = (deps: {
       turn = begun.turn
     }
     const standing = Effect.suspend(() =>
-      Effect.map(db.openTurn(session.id), (open) =>
+      Effect.map(db.openExecution(session.id), (open) =>
         open === turn ? ("mine" as const) : open === undefined ? ("closed" as const) : ("busy" as const),
       ),
     )
@@ -178,7 +181,7 @@ export const sessionPrompting = (deps: {
     const state = yield* awaitReady(h, terminal, adapter, session.id).pipe(
       Effect.onExit((exit) =>
         kept === undefined && !Exit.isSuccess(exit)
-          ? Effect.uninterruptible(db.closeTurn(session.id, turn!, "not_started"))
+          ? Effect.uninterruptible(db.closeExecution(session.id, turn!, "not_started"))
           : Effect.void,
       ),
     )
@@ -195,13 +198,13 @@ export const sessionPrompting = (deps: {
     yield* Ref.set(r.endedAt, undefined)
     yield* Ref.set(r.blockedNotified, false)
     yield* Ref.set(r.sawWorking, false)
-    yield* db.stampTurn(session.id, turn, now)
+    yield* db.stampExecution(session.id, turn, now)
     yield* db.updateSession(session.id, { status: state, lastActive: now })
     const send = Ref.set(r.prompting, true).pipe(
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
     )
-    const missed = Effect.suspend(() => db.closeTurn(session.id, turn!, "not_started"))
+    const missed = Effect.suspend(() => db.closeExecution(session.id, turn!, "not_started"))
     const subscription = yield* bus.subscribe
     const delivered = yield* send.pipe(
       Effect.as(false),

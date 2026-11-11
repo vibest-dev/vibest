@@ -349,11 +349,8 @@ const checks: ReadonlyArray<Check> = [
           )
         }
         const notice = () =>
-          row<{ status: string }>(
-            w,
-            "SELECT status FROM inbox WHERE recipient_session_id = ? AND kind = 'notice'",
-            before.id,
-          )?.status
+          row<{ status: string }>(w, "SELECT status FROM inbox WHERE session_id = ? AND kind = 'notice'", before.id)
+            ?.status
         await until("the continue notice delivered", () => notice() === "delivered").catch(() =>
           fail(`the main agent's continue notice: ${notice()}`),
         )

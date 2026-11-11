@@ -222,10 +222,6 @@ export const sessionSpawn = (deps: {
         const folders = yield* listProjectRepositories(root).pipe(
           Effect.mapError((e) => refuse(`${root}: ${e.message}`)),
         )
-        const base = {
-          routing,
-          ...(input.archive ? { archive: true } : {}),
-        }
         let cwd = shared
         if (cwd === undefined) {
           const repository = folders
@@ -280,7 +276,7 @@ export const sessionSpawn = (deps: {
           exitedAt: null,
           turnState: "none",
           turnPromptedAt: 0,
-          metadata: base,
+          metadata: { routing },
           createdAt: now,
           lastActive: now,
         }
@@ -291,6 +287,7 @@ export const sessionSpawn = (deps: {
           parentSessionId: input.parentSessionId,
           request: input.request,
           origin: input.origin,
+          archiveOnIdle: input.archive === true,
         })
         const unreserve = shared === undefined ? fs.remove(cwd, { recursive: true }).pipe(Effect.ignore) : Effect.void
         if (inserted === false) {

@@ -12,12 +12,13 @@ export const MIGRATION_TABLE = "migration"
 export const LOG_SCHEMA = [
   `PRAGMA application_id = ${APPLICATION_ID}`,
   `CREATE TABLE event (
-    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-    at         INTEGER NOT NULL,
-    type       TEXT    NOT NULL,
-    project_id TEXT,
-    session_id TEXT,
-    data       TEXT    NOT NULL
+    position  INTEGER PRIMARY KEY AUTOINCREMENT,
+    aggregate TEXT    NOT NULL,
+    seq       INTEGER NOT NULL,
+    at        INTEGER NOT NULL,
+    type      TEXT    NOT NULL,
+    data      TEXT    NOT NULL,
+    UNIQUE (aggregate, seq)
   ) STRICT`,
   `CREATE TRIGGER event_no_update BEFORE UPDATE ON event
     BEGIN SELECT RAISE(ABORT, 'event is append-only'); END`,
@@ -41,6 +42,7 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
   detail: Schema.optional(Schema.String),
   older: Schema.optional(Schema.Boolean),
   catalog: Schema.optional(Schema.Number),
+  oldEvents: Schema.optional(Schema.Boolean),
   file: Schema.optional(Schema.String),
 }) {
   override get message() {
@@ -48,6 +50,8 @@ export class SchemaMismatch extends Schema.TaggedError<SchemaMismatch>()("Schema
     if (this.catalog !== undefined)
       return `${file} was written by a newer vibest (event catalog ${this.catalog}, this vibest knows ${CATALOG_VERSION}): run vibest update`
     const aside = `To start empty, with vibestd stopped, move it aside with its -wal and -shm files: for f in ${["", "-wal", "-shm"].map((suffix) => shellQuote(file + suffix)).join(" ")}; do [ -e "$f" ] && mv "$f" "$f.old"; done (the sessions, results and queued messages it holds are lost; agents still running keep running, but vibest no longer knows them)`
+    if (this.oldEvents)
+      return `${file} is from an older vibest (its event log is the shape from before per-aggregate events): see "The event log is per aggregate" in the vibest CHANGELOG. ${aside}`
     if (this.older)
       return `${file} is from an older vibest (its tables are the shape from before this release). ${aside}`
     const id = `0x${(this.applicationId >>> 0).toString(16)}`
@@ -64,6 +68,9 @@ const metaOf = (sql: SqlClient.SqlClient, key: "catalog" | "projection") =>
     Effect.map((rows) => (rows[0] === undefined ? undefined : Number(rows[0].value))),
   )
 
+export const ledgerOf = (sql: SqlClient.SqlClient) =>
+  sql<{ value: string }>`SELECT value FROM meta WHERE key = 'ledger'`.pipe(Effect.map((rows) => rows[0]?.value))
+
 export const inspectSchema = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const rows = yield* sql.unsafe<{ type: string; name: string }>("SELECT type, name FROM sqlite_master")
@@ -77,6 +84,8 @@ export const inspectSchema = Effect.gen(function* () {
   const catalog = has("table", "meta") ? yield* metaOf(sql, "catalog") : undefined
   if (catalog === undefined) return yield* mismatch(userVersion, applicationId, "no event catalog version")
   if (catalog > CATALOG_VERSION) return yield* new SchemaMismatch({ version: userVersion, applicationId, catalog })
+  if (catalog < CATALOG_VERSION || (yield* ledgerOf(sql)) === undefined)
+    return yield* new SchemaMismatch({ version: userVersion, applicationId, oldEvents: true })
   const rebuilt = (yield* metaOf(sql, "projection")) !== PROJECTION_VERSION
   const absent = objectsOf(rebuilt ? LOG_SCHEMA : [...LOG_SCHEMA, ...PROJECTION_SCHEMA]).find(
     (object) => !has(object.type, object.name),

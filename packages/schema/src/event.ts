@@ -2,19 +2,19 @@ import { Effect, Schema } from "effect"
 
 import { Routing } from "./plugin.ts"
 
-export type Envelope = "project" | "session" | "none"
+export type Aggregate = "project" | "session" | "ledger"
 
 export interface Definition<T extends string = string, S extends Schema.Top = Schema.Top> {
   readonly type: T
-  readonly envelope: Envelope
+  readonly aggregate: Aggregate
   readonly data: S
 }
 
 export const fact = <const T extends string, const F extends Schema.Struct.Fields>(
   type: T,
-  envelope: Envelope,
+  aggregate: Aggregate,
   fields: F,
-): Definition<T, Schema.Struct<F>> => ({ type, envelope, data: Schema.Struct(fields) })
+): Definition<T, Schema.Struct<F>> => ({ type, aggregate, data: Schema.Struct(fields) })
 
 const Text = Schema.NonEmptyString
 const optional = <S extends Schema.Top>(schema: S) => Schema.optionalKey(schema)
@@ -35,13 +35,12 @@ export const ProjectRepositoriesChanged = fact("project.repositories_changed", "
 export const ProjectEntryChanged = fact("project.entry_changed", "project", { session: optional(Text) })
 
 export const SessionCreated = fact("session.created", "session", {
-  role: Text,
+  project: Text,
+  agent: Text,
   name: Text,
   directory: Schema.String,
   parent: optional(Text),
-  reportTo: optional(Text),
-  archiveOnCompletion: Schema.Boolean,
-  origin: optional(Schema.Struct({ peer: Text, project: Text, parent: optional(Text), reportTo: optional(Text) })),
+  origin: optional(Schema.Struct({ peer: Text, project: Text, session: optional(Text) })),
 })
 export const SessionRenamed = fact("session.renamed", "session", { name: Text })
 export const SessionDirectoryChanged = fact("session.directory_changed", "session", { directory: Text })
@@ -77,26 +76,20 @@ export const ProcessEndReason = Schema.Literals([
 export type ProcessEndReason = typeof ProcessEndReason.Type
 export const ProcessEnded = fact("process.ended", "session", { process: Seq, reason: ProcessEndReason })
 
-export const TurnStarted = fact("turn.started", "session", { process: optional(Seq), typed: optional(Text) })
-export const TurnReported = fact("turn.reported", "session", {
+export const ExecutionStarted = fact("execution.started", "session", {
   process: optional(Seq),
-  harness: Text,
-  text: Schema.String,
-  error: optional(Text),
-  conversation: optional(Text),
-  interrupted: optional(Schema.Literal(true)),
+  typed: optional(Text),
 })
-export const TurnStatus = Schema.Literals(["completed", "failed", "interrupted", "lost", "not_started"])
-export const TurnEnded = fact("turn.ended", "session", {
-  turn: Seq,
-  status: TurnStatus,
-  report: optional(Seq),
+export const ExecutionOutcome = Schema.Literals(["completed", "failed", "interrupted", "lost", "not_started"])
+export const ExecutionEnded = fact("execution.ended", "session", {
+  execution: Seq,
+  outcome: ExecutionOutcome,
   failure: optional(Schema.Struct({ message: Text })),
   conversation: optional(Text),
   reply: optional(Schema.String),
 })
 
-export const InboxKind = Schema.Literals(["task", "send", "report", "result", "notice"])
+export const InboxKind = Schema.Literals(["task", "send", "notice"])
 export type InboxKind = typeof InboxKind.Type
 export const InboxQueued = fact("inbox.queued", "session", {
   kind: InboxKind,
@@ -104,29 +97,28 @@ export const InboxQueued = fact("inbox.queued", "session", {
   sender: optional(Text),
   content: Schema.String,
   status: Schema.Literals(["pending", "delivered", "dropped"]),
-  turn: optional(Seq),
   request: optional(Text),
   peerItem: optional(Text),
 })
 export const InboxMoved = fact("inbox.moved", "session", {
   inbox: Seq,
   to: Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped"]),
-  turn: optional(Seq),
+  execution: optional(Seq),
 })
 
-export const MachineAdded = fact("machine.added", "none", { name: Text, target: Text, vibestd: Text })
-export const MachineConnected = fact("machine.connected", "none", { name: Text })
-export const MachineRemoved = fact("machine.removed", "none", { name: Text })
+export const MachineAdded = fact("machine.added", "ledger", { name: Text, target: Text, vibestd: Text })
+export const MachineConnected = fact("machine.connected", "ledger", { name: Text })
+export const MachineRemoved = fact("machine.removed", "ledger", { name: Text })
 
-export const PeerSeen = fact("peer.seen", "none", { id: Text, name: Text, callsMe: Text })
+export const PeerSeen = fact("peer.seen", "ledger", { id: Text, name: Text })
 
-export const OutboxQueued = fact("outbox.queued", "session", {
+export const OutboxQueued = fact("outbox.queued", "ledger", {
   id: Text,
   peer: Text,
-  kind: Schema.Literals(["result", "notice"]),
+  session: Text,
   content: Schema.String,
 })
-export const OutboxAcked = fact("outbox.acked", "none", { peer: Text, ids: Schema.NonEmptyArray(Text) })
+export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })
 
 const definitions = [
   ProjectCreated,
@@ -143,9 +135,8 @@ const definitions = [
   ProcessPid,
   ProcessConversation,
   ProcessEnded,
-  TurnStarted,
-  TurnReported,
-  TurnEnded,
+  ExecutionStarted,
+  ExecutionEnded,
   InboxQueued,
   InboxMoved,
   MachineAdded,
@@ -164,10 +155,11 @@ export const Catalog = Object.fromEntries(definitions.map((d) => [d.type, d])) a
   readonly [D in Defined as D["type"]]: D
 }
 
-export const CATALOG_VERSION = 1
+export const CATALOG_VERSION = 2
 
 export type Fact = {
   readonly [D in Defined as D["type"]]: {
+    readonly aggregate: string
     readonly seq: number
     readonly at: number
     readonly type: D["type"]
@@ -180,28 +172,21 @@ export type Fact = {
 export type FactOf<T extends FactType> = Extract<Fact, { readonly type: T }>
 
 export interface Row {
+  readonly aggregate: string
   readonly seq: number
   readonly at: number
   readonly type: string
-  readonly project_id: string | null
-  readonly session_id: string | null
   readonly data: string
 }
 
 export class UnknownFact extends Schema.TaggedError<UnknownFact>()("UnknownFact", {
+  aggregate: Schema.String,
   seq: Schema.Number,
   type: Schema.String,
   message: Schema.String,
 }) {}
 
 const strict = { onExcessProperty: "error" } as const
-
-const envelopeFits = (envelope: Envelope, row: Pick<Row, "project_id" | "session_id">) =>
-  envelope === "none"
-    ? row.project_id === null && row.session_id === null
-    : envelope === "project"
-      ? row.project_id !== null && row.session_id === null
-      : row.project_id !== null && row.session_id !== null
 
 export const encodeData = <D extends Defined>(
   definition: D,
@@ -213,29 +198,29 @@ export const encodeData = <D extends Defined>(
   )
 
 export const decodeRow = (row: Row): Effect.Effect<Fact, UnknownFact> => {
-  const refuse = (message: string) => new UnknownFact({ seq: row.seq, type: row.type, message })
-  if (!Object.hasOwn(Catalog, row.type))
-    return Effect.fail(refuse(`event ${row.seq}: ${row.type} is not in the event catalog`))
+  const where = `event ${row.aggregate} ${row.seq}`
+  const refuse = (message: string) =>
+    new UnknownFact({ aggregate: row.aggregate, seq: row.seq, type: row.type, message: `${where}: ${message}` })
+  if (!Object.hasOwn(Catalog, row.type)) return Effect.fail(refuse(`${row.type} is not in the event catalog`))
   const definition: Defined = Catalog[row.type as FactType]
-  if (!envelopeFits(definition.envelope, row))
-    return Effect.fail(refuse(`event ${row.seq}: ${row.type} needs a ${definition.envelope} envelope`))
   return Effect.try({
     try: () => JSON.parse(row.data) as unknown,
-    catch: (cause) => refuse(`event ${row.seq}: ${row.type} data is not JSON: ${String(cause)}`),
+    catch: (cause) => refuse(`${row.type} data is not JSON: ${String(cause)}`),
   }).pipe(
     Effect.flatMap((json) =>
       Schema.decodeUnknownEffect(definition.data)(json, strict).pipe(
-        Effect.mapError((cause) => refuse(`event ${row.seq}: ${row.type} does not decode: ${cause.message}`)),
+        Effect.mapError((cause) => refuse(`${row.type} does not decode: ${cause.message}`)),
       ),
     ),
     Effect.map(
       (data) =>
         ({
+          aggregate: row.aggregate,
           seq: row.seq,
           at: row.at,
           type: definition.type,
-          ...(row.project_id === null ? {} : { projectId: row.project_id }),
-          ...(row.session_id === null ? {} : { sessionId: row.session_id }),
+          ...(definition.aggregate === "project" ? { projectId: row.aggregate } : {}),
+          ...(definition.aggregate === "session" ? { sessionId: row.aggregate } : {}),
           data,
         }) as Fact,
     ),

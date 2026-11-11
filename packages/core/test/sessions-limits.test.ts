@@ -95,7 +95,7 @@ describe.concurrent("Sessions", () => {
       assert.isTrue((yield* herdr.callsTo("open")).at(-1)!.argv.includes("--plugin-dir"))
       const rounds = () =>
         sql<{ status: string; inbox: number | null; task: number }>`SELECT m.status AS status, m.inbox_id AS inbox,
-        (SELECT id FROM inbox WHERE recipient_session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
+        (SELECT id FROM inbox WHERE session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
         FROM ${sql.literal(TURNS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
       const moved2 = yield* rounds()
       assert.deepStrictEqual(
@@ -124,7 +124,7 @@ describe.concurrent("Sessions", () => {
       )
       const [answer] = yield* sql<{
         answer: string | null
-      }>`SELECT answer FROM turn WHERE session_id = ${id} AND status = 'completed'`.pipe(Effect.orDie)
+      }>`SELECT reply AS answer FROM execution WHERE session_id = ${id} AND outcome = 'completed'`.pipe(Effect.orDie)
       assert.include(answer!.answer, "moved")
       assert.notInclude(answer!.answer, "stale")
     }),
@@ -293,7 +293,7 @@ describe.concurrent("Sessions", () => {
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "cursor")
       const rounds = () =>
         sql<{ status: string; inbox: number | null; task: number }>`SELECT m.status AS status, m.inbox_id AS inbox,
-        (SELECT id FROM inbox WHERE recipient_session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
+        (SELECT id FROM inbox WHERE session_id = m.session_id AND kind IN ('task', 'send') ORDER BY id LIMIT 1) AS task
         FROM ${sql.literal(TURNS)} m WHERE m.session_id = ${id} ORDER BY m.id`.pipe(Effect.orDie)
       assert.deepStrictEqual(
         (yield* rounds()).map((row) => [row.status, row.inbox === row.task]),
@@ -551,7 +551,7 @@ describe.concurrent("Sessions", () => {
       console.log(
         "DEBUG",
         JSON.stringify(yield* sql`SELECT kind, content FROM inbox WHERE sender_session_id = ${id}`),
-        JSON.stringify(yield* sql`SELECT * FROM turn`),
+        JSON.stringify(yield* sql`SELECT * FROM execution`),
       )
       assert.strictEqual(results[0]!.n, 1)
       assert.lengthOf(yield* sqlNotices(id), 1)

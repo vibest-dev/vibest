@@ -16,13 +16,13 @@ const observedEnd = (harness: string, payload: object) =>
     return turnEndFrom(adapter, payload as Record<string, unknown>, yield* Clock.currentTimeMillis)
   })
 
-const ends = (id: string) => eventsOf(id, "turn.ended").pipe(Effect.map((rows) => rows.map((row) => row.data)))
+const ends = (id: string) => eventsOf(id, "execution.ended").pipe(Effect.map((rows) => rows.map((row) => row.data)))
 
 const pendingSends = (id: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     return yield* sql<{ content: string }>`SELECT content FROM inbox
-      WHERE recipient_session_id = ${id} AND kind = 'send' AND status = 'pending'`.pipe(
+      WHERE session_id = ${id} AND kind = 'send' AND status = 'pending'`.pipe(
       Effect.map((rows) => rows.map((row) => row.content)),
       Effect.orDie,
     )
@@ -37,7 +37,7 @@ describe("observed turn end", () => {
       assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
       yield* writeResult(id, "pi", { text: "second" })
       assert.deepStrictEqual(
-        (yield* ends(id)).map((end) => [end.status, end.reply]),
+        (yield* ends(id)).map((end) => [end.outcome, end.reply]),
         [
           ["completed", "first"],
           ["completed", "second"],
@@ -97,11 +97,11 @@ describe("observed turn end", () => {
     "a close vibestd decided writes nothing when an observed end already closed that turn",
     Effect.gen(function* () {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
-      const turn = (yield* db.openTurn(id))!
+      const turn = (yield* db.openExecution(id))!
       yield* writeResult(id, "pi", { text: "done" })
-      assert.isFalse(yield* db.closeTurn(id, turn, "lost", { failure: "gone", notice: "lost it" }))
+      assert.isFalse(yield* db.closeExecution(id, turn, "lost", { failure: "gone", notice: "lost it" }))
       assert.deepStrictEqual(
-        (yield* ends(id)).map((end) => end.status),
+        (yield* ends(id)).map((end) => end.outcome),
         ["completed"],
       )
       assert.isEmpty(yield* sqlNotices(id))
@@ -176,12 +176,12 @@ describe("observed turn end", () => {
       const held = yield* herdr.hold("send", id)
       yield* sessions.send(id, "next")
       yield* held.reached
-      const handed = yield* db.openTurn(id)
+      const handed = yield* db.openExecution(id)
       yield* writeResult(id, "pi", { text: "done fast" })
       yield* held.release()
       const [row] = yield* until(
-        sql<{ status: string; turn: number | null }>`SELECT status, turn_id AS turn FROM inbox
-          WHERE recipient_session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
+        sql<{ status: string; turn: number | null }>`SELECT status, execution_id AS turn FROM inbox
+          WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         (rows) => rows[0]?.status === "delivered",
       )
       assert.isDefined(handed)
@@ -201,11 +201,11 @@ describe("observed turn end", () => {
       const checking = yield* Effect.forkChild(sessions.check(id))
       yield* held.reached
       yield* sessions.userPrompt(id, "typed during the check")
-      const typed = yield* db.openTurn(id)
+      const typed = yield* db.openExecution(id)
       yield* held.release()
       yield* Fiber.join(checking)
       assert.isDefined(typed)
-      assert.strictEqual(yield* db.openTurn(id), typed)
+      assert.strictEqual(yield* db.openExecution(id), typed)
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "pi")
       assert.lengthOf(yield* herdr.callsTo("open"), 1)
       assert.isEmpty(yield* sqlNotices(id))
@@ -224,13 +224,13 @@ describe("observed turn end", () => {
       yield* held.reached
       yield* writeResult(id, "pi", { text: "", error: "aborted", aborted: true })
       yield* sessions.userPrompt(id, "typed during the archive")
-      assert.isDefined(yield* db.openTurn(id))
+      assert.isDefined(yield* db.openExecution(id))
       yield* held.release()
       yield* Fiber.join(removing)
-      assert.isUndefined(yield* db.openTurn(id))
+      assert.isUndefined(yield* db.openExecution(id))
       assert.notStrictEqual((yield* db.getSession(id))!.turnState, "open")
       yield* sessions.userPrompt(id, "typed after the archive")
-      assert.isUndefined(yield* db.openTurn(id))
+      assert.isUndefined(yield* db.openExecution(id))
     }),
     { hooked: ["pi"] },
   )

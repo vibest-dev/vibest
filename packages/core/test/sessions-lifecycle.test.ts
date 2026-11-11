@@ -114,7 +114,7 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(
         (yield* (yield* SqlClient.SqlClient)<{
           status: string
-        }>`SELECT status AS status FROM inbox WHERE recipient_session_id = ${id} AND kind IN ('task', 'send') AND id > (SELECT min(id) FROM inbox WHERE recipient_session_id = ${id} AND kind IN ('task', 'send'))`.pipe(
+        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND kind IN ('task', 'send') AND id > (SELECT min(id) FROM inbox WHERE session_id = ${id} AND kind IN ('task', 'send'))`.pipe(
           Effect.orDie,
         )).map((r) => r.status),
         ["failed"],

@@ -445,7 +445,7 @@ export class World {
         if (!fs.existsSync(file)) return false
         const db = readDb(file)
         try {
-          return db.query("SELECT id FROM session WHERE role = 'main' AND ended_at IS NULL").get() !== null
+          return db.query("SELECT id FROM session WHERE agent = 'main' AND ended_at IS NULL").get() !== null
         } catch {
           return false
         } finally {
@@ -739,14 +739,14 @@ export const removeExpiredWorlds = async (
   }
 }
 
-export const SESSIONS = `(SELECT s.id, s.project_id, s.role AS agent_type, s.directory, s.created_at, s.ended_at,
+export const SESSIONS = `(SELECT s.id, s.project_id, s.agent AS agent_type, s.directory, s.created_at, s.ended_at,
     p.harness, p.provider,
     CASE WHEN p.id IS NULL THEN NULL ELSE json_object('kind', p.runtime, 'id', coalesce(p.terminal, '')) END AS runtime,
     p.conversation AS harness_session_id, p.pid, p.integration_version AS version,
     p.ended_at AS exited_at
-  FROM session s LEFT JOIN process p ON p.id = (SELECT max(id) FROM process WHERE session_id = s.id))`
+  FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = (SELECT max(id) FROM process WHERE session_id = s.id))`
 
-export const TURNS = `(SELECT id, session_id, coalesce(status, 'working') AS status FROM turn)`
+export const TURNS = `(SELECT id, session_id, coalesce(outcome, 'working') AS status FROM execution)`
 
 export const readDb = (file: string) => {
   const db = new Database(file, { readonly: true })
@@ -773,7 +773,7 @@ export const rows = <A>(w: World, sql: string, ...args: Array<string | number>) 
 }
 
 export const factsOf = (w: World, sessionId: string) =>
-  rows<{ type: string }>(w, "SELECT type FROM event WHERE session_id = ? ORDER BY seq", sessionId).map((r) => r.type)
+  rows<{ type: string }>(w, "SELECT type FROM event WHERE aggregate = ? ORDER BY seq", sessionId).map((r) => r.type)
 
 export const expectFacts = (w: World, sessionId: string, expected: ReadonlyArray<string>) => {
   const recorded = factsOf(w, sessionId)
@@ -791,25 +791,26 @@ export const expectAnswered = async (w: World, sub: string) => {
     "process.started",
     "inbox.queued",
     "process.placed",
-    "turn.started",
+    "execution.started",
     "inbox.moved",
-    "turn.ended",
+    "execution.ended",
   ])
   const task = row<{ status: string; turn: number | null }>(
     w,
-    "SELECT status, turn_id AS turn FROM inbox WHERE recipient_session_id = ? AND kind = 'task'",
+    "SELECT status, execution_id AS turn FROM inbox WHERE session_id = ? AND kind = 'task'",
     sub,
   )
   expect(task?.status === "delivered" && task.turn !== null, `${sub}'s task row: ${JSON.stringify(task)}`)
   const turn = row<{ status: string; answer: string | null }>(
     w,
-    "SELECT status, answer FROM turn WHERE id = ?",
+    "SELECT outcome AS status, reply AS answer FROM execution WHERE session_id = ? AND id = ?",
+    sub,
     task!.turn!,
   )
   expect(turn?.status === "completed" && typeof turn.answer === "string", `${sub}'s task turn: ${JSON.stringify(turn)}`)
 }
 
-const READ_MODEL = ["session", "process", "turn", "inbox"] as const
+const READ_MODEL = ["session", "process", "execution", "inbox"] as const
 
 export const ledgerSnapshot = (home: string) => {
   const file = path.join(home, "vibest.db")
@@ -817,7 +818,7 @@ export const ledgerSnapshot = (home: string) => {
   const db = readDb(file)
   try {
     const facts = (
-      db.query("SELECT seq, at, type, project_id, session_id, data FROM event ORDER BY seq").all() as Array<{
+      db.query("SELECT aggregate, seq, at, type, data FROM event ORDER BY position").all() as Array<{
         data: string
       }>
     ).map((fact) => ({ ...fact, data: JSON.parse(fact.data) as unknown }))

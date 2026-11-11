@@ -149,7 +149,7 @@ describe("a vibestd restart", () => {
         ] as const) {
           const { sessionId } = yield* db.coordinatorLaunch(yield* projectOf(key), harness, false, place(key))
           const row = yield* db.insertInbox({ sessionId, message: key })
-          assert.deepStrictEqual(yield* db.claim([row.id]), [row.id])
+          assert.deepStrictEqual(yield* db.claim(sessionId, [row.id]), [row.id])
           ids.push(row.id)
         }
         return ids
