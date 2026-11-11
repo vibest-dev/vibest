@@ -19,7 +19,7 @@ import { repositoryIdentity } from "./repository-url.ts"
 import { defaultSessionName, Sessions } from "./sessions.ts"
 
 export const outboxItem = (row: OutboxRow): OutboxItem => {
-  const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: row.kind }
+  const base = { id: row.id, session: row.sessionId, recipient: row.reportTo, kind: "notice" as const }
   const { read } = new TextEncoder().encodeInto(row.content, new Uint8Array(OUTBOX_ITEM_MAX))
   return read === row.content.length
     ? { ...base, content: row.content }

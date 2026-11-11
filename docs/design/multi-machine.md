@@ -48,9 +48,9 @@ project, `vibest-peer-project: <A's project id>`. B refuses every peer request e
 that id has a `peer` row, and refuses every method not in `PEER_CALLS` (`packages/protocol/src/rpc.ts`). This
 scopes by mistake, not by trust: whoever can run the ssh command already acts as that user on B.
 
-`Peer.Hello { id, name, callsMe }` answers B's `{ id, name, version }` and upserts the `peer` row (not for B's own
-id: A refuses dialing itself). As in herdr-core, B has no command to show or forget the vibestds that dial it: the
-`peer` table is the line's own record, and the user manages machines from A (`vibest machine`).
+`Peer.Hello { id, name, callsMe }` answers B's `{ id, name, version }` and upserts the `peer` row with `id` and `name`
+(not for B's own id: A refuses dialing itself; `callsMe` is not stored). As in herdr-core, B has no command to show
+or forget the vibestds that dial it: the `peer` table is the line's own record, and the user manages machines from A (`vibest machine`).
 
 `vibest connect` and `vibest machine` are the user's: `userOnly` refuses them for agents, and the
 guard refuses them in an agent's shell.
@@ -290,7 +290,6 @@ CREATE TABLE machine (             -- A: another machine's vibestd this one dial
 CREATE TABLE peer (                -- B: a vibestd that dials this one, like an hc peers.json entry
   id           TEXT PRIMARY KEY CHECK (length(id) = 36),  -- that vibestd's identity id
   name         TEXT NOT NULL,      -- its identity name, as it last presented it
-  calls_me     TEXT NOT NULL,      -- the machine name it uses for this vibestd, as it last presented it
   connected_at INTEGER NOT NULL    -- its last successful Peer.Hello (peer.seen)
 ) STRICT;
 
@@ -298,8 +297,7 @@ CREATE TABLE outbox (              -- B: what this vibestd still has to deliver 
   id         TEXT PRIMARY KEY CHECK (length(id) = 36),  -- random UUIDv4; the dedupe key on A (inbox.peer_item)
   seq        INTEGER NOT NULL,     -- its outbox.queued in the ledger aggregate: the order it is sent in
   peer_id    TEXT NOT NULL,
-  session_id TEXT NOT NULL,        -- the peer session it is about
-  kind       TEXT NOT NULL CHECK (kind = 'notice'),
+  session_id TEXT NOT NULL,        -- the peer session it is about; every item is a notice
   content    TEXT NOT NULL,        -- rendered on B
   created_at INTEGER NOT NULL
 ) STRICT;

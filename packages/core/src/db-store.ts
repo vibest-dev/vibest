@@ -265,7 +265,7 @@ export const makeStore = Effect.gen(function* () {
   const linkTask = (sessionId: string, execution: number, at: number) =>
     Effect.gen(function* () {
       const [task] = yield* sql<{ id: number }>`SELECT id FROM inbox WHERE session_id = ${sessionId}
-        AND kind = 'task' AND status = 'delivered' AND seq = id`
+        AND kind = 'task' AND status = 'delivered' AND execution_id IS NULL`
       if (task !== undefined)
         yield* emit(InboxMoved, { sessionId, at, data: { inbox: task.id, to: "delivered", execution } })
     })
@@ -365,7 +365,7 @@ export const makeStore = Effect.gen(function* () {
       if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
       yield* emit(OutboxQueued, {
         ...(row.at === undefined ? {} : { at: row.at }),
-        data: { id: randomId(), peer, session: row.sessionId, kind: "notice", content: row.content },
+        data: { id: randomId(), peer, session: row.sessionId, content: row.content },
       })
       yield* notify({ type: "live.outbox", peerId: peer })
       return true

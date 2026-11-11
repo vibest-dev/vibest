@@ -142,7 +142,7 @@ describe("sends from sessions", () => {
       Effect.gen(function* () {
         const { db, project } = yield* setup
         const sql = yield* SqlClient.SqlClient
-        yield* db.notePeer({ id: "11111111-1111-4111-8111-111111111111", name: "other", callsMe: "x" })
+        yield* db.notePeer({ id: "11111111-1111-4111-8111-111111111111", name: "other" })
         yield* db.insertSession(session(B), project, {
           cwd: "/w",
           task: "b",
@@ -154,11 +154,8 @@ describe("sends from sessions", () => {
         })
         assert.isUndefined(yield* db.sendToOrigin(B, "eeeeeeee", "hi"))
         assert.isTrue(yield* db.sendToOrigin(B, "dddddddd", "hi"))
-        const out = yield* sql<{ kind: string; content: string }>`SELECT kind, content FROM outbox`
-        assert.deepStrictEqual(
-          out.map((o) => o.kind),
-          ["notice"],
-        )
+        const out = yield* sql<{ content: string }>`SELECT content FROM outbox`
+        assert.lengthOf(out, 1)
         assert.include(out[0]!.content, "<agent-message>")
         assert.include(out[0]!.content, "hi")
       }),

@@ -121,8 +121,7 @@ CREATE TABLE session (
   origin_session        TEXT,                         -- and the session there its notices and sends go to (that project's entry session)
   created_at            INTEGER NOT NULL,
   ended_at              INTEGER,                      -- archived, or replaced by vibest --new
-  process_id            INTEGER,                      -- its current process
-  execution_id          INTEGER,                      -- its latest execution
+  process_id            INTEGER,                      -- its current process; its latest execution is its highest execution id
   active_at             INTEGER
 ) STRICT;
 CREATE INDEX session_project ON session (project_id);
@@ -177,7 +176,6 @@ CREATE TABLE inbox (                                  -- id: the seq of its inbo
   peer_item         TEXT,                             -- a notice from another vibestd: its outbox item id
   status            TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
   execution_id      INTEGER,                          -- delivered: the execution that took it
-  seq               INTEGER NOT NULL,                 -- the seq of its latest inbox fact
   PRIMARY KEY (session_id, id)
 ) STRICT;
 CREATE INDEX inbox_status    ON inbox (status, session_id);   -- full index on purpose: a partial IN (...) index is not used for status = 'pending'
@@ -235,8 +233,8 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | inbox.queued                        | kind: task, send or notice, recipient?, sender?, content, status: pending, delivered or dropped, request?, peerItem? |
 | inbox.moved                         | inbox, to, execution? (on to = delivered: the execution that took it)                                                |
 | machine.added, .connected, .removed | name (added: target, vibestd)                                                                                        |
-| peer.seen                           | id, name, callsMe                                                                                                    |
-| outbox.queued                       | id, peer, session (the session it is about), kind: notice, content                                                   |
+| peer.seen                           | id, name                                                                                                             |
+| outbox.queued                       | id, peer, session (the session it is about), content (always a notice)                                               |
 | outbox.acked                        | peer, ids                                                                                                            |
 
 An execution's input is its typed text, or the inbox rows that moved to delivered with that execution. A delivery opens
@@ -285,9 +283,9 @@ with its test, which turns the previous samples (`tools/ledger-rewrite/test/even
 - A usage-limit move resends the open turn's input (its typed text or the rows it consumed); when that is empty, the
   trailing run of delivered `task` and `send` rows from one sender that no turn consumed, oldest first, joined with a
   blank line.
-- A task is queued `delivered` with no turn; one that never moved since (its `seq` is still its `id`) was never
-  handed over. A turn that ended before its handover (vibestd stopped while waiting for ready) took nothing, so the
-  task is still handed over.
+- A task is queued `delivered` with no execution; one with no `execution_id` was never handed over: the only move a
+  task gets is its handover, which names the execution. A turn that ended before its handover (vibestd stopped while
+  waiting for ready) took nothing, so the task is still handed over.
 - A conversation can be resumed when a process of the session that resumed it or reported it has an ended turn, or,
   for an entry session, when a process of it reported it. The read model keeps only each process's latest
   conversation, so an earlier one in the same process no longer counts.
@@ -325,10 +323,12 @@ E2E runs it on every world's database at the end of each check.
 
 `tools/ledger-rewrite` turns a catalog-1 ledger into this shape, on a stopped vibestd's file (it takes vibestd's start
 lock), in one transaction: it strictly decodes every old row with the frozen catalog-1 code, rewrites it (types and
-keys renamed, `turn.reported` folded into the `execution.ended` that consumed it or the open execution it ended, or
-dropped when nothing read it), keeps each row's `seq` as its new `seq` and `position`, strictly decodes every new row,
-rebuilds the read model and compares it with the old read model replayed by the frozen code. Any difference it did not
-expect, or any row that does not decode, rolls everything back and names all of them at once.
+keys renamed, `outbox.queued` `kind` and `peer.seen` `callsMe` dropped, `turn.reported` folded into the
+`execution.ended` that consumed it or the open execution it ended, or dropped when nothing read it), keeps each row's
+`seq` as its new `seq` and `position`, strictly decodes every new row, rebuilds the read model and compares it with the
+old read model replayed by the frozen code (without the columns this shape dropped; an old `task` row counts as handed
+over by `seq` exactly when it has an execution). Any difference it did not expect, or any row that does not decode,
+rolls everything back and names all of them at once.
 
 ## Hot paths
 

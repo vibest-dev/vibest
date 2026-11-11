@@ -29,7 +29,6 @@ export const PROJECTION_SCHEMA = [
     created_at            INTEGER NOT NULL,
     ended_at              INTEGER,
     process_id            INTEGER,
-    execution_id          INTEGER,
     active_at             INTEGER
   ) STRICT`,
   `CREATE INDEX session_project ON session (project_id)`,
@@ -81,7 +80,6 @@ export const PROJECTION_SCHEMA = [
     peer_item         TEXT,
     status            TEXT    NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
     execution_id      INTEGER,
-    seq               INTEGER NOT NULL,
     PRIMARY KEY (session_id, id)
   ) STRICT`,
   `CREATE INDEX inbox_status ON inbox (status, session_id)`,
@@ -99,7 +97,6 @@ export const PROJECTION_SCHEMA = [
   `CREATE TABLE peer (
     id           TEXT PRIMARY KEY CHECK (length(id) = 36),
     name         TEXT NOT NULL,
-    calls_me     TEXT NOT NULL,
     connected_at INTEGER NOT NULL
   ) STRICT`,
   `CREATE TABLE outbox (
@@ -107,7 +104,6 @@ export const PROJECTION_SCHEMA = [
     seq        INTEGER NOT NULL,
     peer_id    TEXT NOT NULL,
     session_id TEXT NOT NULL,
-    kind       TEXT NOT NULL CHECK (kind = 'notice'),
     content    TEXT NOT NULL,
     created_at INTEGER NOT NULL
   ) STRICT`,
@@ -225,12 +221,9 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
     }),
 
   "execution.started": (fact, sql) =>
-    Effect.andThen(
-      sql`INSERT INTO execution (session_id, id, process_id, typed, started_at)
+    sql`INSERT INTO execution (session_id, id, process_id, typed, started_at)
         VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${fact.data.process ?? null}, ${fact.data.typed ?? null},
           ${fact.at})`,
-      sql`UPDATE session SET execution_id = ${fact.seq} WHERE id = ${sessionIdOf(fact)}`,
-    ),
   "execution.ended": (fact, sql) =>
     Effect.andThen(
       sql`UPDATE execution SET outcome = ${fact.data.outcome}, reply = ${fact.data.reply ?? null},
@@ -245,12 +238,12 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
 
   "inbox.queued": (fact, sql) => {
     const { data } = fact
-    return sql`INSERT INTO inbox (session_id, id, sender_session_id, kind, content, request, peer_item, status, seq)
+    return sql`INSERT INTO inbox (session_id, id, sender_session_id, kind, content, request, peer_item, status)
       VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${data.sender ?? null}, ${data.kind}, ${data.content},
-        ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${fact.seq})`
+        ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status})`
   },
   "inbox.moved": (fact, sql) =>
-    sql`UPDATE inbox SET status = ${fact.data.to}, seq = ${fact.seq},
+    sql`UPDATE inbox SET status = ${fact.data.to},
         execution_id = coalesce(${fact.data.execution ?? null}, execution_id)
       WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.inbox}`,
 
@@ -261,15 +254,13 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
   "machine.removed": (fact, sql) => sql`DELETE FROM machine WHERE name = ${fact.data.name}`,
 
   "peer.seen": (fact, sql) =>
-    sql`INSERT INTO peer (id, name, calls_me, connected_at)
-      VALUES (${fact.data.id}, ${fact.data.name}, ${fact.data.callsMe}, ${fact.at})
-      ON CONFLICT (id) DO UPDATE SET name = excluded.name, calls_me = excluded.calls_me,
-        connected_at = excluded.connected_at`,
+    sql`INSERT INTO peer (id, name, connected_at)
+      VALUES (${fact.data.id}, ${fact.data.name}, ${fact.at})
+      ON CONFLICT (id) DO UPDATE SET name = excluded.name, connected_at = excluded.connected_at`,
 
   "outbox.queued": (fact, sql) =>
-    sql`INSERT INTO outbox (id, seq, peer_id, session_id, kind, content, created_at)
-      VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.peer}, ${fact.data.session}, ${fact.data.kind},
-        ${fact.data.content}, ${fact.at})`,
+    sql`INSERT INTO outbox (id, seq, peer_id, session_id, content, created_at)
+      VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.peer}, ${fact.data.session}, ${fact.data.content}, ${fact.at})`,
   "outbox.acked": (fact, sql) =>
     sql`DELETE FROM outbox WHERE peer_id = ${fact.data.peer} AND ${sql.in("id", fact.data.ids)}`,
 }

@@ -347,21 +347,21 @@
     "seq": 52,
     "at": 1793000052000,
     "type": "peer.seen",
-    "data": "{\"id\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"name\":\"mac\",\"callsMe\":\"mb\"}"
+    "data": "{\"id\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"name\":\"mac\"}"
   },
   {
     "aggregate": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
     "seq": 53,
     "at": 1793000053000,
     "type": "outbox.queued",
-    "data": "{\"id\":\"7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f\",\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"session\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"kind\":\"notice\",\"content\":\"All 42 tests pass.\"}"
+    "data": "{\"id\":\"7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f\",\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"session\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"content\":\"All 42 tests pass.\"}"
   },
   {
     "aggregate": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
     "seq": 54,
     "at": 1793000054000,
     "type": "outbox.queued",
-    "data": "{\"id\":\"2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e\",\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"session\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"kind\":\"notice\",\"content\":\"remote-task was archived\"}"
+    "data": "{\"id\":\"2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e\",\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"session\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"content\":\"remote-task was archived\"}"
   },
   {
     "aggregate": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",

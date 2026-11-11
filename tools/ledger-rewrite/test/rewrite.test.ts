@@ -127,9 +127,7 @@ describe("ledger rewrite", () => {
           { session_id: S, id: 6, kind: "task", execution_id: 7 },
         ],
       )
-      assert.deepStrictEqual(query(file, "SELECT session_id, kind, seq FROM outbox"), [
-        { session_id: S, kind: "notice", seq: 17 },
-      ])
+      assert.deepStrictEqual(query(file, "SELECT session_id, seq FROM outbox"), [{ session_id: S, seq: 17 }])
       assert.deepStrictEqual(query(file, "SELECT id, agent FROM session ORDER BY created_at"), [
         { id: M, agent: "main" },
         { id: S, agent: "subagent" },

@@ -110,13 +110,12 @@ export const MachineAdded = fact("machine.added", "ledger", { name: Text, target
 export const MachineConnected = fact("machine.connected", "ledger", { name: Text })
 export const MachineRemoved = fact("machine.removed", "ledger", { name: Text })
 
-export const PeerSeen = fact("peer.seen", "ledger", { id: Text, name: Text, callsMe: Text })
+export const PeerSeen = fact("peer.seen", "ledger", { id: Text, name: Text })
 
 export const OutboxQueued = fact("outbox.queued", "ledger", {
   id: Text,
   peer: Text,
   session: Text,
-  kind: Schema.Literal("notice"),
   content: Schema.String,
 })
 export const OutboxAcked = fact("outbox.acked", "ledger", { peer: Text, ids: Schema.NonEmptyArray(Text) })

@@ -109,7 +109,10 @@ export const planRewrite = (old: ReadonlyArray<RowBefore>, ledger: string): Plan
         keep(row.type, sessionCreated(data, row.project_id))
         break
       case "outbox.queued":
-        keep(row.type, { ...data, session: row.session_id, kind: notice(data["kind"]) })
+        keep(row.type, { ...without(data, "kind"), session: row.session_id })
+        break
+      case "peer.seen":
+        keep(row.type, without(data, "callsMe"))
         break
       default:
         keep(row.type, data)
@@ -158,15 +161,16 @@ const renameKeys = (row: Record<string, unknown>, names: Record<string, string>)
   Object.fromEntries(Object.entries(row).map(([key, value]) => [names[key] ?? key, value]))
 
 const asNew: Record<string, (row: Record<string, unknown>) => Record<string, unknown> | undefined> = {
-  session: (row) => renameKeys(without(row, "archive_on_idle"), { role: "agent", turn_id: "execution_id" }),
+  session: (row) => renameKeys(without(row, "archive_on_idle", "turn_id"), { role: "agent" }),
   process: (row) => without(row, "ready_seq"),
   turn: (row) => renameKeys(without(row, "report_seq"), { status: "outcome", answer: "reply" }),
   inbox: (row) => ({
-    ...renameKeys(without(row, "recipient_session_id"), { turn_id: "execution_id" }),
+    ...renameKeys(without(row, "recipient_session_id", "seq"), { turn_id: "execution_id" }),
     session_id: row["recipient_session_id"] ?? row["sender_session_id"],
     kind: notice(row["kind"]),
   }),
-  outbox: (row) => ({ ...row, kind: notice(row["kind"]) }),
+  outbox: (row) => without(row, "kind"),
+  peer: (row) => without(row, "calls_me"),
 }
 
 const NEW_NAME: Record<string, string> = { turn: "execution" }
@@ -258,6 +262,9 @@ export const referee = (before: Record<string, Table>, after: Record<string, Tab
     for (const [key, row] of now)
       if (!old.has(key)) differences.push(`${name} ${key}: before nothing, after ${sorted(row)}`)
   }
+  for (const row of before["inbox"]!)
+    if (row["kind"] === "task" && (row["seq"] === row["id"]) !== (row["turn_id"] === null))
+      differences.push(`inbox ${String(row["id"])}: a task that moved without a turn, or took one without moving`)
   return { differences, expected }
 }
 

@@ -13,11 +13,13 @@ release. Each release lists what broke, who is affected and how to migrate under
   `turn.started`/`turn.ended` are `execution.started`/`execution.ended` (`turn` → `execution`, `status` → `outcome`),
   `turn.reported` is gone, `session.created` has `project` and `agent` (was `role`) and no `archiveOnCompletion` or
   `reportTo`, `origin.reportTo` is `origin.session`, `inbox.queued` has no `turn`, `inbox.moved` has `execution`,
-  inbox kinds are `task`, `send` and `notice` only, and `outbox.queued` names its `session` and is always a `notice`.
-  The read model (projection 5) has table `execution` (`outcome`, `reply`) instead of `turn` (`status`, `answer`),
-  `session.agent` and `session.execution_id` instead of `role` and `turn_id`, no `session.archive_on_idle` or
-  `process.ready_seq`, and `process`, `execution` and `inbox` keyed by `(session_id, id)`, with `inbox.session_id`
-  (the recipient, never null) instead of `recipient_session_id` and `inbox.execution_id` instead of `turn_id`.
+  inbox kinds are `task`, `send` and `notice` only, `outbox.queued` names its `session` and has no `kind` (it is
+  always a notice), and `peer.seen` has no `callsMe`. The read model (projection 5) has table `execution` (`outcome`,
+  `reply`) instead of `turn` (`status`, `answer`), `session.agent` instead of `role`, no `session.turn_id` (a session's
+  latest execution is its highest `execution.id`), no `session.archive_on_idle`, `process.ready_seq`, `inbox.seq`
+  (a task with no `execution_id` was never handed over), `outbox.kind` or `peer.calls_me`, and `process`, `execution`
+  and `inbox` keyed by `(session_id, id)`, with `inbox.session_id` (the recipient, never null) instead of
+  `recipient_session_id` and `inbox.execution_id` instead of `turn_id`.
   vibestd and `vibest daemon import-check` refuse a database in the old shape and change nothing in it. Migrate: stop
   vibestd, run `bun tools/ledger-rewrite/src/main.ts ~/.vibest/vibest.db` from a vibest checkout (after `pnpm
   install`), start vibestd, then run `vibest daemon restart` to restart the agents still on the old integration. The

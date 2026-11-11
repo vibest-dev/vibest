@@ -168,8 +168,11 @@ const rpc = (socket: string, method: string, params: object, headers: ReadonlyAr
   })
 
 const untaken = (w: World, id: string) =>
-  row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'task' AND seq = id", id)
-    ?.n === 1
+  row<{ n: number }>(
+    w,
+    "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'task' AND execution_id IS NULL",
+    id,
+  )?.n === 1
 
 const nothingMoreComesWithin = (ms: number) => Bun.sleep(ms)
 

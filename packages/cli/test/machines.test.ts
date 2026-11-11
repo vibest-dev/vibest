@@ -63,7 +63,7 @@ const overNodeSocket = (path: string) =>
 
 const peers = Effect.flatMap(
   SqlClient.SqlClient,
-  (sql) => sql<{ id: string; name: string; callsMe: string }>`SELECT id, name, calls_me FROM peer ORDER BY id`,
+  (sql) => sql<{ id: string; name: string }>`SELECT id, name FROM peer ORDER BY id`,
 )
 
 describe("the peer caller", () => {
@@ -77,9 +77,9 @@ describe("the peer caller", () => {
       assert.strictEqual(failureTag(yield* Effect.exit(as(client.List({})))), "InvalidCaller", "no Hello yet")
       const hello = yield* as(client["Peer.Hello"]({ id: peer, name: "mac-mini", callsMe: "mb" }))
       assert.deepStrictEqual({ id: hello.id, name: hello.name }, { id: self.id, name: self.name })
-      assert.deepStrictEqual(yield* peers, [{ id: peer, name: "mac-mini", callsMe: "mb" }])
-      yield* as(client["Peer.Hello"]({ id: peer, name: "mac-mini", callsMe: "renamed" }))
-      assert.deepStrictEqual(yield* peers, [{ id: peer, name: "mac-mini", callsMe: "renamed" }])
+      assert.deepStrictEqual(yield* peers, [{ id: peer, name: "mac-mini" }])
+      yield* as(client["Peer.Hello"]({ id: peer, name: "mac-mini-2", callsMe: "mb" }))
+      assert.deepStrictEqual(yield* peers, [{ id: peer, name: "mac-mini-2" }])
       const refused: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
         client.Spawn({ prompt: "x", callerEnv: {} }),
         client.Launch({ argv: [], focus: false, callerEnv: {} }),
@@ -159,7 +159,7 @@ describe("machine add, ls and rm", () => {
         assert.strictEqual(listed!.id, b.id)
         assert.strictEqual(listed!.vibestd, "test-host")
         assert.lengthOf(net.argv, 1, "add dials once and keeps that connection")
-        assert.deepStrictEqual(yield* b.run(peers), [{ id: a.id, name: "test-host", callsMe: "mb" }])
+        assert.deepStrictEqual(yield* b.run(peers), [{ id: a.id, name: "test-host" }])
         const again = yield* Effect.flip(a.cli(a.raw["Machine.Add"]({ name: "mb-again", target: "b-host" })))
         assert.strictEqual(again._tag, "AlreadyAdded")
         assert.include(again.message, "this is the vibestd already added as mb")
@@ -292,8 +292,7 @@ const outboxRows = Effect.flatMap(
     sql<{
       peerId: string
       sessionId: string
-      kind: string
-    }>`SELECT peer_id, session_id, kind FROM outbox ORDER BY created_at`,
+    }>`SELECT peer_id, session_id FROM outbox ORDER BY created_at`,
 )
 
 const finish = (db: Db["Service"], session: string, message: string) => db.insertInbox({ sessionId: session, message })

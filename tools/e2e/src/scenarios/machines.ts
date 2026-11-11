@@ -260,10 +260,8 @@ const checks: ReadonlyArray<Check> = [
           30_000,
         )
         expect(m?.state === "connected" && m.id === b.id, `machine ls: ${JSON.stringify(m)}`)
-        const peer = s.bDb<{ id: string; callsMe: string; n: number }>(
-          "SELECT id, calls_me AS callsMe, (SELECT count(*) FROM peer) AS n FROM peer",
-        )
-        expect(peer?.n === 1 && peer.id === a.id && peer.callsMe === "mb", `B's peer rows: ${JSON.stringify(peer)}`)
+        const peer = s.bDb<{ id: string; n: number }>("SELECT id, (SELECT count(*) FROM peer) AS n FROM peer")
+        expect(peer?.n === 1 && peer.id === a.id, `B's peer rows: ${JSON.stringify(peer)}`)
         const again = await s.onA(["machine", "add", "mb-again", "b-host"])
         expect(again.code !== 0 && again.stderr.includes("already added as mb"), `second add: ${again.stderr}`)
 

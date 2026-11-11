@@ -173,7 +173,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
         (SELECT json_group_array(json_object('harness', l.harness, 'provider', l.provider, 'at', l.ended_at))
           FROM (SELECT * FROM process WHERE session_id = s.id AND end_reason = 'limited' ORDER BY id) l) AS attempts
       FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id
-        LEFT JOIN execution t ON t.session_id = s.id AND t.id = s.execution_id
+        LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
       ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
@@ -205,7 +205,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
           (SELECT i.content FROM inbox i WHERE i.session_id = s.id AND i.kind = 'task'
             ORDER BY i.id LIMIT 1) AS task,
           t.id AS execution_id, t.outcome, t.ended_at, t.reply
-        FROM session s LEFT JOIN execution t ON t.session_id = s.id AND t.id = s.execution_id
+        FROM session s LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
         WHERE ${sql.in("s.id", ids)}`
       const found = new Map<string, SessionBrief>()
       for (const row of rows) {
@@ -229,7 +229,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
 
   const untakenTask = (id: string) =>
     sql<{ content: string }>`SELECT i.content FROM inbox i
-      WHERE i.session_id = ${id} AND i.kind = 'task' AND i.seq = i.id
+      WHERE i.session_id = ${id} AND i.kind = 'task' AND i.execution_id IS NULL
         AND NOT EXISTS (SELECT 1 FROM execution t WHERE t.session_id = ${id} AND t.outcome IS NOT NULL
           AND (t.typed IS NOT NULL
             OR EXISTS (SELECT 1 FROM inbox x WHERE x.session_id = t.session_id AND x.execution_id = t.id)))
@@ -268,7 +268,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     )
 
   const outboxOf = (peer: string) =>
-    sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.kind, o.content, o.created_at,
+    sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.content, o.created_at,
         s.origin_session AS report_to
       FROM outbox o JOIN session s ON s.id = o.session_id WHERE o.peer_id = ${peer} ORDER BY o.seq`.pipe(
       Effect.map((rows) => rows.filter((row): row is OutboxRow => row.reportTo !== null)),
