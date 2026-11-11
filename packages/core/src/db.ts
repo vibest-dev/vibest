@@ -1,6 +1,7 @@
 import {
   ProcessConversation,
   ProcessEnded,
+  type ProcessEndReason,
   ProcessPid,
   ProcessReady,
   ProjectCreated,
@@ -21,26 +22,19 @@ import { Bus } from "./bus.ts"
 import { apply } from "./database/migration.ts"
 import { inboxMethods } from "./db-inbox.ts"
 import { remoteQueries, type PeerStart } from "./db-remote.ts"
-import {
-  SessionRow,
-  type EndReason,
-  type SessionPatch,
-  type SpawnedBefore,
-  type RepositoryRow,
-  type Integration,
-} from "./db-rows.ts"
+import { SessionRow, type SessionPatch, type SpawnedBefore, type RepositoryRow, type Integration } from "./db-rows.ts"
 import { makeStore } from "./db-store.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import type { HarnessId } from "./harness.ts"
 
 export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"
-export { RuntimeAddress, InboxKind, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
+export { InboxKind, type ProcessEndReason } from "@vibest/schema/event"
+export { RuntimeAddress, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
 export {
   AddressJson,
   encodeAddress,
   SessionRow,
-  type EndReason,
   type SessionPatch,
   CoordinatorRow,
   type NewInboxRow,
@@ -594,7 +588,7 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    endProcess: (id: string, reason: EndReason) => tx(endProcess(id, reason)).pipe(Effect.orDie),
+    endProcess: (id: string, reason: ProcessEndReason) => tx(endProcess(id, reason)).pipe(Effect.orDie),
 
     reportCoordinatorSession: (sessionId: string, harness: HarnessId, harnessSessionId: string) =>
       tx(

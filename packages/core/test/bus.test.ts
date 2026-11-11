@@ -82,8 +82,7 @@ describe("bus", () => {
           address: { machine: "bench", id: "main" },
         })
         yield* db.insertSession(session, project)
-        const notice = (text: string) =>
-          db.insertInbox({ sessionId: session.id, kind: "notice", message: text, details: {} })
+        const notice = (text: string) => db.insertInbox({ sessionId: session.id, message: text })
         const rows = [yield* notice("one"), yield* notice("two")]
         yield* db.claim(rows.map((row) => row.id))
         const sub = yield* bus.subscribe

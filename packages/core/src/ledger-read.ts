@@ -38,13 +38,6 @@ export const latestRun = (rows: ReadonlyArray<{ readonly content: string; readon
     .join("\n\n")
 }
 
-export type PeerRow = {
-  readonly id: string
-  readonly name: string
-  readonly callsMe: string
-  readonly connectedAt: number
-}
-
 export type SessionColumns = {
   readonly id: string
   readonly project: string
@@ -171,8 +164,6 @@ type InboxColumns = {
   readonly status: string
 }
 
-const inboxOf = toInbox
-
 export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
     sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.role, s.name,
@@ -186,8 +177,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
-  const sessions = sessionRows([]).pipe(Effect.flatMap((rows) => decodeSessions(rows.map((row) => sessionOf(row)))))
-
   const coordinatorRows = (project?: string) =>
     sql<CoordinatorColumns>`SELECT s.id, s.project_id AS project, s.created_at, s.directory AS own_directory,
         q.directory AS project_directory,
@@ -197,26 +186,9 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       ${project === undefined ? sql`` : sql`WHERE q.id = ${project}`}
       ORDER BY s.created_at, s.id`
 
-  const coordinators = coordinatorRows().pipe(
-    Effect.flatMap((rows) => decodeCoordinators(rows.map((row) => coordinatorOf(row)))),
-  )
-
   const inboxWhere = (where: Statement.Fragment, order: Statement.Fragment = sql`m.id`) =>
     sql<InboxColumns>`SELECT m.id, m.recipient_session_id, m.sender_session_id, m.kind, m.content, m.status
-      FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(inboxOf))))
-
-  const inbox = Effect.gen(function* () {
-    const rows = yield* sql<InboxColumns>`SELECT m.id, m.recipient_session_id, m.sender_session_id, m.kind,
-        m.content, m.status
-      FROM inbox m WHERE m.kind != 'task' ORDER BY m.id`
-    const decoded = yield* decodeInbox(rows.map(inboxOf))
-    return rows.map((row, i) => ({
-      row: decoded[i]!,
-      id: row.id,
-      recipient: row.recipientSessionId,
-      sender: row.senderSessionId,
-    }))
-  })
+      FROM inbox m WHERE ${where} ORDER BY ${order}`.pipe(Effect.flatMap((rows) => decodeInbox(rows.map(toInbox))))
 
   const reportOf = (row: { seq: number; at: number; data: string; sessionId: string }) =>
     decodeRow({
@@ -360,10 +332,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     })
 
   return {
-    sessions,
-    coordinators,
     rescheduleSource,
-    inbox,
     briefs,
     latestReport,
     hadTerminal,
@@ -377,6 +346,5 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     hasPeerItem: (item: string) =>
       sql`SELECT 1 FROM inbox WHERE peer_item = ${item}`.pipe(Effect.map((rows) => rows.length > 0)),
     machines: sql<MachineRow>`SELECT name, target, vibestd_id, connected_at, created_at FROM machine ORDER BY name`,
-    peers: sql<PeerRow>`SELECT id, name, calls_me, connected_at FROM peer ORDER BY id`,
   }
 }

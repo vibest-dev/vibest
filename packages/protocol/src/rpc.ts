@@ -22,7 +22,6 @@ import {
   AllocationFailed,
   AmbiguousSession,
   HarnessUnavailable,
-  InboxRow,
   LaunchFailed,
   LimitReached,
   NoHarnessChosen,
@@ -246,9 +245,6 @@ export const SessionInfo = Schema.Struct({
 export type SessionInfo = typeof SessionInfo.Type
 
 const LINE_ERRORS = [UnknownMachine, MachineUnavailable, MachineIncompatible] as const
-
-export const InboxMessage = Schema.Struct({ ...InboxRow.fields, details: Schema.Record(Schema.String, Schema.Unknown) })
-export type InboxMessage = typeof InboxMessage.Type
 
 export const SessionAnswer = Schema.Struct({
   turn: Schema.Number,

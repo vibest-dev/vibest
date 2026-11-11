@@ -293,9 +293,7 @@ export const sessionRestart = (deps: {
             if (interrupted)
               yield* inbox.enqueue({
                 sessionId: id,
-                kind: "notice",
                 message: continueNotice(VERSION, [...before.filter((r) => r.projectId === projectId), restarted]),
-                details: {},
               })
             return restarted
           }),

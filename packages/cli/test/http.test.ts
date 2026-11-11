@@ -34,9 +34,7 @@ const row = (over: Partial<InboxRow>): InboxRow => ({
   recipient: null,
   kind: "notice",
   message: "full text",
-  details: {},
   status: "pending",
-  createdAt: 0,
   ...over,
 })
 
@@ -184,7 +182,7 @@ describe("vibestd's HTTP API", () => {
     "poll hands a batch out once, each row leased; ack delivers it; an expired lease hands it out again",
     Effect.gen(function* () {
       const { call, db, inbox, main, worker, projectId } = yield* project
-      yield* inbox.enqueue({ sessionId: worker, kind: "notice", message: "hello", details: {} })
+      yield* inbox.enqueue({ sessionId: worker, message: "hello" })
       const first = (yield* call("/inbox/poll", { sessionId: main })).body as Http.Reply["body"] & {
         ids: Array<number>
         line: string
@@ -216,10 +214,10 @@ describe("vibestd's HTTP API", () => {
             assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
           }
         })
-      yield* inbox.enqueue({ sessionId: worker, kind: "notice", message: "old", details: {} })
+      yield* inbox.enqueue({ sessionId: worker, message: "old" })
       const old = yield* inbox.poll(projectId)
       yield* wait(20)
-      yield* inbox.enqueue({ sessionId: worker, kind: "notice", message: "new", details: {} })
+      yield* inbox.enqueue({ sessionId: worker, message: "new" })
       const newer = yield* inbox.poll(projectId)
       assert.notDeepEqual(newer.ids, old.ids)
       yield* wait(9)
@@ -235,7 +233,7 @@ describe("vibestd's HTTP API", () => {
     "a vibestd restart puts a polling main agent's handed-out rows back to pending",
     Effect.gen(function* () {
       const { db, inbox, worker, projectId } = yield* project
-      yield* inbox.enqueue({ sessionId: worker, kind: "notice", message: "hello", details: {} })
+      yield* inbox.enqueue({ sessionId: worker, message: "hello" })
       const { ids } = yield* inbox.poll(projectId)
       yield* db.recoverDelivering(["claude"], () => "")
       assert.strictEqual(yield* statusOf(db, worker), "pending")
@@ -249,7 +247,7 @@ describe("vibestd's HTTP API", () => {
     "a plugin that stopped polling: its lease goes back to pending after AWAY; an ack of a pending row still counts",
     Effect.gen(function* () {
       const { db, inbox, worker, projectId } = yield* project
-      yield* inbox.enqueue({ sessionId: worker, kind: "notice", message: "hello", details: {} })
+      yield* inbox.enqueue({ sessionId: worker, message: "hello" })
       const { ids } = yield* inbox.poll(projectId)
       assert.strictEqual(yield* statusOf(db, worker), "sending")
       yield* TestClock.adjust(AWAY)
@@ -257,7 +255,7 @@ describe("vibestd's HTTP API", () => {
       yield* until(statusOf(db, worker), (s) => s === "pending")
       assert.deepStrictEqual(yield* inbox.ack(projectId, ids), ids)
       assert.strictEqual(yield* statusOf(db, worker), "delivered")
-      yield* inbox.enqueue({ sessionId: worker, kind: "notice", message: "again", details: {} })
+      yield* inbox.enqueue({ sessionId: worker, message: "again" })
       const next = yield* inbox.poll(projectId)
       assert.deepStrictEqual(yield* inbox.ack(projectId + 1, next.ids), [])
     }),
@@ -267,7 +265,7 @@ describe("vibestd's HTTP API", () => {
     "each poll re-arms the away timer: the lease ends AWAY after the last poll, not the first",
     Effect.gen(function* () {
       const { db, inbox, worker, projectId } = yield* project
-      yield* inbox.enqueue({ sessionId: worker, kind: "notice", message: "hello", details: {} })
+      yield* inbox.enqueue({ sessionId: worker, message: "hello" })
       yield* inbox.poll(projectId)
       yield* TestClock.adjust(Duration.subtract(AWAY, Duration.seconds(1)))
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])

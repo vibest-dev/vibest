@@ -4,6 +4,7 @@ import {
   OutboxQueued,
   ProcessConversation,
   ProcessEnded,
+  type ProcessEndReason,
   ProcessPlaced,
   ProcessStarted,
   SessionEnded,
@@ -21,7 +22,6 @@ import {
   encodeAddress,
   SessionRow,
   storedStatus,
-  type EndReason,
   type SessionPatch,
   type NewInboxRow,
   type RepositoryRow,
@@ -229,7 +229,6 @@ export const makeStore = Effect.gen(function* () {
     readonly kind: "task" | "send" | "notice"
     readonly sender: string | null
     readonly content: string
-    readonly turn?: number | undefined
     readonly status: "pending" | "delivered" | "dropped"
     readonly request?: string | undefined
     readonly peerItem?: string | undefined
@@ -244,7 +243,6 @@ export const makeStore = Effect.gen(function* () {
         ...(row.sender === null ? {} : { sender: row.sender }),
         content: row.content,
         status: row.status,
-        ...(row.turn === undefined ? {} : { turn: row.turn }),
         ...(row.request === undefined ? {} : { request: row.request }),
         ...(row.peerItem === undefined ? {} : { peerItem: row.peerItem }),
       },
@@ -258,7 +256,7 @@ export const makeStore = Effect.gen(function* () {
         yield* emit(InboxMoved, { sessionId, at, data: { inbox: task.id, to: "delivered", turn } })
     })
 
-  const endProcess = (id: string, reason: EndReason, at?: number) =>
+  const endProcess = (id: string, reason: ProcessEndReason, at?: number) =>
     Effect.gen(function* () {
       const current = yield* currentProcess(id)
       if (current === undefined || current.ended !== null) return false
@@ -346,7 +344,7 @@ export const makeStore = Effect.gen(function* () {
   const queueForPeer = (
     peer: string,
     reportTo: string | null,
-    row: { readonly sessionId: string; readonly kind: string; readonly content: string; readonly at?: number },
+    row: { readonly sessionId: string; readonly content: string; readonly at?: number },
   ) =>
     Effect.gen(function* () {
       if (reportTo === null) return false
@@ -422,7 +420,7 @@ export const makeStore = Effect.gen(function* () {
       const insert = (recipient: string, status: "pending" | "dropped") =>
         queueInbox({
           recipient,
-          kind: row.kind,
+          kind: "notice",
           sender: row.sessionId,
           content: row.message,
           status,
@@ -433,7 +431,6 @@ export const makeStore = Effect.gen(function* () {
         const [queued] = yield* insert(row.sessionId, "dropped")
         yield* queueForPeer(origin.peer, origin.reportTo, {
           sessionId: row.sessionId,
-          kind: row.kind,
           content: row.message,
           ...(at === undefined ? {} : { at }),
         })
@@ -453,7 +450,7 @@ export const makeStore = Effect.gen(function* () {
   const tellSender = (sender: string, content: string) =>
     Effect.gen(function* () {
       if (yield* noticeTo(sender, content)) return
-      yield* insertInboxRow({ sessionId: sender, kind: "notice", message: content, details: {} })
+      yield* insertInboxRow({ sessionId: sender, message: content })
     })
 
   const tellSendersOf = (ids: ReadonlyArray<number>, reason: string) =>
