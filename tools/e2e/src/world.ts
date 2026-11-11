@@ -401,7 +401,7 @@ export class World {
   }
 
   async startMain(input: {
-    readonly harness: string
+    readonly harness?: string
     readonly env?: Record<string, string>
     readonly cwd?: string
     readonly session?: string
@@ -431,7 +431,9 @@ export class World {
         .map(([key, value]) => `${key}=${shSingle(value)}`)
         .join(" ")
       const program = input.bin ?? "vibest"
-      const args = [program, "--harness", input.harness, ...(input.extra ?? [])].map(shSingle).join(" ")
+      const args = [program, ...(input.harness ? ["--harness", input.harness] : []), ...(input.extra ?? [])]
+        .map(shSingle)
+        .join(" ")
       const typed = await input.hc.run(
         "send",
         name,
@@ -463,7 +465,9 @@ export class World {
         30_000,
       )
       const program = input.bin ?? binary
-      const args = [program, "--harness", input.harness, ...(input.extra ?? [])].map(shSingle).join(" ")
+      const args = [program, ...(input.harness ? ["--harness", input.harness] : []), ...(input.extra ?? [])]
+        .map(shSingle)
+        .join(" ")
       await herdr(socket, "pane.send_text", { pane_id: pane, text: args })
       await herdr(socket, "pane.send_keys", { pane_id: pane, keys: ["enter"] })
     }

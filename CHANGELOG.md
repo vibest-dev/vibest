@@ -7,6 +7,16 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Cursor is a plugin, claude is the default harness** (users of Cursor, and anyone relying on "no harness to
+  inherit"): vibest comes with the Claude and Pi integrations only. To use Cursor add the file
+  `harnesses/cursor/plugin.js` of the install directory to `plugins` in `~/.vibest/vibest.json` (or put it in
+  `~/.vibest/plugins/`); until then `--harness cursor` fails saying no plugin provides it, and a Cursor session cannot
+  resume or restart. A run with no `--harness`, nothing to inherit and no plugin choosing now starts Claude (the first
+  bare `vibest` in a project too) when Claude is available. To choose differently write `"-harness-default"` in
+  `plugins` and pick the harness in a plugin of your own.
+- **`-<id>` removes builtin plugins** (plugin authors): an entry such as `"-runtime-choice"` now removes the builtin with
+  that exact id; `"-*"` and `"-prefix.*"` still match only user plugins. Builtins are kept or removed from the config
+  text at every activation, so un-removing one takes effect on the next reload without restarting vibestd.
 - **Handoff database copies** (users): a handing-over vibestd no longer writes `vibest.db.before-<version>` (a copy of
   `vibest.db` and its `-wal`). Copies already in the home are left where they are. Copy the database yourself before
   `vibest update` if you want one.

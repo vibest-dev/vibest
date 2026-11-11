@@ -15,10 +15,13 @@ export type { HarnessDefinition }
 
 export const encodeCommand = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
 
+export const addPluginHint =
+  "a harness comes from a plugin: add one that provides it to `plugins` in vibest.json in the vibest home"
+
 export const unprovided = (id: string, loaded: ReadonlyArray<HarnessDefinition>) =>
   new HarnessUnavailable({
     harness: id,
-    message: `no plugin provides harness ${id}; loaded: ${loaded.map((definition) => definition.id).join(", ") || "none"}`,
+    message: `no plugin provides harness ${id}; loaded: ${loaded.map((definition) => definition.id).join(", ") || "none"}; ${addPluginHint}`,
   })
 
 export const makeHarnesses: Effect.Effect<HarnessesShape> = Effect.sync(() => {
