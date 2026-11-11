@@ -1116,8 +1116,11 @@ npm in its prefix. Its own entries:
 
 ```
 ~/.vibest/                   (VIBEST_HOME overrides)
-  vibest.json  vibest.db  vibest.sock  vibest-http.sock  vibestd.pid  vibestd.log
-  definitions/  skills/  plugins/  packages/
+  vibest.json                the plugin list (§7), read only
+  plugins/                   plugin files and directories (§7), read only
+  vibest.db                  the ledger and read model (with its -wal and -shm files)
+  vibest.sock  vibest-http.sock   vibestd's RPC socket, and the HTTP socket the Claude plugin reports to
+  vibestd.pid  vibestd.log   vibestd's start lock and record, and its log
   projects/<project id>/     the project folder: preferences.md, docs/, memories/, artifacts/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
 ```
