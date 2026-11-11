@@ -526,9 +526,7 @@ describe("Db", () => {
         yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, place)
         const row = yield* db.insertInbox({
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          kind: "notice",
           message: "hi",
-          details: {},
         })
         assert.strictEqual(row.status, "pending")
         const guard = {
@@ -545,9 +543,7 @@ describe("Db", () => {
         )
         yield* db.insertInbox({
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          kind: "notice",
           message: "n",
-          details: {},
         })
         yield* db.clearCoordinator(RUNTIME, place.address)
         assert.strictEqual((yield* db.latestInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "notice"))!.status, "dropped")

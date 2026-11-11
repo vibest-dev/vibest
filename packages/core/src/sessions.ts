@@ -227,8 +227,7 @@ export class Sessions extends Context.Service<
           drain.work(`session ${id}`, locks.withLock(id)(effect), settlement)
       const logged = Engine.logFailure
 
-      const notice = (session: SessionRow, message: string) =>
-        inbox.enqueue({ sessionId: session.id, kind: "notice", message, details: {} })
+      const notice = (session: SessionRow, message: string) => inbox.enqueue({ sessionId: session.id, message })
 
       const worktreeOf = (session: SessionRow) =>
         db.sessionDirectory(session.id).pipe(
