@@ -551,14 +551,15 @@ every skill installed in the CLI, so its descriptions stay few and clear.
 
 1. Just say what you want; the main Agent picks a skill from its description.
 2. Name it: invoke the skill in the CLI (`/pipeline …`) or say "do it as a pipeline".
-3. Rules that must hold every time go in plugins (§4.3).
+3. Rules that must hold every time go in Project configuration as plugins (§4.3).
 
-**Adding a flow** (a committee, racing, an advisor) is a skill file in `~/.vibest/skills/`, or a builtin skill
-later. It needs no core change, because every flow uses the same commands.
+**Adding a flow** (a committee, racing, an advisor) is a skill file in `.vibest/skills/` (this Project) or
+`~/.vibest/skills/` (everywhere), or a builtin skill later. It needs no core change, because every flow uses the
+same commands.
 
 ### 4.3 Rules (hook plugins)
 
-A rule is an ordinary plugin on one hook (§7), installed in the vibest home.
+A rule is an ordinary plugin on one hook (§7), listed in the Project configuration.
 
 Rule state lives in `storage` and decisions are idempotent, because decision hooks run again after a restart.
 
@@ -749,10 +750,13 @@ user plugins            configuration `plugins` and plugin directories, in order
 configuration plugins   configuration files into catalogs (definitions, machines, skills)
 ```
 
-**Where plugins live**: only in the vibest home (`VIBEST_HOME`, by default `~/.vibest`), in `vibest.json` and the
-`plugins/` directory. There is no project tier: a Project directory adds no plugins and no configuration.
+**Configuration tiers** (as OpenCode: global, then project, project wins):
 
-**Plugin entries** (as OpenCode's `plugins`): the ordered `plugins` list of `vibest.json`.
+- global: `~/.vibest/vibest.jsonc` and `~/.vibest/{definitions,skills,plugins}/`;
+- project: `vibest.jsonc` and `.vibest/{definitions,skills,plugins}/` in the Project directory, found by
+  walking up from where `vibest` starts.
+
+**Plugin entries** (as OpenCode's `plugins`): an ordered list of directives, merged across tiers in order.
 
 | Entry                                  | Meaning                                                                       |
 | -------------------------------------- | ----------------------------------------------------------------------------- |
@@ -761,8 +765,8 @@ configuration plugins   configuration files into catalogs (definitions, machines
 | `{ "package": "…", "options": { … } }` | add, or configure, a plugin with options; a builtin plugin is named by its id |
 | `"-check"`                             | remove a plugin, builtin ones included                                        |
 
-Files and directories in `~/.vibest/plugins/` are added without an entry, before the entries. A plugin reads its
-options from `context.options` (V2's `PluginOptions`) and they reload live:
+Files in `.vibest/plugins/` are added without an entry. A plugin reads its options from `context.options`
+(V2's `PluginOptions`) and they reload live:
 
 ```ts
 export default Plugin.define({
@@ -776,8 +780,8 @@ export default Plugin.define({
 })
 ```
 
-Settings of core concepts (definitions, machines, skills) are top-level keys or files in the vibest home, not plugin
-options, as in OpenCode.
+Settings of core concepts (definitions, machines, skills) are top-level keys or files in the tier
+directories, not plugin options, as in OpenCode.
 
 ## 8. Harness adapters
 
@@ -1117,7 +1121,7 @@ npm in its prefix. Its own entries:
 
 ```
 ~/.vibest/                   (VIBEST_HOME overrides)
-  vibest.json  vibest.db  vibest.sock  vibest-http.sock  vibestd.pid  vibestd.log
+  vibest.jsonc  vibest.db  vibest.sock  vibest-http.sock  vibestd.pid  vibestd.log
   definitions/  skills/  plugins/  packages/
   projects/<project id>/     the project folder: preferences.md, docs/, memories/, artifacts/
   worktrees/<repository>/<name>/   isolated Workspaces (omac naming, `.worktreeinclude` copied)
@@ -1212,7 +1216,7 @@ Paths are in `anomalyco/opencode` at `f0944f0`. These are sources to read when i
 | AgentDefinition (§3)                           | definition with `mode`                                                                                          | `packages/schema/src/agent.ts`                                                                                                                     |
 | Subscription limits (§3)                       | per-window meter (V2: `{ percent, limited, resetsAt }`)                                                         | `packages/schema/src/usage-limits.ts`                                                                                                              |
 | IDs (§3)                                       | prefixed branded IDs with sortable bodies and `create()`                                                        | `packages/schema/src/identifier.ts`, `session-id.ts`                                                                                               |
-| Global configuration (§7)                      | global directory only (vibest has no project tier)                                                              | `packages/core/src/config/discovery.ts`                                                                                                            |
+| Global and project configuration (§7)          | global directory, then project files found walking up from the working directory                                | `packages/core/src/config/discovery.ts`                                                                                                            |
 | Plugin entries (§7)                            | ordered `plugins` directives: name, path, `{ package, options }`, `-id` to remove; options on `context.options` | `packages/schema/src/config/plugin.ts`, `packages/core/src/config/plugin/source.ts`, `packages/plugin/src/effect/plugin.ts`                        |
 | Configuration through plugins (§7)             | configuration files projected into catalogs by builtin plugins                                                  | `packages/core/src/config/plugin/agent.ts`                                                                                                         |
 
