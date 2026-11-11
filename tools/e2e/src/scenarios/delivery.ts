@@ -1,6 +1,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
+import { note } from "../../../reap.ts"
 import type { Check } from "../check.ts"
 import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
 import {
@@ -553,6 +554,7 @@ const checks: ReadonlyArray<Check> = [
           stdout: "ignore",
           stderr: "pipe",
         })
+        note(server.pid, `herdr server --session ${stale}`, w.root)
         const socket = path.join(w.home, ".config", "herdr", "sessions", stale, "herdr.sock")
         await until(
           "the inherited herdr server",
@@ -610,7 +612,12 @@ const checks: ReadonlyArray<Check> = [
         const ran = await typed(wayOut.replace(/ vibest /, ` ${binary} `), asUser)
         expect(ran.includes("exit=0") && !ran.includes("Forbidden"), `the hinted command failed: ${ran}`)
       } finally {
-        server?.kill()
+        if (server !== undefined && server.exitCode === null) {
+          server.kill()
+          for (const deadline = Date.now() + 2_000; server.exitCode === null && Date.now() < deadline;)
+            await Bun.sleep(50)
+          if (server.exitCode === null) server.kill("SIGKILL")
+        }
         await server?.exited
         main.stop()
         sub.stop()

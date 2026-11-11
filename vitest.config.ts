@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config"
 export default defineConfig({
   ssr: { resolve: { conditions: ["bun", "import", "default"] } },
   test: {
+    globalSetup: ["./vitest.globalSetup.ts"],
     setupFiles: ["./vitest.setup.ts"],
     include: [
       "packages/cli/test/**/*.test.ts",

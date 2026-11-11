@@ -19,6 +19,7 @@ import * as Platform from "#platform"
 import { replaceDaemon, type Timing } from "../src/replace.ts"
 import {
   PATH_WITHOUT_HARNESS_CLIS,
+  noteRecorded,
   pingOf,
   projectOf,
   recordedInfo,
@@ -160,6 +161,7 @@ layer(Platform.services)(
             )
           yield* Effect.gen(function* () {
             yield* startDaemon.pipe(Effect.provideService(VibestCommand, sourceArgv))
+            yield* noteRecorded(layout.daemonInfo)
             const old = yield* ping
             const info = yield* recordedInfo(layout.daemonInfo, old.instance)
             assert.deepStrictEqual(
@@ -196,6 +198,7 @@ layer(Platform.services)(
               /^the old vibestd stopped answering, and vibest started .*vibest-wrapper.*; vibestd .*, instance [0-9a-f-]{36}, answers, not vibest .* as asked\. vibest does nothing more$/,
             )
             assert.notStrictEqual((yield* ping).instance, next.instance)
+            yield* noteRecorded(layout.daemonInfo)
           }).pipe(
             Effect.ensuring(Effect.ignore(stopRecorded(layout.daemonInfo))),
             TestClock.withLive,

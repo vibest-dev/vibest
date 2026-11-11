@@ -9,6 +9,8 @@ import { Effect } from "effect"
 
 import * as Platform from "#platform"
 
+import { note } from "../../../tools/reap.ts"
+
 const pkg = path.join(import.meta.dirname, "..")
 const binary = path.join(pkg, "dist", "vibest")
 
@@ -54,6 +56,7 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
     stdout: "ignore",
     stderr: Bun.file(log),
   })
+  note(daemon.pid, `${binary} daemon --foreground`)
   try {
     for (const deadline = Date.now() + 10_000; !(await rpc(probe(socket))); await Bun.sleep(100)) {
       if (daemon.exitCode !== null || Date.now() > deadline)
@@ -69,7 +72,9 @@ const withVibestd = async (home: string, f: (list: () => Promise<ReadonlyArray<P
       ),
     )
   } finally {
-    daemon.kill()
+    if (daemon.exitCode === null) daemon.kill()
+    for (const deadline = Date.now() + 2_000; daemon.exitCode === null && Date.now() < deadline;) await Bun.sleep(50)
+    if (daemon.exitCode === null) daemon.kill("SIGKILL")
     await daemon.exited
   }
 }
