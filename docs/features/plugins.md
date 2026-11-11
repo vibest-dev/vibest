@@ -14,12 +14,14 @@ same process.
 
 ## G3. A plugin that fails to load
 
-A plugin that throws while loading is listed with its error, and the other plugins stay active.
+A plugin that throws while loading, including one whose setup throws instead of returning an Effect, is listed with its
+error, and the other plugins, those after it included, stay active.
 
 ## G4. A plugin refuses a run
 
 A plugin hook that refuses a run blocks `vibest run` with its reason before any pane or worktree exists: the command
-fails and prints the reason.
+fails and prints the reason. A hook that throws instead of returning an Effect blocks the run the same way, printing
+`plugin <id> crashed: <error>`, and counts as a crash of that plugin.
 
 ## G5. A routing plugin picks the harness
 
@@ -41,6 +43,12 @@ it.
 
 ## G10. A plugin folder with a package.json
 
-A plugin folder whose `package.json` maps `exports` loads the entry the map names. While a package it imports is not
+A plugin folder whose `package.json` maps `exports` loads the file the map names for `./server`, else for `.`, skipping a
+file that does not exist, and never a file the map does not export. While a package it imports is not
 installed it is listed as failed with the missing package; installing the package into its `node_modules` makes it
 active without editing the plugin or restarting vibestd.
+
+## G11. A plugin disabled by a failing transform
+
+A plugin whose transform throws is disabled and listed as failed with the error. A reload caused by another plugin
+does not set it up again; editing the plugin itself does.

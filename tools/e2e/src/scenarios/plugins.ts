@@ -4,7 +4,15 @@ import path from "node:path"
 import type { Check } from "../check.ts"
 import { expect, until, type World } from "../world.ts"
 
-type Info = { id: string; source: string; status: "active" | "failed"; error?: string; calls: number; refused: number }
+type Info = {
+  id: string
+  source: string
+  status: "active" | "failed"
+  error?: string
+  calls: number
+  refused: number
+  crashed: number
+}
 
 const list = (w: World) => w.json<Array<Info>>(["plugins"])
 
@@ -12,6 +20,24 @@ const plugin = (id: string, hook = "() => Effect.void") => `import { AgentRefuse
 import { Effect } from "effect"
 export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", ${hook}) })
 `
+
+const transformThrows = (id: string, counter: string) => `import { Plugin } from "@vibest/plugin"
+import { Effect } from "effect"
+import fs from "node:fs"
+export default Plugin.define({
+  id: ${JSON.stringify(id)},
+  effect: (ctx) =>
+    Effect.sync(() => fs.appendFileSync(${JSON.stringify(counter)}, "setup\\n")).pipe(
+      Effect.andThen(ctx.harness.transform(() => { throw new Error("e2e transform throw") })),
+    ),
+})
+`
+
+const lines = (file: string) =>
+  fs.readFile(file, "utf8").then(
+    (text) => text.split("\n").filter(Boolean).length,
+    () => 0,
+  )
 
 const write = async (file: string, text: string) => {
   await fs.mkdir(path.dirname(file), { recursive: true })
@@ -60,14 +86,22 @@ const checks: ReadonlyArray<Check> = [
         (await list(w)).some((p) => p.id === "steady" && p.status === "active"),
       )
       await write(path.join(w.vibestHome, "plugins", "broken.ts"), "export default 42\n")
-      await until("the failure reported", async () => {
+      await write(
+        path.join(w.vibestHome, "plugins", "a-throw.ts"),
+        `import { Plugin } from "@vibest/plugin"
+export default Plugin.define({ id: "a-throw", effect: () => { throw new Error("e2e setup throw") } })
+`,
+      )
+      await until("the failures reported", async () => {
         const all = await list(w)
         return (
           all.some((p) => p.status === "failed" && p.source.endsWith("broken.ts")) &&
+          all.some((p) => p.id === "a-throw" && p.status === "failed" && p.error?.includes("e2e setup throw")) &&
           all.some((p) => p.id === "steady" && p.status === "active")
         )
       })
       await fs.rm(path.join(w.vibestHome, "plugins", "broken.ts"))
+      await fs.rm(path.join(w.vibestHome, "plugins", "a-throw.ts"))
       await fs.rm(steady)
     },
   },
@@ -95,17 +129,67 @@ const checks: ReadonlyArray<Check> = [
         "the refusal was not counted",
       )
       await fs.rm(path.join(w.vibestHome, "plugins", "refuse.ts"))
+      await write(
+        path.join(w.vibestHome, "plugins", "throw.ts"),
+        plugin("throw", `() => { throw new Error("e2e hook throw") }`),
+      )
+      await until("the throwing plugin active", async () =>
+        (await list(w)).some((p) => p.id === "throw" && p.status === "active"),
+      )
+      const thrown = await w.vibest(["run", "pi", "--session", w.herdrSession, "--", "do nothing"], {
+        timeoutMs: 60_000,
+      })
+      expect(thrown.code !== 0, `run exited 0: ${thrown.stdout}`)
+      expect(thrown.stderr.includes("plugin throw crashed: e2e hook throw"), `crash not shown: ${thrown.stderr}`)
+      expect((await fs.readdir(worktrees).catch(() => [])).length === before.length, "a worktree was created")
+      expect(
+        (await list(w)).some((p) => p.id === "throw" && p.crashed === 1),
+        "the crash was not counted",
+      )
+      await fs.rm(path.join(w.vibestHome, "plugins", "throw.ts"))
+    },
+  },
+  {
+    id: "G11",
+    title: "a plugin disabled by a failing transform is not set up again until it changes",
+    run: async (w) => {
+      const first = path.join(w.vibestHome, "plugins", "a.ts")
+      const second = path.join(w.vibestHome, "plugins", "b.ts")
+      const counter = path.join(w.root, "b-setups")
+      await write(first, plugin("a"))
+      await write(second, transformThrows("b", counter))
+      await until("b disabled by its transform", async () =>
+        (await list(w)).some((p) => p.id === "b" && p.status === "failed" && p.error?.includes("e2e transform throw")),
+      )
+      expect((await lines(counter)) === 1, `b set up ${await lines(counter)} times`)
+      await write(first, plugin("a-v2"))
+      await until("a reloaded", async () => (await list(w)).some((p) => p.id === "a-v2" && p.status === "active"))
+      expect((await lines(counter)) === 1, `b set up again after a changed: ${await lines(counter)} times`)
+      expect(
+        (await list(w)).some((p) => p.id === "b" && p.status === "failed"),
+        "b no longer listed as failed",
+      )
+      await write(second, transformThrows("b", counter).replace("e2e transform throw", "e2e transform throw again"))
+      await until("b retried after it changed", async () => (await lines(counter)) === 2)
+      await fs.rm(first)
+      await fs.rm(second)
     },
   },
   {
     id: "G10",
-    title: "a plugin folder loads its package.json exports entry and recovers once its missing dependency is installed",
+    title:
+      "a plugin folder loads the existing package.json exports entry (./server, else .), never an unexported index.ts, and recovers once its missing dependency is installed",
     run: async (w) => {
       const folder = path.join(w.vibestHome, "plugins", "packaged")
       await write(
         path.join(folder, "package.json"),
-        JSON.stringify({ name: "e2e-packaged", type: "module", exports: { "./server": { import: "./src/main.ts" } } }),
+        JSON.stringify({
+          name: "e2e-packaged",
+          type: "module",
+          exports: { "./server": "./dist/server.js", ".": { import: "./src/main.ts" } },
+        }),
       )
+      await write(path.join(folder, "index.ts"), plugin("unexported"))
       await write(
         path.join(folder, "src", "main.ts"),
         `import id from "e2e-dep"\n${plugin("packaged").replace('id: "packaged"', "id")}`,
@@ -121,6 +205,7 @@ const checks: ReadonlyArray<Check> = [
       await until("the plugin active after the install", async () =>
         (await list(w)).some((p) => p.id === "packaged" && p.status === "active" && p.source.endsWith("main.ts")),
       )
+      expect(!(await list(w)).some((p) => p.id === "unexported"), "the folder's unexported index.ts was loaded")
       await fs.rm(folder, { recursive: true })
     },
   },

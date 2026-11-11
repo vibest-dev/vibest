@@ -78,9 +78,11 @@ export const run = Effect.fnUntraced(function* <N extends Name>(
   timeout: Duration.Input,
 ) {
   const started = yield* Clock.currentTimeMillis
-  const exit = yield* timeoutWithoutWaiting(entry.callback(event), scope, timeout).pipe(
-    Effect.withSpan("vibest.plugin.hook", { attributes: { "plugin.id": entry.plugin, hook: name } }),
-  )
+  const exit = yield* timeoutWithoutWaiting(
+    Effect.suspend(() => entry.callback(event)),
+    scope,
+    timeout,
+  ).pipe(Effect.withSpan("vibest.plugin.hook", { attributes: { "plugin.id": entry.plugin, hook: name } }))
   const ms = (yield* Clock.currentTimeMillis) - started
   const stats = entry.stats
   stats.calls++

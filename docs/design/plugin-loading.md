@@ -20,18 +20,20 @@ and `vibest/no-restricted-disable` reports a disable comment for that rule. What
 ## Loading and watching
 
 In `plugin-sources.ts`: a half-saved `vibest.json` keeps its last parsed plugin list. A plugin directory whose
-`package.json` has a `name` and `exports` loads the file `exports` maps for `./server`, else for `.` (as OpenCode's
-`Host.resolve`), taking the first of the `bun`, `import` and `default` conditions; vibest reads the map itself, because
-Bun's resolver keeps a lookup that failed once (for example while `package.json` was written before its entry), so a
-self-reference resolution would stay failed until vibestd restarts. Without `exports` it loads `server.*`, else
-`index.*`. An
+`package.json` has a `name` and `exports` loads, as OpenCode's `Host.resolve`, the first existing file `exports` maps
+for `./server`, then for `.` (taking the first of the `bun`, `import` and `default` conditions), and nothing else; the
+mapped files are watched until one exists. vibest reads the map itself, because Bun's resolver keeps a lookup that
+failed once (for example while `package.json` was written before its entry), so a self-reference resolution would stay
+failed until vibestd restarts. Without `exports` it loads `server.*`, else `index.*`. An
 entry is imported by its real path, so imports resolve next to the real file and Bun never sees two paths for one
 module (its resolver keeps failing for files added later under a symlinked directory, such as /var on macOS); a
 dangling link is watched at its target until it appears. Imports are cached by the digests of the entry's local
 graph and of the listings of its unresolved import directories: an unchanged graph is not imported again, failed or
 not, so unrelated saves never repeat a broken plugin's import-time effects. An import that never settles times out
-like a setup. A package a plugin imports that is not installed is watched at `node_modules/<package>` in every directory
-above the importing file, so installing it imports the plugin again; an installed `node_modules` is neither watched
+like a setup. A package a plugin imports that does not resolve is watched at `node_modules/<package>` in every directory
+from the importing file up to the plugin's package root (the nearest `package.json`) or the user home, never `/`,
+and an installed folder that does not resolve yet (an install still writing) stays watched, so installing it imports
+the plugin again; `effect`, `@vibest/plugin` and their subpaths are supplied by vibestd and never watched; a package that resolves is neither watched
 nor evicted, and an upgraded package already loaded needs a vibestd restart. While the watched
 directories change the plugins are read again, because a change made before its watch began is not reported; after
 such a rewatch one more read follows a second later, because Bun 1.4's `fs.watch` on macOS sometimes drops other

@@ -213,7 +213,6 @@ const make = Effect.gen(function* () {
               ...(input.model === undefined ? {} : { model: input.model }),
               ...(input.name === undefined ? {} : { title: input.name }),
               ...(runtime === undefined ? {} : { runtime }),
-              ...(from.coordinator === undefined ? {} : { parent: from.coordinator }),
               ...(reportTo === undefined ? {} : { reportTo }),
               request: input.request ?? randomId(),
             },

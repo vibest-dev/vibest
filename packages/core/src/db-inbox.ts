@@ -1,5 +1,5 @@
-import { TurnReported } from "@vibest/schema/event"
-import { InboxKind, InboxRow, InboxStatus, TurnState } from "@vibest/schema/session"
+import { type InboxKind, TurnReported } from "@vibest/schema/event"
+import { InboxRow, InboxStatus, TurnState } from "@vibest/schema/session"
 import { Effect } from "effect"
 
 import { encodeAddress, storedStatus, type SessionPatch, type NewInboxRow, type TurnEnd } from "./db-rows.ts"
@@ -60,7 +60,6 @@ export const inboxMethods = (store: Store) => {
           const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sessionId}`
           const written = yield* queueForPeer(origin.peer, creator, {
             sessionId,
-            kind: "notice",
             content: envelope(
               "agent-message",
               [
@@ -206,8 +205,7 @@ export const inboxMethods = (store: Store) => {
           yield* endTurn(id, end, stamp)
           const { turnState: _, ...rest } = patch
           yield* updateSession(id, rest)
-          if (notice !== undefined)
-            yield* insertInboxRow({ sessionId: id, kind: "notice", message: notice, details: {} }, stamp)
+          if (notice !== undefined) yield* insertInboxRow({ sessionId: id, message: notice }, stamp)
         }),
       ).pipe(Effect.orDie),
 
@@ -291,7 +289,7 @@ export const inboxMethods = (store: Store) => {
               rows.map((r) => r.content),
             )
             if (sender !== null) yield* tellSender(sender, message)
-            else yield* insertInboxRow({ sessionId: recipient, kind: "notice", message, details: {} })
+            else yield* insertInboxRow({ sessionId: recipient, message })
           }
         }),
       ).pipe(Effect.orDie),
@@ -337,12 +335,6 @@ export const inboxMethods = (store: Store) => {
         }
         return yield* moveInbox(sql`${sql.in("id", ids)} AND status = 'pending'`, "delivering")
       }).pipe(Effect.orDie),
-
-    transitionInbox: (ids: ReadonlyArray<number>, status: InboxStatus, from: InboxStatus) =>
-      (ids.length === 0
-        ? Effect.succeed([] as ReadonlyArray<number>)
-        : moveInbox(sql`${sql.in("id", ids)} AND status = ${storedStatus(from)}`, storedStatus(status))
-      ).pipe(Effect.orDie),
 
     setInboxStatus: (ids: ReadonlyArray<number>, status: InboxStatus, from?: InboxStatus) =>
       Effect.gen(function* () {

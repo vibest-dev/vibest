@@ -296,8 +296,7 @@ const outboxRows = Effect.flatMap(
     }>`SELECT peer_id, session_id, kind FROM outbox ORDER BY created_at`,
 )
 
-const finish = (db: Db["Service"], session: string, message: string) =>
-  db.insertInbox({ sessionId: session, kind: "notice", message, details: {} })
+const finish = (db: Db["Service"], session: string, message: string) => db.insertInbox({ sessionId: session, message })
 
 describe("another machine's vibestd runs agents here", () => {
   it.effect("Peer.Spawn records peer.start and no parent; a retry finds it; no project or commit fails clearly", () =>
@@ -325,11 +324,11 @@ describe("another machine's vibestd runs agents here", () => {
           (sql) =>
             sql<{
               parent: string | null
-              reportTo: string | null
-            }>`SELECT parent_session_id AS parent, report_to_session_id AS report_to FROM session WHERE id = ${spawned.session}`,
+              origin: string | null
+            }>`SELECT parent_session_id AS parent, origin_session AS origin FROM session WHERE id = ${spawned.session}`,
         ),
       )
-      assert.deepStrictEqual(row, [{ parent: null, reportTo: null }])
+      assert.deepStrictEqual(row, [{ parent: null, origin: "a-main" }])
       assert.strictEqual((yield* b.spawn(call, request)).session, spawned.session, "the same request")
       const noCommit = yield* Effect.flip(
         call(
@@ -405,7 +404,7 @@ describe("another machine's vibestd runs agents here", () => {
       const call = yield* b.as(randomId(), "aproj")
       const { session } = yield* b.spawn(call)
       yield* finish(b.db, session, "one")
-      yield* b.db.insertInbox({ sessionId: session, kind: "notice", message: "two", details: {} })
+      yield* b.db.insertInbox({ sessionId: session, message: "two" })
       const first = yield* call.outbox.pipe(Stream.take(2), Stream.runCollect)
       assert.deepStrictEqual(
         first.map((i) => [i.kind, i.content]),

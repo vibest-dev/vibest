@@ -7,6 +7,13 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **The read model** (anyone reading `vibest.db`): the projection is version 4 and is rebuilt from the log when vibestd
+  opens the file. `session.report_to_session_id`, `session.origin_parent`, `session.seq`, `project.seq`,
+  `inbox.queued_at` and `process.resume` are gone: a session's notices go to its parent while it lives, else to the
+  entry session, and `process.conversation` starts as the conversation the process resumes.
+  `session.archive_on_completion` is now `archive_on_idle`, and `session.origin_report_to` is now `origin_session`.
+  New facts no longer write `session.created` `reportTo` or `origin.parent`; older facts that carry them still decode.
+- **`Peer.Spawn`** (vibestd to vibestd): the payload has no `parent`; `reportTo` names the origin project's entry session, where remote notices and sends go back to.
 - **Agent messaging** (users, plugin authors, anyone calling the RPC): a turn that ends normally or is interrupted
   sends nothing. Agents send what they decide to with `vibest send <id> -- '<message>'` (to their creator, or any agent
   of the project), and the main agent reads `vibest ls` (state) and `vibest result <id>` (the last reply, in `answer`).
