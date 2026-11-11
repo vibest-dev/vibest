@@ -74,7 +74,7 @@ it("a run killed hard leaves its processes behind; the next run stops each recor
   const saved = process.env.VIBEST_REAP_FILE
   const liveRun = path.join(dir, `vibest-reap-${process.pid}`)
   const liveOwned = childProcess.spawn("sleep", [String(n + 5)], { stdio: "ignore" })
-  const fixture: Array<number> = []
+  const fixtureCleanup = path.join(dir, "fixture-cleanup")
   try {
     process.env.VIBEST_REAP_FILE = liveRun
     note(liveOwned.pid, `sleep ${n + 5}`)
@@ -85,8 +85,11 @@ it("a run killed hard leaves its processes behind; the next run stops each recor
     const leaderNamed = childOf(leader!, `sleep ${n + 1}`)
     const leaderUnnamed = childOf(leader!, `sleep ${n + 2}`)
     const coreChild = childOf(core!, `sleep ${n + 3}`)
-    fixture.push(noted!, leader!, core!, stranger!, leaderNamed!, leaderUnnamed!, coreChild!)
+    const fixture = [noted, leader, core, stranger, leaderNamed, leaderUnnamed, coreChild]
     assert.isTrue(fixture.every((pid) => pid !== undefined && alive(pid)))
+    process.env.VIBEST_REAP_FILE = fixtureCleanup
+    for (const pid of fixture) note(pid, commandOf(pid!).trim())
+    process.env.VIBEST_REAP_FILE = liveRun
     run.kill("SIGKILL")
     process.kill(core!, "SIGKILL")
     await new Promise((resolve) => run.once("exit", resolve))
@@ -103,7 +106,7 @@ it("a run killed hard leaves its processes behind; the next run stops each recor
     assert.isTrue(fs.existsSync(liveRun))
     assert.isTrue(liveOwned.pid !== undefined && alive(liveOwned.pid))
   } finally {
-    for (const pid of fixture) if (pid !== undefined && alive(pid)) process.kill(pid, "SIGKILL")
+    await endNoted(fixtureCleanup)
     liveOwned.kill("SIGKILL")
     fs.rmSync(dir, { recursive: true, force: true })
     if (saved === undefined) delete process.env.VIBEST_REAP_FILE
