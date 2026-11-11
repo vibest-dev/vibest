@@ -133,6 +133,16 @@ export const runMain = BunRuntime.runMain
 
 let mapped = false
 
+const provided: Readonly<Record<string, object>> = {
+  effect,
+  "@vibest/plugin": VibestPlugin,
+  ...Object.fromEntries(
+    Object.entries(effect).flatMap(([name, value]) =>
+      /^[A-Z]/.test(name) && typeof value === "object" && value !== null ? [[`effect/${name}`, value]] : [],
+    ),
+  ),
+}
+
 export const plugins: PluginLoader["Service"] = {
   prepare: Effect.sync(() => {
     if (mapped) return
@@ -144,18 +154,13 @@ export const plugins: PluginLoader["Service"] = {
           exports: exports as Record<string, unknown>,
           loader: "object" as const,
         })
-        build.module("effect", object(effect))
-        build.module("@vibest/plugin", object(VibestPlugin))
-        for (const [name, value] of Object.entries(effect)) {
-          if (/^[A-Z]/.test(name) && typeof value === "object" && value !== null)
-            build.module(`effect/${name}`, object(value))
-        }
+        for (const [name, value] of Object.entries(provided)) build.module(name, object(value))
         keyLocalImports(build)
       },
     })
   }),
   parseJsonc: (text) => Bun.JSONC.parse(text),
-  graph,
+  graph: (entry) => graph(entry, (specifier) => Object.hasOwn(provided, specifier)),
   load,
   watch,
 }

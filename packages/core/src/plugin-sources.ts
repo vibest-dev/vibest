@@ -46,6 +46,12 @@ const ConfigEntry = Schema.Union([
 ])
 const ConfigFile = Schema.Struct({ plugins: Schema.optional(Schema.Array(ConfigEntry)) })
 type ConfigFile = typeof ConfigFile.Type
+const PackageManifest = Schema.fromJsonString(
+  Schema.Struct({
+    name: Schema.String,
+    exports: Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Unknown)]),
+  }),
+)
 const isPlugin = (u: unknown): u is VibestPlugin.Plugin.Plugin =>
   typeof u === "object" &&
   u !== null &&
@@ -55,6 +61,21 @@ const isPlugin = (u: unknown): u is VibestPlugin.Plugin.Plugin =>
 const PluginModule = Schema.Struct({
   default: Schema.declare(isPlugin),
 })
+
+const EXPORT_CONDITIONS = new Set(["bun", "import", "default"])
+const exportTarget = (value: unknown): string | undefined => {
+  if (typeof value === "string") return value
+  if (typeof value !== "object" || value === null) return undefined
+  for (const [condition, target] of Object.entries(value)) {
+    const found = EXPORT_CONDITIONS.has(condition) ? exportTarget(target) : undefined
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+const exportedEntry = (exports: string | Readonly<Record<string, unknown>>) =>
+  typeof exports !== "string" && Object.keys(exports).some((key) => key.startsWith("."))
+    ? (exportTarget(exports["./server"]) ?? exportTarget(exports["."]))
+    : exportTarget(exports)
 
 export type Operation =
   | { readonly type: "add"; readonly target: string; readonly options: Readonly<Record<string, unknown>> }
@@ -113,8 +134,18 @@ export const makeSources = Effect.fnUntraced(function* (
       Effect.map((hex) => hex.slice(0, 12)),
     )
 
+  const packageEntry = (target: string) =>
+    fs.readFileString(path.join(target, "package.json")).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(PackageManifest)),
+      Effect.map(({ exports }) => exportedEntry(exports)),
+      Effect.map((entry) => (entry === undefined ? undefined : path.resolve(target, entry))),
+      Effect.orElseSucceed(() => undefined),
+    )
+
   const entry = Effect.fn(function* (target: string) {
     if (!(yield* isDirectory(target))) return target
+    const exported = yield* packageEntry(target)
+    if (exported !== undefined) return exported
     for (const name of ["server", "index"]) {
       for (const ext of [".ts", ".js", ".mts", ".mjs"]) {
         const file = path.join(target, name + ext)
@@ -177,7 +208,7 @@ export const makeSources = Effect.fnUntraced(function* (
       const file = yield* entry(target).pipe(Effect.orElseSucceed(() => undefined))
       if (file !== target) listings.add(target)
       if (file === undefined) {
-        yield* warn(`plugin ${target} has no server.* or index.* entry; skipped`)
+        yield* warn(`plugin ${target} has no package.json exports, server.* or index.* entry; skipped`)
         return undefined
       }
       const { graph, revision, plugin } = yield* importEntry(file)

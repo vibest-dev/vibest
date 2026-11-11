@@ -97,6 +97,33 @@ const checks: ReadonlyArray<Check> = [
       await fs.rm(path.join(w.vibestHome, "plugins", "refuse.ts"))
     },
   },
+  {
+    id: "G10",
+    title: "a plugin folder loads its package.json exports entry and recovers once its missing dependency is installed",
+    run: async (w) => {
+      const folder = path.join(w.vibestHome, "plugins", "packaged")
+      await write(
+        path.join(folder, "package.json"),
+        JSON.stringify({ name: "e2e-packaged", type: "module", exports: { "./server": { import: "./src/main.ts" } } }),
+      )
+      await write(
+        path.join(folder, "src", "main.ts"),
+        `import id from "e2e-dep"\n${plugin("packaged").replace('id: "packaged"', "id")}`,
+      )
+      await until("the missing dependency reported", async () =>
+        (await list(w)).some(
+          (p) => p.status === "failed" && p.source.endsWith("main.ts") && (p.error ?? "").includes("e2e-dep"),
+        ),
+      )
+      const dependency = path.join(folder, "node_modules", "e2e-dep")
+      await write(path.join(dependency, "package.json"), JSON.stringify({ name: "e2e-dep", exports: "./index.js" }))
+      await write(path.join(dependency, "index.js"), `export default "packaged"\n`)
+      await until("the plugin active after the install", async () =>
+        (await list(w)).some((p) => p.id === "packaged" && p.status === "active" && p.source.endsWith("main.ts")),
+      )
+      await fs.rm(folder, { recursive: true })
+    },
+  },
 ]
 
 export default checks

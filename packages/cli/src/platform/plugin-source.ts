@@ -16,12 +16,40 @@ const resolveLocal = (specifier: string, dir: string): { readonly file: string }
   }
 }
 
+const forgetCachedLookups = (directory: string) => {
+  try {
+    Bun.resolveSync(path.join(directory, ".vibest-forget"), directory)
+  } catch {
+    return
+  }
+}
+
+const ancestors = (directory: string): ReadonlyArray<string> => {
+  const parent = path.dirname(directory)
+  return parent === directory ? [directory] : [directory, ...ancestors(parent)]
+}
+
+const packageName = (specifier: string) =>
+  specifier
+    .split("/")
+    .slice(0, specifier.startsWith("@") ? 2 : 1)
+    .join("/")
+
+const installedFolders = (specifier: string, directory: string) =>
+  ancestors(directory).map((dir) => ({ dir, folder: path.join(dir, "node_modules", packageName(specifier)) }))
+
 const loader = (file: string) =>
   file.endsWith("x") ? (file.endsWith("tsx") ? "tsx" : "jsx") : /\.[cm]?ts$/.test(file) ? "ts" : "js"
 
-export const graph = (entry: string) => {
+export const graph = (entry: string, provided: (specifier: string) => boolean) => {
   const files = new Set<string>()
   const unresolved = new Set<string>()
+  const visitPackage = (specifier: string, directory: string) => {
+    const folders = installedFolders(specifier, directory)
+    const installed = folders.find(({ folder }) => fs.existsSync(folder))
+    if (installed === undefined) for (const { folder } of folders) unresolved.add(folder)
+    else for (const dir of [installed.dir, installed.folder]) forgetCachedLookups(dir)
+  }
   const visit = (file: string) => {
     if (files.has(file) || (file !== entry && file.split(path.sep).includes("node_modules"))) return
     files.add(file)
@@ -33,7 +61,10 @@ export const graph = (entry: string) => {
       return
     }
     for (const item of imports) {
-      if (!LOCAL.test(item.path)) continue
+      if (!LOCAL.test(item.path)) {
+        if (!module.isBuiltin(item.path) && !provided(item.path)) visitPackage(item.path, path.dirname(file))
+        continue
+      }
       const resolved = resolveLocal(item.path, path.dirname(file))
       if ("file" in resolved) visit(resolved.file)
       else unresolved.add(path.dirname(resolved.missing))

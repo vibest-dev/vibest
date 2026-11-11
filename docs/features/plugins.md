@@ -38,3 +38,9 @@ builtin harness.
 
 A user plugin can add a terminal runtime and route an agent to it; the agent starts there and reports its status from
 it.
+
+## G10. A plugin folder with a package.json
+
+A plugin folder whose `package.json` maps `exports` loads the entry the map names. While a package it imports is not
+installed it is listed as failed with the missing package; installing the package into its `node_modules` makes it
+active without editing the plugin or restarting vibestd.
