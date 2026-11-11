@@ -49,7 +49,7 @@ export interface RuntimeCalls {
   readonly close: { readonly terminal: string }
   readonly run: { readonly terminal: string; readonly argv: ReadonlyArray<string> }
   readonly present: { readonly terminal: string; readonly info: Readonly<Record<string, string>> }
-  readonly see: { readonly terminal: string; readonly turn: number }
+  readonly see: { readonly terminal: string; readonly execution: number }
   readonly focus: { readonly terminal: string }
 }
 
@@ -85,8 +85,8 @@ export class FakeRuntime extends Context.Service<
       target: string,
     ) => Effect.Effect<{ readonly terminal: string; readonly agent: FakeAgent } | undefined>
     readonly updateAgent: (target: string, f: (agent: FakeAgent) => FakeAgent) => Effect.Effect<void>
-    readonly endTurn: (target: string) => Effect.Effect<void>
-    readonly finishTurn: (terminal: string) => Effect.Effect<void>
+    readonly endExecution: (target: string) => Effect.Effect<void>
+    readonly finishExecution: (terminal: string) => Effect.Effect<void>
     readonly addWorkspace: (id: string, root: string, path?: string) => Effect.Effect<void>
     readonly addPane: (paneId: string, workspaceId: string, cwd: string) => Effect.Effect<void>
     readonly seedAgent: (terminal: string) => Effect.Effect<void>
@@ -119,7 +119,7 @@ export class FakeRuntime extends Context.Service<
       const marks = yield* Ref.make(HashMap.empty<string, R.Seen>())
       const markOf = (terminal: string) =>
         Effect.map(Ref.get(marks), (map) =>
-          Option.getOrElse(HashMap.get(map, terminal), (): R.Seen => ({ turn: 0, seen: 0 })),
+          Option.getOrElse(HashMap.get(map, terminal), (): R.Seen => ({ execution: 0, seen: 0 })),
         )
       const mark = (terminal: string, f: (now: R.Seen) => R.Seen) =>
         markOf(terminal).pipe(
@@ -162,7 +162,7 @@ export class FakeRuntime extends Context.Service<
           ),
         )
 
-      const endTurn = (target: string) =>
+      const endExecution = (target: string) =>
         updateAgent(target, (agent) => ({ ...agent, status: "idle", seq: agent.seq + 1 }))
 
       const awaitHold = (method: HoldMethod, target: string | undefined) =>
@@ -468,12 +468,12 @@ export class FakeRuntime extends Context.Service<
         present: (terminal, info) =>
           call("present", { terminal: terminal.id, info: { ...info } }, terminal.id, Effect.void),
         seen: (terminal) => markOf(terminal.id),
-        see: (terminal, turn) =>
+        see: (terminal, execution) =>
           call(
             "see",
-            { terminal: terminal.id, turn },
+            { terminal: terminal.id, execution },
             terminal.id,
-            mark(terminal.id, (now) => ({ ...now, seen: turn })),
+            mark(terminal.id, (now) => ({ ...now, seen: execution })),
           ),
         attach: () => ["fake", "attach"],
         ...(options.noFocus
@@ -511,8 +511,8 @@ export class FakeRuntime extends Context.Service<
             }),
           ),
         updateAgent,
-        endTurn,
-        finishTurn: (terminal) => mark(terminal, (now) => ({ ...now, turn: now.turn + 1 })),
+        endExecution,
+        finishExecution: (terminal) => mark(terminal, (now) => ({ ...now, execution: now.execution + 1 })),
         addWorkspace: (id, root, path = root) =>
           Ref.update(workspaces, (map) => HashMap.set(map, id, { path, root, open: true })),
         addPane,

@@ -73,7 +73,7 @@ export const sessionPrompting = (deps: {
     })
 
   const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
-  const sawTurnStart = (id: string) => Effect.flatMap(track(id), (r) => Ref.set(r.sawWorking, true))
+  const sawExecutionStart = (id: string) => Effect.flatMap(track(id), (r) => Ref.set(r.sawWorking, true))
 
   const pickedUp = (session: SessionRow, state: "working" | "blocked") =>
     Effect.gen(function* () {
@@ -99,8 +99,10 @@ export const sessionPrompting = (deps: {
       subscription,
       pickupNow(h, session, terminal).pipe(Effect.map((picked) => (picked ? Option.some(true) : Option.none()))),
       (event) =>
-        event.type === "live.turn_start" && event.sessionId === session.id && event.at >= session.turnPromptedAt
-          ? Effect.as(sawTurnStart(session.id), Option.some(true))
+        event.type === "live.execution_start" &&
+        event.sessionId === session.id &&
+        event.at >= session.executionPromptedAt
+          ? Effect.as(sawExecutionStart(session.id), Option.some(true))
           : event.type === "live.state" &&
               sameTerminal(event.terminal, terminal) &&
               (event.state === "working" || event.state === "blocked")
@@ -166,22 +168,22 @@ export const sessionPrompting = (deps: {
   ) {
     const kept = yield* db.openExecution(session.id)
     const begin = Effect.flatMap(Clock.currentTimeMillis, (at) => db.beginExecution(session.id, at))
-    let turn = kept
-    if (turn === undefined) {
+    let execution = kept
+    if (execution === undefined) {
       const begun = yield* begin
       if (!begun.opened) return undefined
-      turn = begun.turn
+      execution = begun.execution
     }
     const standing = Effect.suspend(() =>
       Effect.map(db.openExecution(session.id), (open) =>
-        open === turn ? ("mine" as const) : open === undefined ? ("closed" as const) : ("busy" as const),
+        open === execution ? ("mine" as const) : open === undefined ? ("closed" as const) : ("busy" as const),
       ),
     )
     const adapter = yield* harnesses.get(session.harnessId)
     const state = yield* awaitReady(h, terminal, adapter, session.id).pipe(
       Effect.onExit((exit) =>
         kept === undefined && !Exit.isSuccess(exit)
-          ? Effect.uninterruptible(db.closeExecution(session.id, turn!, "not_started"))
+          ? Effect.uninterruptible(db.closeExecution(session.id, execution!, "not_started"))
           : Effect.void,
       ),
     )
@@ -190,7 +192,7 @@ export const sessionPrompting = (deps: {
     if (before === "closed") {
       const begun = yield* begin
       if (!begun.opened) return undefined
-      turn = begun.turn
+      execution = begun.execution
     }
     const now = yield* Clock.currentTimeMillis
     yield* onHandover
@@ -198,13 +200,13 @@ export const sessionPrompting = (deps: {
     yield* Ref.set(r.endedAt, undefined)
     yield* Ref.set(r.blockedNotified, false)
     yield* Ref.set(r.sawWorking, false)
-    yield* db.stampExecution(session.id, turn, now)
+    yield* db.stampExecution(session.id, execution, now)
     yield* db.updateSession(session.id, { status: state, lastActive: now })
     const send = Ref.set(r.prompting, true).pipe(
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
     )
-    const missed = Effect.suspend(() => db.closeExecution(session.id, turn!, "not_started"))
+    const missed = Effect.suspend(() => db.closeExecution(session.id, execution!, "not_started"))
     const subscription = yield* bus.subscribe
     const delivered = yield* send.pipe(
       Effect.as(false),
@@ -220,11 +222,11 @@ export const sessionPrompting = (deps: {
     )
     if (delivered) return undefined
     if (state === "unknown" && adapter.ready === "runtime") {
-      yield* sawTurnStart(session.id)
+      yield* sawExecutionStart(session.id)
       yield* db.updateSession(session.id, { status: "working" })
       return undefined
     }
-    const round = { ...session, turnPromptedAt: now }
+    const round = { ...session, executionPromptedAt: now }
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
     if (yield* confirmed(h, round, terminal, subscription)) return undefined
     if (yield* settledElsewhere) return undefined
@@ -239,5 +241,5 @@ export const sessionPrompting = (deps: {
     return `task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`
   }, Effect.scoped)
 
-  return { awaitReady, sawTurnStart, busy, busyOf, settleAfterInterrupt, interruptAgent, prompt }
+  return { awaitReady, sawExecutionStart, busy, busyOf, settleAfterInterrupt, interruptAgent, prompt }
 }

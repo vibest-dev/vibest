@@ -255,8 +255,8 @@ export function register(on: On, _options?: unknown) {
       const host = nativeHost($)
       const who = await identity(host).catch(() => undefined)
       if (who && who.agent !== "coordinator")
-        void report(host, hookRoute("claude", "turn-end"), {
-          hook_event_name: "TurnComplete",
+        void report(host, hookRoute("claude", "execution-end"), {
+          hook_event_name: "ExecutionComplete",
           session_id: await host.conversation().catch(() => ""),
           reason: event.reason,
           last_assistant_message: event.answer,

@@ -168,7 +168,7 @@ describe("contract", () => {
       const repo = yield* makeRepository
       const c = authed(yield* connect(layout.socket), cliHeaders(repo))
       const { id } = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until((yield* Db).getSession(id), (row) => row?.turnState === "open")
+      yield* until((yield* Db).getSession(id), (row) => row?.executionState === "open")
       const worktree = (yield* (yield* Db).sessionDirectory(id))!
       const w = yield* wire
       yield* w.send(request(1, "Remove", { id }, cliHeaders("/")))
@@ -206,7 +206,7 @@ describe("contract", () => {
         sessionHeaders({ sessionId: main.sessionId, projectId: project }),
       )
       const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (row) => row?.turnState === "open")
+      yield* until(db.getSession(id), (row) => row?.executionState === "open")
       yield* settled
       const worktree = (yield* db.sessionDirectory(id))!
       const w = yield* wire

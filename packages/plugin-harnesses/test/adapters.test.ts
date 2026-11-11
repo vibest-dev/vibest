@@ -41,53 +41,53 @@ describe("HarnessAdapter", () => {
     assert.notInclude(dashLeadingArgs, "--yolo")
   })
 
-  it("cursor reports its turn end at its response; its stop hook is not one", () => {
-    const turnEnd = ADAPTERS.cursor.turnEnd!
+  it("cursor reports its execution end at its response; its stop hook is not one", () => {
+    const executionEnd = ADAPTERS.cursor.executionEnd!
     const reply = { hook_event_name: "afterAgentResponse", text: "done" }
-    assert.deepStrictEqual(turnEnd(reply, false), { result: reply })
+    assert.deepStrictEqual(executionEnd(reply, false), { end: reply })
     for (const status of ["completed", "aborted", "error"])
-      assert.isUndefined(turnEnd({ hook_event_name: "stop", status }, false))
-    assert.isUndefined(turnEnd(reply, true))
+      assert.isUndefined(executionEnd({ hook_event_name: "stop", status }, false))
+    assert.isUndefined(executionEnd(reply, true))
   })
 
-  it("claude reports every reason of the plugin's TurnComplete: answer as it is, aborted, refusal and error failed", () => {
-    const turnEnd = ADAPTERS.claude.turnEnd!
+  it("claude reports every reason of the plugin's ExecutionComplete: answer as it is, aborted, refusal and error failed", () => {
+    const executionEnd = ADAPTERS.claude.executionEnd!
     const answer = {
-      hook_event_name: "TurnComplete",
+      hook_event_name: "ExecutionComplete",
       session_id: "c1",
       reason: "answer",
       last_assistant_message: "done",
     }
-    assert.deepStrictEqual(turnEnd(answer, false), { result: answer })
-    assert.isUndefined(turnEnd(answer, true))
+    assert.deepStrictEqual(executionEnd(answer, false), { end: answer })
+    assert.isUndefined(executionEnd(answer, true))
     const aborted = { ...answer, reason: "aborted", last_assistant_message: "" }
-    assert.deepStrictEqual(turnEnd(aborted, false), {
-      result: {
+    assert.deepStrictEqual(executionEnd(aborted, false), {
+      end: {
         ...aborted,
         aborted: true,
         error: "interrupted",
-        error_details: "the turn was stopped in its terminal (Esc) before it ended",
+        error_details: "the execution was stopped in its terminal (Esc) before it ended",
       },
     })
-    assert.isUndefined(turnEnd(aborted, true))
+    assert.isUndefined(executionEnd(aborted, true))
     const error = { ...answer, reason: "error", last_assistant_message: "" }
-    assert.deepStrictEqual(turnEnd(error, false), {
-      result: { ...error, error: "error", error_details: "the turn ended on an API error" },
+    assert.deepStrictEqual(executionEnd(error, false), {
+      end: { ...error, error: "error", error_details: "the execution ended on an API error" },
     })
-    assert.deepStrictEqual(turnEnd({ ...error, last_assistant_message: " API Error: 500 " }, false), {
-      result: {
+    assert.deepStrictEqual(executionEnd({ ...error, last_assistant_message: " API Error: 500 " }, false), {
+      end: {
         ...error,
         last_assistant_message: " API Error: 500 ",
         error: "error",
-        error_details: "the turn ended on an API error",
+        error_details: "the execution ended on an API error",
       },
     })
     const refusal = { ...answer, reason: "refusal", refusal: { category: "cyber", explanation: "not that" } }
-    assert.deepStrictEqual(turnEnd(refusal, false), {
-      result: { ...refusal, error: "refusal", error_details: "cyber: not that" },
+    assert.deepStrictEqual(executionEnd(refusal, false), {
+      end: { ...refusal, error: "refusal", error_details: "cyber: not that" },
     })
-    assert.deepStrictEqual(turnEnd({ ...refusal, refusal: { category: null, explanation: null } }, false), {
-      result: {
+    assert.deepStrictEqual(executionEnd({ ...refusal, refusal: { category: null, explanation: null } }, false), {
+      end: {
         ...refusal,
         refusal: { category: null, explanation: null },
         error: "refusal",
@@ -95,8 +95,8 @@ describe("HarnessAdapter", () => {
       },
     })
     for (const name of ["Stop", "StopFailure", "SubagentStop"])
-      assert.isUndefined(turnEnd({ ...answer, hook_event_name: name }, false), name)
-    assert.isUndefined(turnEnd({ ...answer, session_id: "" }, true))
+      assert.isUndefined(executionEnd({ ...answer, hook_event_name: name }, false), name)
+    assert.isUndefined(executionEnd({ ...answer, session_id: "" }, true))
   })
 
   it("claude reads a user prompt from the plugin's prompt.submit only when the person submitted it", () => {
@@ -111,7 +111,7 @@ describe("HarnessAdapter", () => {
     assert.isUndefined(userPrompt({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" }, false))
   })
 
-  it("cursor reads a user prompt from beforeSubmitPrompt, and a thought or tool result as a turn at work", () => {
+  it("cursor reads a user prompt from beforeSubmitPrompt, and a thought or tool result as an execution at work", () => {
     const userPrompt = ADAPTERS.cursor.userPrompt!
     const event = { hook_event_name: "beforeSubmitPrompt", prompt: "look here" }
     assert.deepStrictEqual(userPrompt(event, false), { text: "look here" })

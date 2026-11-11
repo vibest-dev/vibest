@@ -746,7 +746,7 @@ export const SESSIONS = `(SELECT s.id, s.project_id, s.agent AS agent_type, s.di
     p.ended_at AS exited_at
   FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = (SELECT max(id) FROM process WHERE session_id = s.id))`
 
-export const TURNS = `(SELECT id, session_id, coalesce(outcome, 'working') AS status FROM execution)`
+export const EXECUTIONS = `(SELECT id, session_id, coalesce(outcome, 'working') AS status FROM execution)`
 
 export const readDb = (file: string) => {
   const db = new Database(file, { readonly: true })
@@ -785,7 +785,7 @@ export const expectFacts = (w: World, sessionId: string, expected: ReadonlyArray
   )
 }
 
-export const expectAnswered = async (w: World, sub: string) => {
+export const expectReplied = async (w: World, sub: string) => {
   expectFacts(w, sub, [
     "session.created",
     "process.started",
@@ -795,19 +795,22 @@ export const expectAnswered = async (w: World, sub: string) => {
     "inbox.moved",
     "execution.ended",
   ])
-  const task = row<{ status: string; turn: number | null }>(
+  const task = row<{ status: string; execution: number | null }>(
     w,
-    "SELECT status, execution_id AS turn FROM inbox WHERE session_id = ? AND kind = 'task'",
+    "SELECT status, execution_id AS execution FROM inbox WHERE session_id = ? AND kind = 'task'",
     sub,
   )
-  expect(task?.status === "delivered" && task.turn !== null, `${sub}'s task row: ${JSON.stringify(task)}`)
-  const turn = row<{ status: string; answer: string | null }>(
+  expect(task?.status === "delivered" && task.execution !== null, `${sub}'s task row: ${JSON.stringify(task)}`)
+  const execution = row<{ status: string; reply: string | null }>(
     w,
-    "SELECT outcome AS status, reply AS answer FROM execution WHERE session_id = ? AND id = ?",
+    "SELECT outcome AS status, reply FROM execution WHERE session_id = ? AND id = ?",
     sub,
-    task!.turn!,
+    task!.execution!,
   )
-  expect(turn?.status === "completed" && typeof turn.answer === "string", `${sub}'s task turn: ${JSON.stringify(turn)}`)
+  expect(
+    execution?.status === "completed" && typeof execution.reply === "string",
+    `${sub}'s task execution: ${JSON.stringify(execution)}`,
+  )
 }
 
 const READ_MODEL = ["session", "process", "execution", "inbox"] as const
@@ -936,8 +939,8 @@ export const vibestd = async (w: World, repo: string, method: string, params: un
   return firstAnswer(w, { jsonrpc: "2.0", id: 1, method, params, headers })
 }
 
-export const answerOf = async (w: World, sub: string, cwd?: string) =>
-  (await w.json<{ answer?: { text?: string | null } | null }>(["result", sub], cwd === undefined ? {} : { cwd })).answer
+export const replyOf = async (w: World, sub: string, cwd?: string) =>
+  (await w.json<{ reply?: { text?: string | null } | null }>(["result", sub], cwd === undefined ? {} : { cwd })).reply
     ?.text ?? ""
 
 export const transcript = async (w: World, cwd: string, claudeConfig = path.join(w.home, ".claude")) => {

@@ -94,7 +94,7 @@ const session = (sessionId: string): Role =>
           const { text, error } = yield* Ref.get(reply)
           const headers = yield* piHeaders(sessionId, ctx)
           const event = encodeJson({ type: "agent_settled", text, error, aborted: e.aborted })
-          yield* hookCall(layout.socket, headers, (client) => client.TurnEnd({ sessionId, harness: "pi", event }))
+          yield* hookCall(layout.socket, headers, (client) => client.ExecutionEnd({ sessionId, harness: "pi", event }))
         }),
       )
     }),

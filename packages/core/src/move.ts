@@ -112,7 +112,7 @@ export const sessionMove = (deps: {
     error: string,
     limited: number,
   ) {
-    const newerTurn = Effect.map(db.limitSource(session.id, limited), (fresh) => fresh === undefined)
+    const newerExecution = Effect.map(db.limitSource(session.id, limited), (fresh) => fresh === undefined)
     const source = yield* db.limitSource(session.id, limited)
     if (source === undefined) return true
     const task = source.working || fallbackTask || source.delivered
@@ -242,7 +242,7 @@ export const sessionMove = (deps: {
           sessionId: row.id,
           reason: "limited",
           error,
-          turn: task,
+          input: task,
           harness: row.harnessId,
           provider: row.provider ?? undefined,
           attempts: attempts(),
@@ -288,7 +288,7 @@ export const sessionMove = (deps: {
         skip(next.harness, "unavailable")
         continue
       }
-      if (!limitedEnded && (yield* newerTurn)) return true
+      if (!limitedEnded && (yield* newerExecution)) return true
       if (inPlace) {
         if ((yield* endRunning) === "denied") {
           yield* deps.finish(row, "failed", `${row.id} stayed on ${row.harnessId}: SIGTERM to its harness was refused`)

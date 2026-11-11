@@ -1,5 +1,5 @@
 import { type InboxKind } from "@vibest/schema/event"
-import { InboxRow, InboxStatus, type TurnState } from "@vibest/schema/session"
+import { InboxRow, InboxStatus, type ExecutionState } from "@vibest/schema/session"
 import { Effect } from "effect"
 
 import {
@@ -11,7 +11,7 @@ import {
   type ExecutionEnd,
 } from "./db-rows.ts"
 import type { Store } from "./db-store.ts"
-import { envelope, type TurnEnded } from "./results.ts"
+import { envelope, type ObservedEnd } from "./replies.ts"
 
 export const inboxMethods = (store: Store) => {
   const {
@@ -154,27 +154,27 @@ export const inboxMethods = (store: Store) => {
       tx(
         Effect.gen(function* () {
           const open = yield* openExecution(id)
-          if (open !== undefined) return { turn: open, opened: false }
-          return { turn: yield* startExecution(id, at), opened: true }
+          if (open !== undefined) return { execution: open, opened: false }
+          return { execution: yield* startExecution(id, at), opened: true }
         }),
       ).pipe(Effect.orDie),
 
-    stampExecution: (id: string, turn: number, at: number) =>
+    stampExecution: (id: string, execution: number, at: number) =>
       Effect.gen(function* () {
-        if ((yield* openExecution(id)) !== turn) return false
-        prompted.set(id, { execution: turn, at })
+        if ((yield* openExecution(id)) !== execution) return false
+        prompted.set(id, { execution: execution, at })
         return true
       }).pipe(Effect.orDie),
 
     closeExecution: (
       id: string,
-      turn: number,
-      status: Exclude<TurnState, "none" | "open">,
+      execution: number,
+      status: Exclude<ExecutionState, "none" | "open">,
       options: { readonly failure?: string; readonly notice?: string } = {},
     ) =>
       tx(
         Effect.gen(function* () {
-          if ((yield* openExecution(id)) !== turn) return false
+          if ((yield* openExecution(id)) !== execution) return false
           const failure = failureOf(options.failure)
           yield* endExecution(id, { outcome: status, ...(failure === undefined ? {} : { failure }) })
           if (options.notice !== undefined) yield* insertInboxRow({ sessionId: id, message: options.notice })
@@ -185,8 +185,8 @@ export const inboxMethods = (store: Store) => {
     linkTask: (id: string) =>
       tx(
         Effect.gen(function* () {
-          const turn = yield* openExecution(id)
-          if (turn !== undefined) yield* linkTask(id, turn, yield* now)
+          const execution = yield* openExecution(id)
+          if (execution !== undefined) yield* linkTask(id, execution, yield* now)
         }),
       ).pipe(Effect.orDie),
 
@@ -194,11 +194,11 @@ export const inboxMethods = (store: Store) => {
 
     executionTaken: (id: string) =>
       Effect.gen(function* () {
-        const turn = yield* openExecution(id)
-        if (turn === undefined) return false
+        const execution = yield* openExecution(id)
+        if (execution === undefined) return false
         const [row] = yield* sql<{ taken: number }>`SELECT (t.typed IS NOT NULL
             OR EXISTS (SELECT 1 FROM inbox i WHERE i.session_id = t.session_id AND i.execution_id = t.id)) AS taken
-          FROM execution t WHERE t.session_id = ${id} AND t.id = ${turn}`
+          FROM execution t WHERE t.session_id = ${id} AND t.id = ${execution}`
         return row?.taken === 1
       }).pipe(Effect.orDie),
 
@@ -230,7 +230,7 @@ export const inboxMethods = (store: Store) => {
         }),
       ).pipe(Effect.orDie),
 
-    endObserved: (id: string, end: TurnEnded) =>
+    endObserved: (id: string, end: ObservedEnd) =>
       tx(
         Effect.gen(function* () {
           if (!(yield* observable(id))) return undefined
@@ -254,7 +254,7 @@ export const inboxMethods = (store: Store) => {
           yield* updateSession(id, { status: "idle" })
           if (end.status === "failed" && !end.limited)
             yield* insertInboxRow(
-              { sessionId: id, message: `${id}'s turn ended with an error: ${end.failure}` },
+              { sessionId: id, message: `${id}'s execution ended with an error: ${end.failure}` },
               end.at,
             )
           return end.status
@@ -266,7 +266,7 @@ export const inboxMethods = (store: Store) => {
         Effect.gen(function* () {
           const stamp = at === undefined ? undefined : Math.max(at, yield* now)
           yield* endExecution(id, end, stamp)
-          const { turnState: _, ...rest } = patch
+          const { executionState: _, ...rest } = patch
           yield* updateSession(id, rest)
           if (notice !== undefined) yield* insertInboxRow({ sessionId: id, message: notice }, stamp)
         }),
@@ -443,14 +443,14 @@ export const inboxMethods = (store: Store) => {
         Effect.orDie,
       ),
 
-    latestAnswer: (sessionId: string) =>
+    latestReply: (sessionId: string) =>
       sql<{
-        turn: number
+        execution: number
         status: string
         text: string | null
         failure: string | null
         endedAt: number
-      }>`SELECT id AS turn, outcome AS status, reply AS text, failure, ended_at FROM execution
+      }>`SELECT id AS execution, outcome AS status, reply AS text, failure, ended_at FROM execution
         WHERE session_id = ${sessionId} AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1`.pipe(
         Effect.map((rows) => rows[0]),
         Effect.orDie,

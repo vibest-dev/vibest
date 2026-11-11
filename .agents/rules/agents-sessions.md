@@ -1,7 +1,7 @@
 # Agents and Sessions
 
 1. One main agent per project. Starting it elsewhere asks to move it here and continue its conversation; `y` moves it, anything else fails and changes nothing.
-2. A notice reaches the main agent only when it has something to act on: each notice costs it a turn.
+2. A notice reaches the main agent only when it has something to act on: each notice costs it an execution.
 3. A session has a title (`vibest run --title`): 3 to 6 words, verb first, any language.
 4. Agent types read as nouns: General Agent, later Planner Agent and Reviewer Agent.
 

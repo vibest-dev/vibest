@@ -97,7 +97,7 @@ started it is the `origin` of its `session.created` fact (peer, project, reportT
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
 notices go to B's own inbox delivery and no outbox row is written for it.
 
-Every notice of a peer session with a `reportTo`, and every `vibest send` it makes to that creator, goes to B's `outbox` as a `notice`; a turn end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. B still writes the
+Every notice of a peer session with a `reportTo`, and every `vibest send` it makes to that creator, goes to B's `outbox` as a `notice`; an execution end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. B still writes the
 inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
 B's own delivery never sees it. With no `peer` row nothing is queued. `Peer.Outbox` streams
 the peer's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
@@ -210,7 +210,7 @@ gets B when vibest adds or reaches B, gets it back whenever vibest needs it and 
 - **`machine ls`** gives per machine the runtimes of its last Hello (`runtimes`, `runtimesAt`), each with `here:
   {visible, as?, note?}` from `ensure`, and the last hook notes per plugin with their time (`notes`).
 - **Stepping in.** Keys typed into the terminal on A go through the runtime's own link (A's hc core, B's hc core) to
-  the harness on B. B records the typed turn as any local one, and what the session sends to A's main agent reaches it once as the
+  the harness on B. B records the typed execution as any local one, and what the session sends to A's main agent reaches it once as the
   `<name>/<id8>: …` notice through B's outbox.
 
 The hc plugin (`runtime-herdr-core/src/machines.ts`) finds its mirror row by the link's core id under any name:

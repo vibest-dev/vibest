@@ -1,19 +1,19 @@
 import { assert, describe } from "@effect/vitest"
 import { Harnesses } from "@vibest/core/harness"
 import { Integration } from "@vibest/core/integration"
-import { turnEndFrom } from "@vibest/core/results"
+import { executionEndFrom } from "@vibest/core/replies"
 import { Clock, Effect, Fiber } from "effect"
 import { SqlClient } from "effect/sql"
 
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { answerOf, eventsOf, settled, until, writeResult } from "./lib/observe.ts"
+import { replyOf, eventsOf, settled, until, writeEnd } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { idleSession, spawnWorking, sqlNotices, test } from "./lib/sessions-helpers.ts"
 
 const observedEnd = (harness: string, payload: object) =>
   Effect.gen(function* () {
     const adapter = yield* (yield* Harnesses).get(harness)
-    return turnEndFrom(adapter, payload as Record<string, unknown>, yield* Clock.currentTimeMillis)
+    return executionEndFrom(adapter, payload as Record<string, unknown>, yield* Clock.currentTimeMillis)
   })
 
 const ends = (id: string) => eventsOf(id, "execution.ended").pipe(Effect.map((rows) => rows.map((row) => row.data)))
@@ -28,14 +28,14 @@ const pendingSends = (id: string) =>
     )
   })
 
-describe("observed turn end", () => {
+describe("observed execution end", () => {
   test(
-    "an end closes the open turn with its reply; an end with no open turn is a turn of its own",
+    "an end closes the open execution with its reply; an end with no open execution is an execution of its own",
     Effect.gen(function* () {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "first" })
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
-      yield* writeResult(id, "pi", { text: "second" })
+      yield* writeEnd(id, "pi", { text: "first" })
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
+      yield* writeEnd(id, "pi", { text: "second" })
       assert.deepStrictEqual(
         (yield* ends(id)).map((end) => [end.outcome, end.reply]),
         [
@@ -43,7 +43,7 @@ describe("observed turn end", () => {
           ["completed", "second"],
         ],
       )
-      assert.strictEqual(yield* answerOf(id), "second")
+      assert.strictEqual(yield* replyOf(id), "second")
       assert.isEmpty(yield* sqlNotices(id))
     }),
     { hooked: ["pi"] },
@@ -58,18 +58,18 @@ describe("observed turn end", () => {
       assert.isUndefined(yield* db.endObserved(entry!.id, yield* observedEnd("pi", { text: "x" })))
       assert.isUndefined(yield* db.endObserved(id, yield* observedEnd("claude", { last_assistant_message: "x" })))
       assert.deepStrictEqual(yield* ends(id), [])
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
     }),
     { hooked: ["pi"] },
   )
 
   test(
-    "an interrupted end closes the open turn as interrupted and tells no one; with no open turn it writes nothing",
+    "an interrupted end closes the open execution as interrupted and tells no one; with no open execution it writes nothing",
     Effect.gen(function* () {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "", error: "aborted", aborted: true })
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted")
-      yield* writeResult(id, "pi", { text: "", error: "aborted", aborted: true })
+      yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "interrupted")
+      yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
       assert.lengthOf(yield* ends(id), 1)
       assert.isEmpty(yield* sqlNotices(id))
     }),
@@ -80,26 +80,26 @@ describe("observed turn end", () => {
     "a failed end notifies once in the same write; a usage limit does not",
     Effect.gen(function* () {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "", error: "model_error" })
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
+      yield* writeEnd(id, "pi", { text: "", error: "model_error" })
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "failed")
       const notices = yield* sqlNotices(id)
       assert.lengthOf(notices, 1)
-      assert.include(notices[0], "turn ended with an error: model_error")
+      assert.include(notices[0], "execution ended with an error: model_error")
       const other = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(other.id, "pi", { text: "", error: "rate_limit" })
-      assert.strictEqual((yield* db.getSession(other.id))!.turnState, "failed")
+      yield* writeEnd(other.id, "pi", { text: "", error: "rate_limit" })
+      assert.strictEqual((yield* db.getSession(other.id))!.executionState, "failed")
       assert.isEmpty(yield* sqlNotices(other.id))
     }),
     { hooked: ["pi"] },
   )
 
   test(
-    "a close vibestd decided writes nothing when an observed end already closed that turn",
+    "a close vibestd decided writes nothing when an observed end already closed that execution",
     Effect.gen(function* () {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
-      const turn = (yield* db.openExecution(id))!
-      yield* writeResult(id, "pi", { text: "done" })
-      assert.isFalse(yield* db.closeExecution(id, turn, "lost", { failure: "gone", notice: "lost it" }))
+      const execution = (yield* db.openExecution(id))!
+      yield* writeEnd(id, "pi", { text: "done" })
+      assert.isFalse(yield* db.closeExecution(id, execution, "lost", { failure: "gone", notice: "lost it" }))
       assert.deepStrictEqual(
         (yield* ends(id)).map((end) => end.outcome),
         ["completed"],
@@ -117,12 +117,12 @@ describe("observed turn end", () => {
       const held = yield* herdr.hold("state", id)
       const checking = yield* Effect.forkChild(sessions.check(id))
       yield* held.reached
-      yield* (yield* Integration).turnEnd(
+      yield* (yield* Integration).executionEnd(
         { id, agent: "general", harness: "pi" },
         JSON.stringify({ type: "agent_settled", text: "done while locked" }),
       )
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
-      assert.strictEqual(yield* answerOf(id), "done while locked")
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
+      assert.strictEqual(yield* replyOf(id), "done while locked")
       yield* held.release()
       yield* Fiber.join(checking)
       assert.lengthOf(yield* ends(id), 1)
@@ -131,26 +131,26 @@ describe("observed turn end", () => {
   )
 
   test(
-    "archive waits while a turn the user typed is open",
+    "archive waits while an execution the user typed is open",
     Effect.gen(function* () {
       const { id, sessions, db } = yield* idleSession(yield* makeRepository)
       yield* sessions.userPrompt(id, "typed")
       assert.isFalse(yield* db.archiveIfNoPending(id))
-      yield* writeResult(id, "pi", { text: "done" })
+      yield* writeEnd(id, "pi", { text: "done" })
       assert.isTrue(yield* db.archiveIfNoPending(id))
     }),
     { hooked: ["pi"] },
   )
 
   test(
-    "a message waiting for the harness stays queued when the user opens a turn first, and goes in after it",
+    "a message waiting for the harness stays queued when the user opens an execution first, and goes in after it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* idleSession(yield* makeRepository)
       const held = yield* herdr.hold("state", id, 1)
       yield* sessions.send(id, "next")
       yield* held.reached
-      yield* writeResult(id, "pi", { text: "" })
+      yield* writeEnd(id, "pi", { text: "" })
       yield* sessions.userPrompt(id, "typed first")
       yield* held.release()
       yield* settled
@@ -159,8 +159,8 @@ describe("observed turn end", () => {
         "next",
       )
       assert.deepStrictEqual(yield* pendingSends(id), ["next"])
-      yield* herdr.endTurn(id)
-      yield* writeResult(id, "pi", { text: "typed done" })
+      yield* herdr.endExecution(id)
+      yield* writeEnd(id, "pi", { text: "typed done" })
       yield* sessions.check(id)
       yield* until(herdr.callsTo("send"), (calls) => calls.some((call) => call.text === "next"))
     }),
@@ -168,7 +168,7 @@ describe("observed turn end", () => {
   )
 
   test(
-    "a message is delivered into the turn it was handed to, even when that turn ended before the delivery was recorded",
+    "a message is delivered into the execution it was handed to, even when that execution ended before the delivery was recorded",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const herdr = yield* FakeRuntime
@@ -177,26 +177,26 @@ describe("observed turn end", () => {
       yield* sessions.send(id, "next")
       yield* held.reached
       const handed = yield* db.openExecution(id)
-      yield* writeResult(id, "pi", { text: "done fast" })
+      yield* writeEnd(id, "pi", { text: "done fast" })
       yield* held.release()
       const [row] = yield* until(
-        sql<{ status: string; turn: number | null }>`SELECT status, execution_id AS turn FROM inbox
+        sql<{ status: string; execution: number | null }>`SELECT status, execution_id AS execution FROM inbox
           WHERE session_id = ${id} AND content = 'next'`.pipe(Effect.orDie),
         (rows) => rows[0]?.status === "delivered",
       )
       assert.isDefined(handed)
-      assert.strictEqual(row!.turn, handed)
+      assert.strictEqual(row!.execution, handed)
     }),
     { hooked: ["pi"] },
   )
 
   test(
-    "a usage limit is not moved when a turn the user typed opened while check looked at the runtime",
+    "a usage limit is not moved when an execution the user typed opened while check looked at the runtime",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "", error: "rate_limit" })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: "", error: "rate_limit" })
+      yield* herdr.endExecution(id)
       const held = yield* herdr.hold("state", id)
       const checking = yield* Effect.forkChild(sessions.check(id))
       yield* held.reached
@@ -214,7 +214,7 @@ describe("observed turn end", () => {
   )
 
   test(
-    "a forced archive closes the turn the user typed while it waited for the interrupt",
+    "a forced archive closes the execution the user typed while it waited for the interrupt",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
@@ -222,13 +222,13 @@ describe("observed turn end", () => {
       const held = yield* herdr.hold("send", id)
       const removing = yield* Effect.forkChild(sessions.remove(id))
       yield* held.reached
-      yield* writeResult(id, "pi", { text: "", error: "aborted", aborted: true })
+      yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
       yield* sessions.userPrompt(id, "typed during the archive")
       assert.isDefined(yield* db.openExecution(id))
       yield* held.release()
       yield* Fiber.join(removing)
       assert.isUndefined(yield* db.openExecution(id))
-      assert.notStrictEqual((yield* db.getSession(id))!.turnState, "open")
+      assert.notStrictEqual((yield* db.getSession(id))!.executionState, "open")
       yield* sessions.userPrompt(id, "typed after the archive")
       assert.isUndefined(yield* db.openExecution(id))
     }),
@@ -236,20 +236,20 @@ describe("observed turn end", () => {
   )
 
   test(
-    "an interrupt that loses to the turn end reports the turn finished and keeps its reply",
+    "an interrupt that loses to the execution end reports the execution finished and keeps its reply",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       const held = yield* herdr.hold("send", id)
       const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
       yield* held.reached
-      yield* writeResult(id, "pi", { text: "finished first" })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: "finished first" })
+      yield* herdr.endExecution(id)
       yield* held.release()
       const result = yield* Fiber.join(interrupting)
-      assert.include(result.message, "finished its turn before the interrupt took effect")
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "completed")
-      assert.strictEqual(yield* answerOf(id), "finished first")
+      assert.include(result.message, "finished its execution before the interrupt took effect")
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
+      assert.strictEqual(yield* replyOf(id), "finished first")
     }),
     { hooked: ["pi"] },
   )

@@ -11,7 +11,7 @@ import {
   savedSession,
   tempDirectory,
   testLayer,
-  TURNS,
+  EXECUTIONS,
   type TestServices,
   until,
   untilVirtual,
@@ -128,7 +128,7 @@ const lease = () =>
   Object.getOwnPropertyDescriptor(UserMessageComponent.prototype, "vibestCompactUserMessagesLease")?.value
 const tuiStart = { mode: "tui", hasUI: true, sessionManager: { getSessionId: () => "s" }, ui: { notify: () => {} } }
 
-const turnEnd = (mode: string, sessionId: string, notes: Array<string> = []) => ({
+const executionEnd = (mode: string, sessionId: string, notes: Array<string> = []) => ({
   mode,
   sessionManager: { getSessionId: () => sessionId },
   ui: { notify: (message: string) => void notes.push(message) },
@@ -184,8 +184,8 @@ describe("pi-vibest", () => {
           status: "idle" as const,
           startedAt: 1,
           exitedAt: 1,
-          turnState: "none" as const,
-          turnPromptedAt: 0,
+          executionState: "none" as const,
+          executionPromptedAt: 0,
           metadata: {},
           createdAt: 1,
           lastActive: 1,
@@ -254,8 +254,8 @@ describe("pi-vibest", () => {
             status: "idle",
             startedAt: 1,
             exitedAt: 1,
-            turnState: "none",
-            turnPromptedAt: 0,
+            executionState: "none",
+            executionPromptedAt: 0,
             metadata: {},
             createdAt: 1,
             lastActive: 1,
@@ -300,8 +300,8 @@ describe("pi-vibest", () => {
           status: "idle" as const,
           startedAt: 1,
           exitedAt: 1,
-          turnState: "none" as const,
-          turnPromptedAt: 0,
+          executionState: "none" as const,
+          executionPromptedAt: 0,
           metadata: {},
           createdAt: 1,
           lastActive: 1,
@@ -449,8 +449,8 @@ describe("pi-vibest", () => {
         status: "idle" as const,
         startedAt: 1,
         exitedAt: 1,
-        turnState: "none" as const,
-        turnPromptedAt: 0,
+        executionState: "none" as const,
+        executionPromptedAt: 0,
         metadata: {},
         createdAt: 1,
         lastActive: 1,
@@ -548,8 +548,8 @@ describe("pi-vibest", () => {
         status: "idle" as const,
         startedAt: 1,
         exitedAt: 1,
-        turnState: "none" as const,
-        turnPromptedAt: 0,
+        executionState: "none" as const,
+        executionPromptedAt: 0,
         metadata: {},
         createdAt: 1,
         lastActive: 1,
@@ -563,7 +563,7 @@ describe("pi-vibest", () => {
         sql<{
           input: string
           inbox: number | null
-        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = 'abcd1234-abcd-4abc-8abc-abcd1234abcd' ORDER BY id`.pipe(
+        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = 'abcd1234-abcd-4abc-8abc-abcd1234abcd' ORDER BY id`.pipe(
           Effect.orDie,
         )
       const s = yield* session({
@@ -587,7 +587,9 @@ describe("pi-vibest", () => {
       assert.deepStrictEqual(
         yield* sql<{
           n: number
-        }>`SELECT count(*) AS n FROM ${sql.literal(TURNS)} m WHERE session_id = ${coord.sessionId}`.pipe(Effect.orDie),
+        }>`SELECT count(*) AS n FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${coord.sessionId}`.pipe(
+          Effect.orDie,
+        ),
         [{ n: 0 }],
       )
     }),
@@ -611,7 +613,7 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Coordinator: a TUI startup turn reports its session id once; /new, /resume and /fork report before the next turn",
+    "Coordinator: a TUI startup execution reports its session id once; /new, /resume and /fork report before the next execution",
     Effect.gen(function* () {
       const db = yield* Db
       const c = yield* cli
@@ -625,33 +627,33 @@ describe("pi-vibest", () => {
         VIBEST_COMMAND: '["vibest"]',
       }
       const s = yield* session(env)
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("rpc", "child"))
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("print", "child"))
-      yield* s.emit("session_start", { type: "session_start", reason: "startup" }, turnEnd("tui", "s-startup"))
-      yield* s.emit("session_start", { type: "session_start", reason: "reload" }, turnEnd("tui", "s-reload"))
-      yield* s.emit("session_start", { type: "session_start", reason: "new" }, turnEnd("rpc", "s-rpc"))
-      yield* s.emit("session_start", { type: "session_start", reason: "new" }, turnEnd("print", "s-print"))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("rpc", "child"))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("print", "child"))
+      yield* s.emit("session_start", { type: "session_start", reason: "startup" }, executionEnd("tui", "s-startup"))
+      yield* s.emit("session_start", { type: "session_start", reason: "reload" }, executionEnd("tui", "s-reload"))
+      yield* s.emit("session_start", { type: "session_start", reason: "new" }, executionEnd("rpc", "s-rpc"))
+      yield* s.emit("session_start", { type: "session_start", reason: "new" }, executionEnd("print", "s-print"))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.isNull(yield* saved)
       assert.isFalse(
         ["child", "s-startup", "s-reload", "s-rpc", "s-print"].some((id) => valuesStoredByRefSet.includes(id)),
       )
       const s1 = `s1:${launched.sessionId}`
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", s1))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
       yield* until(
         Effect.sync(() => valuesStoredByRefSet.includes(s1)),
         Boolean,
       )
       assert.strictEqual(yield* saved, s1)
       yield* db.reportCoordinatorSession(launched.sessionId, "pi", "other")
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", s1))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(yield* saved, "other")
-      yield* s.emit("session_start", { type: "session_start", reason: "new" }, turnEnd("tui", "s-new"))
+      yield* s.emit("session_start", { type: "session_start", reason: "new" }, executionEnd("tui", "s-new"))
       yield* until(saved, (id) => id === "s-new")
-      yield* s.emit("session_start", { type: "session_start", reason: "resume" }, turnEnd("tui", "s-resume"))
+      yield* s.emit("session_start", { type: "session_start", reason: "resume" }, executionEnd("tui", "s-resume"))
       yield* until(saved, (id) => id === "s-resume")
-      yield* s.emit("session_start", { type: "session_start", reason: "fork" }, turnEnd("tui", "s-fork"))
+      yield* s.emit("session_start", { type: "session_start", reason: "fork" }, executionEnd("tui", "s-fork"))
       yield* until(saved, (id) => id === "s-fork")
       yield* until(
         Effect.sync(() => valuesStoredByRefSet.includes("s-fork")),
@@ -662,7 +664,7 @@ describe("pi-vibest", () => {
         "s-fork",
       )
       yield* db.reportCoordinatorSession(launched.sessionId, "pi", "kept")
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s-fork"))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
       const renewed = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: true, terminal: "test/p1" })
       assert.notStrictEqual(renewed.sessionId, launched.sessionId)
@@ -710,12 +712,12 @@ describe("pi-vibest", () => {
         VIBEST_COMMAND: '["vibest"]',
         VIBEST_HOME: home,
       })
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s1", notes))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s1", notes))
       yield* until(
         Effect.sync(() => first.held.length > 0),
         Boolean,
       )
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s2", notes))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s2", notes))
       yield* until(saved, (id) => id === "s2")
       yield* until(
         Effect.sync(() => notes.length === 1),
@@ -734,7 +736,7 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Coordinator: the turn never waits for the report; vibestd hanging or gone ends in a warning, and the next turn tries again",
+    "Coordinator: the execution never waits for the report; vibestd hanging or gone ends in a warning, and the next execution tries again",
     Effect.gen(function* () {
       const path = yield* Path.Path
       const hanging = yield* tempDirectory("pi-vibest-hang-")
@@ -755,11 +757,11 @@ describe("pi-vibest", () => {
           VIBEST_HOME: home,
         })
         const notes: Array<string> = []
-        for (const turn of [1, 2]) {
-          yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s1", notes))
-          assert.strictEqual(notes.length, turn - 1, "the turn ended before its report did")
+        for (const execution of [1, 2]) {
+          yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s1", notes))
+          assert.strictEqual(notes.length, execution - 1, "the execution ended before its reply did")
           yield* until(
-            Effect.sync(() => notes.length === turn),
+            Effect.sync(() => notes.length === execution),
             Boolean,
           )
         }

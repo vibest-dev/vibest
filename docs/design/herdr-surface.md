@@ -83,7 +83,7 @@ Manifest `herdr-plugin.toml` (documented, and verified by linking the draft in a
 - Plugin panes start in the plugin root as cwd (verified). vibest must take the Project directory from
   `focused_pane_cwd` / `workspace_cwd` in the context, not from its cwd.
 - vibest's actions (`vibest herdr <verb>`): `run` reads a one-line prompt (a multi-line one is `vibest run`);
-  `stop` interrupts the turn of the subagent in the focused pane, its session, pane and worktree kept (archive is
+  `stop` interrupts the execution of the subagent in the focused pane, its session, pane and worktree kept (archive is
   `vibest rm`); `open-main` focuses the main agent only on the plugin's own herdr server, and otherwise starts it
   the way `vibest` does. An agent may not run them (it would run inside its sandbox).
 - `vibest` outside herdr opens a tab in the repository's parent workspace and types `vibest --in-parent <root>`

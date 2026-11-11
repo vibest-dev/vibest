@@ -35,23 +35,25 @@ const HERDR_TASK = "Run this shell command exactly as written: herdr pane list >
 const listed = async (w: World, id: string, cwd = w.repository) =>
   (
     await w
-      .json<{ sessions: Array<{ id: string; status: string; turnState: string; worktree: string }> }>(["ls"], { cwd })
+      .json<{ sessions: Array<{ id: string; status: string; executionState: string; worktree: string }> }>(["ls"], {
+        cwd,
+      })
       .then((l) => l.sessions)
   ).find((e) => e.id === id)
-const turnState = async (w: World, id: string, cwd = w.repository) => (await listed(w, id, cwd))?.turnState
+const executionState = async (w: World, id: string, cwd = w.repository) => (await listed(w, id, cwd))?.executionState
 
 const latest = async (w: World, id: string, cwd = w.repository) => {
-  const answer = (
+  const reply = (
     await w.json<{
-      answer?: { turn: number; status: string; text: string | null; failure: string | null } | null
+      reply?: { execution: number; status: string; text: string | null; failure: string | null } | null
     }>(["result", id], { cwd })
-  ).answer
-  return answer ? { id: answer.turn, status: answer.status, message: answer.text || answer.failure || "" } : undefined
+  ).reply
+  return reply ? { id: reply.execution, status: reply.status, message: reply.text || reply.failure || "" } : undefined
 }
 
 const ends = async (w: World, id: string) =>
   (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).split("\n").flatMap((l) => {
-    const found = new RegExp(`turn end ${id} \\((\\w+), (\\w+)`).exec(l)
+    const found = new RegExp(`execution end ${id} \\((\\w+), (\\w+)`).exec(l)
     return found ? [{ harness: found[1]!, interrupted: found[2] === "interrupted" }] : []
   })
 
@@ -172,7 +174,7 @@ const checks: ReadonlyArray<Check> = [
           await run(["claude", ...envArgs(await claudeEnv(w, "other", claude.url))]),
         ]
         for (const id of subs) {
-          await until(`${id}'s result`, async () => (await turnState(w, id)) === "completed", 120_000)
+          await until(`${id}'s result`, async () => (await executionState(w, id)) === "completed", 120_000)
           expect(/pong/.test((await latest(w, id))?.message ?? ""), `${id}: ${(await latest(w, id))?.message}`)
         }
         const main = (
@@ -268,7 +270,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I3",
     covers: ["R6", "R8"],
     title:
-      "Pi: vibest run pi (fake model) loads the built extension, which refuses the session's herdr call in process, and the reply lands as the turn's answer",
+      "Pi: vibest run pi (fake model) loads the built extension, which refuses the session's herdr call in process, and the reply lands as the execution's reply",
     run: async (w) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const ran = path.join(w.root, "pi-herdr-ran.txt")
@@ -281,7 +283,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-i3", model.url)}`
         await withSession(w, "pi", ["--env", env], "guard and result", async ({ id }) => {
-          await until("the session's result", async () => (await turnState(w, id)) === "completed", 120_000)
+          await until("the session's result", async () => (await executionState(w, id)) === "completed", 120_000)
           expect(
             results.some((r) => r.includes("Agents must not control a terminal runtime")),
             `the herdr call was not refused: ${JSON.stringify(results)}`,
@@ -299,14 +301,14 @@ const checks: ReadonlyArray<Check> = [
     id: "I5",
     tier: "agent",
     title:
-      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks; asked to run herdr, herdr does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the turn's answer",
+      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks; asked to run herdr, herdr does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the execution's reply",
     run: async (w, evidence) => {
       for (const bin of ["cursor-agent", "herdr"])
         if (!Bun.which(bin, { PATH: w.env().PATH! })) throw new Skip(`${bin} not on PATH`)
       const login = await w.run(w.repository, ["cursor-agent", "status"])
       if (!/Logged in/.test(login.stdout + login.stderr))
         throw new Skip(`cursor-agent is not logged in: ${(login.stdout + login.stderr).trim()}`)
-      const repo = await newRepository(w, "cursor-turn")
+      const repo = await newRepository(w, "cursor-execution")
       const projectHookLog = path.join(w.root, "project-hook.log")
       await fs.mkdir(path.join(repo, ".cursor"), { recursive: true })
       await fs.writeFile(
@@ -331,11 +333,11 @@ const checks: ReadonlyArray<Check> = [
         async ({ id }) => {
           await until(
             "the session's result",
-            async () => ["completed", "failed"].includes((await turnState(w, id, repo)) ?? ""),
+            async () => ["completed", "failed"].includes((await executionState(w, id, repo)) ?? ""),
             240_000,
           )
           const message = (await latest(w, id, repo))?.message ?? ""
-          expect((await turnState(w, id, repo)) === "completed", `the turn did not complete: ${message}`)
+          expect((await executionState(w, id, repo)) === "completed", `the execution did not complete: ${message}`)
           const worktree = await fs.realpath((await listed(w, id, repo))!.worktree)
           expect(!(await Bun.file(path.join(worktree, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
           const transcripts = path.join(w.home, ".cursor", "projects", worktree.slice(1).replace(/[^a-zA-Z0-9]/g, "-"))
@@ -358,7 +360,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I7",
     covers: ["I4", "R7", "S4"],
     title:
-      "Claude (fake model): every main-loop turn end is the plugin's turn.complete: an answer is the turn's answer, Esc in the pane and `vibest interrupt` are each one interrupted turn with no text and no notice, also while a background shell keeps the terminal working; I4: vibest's plugin loads beside a plugin the user installed",
+      "Claude (fake model): every main-loop execution end is the plugin's turn.complete: an answer is the execution's reply, Esc in the pane and `vibest interrupt` are each one interrupted execution with no text and no notice, also while a background shell keeps the terminal working; I4: vibest's plugin loads beside a plugin the user installed",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const HOLD = "Keep working on this until you are stopped."
@@ -374,10 +376,10 @@ const checks: ReadonlyArray<Check> = [
         return new Promise<Step>(() => {})
       })
       try {
-        const flags = await claudeEnv(w, "turns", model.url)
+        const flags = await claudeEnv(w, "executions", model.url)
         const besideRan = await installBesidePlugin(w, claudeConfigOf(flags))
         await withSession(w, "claude", envArgs(flags), "Answer once.", async ({ id, socket }) => {
-          const settled = (want: string) => async () => (await turnState(w, id)) === want
+          const settled = (want: string) => async () => (await executionState(w, id)) === want
           await until("the answer's result", settled("completed"), 120_000)
           const first = await latest(w, id)
           expect(/summary: e2e answer/.test(first?.message ?? ""), `answer: ${first?.message.slice(0, 500)}`)
@@ -385,8 +387,8 @@ const checks: ReadonlyArray<Check> = [
           const aborted = async () => (await ends(w, id)).filter((e) => e.interrupted).length
 
           await w.ok(["send", id, HOLD])
-          await until("the held turn at the model", () => held === 1, 60_000)
-          await until("the held turn open", settled("open"), 60_000)
+          await until("the held execution at the model", () => held === 1, 60_000)
+          await until("the held execution open", settled("open"), 60_000)
           const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
             env: { HERDR_SOCKET_PATH: socket },
           })
@@ -397,17 +399,17 @@ const checks: ReadonlyArray<Check> = [
             second?.status === "interrupted" && second.id !== first!.id && second.message === "",
             `Esc result: ${JSON.stringify(second)}`,
           )
-          expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
+          expect((await aborted()) === 1, `execution ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
           const notices = () =>
             row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", id)
               ?.n
 
           await w.ok(["send", id, HOLD])
-          await until("the second held turn at the model", () => held === 2, 60_000)
-          await until("the second held turn open", settled("open"), 60_000)
+          await until("the second held execution at the model", () => held === 2, 60_000)
+          await until("the second held execution open", settled("open"), 60_000)
           await w.ok(["interrupt", id], { timeoutMs: 60_000 })
-          await until("the interrupted turn's turn.complete", async () => (await aborted()) === 2, 30_000)
-          await until("the turn interrupted", settled("interrupted"), 30_000)
+          await until("the interrupted execution's turn.complete", async () => (await aborted()) === 2, 30_000)
+          await until("the execution interrupted", settled("interrupted"), 30_000)
           const third = await latest(w, id)
           expect(
             third?.status === "interrupted" && third.id !== second!.id && third.message === "",
@@ -415,11 +417,11 @@ const checks: ReadonlyArray<Check> = [
           )
 
           await w.ok(["send", id, BACKGROUND])
-          await until("the background turn held at the model", () => held === 3, 60_000)
-          await until("the background turn open", settled("open"), 60_000)
+          await until("the background execution held at the model", () => held === 3, 60_000)
+          await until("the background execution open", settled("open"), 60_000)
           await w.ok(["interrupt", id], { timeoutMs: 60_000 })
-          await until("the background turn's turn.complete", async () => (await aborted()) === 3, 30_000)
-          await until("the background turn interrupted", settled("interrupted"), 30_000)
+          await until("the background execution's turn.complete", async () => (await aborted()) === 3, 30_000)
+          await until("the background execution interrupted", settled("interrupted"), 30_000)
           const fourth = await latest(w, id)
           expect(
             fourth?.status === "interrupted" && fourth.id !== third!.id && fourth.message === "",
@@ -472,11 +474,13 @@ const checks: ReadonlyArray<Check> = [
           envArgs(await claudeEnv(w, "guard", model.url)),
           "guard test",
           async ({ id, socket }) => {
-            await until("the session's result", async () => (await turnState(w, id)) === "completed", 180_000).catch(
-              (e: Error) => {
-                throw new Error(`${e.message}; the model got ${model.requests.length} requests`)
-              },
-            )
+            await until(
+              "the session's result",
+              async () => (await executionState(w, id)) === "completed",
+              180_000,
+            ).catch((e: Error) => {
+              throw new Error(`${e.message}; the model got ${model.requests.length} requests`)
+            })
             const last = model.requests.findLast((r) => subagentFolder(r.system) !== undefined)
             expect(last !== undefined, "the session never asked the model with its system prompt")
             const made = calls(last!.tools)

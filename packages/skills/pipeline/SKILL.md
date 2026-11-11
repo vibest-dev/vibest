@@ -13,7 +13,7 @@ Plan → the user agrees → implement → review until the reviewer approves �
 vibest run [<harness>] --title 'Plan <topic>' -- 'Write an implementation plan for: <goal, paths, constraints>. Read the code. Send me the approach, the files to change, the steps, how to verify, and open questions. Do not modify files.'
 ```
 
-Its id is <planner id>. Tell the user the plan is being written and end your turn. Do not pass `--archive-on-idle`: the user has not agreed yet, and a completed turn would archive the session before they can answer.
+Its id is <planner id>. Tell the user the plan is being written and end your execution. Do not pass `--archive-on-idle`: the user has not agreed yet, and a completed execution would archive the session before they can answer.
 
 ## 2. Agree
 

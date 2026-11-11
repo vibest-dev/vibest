@@ -32,7 +32,7 @@ import {
 import { makeJournal } from "./journal.ts"
 import { coordinatorOf, decodeCoordinators, decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
 import { Routing } from "./plugins.ts"
-import { envelope } from "./results.ts"
+import { envelope } from "./replies.ts"
 
 type InboxKey = { readonly session: string; readonly id: number }
 
@@ -543,17 +543,21 @@ export const makeStore = Effect.gen(function* () {
       }
       if (patch.exitedAt !== undefined && patch.exitedAt !== null && current.exitedAt === null)
         yield* endProcess(id, patch.end ?? "exited", patch.exitedAt)
-      if (patch.turnState === "open") {
+      if (patch.executionState === "open") {
         const open = yield* openExecution(id)
-        const at = next.turnPromptedAt || (yield* now)
+        const at = next.executionPromptedAt || (yield* now)
         if (open !== undefined) {
-          if (patch.turnPromptedAt !== undefined) prompted.set(id, { execution: open, at })
+          if (patch.executionPromptedAt !== undefined) prompted.set(id, { execution: open, at })
         } else yield* startExecution(id, at)
-      } else if (patch.turnState !== undefined && patch.turnState !== "none" && current.turnState === "open") {
+      } else if (
+        patch.executionState !== undefined &&
+        patch.executionState !== "none" &&
+        current.executionState === "open"
+      ) {
         const open = yield* openExecution(id)
         if (open !== undefined) {
           prompted.delete(id)
-          yield* emit(ExecutionEnded, { sessionId: id, data: { execution: open, outcome: patch.turnState } })
+          yield* emit(ExecutionEnded, { sessionId: id, data: { execution: open, outcome: patch.executionState } })
         }
       }
     })

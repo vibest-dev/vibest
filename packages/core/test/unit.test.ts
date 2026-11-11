@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { normalizeModels } from "@vibest/core/models"
 import { Layout, shellQuote } from "@vibest/core/paths"
-import { envelope, isUsageLimitError } from "@vibest/core/results"
+import { envelope, isUsageLimitError } from "@vibest/core/replies"
 import { privateTmp, UserPlatform } from "@vibest/core/system-prompt"
 import { ID, newId, shortId } from "@vibest/schema/id"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem } from "effect"

@@ -27,10 +27,10 @@ When the client stops acknowledging, the stream fails with `WatchLagged` instead
 or any other end, reconnect and take the new `Snapshot` as the truth.
 
 With capability `projects`: each project has `activity` (`blocked`, `done`, `working` or `idle`), and each session
-`turn` (null: its runtime counts no turns) and may have `status` `done` (idle with a finished turn nobody looked at).
+`execution` (null: its runtime counts no executions) and may have `status` `done` (idle with a finished execution nobody looked at).
 A `Project` comes again whenever one of its sessions changes. Show these as they are. When a session's terminal is
-drawn in the focused window, send `Session.Seen` (`cli`) `{id, turn}` with the `turn` Watch last gave it, once per
-turn; vibestd writes only a mark that rises, so a stale or repeated call changes nothing, and the result comes back
+drawn in the focused window, send `Session.Seen` (`cli`) `{id, execution}` with the `execution` Watch last gave it, once per
+execution; vibestd writes only a mark that rises, so a stale or repeated call changes nothing, and the result comes back
 through Watch.
 
 `Harnesses.List` (`open`, payload `{provider?}`): one entry per harness the loaded plugins provide, `{harness, binary, problem, models}`. `problem` is null when vibestd can

@@ -38,7 +38,7 @@ export const envelope = (
     `</${tag}>`,
   ].join("\n")
 
-export type TurnEnded = {
+export type ObservedEnd = {
   readonly harness: HarnessId
   readonly at: number
   readonly status: "completed" | "failed" | "interrupted"
@@ -49,15 +49,15 @@ export type TurnEnded = {
   readonly needsReady: boolean
 }
 
-export const turnEndOf = (
+export const executionEndOf = (
   adapter: HarnessDefinition,
   agent: string,
   raw: string,
   at: number,
-): TurnEnded | undefined => {
+): ObservedEnd | undefined => {
   const event = jsonObject(raw)
-  const payload = event && adapter.turnEnd?.(event, agent === "coordinator")?.result
-  return payload ? turnEndFrom(adapter, payload, at) : undefined
+  const payload = event && adapter.executionEnd?.(event, agent === "coordinator")?.end
+  return payload ? executionEndFrom(adapter, payload, at) : undefined
 }
 
 const PLAIN_ID_NOT_A_FLAG = /^\w[\w.:-]{0,127}$/
@@ -68,12 +68,12 @@ const errorOf = (payload: Readonly<Record<string, unknown>>) => {
   return typeof details === "string" && details ? `${error}: ${details}` : error
 }
 
-export const turnEndFrom = (
+export const executionEndFrom = (
   adapter: HarnessDefinition,
   payload: Readonly<Record<string, unknown>>,
   at: number,
-): TurnEnded => {
-  const text = payload[adapter.resultField]
+): ObservedEnd => {
+  const text = payload[adapter.replyField]
   const conversation = payload.conversation_id
   const interrupted = payload.aborted === true
   const error = interrupted ? undefined : errorOf(payload)

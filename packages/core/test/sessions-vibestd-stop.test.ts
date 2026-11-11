@@ -9,7 +9,7 @@ import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { TURNS, until, untilVirtual, processEnds } from "./lib/observe.ts"
+import { EXECUTIONS, until, untilVirtual, processEnds } from "./lib/observe.ts"
 import { makeRepository, type TestServices } from "./lib/session.ts"
 import { spawnInput, idleSession, sessionWorktree, test, sqlNotices } from "./lib/sessions-helpers.ts"
 
@@ -140,9 +140,9 @@ describe.concurrent("after a vibestd stop", () => {
       return yield* body(id).pipe(Effect.ensuring(looking.release("unreachable")))
     })
 
-  const turnInputs = (id: string) =>
+  const executionInputs = (id: string) =>
     Effect.flatMap(SqlClient.SqlClient, (sql) =>
-      sql<{ input: string; status: string }>`SELECT input, status FROM ${sql.literal(TURNS)} m
+      sql<{ input: string; status: string }>`SELECT input, status FROM ${sql.literal(EXECUTIONS)} m
         WHERE session_id = ${id} ORDER BY id`.pipe(Effect.orDie),
     )
   const typed = (text: string) =>
@@ -152,14 +152,14 @@ describe.concurrent("after a vibestd stop", () => {
     )
 
   test(
-    "a first turn ended before its handover (vibestd stopped in its ready wait) leaves the task for the next vibestd",
+    "a first execution ended before its handover (vibestd stopped in its ready wait) leaves the task for the next vibestd",
     waitingForReady((id) =>
       Effect.gen(function* () {
         const db = yield* Db
-        yield* db.updateSession(id, { turnState: "not_started" })
+        yield* db.updateSession(id, { executionState: "not_started" })
         assert.strictEqual(yield* db.untakenTask(id), "do it")
         yield* nextVibestd(Effect.map(typed("do it"), (n) => n === 1))
-        assert.deepStrictEqual(yield* turnInputs(id), [
+        assert.deepStrictEqual(yield* executionInputs(id), [
           { input: "", status: "not_started" },
           { input: "do it", status: "working" },
         ])
@@ -170,7 +170,7 @@ describe.concurrent("after a vibestd stop", () => {
   )
 
   test(
-    "a task handed over at reconcile that does not start ends the turn not_started and is not handed over again",
+    "a task handed over at reconcile that does not start ends the execution not_started and is not handed over again",
     waitingForReady((id) =>
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
@@ -178,13 +178,13 @@ describe.concurrent("after a vibestd stop", () => {
         const next = yield* Sessions.make({ maxSessions: undefined }).pipe(
           Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
         )
-        yield* untilVirtual(turnInputs(id), (turns) => turns[0]?.status === "not_started")
+        yield* untilVirtual(executionInputs(id), (executions) => executions[0]?.status === "not_started")
         assert.strictEqual(yield* typed("do it"), 2)
         assert.isTrue((yield* sqlNotices(id)).some((t) => t.startsWith("task_not_started")))
         yield* next.check(id)
         yield* until(next.inMemory, (m) => m.locks === 0)
         assert.strictEqual(yield* typed("do it"), 2)
-        assert.strictEqual((yield* turnInputs(id)).length, 1)
+        assert.strictEqual((yield* executionInputs(id)).length, 1)
       }),
     ),
     { hooked: ["pi"] },

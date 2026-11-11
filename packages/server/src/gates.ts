@@ -34,7 +34,7 @@ import { ID } from "@vibest/schema/id"
 import { Effect, Layer, Option } from "effect"
 import * as Headers from "effect/http/Headers"
 
-const SETTLEMENTS: ReadonlySet<string> = new Set(["TurnEnd", "Prompt"])
+const SETTLEMENTS: ReadonlySet<string> = new Set(["ExecutionEnd", "Prompt"])
 
 export type Read = (name: string) => string | undefined
 

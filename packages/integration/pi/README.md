@@ -4,8 +4,8 @@ Implementation notes for the Pi [harness adapter](../../../docs/design/architect
 
 `pi -e <dir>/extension.mjs` loads `src/extension.ts` bundled with everything it imports except
 Pi's own packages, which Pi resolves for the extensions it loads. `VIBEST_AGENT=coordinator` makes it the main Agent
-(inbox rows delivered in process as custom messages the model sees and the TUI hides: a turn starts when Pi is idle,
-else they queue as follow-ups); another agent with `VIBEST_SESSION_ID` sends its turn starts and ends; without
+(inbox rows delivered in process as custom messages the model sees and the TUI hides: an execution starts when Pi is idle,
+else they queue as follow-ups); another agent with `VIBEST_SESSION_ID` sends its execution starts and ends; without
 `VIBEST_AGENT` it does nothing. Tool calls go through that agent's rules in `guard.ts`, in process. Only the TUI session
 is the harness's root session: print, RPC and JSON modes have no PTY, so a Pi child of the main Agent, which inherits
 `VIBEST_AGENT`, takes no rows, reports nothing and does not change the TUI. Pi calls the extension factory once per
@@ -15,10 +15,10 @@ The extension never starts vibestd: during `vibest daemon restart` the replaceme
 stream is subscribed again when the connection drops or vibestd closes it (rows not yet taken stay pending); anything
 else ends it with a notice to the user. A send that got no answer is unknown, not failed: vibestd may still apply it,
 and keeps the newest conversation id either way (the last report wins). A TUI `session_start` for `new`, `resume` or
-`fork` reports its conversation id before another turn; `agent_end` reports the first startup id. Pi 1.1.0 warns and
+`fork` reports its conversation id before another execution; `agent_end` reports the first startup id. Pi 1.1.0 warns and
 recreates the id of an empty `/new` that has no file yet. Only the main Agent gets the `delegate` and `pipeline` skills.
 Its `before_agent_start` clears the prompt sections other coding-agent extensions add; Pi runs those handlers in load
-order, so only extensions loaded before this one are cleared, and turns started by inbox rows skip that event.
+order, so only extensions loaded before this one are cleared, and executions started by inbox rows skip that event.
 The main Agent's `--system-prompt` replaces Pi's coding-assistant preamble (Pi still adds context files, skills and
 cwd), and its `--tools` is an exact allowlist, not +/- entries on the defaults: those keep every extension's tools,
 and a user's delegation extension (pi-subagents' `subagent`) would then win over `vibest run`. A user prompt is Pi's

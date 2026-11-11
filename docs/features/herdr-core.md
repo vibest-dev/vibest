@@ -17,7 +17,7 @@ each terminal with its project and task and shows which session started which.
 `vibest` in a herdr-core terminal, without `--runtime`, starts the main agent there, and its sessions start there too;
 `vibest run --runtime herdr` places a session in herdr instead.
 
-## S36. Unwatched turn ends
+## S36. Unwatched execution ends
 
-A session turn that ended while nobody watched shows as done, for the session and its project; once it is seen, it is
+A session execution that ended while nobody watched shows as done, for the session and its project; once it is seen, it is
 idle.

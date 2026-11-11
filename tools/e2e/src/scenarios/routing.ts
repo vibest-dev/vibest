@@ -3,7 +3,7 @@ import path from "node:path"
 
 import type { Check } from "../check.ts"
 import { ask, heldModel } from "../fake-model.ts"
-import { answerOf, expect, herdr, readDb, Skip, until, type World } from "../world.ts"
+import { replyOf, expect, herdr, readDb, Skip, until, type World } from "../world.ts"
 import { piShadow } from "../world/shadow.ts"
 
 type Entry = {
@@ -68,7 +68,7 @@ const runId = async (w: World, args: ReadonlyArray<string>, env: Record<string, 
 }
 
 const resultOf = (w: World, id: string, marker: string) =>
-  until(`the answer of ${marker}`, async () => (await answerOf(w, id)).includes(`done-${marker}`), 90_000)
+  until(`the answer of ${marker}`, async () => (await replyOf(w, id)).includes(`done-${marker}`), 90_000)
 
 const mainSession = async (w: World) => {
   let main: Entry | undefined

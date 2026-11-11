@@ -114,8 +114,8 @@ export const peerSession = {
   status: "unknown" as const,
   startedAt: null,
   exitedAt: null,
-  turnState: "none" as const,
-  turnPromptedAt: 0,
+  executionState: "none" as const,
+  executionPromptedAt: 0,
   metadata: {},
 }
 

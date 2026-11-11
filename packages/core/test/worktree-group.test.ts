@@ -49,8 +49,8 @@ const storedRow = (
   status: "idle",
   startedAt: 1,
   exitedAt: null,
-  turnState: "none",
-  turnPromptedAt: 0,
+  executionState: "none",
+  executionPromptedAt: 0,
   metadata,
   createdAt: 1,
   lastActive: 1,
@@ -78,7 +78,7 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
       const db = yield* Db
       const repo = yield* makeRepository
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
       const wt = yield* directoryOf(id)
       const leaf = path.basename(wt)
       assert.match(id, ID)
@@ -212,11 +212,11 @@ describe("repository-grouped worktrees at worktrees/<repository name>/<4 hex>: a
         )
         allocationNameSource.leaves = ["abcd", "abce"]
         const second = yield* sessions.spawn(yield* spawnInput(other))
-        yield* until(db.getSession(second.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+        yield* until(db.getSession(second.id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
         const expected = sameWorktreeBucket("MyRepo", "myrepo") ? "abce" : "abcd"
         assert.strictEqual(yield* directoryOf(second.id), layout.allocationWorktree("myrepo", expected))
         yield* held.release()
-        yield* until(db.getSession(first.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+        yield* until(db.getSession(first.id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
         assert.strictEqual(yield* directoryOf(first.id), layout.allocationWorktree("MyRepo", "abcd"))
         assert.isTrue(yield* fs.exists(layout.allocationWorktree("MyRepo", "abcd")))
       }).pipe(Effect.ensuring(reset))

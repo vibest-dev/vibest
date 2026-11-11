@@ -17,7 +17,7 @@ working" condition. That list is the report's skeleton; every id in scope ends u
 ## 2. Run the gate
 
 From the checkout, run `pnpm verify` to the end (about 10 to 15 minutes; run it in the background and wait for its exit,
-do not end your turn while it runs). Keep its output. Its E2E legs write `tools/e2e/evidence/<run>/report.json` (each
+do not end your execution while it runs). Keep its output. Its E2E legs write `tools/e2e/evidence/<run>/report.json` (each
 check's id, outcome and detail) and the commands each check ran. Each leg prints `evidence in tools/e2e/evidence/<run>`
 at its end; the curl leg's folder name ends in `-curl`, the npm leg's in `-npm`. A failed or skipped gate is a finding,
 not a reason to stop: record it and go on. When `pnpm verify` stops before E2E (build, typecheck, test, pack or install

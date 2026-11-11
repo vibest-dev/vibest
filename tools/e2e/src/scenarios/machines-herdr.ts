@@ -174,7 +174,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M7",
     title:
-      "herdr terminals on another machine: an agent run --machine starts opens in herdr's default session on B; machine add saves that session as a herdr machine on A (isolated XDG state, through herdr's own command, which never installs: against a host without herdr it fails and saves nothing); a plain herdr server on B is refused with a restart note and nothing saved; a run --machine row's address names B's pane under that machine and herdr --machine reaches B's agent; a prompt typed there through herdr starts a typed turn on B whose result arrives once; a profile removed in herdr is added back by the next ls; after B's session stops, B's vibestd starts it again as its own session leader for the next run --machine and the same saved machine reaches the new agent; machine rm removes it",
+      "herdr terminals on another machine: an agent run --machine starts opens in herdr's default session on B; machine add saves that session as a herdr machine on A (isolated XDG state, through herdr's own command, which never installs: against a host without herdr it fails and saves nothing); a plain herdr server on B is refused with a restart note and nothing saved; a run --machine row's address names B's pane under that machine and herdr --machine reaches B's agent; a prompt typed there through herdr starts a typed execution on B whose result arrives once; a profile removed in herdr is added back by the next ls; after B's session stops, B's vibestd starts it again as its own session leader for the next run --machine and the same saved machine reaches the new agent; machine rm removes it",
     run: async (w, evidence) => {
       let s: Setup | undefined
       try {
@@ -242,9 +242,9 @@ const checks: ReadonlyArray<Check> = [
 
         const typed = await s.herdrA("--machine", label, "agent", "prompt", name, ask("hstep"))
         expect(typed.code === 0, `herdr --machine agent prompt: ${typed.stdout}${typed.stderr}`)
-        await until("B saw the typed turn", () => s!.subs.asked("hstep"), 120_000)
+        await until("B saw the typed execution", () => s!.subs.asked("hstep"), 120_000)
         await until(
-          "B recorded a typed turn",
+          "B recorded a typed execution",
           () =>
             (s!.bDb<{ n: number }>(
               "SELECT count(*) AS n FROM execution WHERE session_id = ? AND typed IS NOT NULL",
@@ -252,7 +252,7 @@ const checks: ReadonlyArray<Check> = [
             )?.n ?? 0) === 1,
           60_000,
         )
-        await until("the typed turn's notice", () => s!.notices(printed.slice(0, 11), "hstep") === 1, 120_000)
+        await until("the typed execution's notice", () => s!.notices(printed.slice(0, 11), "hstep") === 1, 120_000)
 
         const removedInHerdr = await s.herdrA("machine", "remove", saved[0]!.id)
         expect(removedInHerdr.code === 0, `herdr machine remove: ${removedInHerdr.stderr}`)

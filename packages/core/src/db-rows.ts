@@ -1,6 +1,6 @@
 import { type ExecutionOutcome, type InboxKind, type ProcessEndReason } from "@vibest/schema/event"
 import { MessageStatus } from "@vibest/schema/model"
-import { AgentStatus, InboxStatus, RuntimeAddress, TurnState } from "@vibest/schema/session"
+import { AgentStatus, InboxStatus, RuntimeAddress, ExecutionState } from "@vibest/schema/session"
 import { Schema } from "effect"
 
 import { Routing } from "./plugins.ts"
@@ -44,8 +44,8 @@ export const SessionRow = Schema.Struct({
   status: AgentStatus,
   startedAt: Schema.NullOr(Schema.Number),
   exitedAt: Schema.NullOr(Schema.Number),
-  turnState: TurnState,
-  turnPromptedAt: Schema.Number,
+  executionState: ExecutionState,
+  executionPromptedAt: Schema.Number,
   metadata: Schema.fromJsonString(Metadata),
   createdAt: Schema.Number,
   lastActive: Schema.Number,

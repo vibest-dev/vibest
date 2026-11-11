@@ -50,8 +50,8 @@ export const sessionRounds = (deps: {
     yield* db.endExecution(
       session.id,
       { outcome: end, failure: { message: error } },
-      { turnState: end, lastActive: yield* Clock.currentTimeMillis },
-      `${session.id}'s turn ended with an error: ${error}`,
+      { executionState: end, lastActive: yield* Clock.currentTimeMillis },
+      `${session.id}'s execution ended with an error: ${error}`,
     )
   })
 
@@ -72,12 +72,12 @@ export const sessionRounds = (deps: {
         session,
         terminal,
         batch.map((r) => r.message).join("\n\n"),
-        Effect.flatMap(db.openExecution(session.id), (turn) =>
+        Effect.flatMap(db.openExecution(session.id), (execution) =>
           db.claim(session.id, ids).pipe(
             Effect.tap((got) =>
               Effect.sync(() => {
                 claimed.push(...got)
-                handedInto = turn
+                handedInto = execution
               }),
             ),
           ),

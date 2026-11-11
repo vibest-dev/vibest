@@ -21,7 +21,7 @@ copy of the user's settings; only the model is fake.
 | `VIBEST_HOME` | `<world>/vibest`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Claude config | a shadow `CLAUDE_CONFIG_DIR` written from the user's `settings.json` keys `permissions`, `env` (without model, provider, base-URL, key or token variables, so the fake model's `ANTHROPIC_BASE_URL` wins), `language`, `worktree`, `autoMode`, `attribution`, `cleanupPeriodDays` and `.claude.json`'s onboarding and auto-mode keys, plus the fake key's approval. Not copied: hooks, `statusLine` and plugins (they reach the user's herdr, Rex and other orchestrators), the model choice, credentials. Auto mode is off: a fake model cannot answer its classifier's side requests (P8, S15 and U4 fail with it on)                        |
 | Pi config     | a shadow `PI_CODING_AGENT_DIR` per agent: the user's `settings.json` keys `defaultThinkingLevel`, `defaultTools`, `steeringMode`, `doubleEscapeAction`, `codemode`, `tuiMode`, `theme`, `trust.json` copied, and a `models.json` naming only the fake providers. Not copied: `packages`, `auth.json`. vibestd's own Pi dir stays empty, as on a fresh install                                                                                                                                                                                                                                                                                  |
-| Cursor config | a shadow `CURSOR_CONFIG_DIR` with the user's `cli-config.json` keys `version`, `approvalMode`, `sandbox`, `permissions` and `network`; never the model fields or `authInfo`. The gate runs no Cursor model turn                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Cursor config | a shadow `CURSOR_CONFIG_DIR` with the user's `cli-config.json` keys `version`, `approvalMode`, `sandbox`, `permissions` and `network`; never the model fields or `authInfo`. The gate runs no Cursor model execution                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Profiles      | `user` (the shadows above, the default) and `first-run` (today's defaults, no user keys). T1-pi runs in a temp `HOME` and uses `first-run`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | User files    | the files and keys the shadows read are hashed (content) before and after the run; a change fails the run. Evidence holds only these hashes, never their content                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | herdr         | sessions named `<world>[-…]` under the real `~/.config/herdr/sessions`, stopped and deleted when the check ends; a session left over fails the check                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -42,7 +42,7 @@ from the packed `@vibest/cli`, both while the unit tests run), then runs the gat
 time, a smoke set (I1, I2, U1, U9, U10, H1) on the npm install; the npm install gets the full gate when its file layout
 differs from the last one that passed it. A skip fails the run (tools/verify/README.md).
 
-**L1, real herdr, no model.** Every command whose effect does not need a model turn.
+**L1, real herdr, no model.** Every command whose effect does not need a model execution.
 
 | Feature       | Check                                                                                                                                               |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -58,20 +58,20 @@ differs from the last one that passed it. A skip fails the run (tools/verify/REA
 login smoke (I5). Prompts are deterministic:
 "create `out-<nonce>.txt` containing `<nonce>`, then reply `DONE-<nonce>`".
 
-| #   | Scenario                                                                          | Pass when                                                                                              |
-| --- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| 1   | `run` in a new worktree                                                           | pane exists, row `working` → `idle`, file in the worktree, `result` holds `DONE-<nonce>` as its answer |
-| 2   | `send` a follow-up                                                                | delivered once (confirm-after-send), turn `completed`                                                  |
-| 3   | `report` from the worker                                                          | the coordinator inbox gets it; same-sender messages merge                                              |
-| 4   | `interrupt` mid-turn                                                              | turn `interrupted`, pane alive, next `send` works                                                      |
-| 5   | `--peer`, `--in-parent`, `--name`, `--model`, `--provider`, `--headless`, `--env` | each flag visible in the row and the pane                                                              |
-| 6   | `archive` clean                                                                   | pane closed with PID proof, worktree removed, branch kept                                              |
-| 7   | `archive` dirty / unpushed / `--keep-worktree`                                    | worktree kept, `reasons` names why                                                                     |
-| 8   | `run --archive-on-idle`                                                           | archived right after the completed result reaches the coordinator                                      |
-| 9   | Self-heal                                                                         | kill the daemon mid-turn, restart: turn ends `lost` or resumes; no blind replay                        |
-| 10  | Startup failure                                                                   | bad model: a failed result with the error, no screen text; `vibest peek <id>` shows the pane           |
-| 11  | Limits                                                                            | `VIBEST_MAX_SESSIONS=1`: the second `run` gets `LimitReached`                                          |
-| 12  | Coordinator                                                                       | `vibest` in the parent workspace, resume after its pane closes, system prompt file written             |
+| #   | Scenario                                                                          | Pass when                                                                                             |
+| --- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 1   | `run` in a new worktree                                                           | pane exists, row `working` → `idle`, file in the worktree, `result` holds `DONE-<nonce>` as its reply |
+| 2   | `send` a follow-up                                                                | delivered once (confirm-after-send), execution `completed`                                            |
+| 3   | `report` from the worker                                                          | the coordinator inbox gets it; same-sender messages merge                                             |
+| 4   | `interrupt` mid-execution                                                         | execution `interrupted`, pane alive, next `send` works                                                |
+| 5   | `--peer`, `--in-parent`, `--name`, `--model`, `--provider`, `--headless`, `--env` | each flag visible in the row and the pane                                                             |
+| 6   | `archive` clean                                                                   | pane closed with PID proof, worktree removed, branch kept                                             |
+| 7   | `archive` dirty / unpushed / `--keep-worktree`                                    | worktree kept, `reasons` names why                                                                    |
+| 8   | `run --archive-on-idle`                                                           | archived right after the completed result reaches the coordinator                                     |
+| 9   | Self-heal                                                                         | kill the daemon mid-execution, restart: execution ends `lost` or resumes; no blind replay             |
+| 10  | Startup failure                                                                   | bad model: a failed result with the error, no screen text; `vibest peek <id>` shows the pane          |
+| 11  | Limits                                                                            | `VIBEST_MAX_SESSIONS=1`: the second `run` gets `LimitReached`                                         |
+| 12  | Coordinator                                                                       | `vibest` in the parent workspace, resume after its pane closes, system prompt file written            |
 
 The pattern-level stories that combine these rows are in [e2e-user-stories.md](e2e-user-stories.md).
 
@@ -118,10 +118,10 @@ whose config directory is in the world rather than ~/.config/herdr/sessions. The
 than a day, and that world's herdr sessions with it. The world's own vibestd is stopped first, only when its pid file
 names a vibest daemon whose socket is inside that world. A herdr session that is still running keeps its world.
 
-Checks that run a turn use a fake model (`tools/e2e/src/fake-model.ts`): a local Anthropic Messages server for Claude
+Checks that run an execution use a fake model (`tools/e2e/src/fake-model.ts`): a local Anthropic Messages server for Claude
 (the shadow `CLAUDE_CONFIG_DIR`, `ANTHROPIC_BASE_URL` and the fake `ANTHROPIC_API_KEY` passed as vibest's own `--env`)
 and OpenAI-compatible servers for Pi (the shadow `PI_CODING_AGENT_DIR`, whose `models.json` names them). The fake answers
-from the request, so what the agent asks and does is scripted, and a turn can be held open until the check releases it.
+from the request, so what the agent asks and does is scripted, and an execution can be held open until the check releases it.
 The gate runs no real model; I5, the Cursor login smoke, is in tier `agent`. `VIBEST_E2E_ENV` (`KEY=VALUE` pairs, one
 per line) names more values the evidence masks.
 
@@ -153,17 +153,17 @@ What the checks that drive real herdr panes rely on:
   answer the auto-mode classifier's side requests.
 - An enter typed right behind text in Claude's input box is sometimes swallowed; a check waiting for that line presses
   enter again.
-- Claude refuses a standalone `sleep`: to keep a main agent busy, the check has its turn wait in a Bash call for a file
+- Claude refuses a standalone `sleep`: to keep a main agent busy, the check has its execution wait in a Bash call for a file
   the check creates.
 - herdr drops a started agent's name when it is not marked ready within `agent.start`'s 120 s, and refuses
   `agent.prompt` until the agent is ready; it marks an agent ready only once the agent is read (S18, S19). S18 proves in
-  the gate that `agent.start` has resolved (the terminal is recorded) while the first turn is still held, and a unit
+  the gate that `agent.start` has resolved (the terminal is recorded) while the first execution is still held, and a unit
   test pins the 120 s window; S18-slow waits the window out.
 - With herdr's own Pi hook installed (`herdr integration install pi`), herdr reads Pi's state from the hook alone, and an
   idle Pi sends it nothing more (S19).
-- Pi can open more than one model stream for one turn: S26 releases every stream held at that moment before the next
-  turn starts.
-- A fake usage limit is an error inside the stream: Pi reports its message as the turn's error, and retries a failed
+- Pi can open more than one model stream for one execution: S26 releases every stream held at that moment before the next
+  execution starts.
+- A fake usage limit is an error inside the stream: Pi reports its message as the execution's error, and retries a failed
   request, so every retry fails too (U5, U8).
 - The user-file invariant hashes only the keys the shadows read: the user's own Claude and Pi sessions rewrite other
   keys of the same files while a run goes on, and cursor-agent rewrites `~/.cursor/cli-config.json`.
@@ -173,14 +173,14 @@ What the checks that drive real herdr panes rely on:
   rules say not to run herdr, and the model sometimes keeps to them: the check asks once more, for that call alone.
 - Pi renames its process to `pi`, and herdr may then show no argv for it: S10-pi proves the resume by B showing A's
   conversation, and finds a harness by the program's own name, not a shell or `vibest` naming it in its arguments.
-- S10 runs one turn first: vibest resumes only a conversation the harness wrote. It prompts through herdr's
-  `agent.prompt`, as vibest does; an enter typed into Pi's editor only adds a line. herdr marks a finished turn nobody
+- S10 runs one execution first: vibest resumes only a conversation the harness wrote. It prompts through herdr's
+  `agent.prompt`, as vibest does; an enter typed into Pi's editor only adds a line. herdr marks a finished execution nobody
   looked at `done`. A keeps only its shell once what the harness's extensions started (Pi's update checks) has ended.
 
 ### Kill windows
 
 S24, S28 and S29 kill vibestd inside a window. S24: while the row is `delivering`, from its claim until the session
-is seen to start the turn. S28: after `vibest run` answers, which it does once the row is stored; the start then makes
+is seen to start the execution. S28: after `vibest run` answers, which it does once the row is stored; the start then makes
 the worktree and opens the terminal. S29: at the first look for the harness's ready report. A try that misses its window (the task linked, or the session archived, before
 the kill) is not the case, so S24, S28, S29 and S30 try again, up to five times. S30 kills vibestd once `vibest archive`
 has stored its mark, before it closes anything. S27's process outside the pane works in the worktree: closing the pane does not
@@ -188,7 +188,7 @@ end it.
 
 ## 4. Cost and time
 
-The gate's turns run on fake models and cost nothing; I5's Cursor turn, in tier `agent`, is the one real-model turn.
+The gate's executions run on fake models and cost nothing; I5's Cursor execution, in tier `agent`, is the one real-model execution.
 Measured on a 10-core Mac shared with other agents' E2E runs (2026-11-07):
 
 | Run                                        | Wall time                                                                              |
@@ -208,7 +208,7 @@ runtime is called. `vibest ls` prints JSON already; it has no `--json` flag.
 
 In `pnpm test`, `cli.test.ts` starts a fresh Bun process for each `vibest` (about 0.3 s, several seconds on a loaded
 machine), up to twenty per test, so its tests run one at a time: run together they share the CPU, and on a two-core CI
-runner they cost twice as much (23 s for the file against 12 s in turn).
+runner they cost twice as much (23 s for the file against 12 s in execution).
 
 The unit fakes (`packages/cli/test/fakes.ts`): `until` polls up to 2000 times 10 ms, about 20 s, under the 30 s test
 timeout. `withStdin` feeds a command from a file, not a pipe, so a command that exits without reading raises no EPIPE.
@@ -232,7 +232,7 @@ it is about in its name (`S10-start` and `S10-pi` are about `S10`) and lists in 
 `bun tools/e2e/src/main.ts --list` prints every check's id, tier and covers as JSON. I6 is the runner's own check after
 every run.
 
-Every check that runs a turn runs it on a fake model server (`tools/e2e/src/fake-model.ts`: Anthropic Messages for
+Every check that runs an execution runs it on a fake model server (`tools/e2e/src/fake-model.ts`: Anthropic Messages for
 Claude, OpenAI-compatible for Pi) with shadow harness config, so its prompts and answers are scripted; no gate check runs
 a real model. No script can prove these, so the verifying agent does them by hand:
 

@@ -196,7 +196,7 @@ export const make = (
             const session = toInfo(row, (yield* db.sessionBriefs([id])).get(id))
             return {
               ...session,
-              answer: (yield* db.latestAnswer(id)) ?? null,
+              reply: (yield* db.latestReply(id)) ?? null,
             }
           }),
         ),
@@ -243,7 +243,7 @@ export const make = (
           }),
         ),
 
-      "Session.Seen": ({ id, turn }) =>
+      "Session.Seen": ({ id, execution }) =>
         Effect.gen(function* () {
           yield* cliOnly("Session.Seen")
           const identity = yield* db.sessionIdentity(id)
@@ -260,7 +260,7 @@ export const make = (
           const seen = rt.seen
           yield* Effect.gen(function* () {
             const now = yield* seen(address).pipe(Effect.mapError(unreachable))
-            if (raisesSeen(now, turn)) yield* see(address, turn).pipe(Effect.mapError(unreachable))
+            if (raisesSeen(now, execution)) yield* see(address, execution).pipe(Effect.mapError(unreachable))
           }).pipe(seenLocked.withLock(`${at.runtime}\n${address.machine}\n${address.id}`))
         }),
 

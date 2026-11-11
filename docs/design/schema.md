@@ -229,7 +229,7 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                            |
 | process.ended                       | process, reason: exited, limited, restart, move, archived, launch_failed, superseded                                 |
 | execution.started                   | process?, typed? (the text typed into the pane)                                                                      |
-| execution.ended                     | execution, outcome, failure? {message}, conversation?, reply? (the harness's answer, when it reported the end)       |
+| execution.ended                     | execution, outcome, failure? {message}, conversation?, reply? (the harness's reply, when it reported the end)        |
 | inbox.queued                        | kind: task, send or notice, recipient?, sender?, content, status: pending, delivered or dropped, request?, peerItem? |
 | inbox.moved                         | inbox, to, execution? (on to = delivered: the execution that took it)                                                |
 | machine.added, .connected, .removed | name (added: target, vibestd)                                                                                        |
@@ -247,7 +247,7 @@ is there; it stays one process. Any other start while the session still has a li
 `superseded`. One whose terminal never opened ends `launch_failed`, and the session's current process is then the one
 before it, if any. Superseded processes are not exits: no reader counts them as one.
 
-An `execution.ended` the harness reported carries its answer (`reply`) and, when it changed, its conversation id; the
+An `execution.ended` the harness reported carries its reply (`reply`) and, when it changed, its conversation id; the
 projector copies `reply` into the execution's `reply` and the conversation into the current process. An end vibestd
 decided (`lost`, `not_started`, an exit, an interrupt it closed) has no `reply`.
 
@@ -281,13 +281,13 @@ type or key changes or removes rows, in the same pull request.
   it is refused. A repeat of a request id returns the row it queued, checked before the archive (it was accepted).
 - A main agent moving to another terminal has no place, but its rows wait for it. Rows for an absent main agent are
   dropped only while it still has no place, so a launch that landed in between keeps them.
-- A usage-limit move resends the open turn's input (its typed text or the rows it consumed); when that is empty, the
-  trailing run of delivered `task` and `send` rows from one sender that no turn consumed, oldest first, joined with a
+- A usage-limit move resends the open execution's input (its typed text or the rows it consumed); when that is empty, the
+  trailing run of delivered `task` and `send` rows from one sender that no execution consumed, oldest first, joined with a
   blank line.
 - A task is queued `delivered` with no execution; one with no `execution_id` was never handed over: the only move a
-  task gets is its handover, which names the execution. A turn that ended before its handover (vibestd stopped while
+  task gets is its handover, which names the execution. An execution that ended before its handover (vibestd stopped while
   waiting for ready) took nothing, so the task is still handed over.
-- A conversation can be resumed when a process of the session that resumed it or reported it has an ended turn, or,
+- A conversation can be resumed when a process of the session that resumed it or reported it has an ended execution, or,
   for an entry session, when a process of it reported it. The read model keeps only each process's latest
   conversation, so an earlier one in the same process no longer counts.
 
@@ -337,7 +337,7 @@ E2E runs it on every world's database at the end of each check.
 
 ## Memory
 
-- One-shot timers (engine): a session's turn-end grace and missed-turn check, a polling main agent's away timer, and
+- One-shot timers (engine): a session's execution-end grace and missed-execution check, a polling main agent's away timer, and
   one lease timer per row a poll handed out. Lost with the process; the start-up reconcile and `recoverDelivering`
   stand in for them.
 - Live status: from the integration's events (working between `execution.started` and `execution.ended`, plus `blocked`), and
@@ -349,11 +349,11 @@ E2E runs it on every world's database at the end of each check.
 - Restarting mark: the end events are written after SIGTERM, so a crash before it leaves the old process running,
   and a crash after it leaves an unended process with no harness in the pane, which reconciliation ends.
 - Skipped options within one harness change, per-session locks, paste and ack waits: lost with the process; an
-  open turn stays open, and the harness's turn end or reconciliation (idle, no result: lost) ends it.
-- A turn start an integration reports is published (`live.turn_start`), never stored: it marks the open turn as
-  worked in the session's flags, which `forget` clears on its `process.ended` or its archive. A turn end is its
+  open execution stays open, and the harness's execution end or reconciliation (idle, no result: lost) ends it.
+- An execution start an integration reports is published (`live.execution_start`), never stored: it marks the open execution as
+  worked in the session's flags, which `forget` clears on its `process.ended` or its archive. An execution end is its
   `execution.ended` fact, written as the hook is admitted (a settlement, so it still lands while vibestd drains).
-  After a restart the stored proof that a turn was taken up is its typed text or an inbox row delivered into it.
+  After a restart the stored proof that an execution was taken up is its typed text or an inbox row delivered into it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.
 - `vibest run --archive-on-idle`: the flag is kept only in the memory of the vibestd that started the session (set at

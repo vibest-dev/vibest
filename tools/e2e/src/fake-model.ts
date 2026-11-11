@@ -166,7 +166,7 @@ export const heldModel = () => {
   }
 }
 
-export const holdsSlowResultModel = () => {
+export const holdsSlowMessageModel = () => {
   const seen: Array<ReadonlyArray<string>> = []
   const held: Array<() => void> = []
   const server = Bun.serve({
@@ -247,8 +247,9 @@ export const fakeOpenAI = (
       const who = main ? "main" : sub ? "pi" : undefined
       const tools = messages.filter((m) => m.role === "tool")
       const last = messages.at(-1)
-      const mainTurnNotStartedBySubagentResult = who === "main" && tools.length === 0 && !text(last).includes("<agent-")
-      if (who === undefined || mainTurnNotStartedBySubagentResult)
+      const mainExecutionNotStartedBySubagentMessage =
+        who === "main" && tools.length === 0 && !text(last).includes("<agent-")
+      if (who === undefined || mainExecutionNotStartedBySubagentMessage)
         return new Response(answer("ok"), { headers: sseHeaders })
       if (tools.length > 3) return new Response(answer("ok"), { headers: sseHeaders })
       dirs[who] = (main ?? sub)![1]!

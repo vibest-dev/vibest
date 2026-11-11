@@ -25,7 +25,7 @@ import {
   listProjectRepositories,
   projectRoot,
 } from "./project-create.ts"
-import { isUsageLimitError } from "./results.ts"
+import { isUsageLimitError } from "./replies.ts"
 import { addressOf, type RuntimesShape, type Runtime, type Terminal } from "./runtimes.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { removeSystemPrompt, type SystemPromptDirUnsafe } from "./system-prompt.ts"
@@ -51,7 +51,7 @@ export const sessionPlacement = (deps: {
     readonly coordinatorOf: (projectId: string) => Effect.Effect<CoordinatorRow | undefined>
     readonly listSessions: (filter?: { readonly projectId?: string }) => Effect.Effect<ReadonlyArray<SessionRow>>
     readonly openExecution: (id: string) => Effect.Effect<number | undefined>
-    readonly closeExecution: (id: string, turn: number, status: "failed") => Effect.Effect<boolean>
+    readonly closeExecution: (id: string, execution: number, status: "failed") => Effect.Effect<boolean>
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly endProcess: (id: string, reason: ProcessEndReason) => Effect.Effect<boolean>
@@ -273,8 +273,8 @@ export const sessionPlacement = (deps: {
         Effect.gen(function* () {
           const e = Cause.squash(cause)
           const t = yield* Clock.currentTimeMillis
-          const turn = yield* db.openExecution(session.id)
-          if (turn !== undefined) yield* db.closeExecution(session.id, turn, "failed")
+          const execution = yield* db.openExecution(session.id)
+          if (execution !== undefined) yield* db.closeExecution(session.id, execution, "failed")
           yield* db.updateSession(session.id, {
             status: "unknown",
             exitedAt: t,

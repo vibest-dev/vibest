@@ -86,8 +86,8 @@ export const sessionArchive = (deps: {
       const seen = yield* agentState(h, terminal)
       const reasons: Array<string> = []
       const working = busyOf(seen)
-      const turn = yield* db.openExecution(id)
-      if (working || turn !== undefined) {
+      const execution = yield* db.openExecution(id)
+      if (working || execution !== undefined) {
         if (options.unlessPending) return undefined
         if (working) {
           const stopped = yield* interruptAgent(h, session, terminal)
@@ -97,7 +97,7 @@ export const sessionArchive = (deps: {
               : `${id} did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; its terminal closed anyway`,
           )
         }
-        if (turn !== undefined) yield* db.closeExecution(id, turn, "interrupted")
+        if (execution !== undefined) yield* db.closeExecution(id, execution, "interrupted")
         session = yield* getRow(id)
       }
       if (!(session.metadata.archived || session.metadata.removed)) {
@@ -156,7 +156,7 @@ export const sessionArchive = (deps: {
                 Effect.flatMap((told) => (told ? Effect.void : notice(session, message))),
               )
             const skip = (why: string) => tell(`${id} not archived (vibest run --archive-on-idle): ${why}`)
-            if (session.turnState !== "completed") return yield* Ref.set(r.archiveTold, false)
+            if (session.executionState !== "completed") return yield* Ref.set(r.archiveTold, false)
             const h = yield* live(session)
             const terminal = session.address
             const seen = yield* agentState(h, terminal)

@@ -8,7 +8,7 @@ import * as Launch from "@vibest/core/launch"
 import { forProvider, listModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory } from "@vibest/core/paths"
 import { locateProject, resolveProject } from "@vibest/core/project-identity"
-import { turnEndFrom, turnEndOf } from "@vibest/core/results"
+import { executionEndFrom, executionEndOf } from "@vibest/core/replies"
 import { copyIncluded, mainCheckout, repositoryDirectoryName } from "@vibest/core/worktree"
 import { claude, cursor, pi } from "@vibest/plugin-harnesses"
 import { noProvider } from "@vibest/plugin-harnesses/models"
@@ -257,24 +257,24 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
       assert.strictEqual(projectActivity([]), "idle")
     })
 
-    it("an idle session is done only while its turn is past the mark; no mark (or no runtime support) is never done", () => {
-      assert.strictEqual(unseenDone("idle", { turn: 3, seen: 2 }), "done")
-      assert.strictEqual(unseenDone("idle", { turn: 3, seen: 3 }), "idle")
-      assert.strictEqual(unseenDone("idle", { turn: 3, seen: null }), "idle")
+    it("an idle session is done only while its execution is past the mark; no mark (or no runtime support) is never done", () => {
+      assert.strictEqual(unseenDone("idle", { execution: 3, seen: 2 }), "done")
+      assert.strictEqual(unseenDone("idle", { execution: 3, seen: 3 }), "idle")
+      assert.strictEqual(unseenDone("idle", { execution: 3, seen: null }), "idle")
       assert.strictEqual(unseenDone("idle", undefined), "idle")
-      assert.strictEqual(unseenDone("working", { turn: 3, seen: 0 }), "working")
-      assert.strictEqual(unseenDone("blocked", { turn: 3, seen: 0 }), "blocked")
+      assert.strictEqual(unseenDone("working", { execution: 3, seen: 0 }), "working")
+      assert.strictEqual(unseenDone("blocked", { execution: 3, seen: 0 }), "blocked")
     })
 
-    it("the seen mark only rises, never past the turn the runtime counted; a missing mark may be set", () => {
-      assert.isTrue(raisesSeen({ turn: 3, seen: 2 }, 3))
-      assert.isFalse(raisesSeen({ turn: 3, seen: 3 }, 3))
-      assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 1))
-      assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 4))
-      assert.isFalse(raisesSeen({ turn: 3, seen: 2 }, 2.5))
-      assert.isTrue(raisesSeen({ turn: 3, seen: null }, 0))
-      assert.isFalse(raisesSeen({ turn: 3, seen: null }, -1))
-      assert.isFalse(raisesSeen({ turn: 3, seen: null }, 1.5))
+    it("the seen mark only rises, never past the execution the runtime counted; a missing mark may be set", () => {
+      assert.isTrue(raisesSeen({ execution: 3, seen: 2 }, 3))
+      assert.isFalse(raisesSeen({ execution: 3, seen: 3 }, 3))
+      assert.isFalse(raisesSeen({ execution: 3, seen: 2 }, 1))
+      assert.isFalse(raisesSeen({ execution: 3, seen: 2 }, 4))
+      assert.isFalse(raisesSeen({ execution: 3, seen: 2 }, 2.5))
+      assert.isTrue(raisesSeen({ execution: 3, seen: null }, 0))
+      assert.isFalse(raisesSeen({ execution: 3, seen: null }, -1))
+      assert.isFalse(raisesSeen({ execution: 3, seen: null }, 1.5))
     })
 
     it("models --provider: only Pi filters by provider; Claude and Cursor refuse any provider and keep provider null", () => {
@@ -359,11 +359,11 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
     )
 
     it.effect(
-      "turn ends: reply field per harness; error fails, aborted interrupts; a junk hook input is no turn end",
+      "execution ends: reply field per harness; error fails, aborted interrupts; a junk hook input is no execution end",
       () =>
         Effect.gen(function* () {
           const harnesses = yield* Harnesses
-          assert.deepInclude(turnEndFrom(yield* harnesses.get("claude"), { last_assistant_message: "hi" }, 5), {
+          assert.deepInclude(executionEndFrom(yield* harnesses.get("claude"), { last_assistant_message: "hi" }, 5), {
             harness: "claude",
             at: 5,
             status: "completed",
@@ -372,26 +372,32 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
             needsReady: true,
           })
           assert.deepInclude(
-            turnEndFrom(yield* harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1),
+            executionEndFrom(yield* harnesses.get("pi"), { text: "", error: "boom", error_details: "why" }, 1),
             { status: "failed", failure: "boom: why", limited: false },
           )
-          assert.deepInclude(turnEndFrom(yield* harnesses.get("pi"), { text: "", error: "rate limit hit" }, 1), {
+          assert.deepInclude(executionEndFrom(yield* harnesses.get("pi"), { text: "", error: "rate limit hit" }, 1), {
             status: "failed",
             limited: true,
           })
           assert.deepInclude(
-            turnEndFrom(yield* harnesses.get("pi"), { text: "so far", error: "aborted", aborted: true }, 1),
+            executionEndFrom(yield* harnesses.get("pi"), { text: "so far", error: "aborted", aborted: true }, 1),
             { status: "interrupted", reply: "so far", failure: undefined },
           )
-          assert.deepInclude(turnEndFrom(yield* harnesses.get("cursor"), { text: "x", conversation_id: "c-1" }, 1), {
-            conversation: "c-1",
-            needsReady: false,
-          })
+          assert.deepInclude(
+            executionEndFrom(yield* harnesses.get("cursor"), { text: "x", conversation_id: "c-1" }, 1),
+            {
+              conversation: "c-1",
+              needsReady: false,
+            },
+          )
           for (const bad of ["--flag", "-f", "--yolo", "--force", "a b", ""])
-            assert.deepInclude(turnEndFrom(yield* harnesses.get("cursor"), { text: "x", conversation_id: bad }, 1), {
-              conversation: undefined,
-            })
-          assert.isUndefined(turnEndOf(yield* harnesses.get("claude"), "general", "{", 1))
+            assert.deepInclude(
+              executionEndFrom(yield* harnesses.get("cursor"), { text: "x", conversation_id: bad }, 1),
+              {
+                conversation: undefined,
+              },
+            )
+          assert.isUndefined(executionEndOf(yield* harnesses.get("claude"), "general", "{", 1))
         }),
     )
 

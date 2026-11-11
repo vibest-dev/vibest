@@ -14,12 +14,12 @@ import {
   subagentFolder,
   type Step,
 } from "../fake-model.ts"
-import { answerOf, binary, expect, herdr, row, Skip, until } from "../world.ts"
+import { replyOf, binary, expect, herdr, row, Skip, until } from "../world.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 type Info = { directory: string; preferences: string; docs: string; memories: string; artifacts: string }
 
-const filesTurn =
+const filesExecution =
   (
     results: Record<string, Array<string>>,
     other: string,
@@ -89,16 +89,21 @@ const checks: ReadonlyArray<Check> = [
       const results: Record<string, Array<string>> = {}
       const dirs: Record<string, string> = {}
       const pi = fakeOpenAI(
-        filesTurn(results, other, { write: "write", read: "read", path: "path", bash: "bash" }),
+        filesExecution(results, other, { write: "write", read: "read", path: "path", bash: "bash" }),
         dirs,
       )
-      const claudeTurn = filesTurn(results, other, { write: "Write", read: "Read", path: "file_path", bash: "Bash" })
+      const claudeExecution = filesExecution(results, other, {
+        write: "Write",
+        read: "Read",
+        path: "file_path",
+        bash: "Bash",
+      })
       const claude = fakeAnthropic((r) => {
         const dir = subagentFolder(r.system)
         if (r.tools.length === 0 || dir === undefined || r.results.length > 3) return "ok"
         dirs.claude = dir
         const last = r.results.at(-1)
-        return claudeTurn(
+        return claudeExecution(
           "claude",
           dir,
           r.results.length,
@@ -133,13 +138,15 @@ const checks: ReadonlyArray<Check> = [
         }
         const answered = (who: string) => (results[who]?.length ?? 0) >= 3
         for (const who of ["pi", "claude", "main"])
-          await until(`the ${who} agent's turn on the folder`, () => answered(who), 180_000).catch(async (e: Error) => {
-            const peek =
-              who === "main" ? undefined : await w.vibest(["peek", subs[who as "pi" | "claude"]], { cwd: repo })
-            throw new Error(
-              `${e.message}; tool results ${JSON.stringify(results)}; folders ${JSON.stringify(dirs)}${peek ? `; its screen:\n${peek.stdout}` : ""}`,
-            )
-          })
+          await until(`the ${who} agent's execution on the folder`, () => answered(who), 180_000).catch(
+            async (e: Error) => {
+              const peek =
+                who === "main" ? undefined : await w.vibest(["peek", subs[who as "pi" | "claude"]], { cwd: repo })
+              throw new Error(
+                `${e.message}; tool results ${JSON.stringify(results)}; folders ${JSON.stringify(dirs)}${peek ? `; its screen:\n${peek.stdout}` : ""}`,
+              )
+            },
+          )
         const main = (
           await w
             .json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"], { cwd: repo })
@@ -207,7 +214,7 @@ const checks: ReadonlyArray<Check> = [
             timeoutMs: 90_000,
           }),
         ) as { id: string }
-        await until("the subagent's answer", async () => (await answerOf(w, id, old)).includes("done-p7"), 90_000)
+        await until("the subagent's answer", async () => (await replyOf(w, id, old)).includes("done-p7"), 90_000)
         vibestOwnWorktree = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", id)?.d ?? ""
         expect(vibestOwnWorktree.startsWith(w.vibestHome), `vibest run made no worktree: ${vibestOwnWorktree}`)
         await w.ok(["archive", id, "--keep-worktree"], { cwd: old, timeoutMs: 60_000 })

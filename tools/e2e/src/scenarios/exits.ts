@@ -54,7 +54,7 @@ export const piProject = async (w: World, name: string) => {
     return ((JSON.parse(runtime ?? "{}") as { id?: string }).id ?? "").split("/")[1] ?? ""
   }
   const pid = (id: string) => q<{ pid: number | null }>(`SELECT pid FROM ${SESSIONS} s WHERE id = ?`, id)?.pid ?? null
-  const turnEnds = (id: string) =>
+  const executionEnds = (id: string) =>
     q<{ n: number }>("SELECT count(*) AS n FROM execution WHERE session_id = ? AND outcome IS NOT NULL", id)?.n ?? 0
   const sent = (id: string) =>
     q<{ n: number }>("SELECT count(*) AS n FROM inbox WHERE sender_session_id = ?", id)?.n ?? 0
@@ -81,7 +81,7 @@ export const piProject = async (w: World, name: string) => {
     )?.n ?? 0
   const idle = (id: string) =>
     q<{ id: number }>("SELECT id FROM execution WHERE session_id = ? AND outcome IS NULL", id) === undefined &&
-    turnEnds(id) > 0
+    executionEnds(id) > 0
   const vibestSend = (id: string, message: string) => w.ok(["send", id, "--", message], { cwd: repo, env })
   const log = () => fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
   const close = async () => {
@@ -99,7 +99,7 @@ export const piProject = async (w: World, name: string) => {
     pane,
     pid,
     sent,
-    turnEnds,
+    executionEnds,
     lastEnd,
     exited,
     sendRow,
@@ -113,7 +113,7 @@ export const piProject = async (w: World, name: string) => {
 const recordMs = (evidence: string, id: string, what: string, ms: number) =>
   fs.writeFile(path.join(evidence, `${id}-timing.json`), `${JSON.stringify({ [what]: ms })}\n`)
 
-const killedMidTurn = async (
+const killedMidExecution = async (
   w: World,
   evidence: string,
   name: string,
@@ -122,7 +122,7 @@ const killedMidTurn = async (
   const p = await piProject(w, name)
   try {
     const sub = await p.runSub("held")
-    await until("the subagent's turn held", () => p.model.held() > 0, 60_000)
+    await until("the subagent's execution held", () => p.model.held() > 0, 60_000)
     const message = ask("queued")
     await p.vibestSend(sub, message)
     await until("the send queued", () => p.sendRow(sub, message)?.status === "pending", 15_000)
@@ -134,7 +134,7 @@ const killedMidTurn = async (
         p.lastEnd(sub)?.status === "failed" &&
         p.lastEnd(sub)?.failure != null &&
         p.sendRow(sub, message)?.status === "failed" &&
-        p.notices(sub, "exited during a turn") === 1 &&
+        p.notices(sub, "exited during an execution") === 1 &&
         p.notices(sub, "Not delivered") === 1 &&
         p.notices(sub, "") === 1 &&
         p.exited(sub),
@@ -183,9 +183,9 @@ const checks: ReadonlyArray<Check> = [
     id: "S21",
     covers: ["S8"],
     title:
-      "pane killed mid-turn: the turn is failed (the session exited), the queued message failed, the session exited, and the creator gets one notice carrying the exit and the undelivered message, and nothing else; the time it took is recorded",
+      "pane killed mid-execution: the execution is failed (the session exited), the queued message failed, the session exited, and the creator gets one notice carrying the exit and the undelivered message, and nothing else; the time it took is recorded",
     run: async (w, evidence) => {
-      const { p } = await killedMidTurn(w, evidence, "s21", async (p, id) => {
+      const { p } = await killedMidExecution(w, evidence, "s21", async (p, id) => {
         await herdr(p.socket, "pane.close", { pane_id: p.pane(id) })
       })
       await p.close()
@@ -194,7 +194,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S51",
     title:
-      "pane killed while the session is idle: the session exited, its completed turn stays completed, and the creator gets exactly one notice that it exited",
+      "pane killed while the session is idle: the session exited, its completed execution stays completed, and the creator gets exactly one notice that it exited",
     run: async (w) => {
       const p = await piProject(w, "s51")
       try {
@@ -205,8 +205,8 @@ const checks: ReadonlyArray<Check> = [
         await until("the exit seen", () => p.exited(sub) && p.notices(sub, "exited") === 1, 30_000)
         await nothingMoreComesWithin(2_000)
         expect(
-          p.turnEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed" && p.sent(sub) === 1,
-          `turns ${p.turnEnds(sub)}, last ${JSON.stringify(p.lastEnd(sub))}, rows sent ${p.sent(sub)}`,
+          p.executionEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed" && p.sent(sub) === 1,
+          `executions ${p.executionEnds(sub)}, last ${JSON.stringify(p.lastEnd(sub))}, rows sent ${p.sent(sub)}`,
         )
       } finally {
         await p.close()
@@ -218,7 +218,7 @@ const checks: ReadonlyArray<Check> = [
     title: "harness killed (kill -9, the pane stays): as S21, and the pane still exists",
     run: async (w, evidence) => {
       let pane = ""
-      const { p } = await killedMidTurn(w, evidence, "s22", async (p, id) => {
+      const { p } = await killedMidExecution(w, evidence, "s22", async (p, id) => {
         const pid = p.pid(id)
         expect(pid !== null, `no pid recorded for ${id}`)
         pane = p.pane(id)
@@ -239,23 +239,23 @@ const checks: ReadonlyArray<Check> = [
     id: "S23",
     covers: ["S8"],
     title:
-      "vibestd restarted mid-turn: (a) restart while held, then release; (b) kill -9 vibestd right after the turn end is logged; both: exactly one completed turn that points at its report and sends nothing",
+      "vibestd restarted mid-execution: (a) restart while held, then release; (b) kill -9 vibestd right after the execution end is logged; both: exactly one completed execution that points at its report and sends nothing",
     run: async (w) => {
       const p = await piProject(w, "s23")
       try {
         const one = async (sub: string, what: string) => {
           await until(
-            `${what}: one completed turn`,
-            () => p.turnEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed",
+            `${what}: one completed execution`,
+            () => p.executionEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed",
             60_000,
           )
           await nothingMoreComesWithin(3_000)
           expect(
-            p.turnEnds(sub) === 1 && p.sent(sub) === 0,
-            `${what}: ${p.turnEnds(sub)} turn ends, ${p.sent(sub)} rows sent`,
+            p.executionEnds(sub) === 1 && p.sent(sub) === 0,
+            `${what}: ${p.executionEnds(sub)} execution ends, ${p.sent(sub)} rows sent`,
           )
           const end = p.lastEnd(sub)!
-          expect(typeof end.reply === "string", `${what}: turn ${JSON.stringify(end)}`)
+          expect(typeof end.reply === "string", `${what}: execution ${JSON.stringify(end)}`)
         }
         const a = await p.runSub("a")
         await until("(a) held", () => p.model.held() > 0, 60_000)
@@ -267,7 +267,11 @@ const checks: ReadonlyArray<Check> = [
         await until("(b) held", () => p.model.held() > 0, 60_000)
         const from = (await p.log()).length
         p.model.releaseOne()
-        await until("(b) turn end logged", async () => (await p.log()).slice(from).includes(`turn end ${b}`), 30_000)
+        await until(
+          "(b) execution end logged",
+          async () => (await p.log()).slice(from).includes(`execution end ${b}`),
+          30_000,
+        )
         const pid = await w.daemonPid()
         await w.killDaemon(pid)
         await p.startDaemon()
@@ -419,7 +423,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S29",
     title:
-      "vibestd killed (kill -9) while a subagent's first turn waits for its harness to be ready (the task not handed over): the next vibestd types the task once, as that turn's input, and the one completed turn sends nothing",
+      "vibestd killed (kill -9) while a subagent's first execution waits for its harness to be ready (the task not handed over): the next vibestd types the task once, as that execution's input, and the one completed execution sends nothing",
     run: async (w) => {
       const p = await piProject(w, "s29")
       try {
@@ -431,7 +435,7 @@ const checks: ReadonlyArray<Check> = [
           const opened = () =>
             row<{ n: number }>(w, "SELECT count(*) AS n FROM execution WHERE session_id = ?", id)?.n === 1
           for (const deadline = Date.now() + 60_000; !opened(); await Bun.sleep(1))
-            expect(Date.now() < deadline, `${id}: its first turn never opened`)
+            expect(Date.now() < deadline, `${id}: its first execution never opened`)
           await w.killDaemon(daemon)
           if (untaken(w, id)) sub = id
           await p.startDaemon()
@@ -439,7 +443,11 @@ const checks: ReadonlyArray<Check> = [
         }
         expect(sub !== "", "every try handed the task over before vibestd was killed")
         const task = `t${row<{ c: string }>(w, "SELECT content AS c FROM inbox WHERE session_id = ? AND kind = 'task'", sub)?.c.match(/done-t(\d+)/)?.[1]}`
-        await until("one completed turn", () => p.turnEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed", 60_000)
+        await until(
+          "one completed execution",
+          () => p.executionEnds(sub) === 1 && p.lastEnd(sub)?.status === "completed",
+          60_000,
+        )
         await nothingMoreComesWithin(3_000)
         expect(p.model.asked(task) === 1, `the task was asked ${p.model.asked(task)} times`)
         expect(p.sent(sub) === 0, `${p.sent(sub)} rows sent by the session`)
@@ -449,7 +457,7 @@ const checks: ReadonlyArray<Check> = [
             WHERE e.aggregate = ? AND e.type = 'inbox.moved' AND i.kind = 'task' AND e.data ->> '$.execution' IS NOT NULL`,
           sub,
         )?.n
-        expect(input === 1, `the task is the input of ${input} turns`)
+        expect(input === 1, `the task is the input of ${input} executions`)
       } finally {
         await p.close()
       }
@@ -517,7 +525,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S32",
     title:
-      "Send repeated over vibest.sock with one request id (as vibest send retries a lost answer): the same answer, one row, one delivery, the task asked once and two turns",
+      "Send repeated over vibest.sock with one request id (as vibest send retries a lost answer): the same answer, one row, one delivery, the task asked once and two executions",
     run: async (w) => {
       const p = await piProject(w, "s32")
       try {
@@ -538,7 +546,7 @@ const checks: ReadonlyArray<Check> = [
           `answers ${JSON.stringify(first)} and ${JSON.stringify(second)}`,
         )
         await until("delivered", () => p.sendRow(sub, message)?.status === "delivered", 30_000)
-        await until("its second turn", () => p.turnEnds(sub) === 2 && p.idle(sub), 60_000)
+        await until("its second execution", () => p.executionEnds(sub) === 2 && p.idle(sub), 60_000)
         await nothingMoreComesWithin(2_000)
         const rows = row<{ n: number }>(
           w,
@@ -547,7 +555,10 @@ const checks: ReadonlyArray<Check> = [
         )?.n
         expect(rows === 1, `${rows} send rows`)
         expect(p.model.asked("again") === 1, `the message was asked ${p.model.asked("again")} times`)
-        expect(p.turnEnds(sub) === 2 && p.sent(sub) === 0, `${p.turnEnds(sub)} turn ends, ${p.sent(sub)} rows sent`)
+        expect(
+          p.executionEnds(sub) === 2 && p.sent(sub) === 0,
+          `${p.executionEnds(sub)} execution ends, ${p.sent(sub)} rows sent`,
+        )
       } finally {
         await p.close()
       }

@@ -1,4 +1,4 @@
-export const PROTOCOL = 9
+export const PROTOCOL = 10
 
 export const MISMATCH_ACTION = "vibest update"
 
@@ -47,10 +47,10 @@ export const peerHeaders = (peer: string, project?: string): Record<string, stri
 
 export const POLL_ROUTE = "/inbox/poll"
 export const ACK_ROUTE = "/inbox/ack"
-export type HookKind = "turn-end" | "prompt" | "guard"
+export type HookKind = "execution-end" | "prompt" | "guard"
 export const hookRoute = (harness: string, hook: HookKind) => `/hooks/${harness}/${hook}`
 export const parseHookRoute = (path: string): { readonly harness: string; readonly hook: HookKind } | undefined => {
-  const m = /^\/hooks\/([a-z]+)\/(turn-end|prompt|guard)$/.exec(path)
+  const m = /^\/hooks\/([a-z]+)\/(execution-end|prompt|guard)$/.exec(path)
   return m ? { harness: m[1]!, hook: m[2] as HookKind } : undefined
 }
 

@@ -73,12 +73,12 @@ export const busEvents = Effect.gen(function* () {
   return yield* (yield* Bus).subscribe
 })
 
-export const nextTurnStart = (subscription: PubSub.Subscription<EngineEvent>, id: string): Effect.Effect<number> =>
+export const nextExecutionStart = (subscription: PubSub.Subscription<EngineEvent>, id: string): Effect.Effect<number> =>
   PubSub.take(subscription).pipe(
     Effect.flatMap((event) =>
-      event.type === "live.turn_start" && event.sessionId === id
+      event.type === "live.execution_start" && event.sessionId === id
         ? Effect.succeed(event.at)
-        : nextTurnStart(subscription, id),
+        : nextExecutionStart(subscription, id),
     ),
   )
 
@@ -151,15 +151,15 @@ export {
 } from "@vibest/core/test/lib/session"
 export {
   GaveUp,
-  TURNS,
+  EXECUTIONS,
   eventsOf,
   processEnds,
-  resultText,
+  replyText,
   settled,
   systemPromptFile,
   until,
   untilVirtual,
-  writeResult,
+  writeEnd,
   yieldToIo,
 } from "@vibest/core/test/lib/observe"
 

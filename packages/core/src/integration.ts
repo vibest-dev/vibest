@@ -7,7 +7,7 @@ import * as Guard from "./guard.ts"
 import { Harnesses } from "./harness.ts"
 import type { HarnessDefinition } from "./host.ts"
 import { Layout } from "./paths.ts"
-import { jsonObject, promptOf, turnEndOf } from "./results.ts"
+import { jsonObject, promptOf, executionEndOf } from "./replies.ts"
 import { Sessions } from "./sessions.ts"
 
 export type HookCaller = { readonly id: string; readonly agent: string; readonly harness: string }
@@ -28,13 +28,13 @@ const make = Effect.gen(function* () {
         yield* Effect.logInfo(`session ${who.id} is in conversation ${conversation}`)
     })
 
-  const turnEnd = Effect.fn("Integration.turnEnd")(function* (who: HookCaller, raw: string) {
+  const executionEnd = Effect.fn("Integration.executionEnd")(function* (who: HookCaller, raw: string) {
     const definition = harnesses.find(who.harness)
     if (definition === undefined) return
-    const end = turnEndOf(definition, who.agent, raw, yield* Clock.currentTimeMillis)
+    const end = executionEndOf(definition, who.agent, raw, yield* Clock.currentTimeMillis)
     if (!end) return yield* noteConversation(definition, who, raw)
     const written = yield* db.endObserved(who.id, end)
-    yield* Effect.log(`turn end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)
+    yield* Effect.log(`execution end ${who.id} (${end.harness}, ${written ?? `${end.status} ignored`})`)
   })
 
   const prompt = Effect.fn("Integration.prompt")(function* (who: HookCaller, raw: string) {
@@ -75,7 +75,7 @@ const make = Effect.gen(function* () {
       Effect.withSpan("Integration.guard"),
     )
 
-  return { turnEnd, prompt, ready, guard }
+  return { executionEnd, prompt, ready, guard }
 })
 
 export class Integration extends Context.Service<Integration, Effect.Success<typeof make>>()("vibest/Integration") {

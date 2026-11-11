@@ -19,9 +19,9 @@ import {
   testLayer,
   type TestServices,
   until,
-  resultText,
+  replyText,
   busEvents,
-  nextTurnStart,
+  nextExecutionStart,
   projectOf,
 } from "./fakes.ts"
 
@@ -278,12 +278,12 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "the prompt hook notes its turn start at once, while the session's lock is held, with the round's stamp",
+    "the prompt hook notes its execution start at once, while the session's lock is held, with the round's stamp",
     Effect.gen(function* () {
       const { call, db, worker } = yield* project
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
-      yield* until(db.getSession(worker), (s) => s?.turnState === "open")
+      yield* until(db.getSession(worker), (s) => s?.executionState === "open")
       const held = yield* herdr.hold("state", worker)
       const checking = yield* Effect.forkChild(sessions.check(worker))
       yield* held.reached
@@ -297,7 +297,7 @@ describe("vibestd's HTTP API", () => {
           JSON.stringify({ hook_event_name: "PromptSubmit", text: "do it", origin: "composer" }),
         ),
       )
-      assert.strictEqual(yield* nextTurnStart(events, worker), stamp)
+      assert.strictEqual(yield* nextExecutionStart(events, worker), stamp)
       yield* held.release()
       yield* Fiber.join(checking)
       assert.strictEqual((yield* Fiber.join(hook)).status, 204)
@@ -305,7 +305,7 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
-    "turn-end, prompt and guard hooks: vibestd keeps the turn start and end",
+    "execution-end, prompt and guard hooks: vibestd keeps the execution start and end",
     Effect.gen(function* () {
       const { call, db, worker, main } = yield* project
       const layout = yield* Layout
@@ -317,24 +317,24 @@ describe("vibestd's HTTP API", () => {
         JSON.stringify({ hook_event_name: "PromptSubmit", text: "next step", origin: "composer" }),
       )
       assert.strictEqual(prompt.status, 204)
-      yield* nextTurnStart(events, worker)
+      yield* nextExecutionStart(events, worker)
       const end = yield* call(
-        "/hooks/claude/turn-end",
+        "/hooks/claude/execution-end",
         { sessionId: worker },
         JSON.stringify({
-          hook_event_name: "TurnComplete",
+          hook_event_name: "ExecutionComplete",
           reason: "answer",
           last_assistant_message: "Fixed the guard.",
         }),
       )
       assert.strictEqual(end.status, 204)
-      assert.include(yield* resultText(worker), "Fixed the guard.")
+      assert.include(yield* replyText(worker), "Fixed the guard.")
       yield* call(
-        "/hooks/claude/turn-end",
+        "/hooks/claude/execution-end",
         { sessionId: main },
-        JSON.stringify({ hook_event_name: "TurnComplete", reason: "answer", last_assistant_message: "x" }),
+        JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "answer", last_assistant_message: "x" }),
       )
-      assert.strictEqual(yield* resultText(main), "")
+      assert.strictEqual(yield* replyText(main), "")
       const key = (yield* db.getSession(worker))!.projectId
       const tool = (file: string) =>
         JSON.stringify({ tool_name: "Write", tool_input: { file_path: file, content: "x" }, cwd: "/tmp" })

@@ -18,7 +18,7 @@ const TEST_HERDR = "herdr"
 const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) =>
   testEffect(sessionFrom({ hooked: ["pi"] }))(name, () => program)
 
-const idleSubagentsBetweenTurns = (n: number, runtime = TEST_HERDR) =>
+const idleSubagentsBetweenExecutions = (n: number, runtime = TEST_HERDR) =>
   Effect.gen(function* () {
     const db = yield* Db
     const herdr = yield* FakeRuntime
@@ -42,8 +42,8 @@ const idleSubagentsBetweenTurns = (n: number, runtime = TEST_HERDR) =>
           status: "idle",
           startedAt: 1,
           exitedAt: null,
-          turnState: "completed",
-          turnPromptedAt: 0,
+          executionState: "completed",
+          executionPromptedAt: 0,
           metadata: {},
           createdAt: 1,
           lastActive: 1,
@@ -87,8 +87,8 @@ describe("reconcile: a terminal whose agent has not started", () => {
         status: "unknown" as const,
         startedAt: 1,
         exitedAt: null,
-        turnState: "open" as const,
-        turnPromptedAt: 1,
+        executionState: "open" as const,
+        executionPromptedAt: 1,
         metadata: {},
         createdAt: 1,
         lastActive: 1,
@@ -107,7 +107,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
       yield* startupSettled(sessions)
       assert.isNotNull((yield* db.getSession(gone))!.exitedAt)
       assert.isNull((yield* db.getSession(alive))!.exitedAt)
-      assert.strictEqual((yield* db.getSession(alive))!.turnState, "open")
+      assert.strictEqual((yield* db.getSession(alive))!.executionState, "open")
     }),
   )
 
@@ -135,8 +135,8 @@ describe("reconcile: a terminal whose agent has not started", () => {
           status: "unknown",
           startedAt: 1,
           exitedAt: null,
-          turnState: "open",
-          turnPromptedAt: 1,
+          executionState: "open",
+          executionPromptedAt: 1,
           metadata: {},
           createdAt: 1,
           lastActive: 1,
@@ -182,8 +182,8 @@ describe("reconcile: a terminal whose agent has not started", () => {
           status: "unknown",
           startedAt: 1,
           exitedAt: null,
-          turnState: "open",
-          turnPromptedAt: 1,
+          executionState: "open",
+          executionPromptedAt: 1,
           metadata: {},
           createdAt: 1,
           lastActive: 1,
@@ -238,8 +238,8 @@ describe("reconcile: a terminal whose agent has not started", () => {
           status: "unknown",
           startedAt: 1,
           exitedAt: null,
-          turnState: "open",
-          turnPromptedAt: 1,
+          executionState: "open",
+          executionPromptedAt: 1,
           metadata: {},
           createdAt: 1,
           lastActive: 1,
@@ -279,7 +279,7 @@ describe("reconcile: one look at every live session at start, when a runtime reg
     "50 idle sessions: one read each when the next vibestd starts over their rows, then none over an idle hour",
     Effect.gen(function* () {
       yield* startupSettled(yield* Sessions)
-      yield* idleSubagentsBetweenTurns(50)
+      yield* idleSubagentsBetweenExecutions(50)
       const sessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
         Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
       )
@@ -300,7 +300,7 @@ describe("reconcile: one look at every live session at start, when a runtime reg
       const sessions = yield* Sessions
       yield* startupSettled(sessions)
       const read = yield* Ref.make<ReadonlyArray<string>>([])
-      yield* idleSubagentsBetweenTurns(3, "late")
+      yield* idleSubagentsBetweenExecutions(3, "late")
       const late = {
         id: "late",
         events: Stream.never,

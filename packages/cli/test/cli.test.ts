@@ -25,7 +25,7 @@ import {
   testLayer,
   type TestServices,
   until,
-  writeResult,
+  writeEnd,
   systemPromptFile,
   projectOf,
   callerPlugin,
@@ -88,7 +88,7 @@ describe("vibest CLI", () => {
       const spawned = yield* run(["run", "--runtime", "herdr", "pi", "-"], task)
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = decodeJson(spawned.stdout) as { id: string }
-      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      yield* until(db.getSession(id), (w) => w?.executionState === "open")
       yield* until(herdr.callsTo("send"), (calls) => calls.length > 0)
       assert.strictEqual((yield* herdr.callsTo("send"))[0]!.text, task)
 
@@ -97,7 +97,7 @@ describe("vibest CLI", () => {
         sessions: Array<{
           id: string
           status: string
-          turnState: string
+          executionState: string
           task: string
           latest: { status: string; summary: string; endedAt: number | null }
         }>
@@ -106,22 +106,27 @@ describe("vibest CLI", () => {
       assert.deepStrictEqual(machines, [])
       assert.deepInclude(listed[0], {
         id,
-        turnState: "open",
+        executionState: "open",
         task,
         latest: { status: "working", summary: "", endedAt: null },
       })
       assert.include(live, listed[0]!.status)
-      assert.deepInclude(decodeJson((yield* run(["result", id])).stdout), { id, turnState: "open", task, answer: null })
-      yield* writeResult(id, "pi", { text: "kept finding\nstatus: completed" })
-      yield* herdr.endTurn(id)
+      assert.deepInclude(decodeJson((yield* run(["result", id])).stdout), {
+        id,
+        executionState: "open",
+        task,
+        reply: null,
+      })
+      yield* writeEnd(id, "pi", { text: "kept finding\nstatus: completed" })
+      yield* herdr.endExecution(id)
       yield* sessions.check(id)
       const done = decodeJson((yield* run(["result", id])).stdout) as {
-        answer: { status: string; text: string }
+        reply: { status: string; text: string }
         task: string
         latest: { status: string; summary: string; endedAt: number | null }
       }
-      assert.deepInclude(done.answer, { status: "completed" })
-      assert.include(done.answer.text, "kept finding")
+      assert.deepInclude(done.reply, { status: "completed" })
+      assert.include(done.reply.text, "kept finding")
       assert.strictEqual(done.task, task)
       assert.strictEqual(done.latest.status, "completed")
       assert.strictEqual(done.latest.summary, "kept finding")
@@ -145,7 +150,7 @@ describe("vibest CLI", () => {
       const { id: other } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "-"], "other")).stdout) as {
         id: string
       }
-      yield* until(db.getSession(other), (w) => w?.turnState === "open")
+      yield* until(db.getSession(other), (w) => w?.executionState === "open")
       yield* db.updateSession(id, { status: "unknown", exitedAt: 1 })
       const ids = (args: ReadonlyArray<string>) =>
         run(args).pipe(
@@ -180,7 +185,7 @@ describe("vibest CLI", () => {
       }
       assert.deepStrictEqual(Object.keys(printed), ["id"])
       const { id } = printed
-      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const asSession = (sessionId: string, args: ReadonlyArray<string>) =>
         Effect.flatMap(db.sessionIdentity(sessionId), (row) =>
           vibest(
@@ -242,9 +247,9 @@ describe("vibest CLI", () => {
       for (const command of ["archive", "rm"] as const) {
         const spawned = yield* asCoord(["run", "pi", "--", "do it"])
         const { id } = decodeJson(spawned.stdout) as { id: string }
-        yield* until(db.getSession(id), (w) => w?.turnState === "open")
-        yield* writeResult(id, "pi", { text: "status: completed" })
-        yield* herdr.endTurn(id)
+        yield* until(db.getSession(id), (w) => w?.executionState === "open")
+        yield* writeEnd(id, "pi", { text: "status: completed" })
+        yield* herdr.endExecution(id)
         yield* sessions.check(id)
         const worktree = yield* db.sessionDirectory(id)
         if (worktree === undefined) return yield* Effect.die(`spawned ${id} has no worktree path`)
@@ -295,7 +300,7 @@ describe("vibest CLI", () => {
         })
 
         const busy = decodeJson((yield* asCoord(["run", "pi", "--", "more"])).stdout) as { id: string }
-        yield* until(db.getSession(busy.id), (w) => w?.turnState === "open")
+        yield* until(db.getSession(busy.id), (w) => w?.executionState === "open")
         const stopped = yield* asCoord([command, busy.id])
         assert.strictEqual(stopped.code, 0, stopped.stderr)
         assert.deepInclude(decodeJson(stopped.stdout) as object, {
@@ -322,22 +327,22 @@ describe("vibest CLI", () => {
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
       const run = (args: ReadonlyArray<string>) => vibest(repo, cli, args)
       const { id } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "do it"])).stdout) as { id: string }
-      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const finding = "status: completed\nsummary: kept finding"
-      yield* writeResult(id, "pi", { text: finding })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: finding })
+      yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      const before = decodeJson((yield* run(["result", id])).stdout) as { answer: { text: string } }
-      assert.include(before.answer.text, "kept finding")
+      const before = decodeJson((yield* run(["result", id])).stdout) as { reply: { text: string } }
+      assert.include(before.reply.text, "kept finding")
       assert.isTrue(yield* fs.exists(yield* systemPromptFile(id)))
 
       const archived = yield* run(["archive", id])
       assert.strictEqual(archived.code, 0, archived.stderr)
       assert.isFalse(yield* fs.exists(yield* systemPromptFile(id)))
 
-      const after = decodeJson((yield* run(["result", id])).stdout) as { id: string; answer: object }
+      const after = decodeJson((yield* run(["result", id])).stdout) as { id: string; reply: object }
       assert.strictEqual(after.id, id)
-      assert.deepStrictEqual(after.answer, before.answer)
+      assert.deepStrictEqual(after.reply, before.reply)
     }),
   )
 })

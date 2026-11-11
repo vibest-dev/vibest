@@ -371,13 +371,13 @@ const checks: ReadonlyArray<Check> = [
           await until("held response after question", () => model.waiting.length === 1, 30_000)
           await status("question answered", "working")
           await model.next("native-status-completed")
-          await status("successful turn", "done")
+          await status("successful execution", "done")
           await until(
             "unchanged vibest result",
             async () =>
-              (
-                await w.json<{ answer: { text: string } | null }>(["result", launched.id], { env })
-              ).answer?.text.includes("native-status-completed") === true,
+              (await w.json<{ reply: { text: string } | null }>(["result", launched.id], { env })).reply?.text.includes(
+                "native-status-completed",
+              ) === true,
             30_000,
           )
           const conversation = row<{ conversation: string }>(
@@ -397,11 +397,11 @@ const checks: ReadonlyArray<Check> = [
           await hc("send", terminal(), "/resume " + conversation)
           await visible("native-status-completed")
           await status("resumed conversation", "idle")
-          await hc("send", terminal(), "Start another turn and wait for the model.")
+          await hc("send", terminal(), "Start another execution and wait for the model.")
           await until("second held request", () => model.waiting.length === 1, 30_000)
-          await status("next turn", "working")
+          await status("next execution", "working")
           await hc("keys", terminal(), "esc")
-          await status("interrupted turn", "idle")
+          await status("interrupted execution", "idle")
           await model.next("discard interrupted response")
           const denied = path.join(w.root, "denied.txt")
           await hc("send", terminal(), "Test a denied scratch action.")
@@ -514,7 +514,7 @@ const checks: ReadonlyArray<Check> = [
         await model.next("pi-status-completed")
         await status("Pi settled", "done")
         expect(
-          (await w.json<{ answer: { text: string } | null }>(["result", pi], { env })).answer?.text.includes(
+          (await w.json<{ reply: { text: string } | null }>(["result", pi], { env })).reply?.text.includes(
             "pi-status-completed",
           ) === true,
           "Pi result changed",

@@ -105,8 +105,12 @@ export const make = Effect.gen(function* () {
       if (!hook || adapter === undefined) return failure(404, `no route ${request.path}`)
       if (hook.harness !== who.harness)
         return failure(403, `session ${who.id} runs ${who.harness}, not ${hook.harness}`)
-      if (hook.hook === "turn-end")
-        return yield* admitted("hook turn-end", true, integration.turnEnd(who, request.body).pipe(Effect.as(ok())))
+      if (hook.hook === "execution-end")
+        return yield* admitted(
+          "hook execution-end",
+          true,
+          integration.executionEnd(who, request.body).pipe(Effect.as(ok())),
+        )
       if (hook.hook === "prompt")
         return yield* admitted("hook prompt", true, integration.prompt(who, request.body).pipe(Effect.as(ok())))
       return yield* integration.guard(who.agent, request.body, who.projectId).pipe(

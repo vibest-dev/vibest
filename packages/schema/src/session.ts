@@ -4,8 +4,16 @@ import { InboxKind } from "./event.ts"
 
 export const AgentStatus = Schema.Literals(["idle", "working", "blocked", "done", "unknown"])
 export type AgentStatus = typeof AgentStatus.Type
-export const TurnState = Schema.Literals(["none", "open", "completed", "failed", "interrupted", "lost", "not_started"])
-export type TurnState = typeof TurnState.Type
+export const ExecutionState = Schema.Literals([
+  "none",
+  "open",
+  "completed",
+  "failed",
+  "interrupted",
+  "lost",
+  "not_started",
+])
+export type ExecutionState = typeof ExecutionState.Type
 export const InboxStatus = Schema.Literals(["pending", "sending", "delivered", "failed", "dropped"])
 export type InboxStatus = typeof InboxStatus.Type
 

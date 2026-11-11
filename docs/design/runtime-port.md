@@ -20,7 +20,7 @@ question 3 (§12, §17).
    each other over vibest's own ssh pipe (§6). A runtime manages only the terminals of its own machine; the
    connection to its product (socket, server) is the plugin's, opened and re-opened in its own scope.
 4. **Connections go outward only.** vibestd calls runtimes; nothing on a machine calls back.
-5. **The truth about a turn comes from vibest's harness integration**, not from the runtime.
+5. **The truth about an execution comes from vibest's harness integration**, not from the runtime.
 
 ## 2. Terms
 
@@ -130,15 +130,15 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 ## 5. Agent state, one direction
 
 - The harness integration (the plugin vibest loads into each CLI agent) writes only OSC 7501 status to its tty. It sends
-  each turn start (the user's prompt) and turn end (the result) to vibestd as the harness's raw event: RPC `Prompt` and
-  `TurnEnd` on vibest.sock (2 s per try, one retry 300 ms later, long enough for a vibestd handoff to listen again;
+  each execution start (the user's prompt) and execution end (the result) to vibestd as the harness's raw event: RPC `Prompt` and
+  `ExecutionEnd` on vibest.sock (2 s per try, one retry 300 ms later, long enough for a vibestd handoff to listen again;
   only when the connection could not be made at all, since a request that may have been sent may have been handled,
-  and a second turn end would be delivered twice), or the HTTP hook routes (Claude). vibestd keeps them in memory
-  (no file) and checks the session: the turn end becomes its `turn.end` event and result row.
-- Core follows each Agent with `events` and `state` when present; it never polls `process`. When a turn ends (state
-  idle after working, or the process exited), core takes the reported turn end and delivers the result. A turn end
-  vibestd had not written when it stopped is lost; reconciliation records that turn lost.
-- Ready for input: `state` idle, else the adapter's ready pattern on `read()`. A process that exits before its turn
+  and a second execution end would be delivered twice), or the HTTP hook routes (Claude). vibestd keeps them in memory
+  (no file) and checks the session: the execution end becomes its `execution.end` event and result row.
+- Core follows each Agent with `events` and `state` when present; it never polls `process`. When an execution ends (state
+  idle after working, or the process exited), core takes the reported execution end and delivers the result. An execution end
+  vibestd had not written when it stopped is lost; reconciliation records that execution lost.
+- Ready for input: `state` idle, else the adapter's ready pattern on `read()`. A process that exits before its execution
   ends loses the round, as today.
 
 ### Terminal status ownership
@@ -154,7 +154,7 @@ question or auth; an unknown blocked reason would omit kind, and native reports 
 Cursor writes no terminal status. Its hooks run detached from the terminal (no `/dev/tty`), so its plugin reports to
 vibestd over RPC instead: `sessionStart` is `Session.Ready` (vibest types the first task only then, since herdr-core
 has no status for Cursor), `afterAgentThought` and `postToolUse` (and `beforeSubmitPrompt` when the user or project
-also hooks it) are a turn start, which vibestd shows as working, and `afterAgentResponse` is the turn end, shown as
+also hooks it) are an execution start, which vibestd shows as working, and `afterAgentResponse` is the execution end, shown as
 idle. Cursor 2026.11.05 does not run a `--plugin-dir` plugin's `stop` hook, and runs its `beforeSubmitPrompt` hook only
 when user or project hooks also have one. It reports no permission/question/auth waits, so vibestd never shows it
 blocked on herdr-core. A report that does not reach vibestd fails the hook and appends its error to `vibestd.log`.
@@ -174,7 +174,7 @@ visible dialog text, pauses, reads it again, then answers only the scratch actio
 
 Caller detection is the environment keys in §4. Do not forge a herdr identity in E2E. Still open: launch a real
 Claude and Pi coordinator with built `vibest --harness <harness>` inside an isolated hc terminal; hold its fake model
-and assert native working, complete it and assert native done, then start another turn and interrupt it to assert
+and assert native working, complete it and assert native done, then start another execution and interrupt it to assert
 idle, with the loaded vibest integration and no competing OSC writer. This is independent of worker result coverage.
 In the same follow-up, remove Cursor's coordinator exclusion from terminal status reporting and verify working/idle
 there; terminal status must not inherit the coordinator exclusion used for result reporting.
@@ -225,7 +225,7 @@ disposed or its plugin unloaded) stops its merge.
 
 ## 8. Order of work
 
-1. API in `@vibest/plugin`; core on it (required members + fallbacks); harness integrations report turn events and
+1. API in `@vibest/plugin`; core on it (required members + fallbacks); harness integrations report execution events and
    OSC 7501; herdr becomes the builtin `runtime-herdr` plugin. Gates and e2e unchanged.
 2. `vibest machine`, remote herdr, the machine flow above; proven on voyracloud (Linux) and macbook-pro-m1 (macOS).
 3. `runtime-rex` and `runtime-tern` (parallel), each passing the contract suite.

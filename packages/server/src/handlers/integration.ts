@@ -53,8 +53,8 @@ export const make = Effect.gen(function* () {
         return answer === undefined ? {} : { answer }
       }),
 
-    TurnEnd: ({ sessionId, harness, event }, { headers }) =>
-      hook(sessionId, harness, headers, (who) => integration.turnEnd(who, event)),
+    ExecutionEnd: ({ sessionId, harness, event }, { headers }) =>
+      hook(sessionId, harness, headers, (who) => integration.executionEnd(who, event)),
 
     Prompt: ({ sessionId, harness, event }, { headers }) =>
       hook(sessionId, harness, headers, (who) => integration.prompt(who, event)),

@@ -6,7 +6,7 @@ import { TestClock } from "effect/testing"
 
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { systemPromptFile, until, untilVirtual, writeResult } from "./lib/observe.ts"
+import { systemPromptFile, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { callerPlugin, makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
@@ -55,8 +55,8 @@ describe.concurrent("Sessions", () => {
       assert.include(ownerFirst.reasons.join("\n"), third.id)
       assert.isTrue(yield* fs.exists(worktree))
 
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: "status: completed" })
+      yield* herdr.endExecution(id)
       yield* peer.sessions.check(id)
       const borrower = (yield* peer.sessions.remove(id))!
       assert.deepInclude(borrower, { processes: "exited", pane: "closed", worktree: "kept", path: worktree })
@@ -70,8 +70,8 @@ describe.concurrent("Sessions", () => {
       assert.notInclude(ownerSecond.reasons.join("\n"), id)
       assert.isTrue(yield* fs.exists(worktree))
 
-      yield* writeResult(third.id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(third.id)
+      yield* writeEnd(third.id, "pi", { text: "status: completed" })
+      yield* herdr.endExecution(third.id)
       yield* peer.sessions.check(third.id)
       const last = (yield* peer.sessions.remove(third.id))!
       assert.deepInclude(last, { worktree: "removed", path: worktree })
@@ -88,8 +88,8 @@ describe.concurrent("Sessions", () => {
       const owner = yield* idleSession(repo)
       const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
       yield* until(owner.db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: "status: completed" })
+      yield* herdr.endExecution(id)
       yield* owner.sessions.check(id)
       for (const session of [owner.id, id]) {
         yield* herdr.updateAgent(session, (a) => ({ ...a, alive: false }))

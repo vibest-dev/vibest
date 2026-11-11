@@ -30,7 +30,7 @@ import type { HarnessId } from "./harness.ts"
 
 export type { MachineRow, OutboxRow, PeerStart } from "./db-remote.ts"
 export { InboxKind, type ProcessEndReason } from "@vibest/schema/event"
-export { RuntimeAddress, InboxRow, InboxStatus, AgentStatus, TurnState } from "@vibest/schema/session"
+export { RuntimeAddress, InboxRow, InboxStatus, AgentStatus, ExecutionState } from "@vibest/schema/session"
 export {
   AddressJson,
   encodeAddress,
@@ -344,14 +344,14 @@ const make = Effect.gen(function* () {
               status: "delivered",
               request,
             })
-          if (row.turnState !== "none") {
-            const execution = yield* startExecution(row.id, row.turnPromptedAt)
-            yield* linkTask(row.id, execution, row.turnPromptedAt)
-            if (row.turnState !== "open")
+          if (row.executionState !== "none") {
+            const execution = yield* startExecution(row.id, row.executionPromptedAt)
+            yield* linkTask(row.id, execution, row.executionPromptedAt)
+            if (row.executionState !== "open")
               yield* emit(ExecutionEnded, {
                 sessionId: row.id,
-                at: row.turnPromptedAt,
-                data: { execution, outcome: row.turnState },
+                at: row.executionPromptedAt,
+                data: { execution, outcome: row.executionState },
               })
           }
           if (stopped)

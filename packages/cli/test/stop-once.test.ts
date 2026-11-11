@@ -16,18 +16,18 @@ const stopper = Effect.gen(function* () {
 
 describe("stopOnce: the takeover (the new vibestd of a handoff) starts only once the stop is certain", () => {
   it.effect(
-    "a turn end arriving while the new vibestd starts is refused, and the handoff completes; it does not fail after the start",
+    "an execution end arriving while the new vibestd starts is refused, and the handoff completes; it does not fail after the start",
     () =>
       Effect.gen(function* () {
         const { drain, shutdown, stop } = yield* stopper
-        const lateTurnEnd = yield* Ref.make<"admitted" | "refused" | "not tried">("not tried")
+        const lateExecutionEnd = yield* Ref.make<"admitted" | "refused" | "not tried">("not tried")
         const takeOver = Effect.gen(function* () {
-          const leave = yield* drain.admit("TurnEnd", true)
-          yield* Ref.set(lateTurnEnd, leave === undefined ? "refused" : "admitted")
+          const leave = yield* drain.admit("ExecutionEnd", true)
+          yield* Ref.set(lateExecutionEnd, leave === undefined ? "refused" : "admitted")
           if (leave !== undefined) yield* leave
         })
         assert.deepStrictEqual(yield* stop("instance", "Daemon.Handoff", takeOver), { instance: "instance" })
-        assert.strictEqual(yield* Ref.get(lateTurnEnd), "refused")
+        assert.strictEqual(yield* Ref.get(lateExecutionEnd), "refused")
         assert.isTrue(yield* Deferred.isDone(shutdown))
         assert.strictEqual(yield* drain.phase, "accepted")
       }).pipe(Effect.provide(drainLayer)),
@@ -36,7 +36,7 @@ describe("stopOnce: the takeover (the new vibestd of a handoff) starts only once
   it.effect("a settlement held through the drain refuses the handoff before anything is started, and reopens", () =>
     Effect.gen(function* () {
       const { drain, shutdown, stop } = yield* stopper
-      const leave = (yield* drain.admit("TurnEnd", true))!
+      const leave = (yield* drain.admit("ExecutionEnd", true))!
       const started = yield* Ref.make(false)
       const fiber = yield* Effect.forkChild(
         stop("instance", "Daemon.Handoff", Ref.set(started, true)).pipe(Effect.flip),
@@ -65,14 +65,14 @@ describe("stopOnce: the takeover (the new vibestd of a handoff) starts only once
       yield* Fiber.join(interrupting)
       assert.isTrue(yield* Deferred.isDone(shutdown))
       assert.strictEqual(yield* drain.phase, "accepted")
-      assert.isUndefined(yield* drain.admit("TurnEnd", true))
+      assert.isUndefined(yield* drain.admit("ExecutionEnd", true))
     }).pipe(Effect.provide(drainLayer)),
   )
 
   it.effect("interrupted while it waits for the drain: nothing started, and vibestd reopens", () =>
     Effect.gen(function* () {
       const { drain, shutdown, stop } = yield* stopper
-      const leave = (yield* drain.admit("TurnEnd", true))!
+      const leave = (yield* drain.admit("ExecutionEnd", true))!
       const started = yield* Ref.make(false)
       const fiber = yield* Effect.forkChild(stop("instance", "Daemon.Handoff", Ref.set(started, true)))
       yield* Effect.yieldNow
