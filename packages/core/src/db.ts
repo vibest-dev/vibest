@@ -510,11 +510,12 @@ const make = Effect.gen(function* () {
         )
       }).pipe(Effect.orDie),
 
-    noteHarnessSession: (id: string, harnessSessionId: string) =>
+    noteHarnessSession: (id: string, harnessSessionId: string, process?: number) =>
       tx(
         Effect.gen(function* () {
           const { current, conversation } = yield* conversationOf(id)
           if (current === undefined || conversation === harnessSessionId) return false
+          if (process !== undefined && process !== current.id) return false
           yield* emit(ProcessConversation, {
             sessionId: id,
             data: { process: current.id, conversation: harnessSessionId },
@@ -523,11 +524,13 @@ const make = Effect.gen(function* () {
         }),
       ).pipe(Effect.orDie),
 
-    noteIntegration: (id: string, integration: Integration) =>
+    noteIntegration: (id: string, integration: Integration, process?: number) =>
       Effect.gen(function* () {
         const exists = yield* sql`SELECT 1 FROM session WHERE id = ${id}`
         if (exists.length === 0) return false
-        const known = integrations.get(id) ?? (yield* currentProcess(id))?.integration
+        const current = yield* currentProcess(id)
+        if (process !== undefined && process !== current?.id) return false
+        const known = integrations.get(id) ?? current?.integration
         if (known?.version === integration.version && known.protocol === integration.protocol) return false
         integrations.set(id, integration)
         return true

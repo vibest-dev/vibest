@@ -29,7 +29,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const event = definition.conversationOf === undefined ? undefined : jsonObject(raw)
       const conversation = event && definition.conversationOf?.(event)
-      if (conversation && (yield* db.noteHarnessSession(who.id, conversation)))
+      if (conversation && (yield* db.noteHarnessSession(who.id, conversation, who.process)))
         yield* Effect.logInfo(`session ${who.id} is in conversation ${conversation}`)
     })
 

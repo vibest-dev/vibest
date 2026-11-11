@@ -76,7 +76,7 @@ const noteConversation = (db: Db["Service"], read: Read, row: { id: string; harn
   Effect.gen(function* () {
     const conversation = read(HARNESS_SESSION_HEADER)
     if (!conversation || read(HARNESS_HEADER) !== row.harness) return
-    if (yield* db.noteHarnessSession(row.id, conversation))
+    if (yield* db.noteHarnessSession(row.id, conversation, processOf(read)))
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
   })
 
@@ -176,7 +176,8 @@ const noteIntegration = (db: Db["Service"], read: (name: string) => string | und
     const version = read(PLUGIN_VERSION_HEADER)
     if (!sessionId || !version) return
     const protocol = Number(read(PROTOCOL_HEADER) ?? "0")
-    if (yield* db.noteIntegration(sessionId, { version, protocol: Number.isFinite(protocol) ? protocol : 0 }))
+    const integration = { version, protocol: Number.isFinite(protocol) ? protocol : 0 }
+    if (yield* db.noteIntegration(sessionId, integration, processOf(read)))
       yield* Effect.logInfo(`session ${sessionId} runs integration ${version} (protocol ${protocol})`).pipe(
         Effect.annotateLogs({
           agent: read(AGENT_HEADER) ?? "",

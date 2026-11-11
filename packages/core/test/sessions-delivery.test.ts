@@ -470,6 +470,20 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "Cursor: a hook from an earlier process does not record its conversation id",
+    Effect.gen(function* () {
+      const integration = yield* Integration
+      const { id, db } = yield* spawnWorking(yield* makeRepository, "cursor")
+      const current = (yield* db.currentProcessId(id))!
+      const event = JSON.stringify({ hook_event_name: "beforeSubmitPrompt", conversation_id: "c-old", prompt: "x" })
+      yield* integration.prompt({ id, agent: "general", harness: "cursor", process: current - 1 }, event)
+      assert.isNull((yield* db.getSession(id))!.harnessSessionId)
+      yield* integration.prompt({ id, agent: "general", harness: "cursor", process: current }, event)
+      assert.strictEqual((yield* db.getSession(id))!.harnessSessionId, "c-old")
+    }),
+  )
+
+  test(
     "Cursor on a runtime with no status for it: the task waits for its ready report and, typed, shows it working without a resend; its execution end shows it idle, and an interrupt goes by its open execution",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

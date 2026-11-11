@@ -297,6 +297,25 @@ describe("vibestd's HTTP API", () => {
   )
 
   test(
+    "a request from an earlier process records no conversation from its headers",
+    Effect.gen(function* () {
+      const { call, db, worker } = yield* project
+      const current = (yield* db.currentProcessId(worker))!
+      const before = (yield* db.getSession(worker))!.harnessSessionId
+      const old = String(current - 1)
+      yield* call("/session/ready", { sessionId: worker, process: old, harnessSessionId: "old-by-header" })
+      yield* call(
+        "/hooks/claude/prompt",
+        { sessionId: worker, process: old },
+        JSON.stringify({ hook_event_name: "PromptSubmit", text: "x", origin: "composer" }),
+      )
+      assert.strictEqual((yield* db.getSession(worker))!.harnessSessionId, before)
+      yield* call("/session/ready", { sessionId: worker, process: String(current), harnessSessionId: "current" })
+      assert.strictEqual((yield* db.getSession(worker))!.harnessSessionId, "current")
+    }),
+  )
+
+  test(
     "execution-end, prompt and guard hooks: vibestd keeps the execution start and end",
     Effect.gen(function* () {
       const { call, db, worker, main } = yield* project
