@@ -55,6 +55,15 @@ const withoutDefaultHarness = async (w: World) => {
   )
 }
 
+const withDefaultHarness = async (w: World) => {
+  await configurePlugins(w, (plugins) => plugins.filter((p) => p !== "-harness-default"))
+  await until(
+    "harness-default back",
+    async () => (await w.json<Array<{ id: string }>>(["plugins"])).some((p) => p.id === "harness-default"),
+    30_000,
+  )
+}
+
 const fakePi = async (w: World, name: string) => {
   const model = heldModel()
   model.release()
@@ -196,7 +205,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H5",
     title:
-      "`vibest run` without a harness takes the main agent's harness, provider and model, from the main agent and from a plain terminal; a named harness drops provider and model; with nothing to inherit it fails `no harness to inherit`",
+      "`vibest run` without a harness takes the main agent's harness, provider and model, from the main agent and from a plain terminal; a named harness drops provider and model; with the default deliberately removed (`-harness-default`) and nothing to inherit it fails `no harness to inherit`; with the default back, the inheritance cases are unchanged",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "inherit")
@@ -208,6 +217,7 @@ const checks: ReadonlyArray<Check> = [
           nothing.code !== 0 && nothing.stderr.includes("no harness to inherit"),
           `run with nothing to inherit: ${nothing.code} ${nothing.stderr}`,
         )
+        await withDefaultHarness(w)
         await w.startMain({
           harness: "pi",
           extra: ["--provider", "second", "--model", "m2"],
@@ -242,7 +252,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H6",
     title:
-      "`vibest` without `--harness`: a project's first start fails asking for it; after the Pi main agent exits, it restarts that harness",
+      "`vibest` without `--harness`: a project's first start with the default deliberately removed (`-harness-default`) fails asking for it; with the default back, a Pi main agent that exits is restarted on Pi (the default does not override reuse)",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "reuse")
@@ -254,6 +264,7 @@ const checks: ReadonlyArray<Check> = [
           first.code !== 0 && /no harness to inherit: pass --harness/.test(first.stderr + first.stdout),
           `first start without --harness: ${first.code} ${first.stderr}${first.stdout}`,
         )
+        await withDefaultHarness(w)
         await w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
         const main = await mainSession(w)
         const processes = () => {

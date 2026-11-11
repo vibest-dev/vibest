@@ -66,20 +66,30 @@ export const supervise = Effect.fnUntraced(function* (
     host.ready.closeUnsafe()
     Queue.offerUnsafe(triggers, undefined)
   }
-  const first = yield* sources.operations
-  yield* host.activate(keptBuiltins(builtins, first.operations))
+  let active: ReadonlyArray<Candidate> = []
   const watcher = yield* makeWatcher(notify)
   const scope = yield* Effect.scope
+  const activate = (candidates: ReadonlyArray<Candidate>) =>
+    host.activate(candidates).pipe(Effect.tap(() => Effect.sync(() => (active = candidates))))
+  const applyBuiltinRemovals = Effect.gen(function* () {
+    const { operations } = yield* sources.operations
+    yield* activate([...keptBuiltins(builtins, operations), ...active.filter((c) => !isBuiltin(c))])
+  })
+  yield* applyBuiltinRemovals
   const reload = Effect.gen(function* () {
+    const generation = observed
     if (changed.size > 0) yield* Effect.log(`plugins: reloading after changes to ${[...changed].join(", ")}`)
     changed.clear()
+    yield* applyBuiltinRemovals
     let resolved = yield* resolve(sources, builtins)
     let rewatched = false
     while (yield* watcher.update(resolved.watched)) {
       rewatched = true
+      yield* applyBuiltinRemovals
       resolved = yield* resolve(sources, builtins)
     }
-    yield* host.activate(resolved.candidates)
+    if (observed !== generation) return
+    yield* activate(resolved.candidates)
     if (rewatched) yield* Effect.sleep(RECHECK).pipe(Effect.andThen(Effect.sync(() => notify())), Effect.forkIn(scope))
   }).pipe(logFailure("plugins: reload failed"))
   yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(

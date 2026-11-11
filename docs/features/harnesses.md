@@ -27,7 +27,9 @@ does not carry SSH session settings into a home it switches to.
 
 `vibest run` without a harness takes the caller's harness, provider and model: from the main agent itself, and from a
 plain terminal in a project that has a main agent, the new session has the main agent's three. Naming a harness drops
-the provider and model. With nothing to inherit, it fails saying there is no harness to inherit.
+the provider and model. With nothing to inherit and nothing choosing a harness (the builtin default removed with
+`"-harness-default"`, or Claude not available, and no plugin picking one), it fails saying there is no harness to
+inherit; otherwise the default applies (H7).
 
 ## H6. `vibest` reuses the main agent's last harness
 
