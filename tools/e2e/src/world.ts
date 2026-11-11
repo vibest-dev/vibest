@@ -355,11 +355,12 @@ export class World {
       .split(/\s+/)
       .map(Number)
       .filter((pid) => Number.isInteger(pid) && pid > 1)
-    for (const pid of new Set(pids))
-      if (commandOf(pid).includes("--hc-launchd")) {
-        note(pid, "--hc-launchd", this.root, this.root)
-        this.hcCores.set(socket, pid)
-      }
+    for (const pid of new Set(pids)) {
+      const command = commandOf(pid).trim()
+      if (!/^\S*\bhc\s/.test(command)) continue
+      note(pid, command, this.root, this.root)
+      this.hcCores.set(socket, pid)
+    }
   }
 
   private async noteDaemon(home: string | undefined) {

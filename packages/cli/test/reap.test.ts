@@ -5,7 +5,7 @@ import path from "node:path"
 
 import { assert, it } from "@effect/vitest"
 
-import { alive, endNoted, note, reapEndedRuns, survivors } from "../../../tools/reap.ts"
+import { alive, commandOf, endNoted, note, reapEndedRuns, survivors } from "../../../tools/reap.ts"
 
 it("a process this run noted is still alive afterwards: the run reports it and it is killed; a different command at that pid is not", async () => {
   const file = path.join(os.tmpdir(), `vibest-reap-test-${process.pid}-${Date.now()}`)
@@ -39,51 +39,71 @@ it("a process this run noted is still alive afterwards: the run reports it and i
 const killedRun = `
 import childProcess from "node:child_process"
 import path from "node:path"
-import { note } from ${JSON.stringify(path.join(import.meta.dirname, "../../../tools/reap.ts"))}
-process.env.VIBEST_REAP_FILE = path.join(process.argv[2], \`vibest-reap-\${process.pid}\`)
+import { commandOf, note, noteChildren } from ${JSON.stringify(path.join(import.meta.dirname, "../../../tools/reap.ts"))}
+const file = path.join(process.argv[2], \`vibest-reap-\${process.pid}\`)
+process.env.VIBEST_REAP_FILE = file
+const n = Number(process.argv[3])
 const start = (script) => childProcess.spawn("sh", ["-c", script], { detached: true, stdio: "ignore" }).pid
-const core = start("sleep 3001 & sleep 3002 & wait")
-note(start("exec sleep 3000"), "sleep 3000")
-note(core, "sleep 3001 & sleep 3002", "", "sleep 3001")
-start("exec sleep 3003")
+const noted = start(\`exec sleep \${n}\`)
+const leader = start(\`trap "" TERM; sleep \${n + 1} & sleep \${n + 2} & wait\`)
+const core = start(\`sleep \${n + 3} & wait\`)
+const stranger = start(\`exec sleep \${n + 4}\`)
 await new Promise((resolve) => setTimeout(resolve, 300))
-console.log(JSON.stringify({ core }))
+note(noted, commandOf(noted).trim())
+note(leader, commandOf(leader).trim(), "", \`sleep \${n + 1}\`)
+note(core, commandOf(core).trim(), "", \`sleep \${n + 3}\`)
+noteChildren(file)
+console.log(JSON.stringify({ noted, leader, core, stranger }))
 setInterval(() => {}, 1000)
 `
 
-const pidsOf = (pattern: string) =>
-  childProcess.spawnSync("pgrep", ["-f", pattern], { encoding: "utf8" }).stdout.split("\n").filter(Boolean).map(Number)
+const childOf = (parent: number, command: string) =>
+  childProcess
+    .spawnSync("pgrep", ["-P", String(parent)], { encoding: "utf8" })
+    .stdout.split("\n")
+    .filter(Boolean)
+    .map(Number)
+    .find((pid) => commandOf(pid).trim() === command)
 
-it("a run killed hard leaves noted processes and its core's noted children behind; the next run stops them, keeps everything not noted, and keeps a live run's file", async () => {
+it("a run killed hard leaves its processes behind; the next run stops each recorded one by itself (not its group), a recorded child even after its core died, and nothing unrecorded", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-reap-dir-"))
   const script = path.join(dir, "run.ts")
   fs.writeFileSync(script, killedRun)
+  fs.mkdirSync(path.join(dir, "vibest-reap-999999999"))
+  const n = 40_000 + Math.floor(Math.random() * 50_000)
   const saved = process.env.VIBEST_REAP_FILE
   const liveRun = path.join(dir, `vibest-reap-${process.pid}`)
-  const liveOwned = childProcess.spawn("sleep", ["3004"], { stdio: "ignore" })
+  const liveOwned = childProcess.spawn("sleep", [String(n + 5)], { stdio: "ignore" })
+  const fixture: Array<number> = []
   try {
     process.env.VIBEST_REAP_FILE = liveRun
-    note(liveOwned.pid, "sleep 3004")
-    const run = childProcess.spawn(process.execPath, [script, dir], { stdio: ["ignore", "pipe", "inherit"] })
+    note(liveOwned.pid, `sleep ${n + 5}`)
+    const run = childProcess.spawn(process.execPath, [script, dir, String(n)], { stdio: ["ignore", "pipe", "inherit"] })
     const file = path.join(dir, `vibest-reap-${run.pid}`)
     const ready = await new Promise<string>((resolve) => run.stdout.once("data", (chunk) => resolve(String(chunk))))
-    assert.include(ready, "core")
+    const { noted, leader, core, stranger } = JSON.parse(ready) as Record<string, number>
+    const leaderNamed = childOf(leader!, `sleep ${n + 1}`)
+    const leaderUnnamed = childOf(leader!, `sleep ${n + 2}`)
+    const coreChild = childOf(core!, `sleep ${n + 3}`)
+    fixture.push(noted!, leader!, core!, stranger!, leaderNamed!, leaderUnnamed!, coreChild!)
+    assert.isTrue(fixture.every((pid) => pid !== undefined && alive(pid)))
     run.kill("SIGKILL")
+    process.kill(core!, "SIGKILL")
     await new Promise((resolve) => run.once("exit", resolve))
-    for (const left of ["^sleep 3000$", "^sh -c sleep 3001", "^sleep 3001$", "^sleep 3002$", "^sleep 3003$"])
-      assert.lengthOf(pidsOf(left), 1, `${left} outlived its run`)
+    while (alive(core!)) await new Promise((resolve) => setTimeout(resolve, 50))
+    assert.isTrue(alive(coreChild!), "the core's child outlives the core")
 
     await reapEndedRuns(dir)
 
-    for (const stopped of ["^sleep 3000$", "^sh -c sleep 3001", "^sleep 3001$"])
-      assert.deepStrictEqual(pidsOf(stopped), [], `${stopped} was not stopped`)
-    assert.lengthOf(pidsOf("^sleep 3002$"), 1, "a child the core's row does not name was stopped")
-    assert.lengthOf(pidsOf("^sleep 3003$"), 1, "a process no row names was stopped")
+    for (const [what, pid] of Object.entries({ noted, leader, leaderNamed, coreChild }))
+      assert.isFalse(alive(pid!), `${what} was not stopped`)
+    assert.isTrue(alive(leaderUnnamed!), "an unrecorded member of a recorded leader's group was stopped")
+    assert.isTrue(alive(stranger!), "a process no row names was stopped")
     assert.isFalse(fs.existsSync(file))
     assert.isTrue(fs.existsSync(liveRun))
     assert.isTrue(liveOwned.pid !== undefined && alive(liveOwned.pid))
   } finally {
-    for (const pid of pidsOf("^(sh -c )?sleep 300[0-3]")) process.kill(pid, "SIGKILL")
+    for (const pid of fixture) if (pid !== undefined && alive(pid)) process.kill(pid, "SIGKILL")
     liveOwned.kill("SIGKILL")
     fs.rmSync(dir, { recursive: true, force: true })
     if (saved === undefined) delete process.env.VIBEST_REAP_FILE

@@ -35,13 +35,16 @@ A test that starts the built vibestd itself (`test/plugin-binary.test.ts`) asks 
 gives vibestd a `PATH` of the system directories only, so vibestd does not poll the harnesses the user installed.
 
 Every process a test or a check starts that could outlive it is recorded in the run's reap file
-(`<tmpdir>/vibest-reap-<run pid>`, `tools/reap.ts`) with its command and start time: herdr servers, vibestd daemons,
-herdr-core cores (with the `hc hold` children that keep their terminals, which outlive a core ended by a signal), and,
-under `pnpm test`, every Bun process a test starts (vitest's setup puts `tools/reap-preload.ts` into `BUN_OPTIONS`, so a
-vibestd started from source records itself before it runs). A detached watcher stops them when the run exits; when the
-watcher dies with the run (a killed agent session, a crash), the next `pnpm test` or `pnpm e2e` stops what every reap
-file of an ended run still names and deletes the file. Only a process with the recorded command and start time is
-stopped, so the user's own vibestd, herdr and herdr-core are never touched.
+(`<tmpdir>/vibest-reap-<run pid>` or `vibest-reap-e2e-<run pid>`, `tools/reap.ts`) with its command and start time:
+herdr servers, vibestd daemons, herdr-core cores and, under `pnpm test`, every Bun process a test starts (vitest's setup
+puts `--preload=tools/reap-preload.ts` into `BUN_OPTIONS`; `bun run` refuses `--preload <path>` with a space, so a
+vibestd started from source records itself before it runs). A core's row names its `hc hold` children, which keep its
+terminals and outlive a core ended by a signal: the run's detached watcher records each of them as a row of its own
+every half second while the core is still the recorded one. The watcher stops everything recorded when the run exits;
+when it dies with the run (a killed agent session, a crash), the next `pnpm test` or `pnpm e2e` stops what every reap
+file of an ended run still names and deletes the file. A process is signalled only by its own pid, never its group, and
+only while it still has the recorded command and start time, checked again before each signal, so the user's own
+vibestd, herdr and herdr-core are never touched.
 
 ## 2. Layers
 
