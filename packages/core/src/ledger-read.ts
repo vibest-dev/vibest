@@ -326,10 +326,21 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       }),
     )
 
+  const creatorOf = (id: string) =>
+    sql<{ id: string | null; entry: string | null; name: string | null }>`SELECT
+        CASE WHEN s.origin_peer IS NOT NULL THEN s.origin_parent
+          ELSE coalesce(s.parent_session_id, p.entry_session_id) END AS id,
+        p.entry_session_id AS entry, c.name AS name
+      FROM session s JOIN project p ON p.id = s.project_id
+      LEFT JOIN session c ON c.id = CASE WHEN s.origin_peer IS NOT NULL THEN s.origin_parent
+        ELSE coalesce(s.parent_session_id, p.entry_session_id) END
+      WHERE s.id = ${id}`.pipe(Effect.map((rows) => rows[0]))
+
   const outboxOf = (peer: string) =>
     sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.kind, o.content, o.created_at,
-        s.origin_report_to AS report_to
-      FROM outbox o JOIN session s ON s.id = o.session_id WHERE o.peer_id = ${peer} ORDER BY o.seq`.pipe(
+        s.origin_parent AS report_to
+      FROM outbox o JOIN session s ON s.id = o.session_id
+      WHERE o.peer_id = ${peer} ORDER BY o.seq`.pipe(
       Effect.map((rows) => rows.filter((row): row is OutboxRow => row.reportTo !== null)),
     )
 
@@ -370,6 +381,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     untakenTask,
     queuedBy,
     spawnedBy,
+    creatorOf,
     outboxOf,
     sessionRows,
     coordinatorRows,

@@ -91,13 +91,12 @@ notifies nobody.
 refused), checks that the checkout has `commit`
 (`Git.hasCommit`: `git cat-file -e <sha>^{commit}`; "<B>'s checkout <dir> does not have <sha>: push it
 and fetch it there"), and runs `Sessions.spawn` with the worktree detached at that commit. B learns a checkout with
-`vibest project add [dir]` (user only). The session is an ordinary B session with no parent and no report-to; who
-started it is the `origin` of its `session.created` fact (peer, project, parent?, reportTo?), kept in the session's
-`origin_*` columns; it has no `reportTo` when A's project had no main agent. The forwarded `request` finds the session
+`vibest project add [dir]` (user only). The session is an ordinary B session with no local parent. Who
+started it is the `origin` of its `session.created` fact (peer, project, parent?). `parent` is the calling session, or A's main agent when the user started it, and is absent when A's project had no main agent. A `reportTo` on an older fact is ignored. The forwarded `request` finds the session
 on a retry. A v1 `peer.start` event that did not decode was imported as a local session (the import counts it): its
 notices go to B's own inbox delivery and no outbox row is written for it.
 
-Every notice of a peer session with a `reportTo`, and every `vibest send` it makes to that creator, goes to B's `outbox` as a `notice`; a turn end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. B still writes the
+Every notice of a peer session with an origin parent, and every `vibest send` it makes to that creator, goes to B's `outbox` as a `notice`; a turn end queues nothing. The item is written as `outbox.queued` in the transaction that writes the row. B still writes the
 inbox row, addressed to the session itself and `dropped`, so `vibest result` on B and a forwarded `Get` read it, and
 B's own delivery never sees it. With no `peer` row nothing is queued. `Peer.Outbox` streams
 the peer's rows in `seq` order, then each new one after its commit; an item over 1 MiB is sent cut with `cut: true`.
@@ -132,8 +131,7 @@ their case; either gives `NoProject`.
 ## A: remote sessions
 
 `vibest run --machine <name>` (the user or the main agent) sends `Peer.Spawn` over the machine's connection with
-the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`), the caller as `parent` and the
-main agent as `reportTo`; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. With no main agent there is no `report_to`, as in `hc run --on`
+the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`), and as `parent` the caller or, when the user started it, A's main agent; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. With no main agent there is no parent, as in `hc run --on`
 with no parent: nothing is sent back, the answer stays on B and `vibest result <name>/<id>` reads it there.
 `--env`, `--peer`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.

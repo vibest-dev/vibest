@@ -161,7 +161,12 @@ const story = Effect.gen(function* () {
           name: "remote",
           directory: "/src/app",
           archiveOnCompletion: false,
-          origin: { peer: PEER, project: OTHER_PROJECT, reportTo: MAIN },
+          origin: {
+            peer: PEER,
+            project: OTHER_PROJECT,
+            parent: MAIN,
+            reportTo: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+          },
         },
       })
       yield* emit(Catalog["outbox.queued"], {
@@ -258,8 +263,8 @@ describe("journal projectors", () => {
       const { sql, subProcess, turn, typed, mainProcess } = yield* story
       const rows = yield* rowsOf<Record<string, unknown>>(
         sql,
-        `SELECT id, name, role, parent_session_id, report_to_session_id, archive_on_completion, origin_peer,
-          origin_project, origin_parent, origin_report_to, created_at, ended_at, process_id, turn_id, active_at
+        `SELECT id, name, role, parent_session_id, archive_on_completion, origin_peer,
+          origin_project, origin_parent, created_at, ended_at, process_id, turn_id, active_at
         FROM session ORDER BY created_at`,
       )
       assert.deepStrictEqual(rows, [
@@ -268,12 +273,10 @@ describe("journal projectors", () => {
           name: "main",
           role: "main",
           parentSessionId: null,
-          reportToSessionId: null,
           archiveOnCompletion: 0,
           originPeer: null,
           originProject: null,
           originParent: null,
-          originReportTo: null,
           createdAt: 210,
           endedAt: null,
           processId: mainProcess,
@@ -285,12 +288,10 @@ describe("journal projectors", () => {
           name: "fix-tests",
           role: "subagent",
           parentSessionId: MAIN,
-          reportToSessionId: MAIN,
           archiveOnCompletion: 1,
           originPeer: null,
           originProject: null,
           originParent: null,
-          originReportTo: null,
           createdAt: 300,
           endedAt: null,
           processId: subProcess,
@@ -302,12 +303,10 @@ describe("journal projectors", () => {
           name: "remote",
           role: "subagent",
           parentSessionId: null,
-          reportToSessionId: null,
           archiveOnCompletion: 0,
           originPeer: PEER,
           originProject: OTHER_PROJECT,
-          originParent: null,
-          originReportTo: MAIN,
+          originParent: MAIN,
           createdAt: 500,
           endedAt: null,
           processId: null,

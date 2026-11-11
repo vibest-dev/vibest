@@ -2,7 +2,7 @@ import type { Fact, FactOf, FactType } from "@vibest/schema/event"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 
-export const PROJECTION_VERSION = 3
+export const PROJECTION_VERSION = 4
 
 export const PROJECTION_SCHEMA = [
   `CREATE INDEX event_session ON event (session_id, seq) WHERE session_id IS NOT NULL`,
@@ -22,7 +22,6 @@ export const PROJECTION_SCHEMA = [
     id                    TEXT PRIMARY KEY,
     project_id            TEXT NOT NULL,
     parent_session_id     TEXT,
-    report_to_session_id  TEXT,
     role                  TEXT NOT NULL,
     name                  TEXT NOT NULL,
     directory             TEXT NOT NULL,
@@ -30,7 +29,6 @@ export const PROJECTION_SCHEMA = [
     origin_peer           TEXT,
     origin_project        TEXT,
     origin_parent         TEXT,
-    origin_report_to      TEXT,
     created_at            INTEGER NOT NULL,
     ended_at              INTEGER,
     process_id            INTEGER,
@@ -181,12 +179,11 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
   "session.created": (fact, sql) => {
     const { data } = fact
     const origin = data.origin
-    return sql`INSERT INTO session (id, project_id, parent_session_id, report_to_session_id, role, name, directory,
-        archive_on_completion, origin_peer, origin_project, origin_parent, origin_report_to, created_at, active_at, seq)
-      VALUES (${sessionIdOf(fact)}, ${projectIdOf(fact)}, ${data.parent ?? null}, ${data.reportTo ?? null},
-        ${data.role}, ${data.name}, ${data.directory}, ${data.archiveOnCompletion ? 1 : 0}, ${origin?.peer ?? null},
-        ${origin?.project ?? null}, ${origin?.parent ?? null}, ${origin?.reportTo ?? null}, ${fact.at},
-        ${origin === undefined ? null : fact.at}, ${fact.seq})`
+    return sql`INSERT INTO session (id, project_id, parent_session_id, role, name, directory,
+        archive_on_completion, origin_peer, origin_project, origin_parent, created_at, active_at, seq)
+      VALUES (${sessionIdOf(fact)}, ${projectIdOf(fact)}, ${data.parent ?? null}, ${data.role}, ${data.name},
+        ${data.directory}, ${data.archiveOnCompletion ? 1 : 0}, ${origin?.peer ?? null}, ${origin?.project ?? null},
+        ${origin?.parent ?? null}, ${fact.at}, ${origin === undefined ? null : fact.at}, ${fact.seq})`
   },
   "session.renamed": (fact, sql) => sql`UPDATE session SET name = ${fact.data.name} WHERE id = ${sessionIdOf(fact)}`,
   "session.directory_changed": (fact, sql) =>

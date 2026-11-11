@@ -55,7 +55,7 @@ export const inboxMethods = (store: Store) => {
       tx(
         Effect.gen(function* () {
           const origin = yield* origins(sessionId)
-          const creator = origin?.reportTo
+          const creator = origin?.parent
           if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return undefined
           const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sessionId}`
           const written = yield* queueForPeer(origin.peer, creator, {

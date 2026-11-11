@@ -240,17 +240,9 @@ const make = Effect.gen(function* () {
       ),
 
     creatorOf: (id: string) =>
-      sql<{
-        creator: string | null
-        origin: string | null
-        entry: string | null
-        name: string | null
-      }>`SELECT s.report_to_session_id AS creator, s.origin_report_to AS origin, p.entry_session_id AS entry,
-          c.name AS name
-        FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = s.report_to_session_id
-        WHERE s.id = ${id}`.pipe(
-        Effect.map(([row]) => {
-          const creator = row?.creator ?? row?.origin ?? row?.entry
+      reads.creatorOf(id).pipe(
+        Effect.map((row) => {
+          const creator = row?.id
           if (creator === null || creator === undefined) return undefined
           const label =
             creator === row?.entry ? "the main agent" : row?.name ? `agent ${row.name}` : "the agent that started you"
@@ -288,11 +280,6 @@ const make = Effect.gen(function* () {
             const n = (yield* selectRaw([notMain, sql`s.ended_at IS NULL`], running)).length
             if (n >= max) return false
           }
-          const [entry] =
-            origin === undefined && parentSessionId === undefined && row.agent !== "main"
-              ? yield* sql<{ id: string | null }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
-              : []
-          const reportTo = parentSessionId ?? entry?.id ?? undefined
           const stopped = row.metadata.archived || row.metadata.removed
           yield* emit(SessionCreated, {
             sessionId: row.id,
@@ -303,7 +290,6 @@ const make = Effect.gen(function* () {
               name: row.name,
               directory: cwd,
               ...(parentSessionId === undefined ? {} : { parent: parentSessionId }),
-              ...(reportTo === undefined ? {} : { reportTo }),
               archiveOnCompletion: row.metadata.archive === true,
               ...(origin === undefined
                 ? {}
@@ -311,8 +297,9 @@ const make = Effect.gen(function* () {
                     origin: {
                       peer: origin.peer,
                       project: origin.project,
-                      ...(origin.parent === undefined ? {} : { parent: origin.parent }),
-                      ...(origin.reportTo === undefined ? {} : { reportTo: origin.reportTo }),
+                      ...((origin.parent ?? origin.reportTo) === undefined
+                        ? {}
+                        : { parent: origin.parent ?? origin.reportTo }),
                     },
                   }),
             },
