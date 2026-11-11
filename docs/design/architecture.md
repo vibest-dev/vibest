@@ -49,7 +49,7 @@ Reference implementations:
 | D2  | The core defines the domain (schema contracts, lifecycles, execution, scheduling framework). Implementations and rules are plugins, builtin by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | D3  | The execution unit is the **Run**: one or more subagents working on one input. The core defines no orchestration patterns and no roles. Every Run is controlled by the main Agent (or the user) that started it. A flow over several subagents is a skill the main Agent follows; there is no workflow engine or program controller. Plugins observe, refuse, transform, schedule, and enforce rules (such as "a writing subagent is done only when the tests pass"); they never start or steer Runs.                                                                                                                                                                                                     |
 | D4  | `vibest` runs inside a Project directory and opens that Project's main Agent; there is always exactly one, with one active conversation and earlier ones kept (`vibest --new`). There is no separate `launch` command: the main Agent starts through the same path as every Agent, placed in the current terminal. `vibest run` starts subagents, and only the main Agent (or the user) can run it: subagents never start Agents, so there is no nesting. Every result, and every exchange the user has directly with a subagent, returns to the main Agent. Status: this describes today and the default mode; D13 and §1.1 plan an optional entry session, nested leads and routing as data.            |
-| D5  | Plugins follow OpenCode V2 exactly, Effect only (no Promise edition).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| D5  | Plugins follow OpenCode V2: `{ id, effect }` or `{ id, setup }` with Promises.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | D6  | Products are composed per host from shared packages; hosts are fully isolated (no shared daemon, database, or Runs). The Herdr TUI product comes first; the herdr-core desktop application comes after the base capabilities.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | D7  | Machine and multi-repository Project dimensions exist from the first commit; one machine and one repository are special cases. Several repositories are composed by copying them into one directory, never by symlinks (Node and other toolchains break on symlinked folders).                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | D8  | In scope now: delegation (main Agent and subagents); the `pipeline` skill (plan → implement → review → pull request); multi-machine scheduling. Other multi-agent flows (committee, racing, advisor, …) are added later as skills, by us or by the user, without core changes. Out of scope: DynamicWorkflow and any workflow engine, work-item intake, several accounts per CLI (each CLI's own login is its one Subscription for now).                                                                                                                                                                                                                                                                  |
@@ -156,7 +156,7 @@ started, a main agent) cannot answer results with results (rule 4), and that eve
 │ Builtin plugins: harness adapters and integrations · workspace types       │
 │   scheduling · guard · knowledge · skills (delegate, pipeline) · check     │
 ├───────────────────────────────────────────────────────────────────────────┤
-│ Plugin API (OpenCode V2, Effect only)                                      │
+│ Plugin API (OpenCode V2, effect or setup)                                  │
 ├───────────────────────────────────────────────────────────────────────────┤
 │ Core: schema contracts · lifecycles · execution · scheduling framework     │
 │       durable events · plugin host · ports                                 │
@@ -175,7 +175,7 @@ on `schema` and `protocol` only. Plugin types derive from the client API.
 | `core`               | Persistence, event bus, Run and Agent execution, scheduling framework, plugin host, ports.                                                                                                          |
 | `server`             | Handlers implementing `protocol`, the ACCESS table and admission, the daemon's service graph, the unix socket listener (omac `server.ts`, `daemon.ts`).                                             |
 | `client`             | Effect RPC client with the per-command Ping preflight and auto-start rules (omac `client.ts`).                                                                                                      |
-| `plugin`             | Plugin authoring API (Effect only).                                                                                                                                                                 |
+| `plugin`             | Plugin authoring API (an Effect or a Promise plugin).                                                                                                                                               |
 | `effect-herdr-sdk`   | Effect client for the herdr socket API.                                                                                                                                                             |
 | `runtime-herdr`      | Runtime port on herdr.                                                                                                                                                                              |
 | `plugin-harnesses`   | Builtin plugins `harness-pi`, `harness-claude`, `harness-cursor`: one `HarnessDefinition` per CLI (launch side, models, subscription reader, guard answer, how its vibest plugin loads).            |
@@ -620,17 +620,25 @@ Copied from omac `db.ts`, on the four tables of `schema.md`:
   failing one is logged and stops nothing else, and none depends on the order events arrive in. Each re-derives what
   to do from storage under its session's lock, so a late or repeated event finds the work done or redoes it once.
 
-## 7. Plugin architecture (Effect only)
+## 7. Plugin architecture
 
-**Definition** (`packages/plugin/src/plugin.ts`): a plugin is only an id and an effect.
+**Definition** (`packages/plugin/src/plugin.ts`): a plugin is an id and either an effect or a Promise setup.
 
 ```ts
-export interface Plugin {
-  readonly id: string
-  readonly effect: (context: Context) => Effect.Effect<void, never, Scope.Scope>
-}
-export const define = (plugin: Plugin) => plugin
+export type Plugin =
+  | { readonly id: string; readonly effect: (context: Context) => Effect.Effect<void, never, Scope.Scope> }
+  | { readonly id: string; readonly setup: (context: PromiseContext) => Promise<Cleanup | void> | Cleanup | void }
+export const define = <P extends Plugin>(plugin: P) => plugin
 ```
+
+A `setup` plugin is turned into an `effect` plugin when it is set up (`packages/plugin/src/promise.ts`, as OpenCode's
+`promise/adapter.ts`), so both forms share one loading, failure and reload path. Its `PromiseContext` has the same
+domains with Promises: `hook` callbacks return `Promise<result | void>` or the result, and refuse by throwing
+`AgentRefused`; registrations resolve to `{ dispose(): Promise<void> }`; `event.subscribe` is an `AsyncIterable`,
+closed when the plugin unloads; `subscription.report` and `reload` return Promises; `transform` takes the same
+synchronous editor (runtime and harness definitions stay Effect types, so their authors write Effect). The `Cleanup`
+`setup` returns runs when the plugin's scope closes; registrations made later, from inside `setup`, still belong to
+that scope.
 
 **Two capabilities**, as OpenCode V2: `transform(editor)` with a synchronous editor (`list`, `get`, `add`, `update`,
 `remove`) plus `reload()` for the definition registries, and `hook(name, callback)` for live interception. Both return

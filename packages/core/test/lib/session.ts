@@ -72,8 +72,8 @@ export type PluginEntry =
   | { readonly plugin: VibestPlugin.Plugin.Plugin; readonly options?: Readonly<Record<string, unknown>> }
 
 const candidateOf = (entry: PluginEntry): Candidate => {
-  const plugin = "effect" in entry ? entry : entry.plugin
-  const pluginOptions = "effect" in entry ? {} : (entry.options ?? {})
+  const plugin = "plugin" in entry ? entry.plugin : entry
+  const pluginOptions = "plugin" in entry ? (entry.options ?? {}) : {}
   return { source: `test:${plugin.id}`, revision: "-", options: pluginOptions, plugin }
 }
 

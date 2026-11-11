@@ -103,6 +103,21 @@ export default Plugin.define({
 })
 `
 
+const promised = (facts: string, cleanup: string) => `import fs from "node:fs"
+import { Plugin } from "@vibest/plugin"
+export default Plugin.define({
+  id: "promised",
+  setup: async (ctx) => {
+    await ctx.agent.hook("start.before", async (e) => (e.prompt.includes("done-promised") ? { harness: "pi" } : undefined))
+    void (async () => {
+      for await (const fact of ctx.event.subscribe({ types: ["turn.ended"] }))
+        fs.appendFileSync(${JSON.stringify(facts)}, \`\${fact.type} \${fact.sessionId}\\n\`)
+    })()
+    return () => fs.appendFileSync(${JSON.stringify(cleanup)}, "cleanup\\n")
+  },
+})
+`
+
 const checks: ReadonlyArray<Check> = [
   {
     id: "G5",
@@ -312,6 +327,45 @@ const checks: ReadonlyArray<Check> = [
           (await factLines(first)).length === before,
           `the replaced revision still wrote: ${JSON.stringify((await factLines(first)).slice(before))}`,
         )
+      } finally {
+        model.stop()
+      }
+    },
+  },
+  {
+    id: "G13",
+    title:
+      "a plugin written as { id, setup } with Promises routes `vibest run -- <task>` to a real Pi, ls names it as the decider, its event.subscribe iterator gets the agent's turn.ended, and deleting the file runs its cleanup",
+    run: async (w) => {
+      needs("pi", "herdr")
+      const { model, dir } = await fakePi(w, "promised")
+      const facts = path.join(w.root, "promised-facts")
+      const cleanup = path.join(w.root, "promised-cleanup")
+      const file = path.join(w.vibestHome, "plugins", "promised.ts")
+      try {
+        await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
+        await fs.mkdir(path.dirname(file), { recursive: true })
+        await fs.writeFile(`${file}.tmp`, promised(facts, cleanup))
+        await fs.rename(`${file}.tmp`, file)
+        await until("the setup plugin active", async () =>
+          (await w.json<Array<{ id: string; status: string }>>(["plugins"])).some(
+            (p) => p.id === "promised" && p.status === "active",
+          ),
+        )
+        const id = await runId(w, ["--", ask("promised")])
+        const e = await entry(w, id)
+        expect(
+          e?.harness === "pi" && e.routing?.decidedBy.harness === "promised",
+          `routed session: ${JSON.stringify(e)}`,
+        )
+        await resultOf(w, id, "promised")
+        await until("the agent's turn.ended", async () => (await factLines(facts)).includes(`turn.ended ${id}`), 60_000)
+        expect((await factLines(cleanup)).length === 0, "cleanup ran while the plugin was loaded")
+        await fs.rm(file)
+        await until("the plugin unloaded", async () =>
+          (await w.json<Array<{ id: string }>>(["plugins"])).every((p) => p.id !== "promised"),
+        )
+        await until("its cleanup ran", async () => (await factLines(cleanup)).join() === "cleanup", 30_000)
       } finally {
         model.stop()
       }
