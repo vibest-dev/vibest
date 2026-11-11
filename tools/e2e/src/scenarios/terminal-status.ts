@@ -201,10 +201,8 @@ const statusCore = async (
       permissions: { defaultMode: "default", disableAutoMode: "disable", ask: ["Bash"] },
     }),
   )
-  const plugin = path.join(w.vibestHome, "plugins/status-runtime.ts")
-  await fs.mkdir(path.dirname(plugin), { recursive: true })
-  await fs.copyFile(path.join(checkout, "tools/e2e/src/fixtures/status-runtime.ts"), plugin)
   await fs.copyFile(path.join(checkout, "tools/e2e/src/fixtures/status-pty.py"), path.join(w.root, "status-pty.py"))
+  const plugin = path.join(w.vibestHome, "plugins/status-runtime.ts")
   const hc = async (...args: Array<string>) => {
     const r = await w.run(w.root, ["hc", ...args], { env })
     expect(r.code === 0, "isolated hc " + args.join(" ") + ": " + r.stderr)
@@ -253,10 +251,12 @@ const statusCore = async (
     )
   }
   const worker = async (harness: string, flags: Array<string> = []) => {
-    const launched = await w.json<{ id: string }>(
-      ["run", harness, ...flags, "--", "Run the terminal status fixture."],
-      { env, timeoutMs: 90_000 },
-    )
+    const launched = JSON.parse(
+      await w.okViaEntry(["run", harness, ...flags, "--", "Run the terminal status fixture."], {
+        env,
+        timeoutMs: 90_000,
+      }),
+    ) as { id: string }
     await bind(launched.id)
     return launched.id
   }
@@ -264,6 +264,23 @@ const statusCore = async (
   try {
     await hc("server", "start")
     await w.ok(["daemon"], { env })
+    w.ownRuntimes.add("hc")
+    await w.entry({
+      runtime: "hc",
+      extra: ["--runtime", "hc"],
+      processEnv: env,
+      hc: { run: (...args) => w.run(w.root, ["hc", ...args], { env }) },
+    })
+    await fs.mkdir(path.dirname(plugin), { recursive: true })
+    await fs.copyFile(path.join(checkout, "tools/e2e/src/fixtures/status-runtime.ts"), plugin)
+    await until(
+      "the status-fixture plugin active",
+      async () =>
+        (await w.json<Array<{ id: string; status: string }>>(["plugins"], { env })).some(
+          (p) => p.id === "status-fixture" && p.status === "active",
+        ),
+      30_000,
+    )
     await body({
       env,
       model,

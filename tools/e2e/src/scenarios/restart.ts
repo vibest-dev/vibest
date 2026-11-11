@@ -117,9 +117,10 @@ const usageLimitMove = async (
         ),
       30_000,
     )
+    await w.entry({ cwd: repo, session, processEnv: env })
     const id = (
       JSON.parse(
-        await w.ok(["run", "pi", "--provider", "first", "--model", "m", "--session", session, ask("limit")], {
+        await w.okViaEntry(["run", "pi", "--provider", "first", "--model", "m", "--session", session, ask("limit")], {
           cwd: repo,
           env,
           timeoutMs: 120_000,
@@ -171,13 +172,8 @@ const checks: ReadonlyArray<Check> = [
         const agentDir = await piDir(w, "pi-restart", model.url)
         const { old, wrapper, point, env } = await oldInstall(w, "restart")
         const piEnv = `PI_CODING_AGENT_DIR=${agentDir}`
-        const vibest = (args: ReadonlyArray<string>, timeoutMs = 60_000) =>
-          w.run(repo, [wrapper, ...ensureRuntime(args)], { env, timeoutMs })
-        const ok = async (args: ReadonlyArray<string>, timeoutMs?: number) => {
-          const r = await vibest(args, timeoutMs)
-          expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
-          return r.stdout
-        }
+        const viaEntry = (args: ReadonlyArray<string>) =>
+          w.okViaEntry(ensureRuntime(args), { cwd: repo, env, bin: wrapper })
         const read = (where: string, arg: string) => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
@@ -221,7 +217,7 @@ const checks: ReadonlyArray<Check> = [
           timeoutMs: 60_000,
         })
         const zero = (
-          JSON.parse(await ok(["run", "pi", "--session", session, "--env", piEnv, ask("zero")])) as { id: string }
+          JSON.parse(await viaEntry(["run", "pi", "--session", session, "--env", piEnv, ask("zero")])) as { id: string }
         ).id
         await reached("the main agent's execution on the first message", result("done-zero"))
         await until("herdr lists the subagent as s-<id>", async () => (await listed(zero))?.agent === "pi", 60_000)
@@ -245,7 +241,7 @@ const checks: ReadonlyArray<Check> = [
               .then((l) => l.sessions)
           ).find((e) => e.id === before.id)?.address
         const addressBefore = await address()
-        await ok(["run", "pi", "--session", session, "--env", piEnv, ask("slow")])
+        await viaEntry(["run", "pi", "--session", session, "--env", piEnv, ask("slow")])
         await until("the main agent's held execution", () => model.held() > 0, 120_000)
 
         await point(binary)
@@ -334,7 +330,7 @@ const checks: ReadonlyArray<Check> = [
             m.some((x) => x.includes("done-zero")) &&
             m.some((x) => x.includes("done-slow")),
         )
-        await ok(["run", "pi", "--session", session, "--env", piEnv, ask("after")])
+        await viaEntry(["run", "pi", "--session", session, "--env", piEnv, ask("after")])
         await reached("the main agent's execution on a message after the update", result("done-after"))
         for (const id of [before.id, zero]) {
           expectFacts(w, id, ["process.started", "process.ended", "process.started", "process.ready"])
@@ -378,6 +374,8 @@ const checks: ReadonlyArray<Check> = [
           expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
           return r.stdout
         }
+        const viaEntry = (args: ReadonlyArray<string>) =>
+          w.okViaEntry(ensureRuntime(args), { cwd: repo, env, bin: wrapper })
         const row = (id: string) => {
           const db = readDb(path.join(w.vibestHome, "vibest.db"))
           try {
@@ -396,9 +394,10 @@ const checks: ReadonlyArray<Check> = [
 
         await w.stopDaemon()
         await ok(["daemon"])
+        await w.entry({ cwd: repo, session, processEnv: env })
         const id = (
           JSON.parse(
-            await ok(["run", "pi", "--session", session, "--env", `PI_CODING_AGENT_DIR=${agentDir}`, ask("one")]),
+            await viaEntry(["run", "pi", "--session", session, "--env", `PI_CODING_AGENT_DIR=${agentDir}`, ask("one")]),
           ) as { id: string }
         ).id
         await until(

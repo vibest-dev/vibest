@@ -85,7 +85,7 @@ const checks: ReadonlyArray<Check> = [
         const run = async (task: string, ...flags: Array<string>) =>
           (
             JSON.parse(
-              await w.ok(["run", "pi", "--session", session, "--env", env, ...flags, "--", ask(task)], {
+              await w.okViaEntry(["run", "pi", "--session", session, "--env", env, ...flags, "--", ask(task)], {
                 cwd: p.repo,
                 env: p.env,
                 timeoutMs: 90_000,
@@ -316,7 +316,7 @@ const checks: ReadonlyArray<Check> = [
         await p.startDaemon()
         const first = await p.runSub("one")
         await p.runSub("two")
-        const third = await w.vibest(
+        const third = await w.viaEntry(
           [
             "run",
             "pi",

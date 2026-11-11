@@ -5,8 +5,8 @@ counts as working.
 
 ## S1. Running a session
 
-`vibest run` starts a session in a new worktree: a linked worktree of the repository, detached, at its HEAD. Its
-options work: `--title` names it, `--provider` and `--model` choose what it runs on, `--env` reaches the harness but is
+`vibest run`, run by the main agent or another session, starts a session in a new worktree: a linked worktree of the
+repository, detached, at its HEAD. Its options work: `--title` names it, `--provider` and `--model` choose what it runs on, `--env` reaches the harness but is
 never stored, `--session` picks the herdr session it opens in, and `--peer` runs a second session in the same worktree
 in another pane. `vibest ls` shows the title, harness, provider, model and where it runs.
 
@@ -33,12 +33,12 @@ or was sent still waiting, and sends no notice for a clean archive. `--archive-o
 
 ## S9. A limit on sessions
 
-`VIBEST_MAX_SESSIONS` limits how many sessions run at once, not counting the main agent: one more `vibest run` fails
-naming the limit, and starts once a session is archived.
+`VIBEST_MAX_SESSIONS` limits how many sessions run at once, not counting the main agent: one more `vibest run` by the
+main agent fails naming the limit, and starts once a session is archived.
 
 ## S20. Ids and peek
 
-`vibest run` answers a UUID; herdr names the agent `s-` and 30 characters of it; `vibest result` takes the first 8
+`vibest run` answers the session that ran it a UUID; herdr names the agent `s-` and 30 characters of it; `vibest result` takes the first 8
 characters and `vibest peek` 12; the session's system prompt is a file of its own. `vibest peek` prints the terminal, at
 most N lines with `--lines N`, and refuses an id it does not know.
 
