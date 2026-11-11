@@ -339,16 +339,17 @@ export const makeStore = Effect.gen(function* () {
       peer: string | null
       project: string | null
       parent: string | null
-    }>`SELECT origin_peer AS peer, origin_project AS project, origin_parent AS parent
+      reportTo: string | null
+    }>`SELECT origin_peer AS peer, origin_project AS project, origin_parent AS parent, origin_report_to AS report_to
       FROM session WHERE id = ${sessionId}`.pipe(Effect.map((rows) => rows[0]))
 
   const queueForPeer = (
     peer: string,
-    creator: string | null,
+    reportTo: string | null,
     row: { readonly sessionId: string; readonly kind: string; readonly content: string; readonly at?: number },
   ) =>
     Effect.gen(function* () {
-      if (creator === null) return false
+      if (reportTo === null) return false
       if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
       yield* emit(OutboxQueued, {
         sessionId: row.sessionId,
@@ -376,9 +377,11 @@ export const makeStore = Effect.gen(function* () {
     Effect.gen(function* () {
       if (sender === undefined) return message
       const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sender}`
-      const to = yield* reads.creatorOf(recipient)
+      const [to] = yield* sql<{ creator: string | null; entry: string | null }>`SELECT
+          s.report_to_session_id AS creator, p.entry_session_id AS entry
+        FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${recipient}`
       const toEntry = to?.entry === recipient
-      if (!toEntry && (sender === to?.id || sender === to?.entry)) return message
+      if (!toEntry && (sender === to?.creator || sender === to?.entry)) return message
       return envelope(
         "agent-message",
         [["agent-id", sender], ...(toEntry ? ([["title", from?.name ?? ""]] as const) : [])],
@@ -414,9 +417,7 @@ export const makeStore = Effect.gen(function* () {
       }>`SELECT
           CASE WHEN r.id IS NOT NULL AND r.ended_at IS NULL THEN r.id ELSE p.entry_session_id END AS recipient,
           p.id AS project
-        FROM session s JOIN project p ON p.id = s.project_id
-        LEFT JOIN session r ON r.id = CASE WHEN s.origin_peer IS NOT NULL THEN s.origin_parent
-          ELSE coalesce(s.parent_session_id, p.entry_session_id) END
+        FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session r ON r.id = s.report_to_session_id
         WHERE s.id = ${row.sessionId}`
       const insert = (recipient: string, status: "pending" | "dropped") =>
         queueInbox({
@@ -430,7 +431,7 @@ export const makeStore = Effect.gen(function* () {
       const origin = yield* origins(row.sessionId)
       if (origin?.peer) {
         const [queued] = yield* insert(row.sessionId, "dropped")
-        yield* queueForPeer(origin.peer, origin.parent, {
+        yield* queueForPeer(origin.peer, origin.reportTo, {
           sessionId: row.sessionId,
           kind: row.kind,
           content: row.message,

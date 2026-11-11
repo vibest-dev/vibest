@@ -325,10 +325,11 @@ describe("another machine's vibestd runs agents here", () => {
           (sql) =>
             sql<{
               parent: string | null
-            }>`SELECT parent_session_id AS parent FROM session WHERE id = ${spawned.session}`,
+              reportTo: string | null
+            }>`SELECT parent_session_id AS parent, report_to_session_id AS report_to FROM session WHERE id = ${spawned.session}`,
         ),
       )
-      assert.deepStrictEqual(row, [{ parent: null }])
+      assert.deepStrictEqual(row, [{ parent: null, reportTo: null }])
       assert.strictEqual((yield* b.spawn(call, request)).session, spawned.session, "the same request")
       const noCommit = yield* Effect.flip(
         call(

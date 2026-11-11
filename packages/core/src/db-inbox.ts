@@ -42,11 +42,6 @@ export const inboxMethods = (store: Store) => {
     insertSend: (recipient: string, message: string, request?: string, sender?: string) =>
       tx(
         Effect.gen(function* () {
-          if (sender !== undefined) {
-            const from = yield* reads.creatorOf(sender)
-            const to = yield* reads.creatorOf(recipient)
-            if (from?.id !== recipient && to?.id !== sender) return undefined
-          }
           const before = request === undefined ? undefined : yield* queuedBy(recipient, request)
           if (before !== undefined) return (yield* inboxIn([before]))[0]
           if (!(yield* liveRecipient(recipient))) return undefined
@@ -60,7 +55,7 @@ export const inboxMethods = (store: Store) => {
       tx(
         Effect.gen(function* () {
           const origin = yield* origins(sessionId)
-          const creator = origin?.parent
+          const creator = origin?.reportTo
           if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return undefined
           const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sessionId}`
           const written = yield* queueForPeer(origin.peer, creator, {

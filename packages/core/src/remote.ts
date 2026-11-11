@@ -191,7 +191,7 @@ const make = Effect.gen(function* () {
           )
         const identity = yield* repositoryIdentity(remote)
         const main = yield* db.coordinatorOf(from.project)
-        const creator = from.coordinator ?? main?.id
+        const reportTo = from.coordinator ?? main?.id
         const runtime =
           input.runtime ??
           callerKind(yield* plugins.settled.pipe(Effect.andThen(runtimes.callers)), input.callerEnv) ??
@@ -213,7 +213,8 @@ const make = Effect.gen(function* () {
               ...(input.model === undefined ? {} : { model: input.model }),
               ...(input.name === undefined ? {} : { title: input.name }),
               ...(runtime === undefined ? {} : { runtime }),
-              ...(creator === undefined ? {} : { parent: creator }),
+              ...(from.coordinator === undefined ? {} : { parent: from.coordinator }),
+              ...(reportTo === undefined ? {} : { reportTo }),
               request: input.request ?? randomId(),
             },
             { headers },

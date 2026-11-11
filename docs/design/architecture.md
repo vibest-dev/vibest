@@ -95,15 +95,16 @@ subagents. Everything else in this list is planned; each item says what runs tod
   is kept and read with `vibest inbox`. Today a main agent is never typed into: only a harness that polls (Claude)
   or subscribes (Pi) can be one, and a subagent-only harness (Cursor) has no inbox mode. Subagents are typed into,
   and a row with no session to go to is dropped.
-- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the main agent included. A session reaches only the agent that started it, and sessions it started. A turn end writes only `turn.ended`; the reply text stays in
+- **Delivery is by recipient.** `vibest send <id>` from the user, the main agent or any session reaches any unfinished
+  session of the same project, the main agent included. A turn end writes only `turn.ended`; the reply text stays in
   `turn.reported` and is read as `turn.answer` with `vibest result`. vibest's own notices say only what an agent could
-  not say itself, and go to its creator (its parent, else the current entry session, else `origin_parent` through the
+  not say itself, and go to its creator (`report_to`, else the entry session, else `origin_report_to` through the
   outbox): its harness exited, its turn ended in an error, it never started, it waits on a permission. An
   undeliverable message goes back to its sender. Completed and interrupted turns send nothing, and nothing says an
   agent went idle.
 
-- **Provenance by parent.** `parent_session_id` records who spawned whom. It decides management rights (ancestors),
-  where a new terminal opens (beside its spawner), and, with the project's current entry session, who a notice goes to.
+- **Provenance by parent.** `parent_session_id` records who spawned whom. It decides management rights (ancestors)
+  and where a new terminal opens (beside its spawner), never routing. It never decides routing.
 - **An optional entry session** (`project.entry_session_id`, `main_session_id` before the schema baseline): the session a
   bare `vibest` reopens, and the fallback when a recipient has ended. It is not identity. "One main agent per
   project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.

@@ -105,14 +105,16 @@ CREATE INDEX project_repository_project ON project_repository (project_id);
 CREATE TABLE session (
   id                    TEXT PRIMARY KEY,             -- UUIDv4
   project_id            TEXT NOT NULL,
-  parent_session_id     TEXT,                         -- who spawned it; null: the user. Notices go here, or to the current entry session
+  parent_session_id     TEXT,                         -- who spawned it; null: the user. Rights and placement, never routing
+  report_to_session_id  TEXT,                         -- where its notices go; written at spawn, never changed; null: the user
   role                  TEXT NOT NULL,                -- agent definition name (open set)
   name                  TEXT NOT NULL,
   directory             TEXT NOT NULL,
   archive_on_completion INTEGER NOT NULL DEFAULT 0 CHECK (archive_on_completion IN (0, 1)),
   origin_peer           TEXT,                         -- started by another vibestd: its id
   origin_project        TEXT,                         -- and its project, caller and result session there
-  origin_parent         TEXT,                         -- who started it on the other machine: that session, or its main agent
+  origin_parent         TEXT,
+  origin_report_to      TEXT,
   created_at            INTEGER NOT NULL,
   ended_at              INTEGER,                      -- archived, or replaced by vibest --new
   process_id            INTEGER,                      -- its current process
@@ -198,13 +200,13 @@ An inbox row is text for one recipient: a session, or the user (`recipient_sessi
 | `kind`   | What it is                                                                                                                                         |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `task`   | the first input of a session, from whoever spawned it                                                                                              |
-| `send`   | a message from the user to any unfinished session of the project, or from a session to its creator or a session it started                         |
+| `send`   | a message from the user or a session to any unfinished session of its project, the main agent included                                             |
 | `notice` | something vibest tells the recipient about a session (`sender_session_id`): blocked, not started, undelivered, archived, exited, ended in an error |
 
 - Delivery scans rows with `recipient_session_id IS NOT NULL`. A row for the user is marked delivered once
   `vibest inbox` has shown it.
-- A turn end writes no inbox row. The recipient of a `notice` is `parent_session_id`, then the current entry session;
-  a session started on another machine sends it to `origin_parent` through the outbox. An undeliverable `send` notifies its sender. The kinds `report` and `result`
+- A turn end writes no inbox row. The recipient of a `notice` is `report_to_session_id`, then the entry session, then
+  `origin_report_to` through the outbox; an undeliverable `send` notifies its sender. The kinds `report` and `result`
   stay in the check because the log is append-only: rows imported from it keep them, and nothing writes them.
 
 ## Facts
@@ -215,31 +217,31 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 `TraceEntry` (with `Change`) from `packages/schema/src/plugin.ts` are part of the catalog contract through
 `process.started.routing`: change them by the same rules as a fact.
 
-| type                                | data                                                                                                                            |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| project.created                     | directory?, repositories                                                                                                        |
-| project.moved                       | from, to, repositories                                                                                                          |
-| project.repositories_changed        | repositories                                                                                                                    |
-| project.entry_changed               | session? (none: the project has no entry session)                                                                               |
-| session.created                     | role, name, directory, parent?, reportTo? (ignored), archiveOnCompletion, origin? {peer, project, parent?, reportTo? (ignored)} |
-| session.renamed                     | name                                                                                                                            |
-| session.directory_changed           | directory                                                                                                                       |
-| session.ended                       | reason: archived, replaced (vibest --new)                                                                                       |
-| process.started                     | harness, provider?, model?, routing?, resume?, runtime, terminal?, pid? (a main agent's launch)                                 |
-| process.placed                      | process, terminal, pid?: the terminal of a process started before its terminal opened                                           |
-| process.ready                       | process, pid?, integration? {version, protocol}; may repeat after a plugin reload                                               |
-| process.pid                         | process, pid: a pid report that is not a ready report                                                                           |
-| process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                       |
-| process.ended                       | process, reason: exited, limited, restart, move, archived, launch_failed, superseded                                            |
-| turn.started                        | process?, typed? (the text typed into the pane)                                                                                 |
-| turn.reported                       | process?, harness, text, error?, conversation?, interrupted?: the turn end as the hook reported it                              |
-| turn.ended                          | turn, status, report? (the turn.reported it consumed), failure? {message}                                                       |
-| inbox.queued                        | kind, recipient?, sender?, content, status: pending, delivered or dropped, turn?, request?, peerItem?                           |
-| inbox.moved                         | inbox, to, turn? (on to = delivered: the turn that took it)                                                                     |
-| machine.added, .connected, .removed | name (added: target, vibestd)                                                                                                   |
-| peer.seen                           | id, name, callsMe                                                                                                               |
-| outbox.queued                       | id, peer, kind: result or notice, content                                                                                       |
-| outbox.acked                        | peer, ids                                                                                                                       |
+| type                                | data                                                                                                        |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| project.created                     | directory?, repositories                                                                                    |
+| project.moved                       | from, to, repositories                                                                                      |
+| project.repositories_changed        | repositories                                                                                                |
+| project.entry_changed               | session? (none: the project has no entry session)                                                           |
+| session.created                     | role, name, directory, parent?, reportTo?, archiveOnCompletion, origin? {peer, project, parent?, reportTo?} |
+| session.renamed                     | name                                                                                                        |
+| session.directory_changed           | directory                                                                                                   |
+| session.ended                       | reason: archived, replaced (vibest --new)                                                                   |
+| process.started                     | harness, provider?, model?, routing?, resume?, runtime, terminal?, pid? (a main agent's launch)             |
+| process.placed                      | process, terminal, pid?: the terminal of a process started before its terminal opened                       |
+| process.ready                       | process, pid?, integration? {version, protocol}; may repeat after a plugin reload                           |
+| process.pid                         | process, pid: a pid report that is not a ready report                                                       |
+| process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                   |
+| process.ended                       | process, reason: exited, limited, restart, move, archived, launch_failed, superseded                        |
+| turn.started                        | process?, typed? (the text typed into the pane)                                                             |
+| turn.reported                       | process?, harness, text, error?, conversation?, interrupted?: the turn end as the hook reported it          |
+| turn.ended                          | turn, status, report? (the turn.reported it consumed), failure? {message}                                   |
+| inbox.queued                        | kind, recipient?, sender?, content, status: pending, delivered or dropped, turn?, request?, peerItem?       |
+| inbox.moved                         | inbox, to, turn? (on to = delivered: the turn that took it)                                                 |
+| machine.added, .connected, .removed | name (added: target, vibestd)                                                                               |
+| peer.seen                           | id, name, callsMe                                                                                           |
+| outbox.queued                       | id, peer, kind: result or notice, content                                                                   |
+| outbox.acked                        | peer, ids                                                                                                   |
 
 A turn's input is its typed text, or the inbox rows that moved to delivered with that turn. A delivery opens the turn
 before the rows move to delivered, so they get its id. A `task` is handed over with the spawn, before any turn: its
