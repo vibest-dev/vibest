@@ -22,6 +22,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
+import { commandOf, note } from "../../../tools/reap.ts"
 import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime } from "./fake-runtime.ts"
 
@@ -115,6 +116,7 @@ export const runVibest = (cwd: string, env: Record<string, string>, args: Readon
         stdin: "ignore",
       }),
     )
+    if (args[0] === "daemon") note(Number(handle.pid), mainTs)
     const text = (s: Stream.Stream<Uint8Array, unknown>) => Stream.mkString(Stream.decodeText(s))
     const [stdout, stderr, code] = yield* Effect.all([text(handle.stdout), text(handle.stderr), handle.exitCode], {
       concurrency: 3,
@@ -168,14 +170,31 @@ export const recordedInfo = (daemonInfo: string, instance: string | undefined) =
     return yield* Effect.die(new Error(`${daemonInfo} never recorded vibestd ${instance}`))
   })
 
+const endDaemonPid = async (pid: number) => {
+  try {
+    process.kill(pid, "SIGTERM")
+  } catch (e) {
+    if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+    return
+  }
+  for (const deadline = Date.now() + 2_000; Platform.liveness(pid) !== "exited" && Date.now() < deadline;)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  if (Platform.liveness(pid) === "exited") return
+  try {
+    process.kill(pid, "SIGKILL")
+  } catch (e) {
+    if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+  }
+}
+
 export const stopRecorded = (daemonInfo: string) =>
   Effect.gen(function* () {
     const running = Option.getOrUndefined(yield* readDaemonInfo(daemonInfo))
     if (!running) return
-    yield* Effect.try(() => process.kill(running.pid, "SIGTERM")).pipe(Effect.ignore)
-    yield* Effect.sleep("100 millis").pipe(
-      Effect.repeat({ until: () => Platform.liveness(running.pid) === "exited", times: 100 }),
-    )
+    const command = commandOf(running.pid)
+    if (!command.includes("daemon --foreground")) return
+    if (running.command !== undefined && running.command.some((part) => !command.includes(part))) return
+    yield* Effect.promise(() => endDaemonPid(running.pid))
   }).pipe(Effect.ignore)
 
 export type Line = Record<string, unknown>

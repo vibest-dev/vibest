@@ -4,6 +4,7 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
+import { commandOf, endOwned, note } from "../../reap.ts"
 import {
   DAY_MS,
   herdrConfigSessions,
@@ -213,6 +214,7 @@ export class World {
         ? { code, stdout: `<${stdout.length} bytes not kept>`, stderr: `<${stderr.length} bytes not kept>` }
         : result,
     })
+    if (argv.includes("daemon") && !argv.includes("import-check")) await this.noteDaemon(env.VIBEST_HOME)
     return result
   }
 
@@ -296,6 +298,8 @@ export class World {
   spawn(argv: ReadonlyArray<string>, log: string) {
     const p = Bun.spawn([...argv], { cwd: this.repository, env: this.env(), stdout: "ignore", stderr: Bun.file(log) })
     this.started.push(p)
+    const marker = argv.join(" ")
+    if (marker.includes("herdr") || marker.includes("daemon --foreground")) note(p.pid, marker, this.root)
     return p
   }
 
@@ -329,9 +333,38 @@ export class World {
     await until("vibestd gone", () => !alive(pid!), 10_000)
   }
 
+  private noteHerdr(session: string, socket: string) {
+    const pids = Bun.spawnSync(["lsof", "-t", socket], { stdout: "pipe", stderr: "ignore" })
+      .stdout.toString()
+      .split(/\s+/)
+      .map(Number)
+      .filter((pid) => Number.isInteger(pid) && pid > 1)
+    for (const pid of new Set(pids)) {
+      const command = commandOf(pid).trim()
+      if (command.includes("herdr") && command.includes(session)) note(pid, command, this.root)
+    }
+  }
+
+  private async noteDaemon(home: string | undefined) {
+    if (home === undefined) return
+    const text = await fsPromises.readFile(path.join(home, "vibestd.pid"), "utf8").catch(() => "")
+    let parsed: { pid?: unknown; command?: unknown }
+    try {
+      parsed = JSON.parse(text) as { pid?: unknown; command?: unknown }
+    } catch {
+      return
+    }
+    if (typeof parsed.pid !== "number" || !Array.isArray(parsed.command)) return
+    const marker = parsed.command.filter((part): part is string => typeof part === "string").join(" ")
+    if (marker !== "" && commandOf(parsed.pid).includes("daemon --foreground")) note(parsed.pid, marker, this.root)
+  }
+
   private async ensureHerdr(session: string) {
     const socket = path.join(this.home, ".config", "herdr", "sessions", session, "herdr.sock")
-    if (fs.existsSync(socket)) return socket
+    if (fs.existsSync(socket)) {
+      this.noteHerdr(session, socket)
+      return socket
+    }
     const server = Bun.spawn(["herdr", "server", "--session", session], {
       env: this.env(),
       stdin: "ignore",
@@ -340,7 +373,9 @@ export class World {
     })
     server.unref()
     this.started.push(server)
+    note(server.pid, `herdr server --session ${session}`, this.root)
     await until(`herdr session ${session}`, () => fs.existsSync(socket), 20_000)
+    this.noteHerdr(session, socket)
     return socket
   }
 
@@ -427,6 +462,9 @@ export class World {
       },
       timeoutMs,
     )
+    await this.noteDaemon(this.vibestHome)
+    if (typeof input.env?.VIBEST_HOME === "string") await this.noteDaemon(input.env.VIBEST_HOME)
+    if (typeof input.processEnv?.VIBEST_HOME === "string") await this.noteDaemon(input.processEnv.VIBEST_HOME)
   }
 
   private async killStarted() {
@@ -445,29 +483,43 @@ export class World {
   }
 
   async close() {
+    const errors: Array<unknown> = []
+    const step = async (run: () => Promise<void>) => {
+      try {
+        await run()
+      } catch (e) {
+        errors.push(e)
+      }
+    }
+    const sessionsDir = herdrConfigSessions(this.home)
+    const run = (args: ReadonlyArray<string>, extra: Record<string, string | undefined> = {}) =>
+      this.run(this.root, ["herdr", ...args], { timeoutMs: 20_000, env: extra })
+    const names = sessionNamesForWorld(
+      await fsPromises.readdir(sessionsDir).catch(() => [] as Array<string>),
+      this.herdrSession,
+    )
     try {
-      await this.stopDaemon()
-      const sessionsDir = herdrConfigSessions(this.home)
-      const run = (args: ReadonlyArray<string>, extra: Record<string, string | undefined> = {}) =>
-        this.run(this.root, ["herdr", ...args], { timeoutMs: 20_000, env: extra })
-      const names = sessionNamesForWorld(
-        await fsPromises.readdir(sessionsDir).catch(() => [] as Array<string>),
-        this.herdrSession,
-      )
-      for (const name of names) await run(["session", "stop", name]).catch(() => undefined)
-      await stopSocketsUnder(this.root, (args, extra) => run(args, extra))
+      await step(() => this.stopDaemon())
+      await step(() => stopRecordedDaemon(this.root))
+      for (const name of names) await step(() => run(["session", "stop", name]).then(() => undefined))
+      await step(() => stopSocketsUnder(this.root, (args, extra) => run(args, extra)))
+      for (const name of names) await step(() => endHerdrSocket(path.join(sessionsDir, name, "herdr.sock"), name))
       for (const sock of await pathsNamed(this.root, "hc.sock"))
-        await this.run(this.root, ["hc", "server", "stop"], { timeoutMs: 15_000, env: { HC_SOCKET: sock } }).catch(
-          () => undefined,
+        await step(() =>
+          this.run(this.root, ["hc", "server", "stop"], { timeoutMs: 15_000, env: { HC_SOCKET: sock } }).then(
+            () => undefined,
+          ),
         )
-      await this.killStarted()
+      await step(() => this.killStarted())
+      await step(() => stopOwners(this.root))
       for (const name of names) {
-        await run(["session", "delete", name]).catch(() => undefined)
-        await removeStoppedSession(path.join(sessionsDir, name))
+        await step(() => run(["session", "delete", name]).then(() => undefined))
+        await step(() => removeStoppedSession(path.join(sessionsDir, name)).then(() => undefined))
       }
     } finally {
       this.releases.stop(true)
     }
+    if (errors[0] !== undefined) throw errors[0]
   }
 }
 
@@ -544,37 +596,45 @@ const stopSocketsUnder = async (
   }
 }
 
+const endHerdrSocket = async (sock: string, name: string) => {
+  if (!(await socketListening(sock))) return
+  const pids = Bun.spawnSync(["lsof", "-t", sock], { stdout: "pipe", stderr: "ignore" })
+    .stdout.toString()
+    .split(/\s+/)
+    .map(Number)
+    .filter((pid) => Number.isInteger(pid) && pid > 1)
+  for (const pid of new Set(pids)) {
+    const command = commandOf(pid)
+    if (command.includes("herdr") && command.includes(name)) endOwned(pid, name)
+  }
+}
+
 const stopRecordedDaemon = async (root: string) => {
-  const text = await fsPromises.readFile(path.join(root, "vibest", "vibestd.pid"), "utf8").catch(() => "")
-  let pid: number | undefined
-  let socket = ""
-  try {
-    const parsed = JSON.parse(text) as { pid?: unknown; socket?: unknown }
-    if (typeof parsed.pid === "number") pid = parsed.pid
-    if (typeof parsed.socket === "string") socket = parsed.socket
-  } catch {
-    return
-  }
-  if (pid === undefined || socket === "" || !alive(pid)) return
-  const realRoot = await fsPromises.realpath(root).catch(() => root)
-  const realSocket = await fsPromises.realpath(socket).catch(() => socket)
-  const under = (dir: string, file: string) => file === dir || file.startsWith(dir + path.sep)
-  if (![root, realRoot].some((dir) => [socket, realSocket].some((file) => under(dir, file)))) return
-  const command = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]).stdout.toString()
-  if (!command.includes("vibest") || !command.includes("daemon")) return
-  try {
-    process.kill(pid, "SIGTERM")
-  } catch (e) {
-    if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
-    return
-  }
-  const deadline = Date.now() + 5_000
-  while (alive(pid) && Date.now() < deadline) await Bun.sleep(50)
-  if (!alive(pid)) return
-  try {
-    process.kill(pid, "SIGKILL")
-  } catch (e) {
-    if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+  for (const file of await pathsNamed(root, "vibestd.pid")) {
+    const text = await fsPromises.readFile(file, "utf8").catch(() => "")
+    let pid: number | undefined
+    let socket = ""
+    try {
+      const parsed = JSON.parse(text) as { pid?: unknown; socket?: unknown }
+      if (typeof parsed.pid === "number") pid = parsed.pid
+      if (typeof parsed.socket === "string") socket = parsed.socket
+    } catch {
+      continue
+    }
+    if (pid === undefined || socket === "" || !alive(pid)) continue
+    const realRoot = await fsPromises.realpath(root).catch(() => root)
+    const realSocket = await fsPromises.realpath(socket).catch(() => socket)
+    const under = (dir: string, target: string) => target === dir || target.startsWith(dir + path.sep)
+    if (![root, realRoot].some((dir) => [socket, realSocket].some((target) => under(dir, target)))) continue
+    if (!commandOf(pid).includes("daemon --foreground")) continue
+    try {
+      process.kill(pid, "SIGTERM")
+    } catch (e) {
+      if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
+      continue
+    }
+    for (const deadline = Date.now() + 2_000; alive(pid) && Date.now() < deadline;) await Bun.sleep(50)
+    if (alive(pid)) endOwned(pid, "daemon --foreground")
   }
 }
 

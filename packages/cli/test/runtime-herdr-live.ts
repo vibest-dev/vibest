@@ -14,6 +14,8 @@ import { ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
 
+import { commandOf, endOwned, note } from "../../../tools/reap.ts"
+
 export const herdrOnPath = childProcess.spawnSync("herdr", ["--version"], { stdio: "ignore" }).status === 0
 export const piOnPath = (process.env.PATH ?? "")
   .split(":")
@@ -49,24 +51,6 @@ export const readSessions = (): ReadonlyArray<ListedSession> | undefined => {
   }
 }
 
-export const signalablePid = (pid: number) => pid > 1
-
-export const livePid = (child: ReturnType<typeof childProcess.spawn> | undefined) => {
-  const pid = child?.pid
-  return child?.exitCode === null && child?.signalCode === null && pid !== undefined && signalablePid(pid)
-    ? pid
-    : undefined
-}
-
-export const killDetachedProcessGroup = (leader: number) => {
-  try {
-    process.kill(-leader, "SIGKILL")
-    return true
-  } catch {
-    return false
-  }
-}
-
 const sessionDirectory = (name: string, env: Record<string, string>) =>
   path.join(env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "herdr", "sessions", name)
 
@@ -91,31 +75,42 @@ const socketListening = (sock: string) =>
     })
   })
 
+const holders = (sock: string) =>
+  childProcess
+    .spawnSync("lsof", ["-t", sock], { encoding: "utf8" })
+    .stdout.split(/\s+/)
+    .map(Number)
+    .filter((pid) => Number.isInteger(pid) && pid > 1)
+
+const endHerdr = (pid: number | undefined, name: string) => {
+  if (pid === undefined) return
+  const command = commandOf(pid)
+  if (!command.includes("herdr") || !command.includes(name)) return
+  endOwned(pid, name)
+}
+
 export const stopSession = async (name: string) => {
   if (!sessionName.test(name)) return
   const env = herdrChildEnv()
   const dir = sessionDirectory(name, env)
   const sock = path.join(dir, "herdr.sock")
-  const child = children.get(name)
-  const killChild = () => {
-    const pid = livePid(child)
-    if (pid !== undefined) killDetachedProcessGroup(pid)
-  }
-  killChild()
-  if (await socketListening(sock)) {
-    const stop = childProcess.spawn("herdr", ["session", "stop", name], { env, stdio: "ignore" })
-    stop.unref()
-    const deadline = Date.now() + 8_000
-    while ((await socketListening(sock)) && Date.now() < deadline) {
-      killChild()
-      await new Promise((resolve) => setTimeout(resolve, 100))
-    }
-    if (stop.exitCode === null) stop.kill("SIGKILL")
+  endHerdr(children.get(name)?.pid, name)
+  for (const pid of holders(sock)) endHerdr(pid, name)
+  childProcess.spawnSync("herdr", ["session", "stop", name], { env, stdio: "ignore", timeout: 2_000 })
+  const deadline = Date.now() + 2_000
+  while ((await socketListening(sock)) && Date.now() < deadline) {
+    for (const pid of holders(sock)) endHerdr(pid, name)
+    await new Promise((resolve) => setTimeout(resolve, 50))
   }
   if (!(await socketListening(sock))) {
     childProcess.spawnSync("herdr", ["session", "delete", name], { env, stdio: "ignore", timeout: 2_000 })
     fs.rmSync(dir, { recursive: true, force: true })
   }
+  const left = holders(sock).filter((pid) => {
+    const command = commandOf(pid)
+    return command.includes("herdr") && command.includes(name)
+  })
+  if (left.length > 0) throw new Error(`herdr ${name} still running (${left.join(", ")})`)
   if (fs.existsSync(dir)) throw new Error(`herdr session ${name} is still at ${dir}`)
   started.delete(name)
   children.delete(name)
@@ -172,6 +167,7 @@ export const withSession = <A, E, R>(
     })
     child.unref()
     children.set(name, child)
+    note(child.pid, `herdr --session ${name} server`)
     yield* Effect.addFinalizer(() => Effect.promise(() => stopSession(name)))
     let socketPath: string | undefined
     for (let attempt = 0; attempt < 50 && socketPath === undefined; attempt++) {

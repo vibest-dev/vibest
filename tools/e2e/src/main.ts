@@ -1,6 +1,8 @@
 import fs from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 
+import { endNoted, startWatch, survivors } from "../../reap.ts"
 import type { Check } from "./check.ts"
 import { cached, cacheKeys, rememberPasses } from "./runner/cache.ts"
 import { changedUserFiles, herdrSessionsLeft, historyNaming, userFileHashes } from "./runner/invariants.ts"
@@ -129,6 +131,11 @@ for (const built of [binary, path.join(harnesses, "pi/extension.mjs")]) {
   }
 }
 
+const tracked = path.join(os.tmpdir(), `vibest-reap-e2e-${process.pid}`)
+await fs.writeFile(tracked, "")
+process.env.VIBEST_REAP_FILE = tracked
+startWatch(process.pid, tracked)
+
 await removeExpiredWorlds()
 
 type Outcome = "pass" | "cached" | "fail" | "skip" | "flaky-under-load"
@@ -191,6 +198,11 @@ const once = async ({ area, check }: (typeof checks)[number], evidenceName: stri
     )
       problem(`world left at ${world.root}`)
   }
+  const still = survivors(tracked, world.root)
+  if (still.length > 0) {
+    problem(`processes still alive: ${still.join("; ")}`)
+    await endNoted(tracked, world.root)
+  }
   return {
     id: check.id,
     area,
@@ -251,6 +263,8 @@ for (const c of selected.filter((c) => results.get(c.id)?.outcome === "fail")) {
 const ordered = selected.map((c) => results.get(c.id)!)
 await saveMs(Object.fromEntries(ordered.filter((r) => r.outcome === "pass").map((r) => [r.id, r.ms])))
 
+const stillRunning = survivors(tracked)
+if (stillRunning.length > 0) await endNoted(tracked)
 const changed = changedUserFiles(userFilesBefore, await userFileHashes())
 const typedIntoHistory = await historyNaming(worlds)
 const leaked = (
@@ -269,6 +283,7 @@ const invariants = [
     ? [`commands typed in this run's worlds reached the user's shell history: ${typedIntoHistory.join(", ")}`]
     : []),
   ...(leaked.length ? [`evidence holds a user model, provider or account value: ${leaked.join(", ")}`] : []),
+  ...(stillRunning.length > 0 ? [`processes still alive: ${stillRunning.join("; ")}`] : []),
 ]
 for (const line of invariants) console.log(`FAIL ${line}`)
 await rememberPasses(
@@ -287,4 +302,5 @@ const count = (o: Outcome) => ordered.filter((r) => r.outcome === o).length
 console.log(
   `\n${count("pass")} passed, ${count("cached")} cached, ${count("fail")} failed, ${count("flaky-under-load")} flaky under load, ${count("skip")} skipped in ${((Date.now() - t0) / 1000).toFixed(0)} s; evidence in ${path.relative(checkout, evidence)}`,
 )
+await fs.rm(tracked, { force: true })
 process.exit(count("fail") || count("flaky-under-load") || invariants.length || (strict && count("skip")) ? 1 : 0)
