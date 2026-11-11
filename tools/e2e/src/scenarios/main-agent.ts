@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
+import { ask, entryRun, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
 import { replyOf, expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
@@ -111,6 +111,8 @@ const toolsModel = (readme: string) => {
     hostname: "127.0.0.1",
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const entryAnswer = entryRun(messages)
+      if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const user = messages.findLastIndex((m) => m.role === "user")
       const done = messages.slice(user + 1).filter((m) => m.role === "tool").length
       const step = text(messages[user]).includes("group-tools") ? steps[done] : undefined
@@ -278,9 +280,13 @@ const checks: ReadonlyArray<Check> = [
       try {
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-repos", model.url)}`
         await w.daemon()
+        await w.entry({ cwd: shop })
+        await w.entry({ cwd: admin })
         const run = async (cwd: string, task: string) =>
           (
-            JSON.parse(await w.ok(["run", "pi", "--env", env, "--", ask(task)], { cwd, timeoutMs: 60_000 })) as {
+            JSON.parse(
+              await w.okViaEntry(["run", "pi", "--env", env, "--", ask(task)], { cwd, timeoutMs: 60_000 }),
+            ) as {
               id: string
             }
           ).id

@@ -80,6 +80,18 @@ const claudeMain = async (
   const configTheResumeCheckReads = w.config.claude
   const flags = await claudeEnv(w, name, anthropic.url, configTheResumeCheckReads)
   const config = claudeConfigOf(flags)
+  const settingsFile = path.join(config, "settings.json")
+  const settings = JSON.parse(await fs.readFile(settingsFile, "utf8")) as { permissions?: { allow?: Array<string> } }
+  await fs.writeFile(
+    settingsFile,
+    JSON.stringify({
+      ...settings,
+      permissions: {
+        ...settings.permissions,
+        allow: [...(settings.permissions?.allow ?? []), `Bash(${binary} run:*)`],
+      },
+    }),
+  )
   const session = `${w.herdrSession}-${name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const repo = await project(w, name)
@@ -146,7 +158,10 @@ const claudeMain = async (
   const start = async (title: string, marker: string) =>
     (
       JSON.parse(
-        await w.ok(["run", "pi", "--env", env, "--title", title, "--", ask(marker)], { cwd: repo, timeoutMs: 60_000 }),
+        await w.okViaEntry(["run", "pi", "--env", env, "--title", title, "--", ask(marker)], {
+          cwd: repo,
+          timeoutMs: 60_000,
+        }),
       ) as { id: string }
     ).id
   const result = async (sub: string, title: string, marker: string, before: number) => {
@@ -244,7 +259,7 @@ const heldSubagent = async (w: World, pastWindow: boolean) => {
     })
     const sub = (
       JSON.parse(
-        await w.ok(["run", "pi", "--session", session, "--env", env, "--", ask("held")], {
+        await w.okViaEntry(["run", "pi", "--session", session, "--env", env, "--", ask("held")], {
           cwd: repo,
           timeoutMs: 60_000,
         }),
@@ -493,7 +508,7 @@ const checks: ReadonlyArray<Check> = [
               throw new Error(`${e.message}; the main agent's model saw: ${JSON.stringify(model.seen, null, 1)}`)
             },
           )
-        await w.ok(["run", "pi", "--env", env, ask("zero")], { cwd: repo, timeoutMs: 60_000 })
+        await w.okViaEntry(["run", "pi", "--env", env, ask("zero")], { cwd: repo, timeoutMs: 60_000 })
         await reached("the main agent's execution on the first result", "done-zero")
         await reached("the main agent's execution on the Claude subagent's first result", "done-one")
         await reached("the main agent's execution on the Claude subagent's second result", "done-two")
@@ -504,9 +519,11 @@ const checks: ReadonlyArray<Check> = [
         const main = (await mains())[0]!.id
         await expectReplied(w, model.sessionId())
         const toMain = () =>
-          rows<{ status: string }>(w, "SELECT status FROM inbox WHERE session_id = ? AND kind = 'send'", main).map(
-            (r) => r.status,
-          )
+          rows<{ status: string }>(
+            w,
+            "SELECT status FROM inbox WHERE session_id = ? AND kind = 'send' AND sender_session_id IS NOT NULL",
+            main,
+          ).map((r) => r.status)
         await until(
           "the main agent's four sends delivered",
           () => JSON.stringify(toMain()) === JSON.stringify(Array(4).fill("delivered")),
@@ -548,7 +565,7 @@ const checks: ReadonlyArray<Check> = [
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-cmsend-sender", `http://127.0.0.1:${sender.port}/v1`)}`
         const sub = (
           JSON.parse(
-            await w.ok(["run", "pi", "--env", env, "--title", "Send probe", "--", "send to the main agent"], {
+            await w.okViaEntry(["run", "pi", "--env", env, "--title", "Send probe", "--", "send to the main agent"], {
               cwd: c.repo,
               timeoutMs: 60_000,
             }),
@@ -630,7 +647,7 @@ const checks: ReadonlyArray<Check> = [
         })
         const sub = (
           JSON.parse(
-            await w.ok(["run", "pi", "--session", session, "--env", env, "--", ask("ids")], {
+            await w.okViaEntry(["run", "pi", "--session", session, "--env", env, "--", ask("ids")], {
               cwd: repo,
               timeoutMs: 60_000,
             }),
@@ -696,7 +713,7 @@ const checks: ReadonlyArray<Check> = [
         })
         const sub = (
           JSON.parse(
-            await w.ok(["run", "pi", "--session", session, "--env", env, "--", ask("confirm")], {
+            await w.okViaEntry(["run", "pi", "--session", session, "--env", env, "--", ask("confirm")], {
               cwd: repo,
               timeoutMs: 60_000,
             }),
@@ -765,7 +782,7 @@ const checks: ReadonlyArray<Check> = [
         const runSub = async (task: string) =>
           (
             JSON.parse(
-              await w.ok(["run", "pi", "--session", session, "--env", pi, "--", ask(task)], {
+              await w.okViaEntry(["run", "pi", "--session", session, "--env", pi, "--", ask(task)], {
                 cwd: repo,
                 env,
                 timeoutMs: 90_000,

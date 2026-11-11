@@ -168,6 +168,7 @@ const once = async ({ area, check }: (typeof checks)[number], evidenceName: stri
     detail = `${detail ? `${detail}\n` : ""}${text}`
   }
   try {
+    if (check.entry) await world.entry()
     await check.run(world, evidence)
   } catch (e) {
     outcome = e instanceof Skip ? "skip" : "fail"

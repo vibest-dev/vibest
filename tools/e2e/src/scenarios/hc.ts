@@ -134,7 +134,7 @@ const checks: ReadonlyArray<Check> = [
             await Bun.sleep(100)
           }
         })()
-        await w.ok(["run", "pi", "--runtime", "hc", "--env", env, "--title", "Fix login bug", ask("zero")], {
+        await w.okViaEntry(["run", "pi", "--runtime", "hc", "--env", env, "--title", "Fix login bug", ask("zero")], {
           cwd: repo,
           timeoutMs: 60_000,
         })
@@ -364,7 +364,7 @@ const checks: ReadonlyArray<Check> = [
           mainAt.kind === "hc" && mainAt.id === `${caller.address}@${w.hcSocket}`,
           `the main agent runs in ${JSON.stringify(mainAt)}, not in ${caller.address} on ${w.hcSocket}`,
         )
-        await w.ok(["run", "pi", "--runtime", "hc", "--env", env, "--title", "Wake parent", ask("zero")], {
+        await w.okViaEntry(["run", "pi", "--runtime", "hc", "--env", env, "--title", "Wake parent", ask("zero")], {
           cwd: repo,
           timeoutMs: 60_000,
         })
@@ -395,10 +395,13 @@ const checks: ReadonlyArray<Check> = [
           `the subagent's parent is ${subTerminal.parent}, not ${caller.address}`,
         )
         const placed = JSON.parse(
-          await w.ok(["run", "pi", "--runtime", "herdr", "--env", env, "--title", "Place in herdr", ask("side")], {
-            cwd: repo,
-            timeoutMs: 90_000,
-          }),
+          await w.okViaEntry(
+            ["run", "pi", "--runtime", "herdr", "--env", env, "--title", "Place in herdr", ask("side")],
+            {
+              cwd: repo,
+              timeoutMs: 90_000,
+            },
+          ),
         ) as { id: string }
         await until(
           "the herdr subagent's terminal",
@@ -451,7 +454,7 @@ const checks: ReadonlyArray<Check> = [
         )
         const sub = (
           JSON.parse(
-            await w.ok(
+            await w.okViaEntry(
               ["run", "pi", "--runtime", "hc", "--env", env, "--title", "Check seen state", "--", ask("seen")],
               {
                 cwd: repo,

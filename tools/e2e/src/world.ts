@@ -4,20 +4,18 @@ import fsPromises from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { commandOf, endOwned, note } from "../../reap.ts"
+import { commandOf, note } from "../../reap.ts"
+import { entryModel, entryRunMessage, entryRunOutput, nextEntryRun } from "./fake-model.ts"
 import {
-  DAY_MS,
   herdrConfigSessions,
-  isWorldDirectoryName,
   pathsNamed,
   removeStoppedSession,
   sessionNamesForWorld,
-  socketListening,
-  sweepTargets,
-  worldOfHerdrSession,
   worldTmpBase,
 } from "./runner/cleanup.ts"
-import { claudeShadow, cursorShadow, type Profile, userPrivateValues } from "./world/shadow.ts"
+import { alive } from "./world/alive.ts"
+import { claudeShadow, cursorShadow, piShadow, type Profile, userPrivateValues } from "./world/shadow.ts"
+import { endHerdrSocket, stopOwners, stopRecordedDaemon, stopSocketsUnder } from "./world/teardown.ts"
 import { loginEnv, secretName } from "./world/user-env.ts"
 
 export const checkout = path.resolve(import.meta.dirname, "../../..")
@@ -55,6 +53,7 @@ export const buildVersion = (
 ).version
 
 const shSingle = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
+const shWord = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : shSingle(s))
 
 const zshKeepingHistoryInTheWorld = async (dir: string) => {
   await fsPromises.mkdir(dir, { mode: 0o700 })
@@ -89,6 +88,9 @@ export interface Ran {
   readonly stderr: string
 }
 
+export { alive } from "./world/alive.ts"
+export { removeExpiredWorlds, removeWorldDir } from "./world/teardown.ts"
+
 export class Skip extends Error {}
 
 export const fail = (message: string): never => {
@@ -112,6 +114,7 @@ export class World {
   readonly hcSocket: string
   readonly shellDir: string
   readonly ownRuntimes = new Set<string>()
+  private readonly entryModels: Array<{ readonly stop: () => void }> = []
 
   private constructor(
     readonly root: string,
@@ -248,6 +251,94 @@ export class World {
     return this.run(options.cwd ?? this.repository, [binary, ...this.withSession(args)], options)
   }
 
+  async entryOf(cwd: string, home = this.vibestHome) {
+    const file = path.join(home, "vibest.db")
+    if (!fs.existsSync(file)) return undefined
+    const directory = await fsPromises.realpath(cwd)
+    const db = readDb(file)
+    try {
+      const found = db
+        .query(
+          `SELECT s.id FROM project p JOIN session s ON s.id = p.entry_session_id
+            WHERE p.directory = ? AND s.ended_at IS NULL`,
+        )
+        .get(directory) as { id: string } | null
+      return found?.id
+    } finally {
+      db.close()
+    }
+  }
+
+  async entry(options: Omit<Parameters<World["startMain"]>[0], "harness" | "env" | "timeoutMs"> = {}) {
+    if ((await this.entryOf(options.cwd ?? this.repository)) !== undefined) return
+    await this.ok(["daemon"], {
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+      env: options.processEnv ?? {},
+    })
+    const model = entryModel()
+    this.entryModels.push(model)
+    const dir = await piShadow(path.join(this.root, `pi-entry-${this.entryModels.length}`), this.profile, {
+      fake: { baseUrl: model.url },
+    })
+    if (options.runtime !== "hc" && options.socket === undefined)
+      await this.ensureHerdr(options.session ?? this.herdrSession, this.env(options.processEnv))
+    await this.startMain({ ...options, harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
+    const cwd = options.cwd ?? this.repository
+    await until("the entry session", async () => (await this.entryOf(cwd)) !== undefined, 90_000)
+  }
+
+  async viaEntry(
+    args: ReadonlyArray<string>,
+    options: {
+      cwd?: string
+      env?: Record<string, string | undefined>
+      timeoutMs?: number
+      bin?: string
+      asIs?: boolean
+    } = {},
+  ): Promise<Ran> {
+    const cwd = options.cwd ?? this.repository
+    let entry: string | undefined
+    await until(
+      `the entry session in ${cwd} to run vibest ${args.join(" ")}`,
+      async () => (entry = await this.entryOf(cwd, options.env?.VIBEST_HOME)) !== undefined,
+      60_000,
+    )
+    const run = nextEntryRun()
+    const vars = Object.entries(options.env ?? {})
+    const env = [
+      ...vars.flatMap(([key, value]) => (value === undefined ? ["-u", key] : [])),
+      ...vars.flatMap(([key, value]) => (value === undefined ? [] : [`${key}=${value}`])),
+    ]
+    const argv = [
+      ...(env.length > 0 ? ["env", ...env] : []),
+      options.bin ?? binary,
+      ...(options.asIs ? args : this.withSession(args)),
+    ]
+    const vibest = (more: ReadonlyArray<string>) =>
+      this.run(cwd, [options.bin ?? binary, ...more], options.env === undefined ? {} : { env: options.env })
+    const sent = await vibest(["send", entry!, "--", entryRunMessage(run, argv.map(shWord).join(" "))])
+    expect(sent.code === 0, `vibest send to the entry exited ${sent.code}: ${sent.stderr}${sent.stdout}`)
+    await until(
+      `the entry session to run vibest ${args.join(" ")}`,
+      () => entryRunOutput(run) !== undefined,
+      (options.timeoutMs ?? 60_000) + 60_000,
+    )
+    const { code, output } = entryRunOutput(run)!
+    const result = { code, stdout: output, stderr: output }
+    this.log.push({ argv: ["(entry)", binary, ...args].map(redact), cwd, result })
+    return result
+  }
+
+  async okViaEntry(args: ReadonlyArray<string>, options: Parameters<World["viaEntry"]>[1] = {}): Promise<string> {
+    const r = await this.viaEntry(args, options)
+    expect(
+      r.code === 0,
+      `vibest ${args.join(" ")} (from the entry) exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`,
+    )
+    return r.stdout
+  }
+
   foreignTerminals(): ReadonlyArray<string> {
     const file = path.join(this.vibestHome, "vibest.db")
     if (!fs.existsSync(file)) return []
@@ -351,14 +442,14 @@ export class World {
     if (marker !== "" && commandOf(parsed.pid).includes("daemon --foreground")) note(parsed.pid, marker, this.root)
   }
 
-  private async ensureHerdr(session: string) {
+  private async ensureHerdr(session: string, env: Record<string, string>) {
     const socket = path.join(this.home, ".config", "herdr", "sessions", session, "herdr.sock")
     if (fs.existsSync(socket)) {
       this.noteHerdr(session, socket)
       return socket
     }
     const server = Bun.spawn(["herdr", "server", "--session", session], {
-      env: this.env(),
+      env,
       stdin: "ignore",
       stdout: "ignore",
       stderr: "ignore",
@@ -411,7 +502,7 @@ export class World {
       expect(typed.code === 0, `hc send: ${typed.stderr}${typed.stdout}`)
     } else {
       const session = input.session ?? this.herdrSession
-      const socket = input.socket ?? (await this.ensureHerdr(session))
+      const socket = input.socket ?? (await this.ensureHerdr(session, this.env()))
       const workspace = await herdr(socket, "workspace.create", { cwd, focus: false, label: "project" })
       const workspaceId = (workspace.workspace as { workspace_id: string }).workspace_id
       const created = await herdr(socket, "tab.create", {
@@ -510,232 +601,9 @@ export class World {
       }
     } finally {
       this.releases.stop(true)
+      for (const model of this.entryModels) model.stop()
     }
     if (errors[0] !== undefined) throw errors[0]
-  }
-}
-
-export const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-  } catch {
-    return false
-  }
-  const state = Bun.spawnSync(["ps", "-p", String(pid), "-o", "state="])
-    .stdout.toString()
-    .trim()
-  return state !== "" && !state.startsWith("Z")
-}
-
-const datedDirs = async (dir: string, keep: (name: string) => boolean) => {
-  const found: Array<{ name: string; mtimeMs: number }> = []
-  for (const name of await fsPromises.readdir(dir).catch(() => [] as Array<string>)) {
-    if (!keep(name)) continue
-    const st = await fsPromises.lstat(path.join(dir, name)).catch(() => undefined)
-    if (st?.isDirectory()) found.push({ name, mtimeMs: st.mtimeMs })
-  }
-  return found
-}
-
-const sessionOfSocket = (sock: string) => {
-  const name = path.basename(path.dirname(sock))
-  const sessions = path.dirname(path.dirname(sock))
-  const herdrDir = path.dirname(sessions)
-  if (path.basename(sessions) !== "sessions" || path.basename(herdrDir) !== "herdr") return undefined
-  return { name, xdg: path.dirname(herdrDir) }
-}
-
-const stopSocketsUnder = async (
-  root: string,
-  run: (args: ReadonlyArray<string>, env: Record<string, string>) => Promise<unknown>,
-) => {
-  for (const sock of await pathsNamed(root, "herdr.sock")) {
-    const session = sessionOfSocket(sock)
-    if (session === undefined) continue
-    const env = { XDG_CONFIG_HOME: session.xdg }
-    const forget = async (args: ReadonlyArray<string>) => {
-      try {
-        await run(args, env)
-      } catch {
-        return
-      }
-    }
-    await forget(["session", "stop", session.name])
-    await forget(["session", "delete", session.name])
-    if (!(await socketListening(sock))) continue
-    const pids = Bun.spawnSync(["lsof", "-t", sock], { stdout: "pipe", stderr: "ignore" })
-      .stdout.toString()
-      .split(/\s+/)
-      .map(Number)
-      .filter((pid) => Number.isInteger(pid) && pid > 1)
-    for (const pid of new Set(pids)) {
-      try {
-        process.kill(pid, "SIGTERM")
-      } catch (e) {
-        if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
-      }
-    }
-    const deadline = Date.now() + 5_000
-    while ((await socketListening(sock)) && Date.now() < deadline) await Bun.sleep(50)
-    if (!(await socketListening(sock))) continue
-    for (const pid of new Set(pids)) {
-      try {
-        process.kill(pid, "SIGKILL")
-      } catch (e) {
-        if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
-      }
-    }
-  }
-}
-
-const endHerdrSocket = async (sock: string, name: string) => {
-  if (!(await socketListening(sock))) return
-  const pids = Bun.spawnSync(["lsof", "-t", sock], { stdout: "pipe", stderr: "ignore" })
-    .stdout.toString()
-    .split(/\s+/)
-    .map(Number)
-    .filter((pid) => Number.isInteger(pid) && pid > 1)
-  for (const pid of new Set(pids)) {
-    const command = commandOf(pid)
-    if (command.includes("herdr") && command.includes(name)) endOwned(pid, name)
-  }
-}
-
-const stopRecordedDaemon = async (root: string) => {
-  for (const file of await pathsNamed(root, "vibestd.pid")) {
-    const text = await fsPromises.readFile(file, "utf8").catch(() => "")
-    let pid: number | undefined
-    let socket = ""
-    try {
-      const parsed = JSON.parse(text) as { pid?: unknown; socket?: unknown }
-      if (typeof parsed.pid === "number") pid = parsed.pid
-      if (typeof parsed.socket === "string") socket = parsed.socket
-    } catch {
-      continue
-    }
-    if (pid === undefined || socket === "" || !alive(pid)) continue
-    const realRoot = await fsPromises.realpath(root).catch(() => root)
-    const realSocket = await fsPromises.realpath(socket).catch(() => socket)
-    const under = (dir: string, target: string) => target === dir || target.startsWith(dir + path.sep)
-    if (![root, realRoot].some((dir) => [socket, realSocket].some((target) => under(dir, target)))) continue
-    if (!commandOf(pid).includes("daemon --foreground")) continue
-    try {
-      process.kill(pid, "SIGTERM")
-    } catch (e) {
-      if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
-      continue
-    }
-    for (const deadline = Date.now() + 2_000; alive(pid) && Date.now() < deadline;) await Bun.sleep(50)
-    if (alive(pid)) endOwned(pid, "daemon --foreground")
-  }
-}
-
-const herdrRun = async (args: ReadonlyArray<string>, extra: Record<string, string> = {}) => {
-  const env: Record<string, string> = { ...extra }
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && !key.startsWith("HERDR_") && env[key] === undefined) env[key] = value
-  }
-  const child = Bun.spawn(["herdr", ...args], { env, stdin: "ignore", stdout: "ignore", stderr: "ignore" })
-  const timer = setTimeout(() => child.kill(), 20_000)
-  await child.exited
-  clearTimeout(timer)
-}
-
-const worldDirExists = (root: string) =>
-  fsPromises.stat(root).then(
-    () => true,
-    () => false,
-  )
-
-const stopOwners = async (root: string) => {
-  const listed = Bun.spawnSync(["lsof", "-t", "+D", root], { stdout: "pipe", stderr: "ignore" }).stdout.toString()
-  const pids = [
-    ...new Set(
-      listed
-        .split(/\s+/)
-        .map(Number)
-        .filter((pid) => Number.isInteger(pid) && pid > 1 && pid !== process.pid),
-    ),
-  ]
-  const doomed: Array<number> = []
-  for (const pid of pids) {
-    const command = Bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]).stdout.toString()
-    if (!/(herdr|hc|vibest)/.test(command) || command.includes("tools/e2e")) continue
-    doomed.push(pid)
-    try {
-      process.kill(pid, "SIGTERM")
-    } catch (e) {
-      if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
-    }
-  }
-  const deadline = Date.now() + 2_000
-  while (doomed.some((pid) => alive(pid)) && Date.now() < deadline) await Bun.sleep(50)
-  for (const pid of doomed) {
-    if (!alive(pid)) continue
-    try {
-      process.kill(pid, "SIGKILL")
-    } catch (e) {
-      if (!(e instanceof Error) || !("code" in e) || e.code !== "ESRCH") throw e
-    }
-  }
-}
-
-export const removeWorldDir = async (root: string) => {
-  const deadline = Date.now() + 20_000
-  let removed = false
-  while (Date.now() < deadline) {
-    if (await worldDirExists(root)) {
-      removed = true
-      await stopOwners(root)
-      await fsPromises.rm(root, { recursive: true, force: true }).catch(() => undefined)
-      await Bun.sleep(200)
-      continue
-    }
-    if (!removed) return
-    await Bun.sleep(1_000)
-    if (!(await worldDirExists(root))) return
-  }
-}
-
-export const removeExpiredWorlds = async (
-  options: {
-    tmpBase?: string
-    sessionsDir?: string
-    now?: number
-    maxAgeMs?: number
-    run?: (args: ReadonlyArray<string>, env?: Record<string, string>) => Promise<unknown>
-  } = {},
-) => {
-  const tmpBase = options.tmpBase ?? worldTmpBase()
-  const sessionsDir = options.sessionsDir ?? herdrConfigSessions()
-  const now = options.now ?? Date.now()
-  const maxAgeMs = options.maxAgeMs ?? DAY_MS
-  const run = options.run ?? herdrRun
-  const forget = async (task: () => Promise<unknown>) => {
-    try {
-      await task()
-    } catch {
-      return
-    }
-  }
-  const worlds = await datedDirs(tmpBase, isWorldDirectoryName)
-  const sessions = await datedDirs(sessionsDir, (name) => worldOfHerdrSession(name) !== undefined)
-  const targets = sweepTargets(worlds, sessions, now, maxAgeMs)
-  const stuck = new Set<string>()
-  for (const world of targets.worlds) {
-    const root = path.join(tmpBase, world)
-    await stopRecordedDaemon(root)
-    await stopSocketsUnder(root, run)
-  }
-  for (const name of targets.sessions) {
-    const world = worldOfHerdrSession(name)
-    await forget(() => run(["session", "stop", name]))
-    await forget(() => run(["session", "delete", name]))
-    if (!(await removeStoppedSession(path.join(sessionsDir, name))) && world !== undefined) stuck.add(world)
-  }
-  for (const world of targets.worlds) {
-    if (stuck.has(world)) continue
-    await removeWorldDir(path.join(tmpBase, world))
   }
 }
 

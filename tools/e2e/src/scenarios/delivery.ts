@@ -3,7 +3,18 @@ import path from "node:path"
 
 import { note } from "../../../reap.ts"
 import type { Check } from "../check.ts"
-import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
+import {
+  ask,
+  entryRun,
+  heldModel,
+  isEntryRunResult,
+  type Message,
+  piDir,
+  reply,
+  sseHeaders,
+  text,
+  toolCall,
+} from "../fake-model.ts"
 import {
   binary,
   expect,
@@ -37,7 +48,7 @@ const piMain = async (w: World, name: string, url: string) => {
 const runSub = async (w: World, repo: string, session: string, url: string, name: string, task: string) =>
   (
     JSON.parse(
-      await w.ok(
+      await w.okViaEntry(
         ["run", "pi", "--session", session, "--env", `PI_CODING_AGENT_DIR=${await piDir(w, name, url)}`, "--", task],
         { cwd: repo, timeoutMs: 90_000 },
       ),
@@ -58,6 +69,8 @@ const recordingModel = (answer: (messages: Array<Message>) => string | Promise<s
     idleTimeout: 0,
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const entryAnswer = entryRun(messages)
+      if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       requests.push(messages)
       return new Response(await answer(messages), { headers: sseHeaders })
     },
@@ -303,7 +316,8 @@ const sendChecks: ReadonlyArray<Check> = [
       needs()
       let target = ""
       const main = recordingModel((messages) => {
-        if (messages.some((m) => m.role === "tool")) return reply("done-main\nstatus: completed")
+        if (messages.some((m) => m.role === "tool" && !isEntryRunResult(m)))
+          return reply("done-main\nstatus: completed")
         return text(messages.at(-1)).includes("send-now")
           ? toolCall("call1", "bash", { command: `${binary} send ${target} -- never-delivered` })
           : reply("ok")
@@ -507,7 +521,7 @@ const checks: ReadonlyArray<Check> = [
         const m = await piMain(w, "badmodel", main.url)
         session = m.session
         const before = row<{ n: number }>(w, "SELECT count(*) AS n FROM session")?.n ?? 0
-        const r = await w.vibest(
+        const r = await w.viaEntry(
           [
             "run",
             "pi",

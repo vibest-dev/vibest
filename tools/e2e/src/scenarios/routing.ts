@@ -61,8 +61,8 @@ const sessions = (w: World, cwd = w.repository) =>
 
 const entry = async (w: World, id: string) => (await sessions(w)).find((e) => e.id === id)
 
-const runId = async (w: World, args: ReadonlyArray<string>, env: Record<string, string> = {}) => {
-  const printed = JSON.parse(await w.ok(["run", ...args], { env, timeoutMs: 90_000 })) as { id: string }
+const runId = async (w: World, args: ReadonlyArray<string>) => {
+  const printed = JSON.parse(await w.okViaEntry(["run", ...args], { timeoutMs: 90_000 })) as { id: string }
   expect(Object.keys(printed).join() === "id", `vibest run prints only the id: ${JSON.stringify(printed)}`)
   return printed.id
 }
@@ -133,6 +133,7 @@ const checks: ReadonlyArray<Check> = [
           before.code !== 0 && before.stderr.includes("no harness to inherit"),
           `run without a router: ${before.code} ${before.stderr}`,
         )
+        await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
         await writePlugin(
           w,
           "router",
@@ -161,7 +162,9 @@ const checks: ReadonlyArray<Check> = [
         await fs.writeFile(path.join(bin, "pi-wrapped"), `#!/bin/sh\necho ran >> '${marker}'\nexec pi "$@"\n`, {
           mode: 0o755,
         })
-        await w.daemon({ env: { PI_CODING_AGENT_DIR: dir, PATH: `${bin}:${w.env().PATH}` } })
+        const daemonEnv = { PI_CODING_AGENT_DIR: dir, PATH: `${bin}:${w.env().PATH}` }
+        await w.daemon({ env: daemonEnv })
+        await w.entry({ processEnv: daemonEnv })
         const piBinary = async () =>
           (await w.json<Array<Listed>>(["harness", "list"], { timeoutMs: 60_000 })).find((h) => h.harness === "pi")
         const file = await writePlugin(
@@ -184,7 +187,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H5",
     title:
-      "`vibest run` without a harness takes the main agent's harness, provider and model, from the main agent and from a plain terminal; a named harness drops provider and model; with nothing to inherit it fails `no harness to inherit`",
+      "`vibest run` without a harness takes the harness, provider and model of the main agent that runs it; a named harness drops provider and model; with nothing to inherit it fails `no harness to inherit`",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "inherit")
@@ -206,16 +209,11 @@ const checks: ReadonlyArray<Check> = [
           main.harness === "pi" && main.provider === "second" && main.model === "m2",
           `main agent: ${JSON.stringify(main)}`,
         )
-        const inherits = async (label: string, env: Record<string, string>) => {
-          const e = await entry(w, await runId(w, ["--", ask(label)], env))
-          expect(e?.harness === "pi" && e.provider === "second" && e.model === "m2", `${label}: ${JSON.stringify(e)}`)
-        }
-        await inherits("plain", {})
-        await inherits("frommain", {
-          VIBEST_AGENT: "coordinator",
-          VIBEST_SESSION_ID: main.id,
-          VIBEST_PROJECT_ID: main.projectId,
-        })
+        const inherited = await entry(w, await runId(w, ["--", ask("frommain")]))
+        expect(
+          inherited?.harness === "pi" && inherited.provider === "second" && inherited.model === "m2",
+          `frommain: ${JSON.stringify(inherited)}`,
+        )
         const named = await entry(w, await runId(w, ["pi", "--", ask("named")]))
         expect(
           named?.harness === "pi" && named.provider === null && named.model === null,
@@ -294,6 +292,7 @@ const checks: ReadonlyArray<Check> = [
       }
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
+        await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
         await save(observer(first, JSON.stringify({ types: ordered })))
         await until("the observer active", async () =>
           (await w.json<Array<{ id: string; status: string }>>(["plugins"])).some(
@@ -344,6 +343,7 @@ const checks: ReadonlyArray<Check> = [
       const file = path.join(w.vibestHome, "plugins", "promised.ts")
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
+        await w.entry({ processEnv: { PI_CODING_AGENT_DIR: dir } })
         await fs.mkdir(path.dirname(file), { recursive: true })
         await fs.writeFile(`${file}.tmp`, promised(facts, cleanup))
         await fs.rename(`${file}.tmp`, file)

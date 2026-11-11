@@ -69,9 +69,10 @@ const withSession = async (
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   await w.stopDaemon()
   await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined } })
+  await w.entry({ ...options, session, processEnv: { CLAUDE_CONFIG_DIR: undefined } })
   let id = ""
   try {
-    const run = await w.ok(["run", harness, ...flags, "--session", session, "--", task], {
+    const run = await w.okViaEntry(["run", harness, ...flags, "--session", session, "--", task], {
       timeoutMs: 120_000,
       ...options,
     })
@@ -166,7 +167,10 @@ const checks: ReadonlyArray<Check> = [
         const run = async (flags: ReadonlyArray<string>) =>
           (
             JSON.parse(
-              await w.ok(["run", ...flags, "--session", session, "--", "Answer once."], { env, timeoutMs: 120_000 }),
+              await w.okViaEntry(["run", ...flags, "--session", session, "--", "Answer once."], {
+                env,
+                timeoutMs: 120_000,
+              }),
             ) as { id: string }
           ).id
         const subs = [
