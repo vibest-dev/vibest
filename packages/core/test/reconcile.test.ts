@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Runtimes } from "@vibest/core/runtimes"
+import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions, START_TIMEOUT } from "@vibest/core/sessions"
 import type { Runtime } from "@vibest/plugin"
 import { Effect, Ref, Stream } from "effect"
@@ -100,7 +101,9 @@ describe("reconcile: a terminal whose agent has not started", () => {
         projectId,
         { cwd: repo },
       )
-      const sessions = yield* Sessions.make({ maxSessions: undefined })
+      const sessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
+        Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+      )
       yield* startupSettled(sessions)
       assert.isNotNull((yield* db.getSession(gone))!.exitedAt)
       assert.isNull((yield* db.getSession(alive))!.exitedAt)
@@ -141,7 +144,9 @@ describe("reconcile: a terminal whose agent has not started", () => {
         projectId,
         { cwd: repo },
       )
-      const sessions = yield* Sessions.make({ maxSessions: undefined })
+      const sessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
+        Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+      )
       yield* startupSettled(sessions)
       assert.isNull((yield* db.getSession(id))!.exitedAt)
       yield* herdr.seedAgent("w8:pending")
@@ -192,7 +197,9 @@ describe("reconcile: a terminal whose agent has not started", () => {
           const process = (yield* herdr.callsTo("process")).filter((call) => call.terminal === terminal).length
           return state + process
         })
-      const sessions = yield* Sessions.make({ maxSessions: undefined })
+      const sessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
+        Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+      )
       yield* startupSettled(sessions)
       const afterFirst = yield* reads()
       assert.isNull((yield* db.getSession(id))!.exitedAt)
@@ -246,7 +253,9 @@ describe("reconcile: a terminal whose agent has not started", () => {
           const process = (yield* herdr.callsTo("process")).filter((call) => call.terminal === terminal).length
           return state + process
         })
-      const sessions = yield* Sessions.make({ maxSessions: undefined })
+      const sessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
+        Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+      )
       yield* startupSettled(sessions)
       const afterFirst = yield* reads()
       yield* TestClock.adjust(START_TIMEOUT)
@@ -271,7 +280,9 @@ describe("reconcile: one look at every live session at start, when a runtime reg
     Effect.gen(function* () {
       yield* startupSettled(yield* Sessions)
       yield* idleSubagentsBetweenTurns(50)
-      const sessions = yield* Sessions.make({ maxSessions: undefined })
+      const sessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
+        Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+      )
       yield* startupSettled(sessions)
       assert.strictEqual(yield* terminalReads, 50)
       for (let minute = 0; minute < 60; minute++) {
