@@ -136,6 +136,42 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
         }),
     ))
 
+  it("a setup plugin answers with a Promise and refuses by throwing AgentRefused", () =>
+    run(
+      [
+        candidate(
+          "pick",
+          Plugin.define({
+            id: "pick",
+            setup: (ctx) => ctx.agent.hook("start.before", async () => ({ model: "a" })).then(() => undefined),
+          }),
+        ),
+        candidate(
+          "budget",
+          Plugin.define({
+            id: "budget",
+            setup: async (ctx) => {
+              await ctx.agent.hook("start.before", (event) => {
+                if (event.model === "a") throw new AgentRefused({ reason: "no a" })
+              })
+            },
+          }),
+        ),
+      ],
+      (p) =>
+        Effect.gen(function* () {
+          const refused = yield* Effect.flip(p.start(start))
+          assert.deepInclude(refused, { _tag: "AgentRefused", plugin: "budget", reason: "no a" })
+          assert.deepStrictEqual(
+            (yield* p.list).map((q) => [q.id, q.changed, q.refused]),
+            [
+              ["pick", 1, 0],
+              ["budget", 0, 1],
+            ],
+          )
+        }),
+    ))
+
   it("a JS throw, or a typed failure that is not AgentRefused, is a refusal in the host's words", () =>
     Effect.gen(function* () {
       yield* run(

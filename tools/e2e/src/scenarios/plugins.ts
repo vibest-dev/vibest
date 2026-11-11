@@ -21,6 +21,15 @@ import { Effect } from "effect"
 export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ctx.agent.hook("start.before", ${hook}) })
 `
 
+const promised = (id: string) => `import { Plugin } from "@vibest/plugin"
+export default Plugin.define({
+  id: ${JSON.stringify(id)},
+  setup: async (ctx) => {
+    await ctx.agent.hook("start.before", () => undefined)
+  },
+})
+`
+
 const transformThrows = (id: string, counter: string) => `import { Plugin } from "@vibest/plugin"
 import { Effect } from "effect"
 import fs from "node:fs"
@@ -77,14 +86,14 @@ const checks: ReadonlyArray<Check> = [
   },
   {
     id: "G2",
-    title: "editing a plugin reloads it without restarting vibestd",
+    title: "editing a plugin reloads it without restarting vibestd, also into the { id, setup } form",
     run: async (w) => {
       await write(path.join(w.vibestHome, "plugins", "home.ts"), plugin("home"))
       await until("the plugin loaded", async () =>
         (await list(w)).some((p) => p.id === "home" && p.status === "active"),
       )
       const pid = await w.daemonPid()
-      await write(path.join(w.vibestHome, "plugins", "home.ts"), plugin("home-v2"))
+      await write(path.join(w.vibestHome, "plugins", "home.ts"), promised("home-v2"))
       await until("the edited plugin loaded", async () =>
         (await list(w)).some((p) => p.id === "home-v2" && p.status === "active"),
       )

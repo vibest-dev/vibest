@@ -10,7 +10,7 @@ is and when it counts as working.
 ## G2. Reloading an edited plugin
 
 Editing a plugin file reloads it without a daemon restart: `vibest plugins` shows the new version, and vibestd is the
-same process.
+same process. An Effect plugin edited into the `{ id, setup }` form reloads the same way.
 
 ## G3. A plugin that fails to load
 
@@ -70,3 +70,10 @@ A plugin that subscribes with `ctx.event.subscribe` to `session.created`, `proce
 `turn.ended` gets those facts of a real Pi subagent, in that order, and none it did not ask for. A plugin that
 subscribes to every fact gets no `live.*` event. After the plugin is edited, the new revision gets the next agent's
 facts and the old one gets nothing more.
+
+## G13. A plugin written with Promises
+
+A plugin defined as `{ id, setup }` with Promises loads like an Effect plugin: its `agent.start.before` callback routes
+`vibest run -- <task>` to a real Pi and `vibest ls` names it as the decider, its `event.subscribe` iterator gets the
+agent's `turn.ended`, and deleting its file unloads it and runs the cleanup its `setup` returned. Editing an Effect
+plugin into the `setup` form reloads it like any edit (G2).

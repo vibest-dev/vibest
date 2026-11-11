@@ -5,7 +5,7 @@ plugin imports both normally and bundles neither.
 
 ## A plugin
 
-A plugin is an id and an effect. The effect runs once per load in the plugin's own scope; everything it registers lasts
+A plugin is an id and an effect, or an id and a Promise `setup`. The effect runs once per load in the plugin's own scope; everything it registers lasts
 until the plugin is unloaded or reloaded.
 
 ```ts
@@ -15,6 +15,24 @@ import { Effect } from "effect"
 export default Plugin.define({
   id: "my-plugin",
   effect: (context) => Effect.void,
+})
+```
+
+Or write it with Promises: `setup` gets the same context with Promises (hook callbacks return a value or a Promise and
+refuse by throwing `AgentRefused`; `event.subscribe` is an `AsyncIterable`) and may return a cleanup that runs when the
+plugin unloads.
+
+```ts
+import { Plugin } from "@vibest/plugin"
+
+export default Plugin.define({
+  id: "my-plugin",
+  setup: async (context) => {
+    await context.agent.hook("start.before", async (event) =>
+      event.prompt.startsWith("ask:") ? { harness: "pi" } : undefined,
+    )
+    return () => console.log("unloaded")
+  },
 })
 ```
 
