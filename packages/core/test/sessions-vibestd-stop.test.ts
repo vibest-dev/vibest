@@ -1,5 +1,6 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
+import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
 import { Deferred, Effect, FileSystem, Ref } from "effect"
 import { SqlClient } from "effect/sql"
@@ -14,7 +15,9 @@ import { spawnInput, idleSession, sessionWorktree, test, sqlNotices } from "./li
 
 const nextVibestd = (done: Effect.Effect<boolean, never, TestServices>) =>
   Effect.gen(function* () {
-    const next = yield* Sessions.make({ maxSessions: undefined })
+    const next = yield* Sessions.make({ maxSessions: undefined }).pipe(
+      Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+    )
     yield* until(done, (yes) => yes)
     yield* until(next.inMemory, (m) => m.locks === 0)
   })
@@ -172,7 +175,9 @@ describe.concurrent("after a vibestd stop", () => {
       Effect.gen(function* () {
         const herdr = yield* FakeRuntime
         yield* Ref.set(herdr.skipPromptUpdates, 2)
-        const next = yield* Sessions.make({ maxSessions: undefined })
+        const next = yield* Sessions.make({ maxSessions: undefined }).pipe(
+          Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+        )
         yield* untilVirtual(turnInputs(id), (turns) => turns[0]?.status === "not_started")
         assert.strictEqual(yield* typed("do it"), 2)
         assert.isTrue((yield* sqlNotices(id)).some((t) => t.startsWith("task_not_started")))

@@ -116,9 +116,7 @@ const workingPiMain = Effect.gen(function* () {
   )
   yield* db.insertInbox({
     sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-    kind: "notice",
     message: "waiting for the main agent",
-    details: {},
   })
   const stop = c["Project.StopCoordinator"]({ runtime: origin.runtime, address })
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>

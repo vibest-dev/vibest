@@ -74,6 +74,7 @@ export const ProcessEndReason = Schema.Literals([
   "launch_failed",
   "superseded",
 ])
+export type ProcessEndReason = typeof ProcessEndReason.Type
 export const ProcessEnded = fact("process.ended", "session", { process: Seq, reason: ProcessEndReason })
 
 export const TurnStarted = fact("turn.started", "session", { process: optional(Seq), typed: optional(Text) })
@@ -94,6 +95,7 @@ export const TurnEnded = fact("turn.ended", "session", {
 })
 
 export const InboxKind = Schema.Literals(["task", "send", "report", "result", "notice"])
+export type InboxKind = typeof InboxKind.Type
 export const InboxQueued = fact("inbox.queued", "session", {
   kind: InboxKind,
   recipient: optional(Text),

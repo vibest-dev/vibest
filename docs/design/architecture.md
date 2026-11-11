@@ -98,7 +98,7 @@ subagents. Everything else in this list is planned; each item says what runs tod
 - **Delivery is by recipient.** `vibest send <id>` from the user, the main agent or any session reaches any unfinished
   session of the same project, the main agent included. A turn end writes only `turn.ended`; the reply text stays in
   `turn.reported` and is read as `turn.answer` with `vibest result`. vibest's own notices say only what an agent could
-  not say itself, and go to its creator (`report_to`, else the entry session, else `origin_report_to` through the
+  not say itself, and go to its creator (its living parent, else the entry session, else `origin_session` through the
   outbox): its harness exited, its turn ended in an error, it never started, it waits on a permission. An
   undeliverable message goes back to its sender. Completed and interrupted turns send nothing, and nothing says an
   agent went idle.
@@ -665,7 +665,8 @@ Every event carries the Project, the caller, the current Subscriptions, and the 
 each callback gets a frozen copy (its object fields frozen too), so assigning to it throws and counts as that
 plugin crashing. Callbacks run sequentially in plugin order and return what they decide; core applies each
 returned value before the next callback, so a later plugin sees (and may override) what an earlier one decided. On
-`agent.start.before` the fields a route names replace the event's (a field named with `undefined` unsets it); on
+`agent.start.before` the fields a route names replace the event's (`undefined`
+unsets `harness`, `provider`, `model` or `runtime`, and leaves `prompt` and `machine` as they are); on
 `agent.fail` the last move returned wins. The trace attributes each field to the plugin that returned it
 last. Only `agent.start.before` may refuse: `Effect.fail(new AgentRefused({ reason }))` stops the chain at
 once, nothing is inserted and nothing starts; a defect or a timeout there is also a refusal (`plugin <id>
@@ -697,8 +698,12 @@ callback is bounded by a 5 s timeout (waiting on its fiber, so an uninterruptibl
 time).
 
 **Registry and supervisor:** identity `(id, revision)`; reactivation keeps the longest unchanged prefix and
-rebuilds the rest in order inside a batch; a failing new revision falls back to the previous one and is not
-retried until it changes; an activation latch gates entry points; builtin plugins activate while vibestd's
+rebuilds the rest in order inside a batch; a new revision that fails to import with unchanged options leaves the
+running one as it is (not torn down or set up again, and neither are the plugins after it) and `vibest plugins` shows
+both revisions, while with changed options it is failed and the old one is not restored; one whose setup fails falls
+back to the previous one; neither is retried until it changes; a plugin file found in the plugins
+directory and named in `vibest.json`, or named there twice, is one plugin, at its first place with the options of its
+last mention; an activation latch gates entry points; builtin plugins activate while vibestd's
 layers are built, before it listens, so a request that routes to a builtin runtime never finds it unregistered
 (user plugins activate afterwards, in the background; a runtime a user plugin registers can still be missing for
 a request admitted before that). A builtin plugin's setup must not do I/O (it connects lazily, as `runtime-herdr`

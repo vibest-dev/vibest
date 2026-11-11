@@ -112,9 +112,7 @@ describe("vibest.sock", () => {
       const project = yield* projectOf("r")
       const row = yield* inbox.enqueue({
         sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        kind: "notice",
         message: "back",
-        details: {},
       })
       const claimedElsewhereBeforeSubscribe = yield* db.claim([row.id])
       assert.deepStrictEqual(claimedElsewhereBeforeSubscribe, [row.id])
@@ -237,9 +235,7 @@ describe("vibest.sock", () => {
       })
       yield* inbox.enqueue({
         sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        kind: "notice",
         message: "one",
-        details: {},
       })
       const c = yield* asSession(yield* client, coord.sessionId)
       const got = yield* Deferred.make<string>()

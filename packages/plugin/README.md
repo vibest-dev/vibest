@@ -24,14 +24,14 @@ lists every plugin, builtins first, with its status and counters.
 
 ## Context
 
-| Member                             | What it does                                                                                                                                           |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `options`                          | the plugin's options                                                                                                                                   |
-| `agent.hook`                       | intercept `start.before` (return `prompt`, `harness`, `provider`, `model`, `runtime` to change; refuse with `AgentRefused`) and `fail` (return a move) |
-| `runtime.transform`                | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                     |
-| `harness.transform`                | add, change or remove `Harness.HarnessDefinition`s                                                                                                     |
-| `runtime.reload`, `harness.reload` | rebuild that registry, for a transform that reads data of its own                                                                                      |
-| `subscription.report`              | replace one `(harness, provider)` row's usage limits                                                                                                   |
+| Member                             | What it does                                                                                                                                                      |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `options`                          | the plugin's options                                                                                                                                              |
+| `agent.hook`                       | intercept `start.before` (return `prompt`, `harness`, `provider`, `model`, `machine`, `runtime` to change; refuse with `AgentRefused`) and `fail` (return a move) |
+| `runtime.transform`                | add, change or remove `Runtime.RuntimeDefinition`s                                                                                                                |
+| `harness.transform`                | add, change or remove `Harness.HarnessDefinition`s                                                                                                                |
+| `runtime.reload`, `harness.reload` | rebuild that registry, for a transform that reads data of its own                                                                                                 |
+| `subscription.report`              | replace one `(harness, provider)` row's usage limits                                                                                                              |
 
 **Hooks** run in plugin order; each callback gets a read-only event, returns what it decides, and has 5 seconds.
 Assigning to the event throws, and counts as the plugin crashing. **Transforms** take a synchronous

@@ -131,6 +131,22 @@ describe("plugins: spawn hook", () => {
   )
 
   test(
+    "a JS plugin that returns undefined for the prompt or the machine changes neither; its other fields apply",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const s = yield* (yield* Sessions).spawn(yield* spawnInput(yield* makeRepository, { harness: "pi" }))
+      assert.deepStrictEqual(s.trace.at(-1)!.changes, [{ field: "model", to: "m" }])
+      yield* until(herdr.callsTo("send"), (c) => c.length > 0)
+      assert.include((yield* herdr.callsTo("send"))[0]!.text, "do it")
+    }),
+    {
+      plugins: [
+        write("untyped", () => ({ prompt: undefined, machine: undefined, model: "m" }) as unknown as AgentRoute),
+      ],
+    },
+  )
+
+  test(
     "P8/P14: an unknown harness written by a plugin is refused, naming it; one that unsets the harness leaves NoHarnessChosen",
     Effect.gen(function* () {
       const repo = yield* makeRepository

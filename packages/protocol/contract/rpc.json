@@ -6160,16 +6160,6 @@
               }
             ]
           },
-          "parent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "reportTo": {
             "anyOf": [
               {

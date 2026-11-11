@@ -263,12 +263,29 @@ describe("plugins: activation", () => {
         yield* h.activate([a1, b1])
         yield* takeEvents
         yield* h.activate([a1, candidate("b", "2", { error: "import failed: SyntaxError" })])
-        assert.deepStrictEqual(yield* takeEvents, ["close b1", "setup b1"])
+        assert.deepStrictEqual(yield* takeEvents, [], "the running b1 is neither closed nor set up again")
         const [, b] = yield* h.service.list
         assert.deepInclude(b, { id: "b", status: "active", revision: "1" })
-        assert.include(b!.error, "import failed: SyntaxError")
+        assert.include(b!.error, "revision 2 failed, still running 1: import failed: SyntaxError")
       }),
     ),
+  )
+
+  it.effect(
+    "P17: a revision that fails to import with changed options is failed; the old one is not kept or restored",
+    () =>
+      host((h) =>
+        Effect.gen(function* () {
+          yield* h.activate([a1, b1])
+          yield* takeEvents
+          yield* h.activate([candidate("a", "2", { error: "import failed: SyntaxError" }, { level: 2 }), b1])
+          assert.deepStrictEqual(yield* takeEvents, ["close b1", "close a1", "setup b1"])
+          const [a, b] = yield* h.service.list
+          assert.deepInclude(a, { status: "failed", revision: "2" })
+          assert.strictEqual(a!.error, "import failed: SyntaxError")
+          assert.deepInclude(b, { id: "b", status: "active" })
+        }),
+      ),
   )
 
   it.effect(

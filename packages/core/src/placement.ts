@@ -15,7 +15,7 @@ import {
 } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 
-import type { CoordinatorRow, EndReason, SessionPatch, SessionRow } from "./db.ts"
+import type { CoordinatorRow, ProcessEndReason, SessionPatch, SessionRow } from "./db.ts"
 import type { HarnessUnavailable } from "./harness.ts"
 import type { LimitMove } from "./move.ts"
 import { messageOf } from "./plugin-sources.ts"
@@ -53,7 +53,7 @@ export const sessionPlacement = (deps: {
     readonly closeTurn: (id: string, end: "failed", patch: SessionPatch) => Effect.Effect<void>
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
-    readonly endProcess: (id: string, reason: EndReason) => Effect.Effect<boolean>
+    readonly endProcess: (id: string, reason: ProcessEndReason) => Effect.Effect<boolean>
     readonly startedByPeer: (id: string) => Effect.Effect<boolean>
   }
   readonly runtimes: RuntimesShape

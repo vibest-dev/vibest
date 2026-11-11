@@ -70,11 +70,13 @@ type Running = {
   readonly hooks: Hooks.Hooks
   broken: string | undefined
 }
+type ImportFailure = { readonly revision: string; readonly error: string }
 type Slot = {
   readonly candidate: Candidate
   readonly running: Running | undefined
   readonly failure: string | undefined
   readonly rollback?: string
+  readonly importFailed?: ImportFailure | undefined
   readonly setupFailed: boolean
   readonly loadedAt: number
   readonly stats: Stats
@@ -85,7 +87,8 @@ const keyOf = (c: Candidate) => JSON.stringify([c.source, c.revision, c.options]
 const info = (slot: Slot): PluginInfo => {
   const { candidate } = slot
   const running = slot.running?.broken === undefined ? slot.running : undefined
-  const failure = slot.running?.broken ?? slot.failure
+  const failure = slot.running?.broken ?? slot.importFailed?.error ?? slot.failure
+  const failedRevision = slot.importFailed?.revision ?? candidate.revision
   const shown = slot.running?.candidate ?? candidate
   return {
     id: slot.running?.candidate.plugin.id ?? ("error" in candidate.plugin ? candidate.source : candidate.plugin.id),
@@ -97,7 +100,7 @@ const info = (slot: Slot): PluginInfo => {
       ? {}
       : {
           error: running
-            ? `revision ${candidate.revision} failed, still running ${shown.revision}: ${failure}`
+            ? `revision ${failedRevision} failed, still running ${shown.revision}: ${failure}`
             : [failure, slot.rollback].filter(Boolean).join("; "),
         }),
     ...slot.stats,
@@ -105,6 +108,10 @@ const info = (slot: Slot): PluginInfo => {
 }
 
 const ROUTE = ["prompt", "harness", "provider", "model", "machine", "runtime"] as const
+const REQUIRED: ReadonlyArray<(typeof ROUTE)[number]> = ["prompt", "machine"]
+
+const routed = (patch: VibestPlugin.AgentRoute) =>
+  ROUTE.filter((field) => Object.hasOwn(patch, field) && (patch[field] !== undefined || !REQUIRED.includes(field)))
 
 const readOnly = <T extends object>(event: T): T =>
   Object.freeze(
@@ -263,7 +270,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
             : yield* setUp({ ...candidate, plugin }, stats)
       if (typeof outcome !== "string") return { ...base, running: outcome }
       const failed: Slot = { ...base, failure: outcome, setupFailed: !("error" in plugin) }
-      const last = previous?.running?.candidate
+      const last = "error" in plugin ? undefined : previous?.running?.candidate
       if (last === undefined) {
         return unchanged && previous.rollback !== undefined ? { ...failed, rollback: previous.rollback } : failed
       }
@@ -273,9 +280,28 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         : { ...failed, running: restored }
     })
 
-    const activate = (candidates: ReadonlyArray<Candidate>) =>
+    const keepRunning = (incoming: ReadonlyArray<Candidate>) => {
+      const failures = new Map<string, ImportFailure>()
+      const candidates = incoming.map((candidate) => {
+        if (!("error" in candidate.plugin)) return candidate
+        const kept = slots.find(
+          (s) =>
+            s.running !== undefined &&
+            s.candidate.source === candidate.source &&
+            JSON.stringify(s.candidate.options) === JSON.stringify(candidate.options),
+        )
+        if (kept === undefined) return candidate
+        failures.set(candidate.source, { revision: candidate.revision, error: candidate.plugin.error })
+        return kept.candidate
+      })
+      return { candidates, failures }
+    }
+
+    const activate = (incoming: ReadonlyArray<Candidate>) =>
       Registry.batch(
         Effect.gen(function* () {
+          const { candidates, failures } = keepRunning(incoming)
+          slots = slots.map((slot) => ({ ...slot, importFailed: failures.get(slot.candidate.source) }))
           let prefix = 0
           while (
             prefix < candidates.length &&
@@ -296,7 +322,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
               ids,
             )
             if (slot.running) ids.add(slot.running.candidate.plugin.id)
-            slots = [...slots, slot]
+            slots = [...slots, { ...slot, importFailed: failures.get(candidate.source) }]
           }
         }),
       )
@@ -382,7 +408,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
           let event: VibestPlugin.AgentStartBefore = { ...input, machines, subscriptions: current }
           const decidedBy: Record<string, string> = {}
           const route = (patch: VibestPlugin.AgentRoute, plugin: string) => {
-            const fields = ROUTE.filter((field) => Object.hasOwn(patch, field))
+            const fields = routed(patch)
             const changes = fields.map((field) => decide(field, event[field], patch[field], plugin, decidedBy))
             event = { ...event, ...Object.fromEntries(fields.map((field) => [field, patch[field]])) }
             return changes
