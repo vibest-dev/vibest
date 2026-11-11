@@ -39,7 +39,6 @@ describe("Db session rows", () => {
         yield* db.endExecution(
           child,
           { outcome: "failed", failure: { message: "rate_limit", kind: "limit" } },
-          { executionState: "failed" },
           undefined,
           9,
         )

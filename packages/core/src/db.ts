@@ -13,7 +13,7 @@ import {
   ExecutionEnded,
 } from "@vibest/schema/event"
 import { newId } from "@vibest/schema/id"
-import { AmbiguousSession, NoSuchSession, RuntimeAddress } from "@vibest/schema/session"
+import { type AgentStatus, AmbiguousSession, NoSuchSession, RuntimeAddress } from "@vibest/schema/session"
 import { Context, Effect, Layer, String as Str } from "effect"
 import { SqlClient } from "effect/sql"
 
@@ -548,6 +548,8 @@ const make = Effect.gen(function* () {
       tx(store.noteConversation(id, conversation, process)).pipe(Effect.orDie),
 
     rename: (id: string, name: string) => tx(store.rename(id, name)).pipe(Effect.orDie),
+
+    setStatus: (id: string, status: AgentStatus) => tx(store.setStatus(id, status)).pipe(Effect.orDie),
 
     placeProcess: (id: string, terminal: string, pid?: number) =>
       tx(store.placeProcess(id, terminal, pid)).pipe(Effect.orDie),

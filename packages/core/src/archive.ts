@@ -5,10 +5,10 @@ import { type Db, type SessionRow, sessionEnded } from "./db.ts"
 import { directoryLock, type keyedLock } from "./keyed-lock.ts"
 import type { sessionPlacement } from "./placement.ts"
 import { errorMessage } from "./plugins.ts"
-import { type sessionPrompting, STOP_WAIT } from "./prompting.ts"
 import type * as Remove from "./remove.ts"
 import { agentState, type Runtimes, type Runtime, type AgentSeen } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
+import { type Executions, STOP_WAIT } from "./session/executions.ts"
 import type { SessionLive } from "./session/live.ts"
 
 export const sessionArchive = (deps: {
@@ -29,8 +29,8 @@ export const sessionArchive = (deps: {
   ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly logged: (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<void | A, never, R>
   readonly busyOf: (seen: AgentSeen) => boolean
-  readonly interruptAgent: ReturnType<typeof sessionPrompting>["interruptAgent"]
-  readonly settleAfterInterrupt: ReturnType<typeof sessionPrompting>["settleAfterInterrupt"]
+  readonly interruptAgent: Executions["Service"]["interruptAgent"]
+  readonly settleAfterInterrupt: Executions["Service"]["settleAfterInterrupt"]
 }) => {
   const {
     db,
