@@ -536,11 +536,11 @@ main Agent's integration delivers it as new input     ← back in the main conve
 
 ### 4.2 Skills
 
-A skill is a named instruction document for an Agent (`{ name, description, body }`), contributed through the
-`skill` catalog. The harness adapter installs skills in the CLI's own skill format where it has one (Claude Code,
-Pi) and appends them to the instructions otherwise. Skills go to the main Agent only, since subagents
-cannot start Agents. The main Agent gets the builtin skills and the Project's and the user's vibest skills, never
-every skill installed in the CLI, so its descriptions stay few and clear.
+A skill is a `SKILL.md` instruction document for an Agent. vibest has only builtin skills, `delegate` and
+`pipeline` in `packages/skills/`; it loads no skill directory of the user or of a Project. The build copies them into
+each harness's vibest plugin: Claude Code and Cursor load that plugin (`--plugin-dir`) in every Agent, and each skill's
+description says only the main Agent uses it; Pi's vibest extension offers them (`resources_discover`) to the main
+Agent only. Skills the user installed in the CLI itself stay the CLI's own.
 
 | Skill    | The main Agent…                                                                                                                                                                                                                                                                                                                                                                        |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -553,8 +553,8 @@ every skill installed in the CLI, so its descriptions stay few and clear.
 2. Name it: invoke the skill in the CLI (`/pipeline …`) or say "do it as a pipeline".
 3. Rules that must hold every time go in plugins (§4.3).
 
-**Adding a flow** (a committee, racing, an advisor) is a skill file in `~/.vibest/skills/`, or a builtin skill
-later. It needs no core change, because every flow uses the same commands.
+**Adding a flow** (a committee, racing, an advisor) is a new builtin skill in `packages/skills/`. It needs no core
+change, because every flow uses the same commands.
 
 ### 4.3 Rules (hook plugins)
 
