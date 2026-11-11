@@ -321,8 +321,8 @@ describe("vibestd's HTTP API", () => {
       const { call, db, worker } = yield* project
       yield* until(db.getSession(worker), (s) => s?.startedAt != null)
       const first = (yield* db.currentProcessId(worker))!
-      const ready = (process: number, pid: number) =>
-        call("/session/ready", { sessionId: worker, process: String(process) }, JSON.stringify({ pid }))
+      const ready = (process: number, pid: number, pluginVersion = VERSION) =>
+        call("/session/ready", { sessionId: worker, process: String(process), pluginVersion }, JSON.stringify({ pid }))
       assert.deepStrictEqual((yield* ready(first, 111)).body, { process: first })
       yield* db.restartProcess(worker)
       const second = (yield* db.currentProcessId(worker))!
@@ -331,9 +331,12 @@ describe("vibestd's HTTP API", () => {
       assert.strictEqual(late.status, 204)
       assert.isUndefined(yield* db.readyAt(worker))
       assert.isUndefined((yield* db.getSession(worker))!.metadata.pid)
-      assert.deepStrictEqual((yield* ready(first, 222)).body, { process: second })
+      assert.deepStrictEqual((yield* ready(first, 222, "0.0.2-next")).body, { process: second })
       assert.isNumber(yield* db.readyAt(worker))
-      assert.strictEqual((yield* db.getSession(worker))!.metadata.pid, 222)
+      assert.deepInclude((yield* db.getSession(worker))!.metadata, {
+        pid: 222,
+        integration: { version: "0.0.2-next", protocol: PROTOCOL },
+      })
     }),
   )
 

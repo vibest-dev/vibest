@@ -170,15 +170,22 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
     return yield* bad(`${method} has caller ${kind.value}; expected cli or session`)
   })
 
-const noteIntegration = (db: Db["Service"], read: (name: string) => string | undefined): Effect.Effect<void> =>
+export const integrationOf = (read: Read) => {
+  const version = read(PLUGIN_VERSION_HEADER)
+  if (!version) return undefined
+  const protocol = Number(read(PROTOCOL_HEADER) ?? "0")
+  return { version, protocol: Number.isFinite(protocol) ? protocol : 0 }
+}
+
+const noteIntegration = (db: Db["Service"], read: Read): Effect.Effect<void> =>
   Effect.gen(function* () {
     const sessionId = read(SESSION_HEADER)
-    const version = read(PLUGIN_VERSION_HEADER)
-    if (!sessionId || !version) return
-    const protocol = Number(read(PROTOCOL_HEADER) ?? "0")
-    const integration = { version, protocol: Number.isFinite(protocol) ? protocol : 0 }
+    const integration = integrationOf(read)
+    if (!sessionId || !integration) return
     if (yield* db.noteIntegration(sessionId, integration, processOf(read)))
-      yield* Effect.logInfo(`session ${sessionId} runs integration ${version} (protocol ${protocol})`).pipe(
+      yield* Effect.logInfo(
+        `session ${sessionId} runs integration ${integration.version} (protocol ${integration.protocol})`,
+      ).pipe(
         Effect.annotateLogs({
           agent: read(AGENT_HEADER) ?? "",
           harness: read(HARNESS_HEADER) ?? "",

@@ -9,7 +9,7 @@ import { Caller, type CallerShape, Forbidden, type PayloadOf, WatchLagged, type 
 import { RuntimeUnreachable } from "@vibest/schema/session"
 import { Effect, Queue, Stream } from "effect"
 
-import { processOf, reader } from "../gates.ts"
+import { integrationOf, processOf, reader } from "../gates.ts"
 import { type Listing, toInfo } from "../listing.ts"
 import type { Checks, Handlers, MethodOf } from "./caller.ts"
 import type { RemoteHandlers } from "./remote.ts"
@@ -268,7 +268,8 @@ export const make = (
       "Session.Ready": ({ id, pid }, { headers }) =>
         Effect.gen(function* () {
           yield* self("Session.Ready", id)
-          const current = yield* integration.ready(id, pid, undefined, processOf(reader(headers)))
+          const read = reader(headers)
+          const current = yield* integration.ready(id, pid, integrationOf(read), processOf(read))
           return current === undefined ? {} : { process: current }
         }),
 
