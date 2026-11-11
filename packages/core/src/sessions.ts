@@ -361,7 +361,12 @@ export class Sessions extends Context.Service<
       })
 
       const limit = limitMoveBox()
-      const { finish, deliverQueued } = sessionExecutions({ db, undelivered, prompt })
+      const { finish, deliverQueued } = sessionExecutions({
+        db,
+        undelivered,
+        prompt,
+        handTask: (h, session, terminal, task) => handTask(h, session, terminal, task),
+      })
 
       const handTask = (h: Runtime, session: SessionRow, terminal: Terminal, task: string) =>
         Effect.gen(function* () {
@@ -492,11 +497,6 @@ export class Sessions extends Context.Service<
         }
 
         const s = state ?? "unknown"
-        if (s !== "working" && s !== "blocked" && session.startedAt !== null) {
-          const task = yield* db.untakenTask(id)
-          if (task !== undefined && !(open && (yield* db.executionTaken(id))))
-            return yield* handTask(h, session, terminal, task)
-        }
         if (!open) {
           if (s !== "working" && s !== "blocked") yield* deliverQueued(h, session, terminal)
           return
@@ -665,9 +665,9 @@ export class Sessions extends Context.Service<
         }).pipe(Effect.provideContext(platform))
 
       const deliverNext = (id: string) =>
-        locked(id)(
-          db.pendingInbox(id).pipe(Effect.flatMap((pending) => (pending.length === 0 ? Effect.void : deliver(id)))),
-        ).pipe(Effect.provideContext(platform))
+        locked(id)(db.hasQueued(id).pipe(Effect.flatMap((queued) => (queued ? deliver(id) : Effect.void)))).pipe(
+          Effect.provideContext(platform),
+        )
 
       const interrupt = (id: string) =>
         getRow(id).pipe(

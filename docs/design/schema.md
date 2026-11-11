@@ -299,7 +299,8 @@ type or key changes or removes rows, in the same pull request.
   blank line.
 - A task is queued `delivered` with no execution; one with no `execution_id` was never handed over: the only move a
   task gets is its handover, which names the execution. An execution that ended before its handover (vibestd stopped while
-  waiting for ready) took nothing, so the task is still handed over.
+  waiting for ready, or one the user typed meanwhile) took nothing, so the task is still handed over: it is the head
+  of the session's queue, an execution end hands it over like a pending row, and an automatic archive waits for it.
 - A conversation can be resumed when a process of the session that resumed it or reported it has an ended execution, or,
   for an entry session, when a process of it reported it. The read model keeps only each process's latest
   conversation, so an earlier one in the same process no longer counts.

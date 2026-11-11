@@ -113,6 +113,39 @@ describe.concurrent("Sessions", () => {
     { hooked: ["pi"] },
   )
 
+  const typedBeforeTheTask = Effect.gen(function* () {
+    const herdr = yield* FakeRuntime
+    const sessions = yield* Sessions
+    const db = yield* Db
+    const repo = yield* makeRepository
+    const held = yield* herdr.hold("state")
+    const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), archive: true })
+    yield* held.reached
+    yield* sessions.userPrompt(id, "typed during the ready wait")
+    yield* held.release()
+    yield* settled
+    yield* herdr.endExecution(id)
+    yield* writeEnd(id, "pi", { text: "typed done" })
+    yield* until(
+      herdr.callsTo("send").pipe(Effect.map((calls) => calls.some((c) => c.text?.includes("do it")))),
+      (sent) => sent,
+    )
+    assert.isUndefined(yield* db.untakenTask(id))
+    assert.isNull((yield* db.getSession(id))!.endedAt)
+  })
+
+  test(
+    "auto-archive: a typed execution that ends before the first task was handed over hands the task over, not an archive",
+    typedBeforeTheTask,
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "auto-archive with runtime status events: the first task is still handed over after a typed execution ends",
+    typedBeforeTheTask,
+    { hooked: ["pi"], statusEvents: true },
+  )
+
   test(
     "a prompt typed while the first task waits for ready is its own execution; the task is handed over once it ends",
     Effect.gen(function* () {

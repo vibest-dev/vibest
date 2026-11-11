@@ -135,7 +135,8 @@ export const inboxMethods = (store: Store) => {
           const s = yield* findSession(id)
           if (s === undefined) return false
           const waiting = yield* sql<{ id: number }>`SELECT id FROM inbox
-            WHERE (session_id = ${id} OR sender_session_id = ${id}) AND status IN ('pending', 'delivering')
+            WHERE ((session_id = ${id} OR sender_session_id = ${id}) AND status IN ('pending', 'delivering'))
+              OR (session_id = ${id} AND kind = 'task' AND execution_id IS NULL)
             LIMIT 1`
           if (waiting.length > 0) return false
           if ((yield* openExecution(id)) !== undefined) return false
@@ -198,6 +199,14 @@ export const inboxMethods = (store: Store) => {
       ).pipe(Effect.orDie),
 
     untakenTask: (id: string) => reads.untakenTask(id).pipe(Effect.orDie),
+
+    hasQueued: (id: string) =>
+      sql<{ id: number }>`SELECT id FROM inbox WHERE session_id = ${id}
+          AND ((kind != 'task' AND status = 'pending') OR (kind = 'task' AND execution_id IS NULL))
+        LIMIT 1`.pipe(
+        Effect.map((rows) => rows.length > 0),
+        Effect.orDie,
+      ),
 
     executionTaken: (id: string) =>
       Effect.gen(function* () {
