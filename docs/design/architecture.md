@@ -635,7 +635,8 @@ export const define = (plugin: Plugin) => plugin
 a `Registration` (`{ dispose }`) owned by the plugin's scope: unloading the plugin disposes everything it registered,
 and `dispose` may be called earlier (a second call is a no-op). Registries are `packages/core/src/registry.ts`, a port
 of V2's `State`: transforms apply in registration order on a lazy rebuild, a plugin's setup runs in one `group` (a
-throwing transform disables the whole plugin and removes its earlier registrations), and an activation runs in one
+throwing transform disables the whole plugin and removes its earlier registrations; a disabled plugin is not set up
+again until its own revision or options change), and an activation runs in one
 `batch` (one rebuild and one notification however many plugins changed). Removing a plugin's transform restores the
 definitions it changed or removed. Editor callbacks are synchronous: load effectful data before registering a
 transform or reloading.
@@ -676,7 +677,8 @@ the hook events for a plugin that wants to route by quota.
 **Plugin API facts** (`@vibest/plugin`): vibestd maps this module and `effect` to its own instances when it loads a
 plugin, so a plugin imports both normally and bundles neither. A plugin's `effect` runs once per load in the plugin's
 own scope; what it registers (hooks, runtime and harness transforms) and acquires lasts until unload, and a hook name
-not in `Hooks` fails its setup. In `subscriptions`, `provider` is empty for Claude Code and Cursor and set for Pi; empty `limits` means
+not in `Hooks` fails its setup. An `effect` or a hook callback that throws instead of returning an Effect counts as that
+plugin's failure (a failed setup, or `plugin <id> crashed: ...`), never as a defect of the activation or the call. In `subscriptions`, `provider` is empty for Claude Code and Cursor and set for Pi; empty `limits` means
 unknown, not unlimited, and a login is limited when any of its usage windows is. A remembered limit rules its login
 out until that login's own row was refreshed after it and reads fine again; a login with no row, or none named by the
 attempt, keeps the plain memory. `subscription.report` replaces one `(harness, provider)` row's limits until the next usage

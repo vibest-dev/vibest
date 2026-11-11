@@ -196,7 +196,7 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         Queue.offerUnsafe(broken, { running, refresh })
       }
       const exit = yield* timeoutWithoutWaiting(
-        plugin.effect(context).pipe(Scope.provide(scope), Registry.group(report)),
+        Effect.suspend(() => plugin.effect(context)).pipe(Scope.provide(scope), Registry.group(report)),
         scope,
         timeout,
       )
@@ -238,6 +238,8 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
       const plugin = candidate.plugin
       if (!("error" in plugin) && ids.has(plugin.id)) return { ...base, failure: `Duplicate plugin ID: ${plugin.id}` }
       const unchanged = previous !== undefined && keyOf(previous.candidate) === keyOf(candidate)
+      const disabled = unchanged ? previous.running?.broken : undefined
+      if (disabled !== undefined) return { ...base, failure: disabled, setupFailed: true }
       const outcome =
         "error" in plugin
           ? plugin.error
