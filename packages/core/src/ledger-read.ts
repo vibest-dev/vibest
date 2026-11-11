@@ -228,9 +228,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const untakenTask = (id: string) =>
     sql<{ content: string }>`SELECT i.content FROM inbox i
       WHERE i.session_id = ${id} AND i.kind = 'task' AND i.execution_id IS NULL
-        AND NOT EXISTS (SELECT 1 FROM execution t WHERE t.session_id = ${id} AND t.outcome IS NOT NULL
-          AND (t.typed IS NOT NULL
-            OR EXISTS (SELECT 1 FROM inbox x WHERE x.session_id = t.session_id AND x.execution_id = t.id)))
       ORDER BY i.id LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.content))
 
   const queuedBy = (session: string, request: string) =>

@@ -494,7 +494,8 @@ export class Sessions extends Context.Service<
         const s = state ?? "unknown"
         if (s !== "working" && s !== "blocked" && session.startedAt !== null) {
           const task = yield* db.untakenTask(id)
-          if (task !== undefined) return yield* handTask(h, session, terminal, task)
+          if (task !== undefined && !(open && (yield* db.executionTaken(id))))
+            return yield* handTask(h, session, terminal, task)
         }
         if (!open) {
           if (s !== "working" && s !== "blocked") yield* deliverQueued(h, session, terminal)
