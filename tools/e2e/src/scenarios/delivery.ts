@@ -457,9 +457,10 @@ const checks: ReadonlyArray<Check> = [
           async () => (await answerOf(w, sub, m.repo)).includes("done-next"),
           60_000,
         )
-        expect(
-          inboxRows(w, "recipient_session_id = ? AND kind = 'send' AND status = 'delivered'", sub) === 1,
-          "the send after the interrupt is not delivered",
+        await until(
+          "the send after the interrupt delivered",
+          () => inboxRows(w, "recipient_session_id = ? AND kind = 'send' AND status = 'delivered'", sub) === 1,
+          10_000,
         )
         expect(inboxRows(w, "sender_session_id = ?", sub) === 0, "the subagent sent or notified something")
         const turns = rows<{ status: string }>(w, "SELECT status FROM turn WHERE session_id = ? ORDER BY id", sub)

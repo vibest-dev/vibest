@@ -154,8 +154,8 @@ CREATE TABLE turn (                                   -- id: the seq of its turn
   typed      TEXT,                                    -- the text typed into the pane; none for a turn a delivery opened
   started_at INTEGER NOT NULL,
   status     TEXT CHECK (status IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),  -- null: open
-  report_seq INTEGER,                                 -- the turn.reported it consumed
-  answer     TEXT,                                    -- that report's text; null: no report (interrupted, lost, an exit)
+  report_seq INTEGER,                                 -- imported history: the turn.reported it consumed
+  answer     TEXT,                                    -- the reply its turn.ended carried; null: none (lost, an exit)
   failure    TEXT,
   ended_at   INTEGER
 ) STRICT;
@@ -228,8 +228,8 @@ decoding refuse keys a definition does not have, and encoding fails when its JSO
 | process.conversation                | process, conversation (a new conversation id: after /clear, or Pi at its first agent_end)                                                             |
 | process.ended                       | process, reason: exited, limited, restart, move, archived, launch_failed, superseded                                                                  |
 | turn.started                        | process?, typed? (the text typed into the pane)                                                                                                       |
-| turn.reported                       | process?, harness, text, error?, conversation?, interrupted?: the turn end as the hook reported it                                                    |
-| turn.ended                          | turn, status, report? (the turn.reported it consumed), failure? {message}                                                                             |
+| turn.reported                       | process?, harness, text, error?, conversation?, interrupted?: history only; vibestd no longer writes it                                               |
+| turn.ended                          | turn, status, report? (history only), failure? {message}, conversation?, reply? (the harness's answer, when it reported the end)                      |
 | inbox.queued                        | kind, recipient?, sender?, content, status: pending, delivered or dropped, turn?, request?, peerItem?                                                 |
 | inbox.moved                         | inbox, to, turn? (on to = delivered: the turn that took it)                                                                                           |
 | machine.added, .connected, .removed | name (added: target, vibestd)                                                                                                                         |
@@ -247,16 +247,15 @@ is there; it stays one process. Any other start while the session still has a li
 `superseded`. One whose terminal never opened ends `launch_failed`, and the session's current process is then the one
 before it, if any. Superseded processes are not exits: no reader counts them as one.
 
-A `turn.ended` points at the `turn.reported` it consumed (`report`). That row's `text` is the harness's answer; the projector copies it into the turn's `answer`. An end the harness never reported (`lost`, `not_started`, an exit, an
-interrupt) has no `report`.
+A `turn.ended` the harness reported carries its answer (`reply`) and, when it changed, its conversation id; the
+projector copies `reply` into the turn's `answer` and the conversation into the current process. An end vibestd
+decided (`lost`, `not_started`, an exit, an interrupt it closed) has no `reply`. Older ledgers end a turn by pointing
+at the `turn.reported` it consumed (`report`); the projector still reads that row's `text` as the answer.
 
-A `turn.reported`'s `process` is the session's current process when vibestd received the hook, not the harness that
-sent it: in a restart's window the new process is already started while the old harness still reports, so that report
-carries the new process. What keeps it out is a fence on `seq`: a report counts only when its seq is above the current
-process's first `process.ready` its integration wrote (`ready_seq`; a harness ends a turn only after it is ready), or
-above the process's own start for a harness whose ready comes from the runtime (Cursor). The first, not the latest: the
-same harness reports ready again (a plugin reload, a new conversation), and a report written before that and not yet
-consumed still counts. A report a `turn.ended` consumed is not taken again.
+A reported end is written only for the harness the session's current process runs, and, for a harness whose
+integration reports ready, only after that process's ready report: in a restart's window the new process is already
+started while the old harness may still report, and that end is dropped. vibestd's own closes write only while the
+round they decided about is still open, so an end the harness reported first is the one that stands.
 
 Changing the catalog: add an optional key directly; a change of meaning or structure gets a new type name and the old
 definition stays in the catalog. Both raise `CATALOG_VERSION` by one. Changing the read model (a column, table, index or
@@ -346,11 +345,9 @@ E2E runs it on every world's database at the end of each check.
   and a crash after it leaves an unended process with no harness in the pane, which reconciliation ends.
 - Skipped options within one harness change, per-session locks, paste and ack waits: lost with the process; an
   open turn stays open, and the harness's turn end or reconciliation (idle, no result: lost) ends it.
-- When an open turn's text was last handed over (after a resume or a move to the next harness): a turn end
-  reported before it is not this turn's. Lost with the process; the turn's own start time stands then.
 - A turn start an integration reports is published (`live.turn_start`), never stored: it marks the open turn as
-  worked in the session's flags, which `forget` clears on its `process.ended` or its archive. A turn end is a
-  `turn.reported` fact, written as the hook is admitted (a settlement, so it still lands while vibestd drains) and kept across a restart. The check that writes it as `turn.ended` is a settlement too.
+  worked in the session's flags, which `forget` clears on its `process.ended` or its archive. A turn end is its
+  `turn.ended` fact, written as the hook is admitted (a settlement, so it still lands while vibestd drains).
   After a restart the stored proof that a turn was taken up is its typed text or an inbox row delivered into it.
 - The integration version a session's requests carry, until its next `process.ready` records it.
 - A main agent moving to another terminal (`vibest` answered y): its rows keep waiting for it.

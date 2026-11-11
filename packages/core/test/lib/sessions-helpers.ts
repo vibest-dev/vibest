@@ -69,8 +69,8 @@ export const idleSession = (repo: string, extra: { readonly archive?: boolean } 
   Effect.gen(function* () {
     const herdr = yield* FakeRuntime
     const w = yield* spawnWorking(repo, "pi", extra)
-    yield* writeResult(w.id, "pi", { text: "status: completed" })
     yield* herdr.endTurn(w.id)
+    yield* writeResult(w.id, "pi", { text: "status: completed" })
     yield* w.sessions.check(w.id)
     yield* settled
     return w

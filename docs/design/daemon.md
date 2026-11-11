@@ -87,7 +87,7 @@ Changes are counted at the RPC and HTTP entry until they end, failed or interrup
 hook's turn start (`Prompt`) or turn end (`TurnEnd`) and an inbox ack. While it drains these are still admitted;
 after the Stop is accepted they are refused too. Refused while draining, a spawn's first turn would never show its
 pickup proof (its launch then holds the drain open) and a turn end would lose its result. A turn end is one
-`turn.reported` event, written without the session lock; a write that fails fails the request, so the caller sees a
+transaction that writes the round's `turn.ended` with its reply, without the session lock; a write that fails fails the request, so the caller sees a
 failure, not a silent retry. A turn start is stamped once, when the hook arrives: `userPrompt` notes the start before
 it may wait for the session's lock, held through a send's whole confirm, and stamps the round with the same time, so
 the pending send sees its pickup proof while it still waits.

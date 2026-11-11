@@ -98,7 +98,7 @@ describe("Db", () => {
             task: "do it",
             parentSessionId: parent.sessionId,
           })
-          yield* db.beginUserTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "typed", { turnPromptedAt: 1 })
+          yield* db.startObserved("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "typed", 1)
           const inbox = (kind: string, senderId: string | null, content: string, status: string) =>
             fact("inbox.queued", {
               sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -118,20 +118,23 @@ describe("Db", () => {
             working: "typed",
             delivered: "a notice",
             parentSessionId: parent.sessionId,
+            since: 1,
           })
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
-          yield* db.beginUserTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "", { turnPromptedAt: 2 })
+          yield* db.beginTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 2)
           assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).working, "")
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { turnState: "completed" })
           assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
             working: "",
             delivered: "a notice",
             parentSessionId: parent.sessionId,
+            since: 2,
           })
           assert.deepStrictEqual(yield* db.rescheduleSource("00000000-0000-4000-8000-000000000000"), {
             working: "",
             delivered: "",
             parentSessionId: undefined,
+            since: 0,
           })
 
           yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), {
@@ -165,6 +168,7 @@ describe("Db", () => {
             working: "",
             delivered: "and docs\n\nalso types",
             parentSessionId: parent.sessionId,
+            since: 5,
           })
           yield* row("send", null, "still pending", "pending")
           yield* row("notice", parent.sessionId, "a notice", "pending")
@@ -238,22 +242,42 @@ describe("Db", () => {
       ),
   )
 
-  it.effect("beginUserTurn is false when a round is already working and leaves that input", () =>
+  it.effect("startObserved keeps a round that is already open and does not record the typed text", () =>
     memory(
       Effect.gen(function* () {
         const db = yield* Db
         const sql = yield* SqlClient.SqlClient
         yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"))
-        assert.isTrue(yield* db.beginUserTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "kept", { turnPromptedAt: 1 }))
-        assert.isFalse(
-          yield* db.beginUserTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "dropped", { turnPromptedAt: 2 }),
-        )
+        yield* db.startObserved("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "kept", 1)
+        yield* db.startObserved("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "dropped", 2)
         assert.deepStrictEqual(
           yield* sql<{
             input: string
           }>`SELECT input FROM ${sql.literal(TURNS)} m WHERE session_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
           [{ input: "kept" }],
         )
+      }),
+    ),
+  )
+
+  it.effect("an observed end that needs the integration's ready report waits for the process to report ready", () =>
+    memory(
+      Effect.gen(function* () {
+        const db = yield* Db
+        const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        yield* db.insertSession(session(id), yield* projectOf("r"))
+        yield* db.startObserved(id, "typed", 1)
+        const end = {
+          harness: "pi",
+          at: 2,
+          status: "completed" as const,
+          reply: "done",
+          failure: undefined,
+          limited: false,
+          conversation: undefined,
+        }
+        assert.isUndefined(yield* db.endObserved(id, { ...end, needsReady: true }))
+        assert.strictEqual(yield* db.endObserved(id, { ...end, needsReady: false }), "completed")
       }),
     ),
   )
@@ -333,7 +357,8 @@ describe("Db", () => {
           undefined,
         )
         assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.turnState, "completed")
-        yield* db.closeTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "interrupted", {})
+        const ended = (yield* db.latestAnswer("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.turn
+        assert.isFalse(yield* db.closeTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ended, "interrupted"))
         assert.strictEqual((yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.turnState, "completed")
         assert.notProperty(
           (yield* sql`SELECT * FROM session WHERE id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`)[0],

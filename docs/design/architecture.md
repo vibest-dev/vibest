@@ -95,8 +95,8 @@ subagents. Everything else in this list is planned; each item says what runs tod
   is kept and read with `vibest inbox`. Today a main agent is never typed into: only a harness that polls (Claude)
   or subscribes (Pi) can be one, and a subagent-only harness (Cursor) has no inbox mode. Subagents are typed into,
   and a row with no session to go to is dropped.
-- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the main agent included. A session reaches only the agent that started it, and sessions it started. A turn end writes only `turn.ended`; the reply text stays in
-  `turn.reported` and is read as `turn.answer` with `vibest result`. vibest's own notices say only what an agent could
+- **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the main agent included. A session reaches only the agent that started it, and sessions it started. A turn end writes only `turn.ended`, which carries the reply
+  text, read as `turn.answer` with `vibest result`. vibest's own notices say only what an agent could
   not say itself, and go to its creator (its living parent, else the entry session, else `origin_session` through the
   outbox): its harness exited, its turn ended in an error, it never started, it waits on a permission. An
   undeliverable message goes back to its sender. Completed and interrupted turns send nothing, and nothing says an
@@ -291,7 +291,7 @@ by `vibest interrupt`. Text the user types into a subagent's pane is recorded as
 opens no such Message; when that turn ends, the user's text and the subagent's answer go to the main Agent as one
 `notice` (information, delivered with its next input, never a task it must act on).
 
-**Answers** come through the best channel (D11): the integration sends its turn-end event to the daemon, which writes the agent's last reply (Claude `last_assistant_message`, Cursor and Pi `text`) as `turn.reported` and the turn's `turn.ended`; the projection keeps it as `turn.answer`, read with `vibest result` and shown as the summary in `vibest ls`. A turn end counts only if newer than the delivered Message. Nothing is sent to anyone: an agent that has something to say runs `vibest send <id>`; `herdr agent read` is last.
+**Answers** come through the best channel (D11): the integration sends its turn-end event to the daemon, which writes the agent's last reply (Claude `last_assistant_message`, Cursor and Pi `text`) in the turn's `turn.ended`; the projection keeps it as `turn.answer`, read with `vibest result` and shown as the summary in `vibest ls`. Nothing is sent to anyone: an agent that has something to say runs `vibest send <id>`; `herdr agent read` is last.
 
 The subagent's rules ask for a message whose first line is one sentence the recipient can relay, then the details, and an
 optional `## Remember`. The recipient gets it as:
@@ -339,9 +339,8 @@ How `packages/core/src/sessions.ts` keeps these:
   directory goes and a `--peer` spawn holds while it joins it. Per-session flags live in memory and are dropped once
   the session is no longer live and nothing is in flight on them (`forget`, under the lock).
 - Remove and archive close the round and mark the session archived and exited under its lock. The aborted turn
-  end their interrupt causes, landing during the interrupt or after the archive, is no result for two independent
-  reasons: check returns early for an archived session, and an aborted payload with no open round collects
-  nothing (`rounds.ts` `collectResult`).
+  end their interrupt causes, landing during the interrupt or after the archive, writes nothing: an interrupted end
+  with no open round is dropped (`Db.endObserved`).
 - Ready for input: a harness whose integration reports ready is ready once that report is on its row (a restart or
   move removes the previous one); any other once the runtime's state is idle, working or blocked. While neither (a
   harness starting, or a startup dialog such as Claude's folder trust) the harness's startup step answers it, polled
@@ -390,14 +389,18 @@ How `packages/core/src/sessions.ts` keeps these:
   runtime does not keep labels), then check every live session once. The same reconcile runs when a runtime
   registers or comes back, and finishes archives and `--archive-on-idle` archives a stop cut off.
 
-How `packages/core/src/rounds.ts` ends a round (under the session's lock, except where noted):
+How a round ends:
 
-- A reported turn end counts only when it is from the session's current harness, stored after its current process's
-  ready report (`Db.latestReport`, a fence that holds across a vibestd restart), and received after the open round's
-  prompt. The `turn.end` is stamped no earlier than the report, so one report is not taken twice. A late end from the
-  harness the session just left is left alone: the new harness's end replaces it. A turn stopped in its terminal with
-  no round open is `vibest interrupt`'s own, or no round of vibest's. A usage-limit end moves the session to the next
-  harness and the open round stays the one that finishes.
+- A turn end the harness reports (`Db.endObserved`) is written as it arrives, without the session lock, in one
+  transaction: the `turn.ended` with the reply and the conversation, the session idle, and the error notice for a
+  failed end that is not a usage limit. It is ignored for the entry session, for a harness the session no longer
+  runs, before the current process's ready report when its harness reports ready, and when it is interrupted with no
+  round open. A completed or failed end with no round open is a round of its own (a turn typed in the terminal whose
+  start was missed). vibestd's own closes (`lost`, `not_started`, `interrupted`, an exit) are conditional on the
+  round they decided about still being open (`Db.closeTurn`), so an observed end that came first wins and the close
+  writes nothing, notice included. A reply that arrives after vibestd closed the round as `lost` is a new round; it
+  is not attached back. A usage-limit end closes its round `failed`; check then moves the session to the next harness,
+  which resends the input in a new round, so a limit is two rounds.
 - Queued Messages: one wake is one delivery; the batch goes pending, sending, delivered, or failed with the owner
   told. A broken connection before the handover leaves it pending for the next check; after it, the text may have
   arrived, so it is not sent again and the owner decides.

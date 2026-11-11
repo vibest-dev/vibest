@@ -165,7 +165,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a turn that reported an error and whose harness is gone gives one notice carrying both",
+    "a turn that reported an error and whose harness is gone: the error notice at the turn end, then one exit notice naming it",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
@@ -174,8 +174,9 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       yield* sessions.check(id)
       const notices = yield* sqlNotices(id)
-      assert.lengthOf(notices, 1)
-      assert.include(notices[0], "exited after its turn ended with an error: model_error")
+      assert.lengthOf(notices, 2)
+      assert.include(notices[0], "turn ended with an error: model_error")
+      assert.include(notices[1], "exited after its turn ended with an error: model_error")
       assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
     }),
     { hooked: ["pi"] },
@@ -626,11 +627,8 @@ describe.concurrent("Sessions", () => {
       yield* writeResult(id, "claude", claudeEnd("aborted"))
       yield* herdr.endTurn(id)
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "failed")
-      assert.include(
-        (yield* db.latestInbox(id, "notice"))!.message,
-        "interrupted: the turn was stopped in its terminal (Esc) before it ended",
-      )
+      assert.strictEqual((yield* db.getSession(id))!.turnState, "interrupted")
+      assert.isUndefined(yield* db.latestInbox(id, "notice"))
     }),
     { interruptIgnored: true },
   )

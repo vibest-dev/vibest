@@ -19,8 +19,8 @@ When a session's harness process is killed and its pane stays, the same happens 
 
 ## S23. vibestd restarted or killed around a turn end
 
-When vibestd restarts mid-turn, or is killed right after a turn ends, exactly one completed turn results, pointing at
-the turn's report, and it sends nothing.
+When vibestd restarts mid-turn, or is killed right after a turn ends, exactly one completed turn results, carrying
+the turn's reply, and it sends nothing.
 
 ## S24. vibestd killed mid-delivery
 

@@ -793,7 +793,6 @@ export const expectAnswered = async (w: World, sub: string) => {
     "process.placed",
     "turn.started",
     "inbox.moved",
-    "turn.reported",
     "turn.ended",
   ])
   const task = row<{ status: string; turn: number | null }>(
@@ -802,14 +801,12 @@ export const expectAnswered = async (w: World, sub: string) => {
     sub,
   )
   expect(task?.status === "delivered" && task.turn !== null, `${sub}'s task row: ${JSON.stringify(task)}`)
-  const turn = row<{ status: string; report: number | null }>(
+  const turn = row<{ status: string; answer: string | null }>(
     w,
-    "SELECT status, report_seq AS report FROM turn WHERE id = ?",
+    "SELECT status, answer FROM turn WHERE id = ?",
     task!.turn!,
   )
-  expect(turn?.status === "completed" && turn.report !== null, `${sub}'s task turn: ${JSON.stringify(turn)}`)
-  const answer = row<{ answer: string | null }>(w, "SELECT answer FROM turn WHERE id = ?", task!.turn!)
-  expect(typeof answer?.answer === "string", `${sub}'s task turn has no answer`)
+  expect(turn?.status === "completed" && typeof turn.answer === "string", `${sub}'s task turn: ${JSON.stringify(turn)}`)
 }
 
 const READ_MODEL = ["session", "process", "turn", "inbox"] as const

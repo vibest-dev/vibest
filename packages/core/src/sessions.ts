@@ -23,12 +23,10 @@ import {
   Layer,
   Option,
   Path,
-  PlatformError,
   Predicate,
   Ref,
   SynchronizedRef,
 } from "effect"
-import { ChildProcessSpawner } from "effect/process"
 
 import { sessionArchive } from "./archive.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
@@ -46,10 +44,11 @@ import { sessionPlacement } from "./placement.ts"
 import { errorMessage, Plugins } from "./plugins.ts"
 import { Processes } from "./processes.ts"
 import { projectRoot, workspaceGit } from "./project-create.ts"
-import { type Collected, CONFIRM_TIMEOUT, sessionPrompting, STOP_WAIT } from "./prompting.ts"
+import { CONFIRM_TIMEOUT, sessionPrompting, STOP_WAIT } from "./prompting.ts"
 import * as Remove from "./remove.ts"
 import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
 import { Restarting } from "./restarting.ts"
+import { isUsageLimitError } from "./results.ts"
 import { sessionRounds } from "./rounds.ts"
 import {
   agentState,
@@ -276,7 +275,7 @@ export class Sessions extends Context.Service<
 
       const live = (session: SessionRow) => runtimes.route(session.runtime)
 
-      const announceExit = (session: SessionRow, duringTurn: boolean, afterError: boolean) =>
+      const announceExit = (session: SessionRow, turn: number | undefined) =>
         Effect.gen(function* () {
           const queued = yield* db.pendingInbox(session.id)
           const signed = queued.filter((r) => r.kind === "send" && r.sender)
@@ -287,27 +286,25 @@ export class Sessions extends Context.Service<
             "failed",
           )
           const lost = unsigned.map((r) => r.message).join("\n\n")
-          const failure = afterError ? ((yield* db.latestAnswer(session.id))?.failure ?? "") : ""
-          const how = afterError
-            ? ` after its turn ended with an error: ${failure}`
-            : duringTurn
-              ? " during a turn"
-              : ""
-          const text = `${session.id} (${session.harnessId}) exited${how}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
-          if (duringTurn && !afterError)
-            yield* finish(session, "failed", "the harness exited", undefined, undefined, text)
-          else yield* notice(session, text)
+          const text = (how: string) =>
+            `${session.id} (${session.harnessId}) exited${how}; vibest peek ${session.id} shows its terminal; vibest send ${session.id} resumes it${lost === "" ? "" : `\n\nNot delivered:\n\n${lost}`}`
+          if (
+            turn !== undefined &&
+            (yield* db.closeTurn(session.id, turn, "failed", {
+              failure: "the harness exited",
+              notice: text(" during a turn"),
+            }))
+          )
+            return
+          const last = yield* db.latestAnswer(session.id)
+          yield* notice(
+            session,
+            text(last?.status === "failed" ? ` after its turn ended with an error: ${last.failure ?? ""}` : ""),
+          )
         })
 
       const { awaitReady, sawTurnStart, busy, busyOf, settleAfterInterrupt, interruptAgent, prompt } = sessionPrompting(
-        {
-          db,
-          harnesses,
-          bus,
-          track,
-          platform,
-          collectResult: (h, session) => collectResult(h, session),
-        },
+        { db, harnesses, bus, track },
       )
 
       const vibestEnv = (session: SessionRow) => ({
@@ -359,30 +356,8 @@ export class Sessions extends Context.Service<
         ]
       })
 
-      let collectResult: (
-        h: Runtime | undefined,
-        session: SessionRow,
-        exiting?: boolean,
-      ) => Effect.Effect<
-        Collected,
-        RuntimeError | NoSuchSession | PlatformError.PlatformError,
-        ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path | Git
-      > = () => Effect.die("collectResult")
-
       const limit = limitMoveBox()
-      const rounds = sessionRounds({
-        db,
-        harnesses,
-        track,
-        lock: locks.withLock,
-        worktreeOf,
-        undelivered,
-        logged,
-        prompt,
-        limitMove: limit.move,
-      })
-      collectResult = rounds.collectResult
-      const { finish, deliverQueued, userPrompt } = rounds
+      const { finish, deliverQueued } = sessionRounds({ db, undelivered, prompt })
 
       const handTask = (h: Runtime, session: SessionRow, terminal: Terminal, task: string) =>
         Effect.gen(function* () {
@@ -461,12 +436,10 @@ export class Sessions extends Context.Service<
         if ((!open && session.exitedAt !== null) || session.metadata.archived || session.metadata.removed) return
         if (restarting.has(id)) return
         const routed = yield* live(session).pipe(Effect.option)
-        if (Option.isNone(routed)) {
-          yield* collectResult(undefined, session)
-          return yield* live(session)
-        }
+        if (Option.isNone(routed)) return yield* live(session)
         const h = routed.value
         const terminal = session.address
+        const turn = open ? yield* db.openTurn(id) : undefined
         const r = yield* track(id)
         const maybe = yield* agentState(h, terminal).pipe(Effect.option)
         if (Option.isNone(maybe)) return
@@ -484,13 +457,12 @@ export class Sessions extends Context.Service<
               (typeof reportedPid === "number" && (yield* processes.liveness(reportedPid)) === "exited")
             )
           }))
-        if ((yield* collectResult(h, session, exited)) !== "none") return
+        if (!open && (yield* rerunLimited(h, session))) return
         if (state === undefined) {
           if (exited) {
             const cutOff = session.startedAt === null
-            const afterError = open && (yield* db.getSession(id))?.turnState !== "open"
             const announce = !cutOff && (open || session.exitedAt === null)
-            if (announce) yield* announceExit(session, open, afterError)
+            if (announce) yield* announceExit(session, turn)
             if (session.exitedAt === null) {
               yield* db.updateSession(id, {
                 status: "unknown",
@@ -540,25 +512,42 @@ export class Sessions extends Context.Service<
         const now = yield* Clock.currentTimeMillis
         const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - session.turnPromptedAt)
         if (idle && !ended && unconfirmed <= 0) {
-          yield* db.updateSession(id, { turnState: "not_started", lastActive: now })
-          yield* notice(
-            session,
-            `task_not_started: vibest did not see ${id} start the turn it was sent (if it starts it late, that turn's result is not collected); it is idle and takes queued messages again.`,
-          )
-          return yield* deliverQueued(h, { ...session, turnState: "not_started" }, terminal)
+          const closed =
+            turn !== undefined &&
+            (yield* db.closeTurn(id, turn, "not_started", {
+              notice: `task_not_started: vibest did not see ${id} start the turn it was sent (if it starts it late, that turn's result is not collected); it is idle and takes queued messages again.`,
+            }))
+          if (closed) yield* deliverQueued(h, { ...session, turnState: "not_started" }, terminal)
+          return
         }
         if (idle && !ended) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
         const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
         if (grace > 0) return yield* engine.arm(`grace:${id}`, Duration.millis(grace), checkSession(id))
+        if (turn === undefined) return
         yield* Effect.logInfo(`lost ${id}: terminal tail\n${yield* paneTail(h, terminal)}`)
-        yield* finish(
-          session,
-          "lost",
-          `the turn ended without a report: the harness stopped without firing its turn-end hook (an error it has no hook for, such as a usage limit?); ${peekHint(id)}`,
-        )
+        const failure = `the turn ended without a report: the harness stopped without firing its turn-end hook (an error it has no hook for, such as a usage limit?); ${peekHint(id)}`
+        yield* db.closeTurn(id, turn, "lost", { failure, notice: `${id}'s turn ended with an error: ${failure}` })
       })
+
+      const rerunLimited = (h: Runtime, session: SessionRow) =>
+        Effect.gen(function* () {
+          const last = yield* db.latestAnswer(session.id)
+          const reported = last?.text !== null && last?.text !== undefined
+          if (!reported || last.status !== "failed" || !isUsageLimitError(last.failure ?? undefined)) return false
+          const terminal = session.address
+          yield* limit.move.rerun(
+            h,
+            session,
+            terminal.id === "" ? undefined : terminal,
+            "",
+            false,
+            last.failure!,
+            last.turn,
+          )
+          return true
+        })
 
       const checkSession = (id: string): Effect.Effect<unknown, unknown> =>
         locked(id)(check(id)).pipe(Effect.provideContext(platform))
@@ -677,26 +666,27 @@ export class Sessions extends Context.Service<
                 const session = yield* getRow(id)
                 const h = yield* live(session)
                 const terminal = session.address
-                const collected = yield* collectResult(h, session)
-                if (collected === "delivered")
-                  return { message: `${id} had already finished its turn; its result is delivered` }
+                const turn = yield* db.openTurn(id)
+                if (turn === undefined)
+                  return { message: `${id} is not working; its turn had already finished and its reply is recorded` }
                 const state = stateOf(yield* agentState(h, terminal))
                 const runtimeKnows = state !== undefined && state !== "unknown"
-                const started = session.turnState === "open" && (yield* Ref.get((yield* track(id)).sawWorking))
-                if (!started && (runtimeKnows ? !busy(state) : session.turnState !== "open"))
+                const started = yield* Ref.get((yield* track(id)).sawWorking)
+                if (!started && runtimeKnows && !busy(state))
                   return { message: `${id} is not working; nothing to interrupt` }
                 if (!(yield* interruptAgent(h, session, terminal)))
                   return yield* new SessionBusy({
                     id,
                     message: `${id} did not stop within ${Duration.format(STOP_WAIT)}; it may still be working`,
                   })
-                yield* db.closeTurn(id, "interrupted", {
-                  lastActive: yield* Clock.currentTimeMillis,
-                  ...(runtimeKnows ? {} : { status: "idle" as const }),
-                })
+                const closed = yield* db.closeTurn(id, turn, "interrupted")
+                if (closed && !runtimeKnows) yield* db.updateSession(id, { status: "idle" })
+                const last = closed ? undefined : yield* db.latestAnswer(id)
+                if (!closed && !(last?.turn === turn && last.status === "interrupted"))
+                  return { message: `${id} finished its turn before the interrupt took effect; its reply is recorded` }
                 return { message: `${id} interrupted; its terminal, worktree and session are kept` }
               }),
-            ).pipe(Effect.catchTags({ RuntimeError: unreachable(known), PlatformError: Effect.die })),
+            ).pipe(Effect.catchTags({ RuntimeError: unreachable(known) })),
           ),
           Effect.provideContext(platform),
         )
@@ -779,12 +769,12 @@ export class Sessions extends Context.Service<
 
       const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
         switch (event.type) {
-          case "turn.reported":
-            return resultReady(event.sessionId!)
           case "turn.ended":
-            return deliverNext(event.sessionId!).pipe(
-              Effect.andThen(event.data.status === "completed" ? archiveSoon([event.sessionId!]) : Effect.void),
-            )
+            return event.data.status === "failed"
+              ? resultReady(event.sessionId!)
+              : deliverNext(event.sessionId!).pipe(
+                  Effect.andThen(event.data.status === "completed" ? archiveSoon([event.sessionId!]) : Effect.void),
+                )
           case "inbox.moved":
             return event.data.to === "pending" || event.data.to === "delivering"
               ? Effect.void
@@ -934,9 +924,9 @@ export class Sessions extends Context.Service<
           Effect.gen(function* () {
             const now = at ?? (yield* Clock.currentTimeMillis)
             yield* bus.observe({ type: "live.turn_start", sessionId: id, at: now })
-            yield* userPrompt(id, text, now)
-            yield* db.markWorking(id)
-          }).pipe(Effect.provideContext(platform)),
+            const prompting = yield* Ref.get((yield* track(id)).prompting)
+            yield* db.startObserved(id, prompting || text.trim() === "" ? undefined : text, now)
+          }),
         republish: republish().pipe(Effect.provideContext(platform)),
         inMemory: Effect.gen(function* () {
           const map = yield* SynchronizedRef.get(tracked)

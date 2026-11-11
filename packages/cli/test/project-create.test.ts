@@ -17,7 +17,7 @@ import { sessionHeaders } from "@vibest/protocol/protocol"
 import { liveDaemon } from "@vibest/runtime-herdr/commands"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import * as Server from "@vibest/server/server"
-import { Effect, Exit, FileSystem, Layer, Path, type Scope } from "effect"
+import { Effect, Exit, FileSystem, Layer, Path, PlatformError, type Scope } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
@@ -148,6 +148,28 @@ describe("multi-repository project", () => {
       assert.isUndefined(yield* listProjectRepositories(sub))
       assert.isUndefined(yield* listProjectRepositories(path.join(parent, "empty")))
     }),
+  )
+
+  it.effect("listProjectRepositories finds nothing in a folder removed between its stat and its listing", () =>
+    listProjectRepositories("/removed/while/listed").pipe(
+      Effect.map((found) => assert.isUndefined(found)),
+      Effect.provide(FakeGit.layers),
+      Effect.provide(
+        FileSystem.layerNoop({
+          stat: () => Effect.succeed({ type: "Directory" } as FileSystem.File.Info),
+          readDirectory: (path) =>
+            Effect.fail(
+              PlatformError.systemError({
+                _tag: "NotFound",
+                module: "FileSystem",
+                method: "readDirectory",
+                pathOrDescriptor: path,
+              }),
+            ),
+        }),
+      ),
+      Effect.provide(Path.layer),
+    ),
   )
 
   test(

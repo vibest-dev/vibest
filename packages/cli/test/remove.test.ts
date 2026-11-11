@@ -168,10 +168,11 @@ describe.concurrent("vibest rm: process proof", () => {
         })
 
       const reportedTurnEndEvent = (id: string) =>
-        eventsOf(id, "turn.reported").pipe(Effect.map((rows) => rows.at(-1)?.data.text))
+        eventsOf(id, "turn.ended").pipe(Effect.map((rows) => rows.at(-1)?.data.reply))
       const a = yield* idleSession
       yield* a.herdr.runtime.close({ id: a.pane })
       yield* worktreeDeletedOutsideVibest(a)
+      yield* a.sessions.check(a.id)
       yield* until(a.db.getSession(a.id), (row) => row?.exitedAt !== null)
       yield* settled
       assert.deepInclude(

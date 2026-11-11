@@ -61,8 +61,8 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     error?: string,
   ) =>
     Effect.gen(function* () {
-      yield* writeResult(w.id, "pi", error ? { text, error } : { text })
       yield* w.herdr.endTurn(w.id)
+      yield* writeResult(w.id, "pi", error ? { text, error } : { text })
       yield* w.sessions.check(w.id)
     })
 
@@ -306,7 +306,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* askMain(sender)
       yield* finishTurn(sender, "status: completed")
       assert.isFalse(yield* sender.db.archiveIfNoPending(sender.id))
-      const b = yield* archiveSession(repo)
+      const b = yield* idleSession(repo)
       assert.isTrue(yield* b.db.archiveIfNoPending(b.id))
       assert.isUndefined(yield* b.db.insertSend(b.id, "late"))
       assert.deepStrictEqual(yield* b.db.pendingInbox(b.id), [])
@@ -317,9 +317,9 @@ describe.concurrent("vibest run --archive-on-idle", () => {
     "its harness already exited: archived once nothing it sent is waiting, and delivering the exit notice repeats nothing",
     Effect.gen(function* () {
       const w = yield* archiveSession(yield* makeRepository)
-      yield* writeResult(w.id, "pi", { text: "status: completed" })
       yield* w.herdr.updateAgent(w.id, (a) => ({ ...a, alive: false }))
       yield* w.sessions.check(w.id)
+      yield* writeResult(w.id, "pi", { text: "status: completed" })
       yield* w.sessions.check(w.id)
       assert.isFalse(yield* archived(w.db, w.id))
       yield* ackResult(w)

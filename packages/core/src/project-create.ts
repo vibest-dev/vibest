@@ -1,5 +1,5 @@
 import { ProjectCreateFailed } from "@vibest/protocol/rpc"
-import { Effect, Exit, FileSystem, Option, Path } from "effect"
+import { Effect, Exit, FileSystem, Option, Path, type PlatformError } from "effect"
 
 import { safeRepositoryDirectory, sameWorktreeBucket } from "./paths.ts"
 
@@ -138,17 +138,21 @@ const ownGitCheckout = (dir: string) =>
 export const listProjectRepositories = Effect.fn("listProjectRepositories")(function* (directory: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const info = yield* fs.stat(directory).pipe(
-    Effect.catchIf(
-      (e) => e.reason._tag === "NotFound",
-      () => Effect.succeed(undefined),
-    ),
-  )
+  const goneIsUndefined = <A>(read: Effect.Effect<A, PlatformError.PlatformError>) =>
+    read.pipe(
+      Effect.catchIf(
+        (e) => e.reason._tag === "NotFound",
+        () => Effect.succeed(undefined),
+      ),
+    )
+  const info = yield* goneIsUndefined(fs.stat(directory))
   if (info === undefined || info.type !== "Directory") return undefined
   const git = yield* Git
   if (yield* git.insideWorkTree(directory)) return undefined
+  const names = yield* goneIsUndefined(fs.readDirectory(directory))
+  if (names === undefined) return undefined
   const found: ProjectRepository[] = []
-  for (const name of (yield* fs.readDirectory(directory)).slice().sort()) {
+  for (const name of names.slice().sort()) {
     if (!safeRepositoryDirectory(name)) continue
     const child = path.join(directory, name)
     const stat = yield* fs.stat(child).pipe(

@@ -6,7 +6,7 @@ import { TestClock } from "effect/testing"
 
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { resultText, systemPromptFile, until, untilVirtual, writeResult } from "./lib/observe.ts"
+import { systemPromptFile, until, untilVirtual, writeResult } from "./lib/observe.ts"
 import { callerPlugin, makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
@@ -62,7 +62,6 @@ describe.concurrent("Sessions", () => {
       assert.deepInclude(borrower, { processes: "exited", pane: "closed", worktree: "kept", path: worktree })
       assert.include(borrower.reasons.join("\n"), `session ${third.id} still works in it`)
       assert.isFalse(yield* fs.exists(yield* systemPromptFile(id)))
-      assert.strictEqual(yield* resultText(id), "")
       assert.isTrue(yield* fs.exists(worktree))
 
       const ownerSecond = (yield* peer.sessions.remove(peer.id))!

@@ -51,8 +51,8 @@ const latest = async (w: World, id: string, cwd = w.repository) => {
 
 const ends = async (w: World, id: string) =>
   (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).split("\n").flatMap((l) => {
-    const found = new RegExp(`turn end ${id} \\((\\w+)(, interrupted)?\\)`).exec(l)
-    return found ? [{ harness: found[1]!, interrupted: found[2] !== undefined }] : []
+    const found = new RegExp(`turn end ${id} \\((\\w+), (\\w+)`).exec(l)
+    return found ? [{ harness: found[1]!, interrupted: found[2] === "interrupted" }] : []
   })
 
 const withSession = async (
@@ -358,7 +358,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I7",
     covers: ["I4", "R7", "S4"],
     title:
-      "Claude (fake model): every main-loop turn end is the plugin's turn.complete: an answer is the turn's answer, Esc in the pane is one failed (interrupted) turn with one notice, `vibest interrupt` is an interrupted turn with none, also while a background shell keeps the terminal working; I4: vibest's plugin loads beside a plugin the user installed",
+      "Claude (fake model): every main-loop turn end is the plugin's turn.complete: an answer is the turn's answer, Esc in the pane and `vibest interrupt` are each one interrupted turn with no text and no notice, also while a background shell keeps the terminal working; I4: vibest's plugin loads beside a plugin the user installed",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const HOLD = "Keep working on this until you are stopped."
@@ -391,19 +391,16 @@ const checks: ReadonlyArray<Check> = [
             env: { HERDR_SOCKET_PATH: socket },
           })
           expect(esc.code === 0, `herdr send-keys esc: ${esc.stderr}`)
-          await until("the interrupted result", settled("failed"), 60_000)
+          await until("the interrupted result", settled("interrupted"), 60_000)
           const second = await latest(w, id)
           expect(
-            second !== undefined &&
-              second.id !== first!.id &&
-              second.message.includes("interrupted: the turn was stopped in its terminal (Esc) before it ended"),
-            `Esc result: ${second?.message.slice(0, 500)}`,
+            second?.status === "interrupted" && second.id !== first!.id && second.message === "",
+            `Esc result: ${JSON.stringify(second)}`,
           )
           expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
           const notices = () =>
             row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", id)
               ?.n
-          await until("the Esc notice", () => notices() === 1, 30_000)
 
           await w.ok(["send", id, HOLD])
           await until("the second held turn at the model", () => held === 2, 60_000)
@@ -428,7 +425,7 @@ const checks: ReadonlyArray<Check> = [
             fourth?.status === "interrupted" && fourth.id !== third!.id && fourth.message === "",
             `the answer after vibest interrupt with background work: ${JSON.stringify(fourth)}`,
           )
-          expect(notices() === 1, `${notices()} notices after the Esc and two vibest interrupts, not one`)
+          expect(notices() === 0, `${notices()} notices after the Esc and two vibest interrupts, not none`)
         })
       } finally {
         model.stop()
