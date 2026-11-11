@@ -28,7 +28,7 @@ export const sessionPrompting = (deps: {
     | "readyAt"
     | "updateSession"
     | "openExecution"
-    | "beginExecution"
+    | "startExecution"
     | "closeExecution"
     | "acceptExecution"
     | "executionAccepted"
@@ -179,7 +179,7 @@ export const sessionPrompting = (deps: {
     if (open !== undefined && open !== kept) return undefined
     const begun =
       open === undefined
-        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.beginExecution(session.id, at))
+        ? yield* Effect.flatMap(Clock.currentTimeMillis, (at) => db.startExecution(session.id, at))
         : { execution: open, opened: true }
     if (!begun.opened) return undefined
     const execution = begun.execution

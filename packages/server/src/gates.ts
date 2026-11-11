@@ -76,7 +76,7 @@ const noteConversation = (db: Db["Service"], read: Read, row: { id: string; harn
   Effect.gen(function* () {
     const conversation = read(HARNESS_SESSION_HEADER)
     if (!conversation || read(HARNESS_HEADER) !== row.harness) return
-    if (yield* db.noteHarnessSession(row.id, conversation, processOf(read)))
+    if (yield* db.noteConversation(row.id, conversation, processOf(read)))
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
   })
 

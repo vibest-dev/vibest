@@ -277,7 +277,13 @@ type or key changes or removes rows, in the same pull request.
 
 - All SQL is in `packages/core/src/db.ts` and its `db-*.ts` modules, over one SQLite connection. The session row
   callers read (`SessionRow`) is built from the read model plus the memory listed below (`ledger-read.ts` holds the
-  reads the import's referee shares).
+  reads the import's referee shares). Besides its older flat fields it carries `endedAt`, `parentId`, `entry`, the
+  current `process`, the `openExecution` (outcome null) and the `lastExecution` (the most recently ended one); a
+  session with neither never ran an execution. `attempts` lists the harness and provider of each of its processes that
+  ended `limited`, in process order, once per pair.
+- Writes go through intent methods, one per fact: `startProcess` opens a process and `placeProcess` only gives the
+  current one its terminal (never a new process id); `startExecution`, `noteConversation`, `rename` and `archive` each
+  write their fact when it changes something. `updateSession` maps a patch onto them until its callers move.
 - `commit` runs one transaction and publishes the facts it appended after the commit, in the order it appended them. A nested `commit`
   shares the outer buffer, so only the outermost commit publishes; a rollback publishes nothing. Only the body is
   interruptible: once it has finished, the commit's facts are published before an interrupt lands. The buffer closes

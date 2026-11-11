@@ -66,6 +66,21 @@ export type SessionColumns = {
   readonly tAt: number | null
   readonly tStatus: string | null
   readonly attempts: string | null
+  readonly parent: string | null
+  readonly entry: number
+  readonly pEndReason: string | null
+  readonly oId: number | null
+  readonly oProcess: number | null
+  readonly oAt: number | null
+  readonly oAccepted: number | null
+  readonly lId: number | null
+  readonly lProcess: number | null
+  readonly lOutcome: string | null
+  readonly lAt: number | null
+  readonly lEnded: number | null
+  readonly lReply: string | null
+  readonly lFailure: string | null
+  readonly lFailureKind: string | null
 }
 
 const integrationOf = (row: Pick<SessionColumns, "integrationVersion" | "integrationProtocol">) =>
@@ -81,6 +96,46 @@ export type Live = {
 }
 
 const NOT_LIVE: Live = { status: "unknown", integration: undefined }
+
+const processOf = (row: SessionColumns, integration: Integration | undefined) =>
+  row.pId === null
+    ? null
+    : {
+        id: row.pId,
+        harness: row.harness ?? "",
+        provider: row.provider,
+        model: row.model,
+        routing: row.routing === null ? null : (JSON.parse(row.routing) as unknown),
+        runtime: row.runtime ?? "",
+        machine: LOCAL_MACHINE,
+        terminal: row.terminal,
+        pid: row.pid,
+        conversation: row.conversation,
+        placedAt: row.placedAt,
+        readyAt: row.readyAt,
+        endedAt: row.pEnded,
+        endReason: row.pEndReason,
+        integration: integration ?? null,
+      }
+
+const openExecutionOf = (row: SessionColumns) =>
+  row.oId === null ? null : { id: row.oId, process: row.oProcess, startedAt: row.oAt ?? 0, acceptedAt: row.oAccepted }
+
+const lastExecutionOf = (row: SessionColumns) =>
+  row.lId === null
+    ? null
+    : {
+        id: row.lId,
+        process: row.lProcess,
+        outcome: row.lOutcome ?? "",
+        startedAt: row.lAt ?? 0,
+        endedAt: row.lEnded,
+        reply: row.lReply,
+        failure:
+          row.lFailure === null
+            ? null
+            : { message: row.lFailure, ...(row.lFailureKind === null ? {} : { kind: row.lFailureKind }) },
+      }
 
 export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
   const integration = live.integration ?? integrationOf(row)
@@ -112,6 +167,12 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
     metadata: JSON.stringify(metadata),
     createdAt: row.createdAt,
     lastActive: row.activeAt ?? row.createdAt,
+    endedAt: row.endedAt,
+    parentId: row.parent,
+    entry: row.entry === 1,
+    process: processOf(row, integration),
+    openExecution: openExecutionOf(row),
+    lastExecution: lastExecutionOf(row),
   }
 }
 
@@ -164,14 +225,22 @@ type InboxColumns = {
 export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
     sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.agent, s.name,
-        s.created_at, s.ended_at, s.active_at,
+        s.created_at, s.ended_at, s.active_at, s.parent_session_id AS parent,
+        EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id) AS entry,
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.placed_at, p.ready_at,
-        p.ended_at AS p_ended, t.id AS t_id, t.started_at AS t_at, t.outcome AS t_status,
+        p.ended_at AS p_ended, p.end_reason AS p_end_reason,
+        t.id AS t_id, t.started_at AS t_at, t.outcome AS t_status,
+        o.id AS o_id, o.process_id AS o_process, o.started_at AS o_at, o.accepted_at AS o_accepted,
+        l.id AS l_id, l.process_id AS l_process, l.outcome AS l_outcome, l.started_at AS l_at,
+        l.ended_at AS l_ended, l.reply AS l_reply, l.failure AS l_failure, l.failure_kind AS l_failure_kind,
         (SELECT json_group_array(json_object('harness', l.harness, 'provider', l.provider, 'at', l.ended_at))
           FROM (SELECT * FROM process WHERE session_id = s.id AND end_reason = 'limited' ORDER BY id) l) AS attempts
       FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id
         LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
+        LEFT JOIN execution o ON o.session_id = s.id AND o.outcome IS NULL
+        LEFT JOIN execution l ON l.session_id = s.id AND l.id = (SELECT id FROM execution
+          WHERE session_id = s.id AND outcome IS NOT NULL ORDER BY coalesce(ended_at, started_at) DESC, id DESC LIMIT 1)
       ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 

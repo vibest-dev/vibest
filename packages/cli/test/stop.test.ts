@@ -318,7 +318,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       ]
       socket.write(JSON.stringify({ jsonrpc: "2.0", id: "s", method: "Inbox.Subscribe", params: null, headers }) + "\n")
       yield* (yield* Inbox).enqueue({ sessionId: worker, message: "held" })
-      yield* until(db.latestInbox(worker, "notice"), (r) => r?.status === "sending")
+      yield* until(db.latestInbox(worker, "notice"), (r) => r?.status === "delivering")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       assert.isFalse(yield* shutdownDone)

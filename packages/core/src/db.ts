@@ -22,7 +22,14 @@ import { Bus } from "./bus.ts"
 import { apply } from "./database/migration.ts"
 import { inboxMethods } from "./db-inbox.ts"
 import { remoteQueries, type PeerStart } from "./db-remote.ts"
-import { SessionRow, type SessionPatch, type SpawnedBefore, type RepositoryRow, type Integration } from "./db-rows.ts"
+import {
+  attemptsOf,
+  type NewSession,
+  type SessionPatch,
+  type SpawnedBefore,
+  type RepositoryRow,
+  type Integration,
+} from "./db-rows.ts"
 import { makeStore } from "./db-store.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
@@ -35,6 +42,7 @@ export {
   AddressJson,
   encodeAddress,
   SessionRow,
+  NewSession,
   type SessionPatch,
   CoordinatorRow,
   type NewInboxRow,
@@ -269,7 +277,7 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.orDie),
 
     insertSession: (
-      row: Omit<SessionRow, "projectId">,
+      row: Omit<NewSession, "projectId">,
       project: string,
       {
         max,
@@ -522,19 +530,21 @@ const make = Effect.gen(function* () {
         )
       }).pipe(Effect.orDie),
 
-    noteHarnessSession: (id: string, harnessSessionId: string, process?: number) =>
-      tx(
-        Effect.gen(function* () {
-          const { current, conversation } = yield* conversationOf(id)
-          if (current === undefined || conversation === harnessSessionId) return false
-          if (process !== undefined && process !== current.id) return false
-          yield* emit(ProcessConversation, {
-            sessionId: id,
-            data: { process: current.id, conversation: harnessSessionId },
-          })
-          return true
-        }),
-      ).pipe(Effect.orDie),
+    noteConversation: (id: string, conversation: string, process?: number) =>
+      tx(store.noteConversation(id, conversation, process)).pipe(Effect.orDie),
+
+    rename: (id: string, name: string) => tx(store.rename(id, name)).pipe(Effect.orDie),
+
+    placeProcess: (id: string, terminal: string, pid?: number) =>
+      tx(store.placeProcess(id, terminal, pid)).pipe(Effect.orDie),
+
+    attempts: (id: string) =>
+      sql<{ attempts: string | null }>`SELECT json_group_array(json_object('harness', harness, 'provider', provider,
+          'at', ended_at)) AS attempts
+        FROM (SELECT * FROM process WHERE session_id = ${id} AND end_reason = 'limited' ORDER BY id)`.pipe(
+        Effect.map((rows) => attemptsOf(rows[0]?.attempts ?? null)),
+        Effect.orDie,
+      ),
 
     noteIntegration: (id: string, integration: Integration, process?: number) =>
       Effect.gen(function* () {

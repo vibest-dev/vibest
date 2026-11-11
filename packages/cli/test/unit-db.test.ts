@@ -121,7 +121,7 @@ describe("Db", () => {
             since: 1,
           })
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { executionState: "completed" })
-          yield* db.beginExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 2)
+          yield* db.startExecution("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", 2)
           assert.strictEqual((yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).working, "")
           yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { executionState: "completed" })
           assert.deepStrictEqual(yield* db.rescheduleSource("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), {
@@ -582,7 +582,7 @@ describe("Db", () => {
         }
         assert.deepStrictEqual(yield* db.claim(row.recipient!, [row.id], guard), [row.id])
         assert.deepStrictEqual(yield* db.claim(row.recipient!, [row.id], guard), [])
-        yield* db.setInboxStatus(row.recipient!, [row.id], "delivered", "sending")
+        yield* db.setInboxStatus(row.recipient!, [row.id], "delivered", "delivering")
         assert.strictEqual(yield* noticeStatus("hi"), "delivered")
         yield* db.insertInbox({
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

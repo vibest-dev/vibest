@@ -89,12 +89,12 @@ export const sessionExecutions = (deps: {
           if (rows.length === 0) return Effect.void
           return notStarted
             ? deps.undelivered(session, rows, notStarted)
-            : db.setInboxStatus(session.id, claimed, "delivered", "sending", handedInto)
+            : db.setInboxStatus(session.id, claimed, "delivered", "delivering", handedInto)
         }),
         Effect.onExit((exit) =>
           Exit.isSuccess(exit) || claimed.length === 0
             ? Effect.void
-            : db.setInboxStatus(session.id, claimed, "failed", "sending"),
+            : db.setInboxStatus(session.id, claimed, "failed", "delivering"),
         ),
         Effect.catchTags({
           RuntimeError: (e) =>

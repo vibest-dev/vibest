@@ -143,7 +143,7 @@ describe("vibestd's HTTP API", () => {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
-      yield* db.noteHarnessSession(main, "pi-conversation")
+      yield* db.noteConversation(main, "pi-conversation")
       const old = yield* call("/inbox/poll", { sessionId: main, harnessSessionId: "claude-conversation" })
       assert.strictEqual(old.status, 403)
       assert.strictEqual((yield* db.coordinatorOf(projectId))?.harnessSessionId, "pi-conversation")
@@ -189,7 +189,7 @@ describe("vibestd's HTTP API", () => {
       assert.lengthOf(first.ids, 1)
       assert.strictEqual(first.line, "Notice: hello")
       assert.strictEqual(first.text, "hello")
-      assert.strictEqual(yield* statusOf(db, worker), "sending")
+      assert.strictEqual(yield* statusOf(db, worker), "delivering")
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
       yield* TestClock.adjust(LEASE)
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, first.ids)
@@ -223,7 +223,7 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, old.ids)
       assert.deepStrictEqual(yield* inbox.ack(projectId, old.ids, newer.ids), old.ids)
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, newer.ids)
-      assert.strictEqual(yield* statusOf(db, worker), "sending")
+      assert.strictEqual(yield* statusOf(db, worker), "delivering")
     }),
   )
 
@@ -247,7 +247,7 @@ describe("vibestd's HTTP API", () => {
       const { db, inbox, worker, projectId } = yield* project
       yield* inbox.enqueue({ sessionId: worker, message: "hello" })
       const { ids } = yield* inbox.poll(projectId)
-      assert.strictEqual(yield* statusOf(db, worker), "sending")
+      assert.strictEqual(yield* statusOf(db, worker), "delivering")
       yield* TestClock.adjust(AWAY)
       yield* TestClock.adjust("2 seconds")
       yield* until(statusOf(db, worker), (s) => s === "pending")
@@ -269,7 +269,7 @@ describe("vibestd's HTTP API", () => {
       assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [])
       yield* TestClock.adjust("2 seconds")
       yield* settled
-      assert.strictEqual(yield* statusOf(db, worker), "sending")
+      assert.strictEqual(yield* statusOf(db, worker), "delivering")
       yield* TestClock.adjust(AWAY)
       yield* until(statusOf(db, worker), (s) => s === "pending")
     }),

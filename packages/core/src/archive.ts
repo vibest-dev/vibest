@@ -1,5 +1,5 @@
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
-import { Cause, Clock, Context, Duration, Effect, FileSystem, Ref } from "effect"
+import { Cause, Context, Duration, Effect, FileSystem, Ref } from "effect"
 import type { Scope } from "effect"
 
 import type { Db, SessionRow } from "./db.ts"
@@ -104,7 +104,7 @@ export const sessionArchive = (deps: {
         if (options.unlessPending) {
           if (!(yield* db.archiveIfNoPending(id))) return undefined
         } else {
-          yield* db.archive(id, yield* Clock.currentTimeMillis)
+          yield* db.archive(id)
           yield* dropQueue(session, `${id} was archived before it was delivered`)
         }
         session = yield* getRow(id)

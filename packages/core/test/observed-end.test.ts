@@ -54,7 +54,7 @@ describe("observed execution end", () => {
     Effect.gen(function* () {
       const { id, db } = yield* idleSession(yield* makeRepository)
       const before = yield* ends(id)
-      const { execution } = yield* db.beginExecution(id, yield* Clock.currentTimeMillis)
+      const { execution } = yield* db.startExecution(id, yield* Clock.currentTimeMillis)
       assert.strictEqual(yield* db.endObserved(id, yield* observedEnd("pi", { text: "background" })), "unaccepted")
       assert.deepStrictEqual(yield* ends(id), before)
       assert.strictEqual(yield* db.openExecution(id), execution)

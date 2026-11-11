@@ -14,7 +14,7 @@ export const ExecutionState = Schema.Literals([
   "not_started",
 ])
 export type ExecutionState = typeof ExecutionState.Type
-export const InboxStatus = Schema.Literals(["pending", "sending", "delivered", "failed", "dropped"])
+export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped"])
 export type InboxStatus = typeof InboxStatus.Type
 
 export const RuntimeAddress = Schema.Struct({

@@ -125,7 +125,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a queued message stays pending while the session is not ready; once herdr has it, it is sending",
+    "a queued message stays pending while the session is not ready; once herdr has it, it is delivering",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* idleSession(yield* makeRepository)
@@ -139,7 +139,7 @@ describe.concurrent("Sessions", () => {
       yield* TestClock.adjust("1 second")
       yield* held.reached
       assert.deepStrictEqual(
-        (yield* db.inboxWithStatus(id, "sending")).map((r) => r.message),
+        (yield* db.inboxWithStatus(id, "delivering")).map((r) => r.message),
         ["next"],
       )
       yield* held.release()

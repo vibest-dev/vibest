@@ -2,14 +2,7 @@ import { ExecutionAccepted, type InboxKind } from "@vibest/schema/event"
 import { InboxRow, InboxStatus, type ExecutionState } from "@vibest/schema/session"
 import { Effect } from "effect"
 
-import {
-  encodeAddress,
-  failureOf,
-  storedStatus,
-  type SessionPatch,
-  type NewInboxRow,
-  type ExecutionEnd,
-} from "./db-rows.ts"
+import { encodeAddress, failureOf, type SessionPatch, type NewInboxRow, type ExecutionEnd } from "./db-rows.ts"
 import type { Store } from "./db-store.ts"
 import { envelope, type ObservedEnd } from "./replies.ts"
 
@@ -153,17 +146,15 @@ export const inboxMethods = (store: Store) => {
 
     openExecution: (id: string) => openExecution(id).pipe(Effect.orDie),
 
-    archive: (id: string, at: number) =>
+    archive: (id: string) =>
       tx(
         Effect.gen(function* () {
-          const s = yield* findSession(id)
-          if (s === undefined) return
           if ((yield* openExecution(id)) !== undefined) yield* endExecution(id, { outcome: "interrupted" })
-          yield* updateSession(id, { metadata: { ...s.metadata, archived: true, removed: true }, lastActive: at })
+          yield* store.archive(id)
         }),
       ).pipe(Effect.orDie),
 
-    beginExecution: (id: string, at: number) =>
+    startExecution: (id: string, at: number) =>
       tx(
         Effect.gen(function* () {
           const open = yield* openExecution(id)
@@ -384,7 +375,7 @@ export const inboxMethods = (store: Store) => {
         }),
       ).pipe(Effect.orDie),
 
-    sendingInbox: inbox(sql`m.status = 'delivering'`).pipe(
+    deliveringInbox: inbox(sql`m.status = 'delivering'`).pipe(
       Effect.map((rows) => rows.map((r) => ({ id: r.id, sessionId: r.recipient ?? r.sender ?? "", kind: r.kind }))),
       Effect.orDie,
     ),
@@ -441,8 +432,8 @@ export const inboxMethods = (store: Store) => {
       Effect.gen(function* () {
         if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
         const moved = yield* moveInbox(
-          sql`session_id = ${sessionId} AND ${sql.in("id", ids)}${from ? sql` AND status = ${storedStatus(from)}` : sql``}`,
-          storedStatus(status),
+          sql`session_id = ${sessionId} AND ${sql.in("id", ids)}${from ? sql` AND status = ${from}` : sql``}`,
+          status,
           into,
         )
         return moved.length === 0

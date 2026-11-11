@@ -21,7 +21,6 @@ import { Bus, type EngineEvent, type LiveEvent } from "./bus.ts"
 import {
   encodeAddress,
   SessionRow,
-  storedStatus,
   type SessionPatch,
   type NewInboxRow,
   type RepositoryRow,
@@ -182,7 +181,7 @@ export const makeStore = Effect.gen(function* () {
   const keysIn = (keys: ReadonlyArray<InboxKey>) =>
     sql.or(keys.map((k) => sql`(session_id = ${k.session} AND id = ${k.id})`))
   const findSend = (sessionId: string, status: InboxStatus) =>
-    inbox(sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = ${storedStatus(status)}
+    inbox(sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = ${status}
         AND NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = m.session_id)`)
   const entryOf = (projectIdValue: string) => sql`(SELECT entry_session_id FROM project WHERE id = ${projectIdValue})`
 
@@ -289,11 +288,7 @@ export const makeStore = Effect.gen(function* () {
       const live = yield* liveProcess(id)
       const stamp = at === undefined ? {} : { at }
       if (live !== undefined && live.terminal === null && start.terminal !== "" && sameChoice(live, start)) {
-        yield* emit(ProcessPlaced, {
-          sessionId: id,
-          ...stamp,
-          data: { process: live.id, terminal: start.terminal, ...(start.pid === undefined ? {} : { pid: start.pid }) },
-        })
+        yield* placeProcess(id, start.terminal, start.pid, at)
         if (start.resume && start.resume !== live.conversation)
           yield* emit(ProcessConversation, {
             sessionId: id,
@@ -320,6 +315,48 @@ export const makeStore = Effect.gen(function* () {
       })
       integrations.delete(id)
       return seq
+    })
+
+  const placeProcess = (id: string, terminal: string, pid?: number, at?: number) =>
+    Effect.gen(function* () {
+      const live = yield* liveProcess(id)
+      if (live === undefined || live.terminal !== null) return undefined
+      yield* emit(ProcessPlaced, {
+        sessionId: id,
+        ...(at === undefined ? {} : { at }),
+        data: { process: live.id, terminal, ...(pid === undefined ? {} : { pid }) },
+      })
+      return live.id
+    })
+
+  const rename = (id: string, name: string) =>
+    Effect.gen(function* () {
+      const [row] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${id}`
+      if (row === undefined || row.name === name) return false
+      yield* emit(SessionRenamed, { sessionId: id, data: { name } })
+      yield* notify({ type: "live.session", sessionId: id })
+      return true
+    })
+
+  const archive = (id: string) =>
+    Effect.gen(function* () {
+      const [row] = yield* sql<{ endedAt: number | null }>`SELECT ended_at FROM session WHERE id = ${id}`
+      if (row === undefined || row.endedAt !== null) return false
+      yield* emit(SessionEnded, { sessionId: id, data: { reason: "archived" } })
+      integrations.delete(id)
+      archiveOnIdle.delete(id)
+      statuses.delete(id)
+      yield* notify({ type: "live.session", sessionId: id })
+      return true
+    })
+
+  const noteConversation = (id: string, conversation: string, process?: number) =>
+    Effect.gen(function* () {
+      const current = yield* currentProcess(id)
+      if (current === undefined || current.conversation === conversation) return false
+      if (process !== undefined && process !== current.id) return false
+      yield* emit(ProcessConversation, { sessionId: id, data: { process: current.id, conversation } })
+      return true
     })
 
   const endExecution = (id: string, end: ExecutionEnd, at?: number) =>
@@ -486,11 +523,9 @@ export const makeStore = Effect.gen(function* () {
       const next = { ...current, ...patch }
       remember(next)
       yield* notify({ type: "live.session", sessionId: id })
-      if (patch.name !== undefined && patch.name !== current.name)
-        yield* emit(SessionRenamed, { sessionId: id, data: { name: patch.name } })
+      if (patch.name !== undefined && patch.name !== current.name) yield* rename(id, patch.name)
       const ending = !!(next.metadata.archived || next.metadata.removed)
-      if (ending && !(current.metadata.archived || current.metadata.removed))
-        yield* emit(SessionEnded, { sessionId: id, data: { reason: "archived" } })
+      if (ending && !(current.metadata.archived || current.metadata.removed)) yield* archive(id)
       const p = yield* currentProcess(id)
       const routing = patch.metadata?.routing
       const choicePatched =
@@ -524,16 +559,8 @@ export const makeStore = Effect.gen(function* () {
           },
           patch.startedAt ?? undefined,
         )
-      } else if (
-        patch.harnessSessionId !== undefined &&
-        patch.harnessSessionId !== null &&
-        patch.harnessSessionId !== current.harnessSessionId
-      ) {
-        yield* emit(ProcessConversation, {
-          sessionId: id,
-          data: { process: p.id, conversation: patch.harnessSessionId },
-        })
-      }
+      } else if (patch.harnessSessionId !== undefined && patch.harnessSessionId !== null)
+        yield* noteConversation(id, patch.harnessSessionId)
       if (patch.exitedAt !== undefined && patch.exitedAt !== null && current.exitedAt === null)
         yield* endProcess(id, patch.end ?? "exited", patch.exitedAt)
       if (patch.executionState === "open") {
@@ -625,6 +652,10 @@ export const makeStore = Effect.gen(function* () {
   return {
     sql,
     reads,
+    placeProcess,
+    rename,
+    archive,
+    noteConversation,
     addressedCreator,
     now,
     statuses,

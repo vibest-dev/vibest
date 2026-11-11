@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Db, type SessionRow } from "@vibest/core/db"
+import { Db, type NewSession } from "@vibest/core/db"
 import type { HarnessId } from "@vibest/core/harness"
 import { Layout, sameWorktreeBucket } from "@vibest/core/paths"
 import { allocationNameSource, Sessions } from "@vibest/core/sessions"
@@ -34,9 +34,9 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Sc
 
 const storedRow = (
   id: string,
-  metadata: SessionRow["metadata"],
-  patch: Partial<Omit<SessionRow, "projectId" | "id" | "metadata">> = {},
-): Omit<SessionRow, "projectId"> => ({
+  metadata: NewSession["metadata"],
+  patch: Partial<Omit<NewSession, "projectId" | "id" | "metadata">> = {},
+): Omit<NewSession, "projectId"> => ({
   id,
   agent: "general",
   name: "stored",
