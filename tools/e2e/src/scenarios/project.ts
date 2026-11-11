@@ -299,7 +299,7 @@ const checks: ReadonlyArray<Check> = [
       const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
       const panes = async () =>
         ((await herdr(socket, "pane.list", {})) as { panes: Array<{ pane_id: string }> }).panes.map((p) => p.pane_id)
-      let mainPane = ""
+      let entryPane = ""
       await until(
         "the entry session's pane",
         async () => {
@@ -309,7 +309,7 @@ const checks: ReadonlyArray<Check> = [
             }
             const fg = info.process_info?.foreground_processes ?? []
             if (fg.some((proc) => (proc.argv0 ?? proc.name ?? "").includes("pi"))) {
-              mainPane = id
+              entryPane = id
               return true
             }
           }
@@ -318,8 +318,8 @@ const checks: ReadonlyArray<Check> = [
         30_000,
       )
       const before = new Set(await panes())
-      await herdr(socket, "pane.close", { pane_id: mainPane })
-      await until("the entryId pane closed", async () => !(await panes()).includes(mainPane), 15_000)
+      await herdr(socket, "pane.close", { pane_id: entryPane })
+      await until("the entry session pane closed", async () => !(await panes()).includes(entryPane), 15_000)
       const opened = await w.ok(["herdr", "open-entry"], {
         env: { HERDR_PLUGIN_CONTEXT_JSON: context, HERDR_SOCKET_PATH: socket },
       })

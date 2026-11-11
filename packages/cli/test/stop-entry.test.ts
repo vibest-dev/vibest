@@ -69,7 +69,7 @@ const refuseRealKills = Effect.acquireRelease(
 
 const HARNESS = 4242
 
-const workingPiMain = Effect.gen(function* () {
+const workingPiEntry = Effect.gen(function* () {
   yield* refuseRealKills
   const db = yield* Db
   const herdr = yield* FakeRuntime
@@ -162,7 +162,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   test(
     "y: SIGTERM to the harness PID only (after a restart in place, the pid it reported ready with), its terminal kept; its exit and a delivery before the launch drop nothing; the start in another terminal resumes the same conversation and gets what waited",
     Effect.gen(function* () {
-      const s = yield* workingPiMain
+      const s = yield* workingPiEntry
       yield* s.processes.set(7777, "alive")
       yield* s.db.patchLive(s.started.sessionId, { pid: 7777 })
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
@@ -185,9 +185,9 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   )
 
   test(
-    "y with another harness: the same entryId session, a new conversation for that harness",
+    "y with another harness: the same entry session, a new conversation for that harness",
     Effect.gen(function* () {
-      const s = yield* workingPiMain
+      const s = yield* workingPiEntry
       assert.deepStrictEqual(yield* s.stop, { result: "stopped" })
       assert.deepInclude(yield* s.startAt("test/p2", "claude"), {
         sessionId: s.started.sessionId,
@@ -200,7 +200,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   test(
     "while a restart is between its harnesses: a start elsewhere is refused even with no agent seen, and the move is unsupported",
     Effect.gen(function* () {
-      const s = yield* workingPiMain
+      const s = yield* workingPiEntry
       yield* (yield* Restarting).mark(s.started.sessionId)
       yield* s.herdr.updateAgent(s.paneId, (a) => ({ ...a, alive: false }))
       const refused = yield* Effect.exit(s.startAt("test/p2"))
@@ -215,7 +215,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   test(
     "a harness that ignores SIGTERM: running after about 10 s, the row back at its terminal, nothing dropped, and the start elsewhere still refused",
     Effect.gen(function* () {
-      const s = yield* workingPiMain
+      const s = yield* workingPiEntry
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
       yield* untilVirtual(
@@ -237,7 +237,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   test(
     "stopped as soon as the runtime reports the harness's exit, with no clock advance, while its PID still reads alive",
     Effect.gen(function* () {
-      const s = yield* workingPiMain
+      const s = yield* workingPiEntry
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
       yield* until(s.processes.signaled, (pids) => pids.length === 1)
@@ -253,7 +253,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   test(
     "a harness that exits without an event is stopped at the deadline's last look",
     Effect.gen(function* () {
-      const s = yield* workingPiMain
+      const s = yield* workingPiEntry
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
       yield* until(s.processes.signaled, (pids) => pids.length === 1)
@@ -266,7 +266,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   test(
     "the CLI interrupted (Ctrl-C) after the detach: the stop still finishes, the row is back at its terminal, and a start elsewhere is still refused",
     Effect.gen(function* () {
-      const s = yield* workingPiMain
+      const s = yield* workingPiEntry
       yield* s.processes.setSignalIgnored(true)
       const stopping = yield* Effect.forkChild(s.stop)
       yield* untilVirtual(s.db.entryOf(s.projectId), (row) => row?.runtime === null)
@@ -283,7 +283,7 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
   test(
     "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded (an older vibest), or no agent seen but a live (reused) PID; an exited PID moves without a signal",
     Effect.gen(function* () {
-      const s = yield* workingPiMain
+      const s = yield* workingPiEntry
       const restore = s.db.startEntry(s.projectId, "pi", false, s.origin, { pid: HARNESS })
       yield* s.db.startEntry(s.projectId, "pi", false, {
         ...s.origin,

@@ -508,7 +508,7 @@ const checks: ReadonlyArray<Check> = [
           expect(r.code === 0, `vibest ${args.join(" ")} exited ${r.code}: ${r.stderr.trim() || r.stdout.trim()}`)
           return r.stdout
         }
-        type Main = {
+        type EntryRow = {
           id: string
           conversation: string | null
           runtime: string
@@ -520,7 +520,7 @@ const checks: ReadonlyArray<Check> = [
           try {
             return (
               db
-                .query<Main, [string]>(
+                .query<EntryRow, [string]>(
                   `SELECT id, harness_session_id AS conversation, runtime, pid, version
                    FROM ${SESSIONS} s WHERE agent_type = 'main' AND ended_at IS NULL AND directory = ?`,
                 )

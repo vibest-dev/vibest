@@ -115,11 +115,11 @@ const executionErrorChecks: ReadonlyArray<Check> = [
       "an execution that ends in an error fails with its failure and sends the creator one notice carrying it, typed into the entry session once",
     run: async (w) => {
       needs()
-      const main = recordingModel(() => reply("ok"))
+      const entryModel = recordingModel(() => reply("ok"))
       const broken = recordingModel(() => `data: ${JSON.stringify({ error: { message: "model exploded" } })}\n\n`)
       let session = ""
       try {
-        const m = await piEntry(w, "execution-error", main.url)
+        const m = await piEntry(w, "execution-error", entryModel.url)
         session = m.session
         const id = await runSub(w, m.repo, session, broken.url, "pi-execution-error-sub", "fail")
         const notices = () =>
@@ -145,9 +145,9 @@ const executionErrorChecks: ReadonlyArray<Check> = [
             notices()[0]!.content.includes("model exploded"),
           `notices from ${id}: ${JSON.stringify(notices())}`,
         )
-        await until("the entry session's model saw it", () => seen(main).includes("model exploded"), 60_000)
+        await until("the entry session's model saw it", () => seen(entryModel).includes("model exploded"), 60_000)
       } finally {
-        main.stop()
+        entryModel.stop()
         broken.stop()
         await dropHerdrSession(w, session)
       }
@@ -162,12 +162,12 @@ const sendChecks: ReadonlyArray<Check> = [
       "a Pi subagent's vibest send to the Pi entry session is one send row from the subagent to the entry session, delivered, with one inbox.queued and one inbox.moved to delivered, and the entry session's model request holds <agent-message> with the subagent's id",
     run: async (w) => {
       needs()
-      const main = recordingModel(() => reply("ok"))
+      const entryModel = recordingModel(() => reply("ok"))
       let entryId = ""
       const sub = sendingModel(() => entryId, "hello-main")
       let session = ""
       try {
-        const m = await piEntry(w, "send-main", main.url)
+        const m = await piEntry(w, "send-main", entryModel.url)
         session = m.session
         entryId = entryIdOf(w)
         const id = await runSub(w, m.repo, session, sub.url, "pi-send-main-sub", "send to the entry session")
@@ -184,13 +184,13 @@ const sendChecks: ReadonlyArray<Check> = [
             ) === 1,
           `the send ${sent[0]!.id} has not exactly one inbox.queued and one inbox.moved to delivered`,
         )
-        await until("the entry session's model saw the send", () => seen(main).includes("hello-main"), 60_000)
+        await until("the entry session's model saw the send", () => seen(entryModel).includes("hello-main"), 60_000)
         expect(
-          seen(main).includes("<agent-message>") && seen(main).includes(id),
-          `the entry session's model saw ${seen(main)}`,
+          seen(entryModel).includes("<agent-message>") && seen(entryModel).includes(id),
+          `the entry session's model saw ${seen(entryModel)}`,
         )
       } finally {
-        main.stop()
+        entryModel.stop()
         sub.stop()
         await dropHerdrSession(w, session)
       }
@@ -201,7 +201,7 @@ const sendChecks: ReadonlyArray<Check> = [
     title: "a Pi subagent's vibest send to a sibling is refused, and no inbox.queued row is written",
     run: async (w) => {
       needs()
-      const main = recordingModel(() => reply("ok"))
+      const entryModel = recordingModel(() => reply("ok"))
       const sibling = recordingModel(() => reply("done-sibling\nstatus: completed"))
       let siblingId = ""
       const refused = path.join(w.root, "s46-refused.txt")
@@ -214,7 +214,7 @@ const sendChecks: ReadonlyArray<Check> = [
       )
       let session = ""
       try {
-        const m = await piEntry(w, "send-sibling", main.url)
+        const m = await piEntry(w, "send-sibling", entryModel.url)
         session = m.session
         siblingId = await runSub(w, m.repo, session, sibling.url, "pi-send-sibling-b", "wait")
         await until(
@@ -243,7 +243,7 @@ const sendChecks: ReadonlyArray<Check> = [
           "inbox.queued was written for the refused send",
         )
       } finally {
-        main.stop()
+        entryModel.stop()
         sibling.stop()
         sender.stop()
         await dropHerdrSession(w, session)
@@ -256,7 +256,7 @@ const sendChecks: ReadonlyArray<Check> = [
       "a Pi subagent's vibest send to a session of another project is Forbidden, and to an archived session NoSuchSession naming the project's entry session; neither appends an inbox.queued",
     run: async (w) => {
       needs()
-      const main = recordingModel(() => reply("ok"))
+      const entryModel = recordingModel(() => reply("ok"))
       const other = recordingModel(() => reply("ok"))
       const idle = recordingModel(() => reply("done-idle\nstatus: completed"))
       let foreign = ""
@@ -271,7 +271,7 @@ const sendChecks: ReadonlyArray<Check> = [
       )
       const sessions: Array<string> = []
       try {
-        const m = await piEntry(w, "send-refused", main.url)
+        const m = await piEntry(w, "send-refused", entryModel.url)
         sessions.push(m.session)
         const o = await piEntry(w, "send-refused-other", other.url)
         sessions.push(o.session)
@@ -300,7 +300,7 @@ const sendChecks: ReadonlyArray<Check> = [
           `an inbox.queued names ${id} as sender`,
         )
       } finally {
-        main.stop()
+        entryModel.stop()
         other.stop()
         idle.stop()
         sender.stop()
@@ -315,7 +315,7 @@ const sendChecks: ReadonlyArray<Check> = [
     run: async (w) => {
       needs()
       let target = ""
-      const main = recordingModel((messages) => {
+      const entryModel = recordingModel((messages) => {
         if (messages.some((m) => m.role === "tool" && !isEntryRunResult(m)))
           return reply("done-main\nstatus: completed")
         return text(messages.at(-1)).includes("send-now")
@@ -325,7 +325,7 @@ const sendChecks: ReadonlyArray<Check> = [
       const held = heldModel()
       let session = ""
       try {
-        const m = await piEntry(w, "send-killed", main.url)
+        const m = await piEntry(w, "send-killed", entryModel.url)
         session = m.session
         const entryId = entryIdOf(w)
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
@@ -349,9 +349,9 @@ const sendChecks: ReadonlyArray<Check> = [
           60_000,
         )
         expect(notices().length === 1, `${notices().length} notices to the sender: ${JSON.stringify(notices())}`)
-        await until("the sender's model saw the notice", () => seen(main).includes("was not delivered"), 60_000)
+        await until("the sender's model saw the notice", () => seen(entryModel).includes("was not delivered"), 60_000)
       } finally {
-        main.stop()
+        entryModel.stop()
         held.release()
         held.stop()
         await dropHerdrSession(w, session)
@@ -367,12 +367,12 @@ const checks: ReadonlyArray<Check> = [
       "two sends to a busy Pi subagent are queued, then delivered once it is idle, merged into one prompt: one more execution, both rows delivered",
     run: async (w) => {
       needs()
-      const main = heldModel()
-      main.release()
+      const entryModel = heldModel()
+      entryModel.release()
       const model = heldModel()
       let session = ""
       try {
-        const m = await piEntry(w, "merge", main.url)
+        const m = await piEntry(w, "merge", entryModel.url)
         session = m.session
         const sub = await runSub(w, m.repo, session, model.url, "pi-merge-sub", ask("busy"))
         await until("the subagent's execution held", () => model.held() > 0, 60_000)
@@ -415,7 +415,7 @@ const checks: ReadonlyArray<Check> = [
           `the model was asked "first" ${model.asked("first")} and "second" ${model.asked("second")} times on its own`,
         )
       } finally {
-        main.stop()
+        entryModel.stop()
         model.stop()
         await dropHerdrSession(w, session)
       }
@@ -427,20 +427,20 @@ const checks: ReadonlyArray<Check> = [
       "an execution end sends nothing: a Pi subagent ends its execution without sending; the execution completes with its reply, no inbox row has the subagent as sender, no inbox.queued names it as sender, and the entry session's model gets no request after the subagent went idle",
     run: async (w) => {
       needs()
-      const main = recordingModel(() => reply("ok"))
+      const entryModel = recordingModel(() => reply("ok"))
       const sub = recordingModel(() => reply("done-s3\nstatus: completed"))
       let session = ""
       try {
-        const m = await piEntry(w, "quiet", main.url)
+        const m = await piEntry(w, "quiet", entryModel.url)
         session = m.session
         const id = await runSub(w, m.repo, session, sub.url, "pi-quiet-sub", "end the execution without sending")
         await until("the subagent's answer", async () => (await replyOf(w, id, m.repo)).includes("done-s3"), 60_000)
         await expectReplied(w, id)
-        const asked = main.requests.length
+        const asked = entryModel.requests.length
         await Bun.sleep(5_000)
         expect(
-          main.requests.length === asked,
-          `the entry session's model got ${main.requests.length - asked} more requests`,
+          entryModel.requests.length === asked,
+          `the entry session's model got ${entryModel.requests.length - asked} more requests`,
         )
         expect(inboxRows(w, "sender_session_id = ?", id) === 0, `rows sent by ${id}`)
         expect(
@@ -448,7 +448,7 @@ const checks: ReadonlyArray<Check> = [
           `an inbox.queued names ${id} as sender`,
         )
       } finally {
-        main.stop()
+        entryModel.stop()
         sub.stop()
         await dropHerdrSession(w, session)
       }
@@ -460,12 +460,12 @@ const checks: ReadonlyArray<Check> = [
       "after vibest interrupt stops a Pi subagent's held execution, which sends and notifies nothing, the next vibest send starts an execution whose answer arrives",
     run: async (w) => {
       needs()
-      const main = heldModel()
-      main.release()
+      const entryModel = heldModel()
+      entryModel.release()
       const model = heldModel()
       let session = ""
       try {
-        const m = await piEntry(w, "next", main.url)
+        const m = await piEntry(w, "next", entryModel.url)
         session = m.session
         const sub = await runSub(w, m.repo, session, model.url, "pi-next-sub", ask("stuck"))
         await until("the subagent's execution held", () => model.held() > 0, 60_000)
@@ -502,7 +502,7 @@ const checks: ReadonlyArray<Check> = [
           "execution.ended",
         ])
       } finally {
-        main.stop()
+        entryModel.stop()
         model.stop()
         await dropHerdrSession(w, session)
       }
@@ -514,11 +514,11 @@ const checks: ReadonlyArray<Check> = [
       "vibest run pi --model with a model Pi does not list is refused (HarnessUnavailable) naming the model, and starts no session",
     run: async (w) => {
       needs()
-      const main = heldModel()
-      main.release()
+      const entryModel = heldModel()
+      entryModel.release()
       let session = ""
       try {
-        const m = await piEntry(w, "badmodel", main.url)
+        const m = await piEntry(w, "badmodel", entryModel.url)
         session = m.session
         const before = row<{ n: number }>(w, "SELECT count(*) AS n FROM session")?.n ?? 0
         const r = await w.viaEntry(
@@ -530,7 +530,7 @@ const checks: ReadonlyArray<Check> = [
             "--model",
             "no-such-model-e2e",
             "--env",
-            `PI_CODING_AGENT_DIR=${await piDir(w, "pi-badmodel-sub", main.url)}`,
+            `PI_CODING_AGENT_DIR=${await piDir(w, "pi-badmodel-sub", entryModel.url)}`,
             "--",
             ask("bad"),
           ],
@@ -543,7 +543,7 @@ const checks: ReadonlyArray<Check> = [
         const after = row<{ n: number }>(w, "SELECT count(*) AS n FROM session")?.n ?? 0
         expect(after === before, `${after - before} sessions were created`)
       } finally {
-        main.stop()
+        entryModel.stop()
         await dropHerdrSession(w, session)
       }
     },
@@ -558,7 +558,7 @@ const checks: ReadonlyArray<Check> = [
       const asAgent = path.join(w.root, "s40-agent.txt")
       const hinted = path.join(w.root, "s40-hinted.txt")
       const asUser = path.join(w.root, "s40-user.txt")
-      const main = recordingModel(() => reply("ok"))
+      const entryModel = recordingModel(() => reply("ok"))
       const sub = recordingModel((messages) =>
         messages.some((m) => m.role === "tool")
           ? reply("done-s40\nstatus: completed")
@@ -570,7 +570,7 @@ const checks: ReadonlyArray<Check> = [
       const stale = `${w.herdrSession}-stale`
       let server: ReturnType<typeof Bun.spawn> | undefined
       try {
-        const m = await piEntry(w, "stale-env", main.url)
+        const m = await piEntry(w, "stale-env", entryModel.url)
         session = m.session
         const id = await runSub(w, m.repo, session, sub.url, "pi-stale-env-sub", "dump the environment")
         await until("the subagent's answer", async () => (await replyOf(w, id, m.repo)).includes("done-s40"), 60_000)
@@ -652,7 +652,7 @@ const checks: ReadonlyArray<Check> = [
           if (server.exitCode === null) server.kill("SIGKILL")
         }
         await server?.exited
-        main.stop()
+        entryModel.stop()
         sub.stop()
         await dropHerdrSession(w, stale)
         await dropHerdrSession(w, session)

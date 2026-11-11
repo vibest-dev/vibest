@@ -787,7 +787,7 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "FocusEntry is null without a running entryId, and focuses one that is running",
+    "FocusEntry is null without a running entry session, and focuses one that is running",
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime

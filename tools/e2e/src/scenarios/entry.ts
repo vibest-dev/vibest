@@ -7,7 +7,7 @@ import { replyOf, expect, fail, herdr, row, SESSIONS, Skip, until, type World } 
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type Proc = { name: string; argv?: Array<string> | null }
-type Main = { id: string; directory: string; conversation: string | null; runtime: string | null }
+type EntryRow = { id: string; directory: string; conversation: string | null; runtime: string | null }
 
 const needs = (...bins: Array<string>) => {
   for (const bin of bins) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
@@ -53,7 +53,7 @@ const flag = (argv: ReadonlyArray<string>, name: string) => {
 }
 
 const liveEntry = (w: World) =>
-  row<Main>(
+  row<EntryRow>(
     w,
     `SELECT s.id, s.directory, s.harness_session_id AS conversation, s.runtime FROM ${SESSIONS} s
      WHERE s.agent_type = 'main' AND s.ended_at IS NULL ORDER BY s.created_at DESC LIMIT 1`,
@@ -90,7 +90,7 @@ const execution = async (w: World, socket: string, pane: string, prompt: string,
   )
 }
 
-const exitMain = async (w: World, socket: string, pane: string, id: string) => {
+const exitEntry = async (w: World, socket: string, pane: string, id: string) => {
   await herdr(socket, "pane.close", { pane_id: pane })
   await until(
     "the entry session's process.end",
@@ -179,7 +179,7 @@ const checks: ReadonlyArray<Check> = [
         const prompt = ask("first")
         await execution(w, socket, first.pane, prompt, "done-first")
         const one = liveEntry(w)!
-        await exitMain(w, socket, first.pane, one.id)
+        await exitEntry(w, socket, first.pane, one.id)
 
         const again = await start([], "the reopened entry session")
         expect(liveEntry(w)?.id === one.id, `reopened ${liveEntry(w)?.id}, not ${one.id}`)
@@ -192,7 +192,7 @@ const checks: ReadonlyArray<Check> = [
           async () => (await screen(socket, again.pane)).includes("done-first"),
           30_000,
         )
-        await exitMain(w, socket, again.pane, one.id)
+        await exitEntry(w, socket, again.pane, one.id)
 
         const fresh = await start(["--new"], "the --new entry session")
         const two = liveEntry(w)!

@@ -127,7 +127,7 @@ describe("restart in place", () => {
     assert.strictEqual(shown, `Notice: ${CONTINUE}`)
   })
 
-  const workingMain = (harness: "cursor" | "pi") =>
+  const workingEntry = (harness: "cursor" | "pi") =>
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime
@@ -147,7 +147,7 @@ describe("restart in place", () => {
   test(
     "a Cursor entry session (no integration reports its pid or its readiness): never listed as outdated, and a restart asked for anyway signals and runs nothing",
     Effect.gen(function* () {
-      const { herdr, id } = yield* workingMain("cursor")
+      const { herdr, id } = yield* workingEntry("cursor")
       const sessions = yield* Sessions
       const processes = yield* FakeProcesses
       assert.deepStrictEqual(yield* sessions.outdated, [])

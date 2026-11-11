@@ -74,7 +74,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S33",
     title:
-      "herdr-core runtime: a Pi entry session started with --runtime hc runs `vibest run`, the subagent starts in hc as its child (no notes, outlives it), results and a send go both ways; the entryId terminal carries herdr.space=<project> and herdr.tab=<entryId session>, with readable project and task names",
+      "herdr-core runtime: a Pi entry session started with --runtime hc runs `vibest run`, the subagent starts in hc as its child (no notes, outlives it), results and a send go both ways; the entry session terminal carries herdr.space=<project> and herdr.tab=<entry session id>, with readable project and task names",
     run: async (w) => {
       for (const bin of ["pi", "hc"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi", { heldMs: 3_000 })
@@ -157,18 +157,21 @@ const checks: ReadonlyArray<Check> = [
             id?: string
           }
         const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, entryId)?.p
-        const mainAt = runtimeOf(entryId)
-        expect(mainAt.kind === "hc", `the entry session runs in ${JSON.stringify(mainAt)}, not hc`)
-        const mainTerminal = await core.get(addressOf(mainAt.id!))
-        expect(mainTerminal.name === "hc-main", `the entryId terminal name: ${mainTerminal.name}`)
-        expect(mainAt.id === `${mainTerminal.address}@${w.hcSocket}`, `the entryId identity changed: ${mainAt.id}`)
+        const entryAt = runtimeOf(entryId)
+        expect(entryAt.kind === "hc", `the entry session runs in ${JSON.stringify(entryAt)}, not hc`)
+        const entryTerminal = await core.get(addressOf(entryAt.id!))
+        expect(entryTerminal.name === "hc-main", `the entry session terminal name: ${entryTerminal.name}`)
         expect(
-          mainTerminal.labels["herdr.space"] === projectId &&
-            mainTerminal.labels["herdr.tab"] === entryId &&
-            mainTerminal.labels["vibest.runtime"] === "hc" &&
-            mainTerminal.labels["vibest.session"] === entryId &&
-            mainTerminal.labels["vibest.project"] === projectId,
-          `the entryId terminal's labels: ${JSON.stringify(mainTerminal.labels)} (project ${projectId}, entryId ${entryId})`,
+          entryAt.id === `${entryTerminal.address}@${w.hcSocket}`,
+          `the entry session identity changed: ${entryAt.id}`,
+        )
+        expect(
+          entryTerminal.labels["herdr.space"] === projectId &&
+            entryTerminal.labels["herdr.tab"] === entryId &&
+            entryTerminal.labels["vibest.runtime"] === "hc" &&
+            entryTerminal.labels["vibest.session"] === entryId &&
+            entryTerminal.labels["vibest.project"] === projectId,
+          `the entry session terminal's labels: ${JSON.stringify(entryTerminal.labels)} (project ${projectId}, entryId ${entryId})`,
         )
         const sub = model.sessionId()
         const subAt = runtimeOf(sub)
@@ -185,19 +188,19 @@ const checks: ReadonlyArray<Check> = [
         )
         expect(subAt.id === `${subTerminal.address}@${w.hcSocket}`, `the subagent identity changed: ${subAt.id}`)
         expect(
-          subTerminal.parent === mainTerminal.address &&
+          subTerminal.parent === entryTerminal.address &&
             subTerminal.notify === false &&
             subTerminal.labels["vibest.session"] === sub &&
             subTerminal.labels["vibest.project"] === projectId &&
             subTerminal.labels["herdr.space"] === undefined,
-          `the subagent's terminal: ${JSON.stringify(subTerminal)}; entryId ${mainTerminal.address}`,
+          `the subagent's terminal: ${JSON.stringify(subTerminal)}; entryId ${entryTerminal.address}`,
         )
         const shown = (id: string) =>
           JSON.stringify((samples.get(id) ?? []).map((x) => `${x.at % 100_000} ${x.status}/${x.executionState}`))
-        const mainSeen = samples.get(entryId) ?? []
-        const mainWorking = mainSeen.findIndex((x) => x.status === "working")
+        const entrySeen = samples.get(entryId) ?? []
+        const entryWorking = entrySeen.findIndex((x) => x.status === "working")
         expect(
-          mainWorking >= 0 && mainSeen.slice(mainWorking).some((x) => x.status === "idle"),
+          entryWorking >= 0 && entrySeen.slice(entryWorking).some((x) => x.status === "idle"),
           `the entry session was not seen working, then idle: ${shown(entryId)}`,
         )
         const subSeen = samples.get(sub) ?? []
@@ -212,7 +215,7 @@ const checks: ReadonlyArray<Check> = [
         }
         const listed = await core.terminals()
         const all = await Promise.all(listed.map((t) => core.get(t.address)))
-        const titled = all.find((t) => t.parent === mainTerminal.address && t.address !== subTerminal.address)
+        const titled = all.find((t) => t.parent === entryTerminal.address && t.address !== subTerminal.address)
         expect(
           titled !== undefined && titled.name === `fix-login-bug-${titled.labels["vibest.session"]?.slice(0, 4)}`,
           `the explicit-title terminal: ${JSON.stringify(titled)}`,
@@ -359,10 +362,10 @@ const checks: ReadonlyArray<Check> = [
         ).catch(async (e: Error) => {
           throw new Error(`${e.message}\nterminals:\n${await core.screens()}`)
         })
-        const mainAt = runtimeOf(entryId)
+        const entryAt = runtimeOf(entryId)
         expect(
-          mainAt.kind === "hc" && mainAt.id === `${caller.address}@${w.hcSocket}`,
-          `the entry session runs in ${JSON.stringify(mainAt)}, not in ${caller.address} on ${w.hcSocket}`,
+          entryAt.kind === "hc" && entryAt.id === `${caller.address}@${w.hcSocket}`,
+          `the entry session runs in ${JSON.stringify(entryAt)}, not in ${caller.address} on ${w.hcSocket}`,
         )
         await w.okViaEntry(["run", "pi", "--runtime", "hc", "--env", env, "--title", "Wake parent", ask("zero")], {
           cwd: repo,

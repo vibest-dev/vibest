@@ -391,7 +391,7 @@ describe("Db", () => {
   )
 
   it.effect(
-    "a execution-error notice goes to the parent while it has not ended, then to the project's current entryId session",
+    "a execution-error notice goes to the parent while it has not ended, then to the project's current entry session",
     () =>
       Effect.gen(function* () {
         const db = yield* Db
