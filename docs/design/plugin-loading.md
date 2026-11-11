@@ -1,6 +1,6 @@
 # Plugin loading
 
-Implementation notes for the [plugin architecture](architecture.md#7-plugin-architecture-effect-only).
+Implementation notes for the [plugin architecture](architecture.md#7-plugin-architecture).
 
 ## Order and boundary
 

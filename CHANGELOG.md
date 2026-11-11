@@ -43,6 +43,11 @@ release. Each release lists what broke, who is affected and how to migrate under
   trace's `changes` list the fields each callback returned. Migrate: `e.harness = "pi"` becomes
   `return { harness: "pi" }` (for example `Effect.succeed({ harness: "pi" })`), `e.move = m` becomes `return m`, and
   `e.notes.push(n)` becomes `return [n]`.
+- **Promise plugins** (plugin authors): a plugin may be `Plugin.define({ id, setup })` instead of `{ id, effect }`:
+  `setup` gets a context of Promises (hook callbacks return a value or a Promise and refuse by throwing
+  `AgentRefused`, `event.subscribe` is an `AsyncIterable`) and may return a cleanup that runs when the plugin unloads.
+  `Plugin.Plugin` is now the union `EffectPlugin | PromisePlugin`, so code that calls `plugin.effect` on a
+  `Plugin.Plugin` calls `Plugin.effectOf(plugin)` instead.
 - **The read model** (anyone reading `vibest.db`): the projection is version 4 and is rebuilt from the log when vibestd
   opens the file. `session.report_to_session_id`, `session.origin_parent`, `session.seq`, `project.seq`,
   `inbox.queued_at` and `process.resume` are gone: a session's notices go to its parent while it lives, else to the

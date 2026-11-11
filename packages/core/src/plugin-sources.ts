@@ -51,7 +51,8 @@ const isPlugin = (u: unknown): u is VibestPlugin.Plugin.Plugin =>
   typeof u === "object" &&
   u !== null &&
   typeof (u as { readonly id?: unknown }).id === "string" &&
-  typeof (u as { readonly effect?: unknown }).effect === "function"
+  (typeof (u as { readonly effect?: unknown }).effect === "function" ||
+    typeof (u as { readonly setup?: unknown }).setup === "function")
 
 const PluginModule = Schema.Struct({
   default: Schema.declare(isPlugin),
@@ -178,7 +179,7 @@ export const makeSources = Effect.fnUntraced(function* (
       }),
       Effect.flatMap((m) =>
         Schema.decodeUnknownEffect(PluginModule)(m).pipe(
-          Effect.mapError(() => "must export default Plugin.define({ id, effect })"),
+          Effect.mapError(() => "must export default Plugin.define({ id, effect }) or Plugin.define({ id, setup })"),
         ),
       ),
       Effect.result,

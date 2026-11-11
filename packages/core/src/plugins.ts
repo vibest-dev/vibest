@@ -1,4 +1,4 @@
-import type * as VibestPlugin from "@vibest/plugin"
+import * as VibestPlugin from "@vibest/plugin"
 import { Catalog, type Fact, type FactOf, type FactType } from "@vibest/schema/event"
 import { AgentRefused, type Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 import { Cause, Clock, Context, Duration, Effect, Exit, Latch, Layer, Option, Queue, Scope, Stream } from "effect"
@@ -243,7 +243,10 @@ export const makeHost = (options: { readonly timeout?: Duration.Input } = {}) =>
         Queue.offerUnsafe(broken, { running, refresh })
       }
       const exit = yield* timeoutWithoutWaiting(
-        Effect.suspend(() => plugin.effect(context)).pipe(Scope.provide(scope), Registry.group(report)),
+        Effect.suspend(() => VibestPlugin.Plugin.effectOf(plugin)(context)).pipe(
+          Scope.provide(scope),
+          Registry.group(report),
+        ),
         scope,
         timeout,
       )
