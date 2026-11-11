@@ -754,7 +754,7 @@ user plugins            the plugins directory (sorted by name), then `vibest.jso
 
 | Entry                                  | Meaning                                                                                                                                                                                         |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `"./plugins/x.ts"`                     | add a local plugin: a `.ts`/`.js` file or a directory, by a path starting with `/`, `./`, `../` or `file://`, relative to the vibest home                                                       |
+| `"./plugins/x.ts"`                     | add a local plugin: a `.ts`/`.js` file or a directory, by a path starting with `/` or `file://` (absolute, taken as is) or `./` or `../` (resolved from the vibest home)                        |
 | `{ "package": "…", "options": { … } }` | add a local plugin with options                                                                                                                                                                 |
 | `"@scope/vibest-plugin-x"`             | any other name is a package: not supported yet, listed as failed with `npm plugins are not supported yet`                                                                                       |
 | `"-check"`                             | remove the user plugins added before it (the plugins directory, earlier entries) whose id matches: an exact id, `prefix.*`, or `*` (which also removes failed ones); builtins cannot be removed |
@@ -1119,6 +1119,8 @@ npm in its prefix. Its own entries:
   vibest.json                the plugin list (§7), read only
   plugins/                   plugin files and directories (§7), read only
   vibest.db                  the ledger and read model (with its -wal and -shm files)
+  vibest.db.before-<version>   copy of vibest.db (and its -wal) a handing-over vibestd of <version> makes at start
+  identity.json              this machine's id, name and machine_id; created or rewritten at every vibestd start
   vibest.sock  vibest-http.sock   vibestd's RPC socket, and the HTTP socket the Claude plugin reports to
   vibestd.pid  vibestd.log   vibestd's start lock and record, and its log
   projects/<project id>/     the project folder: preferences.md, docs/, memories/, artifacts/
