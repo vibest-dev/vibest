@@ -780,7 +780,7 @@ export class Sessions extends Context.Service<
         switch (event.type) {
           case "execution.ended":
             return event.data.outcome === "failed"
-              ? resultReady(event.sessionId!)
+              ? checkFailed(event.sessionId!)
               : deliverNext(event.sessionId!).pipe(
                   Effect.andThen(event.data.outcome === "completed" ? archiveSoon([event.sessionId!]) : Effect.void),
                 )
@@ -854,7 +854,7 @@ export class Sessions extends Context.Service<
           { discard: true },
         )
 
-      const resultReady = (id: string) =>
+      const checkFailed = (id: string) =>
         Effect.forkIn(
           locked(id, true)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform)),
           scope,
