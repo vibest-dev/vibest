@@ -31,27 +31,27 @@ Status: now. Run once per harness (Claude, Pi, Cursor).
 
 ### S2. Delegation: supervisor and workers (type B)
 
-_As a developer, I chat with the main Agent; it splits a feature across workers, and their results come back into
+_As a developer, I chat with the entry session; it splits a feature across workers, and their results come back into
 the same conversation without my polling._
 
-| Step                                                                         | Expect                                                                                                                                     |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `vibest` in `shop`; ask: "add CSV export and fix the login bug, in parallel" | the main Agent (coordinator) runs two workers on different harnesses; it edits no files itself                                             |
-| workers finish at different times                                            | each result arrives in the main conversation as new input, once, in arrival order; nothing is pasted while the main Agent is mid-execution |
-| a worker calls `vibest send <main id> "blocked on X"`                        | the message reaches the main conversation; the main Agent answers with `vibest send`                                                       |
-| main Agent merges                                                            | it summarises both branches; `pnpm test` is green on each                                                                                  |
+| Step                                                                         | Expect                                                                                                                                        |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vibest` in `shop`; ask: "add CSV export and fix the login bug, in parallel" | the entry session (coordinator) runs two workers on different harnesses; it edits no files itself                                             |
+| workers finish at different times                                            | each result arrives in the main conversation as new input, once, in arrival order; nothing is pasted while the entry session is mid-execution |
+| a worker calls `vibest send <main id> "blocked on X"`                        | the message reaches the main conversation; the entry session answers with `vibest send`                                                       |
+| entry session merges                                                         | it summarises both branches; `pnpm test` is green on each                                                                                     |
 
-Status: now (Claude main Agent uses the inbox bridge; Pi main Agent uses its extension).
+Status: now (Claude entry session uses the inbox bridge; Pi entry session uses its extension).
 
 ### S3. Committee (type B, skill)
 
 _As a tech lead, I want two or three models to argue a design until they agree, and see where they differed._
 
-| Step                                                                                              | Expect                                                                                                                         |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| ask the main Agent: "committee: should sessions be stored in SQLite or files? Claude, Cursor, Pi" | three read-only members, one per harness, same question                                                                        |
-| exchanges                                                                                         | the main Agent forwards each member's argument to the others with `vibest send`; every answer returns to the main conversation |
-| end                                                                                               | a summary listing the agreement and the disagreements; no member changed a file (worktrees clean)                              |
+| Step                                                                                                 | Expect                                                                                                                            |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| ask the entry session: "committee: should sessions be stored in SQLite or files? Claude, Cursor, Pi" | three read-only members, one per harness, same question                                                                           |
+| exchanges                                                                                            | the entry session forwards each member's argument to the others with `vibest send`; every answer returns to the main conversation |
+| end                                                                                                  | a summary listing the agreement and the disagreements; no member changed a file (worktrees clean)                                 |
 
 Status: now as coordinator behaviour; after refactor as the `committee` skill with all members in one Run (`--in`),
 one grouped Message.
@@ -63,7 +63,7 @@ _As a developer, I want a planner to write the plan and an implementer to carry 
 | Step                                                                      | Expect                                                                      |
 | ------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | ask: "handoff: plan the CSV export with Claude, implement it with Cursor" | planner writes `PLAN.md` in its worktree and finishes                       |
-| main Agent starts the implementer in the planner's worktree               | same worktree (`--peer` now; same Run later); it reads `PLAN.md`            |
+| entry session starts the implementer in the planner's worktree            | same worktree (`--peer` now; same Run later); it reads `PLAN.md`            |
 | archive both                                                              | the shared worktree is removed only by its owner; the peer never removes it |
 
 Status: now (`--peer`); after refactor as the `handoff` skill.
@@ -72,11 +72,11 @@ Status: now (`--peer`); after refactor as the `handoff` skill.
 
 _As a developer, I want a second opinion on the work in progress without anyone touching the code._
 
-| Step                                                                          | Expect                                                                                         |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| while a worker is on the login bug, ask: "advisor: review that worker's diff" | a read-only Agent in the main checkout                                                         |
-| advisor tries to edit a file or run `vibest run`                              | refused (read-only arguments, guard)                                                           |
-| suggestions                                                                   | arrive in the main conversation; the main Agent forwards them to the worker with `vibest send` |
+| Step                                                                          | Expect                                                                                            |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| while a worker is on the login bug, ask: "advisor: review that worker's diff" | a read-only Agent in the main checkout                                                            |
+| advisor tries to edit a file or run `vibest run`                              | refused (read-only arguments, guard)                                                              |
+| suggestions                                                                   | arrive in the main conversation; the entry session forwards them to the worker with `vibest send` |
 
 Status: now (read-only by instruction plus guard); after refactor with `access: read` enforced by the adapter.
 
@@ -84,11 +84,11 @@ Status: now (read-only by instruction plus guard); after refactor with `access: 
 
 _As a developer, I want three attempts at a hard fix and keep the best one._
 
-| Step                                      | Expect                                                                         |
-| ----------------------------------------- | ------------------------------------------------------------------------------ |
-| ask: "race: fix the login bug three ways" | three workers, three separate worktrees                                        |
-| all finish                                | the main Agent compares `pnpm test` and diff size per worktree, names a winner |
-| keep one                                  | the winner's branch is pushed; the other two are archived, worktrees removed   |
+| Step                                      | Expect                                                                            |
+| ----------------------------------------- | --------------------------------------------------------------------------------- |
+| ask: "race: fix the login bug three ways" | three workers, three separate worktrees                                           |
+| all finish                                | the entry session compares `pnpm test` and diff size per worktree, names a winner |
+| keep one                                  | the winner's branch is pushed; the other two are archived, worktrees removed      |
 
 Status: now (three `run`s); after refactor as one Run with N Agents and one grouped result.
 
@@ -96,9 +96,9 @@ Status: now (three `run`s); after refactor as one Run with N Agents and one grou
 
 _As a developer, I want an agent to keep fixing until the tests pass, at most N tries._
 
-| Step                                                                                                                    | Expect                                                                            |
-| ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| now: tell the main Agent "fix login; after each result run `pnpm test` in its worktree and send failures back, 3 tries" | each failing run's output goes back as the next prompt; stops at green or after 3 |
+| Step                                                                                                                       | Expect                                                                            |
+| -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| now: tell the entry session "fix login; after each result run `pnpm test` in its worktree and send failures back, 3 tries" | each failing run's output goes back as the next prompt; stops at green or after 3 |
 
 Status: now as coordinator behaviour.
 
@@ -131,12 +131,12 @@ Status: now.
 
 _If the daemon or a pane dies, I lose no result and nothing is sent twice._
 
-| Fault                                  | Expect                                                                            |
-| -------------------------------------- | --------------------------------------------------------------------------------- |
-| kill the daemon while two workers work | next `vibest` command restarts it; both results still reach the main Agent once   |
-| close a worker's pane mid-execution    | execution ends `lost` within about 10 s; the main Agent is told                   |
-| model that does not exist              | a failed result with Claude's error, no screen text; `vibest peek` shows the pane |
-| `vibest update` while workers are busy | the replacement waits or names its blockers; no running worker is cut off         |
+| Fault                                  | Expect                                                                             |
+| -------------------------------------- | ---------------------------------------------------------------------------------- |
+| kill the daemon while two workers work | next `vibest` command restarts it; both results still reach the entry session once |
+| close a worker's pane mid-execution    | execution ends `lost` within about 10 s; the entry session is told                 |
+| model that does not exist              | a failed result with Claude's error, no screen text; `vibest peek` shows the pane  |
+| `vibest update` while workers are busy | the replacement waits or names its blockers; no running worker is cut off          |
 
 Status: now.
 
@@ -155,7 +155,7 @@ Status: now.
 
 _Workers share Project knowledge, and a plugin picks the harness for me._
 
-- The main Agent writes `memories/decisions.md` in the project folder with its file tool; a worker's rules list it in the memory index.
+- The entry session writes `memories/decisions.md` in the project folder with its file tool; a worker's rules list it in the memory index.
 - A routing plugin in `$VIBEST_HOME/plugins` picks Cursor for `test`-related tasks; `vibest plugins` shows its calls;
   editing the plugin file changes the choice without a daemon restart; a plugin that refuses blocks the run with its
   reason.
@@ -198,7 +198,7 @@ After M7 (`plugin-git`), as its acceptance test:
 | Step                                                  | Expect                                                                                        |
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `vibest project create work --from shop --from admin` | `work/shop` and `work/admin` are copies (local clones), not symlinks; the originals untouched |
-| `vibest` in `work`                                    | one main Agent for the whole Project; `project info` lists both folders                       |
+| `vibest` in `work`                                    | one entry session for the whole Project; `project info` lists both folders                    |
 | `vibest run … --in isolated`                          | one worktree per repository inside the Workspace, one branch each                             |
 | `admin`'s worktree dirty, `shop`'s clean; archive     | refused, naming `admin` and what would be lost                                                |
 | a plain directory as a Project                        | only the `root` Workspace; `isolated` is refused with a reason                                |

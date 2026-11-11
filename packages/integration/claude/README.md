@@ -7,12 +7,12 @@ vibestd's unix socket `<VIBEST_HOME>/vibest-http.sock`; the plugin runs no `vibe
   current Claude session id. vibest maps the reason: `answer` is the result as it is; `aborted` is an interrupted
   (failed) result when the person pressed Esc, and nothing when `vibest interrupt` (or remove, archive) stopped the
   execution; `refusal` and `error` are failed results. A subagent's loop (`agentId` set) reports nothing. For the
-  coordinator vibestd records only the conversation id.
+  entry session vibestd records only the conversation id.
 - `prompt.submit` posts a worker's prompt with its `origin.kind` to `/hooks/claude/prompt`; vibest keeps only what
   the person submitted (`composer`, or `bridge` for Remote Control).
 - `tool.call` posts each tool call, a subagent's included, to `/hooks/claude/guard` and returns `{ deny }` when vibest
   refuses it. It tries for 2 s, then again after 100, 300 and 900 ms; when nothing answers, the call is refused.
-- The **coordinator inbox**: from `session.start`, a coordinator polls `/inbox/poll` every second. A batch comes as
+- The **entry session inbox**: from `session.start`, an entry session polls `/inbox/poll` every second. A batch comes as
   one short line (`<Type> Agent "<title>" completed (<id>) · +N more`) and its full text. The line is submitted with
   `$.prompt.submit` from the AbovePrompt `ui.render` hook, one batch per draw, and this module's own `prompt.submit`
   hook attaches the full text as context. An accepted submit is acked by row id (`/inbox/ack`) on the next tick; a
@@ -68,7 +68,7 @@ The generated files are ignored by Git. `test/distribution.test.ts` packs this p
 The launch side (arguments, models, resume, subscription reading) is the `claude` harness definition, added by the
 builtin plugin `harness-claude` in `packages/plugin-harnesses`; this package is only what runs inside Claude.
 
-Nothing to install. vibest starts each Claude session (and a Claude coordinator) with
+Nothing to install. vibest starts each Claude session (and a Claude entry session) with
 `claude --plugin-dir <@vibest/cli>/harnesses/claude`, which loads the plugin for that session only. vibest writes
 nothing into `~/.claude`. Plain `claude` sessions never load it, and in a Claude process without `VIBEST_AGENT` and
 `VIBEST_SESSION_ID` every listener returns `next` and sends nothing.

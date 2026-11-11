@@ -5,7 +5,7 @@ import type { SqlClient, Statement } from "effect/sql"
 import type { MachineRow, OutboxRow } from "./db-remote.ts"
 import {
   attemptsOf,
-  CoordinatorRow,
+  EntryRow,
   MESSAGE_STATUSES,
   type MessageStatusName,
   SessionRow,
@@ -176,13 +176,13 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
   }
 }
 
-export type CoordinatorColumns = SessionColumns & {
+export type EntryColumns = SessionColumns & {
   readonly projectDirectory: string | null
   readonly ownDirectory: string
 }
 
-export const coordinatorOf = (
-  row: CoordinatorColumns,
+export const entryRow = (
+  row: EntryColumns,
   live: { readonly integration: Integration | undefined; readonly moving: boolean } = {
     integration: undefined,
     moving: false,
@@ -193,6 +193,7 @@ export const coordinatorOf = (
   const directory = row.projectDirectory || row.ownDirectory
   return {
     id: row.id,
+    agent: row.agent,
     projectId: row.project,
     harnessId: row.harness ?? "",
     harnessSessionId: row.conversation,
@@ -211,7 +212,7 @@ export const coordinatorOf = (
 
 export const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
 const decodeInbox = Schema.decodeUnknownEffect(Schema.Array(InboxRow))
-export const decodeCoordinators = Schema.decodeUnknownEffect(Schema.Array(CoordinatorRow))
+export const decodeEntrySessions = Schema.decodeUnknownEffect(Schema.Array(EntryRow))
 
 type InboxColumns = {
   readonly id: number
@@ -244,8 +245,8 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
       ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
-  const coordinatorRows = (project?: string) =>
-    sql<CoordinatorColumns>`SELECT s.id, s.project_id AS project, s.created_at, s.directory AS own_directory,
+  const entryRows = (project?: string) =>
+    sql<EntryColumns>`SELECT s.id, s.agent, s.project_id AS project, s.created_at, s.directory AS own_directory,
         q.directory AS project_directory,
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.ready_at, p.ended_at AS p_ended
@@ -386,7 +387,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     spawnedBy,
     outboxOf,
     sessionRows,
-    coordinatorRows,
+    entryRows,
     inboxWhere,
     hasPeerItem: (item: string) =>
       sql`SELECT 1 FROM inbox WHERE peer_item = ${item}`.pipe(Effect.map((rows) => rows.length > 0)),

@@ -5,7 +5,7 @@ counts as working.
 
 ## S1. Running a session
 
-`vibest run`, run by the main agent or another session, starts a session in a new worktree: a linked worktree of the
+`vibest run`, run by the entry session or another session, starts a session in a new worktree: a linked worktree of the
 repository, detached, at its HEAD. Its options work: `--title` names it, `--provider` and `--model` choose what it runs on, `--env` reaches the harness but is
 never stored, `--session` picks the herdr session it opens in, and `--peer` runs a second session in the same worktree
 in another pane. `vibest ls` shows the title, harness, provider, model and where it runs.
@@ -15,7 +15,7 @@ in another pane. `vibest ls` shows the title, harness, provider, model and where
 `vibest result` has no `reply` before a session's first execution ends and then holds its reply as `reply` (the latest ended
 execution's status and reply text, kept in the execution row; an execution vibestd ended itself, lost or by an exit, has no text; a
 reply that arrives after vibestd gave up its execution as lost is an execution of its own, not attached back); `vibest status` says vibestd is
-running and which process it is; `vibest ls` lists the main agent and each session with its latest reply; after
+running and which process it is; `vibest ls` lists the entry session and each session with its latest reply; after
 `vibest archive`, only `vibest ls --all` lists the session, as exited.
 
 ## S6. Archiving
@@ -33,8 +33,8 @@ or was sent still waiting, and sends no notice for a clean archive. `--archive-o
 
 ## S9. A limit on sessions
 
-`VIBEST_MAX_SESSIONS` limits how many sessions run at once, not counting the main agent: one more `vibest run` by the
-main agent fails naming the limit, and starts once a session is archived.
+`VIBEST_MAX_SESSIONS` limits how many sessions run at once, not counting the entry session: one more `vibest run` by the
+entry session fails naming the limit, and starts once a session is archived.
 
 ## S20. Ids and peek
 

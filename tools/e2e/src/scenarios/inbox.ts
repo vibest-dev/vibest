@@ -70,7 +70,7 @@ export const dropHerdrSession = async (w: World, session: string) => {
   }
 }
 
-const claudeMain = async (
+const claudeEntry = async (
   w: World,
   name: string,
   model: ReturnType<typeof delegatingModel>,
@@ -97,24 +97,24 @@ const claudeMain = async (
   const repo = await project(w, name)
   const env = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
   await w.daemon()
-  await w.startMain({ harness: "claude", session, cwd: repo, env: flags, timeoutMs: 120_000 })
-  let main = ""
+  await w.startEntry({ harness: "claude", session, cwd: repo, env: flags, timeoutMs: 120_000 })
+  let entryId = ""
   await until(
-    "the main agent in vibest ls",
+    "the entry session in vibest ls",
     async () => {
-      main =
+      entryId =
         (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
           (e) => e.agent === "main",
         )?.id ?? ""
-      return main !== ""
+      return entryId !== ""
     },
     60_000,
   )
-  const projectId = row<{ p: number }>(w, "SELECT project_id AS p FROM session WHERE id = ?", main)!.p
+  const projectId = row<{ p: number }>(w, "SELECT project_id AS p FROM session WHERE id = ?", entryId)!.p
   const conversation = () =>
-    row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, main)?.c ?? null
+    row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, entryId)?.c ?? null
   const pane = () => {
-    const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, main)?.r ?? "{}"
+    const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, entryId)?.r ?? "{}"
     const id = (JSON.parse(runtime) as { id?: string }).id ?? ""
     return id.split("/")[1] ?? ""
   }
@@ -123,8 +123,8 @@ const claudeMain = async (
     return String((r.read as { text?: string } | undefined)?.text ?? "")
   }
   await answerFolderTrust(screen, (key) => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [key] }))
-  await until("the main agent's first poll", () => conversation() !== null, 120_000).catch(async (e: Error) => {
-    const peek = await w.vibest(["peek", main, "--lines", "40"], { cwd: repo })
+  await until("the entry session's first poll", () => conversation() !== null, 120_000).catch(async (e: Error) => {
+    const peek = await w.vibest(["peek", entryId, "--lines", "40"], { cwd: repo })
     const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
     throw new Error(`${e.message}; its screen:\n${peek.stdout}${peek.stderr}\nvibestd.log:\n${log.slice(-3000)}`)
   })
@@ -132,13 +132,13 @@ const claudeMain = async (
     row<{ n: number }>(
       w,
       "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_session_id = ? AND status = 'delivered'",
-      main,
+      entryId,
       from,
     )?.n ?? 0
   const shown = async (line: string, marker: string) => {
     let entries: Awaited<ReturnType<typeof transcript>> = []
     await until(
-      `the ${marker} line and its context in the main agent's conversation`,
+      `the ${marker} line and its context in the entry session's conversation`,
       async () => {
         entries = await transcript(w, repo, config)
         const lineShown = entries.some((e) => e.type === "user" && e.text.includes(line))
@@ -188,7 +188,7 @@ const claudeMain = async (
   }
   return {
     repo,
-    main,
+    entryId,
     flags,
     config,
     projectId,
@@ -211,13 +211,13 @@ const claudeMain = async (
 const curl = async (
   w: World,
   route: string,
-  who: { main: string; projectId: number | string; protocol?: string },
+  who: { entryId: string; projectId: number | string; protocol?: string },
   body: object = {},
 ) => {
   const headers = {
     "vibest-protocol": who.protocol ?? String(PROTOCOL),
     "vibest-caller": "session",
-    "vibest-session-id": who.main,
+    "vibest-session-id": who.entryId,
     "vibest-project-id": String(who.projectId),
     "vibest-agent": "coordinator",
     "vibest-harness": "claude",
@@ -250,7 +250,7 @@ const heldSubagent = async (w: World, pastWindow: boolean) => {
     const repo = await project(w, "held")
     const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-held", model.url)}`
     await w.daemon()
-    await w.startMain({
+    await w.startEntry({
       harness: "pi",
       session,
       cwd: repo,
@@ -311,16 +311,16 @@ const checks: ReadonlyArray<Check> = [
     id: "S15",
     covers: ["S11", "D7"],
     title:
-      "Claude main agent over HTTP: two subagents' lines and contexts match one to one, a result arriving mid-execution still arrives, a lease goes back to pending once its poller leaves, curl --unix-socket poll / ack / project and protocol mismatch, and delivery after `vibest daemon restart`; S11: a result still arrives as one line with its context after /clear, and after the main agent is stopped (SIGTERM) and `vibest` resumes it in the same pane",
+      "Claude entry session over HTTP: two subagents' lines and contexts match one to one, a result arriving mid-execution still arrives, a lease goes back to pending once its poller leaves, curl --unix-socket poll / ack / project and protocol mismatch, and delivery after `vibest daemon restart`; S11: a result still arrives as one line with its context after /clear, and after the entry session is stopped (SIGTERM) and `vibest` resumes it in the same pane",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude", "curl"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
       const go = path.join(w.root, "cmmid-go")
       const wait = `until [ -e ${go} ]; do sleep 1; done`
-      let c: Awaited<ReturnType<typeof claudeMain>> | undefined
+      let c: Awaited<ReturnType<typeof claudeEntry>> | undefined
       let stopped: number | undefined
       try {
-        c = await claudeMain(w, "cmtwo", model, (r): Step => {
+        c = await claudeEntry(w, "cmtwo", model, (r): Step => {
           const last = text(lastUser(r))
           if (last.includes(wait)) return { tool: "Bash", input: { command: wait } }
           return last.includes('"tool_result"') ? "waited" : "ok"
@@ -358,23 +358,29 @@ const checks: ReadonlyArray<Check> = [
         await exchange("cmcleared")
         const cleared = c.conversation()
         const pid = await c.claudePid()
-        expect(pid !== undefined, "no claude process in the main agent's pane")
+        expect(pid !== undefined, "no claude process in the entry session's pane")
         process.kill(pid!, "SIGTERM")
-        await until("the main agent's Claude exited", async () => (await c!.claudePid()) === undefined, 30_000).catch(
-          async (e: Error) => {
-            throw new Error(
-              `${e.message}; pid ${pid} alive ${alive(pid!)}, now ${await c!.claudePid()}; its screen:\n${await c!.screen()}`,
-            )
-          },
-        )
+        await until(
+          "the entry session's Claude exited",
+          async () => (await c!.claudePid()) === undefined,
+          30_000,
+        ).catch(async (e: Error) => {
+          throw new Error(
+            `${e.message}; pid ${pid} alive ${alive(pid!)}, now ${await c!.claudePid()}; its screen:\n${await c!.screen()}`,
+          )
+        })
         await c.typeInShell([binary, "--harness", "claude"].join(" "))
-        await until("Claude again in the main agent's pane", async () => (await c!.claudePid()) !== undefined, 60_000)
+        await until(
+          "Claude again in the entry session's pane",
+          async () => (await c!.claudePid()) !== undefined,
+          60_000,
+        )
         await exchange("cmresumed")
         expect(c.conversation() === cleared, `resumed conversation ${c.conversation()}; before the stop ${cleared}`)
 
         await c.typeIn(`Wait for the go file: ${wait}`)
         await until(
-          "the main agent's own execution running",
+          "the entry session's own execution running",
           async () =>
             (await transcript(w, c!.repo, c!.config)).some((e) => e.type === "assistant" && e.raw.includes(go)),
           60_000,
@@ -385,20 +391,24 @@ const checks: ReadonlyArray<Check> = [
           row<{ n: number }>(
             w,
             "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_session_id = ?",
-            c!.main,
+            c!.entryId,
             a,
           )?.n ?? 0
         const before = c.delivered(a)
         const queued = results()
         await w.ok(["send", a, "--", ask("cmmid")], { cwd: c.repo })
-        await until("the cmmid result queued while the main agent's execution runs", () => results() > queued, 180_000)
+        await until(
+          "the cmmid result queued while the entry session's execution runs",
+          () => results() > queued,
+          180_000,
+        )
         await fs.writeFile(go, "")
         const mid = await c.result(a, "Answer probe alpha", "cmmid", before)
         const midAt = mid.findIndex(
           (e) => e.type === "attachment" && e.raw.includes("hook_additional_context") && e.raw.includes("done-cmmid"),
         )
         await until(
-          "the main agent's execution on the cmmid result ended",
+          "the entry session's execution on the cmmid result ended",
           async () =>
             (await transcript(w, c!.repo, c!.config))
               .slice(midAt)
@@ -407,9 +417,9 @@ const checks: ReadonlyArray<Check> = [
         )
 
         stopped = await c.claudePid()
-        expect(stopped !== undefined, "no claude process in the main agent's pane")
+        expect(stopped !== undefined, "no claude process in the entry session's pane")
         process.kill(stopped!, "SIGSTOP")
-        const who = { main: c.main, projectId: c.projectId }
+        const who = { entryId: c.entryId, projectId: c.projectId }
         const status = (id: number) => row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE id = ?", id)?.s
         await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
         let polled: { ids: Array<number>; line: string; text: string } = { ids: [], line: "", text: "" }
@@ -453,7 +463,7 @@ const checks: ReadonlyArray<Check> = [
         const resumed = stopped!
         stopped = undefined
         await until(
-          "the main agent running in the foreground again",
+          "the entry session running in the foreground again",
           () => {
             const [stat, pgid, tpgid] = ps(resumed)
             return !stat?.startsWith("T") && pgid === tpgid
@@ -477,7 +487,7 @@ const checks: ReadonlyArray<Check> = [
     id: "S12",
     covers: ["D7"],
     title:
-      "Pi main agent: each result reaches the real Pi TUI as its own execution: a Claude subagent's first and second result, and one after `vibest daemon restart`",
+      "Pi entry session: each result reaches the real Pi TUI as its own execution: a Claude subagent's first and second result, and one after `vibest daemon restart`",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const claude = fakeAnthropic((r) => {
@@ -490,44 +500,44 @@ const checks: ReadonlyArray<Check> = [
         const repo = await project(w, "inbox")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-inbox", model.url)}`
         await w.stopDaemon()
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           session,
           cwd: repo,
           env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
-        const mains = async () =>
+        const entryRows = async () =>
           (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).filter(
             (e) => e.agent === "main",
           )
-        await until("the main agent in vibest ls", async () => (await mains()).length === 1, 30_000)
+        await until("the entry session in vibest ls", async () => (await entryRows()).length === 1, 30_000)
         const reached = (what: string, marker: string) =>
           until(what, () => model.seen.some((m) => m.includes("<agent-") && m.includes(marker)), 180_000).catch(
             (e: Error) => {
-              throw new Error(`${e.message}; the main agent's model saw: ${JSON.stringify(model.seen, null, 1)}`)
+              throw new Error(`${e.message}; the entry session's model saw: ${JSON.stringify(model.seen, null, 1)}`)
             },
           )
         await w.okViaEntry(["run", "pi", "--env", env, ask("zero")], { cwd: repo, timeoutMs: 60_000 })
-        await reached("the main agent's execution on the first result", "done-zero")
-        await reached("the main agent's execution on the Claude subagent's first result", "done-one")
-        await reached("the main agent's execution on the Claude subagent's second result", "done-two")
+        await reached("the entry session's execution on the first result", "done-zero")
+        await reached("the entry session's execution on the Claude subagent's first result", "done-one")
+        await reached("the entry session's execution on the Claude subagent's second result", "done-two")
         const restart = await w.tty(["daemon", "restart"], "y\n", { cwd: repo, timeoutMs: 60_000 })
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
         await w.ok(["send", model.sessionId(), ask("three")], { cwd: repo })
-        await reached("the main agent's execution on a result after vibestd restarted", "done-three")
-        const main = (await mains())[0]!.id
+        await reached("the entry session's execution on a result after vibestd restarted", "done-three")
+        const entryId = (await entryRows())[0]!.id
         await expectReplied(w, model.sessionId())
-        const toMain = () =>
+        const toEntry = () =>
           rows<{ status: string }>(
             w,
             "SELECT status FROM inbox WHERE session_id = ? AND kind = 'send' AND sender_session_id IS NOT NULL",
-            main,
+            entryId,
           ).map((r) => r.status)
         await until(
-          "the main agent's four sends delivered",
-          () => JSON.stringify(toMain()) === JSON.stringify(Array(4).fill("delivered")),
-        ).catch(() => fail(`the main agent's send rows: ${JSON.stringify(toMain())}`))
+          "the entry session's four sends delivered",
+          () => JSON.stringify(toEntry()) === JSON.stringify(Array(4).fill("delivered")),
+        ).catch(() => fail(`the entry session's send rows: ${JSON.stringify(toEntry())}`))
       } finally {
         model.stop()
         claude.stop()
@@ -539,15 +549,15 @@ const checks: ReadonlyArray<Check> = [
     id: "S49",
     covers: ["S45"],
     title:
-      "a Pi subagent's vibest send to a Claude main agent (which polls) is one send row from the subagent to the main agent, delivered, with one inbox.queued and one inbox.moved to delivered; the main agent's conversation holds a line naming the subagent and an <agent-message> with its id and text",
+      "a Pi subagent's vibest send to a Claude entry session (which polls) is one send row from the subagent to the entry session, delivered, with one inbox.queued and one inbox.moved to delivered; the entry session's conversation holds a line naming the subagent and an <agent-message> with its id and text",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
-      let c: Awaited<ReturnType<typeof claudeMain>> | undefined
+      let c: Awaited<ReturnType<typeof claudeEntry>> | undefined
       let sender: ReturnType<typeof Bun.serve> | undefined
       try {
-        c = await claudeMain(w, "cmsend", model)
-        const mainId = c.main
+        c = await claudeEntry(w, "cmsend", model)
+        const entryId = c.entryId
         sender = Bun.serve({
           port: 0,
           hostname: "127.0.0.1",
@@ -557,7 +567,7 @@ const checks: ReadonlyArray<Check> = [
             return new Response(
               messages.some((m) => m.role === "tool")
                 ? reply("done-cmsend\nstatus: completed")
-                : toolCall("call1", "bash", { command: `${binary} send ${mainId} -- hello-claude` }),
+                : toolCall("call1", "bash", { command: `${binary} send ${entryId} -- hello-claude` }),
               { headers: sseHeaders },
             )
           },
@@ -565,10 +575,13 @@ const checks: ReadonlyArray<Check> = [
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-cmsend-sender", `http://127.0.0.1:${sender.port}/v1`)}`
         const sub = (
           JSON.parse(
-            await w.okViaEntry(["run", "pi", "--env", env, "--title", "Send probe", "--", "send to the main agent"], {
-              cwd: c.repo,
-              timeoutMs: 60_000,
-            }),
+            await w.okViaEntry(
+              ["run", "pi", "--env", env, "--title", "Send probe", "--", "send to the entry session"],
+              {
+                cwd: c.repo,
+                timeoutMs: 60_000,
+              },
+            ),
           ) as { id: string }
         ).id
         const sent = () =>
@@ -576,13 +589,17 @@ const checks: ReadonlyArray<Check> = [
             w,
             "SELECT id, status FROM inbox WHERE sender_session_id = ? AND session_id = ? AND kind = 'send'",
             sub,
-            mainId,
+            entryId,
           )
         await until("the send delivered", () => sent().some((r) => r.status === "delivered"), 180_000)
         expect(sent().length === 1, `${sent().length} sends from ${sub}: ${JSON.stringify(sent())}`)
         const fact = (sql: string) =>
-          row<{ n: number }>(w, `SELECT count(*) AS n FROM event WHERE aggregate = ? AND ${sql}`, mainId, sent()[0]!.id)
-            ?.n
+          row<{ n: number }>(
+            w,
+            `SELECT count(*) AS n FROM event WHERE aggregate = ? AND ${sql}`,
+            entryId,
+            sent()[0]!.id,
+          )?.n
         expect(
           fact("type = 'inbox.queued' AND seq = ?") === 1 &&
             fact(
@@ -592,7 +609,7 @@ const checks: ReadonlyArray<Check> = [
         )
         const line = `General Agent "Send probe"`
         await until(
-          "the line and the <agent-message> in the main agent's conversation",
+          "the line and the <agent-message> in the entry session's conversation",
           async () => {
             const entries = await transcript(w, c!.repo, c!.config)
             return (
@@ -638,7 +655,7 @@ const checks: ReadonlyArray<Check> = [
         const repo = await project(w, "ids")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-ids", model.url)}`
         await w.daemon()
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           session,
           cwd: repo,
@@ -704,7 +721,7 @@ const checks: ReadonlyArray<Check> = [
         expect(hook.code === 0, `herdr integration install pi exited ${hook.code}: ${hook.stderr}${hook.stdout}`)
         const env = `PI_CODING_AGENT_DIR=${dir}`
         await w.daemon()
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           session,
           cwd: repo,
@@ -771,7 +788,7 @@ const checks: ReadonlyArray<Check> = [
         const repo = await project(w, "s26")
         const pi = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-s26", model.url)}`
         await w.daemon({ env })
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           session,
           cwd: repo,

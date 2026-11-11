@@ -13,7 +13,7 @@ describe("Db session rows", () => {
         const db = yield* Db
         const project = yield* projectOf("r")
         const child = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-        const parent = (yield* db.coordinatorLaunch(project, "pi", false, place)).sessionId
+        const parent = (yield* db.startEntry(project, "pi", false, place)).sessionId
         yield* db.insertSession(session(child, { address: { machine: "local", id: "" } }), project, {
           parentSessionId: parent,
         })

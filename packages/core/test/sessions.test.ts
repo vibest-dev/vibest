@@ -21,10 +21,10 @@ import { makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, sessionWorktree, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
-  const withMain = (repo: string) =>
+  const withEntry = (repo: string) =>
     Effect.gen(function* () {
       const db = yield* Db
-      return yield* db.coordinatorLaunch(
+      return yield* db.startEntry(
         yield* projectOf(repo),
         "pi",
         false,
@@ -39,21 +39,21 @@ describe.concurrent("Sessions", () => {
     })
 
   test(
-    "spawn without a harness from the main agent inherits its harness, provider and model",
+    "spawn without a harness from the entry session inherits its harness, provider and model",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const main = yield* withMain(repo)
-      const input = { ...(yield* spawnInput(repo)), harness: undefined, parentSessionId: main.sessionId }
+      const entry = yield* withEntry(repo)
+      const input = { ...(yield* spawnInput(repo)), harness: undefined, parentSessionId: entry.sessionId }
       const { id } = yield* (yield* Sessions).spawn(input)
       assert.deepStrictEqual(yield* chosen(id), ["pi", "openai", "fake-strong"])
     }),
   )
 
   test(
-    "spawn without a harness from a plain terminal inherits the project's main agent; an explicit harness drops its provider and model; a model alone keeps the rest",
+    "spawn without a harness from a plain terminal inherits the project's entry session; an explicit harness drops its provider and model; a model alone keeps the rest",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      yield* withMain(repo)
+      yield* withEntry(repo)
       const sessions = yield* Sessions
       const base = { ...(yield* spawnInput(repo)), harness: undefined }
       const inherited = yield* sessions.spawn(base)
@@ -194,8 +194,8 @@ describe.concurrent("Sessions", () => {
       const sql = yield* SqlClient.SqlClient
       const repo = yield* makeRepository
       const { id, sessions, db } = yield* spawnWorking(repo)
-      const main = (yield* sql<{ id: string }>`SELECT entry_session_id AS id FROM project`)[0]!.id
-      yield* sessions.userPrompt(main, "hello")
+      const entryId = (yield* sql<{ id: string }>`SELECT entry_session_id AS id FROM project`)[0]!.id
+      yield* sessions.userPrompt(entryId, "hello")
       yield* sessions.userPrompt(id, "do it")
       yield* sessions.userPrompt(id, "and this")
       const working = yield* sql<{
@@ -278,7 +278,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
-      assert.deepStrictEqual(yield* db.coordinatorPending((yield* db.getSession(id))!.projectId), [])
+      assert.deepStrictEqual(yield* db.entryPending((yield* db.getSession(id))!.projectId), [])
       yield* TestClock.adjust("11 seconds")
       yield* sessions.check(id)
       assert.deepInclude(yield* db.getSession(id), { executionState: "lost", exitedAt: null })
@@ -298,7 +298,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })

@@ -74,21 +74,21 @@ login smoke (I5). Prompts are deterministic:
 | --- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | 1   | `run` in a new worktree                                                           | pane exists, row `working` → `idle`, file in the worktree, `result` holds `DONE-<nonce>` as its reply |
 | 2   | `send` a follow-up                                                                | delivered once (confirm-after-send), execution `completed`                                            |
-| 3   | `report` from the worker                                                          | the coordinator inbox gets it; same-sender messages merge                                             |
+| 3   | `report` from the worker                                                          | the entry session inbox gets it; same-sender messages merge                                           |
 | 4   | `interrupt` mid-execution                                                         | execution `interrupted`, pane alive, next `send` works                                                |
 | 5   | `--peer`, `--in-parent`, `--name`, `--model`, `--provider`, `--headless`, `--env` | each flag visible in the row and the pane                                                             |
 | 6   | `archive` clean                                                                   | pane closed with PID proof, worktree removed, branch kept                                             |
 | 7   | `archive` dirty / unpushed / `--keep-worktree`                                    | worktree kept, `reasons` names why                                                                    |
-| 8   | `run --archive-on-idle`                                                           | archived right after the completed result reaches the coordinator                                     |
+| 8   | `run --archive-on-idle`                                                           | archived right after the completed result reaches the entry session                                   |
 | 9   | Self-heal                                                                         | kill the daemon mid-execution, restart: execution ends `lost` or resumes; no blind replay             |
 | 10  | Startup failure                                                                   | bad model: a failed result with the error, no screen text; `vibest peek <id>` shows the pane          |
 | 11  | Limits                                                                            | `VIBEST_MAX_SESSIONS=1`: the second `run` gets `LimitReached`                                         |
-| 12  | Coordinator                                                                       | `vibest` in the parent workspace, resume after its pane closes, system prompt file written            |
+| 12  | Entry session                                                                     | `vibest` in the parent workspace, resume after its pane closes, system prompt file written            |
 
 The pattern-level stories that combine these rows are in [e2e-user-stories.md](e2e-user-stories.md).
 
-Claude only: the inbox bridge (`inbox attach/pull/ack/release`) delivers to a live Claude coordinator without paste,
-and `integration stop` ends cleanly. Pi only: the coordinator TUI (tool groups, user-message padding) renders in the pane.
+Claude only: the inbox bridge (`inbox attach/pull/ack/release`) delivers to a live Claude entry session without paste,
+and `integration stop` ends cleanly. Pi only: the entry session TUI (tool groups, user-message padding) renders in the pane.
 
 ## 3. Runner
 
@@ -159,13 +159,13 @@ What the checks that drive real herdr panes rely on:
 - A pane gets the environment of its herdr server, which gets vibestd's. A check that needs something in its panes
   (`PI_CODING_AGENT_DIR`, or `CLAUDE_CONFIG_DIR` unset for the user's Claude login) starts vibestd and a herdr session
   of its own, and drops only that session at the end.
-- Claude asks whether to trust a new folder and loads hooks only once it is trusted. For a main agent the check answers
+- Claude asks whether to trust a new folder and loads hooks only once it is trusted. For an entry session the check answers
   as the person does (down to Yes, then enter, `drivers/claude.ts`); vibest answers it for subagents.
 - A Claude agent on a fake model gets `disableAutoMode` in its shadow settings: with auto mode on, the fake model cannot
   answer the auto-mode classifier's side requests.
 - An enter typed right behind text in Claude's input box is sometimes swallowed; a check waiting for that line presses
   enter again.
-- Claude refuses a standalone `sleep`: to keep a main agent busy, the check has its execution wait in a Bash call for a file
+- Claude refuses a standalone `sleep`: to keep an entry session busy, the check has its execution wait in a Bash call for a file
   the check creates.
 - herdr drops a started agent's name when it is not marked ready within `agent.start`'s 120 s, and refuses
   `agent.prompt` until the agent is ready; it marks an agent ready only once the agent is read (S18, S19). S18 proves in
@@ -267,7 +267,7 @@ Notes on particular checks:
   hands the restart step on can pass it.
 - T1 uses its own HOME, HC_SESSION, HC_SOCKET and XDG directories; it never contacts the user's herdr-core or changes
   harness configuration outside that temporary root. Its fixture runtime plugin (`fixtures/status-runtime.ts`) also
-  proves G7. Coordinator status coverage is the follow-up in
+  proves G7. Entry session status coverage is the follow-up in
   [runtime-port.md](../design/runtime-port.md#terminal-status-ownership).
 - On macOS, Cursor model discovery and subscription probes need `Library/Keychains/login.keychain-db` as a regular file
   under HOME. H4 puts a sentinel Cursor CLI on PATH and fails if it runs; when a World changes HOME it removes the
@@ -275,7 +275,7 @@ Notes on particular checks:
 - The guard rules themselves are `guard.test.ts`; without a vibest agent, or when vibestd cannot check the call,
   `vibest integration guard` fails with no answer (`cli.test.ts`). Cursor's deny and allow answers through vibestd are
   `guard.test.ts`; a stop refused with each unsettled daemon operation or delivery named (D7, and D8, whose handoff
-  drains the same way) is `stop.test.ts`; which installer U1 runs is `update.test.ts`; a main agent restarting through
+  drains the same way) is `stop.test.ts`; which installer U1 runs is `update.test.ts`; an entry session restarting through
   `VIBEST_COMMAND` (I11) is `restart.test.ts`.
 - The machines checks run two vibest homes on one host: A's vibestd dials B through a fake `ssh` first on its PATH,
   which runs the line with B's environment; agents on both sides run in isolated hc cores on fake models.

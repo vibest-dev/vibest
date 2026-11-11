@@ -397,7 +397,7 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
                 conversation: undefined,
               },
             )
-          assert.isUndefined(executionEndOf(yield* harnesses.get("claude"), "general", "{", 1))
+          assert.isUndefined(executionEndOf(yield* harnesses.get("claude"), false, "{", 1))
         }),
     )
 
@@ -489,7 +489,7 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
     )
 
     it.effect(
-      "vibest: the main checkout from anywhere inside, linked worktrees included; the main agent's command and env; a refused launch never asks for the session",
+      "vibest: the main checkout from anywhere inside, linked worktrees included; the entry session's command and env; a refused launch never asks for the session",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
@@ -527,7 +527,7 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
             }> = Effect.succeed({ sessionId, harnessSessionId, projectId: PROJECT }),
             provider: string | null = null,
           ) =>
-            Launch.coordinatorCommand({
+            Launch.entryCommand({
               harness: h,
               root: repo,
               provider,

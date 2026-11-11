@@ -54,7 +54,7 @@ describe.concurrent("Sessions", () => {
       yield* subs.report({ harness: "pi", provider: "anthropic", limits: [limited] })
       yield* subs.report({ harness: "pi", provider: "openai", limits: [open] })
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -204,7 +204,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -266,7 +266,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -316,7 +316,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -358,7 +358,7 @@ describe.concurrent("Sessions", () => {
       const db = yield* Db
       const sessions = yield* Sessions
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -488,7 +488,7 @@ describe.concurrent("Sessions", () => {
       const subs = yield* Subscriptions
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "pi", { underMain: true })
       const row = (yield* db.getSession(id))!
-      const main = (yield* db.coordinatorOf(row.projectId))!
+      const entry = (yield* db.entryOf(row.projectId))!
       yield* subs.report({
         harness: "pi",
         provider: "openai",
@@ -499,7 +499,7 @@ describe.concurrent("Sessions", () => {
       yield* sessions.check(id)
       assert.strictEqual(moveSeen.length, 1)
       const seen = moveSeen[0]!
-      assert.strictEqual(seen.parent, main.id)
+      assert.strictEqual(seen.parent, entry.id)
       assert.deepStrictEqual(seen.attempts, [["pi", "limited"]])
       assert.strictEqual((yield* db.getSession(id))!.harnessId, "claude")
     }),

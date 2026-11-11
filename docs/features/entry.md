@@ -1,0 +1,16 @@
+# The entry session
+
+`vibest` in a project opens its entry session, the session that starts other sessions and gets the messages they send. Each
+capability below says what it is and when it counts as working.
+
+## S10. Starting, resuming and moving the entry session
+
+`vibest` in a project starts its entry session, and `vibest ls` lists it. From a plain terminal, in any subdirectory, it
+opens the entry session in a pane at the repository root (the parent workspace), with a system prompt file that names the
+Project folder. After its pane closes, `vibest` reopens the same session and conversation; `vibest --new` starts a new
+one. `vibest` in another terminal, answered yes, moves the entry session there: the first terminal keeps only its shell, and
+the second resumes the same conversation.
+
+## S38. Focusing the entry session from herdr
+
+herdr's open-entry action focuses the entry session's pane, through vibestd.

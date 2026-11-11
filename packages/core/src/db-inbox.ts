@@ -21,11 +21,11 @@ export const inboxMethods = (store: Store) => {
     queueForPeer,
     origins,
     currentProcess,
-    findCoordinators,
+    findEntrySessions,
     inbox,
     inboxIn,
     findSend,
-    entryOf,
+    entryIdOf,
     openExecution,
     startExecution,
     moveInbox,
@@ -107,7 +107,7 @@ export const inboxMethods = (store: Store) => {
           const failed = yield* moveInbox(leased, "failed")
           yield* tellSendersOf(
             failed,
-            "the main agent stopped before it took the message; it may or may not have arrived",
+            "the entry session stopped before it took the message; it may or may not have arrived",
           )
         }),
       ).pipe(Effect.orDie),
@@ -294,8 +294,8 @@ export const inboxMethods = (store: Store) => {
 
     inboxWithStatus: (sessionId: string, status: InboxStatus) => findSend(sessionId, status).pipe(Effect.orDie),
 
-    coordinatorPending: (projectIdValue: string) =>
-      inbox(sql`m.kind != 'task' AND m.status = 'pending' AND m.session_id = ${entryOf(projectIdValue)}`).pipe(
+    entryPending: (projectIdValue: string) =>
+      inbox(sql`m.kind != 'task' AND m.status = 'pending' AND m.session_id = ${entryIdOf(projectIdValue)}`).pipe(
         Effect.orDie,
       ),
 
@@ -303,7 +303,7 @@ export const inboxMethods = (store: Store) => {
       ids.length === 0
         ? Effect.succeed([] as ReadonlyArray<number>)
         : moveInbox(
-            sql`${sql.in("id", ids)} AND status = 'delivering' AND session_id = ${entryOf(projectIdValue)}`,
+            sql`${sql.in("id", ids)} AND status = 'delivering' AND session_id = ${entryIdOf(projectIdValue)}`,
             "pending",
           ).pipe(
             Effect.map((keys) => keys.map((k) => k.id)),
@@ -313,15 +313,15 @@ export const inboxMethods = (store: Store) => {
     settleLeased: (projectIdValue: string, ids: ReadonlyArray<number>, release: ReadonlyArray<number>) =>
       tx(
         Effect.gen(function* () {
-          const main = entryOf(projectIdValue)
+          const entry = entryIdOf(projectIdValue)
           if (release.length > 0)
             yield* moveInbox(
-              sql`${sql.in("id", release)} AND status = 'delivering' AND session_id = ${main}`,
+              sql`${sql.in("id", release)} AND status = 'delivering' AND session_id = ${entry}`,
               "pending",
             )
           if (ids.length === 0) return [] as ReadonlyArray<InboxRow>
           const done = yield* moveInbox(
-            sql`${sql.in("id", ids)} AND status IN ('delivering', 'pending') AND session_id = ${main}`,
+            sql`${sql.in("id", ids)} AND status IN ('delivering', 'pending') AND session_id = ${entry}`,
             "delivered",
           )
           return done.length === 0
@@ -349,7 +349,7 @@ export const inboxMethods = (store: Store) => {
           const lost = yield* moveInbox(claimed, "failed")
           yield* tellSendersOf(
             lost,
-            "vibestd stopped while handing it to the main agent; it may or may not have arrived",
+            "vibestd stopped while handing it to the entry session; it may or may not have arrived",
           )
           const cut = yield* sql<{
             id: number
@@ -413,13 +413,13 @@ export const inboxMethods = (store: Store) => {
       Effect.gen(function* () {
         if (ids.length === 0) return [] as ReadonlyArray<number>
         if (guard) {
-          const [main] = yield* findCoordinators(guard.projectId)
+          const [entry] = yield* findEntrySessions(guard.projectId)
           if (
-            !main?.runtime ||
-            !main.address ||
-            main.runtime !== guard.runtime ||
-            encodeAddress(main.address) !== guard.address ||
-            (guard.harnessId !== undefined && guard.harnessId !== "" && main.harnessId !== guard.harnessId)
+            !entry?.runtime ||
+            !entry.address ||
+            entry.runtime !== guard.runtime ||
+            encodeAddress(entry.address) !== guard.address ||
+            (guard.harnessId !== undefined && guard.harnessId !== "" && entry.harnessId !== guard.harnessId)
           )
             return [] as ReadonlyArray<number>
         }

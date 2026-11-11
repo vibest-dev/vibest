@@ -149,11 +149,11 @@ describe.concurrent("Sessions", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
-      const parent = yield* owner.db.coordinatorLaunch(owner.row.projectId, "pi", false, {
+      const parent = yield* owner.db.startEntry(owner.row.projectId, "pi", false, {
         runtime: "hc",
         address: { machine: "local", id: "test/coord-hc" },
       })
-      assert.strictEqual((yield* owner.db.coordinatorOf(owner.row.projectId))?.runtime, "hc")
+      assert.strictEqual((yield* owner.db.entryOf(owner.row.projectId))?.runtime, "hc")
       const base = yield* spawnInput(repo)
       const followed = yield* owner.sessions.spawn({
         machine: base.machine,

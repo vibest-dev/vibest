@@ -1,7 +1,7 @@
 #!/bin/sh
 # The only entrypoint of the vibest herdr plugin.
 #   vibest.sh pane <entrypoint>   open one of this plugin's [[panes]] (an action cannot open a pane itself)
-#   vibest.sh herdr <verb>        exec `vibest herdr <verb>`: startup, open-main, run, stop, runs, subscriptions, palette.
+#   vibest.sh herdr <verb>        exec `vibest herdr <verb>`: startup, open-entry, run, stop, runs, subscriptions, palette.
 #                                 vibest reads HERDR_PLUGIN_CONTEXT_JSON itself (the Project directory is in there).
 # VIBEST_BIN overrides the executable (plugin commands inherit the herdr server's environment).
 set -eu

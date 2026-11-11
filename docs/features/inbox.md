@@ -1,6 +1,6 @@
 # Delivery
 
-Messages between the main agent and its sessions: tasks and sends. An execution end sends nothing; an agent sends when it
+Messages between the entry session and its sessions: tasks and sends. An execution end sends nothing; an agent sends when it
 decides to, and the reply of an execution is read with `vibest result`. Each capability below says what it is and when it
 counts as working.
 
@@ -12,31 +12,31 @@ delivered, together as one prompt in one execution.
 ## S3. An execution end sends nothing
 
 When a session's execution ends without the session sending anything, nothing is sent to anyone: the execution completes with its
-reply, no message has the session as sender, and the main agent's model gets no request.
+reply, no message has the session as sender, and the entry session's model gets no request.
 
 ## S4. Send after an interrupt
 
 `vibest interrupt` stops a session's running execution, which sends and notifies nothing, and the next `vibest send` is
 delivered and its execution's reply can be read.
 
-## S11. Claude main agent inbox
+## S11. Claude entry session inbox
 
-A Claude main agent gets its messages from vibestd: it takes them, holds them while it works on them, and acknowledges
+A Claude entry session gets its messages from vibestd: it takes them, holds them while it works on them, and acknowledges
 each one; a message from a session still arrives as one line with its context after the conversation is cleared, and after the main
 agent is stopped and resumed in the same pane.
 
-## S12. Pi main agent inbox and its screen
+## S12. Pi entry session inbox and its screen
 
-A Pi main agent gets each message from a session pushed into its own execution, also after a daemon restart; an execution of several tool calls
+A Pi entry session gets each message from a session pushed into its own execution, also after a daemon restart; an execution of several tool calls
 shows on its screen as one collapsed group line.
 
 ## S13. Status changes reach vibestd at once
 
 A change in an agent's terminal status reaches vibestd without waiting for its next poll.
 
-## S15. Claude main agent across sessions and restarts
+## S15. Claude entry session across sessions and restarts
 
-A Claude main agent with two sessions gets each one's messages matched to it; a message that arrives mid-execution still
+A Claude entry session with two sessions gets each one's messages matched to it; a message that arrives mid-execution still
 arrives; a message taken by a poller that went away is offered again; delivery continues after `vibest daemon restart`.
 
 ## S18. A long first execution keeps its terminal
@@ -60,12 +60,12 @@ A send repeated with the same request id gets the same answer and makes one mess
 
 ## S39. Sends from one session merge
 
-Two sends from the same session that are waiting together reach the main agent as one message.
+Two sends from the same session that are waiting together reach the entry session as one message.
 
-## S45. A session sends to the main agent
+## S45. A session sends to the entry session
 
-`vibest send` from a session to the main agent of its project queues one message from that session; the main agent gets
-it as an `<agent-message>` naming the session, once, whichever way its harness takes messages (a Claude main agent polls for it, a Pi main agent is pushed it).
+`vibest send` from a session to the entry session of its project queues one message from that session; the entry session gets
+it as an `<agent-message>` naming the session, once, whichever way its harness takes messages (a Claude entry session polls for it, a Pi entry session is pushed it).
 
 ## S46. A session cannot send to a sibling
 
@@ -75,7 +75,7 @@ started it and not one it started. Nothing is queued.
 ## S47. A send stays inside its project
 
 `vibest send` from a session to a session of another project is refused, and to an archived session is refused with the
-id of the project's main agent; neither queues anything.
+id of the project's entry session; neither queues anything.
 
 ## S48. An undeliverable send goes back to its sender
 
@@ -85,7 +85,7 @@ is told so in a notice that holds the message.
 ## S50. An execution that ends in an error tells its creator
 
 When a session's execution ends in an error, the execution is `failed` with its failure, and the session's creator gets exactly one
-notice that carries the failure, typed into the main agent once.
+notice that carries the failure, typed into the entry session once.
 
 ## S52. A session has no report command
 

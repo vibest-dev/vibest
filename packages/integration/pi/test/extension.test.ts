@@ -191,7 +191,7 @@ describe("pi-vibest", () => {
           lastActive: 1,
         }
         yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-        const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+        const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
@@ -307,7 +307,7 @@ describe("pi-vibest", () => {
           lastActive: 1,
         }
         yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-        const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+        const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
@@ -347,7 +347,7 @@ describe("pi-vibest", () => {
         yield* TestClock.withLive(Effect.sleep("3 seconds"))
         assert.deepStrictEqual(yield* contents, ["first", "second"])
         assert.deepStrictEqual(
-          (yield* db.coordinatorPending(yield* projectOf("r"))).map((r) => r.message),
+          (yield* db.entryPending(yield* projectOf("r"))).map((r) => r.message),
           ["after shutdown"],
         )
       }).pipe(Effect.scoped, Effect.provide(testLayer())),
@@ -457,7 +457,7 @@ describe("pi-vibest", () => {
       }
       yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
       yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
-      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+      const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
@@ -503,7 +503,7 @@ describe("pi-vibest", () => {
       yield* s.emit("session_start", { reason: "startup" }, { mode: "rpc" })
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.deepStrictEqual(s.messages, [])
-      assert.strictEqual((yield* db.coordinatorPending(yield* projectOf("r"))).length, 1)
+      assert.strictEqual((yield* db.entryPending(yield* projectOf("r"))).length, 1)
       yield* s.emit("session_start", { reason: "startup" }, { mode: "tui" })
       yield* until(
         Effect.sync(() => s.messages.length),
@@ -527,7 +527,7 @@ describe("pi-vibest", () => {
           options: { triggerTurn: true, deliverAs: "followUp" },
         },
       ])
-      assert.deepStrictEqual(yield* db.coordinatorPending(yield* projectOf("r")), [])
+      assert.deepStrictEqual(yield* db.entryPending(yield* projectOf("r")), [])
     }),
   )
 
@@ -555,7 +555,7 @@ describe("pi-vibest", () => {
         lastActive: 1,
       }
       yield* db.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
-      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+      const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
@@ -617,12 +617,13 @@ describe("pi-vibest", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const c = yield* cli
-      const launched = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
+      const launched = yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
       assert.isNull(launched.harnessSessionId)
       const saved = savedSession(launched.sessionId)
       const env = {
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: launched.sessionId,
+        VIBEST_PROJECT_ID: launched.projectId,
         VIBEST_LAUNCH_PID: String(process.pid),
         VIBEST_COMMAND: '["vibest"]',
       }
@@ -645,7 +646,7 @@ describe("pi-vibest", () => {
         Boolean,
       )
       assert.strictEqual(yield* saved, s1)
-      yield* db.reportCoordinatorSession(launched.sessionId, "pi", "other")
+      yield* db.noteConversation(launched.sessionId, "other")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(yield* saved, "other")
@@ -660,13 +661,13 @@ describe("pi-vibest", () => {
         Boolean,
       )
       assert.strictEqual(
-        (yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })).harnessSessionId,
+        (yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })).harnessSessionId,
         "s-fork",
       )
-      yield* db.reportCoordinatorSession(launched.sessionId, "pi", "kept")
+      yield* db.noteConversation(launched.sessionId, "kept")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
-      const renewed = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: true, terminal: "test/p1" })
+      const renewed = yield* c["Project.EntrySession"]({ harness: "pi", fresh: true, terminal: "test/p1" })
       assert.notStrictEqual(renewed.sessionId, launched.sessionId)
       assert.isNull(renewed.harnessSessionId)
       assert.isNull(yield* saved)
@@ -679,7 +680,7 @@ describe("pi-vibest", () => {
       const layout = yield* Layout
       const path = yield* Path.Path
       const c = yield* cli
-      const launched = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
+      const launched = yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
       const saved = savedSession(launched.sessionId)
       const home = yield* tempDirectory("pi-vibest-slow-")
       const first = {
@@ -708,6 +709,7 @@ describe("pi-vibest", () => {
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: launched.sessionId,
+        VIBEST_PROJECT_ID: launched.projectId,
         VIBEST_LAUNCH_PID: String(process.pid),
         VIBEST_COMMAND: '["vibest"]',
         VIBEST_HOME: home,
@@ -723,7 +725,7 @@ describe("pi-vibest", () => {
         Effect.sync(() => notes.length === 1),
         Boolean,
       )
-      assert.match(notes[0]!, /^vibest: the coordinator's conversation may not have been saved/)
+      assert.match(notes[0]!, /^vibest: the entry session's conversation may not have been saved/)
       first.released = true
       for (const chunk of first.held) first.upstream!.write(chunk)
       yield* until(
@@ -765,7 +767,7 @@ describe("pi-vibest", () => {
             Boolean,
           )
         }
-        assert.match(notes[0]!, /^vibest: the coordinator's conversation may not have been saved/)
+        assert.match(notes[0]!, /^vibest: the entry session's conversation may not have been saved/)
       }
     }),
     30000,

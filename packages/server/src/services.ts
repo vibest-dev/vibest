@@ -7,13 +7,13 @@ import { Harness, Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
 import { Machines } from "@vibest/core/machines"
-import { MainAgent } from "@vibest/core/main-agent"
 import { Peers } from "@vibest/core/peer"
 import { Plugins } from "@vibest/core/plugins"
 import { Project } from "@vibest/core/project"
 import { Remote } from "@vibest/core/remote"
 import { SshHosts } from "@vibest/core/repository-url"
 import { Runtimes } from "@vibest/core/runtimes"
+import { EntrySession } from "@vibest/core/session/entry"
 import { Executions } from "@vibest/core/session/executions"
 import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks } from "@vibest/core/session/locks"
@@ -39,7 +39,7 @@ export const services = LayerNode.group([
   Sessions.node,
   Integration.node,
   Peers.node,
-  MainAgent.node,
+  EntrySession.node,
   Machines.node,
   Remote.node,
 ])

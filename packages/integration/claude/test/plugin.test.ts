@@ -167,7 +167,7 @@ describe("Claude plugin requests", () => {
     assert.deepStrictEqual(h.requests[2]!.body, { hook_event_name: "PromptSubmit", text: "next", origin: "composer" })
   })
 
-  it("the main agent's execution end is not reported", async () => {
+  it("the entry session's execution end is not reported", async () => {
     const h = host()
     h.state.answer = (r) => (r.url.endsWith("/poll") ? batch([], "", "") : { status: 204 })
     await h.executionComplete({ reason: "answer", answer: "x" })

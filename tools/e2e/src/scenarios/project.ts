@@ -81,7 +81,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "P8",
     title:
-      "a Pi main agent, a Pi subagent and a Claude subagent (fake models) each write and read artifacts/<who>.md in the project folder with their file tools, without a permission prompt; a write into another project's folder is refused",
+      "a Pi entry session, a Pi subagent and a Claude subagent (fake models) each write and read artifacts/<who>.md in the project folder with their file tools, without a permission prompt; a write into another project's folder is refused",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const other = (await w.json<Info>(["project", "info"], { cwd: await newRepository(w, "files-other") })).directory
@@ -116,7 +116,7 @@ const checks: ReadonlyArray<Check> = [
         const repo = await newRepository(w, "files")
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-files", pi.url)}`
         await w.daemon()
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           session,
           cwd: repo,
@@ -147,7 +147,7 @@ const checks: ReadonlyArray<Check> = [
               )
             },
           )
-        const main = (
+        const entryId = (
           await w
             .json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"], { cwd: repo })
             .then((l) => l.sessions)
@@ -155,7 +155,7 @@ const checks: ReadonlyArray<Check> = [
         const own = path.join(
           w.vibestHome,
           "projects",
-          row<{ p: string }>(w, "SELECT project_id AS p FROM session WHERE id = ?", main ?? "")?.p ?? "",
+          row<{ p: string }>(w, "SELECT project_id AS p FROM session WHERE id = ?", entryId ?? "")?.p ?? "",
         )
         for (const who of ["pi", "claude", "main"]) {
           expect(dirs[who] === own, `${who}'s system prompt names ${dirs[who]}, not ${own}`)
@@ -257,10 +257,10 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S37",
     title:
-      "vibest ls outside a project lists that project's main agent, and from a git repository that is no project lists nothing, without the CLI running git",
+      "vibest ls outside a project lists that project's entry session, and from a git repository that is no project lists nothing, without the CLI running git",
     run: async (w) => {
       for (const bin of ["pi", "herdr", "git"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      await w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi } })
+      await w.startEntry({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi } })
       const outside = await fs.mkdtemp(path.join(w.root, "outside-"))
       const log = path.join(w.root, "git-calls")
       const shim = path.join(w.root, "git-shim")
@@ -289,19 +289,19 @@ const checks: ReadonlyArray<Check> = [
 
   {
     id: "S38",
-    title: "herdr open-main focuses the main agent's pane through vibestd",
+    title: "herdr open-entry focuses the entry session's pane through vibestd",
     run: async (w) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
-      await w.startMain({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi } })
+      await w.startEntry({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi } })
       const context = JSON.stringify({ workspace_cwd: w.repository })
-      const focused = await w.ok(["herdr", "open-main"], { env: { HERDR_PLUGIN_CONTEXT_JSON: context } })
-      expect(focused.startsWith("focused "), `open-main: ${focused}`)
+      const focused = await w.ok(["herdr", "open-entry"], { env: { HERDR_PLUGIN_CONTEXT_JSON: context } })
+      expect(focused.startsWith("focused "), `open-entry: ${focused}`)
       const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
       const panes = async () =>
         ((await herdr(socket, "pane.list", {})) as { panes: Array<{ pane_id: string }> }).panes.map((p) => p.pane_id)
-      let mainPane = ""
+      let entryPane = ""
       await until(
-        "the main agent's pane",
+        "the entry session's pane",
         async () => {
           for (const id of await panes()) {
             const info = (await herdr(socket, "pane.process_info", { pane_id: id })) as {
@@ -309,7 +309,7 @@ const checks: ReadonlyArray<Check> = [
             }
             const fg = info.process_info?.foreground_processes ?? []
             if (fg.some((proc) => (proc.argv0 ?? proc.name ?? "").includes("pi"))) {
-              mainPane = id
+              entryPane = id
               return true
             }
           }
@@ -318,12 +318,12 @@ const checks: ReadonlyArray<Check> = [
         30_000,
       )
       const before = new Set(await panes())
-      await herdr(socket, "pane.close", { pane_id: mainPane })
-      await until("the main pane closed", async () => !(await panes()).includes(mainPane), 15_000)
-      const opened = await w.ok(["herdr", "open-main"], {
+      await herdr(socket, "pane.close", { pane_id: entryPane })
+      await until("the entry session pane closed", async () => !(await panes()).includes(entryPane), 15_000)
+      const opened = await w.ok(["herdr", "open-entry"], {
         env: { HERDR_PLUGIN_CONTEXT_JSON: context, HERDR_SOCKET_PATH: socket },
       })
-      expect(opened.startsWith("opened "), `open-main after quit: ${opened}`)
+      expect(opened.startsWith("opened "), `open-entry after quit: ${opened}`)
       const after = await panes()
       expect(
         after.some((id) => !before.has(id)),

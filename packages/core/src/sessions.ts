@@ -36,7 +36,7 @@ import * as Engine from "./engine.ts"
 import { sessionExecutions } from "./executions.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox } from "./inbox.ts"
-import { coordinatorCommand, restartArgv } from "./launch.ts"
+import { entryCommand, restartArgv } from "./launch.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 import { sessionPlacement } from "./placement.ts"
@@ -834,22 +834,22 @@ export class Sessions extends Context.Service<
         locked: (id) => locked(id),
         checkLater: (id) => Effect.forkIn(checkLocked(id), scope).pipe(Effect.asVoid),
         launchArgv: (session, resume) => launchArgv(session, resume).pipe(Effect.provideContext(platform)),
-        mainArgv: (main) =>
+        entryArgv: (entry) =>
           Effect.gen(function* () {
-            yield* db.patchLive(main.id, { ready: null })
-            const root = main.projectDirectory ?? (yield* db.projectDirectory(main.projectId)) ?? ""
-            const savedId = main.harnessSessionId
-            const command = yield* coordinatorCommand({
-              harness: main.harnessId,
+            yield* db.patchLive(entry.id, { ready: null })
+            const root = entry.projectDirectory ?? (yield* db.projectDirectory(entry.projectId)) ?? ""
+            const savedId = entry.harnessSessionId
+            const command = yield* entryCommand({
+              harness: entry.harnessId,
               root,
-              provider: main.provider,
-              model: main.model,
+              provider: entry.provider,
+              model: entry.model,
               session: Effect.succeed({
-                sessionId: main.id,
+                sessionId: entry.id,
                 harnessSessionId:
-                  savedId !== null && (yield* db.canResumeConversation(main.id, savedId)) ? savedId : null,
-                projectId: main.projectId,
-                ...(main.runtime && main.address ? { runtime: runtimeEnv(main.runtime, main.address) } : {}),
+                  savedId !== null && (yield* db.canResumeConversation(entry.id, savedId)) ? savedId : null,
+                projectId: entry.projectId,
+                ...(entry.runtime && entry.address ? { runtime: runtimeEnv(entry.runtime, entry.address) } : {}),
               }),
             })
             return restartArgv(command)

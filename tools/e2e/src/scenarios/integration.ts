@@ -132,7 +132,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I11",
     title:
-      "another vibest first on PATH (an older install): a Pi main agent, a Pi subagent and a Claude subagent still reach this build's vibestd through their integrations, and the other vibest never runs",
+      "another vibest first on PATH (an older install): a Pi entry session, a Pi subagent and a Claude subagent still reach this build's vibestd through their integrations, and the other vibest never runs",
     run: async (w) => {
       for (const bin of ["pi", "claude", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const other = path.join(w.root, "other-vibest")
@@ -157,7 +157,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const piEnv = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-other", pi.url)}`
         await w.daemon({ env })
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           session,
           env: { PI_CODING_AGENT_DIR: piEnv.slice("PI_CODING_AGENT_DIR=".length) },
@@ -181,14 +181,14 @@ const checks: ReadonlyArray<Check> = [
           await until(`${id}'s result`, async () => (await executionState(w, id)) === "completed", 120_000)
           expect(/pong/.test((await latest(w, id))?.message ?? ""), `${id}: ${(await latest(w, id))?.message}`)
         }
-        const main = (
+        const entry = (
           await w.json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"]).then((l) => l.sessions)
         ).find((e) => e.agent === "main")
-        expect(main !== undefined, "no main agent")
+        expect(entry !== undefined, "no entry session")
         await until(
-          "the Pi main agent's ready report",
+          "the Pi entry session's ready report",
           () =>
-            row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, main!.id)
+            row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, entry!.id)
               ?.c != null,
           60_000,
         )

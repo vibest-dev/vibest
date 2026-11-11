@@ -84,7 +84,7 @@ Manifest `herdr-plugin.toml` (documented, and verified by linking the draft in a
   `focused_pane_cwd` / `workspace_cwd` in the context, not from its cwd.
 - vibest's actions (`vibest herdr <verb>`): `run` reads a one-line prompt (a multi-line one is `vibest run`);
   `stop` interrupts the execution of the subagent in the focused pane, its session, pane and worktree kept (archive is
-  `vibest rm`); `open-main` focuses the main agent only on the plugin's own herdr server, and otherwise starts it
+  `vibest rm`); `open-entry` focuses the entry session only on the plugin's own herdr server, and otherwise starts it
   the way `vibest` does. An agent may not run them (it would run inside its sandbox).
 - `vibest` outside herdr opens a tab in the repository's parent workspace and types `vibest --in-parent <root>`
   there, which runs in place without asking herdr: herdr does not report a just-created workspace as the parent,
@@ -180,7 +180,7 @@ scripts on stdin through `/bin/sh -s`. vibest mirrors its machines into these sa
 
 ## 4. Recommendations
 
-**runtime-herdr placement.** Subagents open as **tabs in the Project workspace** (the main Agent's workspace):
+**runtime-herdr placement.** Subagents open as **tabs in the Project workspace** (the entry session's workspace):
 `worktree` for the checkout is made by vibest (`plugin-git`), then `tab.create { workspace_id, cwd: worktree,
 label: "<definition> · <harness>", env }`, then `agent.start` into the root pane. Do not use herdr's
 `worktree.create`: it makes a separate grouped workspace, which splits the Project across sidebar rows and would
@@ -199,10 +199,10 @@ need its own cleanup. Because env is lost on restart, the agent's identity must 
   source guard, never set automatically; it is a shared single slot.
 
 **Plugin.** Draft in `packages/cli/herdr-plugin/` (`herdr-plugin.toml`, `bin/vibest.sh`): actions
-`open-main`, `run`, `stop`, `reschedule`, `runs`, `subscriptions`, `palette`; panes `run` and `palette` (popups),
+`open-entry`, `run`, `stop`, `reschedule`, `runs`, `subscriptions`, `palette`; panes `run` and `palette` (popups),
 `runs` and `subscriptions` (overlays); one startup hook. Every command execs `vibest herdr <verb>`; vibest reads
 `HERDR_PLUGIN_CONTEXT_JSON`. This needs a `vibest herdr` command group (herdr-product only, D14): `startup`
-(republish metadata), `open-main`, `run`, `stop`, `reschedule`, `runs`, `subscriptions`, `palette`, each resolving
+(republish metadata), `open-entry`, `run`, `stop`, `reschedule`, `runs`, `subscriptions`, `palette`, each resolving
 the focused pane to its Agent and Run through the daemon. Ship the directory in the npm package (`files`) and
 link it with `herdr plugin link` from `vibest` setup, with consent, since registration is global for the user.
 Keybindings are a documented snippet the user adds (or vibest adds under the user-file mutation rule).
@@ -229,7 +229,7 @@ fragile.
 - **Terminal ids.** A terminal is `<herdr session>/<pane id>`, plus `/<agent name>` when `open` started its agent.
   Pane ids repeat across sessions and are reused after a close, so the agent name keeps a reused pane from being
   taken for the earlier terminal's agent. A named terminal is only the agent `open` named while it still sits in that
-  pane; an unnamed one (the main agent, whose harness a shell ran) is the agent herdr detected holding the pane, never
+  pane; an unnamed one (the entry session, whose harness a shell ran) is the agent herdr detected holding the pane, never
   a named one. A pane another agent holds is never closed or read as this terminal: `state` answers `not_found`,
   which core reads as absent. `Machine.target` is the caller's herdr location as JSON, read only by runtime-herdr.
 - **Agent names.** A vibest session's agent is `s-` and the first 30 hex digits of its id (herdr allows

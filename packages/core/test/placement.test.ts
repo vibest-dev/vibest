@@ -25,9 +25,9 @@ const spawnInput = (repo: string) =>
     runtime: "herdr",
   }))
 
-describe("placement: every session is a tab beside the project's main agent, in vibest's own detached worktree", () => {
+describe("placement: every session is a tab beside the project's entry session, in vibest's own detached worktree", () => {
   test(
-    "a subagent is a tab in the main agent's workspace with its shell in a detached worktree; labelled, labelled again after a restart, archived without closing that workspace",
+    "a subagent is a tab in the entry session's workspace with its shell in a detached worktree; labelled, labelled again after a restart, archived without closing that workspace",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
@@ -36,7 +36,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "main:coord" },
       })
@@ -75,7 +75,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
   )
 
   test(
-    "the project workspace's live count is published again when a session's harness exits, and when the last one is archived the main agent's terminal publishes the count alone with no pane metadata",
+    "the project workspace's live count is published again when a session's harness exits, and when the last one is archived the entry session's terminal publishes the count alone with no pane metadata",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db
@@ -83,7 +83,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* db.coordinatorLaunch(
+      yield* db.startEntry(
         yield* projectOf(repo),
         "pi",
         false,
@@ -109,7 +109,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
   )
 
   test(
-    "a main agent in another herdr session does not place near its pane id: the id repeats in every session; the workspace still resolves by the project",
+    "an entry session in another herdr session does not place near its pane id: the id repeats in every session; the workspace still resolves by the project",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db
@@ -117,7 +117,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("w1", repo)
       yield* herdr.addPane("w1:coord", "w1", repo)
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: "other",
         address: { machine: "local", id: "w1:coord" },
       })

@@ -16,7 +16,7 @@ export type MethodOf<A> = {
 
 export type Handlers = Partial<RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof VibestRpcs>>>
 
-export type Agent = Extract<CallerShape, { _tag: "Cli" | "Coordinator" }>
+export type Agent = Extract<CallerShape, { _tag: "Cli" | "Entry" }>
 
 export const make = Effect.gen(function* () {
   const db = yield* Db
@@ -26,10 +26,10 @@ export const make = Effect.gen(function* () {
   const agent = (method: MethodOf<"agent" | "owner">) =>
     Effect.gen(function* () {
       const c = yield* Caller
-      if (c._tag === "Cli" || c._tag === "Coordinator") return c
+      if (c._tag === "Cli" || c._tag === "Entry") return c
       return yield* new Forbidden({
         method,
-        message: `only the user or a main agent calls ${method}; sessions only message other agents (vibest send)`,
+        message: `only the user or an entry session calls ${method}; sessions only message other agents (vibest send)`,
       })
     })
 
@@ -54,7 +54,7 @@ export const make = Effect.gen(function* () {
         return yield* new Forbidden({
           method,
           message:
-            "a main agent only works in its own project: cd into the directory where vibest was started and run it again",
+            "an entry session only works in its own project: cd into the directory where vibest was started and run it again",
         })
       return here
     })
@@ -81,7 +81,7 @@ export const make = Effect.gen(function* () {
   const self = (method: MethodOf<"self">, id: string) =>
     Effect.gen(function* () {
       const c = yield* Caller
-      if ((c._tag === "Session" || c._tag === "Coordinator") && c.sessionId === id) return undefined
+      if ((c._tag === "Session" || c._tag === "Entry") && c.sessionId === id) return undefined
       return yield* new Forbidden({ method, message: `${method} ${id} runs only in that agent's own terminal` })
     })
 

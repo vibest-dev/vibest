@@ -42,7 +42,7 @@ describe("runtime boundary", () => {
     const banned = [
       "projectRoot",
       "createProject",
-      "coordinatorCommand",
+      "entryCommand",
       "specHits",
       "makeSources",
       "preflight",

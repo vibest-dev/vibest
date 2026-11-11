@@ -1,7 +1,7 @@
 {
   "name": "@vibest/cli",
   "version": "0.0.1-dev",
-  "description": "vibest: vibestd daemon and the vibest CLI. A coordinator directing sessions in herdr panes.",
+  "description": "vibest: vibestd daemon and the vibest CLI. An entry session directing sessions in herdr panes.",
   "license": "MIT",
   "repository": {
     "type": "git",
