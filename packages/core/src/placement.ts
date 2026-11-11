@@ -224,7 +224,7 @@ export const sessionPlacement = (deps: {
       ).pipe(
         Effect.catchTag("AgentOwnLimit", (e) =>
           deps.limitMove
-            .rerun(h, session, undefined, firstPrompt, false, e.message)
+            .rerun(h, session, undefined, firstPrompt, false, e.message, 0)
             .pipe(Effect.map((): Option.Option<Terminal> => Option.none<Terminal>())),
         ),
         Effect.map((outcome) => (Option.isOption(outcome) ? outcome : Option.some<Terminal>(outcome))),

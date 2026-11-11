@@ -104,10 +104,7 @@ export const sessionArchive = (deps: {
         if (options.unlessPending) {
           if (!(yield* db.archiveIfNoPending(id))) return undefined
         } else {
-          yield* db.updateSession(id, {
-            metadata: { ...session.metadata, archived: true, removed: true },
-            lastActive: yield* Clock.currentTimeMillis,
-          })
+          yield* db.archive(id, yield* Clock.currentTimeMillis)
           yield* dropQueue(session, `${id} was archived before it was delivered`)
         }
         session = yield* getRow(id)

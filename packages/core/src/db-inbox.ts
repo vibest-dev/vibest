@@ -39,7 +39,7 @@ export const inboxMethods = (store: Store) => {
   const queuedBy = reads.queuedBy
   const observable = (id: string) =>
     sql<{ ok: number }>`SELECT 1 AS ok FROM session s
-      WHERE s.id = ${id} AND s.role != 'main'
+      WHERE s.id = ${id} AND s.role != 'main' AND s.ended_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id)`.pipe(
       Effect.map((rows) => rows.length > 0),
     )
@@ -132,6 +132,16 @@ export const inboxMethods = (store: Store) => {
 
     openTurn: (id: string) => openTurn(id).pipe(Effect.orDie),
 
+    archive: (id: string, at: number) =>
+      tx(
+        Effect.gen(function* () {
+          const s = yield* findSession(id)
+          if (s === undefined) return
+          if ((yield* openTurn(id)) !== undefined) yield* endTurn(id, { status: "interrupted" })
+          yield* updateSession(id, { metadata: { ...s.metadata, archived: true, removed: true }, lastActive: at })
+        }),
+      ).pipe(Effect.orDie),
+
     beginTurn: (id: string, at: number) =>
       tx(
         Effect.gen(function* () {
@@ -190,6 +200,16 @@ export const inboxMethods = (store: Store) => {
         ORDER BY id`.pipe(Effect.orDie),
 
     rescheduleSource: (id: string) => reads.rescheduleSource(id).pipe(Effect.orDie),
+
+    limitSource: (id: string, limited: number) =>
+      tx(
+        Effect.gen(function* () {
+          if ((yield* openTurn(id)) !== undefined) return undefined
+          const [newest] = yield* sql<{ id: number | null }>`SELECT max(id) AS id FROM turn WHERE session_id = ${id}`
+          if ((newest?.id ?? 0) > limited) return undefined
+          return yield* reads.rescheduleSource(id)
+        }),
+      ).pipe(Effect.orDie),
 
     startObserved: (id: string, typed: string | undefined, at: number) =>
       tx(

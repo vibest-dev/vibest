@@ -191,6 +191,51 @@ describe("observed turn end", () => {
   )
 
   test(
+    "a usage limit is not moved when a turn the user typed opened while check looked at the runtime",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      yield* writeResult(id, "pi", { text: "", error: "rate_limit" })
+      yield* herdr.endTurn(id)
+      const held = yield* herdr.hold("state", id)
+      const checking = yield* Effect.forkChild(sessions.check(id))
+      yield* held.reached
+      yield* sessions.userPrompt(id, "typed during the check")
+      const typed = yield* db.openTurn(id)
+      yield* held.release()
+      yield* Fiber.join(checking)
+      assert.isDefined(typed)
+      assert.strictEqual(yield* db.openTurn(id), typed)
+      assert.strictEqual((yield* db.getSession(id))!.harnessId, "pi")
+      assert.lengthOf(yield* herdr.callsTo("open"), 1)
+      assert.isEmpty(yield* sqlNotices(id))
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "a forced archive closes the turn the user typed while it waited for the interrupt",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      yield* herdr.updateAgent(id, (agent) => ({ ...agent, status: "working" }))
+      const held = yield* herdr.hold("send", id)
+      const removing = yield* Effect.forkChild(sessions.remove(id))
+      yield* held.reached
+      yield* writeResult(id, "pi", { text: "", error: "aborted", aborted: true })
+      yield* sessions.userPrompt(id, "typed during the archive")
+      assert.isDefined(yield* db.openTurn(id))
+      yield* held.release()
+      yield* Fiber.join(removing)
+      assert.isUndefined(yield* db.openTurn(id))
+      assert.notStrictEqual((yield* db.getSession(id))!.turnState, "open")
+      yield* sessions.userPrompt(id, "typed after the archive")
+      assert.isUndefined(yield* db.openTurn(id))
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
     "an interrupt that loses to the turn end reports the turn finished and keeps its reply",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

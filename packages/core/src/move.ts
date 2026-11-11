@@ -27,6 +27,7 @@ export interface LimitMove {
     fallbackTask: string,
     ownsTerminal: boolean,
     error: string,
+    limited: number,
   ) => Effect.Effect<boolean>
 }
 
@@ -56,7 +57,7 @@ export const limitMoveBox = (): {
 export const sessionMove = (deps: {
   readonly db: Pick<
     Db["Service"],
-    "getSession" | "updateSession" | "rescheduleSource" | "endProcess" | "linkTask" | "limitedSince"
+    "getSession" | "updateSession" | "limitSource" | "endProcess" | "linkTask" | "limitedSince"
   >
   readonly plugins: Plugins["Service"]
   readonly subscriptions: Subscriptions["Service"]
@@ -109,8 +110,11 @@ export const sessionMove = (deps: {
     fallbackTask: string,
     ownsTerminal: boolean,
     error: string,
+    limited: number,
   ) {
-    const source = yield* db.rescheduleSource(session.id)
+    const newerTurn = Effect.map(db.limitSource(session.id, limited), (fresh) => fresh === undefined)
+    const source = yield* db.limitSource(session.id, limited)
+    if (source === undefined) return true
     const task = source.working || fallbackTask || source.delivered
     let row = session
     let terminal = current
@@ -284,6 +288,7 @@ export const sessionMove = (deps: {
         skip(next.harness, "unavailable")
         continue
       }
+      if (!limitedEnded && (yield* newerTurn)) return true
       if (inPlace) {
         if ((yield* endRunning) === "denied") {
           yield* deps.finish(row, "failed", `${row.id} stayed on ${row.harnessId}: SIGTERM to its harness was refused`)
@@ -365,8 +370,8 @@ export const sessionMove = (deps: {
     }
   })
 
-  const rerun: LimitMove["rerun"] = (h, session, terminal, fallbackTask, ownsTerminal, error) =>
-    rerunBody(h, session, terminal, fallbackTask, ownsTerminal, error).pipe(
+  const rerun: LimitMove["rerun"] = (h, session, terminal, fallbackTask, ownsTerminal, error, limited) =>
+    rerunBody(h, session, terminal, fallbackTask, ownsTerminal, error, limited).pipe(
       Effect.provideService(Harness, harness),
       Effect.provideService(Harnesses, harnesses),
       Effect.provideContext(deps.platform),

@@ -537,7 +537,15 @@ export class Sessions extends Context.Service<
           const reported = last?.text !== null && last?.text !== undefined
           if (!reported || last.status !== "failed" || !isUsageLimitError(last.failure ?? undefined)) return false
           const terminal = session.address
-          yield* limit.move.rerun(h, session, terminal.id === "" ? undefined : terminal, "", false, last.failure!)
+          yield* limit.move.rerun(
+            h,
+            session,
+            terminal.id === "" ? undefined : terminal,
+            "",
+            false,
+            last.failure!,
+            last.turn,
+          )
           return true
         })
 
