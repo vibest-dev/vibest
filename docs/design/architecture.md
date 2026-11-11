@@ -649,9 +649,22 @@ transform or reloading.
 | `runtime`      | `transform`, `reload` | `RuntimeDefinition`s by `id`, each with its optional `caller` (§10) |
 | `harness`      | `transform`, `reload` | `HarnessDefinition`s by `id` (§8)                                   |
 | `subscription` | `report`              | one `(harness, provider)` row's limits                              |
+| `event`        | `subscribe`           | — (observes the ledger's facts)                                     |
 
-Domains such as workspaces, definitions, machines, commands, skills, events, plugin RPC and storage are planned and not
-part of the API yet.
+Domains such as workspaces, definitions, commands, skills, plugin RPC and storage are planned and not part of the API
+yet.
+
+**Observing facts.** `ctx.event.subscribe({ types? })` is a `Stream` of the ledger's own facts (`Fact` from
+`@vibest/schema/event`: `seq`, `at`, `type`, `projectId?`, `sessionId?`, `data`), taken from the post-commit `Bus`.
+It replaces the earlier rule that plugins never read the ledger: a plugin observes facts, and still gets no SQL, no
+`Journal.emit` and no projector of its own. Only catalog facts reach it: every `live.*` event is filtered out.
+`types` omitted or empty means every fact; an unknown type is logged once per call and ignored, and a non-empty list
+of only unknown types is a stream that never emits. Delivery: this machine only, only after the commit, live from the
+moment the stream is run (no replay, no cursor, no ack); a replaced or unloaded plugin's stream ends with its scope,
+and facts committed between that and the next revision's subscription are not delivered to it; the queue is the
+`Bus`'s unbounded `PubSub`, so a slow consumer never holds up a commit but its backlog has no bound; each plugin gets
+its own copy of a fact. A plugin runs its consumer in its own scope (`Effect.forkScoped`); the 5 s setup bound covers
+starting it, not its life.
 
 **Agent hooks** (OpenCode V2 semantics, one hook domain: `context.agent.hook("start.before" | "fail", ...)`):
 

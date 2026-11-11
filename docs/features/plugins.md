@@ -63,3 +63,10 @@ active without editing the plugin or restarting vibestd.
 
 A plugin whose transform throws is disabled and listed as failed with the error. A reload caused by another plugin
 does not set it up again; editing the plugin itself does.
+
+## G12. A plugin observes the ledger's facts
+
+A plugin that subscribes with `ctx.event.subscribe` to `session.created`, `process.started`, `turn.started` and
+`turn.ended` gets those facts of a real Pi subagent, in that order, and none it did not ask for. A plugin that
+subscribes to every fact gets no `live.*` event. After the plugin is edited, the new revision gets the next agent's
+facts and the old one gets nothing more.

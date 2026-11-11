@@ -12,14 +12,15 @@ import {
   type AgentStartBefore,
   type Registration,
 } from "@vibest/plugin"
-import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope } from "effect"
+import type { Fact } from "@vibest/schema/event"
+import { Context, Effect, Fiber, FileSystem, Layer, Path, type Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
 import * as Platform from "../../cli/src/platform/bun.ts"
 import { projectOf } from "./lib/directory.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { runtimesLayer, subscriptionsLayer, harnessesLayer } from "./lib/harnesses.ts"
-import { until } from "./lib/observe.ts"
+import { until, yieldToIo } from "./lib/observe.ts"
 import { makeRepository, testLayer, type TestOptions, type TestServices } from "./lib/session.ts"
 
 const spawnInput = (repo: string, extra: { harness?: "pi" | "claude"; model?: string; prompt?: string } = {}) =>
@@ -420,5 +421,49 @@ describe("plugins: loading", () => {
         )
         assert.strictEqual((yield* second.start(event)).model, "from-x")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+})
+
+const held: Array<Fact> = []
+let release = () => {}
+const gate = new Promise<void>((resolve) => {
+  release = resolve
+})
+const watcher = Plugin.define({
+  id: "watcher",
+  effect: (ctx) =>
+    ctx.event.subscribe().pipe(
+      Stream.runForEach((fact) =>
+        Effect.promise(() => gate).pipe(Effect.andThen(Effect.sync(() => void held.push(fact)))),
+      ),
+      Effect.forkScoped,
+      Effect.asVoid,
+    ),
+})
+
+describe("plugins: event.subscribe", () => {
+  test(
+    "a consumer that holds up its facts does not hold up the commits, and gets every fact in order once it goes on",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const sessions = yield* Sessions
+      yield* yieldToIo
+      yield* sessions.spawn(yield* spawnInput(repo, { harness: "pi" }))
+      const second = yield* sessions.spawn(yield* spawnInput(repo, { harness: "pi" }))
+      assert.deepStrictEqual(held, [])
+      release()
+      yield* until(
+        Effect.sync(() => held),
+        (facts) => facts.some((fact) => fact.sessionId === second.id && fact.type === "process.started"),
+      )
+      const seqs = held.map((fact) => fact.seq)
+      assert.deepStrictEqual(
+        seqs,
+        [...seqs].sort((a, b) => a - b),
+      )
+      assert.strictEqual(new Set(seqs).size, seqs.length)
+      assert.isTrue(held.some((fact) => fact.sessionId === second.id && fact.type === "session.created"))
+    }),
+    { plugins: [watcher] },
   )
 })

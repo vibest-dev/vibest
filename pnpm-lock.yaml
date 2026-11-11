@@ -393,6 +393,10 @@ importers:
         version: link:../../server
 
   packages/plugin:
+    dependencies:
+      '@vibest/schema':
+        specifier: workspace:*
+        version: link:../schema
     devDependencies:
       effect:
         specifier: 4.0.2

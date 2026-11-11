@@ -83,6 +83,26 @@ const mainSession = async (w: World) => {
   return main!
 }
 
+const factLines = (file: string) =>
+  fs.readFile(file, "utf8").then(
+    (text) => text.split("\n").filter(Boolean),
+    () => [],
+  )
+
+const observer = (file: string, types: string) => `import { Plugin } from "@vibest/plugin"
+import { Effect, Stream } from "effect"
+import fs from "node:fs"
+export default Plugin.define({
+  id: "observer",
+  effect: (ctx) =>
+    ctx.event.subscribe(${types}).pipe(
+      Stream.runForEach((fact) => Effect.sync(() => fs.appendFileSync(${JSON.stringify(file)}, \`\${fact.type} \${fact.sessionId ?? "-"}\\n\`))),
+      Effect.forkScoped,
+      Effect.asVoid,
+    ),
+})
+`
+
 const checks: ReadonlyArray<Check> = [
   {
     id: "G5",
@@ -229,6 +249,69 @@ const checks: ReadonlyArray<Check> = [
         const started = processes()[1]!
         expect(started.harness === "pi", `restarted with ${JSON.stringify(started)}`)
         await until("the restarted Pi ready", () => processes()[1]?.readyAt != null, 60_000)
+      } finally {
+        model.stop()
+      }
+    },
+  },
+  {
+    id: "G12",
+    title:
+      "a plugin's ctx.event.subscribe sees the ledger facts of a real Pi subagent in order (session.created, process.started, turn.started, turn.ended) and no live events; a new revision of the plugin gets the next agent's facts and the old one stops",
+    run: async (w) => {
+      needs("pi", "herdr")
+      const { model, dir } = await fakePi(w, "observe")
+      const first = path.join(w.root, "facts-first")
+      const second = path.join(w.root, "facts-second")
+      const file = path.join(w.vibestHome, "plugins", "observer.ts")
+      const save = async (text: string) => {
+        await fs.mkdir(path.dirname(file), { recursive: true })
+        await fs.writeFile(`${file}.tmp`, text)
+        await fs.rename(`${file}.tmp`, file)
+      }
+      const ordered = ["session.created", "process.started", "turn.started", "turn.ended"]
+      const of = (lines: ReadonlyArray<string>, id: string) =>
+        lines.filter((line) => line.endsWith(` ${id}`)).map((line) => line.split(" ")[0]!)
+      const inOrder = (types: ReadonlyArray<string>) => {
+        let at = 0
+        for (const type of types) if (type === ordered[at]) at++
+        return at === ordered.length
+      }
+      try {
+        await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
+        await save(observer(first, JSON.stringify({ types: ordered })))
+        await until("the observer active", async () =>
+          (await w.json<Array<{ id: string; status: string }>>(["plugins"])).some(
+            (p) => p.id === "observer" && p.status === "active",
+          ),
+        )
+        const one = await runId(w, ["pi", "--", ask("observed")])
+        await resultOf(w, one, "observed")
+        await until("the first agent's facts in order", async () => inOrder(of(await factLines(first), one)), 60_000)
+        const seen = of(await factLines(first), one)
+        expect(
+          seen.every((type) => ordered.includes(type)),
+          `the observer got facts it did not ask for: ${JSON.stringify(seen)}`,
+        )
+        const revision = (await w.json<Array<{ id: string; revision: string }>>(["plugins"])).find(
+          (p) => p.id === "observer",
+        )!.revision
+        await save(observer(second, "{}"))
+        await until("the new revision active", async () =>
+          (await w.json<Array<{ id: string; status: string; revision: string }>>(["plugins"])).some(
+            (p) => p.id === "observer" && p.status === "active" && p.revision !== revision,
+          ),
+        )
+        const before = (await factLines(first)).length
+        const two = await runId(w, ["pi", "--", ask("observedagain")])
+        await resultOf(w, two, "observedagain")
+        await until("the second agent's facts in order", async () => inOrder(of(await factLines(second), two)), 60_000)
+        const all = await factLines(second)
+        expect(!all.some((line) => line.startsWith("live.")), `live events reached the plugin: ${JSON.stringify(all)}`)
+        expect(
+          (await factLines(first)).length === before,
+          `the replaced revision still wrote: ${JSON.stringify((await factLines(first)).slice(before))}`,
+        )
       } finally {
         model.stop()
       }

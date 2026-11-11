@@ -1,11 +1,23 @@
 {
   "name": "@vibest/schema",
   "version": "0.0.1-dev",
-  "private": true,
+  "description": "The schemas of vibest's facts and wire types, shared by vibestd and the plugin API.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vibest-dev/vibest.git",
+    "directory": "packages/schema"
+  },
+  "files": [
+    "src",
+    "LICENSE"
+  ],
   "type": "module",
   "exports": {
     "./*": "./src/*.ts"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "typecheck": "tsrs --noEmit --fast",

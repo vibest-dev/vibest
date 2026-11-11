@@ -71,8 +71,8 @@ Settings the workflow needs and cannot set itself. Check them before the first r
 - [ ] Immutable releases on (Settings, General, Releases): a published release's tag and assets cannot change, and the
       release gets an attestation. Drafts stay editable, which recovery relies on.
 - [ ] npm trusted publisher on each published package, `@vibest/cli`, `@vibest/cli-darwin-arm64`,
-      `@vibest/cli-linux-x64`, `@vibest/plugin` and `effect-herdr-sdk`: GitHub Actions, repository `vibest-dev/vibest`,
-      workflow `release.yml`, environment `release`, "Allow npm publish" on (a new configuration otherwise only
+      `@vibest/cli-linux-x64`, `@vibest/schema`, `@vibest/plugin` and `effect-herdr-sdk`: GitHub Actions, repository
+      `vibest-dev/vibest`, workflow `release.yml`, environment `release`, "Allow npm publish" on (a new configuration otherwise only
       allows staged publishing), for example
       `npm trust github @vibest/cli --file release.yml --repo vibest-dev/vibest --env release --allow-publish`.
       Each package.json `repository.url` is `git+https://github.com/vibest-dev/vibest.git`, which provenance requires.

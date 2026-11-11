@@ -23,6 +23,9 @@
   "scripts": {
     "typecheck": "tsrs --noEmit --fast"
   },
+  "dependencies": {
+    "@vibest/schema": "workspace:*"
+  },
   "devDependencies": {
     "effect": "catalog:"
   },
