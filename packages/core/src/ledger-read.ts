@@ -52,7 +52,6 @@ export type SessionColumns = {
   readonly provider: string | null
   readonly model: string | null
   readonly routing: string | null
-  readonly resume: string | null
   readonly runtime: string | null
   readonly terminal: string | null
   readonly pid: number | null
@@ -101,7 +100,7 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
     projectId: row.project,
     agent: row.role,
     harnessId: row.harness ?? "",
-    harnessSessionId: row.conversation ?? row.resume ?? null,
+    harnessSessionId: row.conversation,
     runtime: row.runtime ?? "",
     address: addressOf(row.terminal),
     name: row.name,
@@ -137,7 +136,7 @@ export const coordinatorOf = (
     id: row.id,
     projectId: row.project,
     harnessId: row.harness ?? "",
-    harnessSessionId: row.conversation ?? row.resume ?? null,
+    harnessSessionId: row.conversation,
     runtime: here ? row.runtime : null,
     address: here ? addressOf(row.terminal) : null,
     ...(directory ? { projectDirectory: directory } : {}),
@@ -167,8 +166,8 @@ type InboxColumns = {
 export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
     sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.role, s.name,
-        s.archive_on_completion AS archive, s.created_at, s.ended_at, s.active_at,
-        p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.resume, p.runtime, p.terminal, p.pid,
+        s.archive_on_idle AS archive, s.created_at, s.ended_at, s.active_at,
+        p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.placed_at, p.ready_at,
         p.ended_at AS p_ended, t.id AS t_id, t.started_at AS t_at, t.status AS t_status,
         (SELECT json_group_array(json_object('harness', l.harness, 'provider', l.provider, 'at', l.ended_at))
@@ -180,7 +179,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const coordinatorRows = (project?: string) =>
     sql<CoordinatorColumns>`SELECT s.id, s.project_id AS project, s.created_at, s.directory AS own_directory,
         q.directory AS project_directory,
-        p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.resume, p.runtime, p.terminal, p.pid,
+        p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.ready_at, p.ended_at AS p_ended
       FROM project q JOIN session s ON s.id = q.entry_session_id LEFT JOIN process p ON p.id = s.process_id
       ${project === undefined ? sql`` : sql`WHERE q.id = ${project}`}
@@ -300,7 +299,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
 
   const outboxOf = (peer: string) =>
     sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.kind, o.content, o.created_at,
-        s.origin_report_to AS report_to
+        s.origin_session AS report_to
       FROM outbox o JOIN session s ON s.id = o.session_id WHERE o.peer_id = ${peer} ORDER BY o.seq`.pipe(
       Effect.map((rows) => rows.filter((row): row is OutboxRow => row.reportTo !== null)),
     )

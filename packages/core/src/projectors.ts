@@ -2,15 +2,14 @@ import type { Fact, FactOf, FactType } from "@vibest/schema/event"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 
-export const PROJECTION_VERSION = 3
+export const PROJECTION_VERSION = 4
 
 export const PROJECTION_SCHEMA = [
   `CREATE INDEX event_session ON event (session_id, seq) WHERE session_id IS NOT NULL`,
   `CREATE TABLE project (
     id               TEXT PRIMARY KEY CHECK (length(id) = 36),
     directory        TEXT UNIQUE,
-    entry_session_id TEXT,
-    seq              INTEGER NOT NULL
+    entry_session_id TEXT
   ) STRICT`,
   `CREATE TABLE project_repository (
     project_id TEXT NOT NULL,
@@ -22,21 +21,18 @@ export const PROJECTION_SCHEMA = [
     id                    TEXT PRIMARY KEY,
     project_id            TEXT NOT NULL,
     parent_session_id     TEXT,
-    report_to_session_id  TEXT,
     role                  TEXT NOT NULL,
     name                  TEXT NOT NULL,
     directory             TEXT NOT NULL,
-    archive_on_completion INTEGER NOT NULL DEFAULT 0 CHECK (archive_on_completion IN (0, 1)),
+    archive_on_idle       INTEGER NOT NULL DEFAULT 0 CHECK (archive_on_idle IN (0, 1)),
     origin_peer           TEXT,
     origin_project        TEXT,
-    origin_parent         TEXT,
-    origin_report_to      TEXT,
+    origin_session        TEXT,
     created_at            INTEGER NOT NULL,
     ended_at              INTEGER,
     process_id            INTEGER,
     turn_id               INTEGER,
-    active_at             INTEGER,
-    seq                   INTEGER NOT NULL
+    active_at             INTEGER
   ) STRICT`,
   `CREATE INDEX session_project ON session (project_id)`,
   `CREATE INDEX session_parent ON session (parent_session_id)`,
@@ -49,7 +45,6 @@ export const PROJECTION_SCHEMA = [
     provider             TEXT,
     model                TEXT,
     routing              TEXT,
-    resume               TEXT,
     runtime              TEXT NOT NULL,
     terminal             TEXT,
     pid                  INTEGER,
@@ -91,7 +86,6 @@ export const PROJECTION_SCHEMA = [
     peer_item            TEXT,
     status               TEXT NOT NULL CHECK (status IN ('pending', 'delivering', 'delivered', 'failed', 'dropped')),
     turn_id              INTEGER,
-    queued_at            INTEGER NOT NULL,
     seq                  INTEGER NOT NULL,
     CHECK (recipient_session_id IS NOT NULL OR sender_session_id IS NOT NULL)
   ) STRICT`,
@@ -160,8 +154,7 @@ const sessionIdOf = (fact: Fact) => fact.sessionId!
 export const projectors: { readonly [T in FactType]: Projector<T> } = {
   "project.created": (fact, sql) =>
     Effect.andThen(
-      sql`INSERT INTO project (id, directory, seq) VALUES (${projectIdOf(fact)}, ${fact.data.directory ?? null},
-        ${fact.seq})`,
+      sql`INSERT INTO project (id, directory) VALUES (${projectIdOf(fact)}, ${fact.data.directory ?? null})`,
       putRepositories(sql, projectIdOf(fact), fact.data.repositories),
     ),
   "project.moved": (fact, sql) =>
@@ -181,12 +174,11 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
   "session.created": (fact, sql) => {
     const { data } = fact
     const origin = data.origin
-    return sql`INSERT INTO session (id, project_id, parent_session_id, report_to_session_id, role, name, directory,
-        archive_on_completion, origin_peer, origin_project, origin_parent, origin_report_to, created_at, active_at, seq)
-      VALUES (${sessionIdOf(fact)}, ${projectIdOf(fact)}, ${data.parent ?? null}, ${data.reportTo ?? null},
-        ${data.role}, ${data.name}, ${data.directory}, ${data.archiveOnCompletion ? 1 : 0}, ${origin?.peer ?? null},
-        ${origin?.project ?? null}, ${origin?.parent ?? null}, ${origin?.reportTo ?? null}, ${fact.at},
-        ${origin === undefined ? null : fact.at}, ${fact.seq})`
+    return sql`INSERT INTO session (id, project_id, parent_session_id, role, name, directory, archive_on_idle,
+        origin_peer, origin_project, origin_session, created_at, active_at)
+      VALUES (${sessionIdOf(fact)}, ${projectIdOf(fact)}, ${data.parent ?? null}, ${data.role}, ${data.name},
+        ${data.directory}, ${data.archiveOnCompletion ? 1 : 0}, ${origin?.peer ?? null}, ${origin?.project ?? null},
+        ${origin?.reportTo ?? null}, ${fact.at}, ${origin === undefined ? null : fact.at})`
   },
   "session.renamed": (fact, sql) => sql`UPDATE session SET name = ${fact.data.name} WHERE id = ${sessionIdOf(fact)}`,
   "session.directory_changed": (fact, sql) =>
@@ -200,8 +192,8 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
   "process.started": (fact, sql) => {
     const { data } = fact
     return Effect.andThen(
-      sql`INSERT INTO process (id, session_id, harness, provider, model, routing, resume, runtime, terminal, pid,
-          started_at, placed_at)
+      sql`INSERT INTO process (id, session_id, harness, provider, model, routing, conversation, runtime, terminal,
+          pid, started_at, placed_at)
         VALUES (${fact.seq}, ${sessionIdOf(fact)}, ${data.harness}, ${data.provider ?? null}, ${data.model ?? null},
           ${data.routing === undefined ? null : JSON.stringify(data.routing)}, ${data.resume ?? null}, ${data.runtime},
           ${data.terminal ?? null}, ${data.pid ?? null}, ${fact.at}, ${data.terminal === undefined ? null : fact.at})`,
@@ -251,9 +243,9 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
 
   "inbox.queued": (fact, sql) => {
     const { data } = fact
-    return sql`INSERT INTO inbox (id, recipient_session_id, sender_session_id, kind, content, request, peer_item, status, queued_at, seq)
+    return sql`INSERT INTO inbox (id, recipient_session_id, sender_session_id, kind, content, request, peer_item, status, seq)
       VALUES (${fact.seq}, ${data.recipient ?? null}, ${data.sender ?? null}, ${data.kind}, ${data.content},
-        ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${fact.at}, ${fact.seq})`
+        ${data.request ?? null}, ${data.peerItem ?? null}, ${data.status}, ${fact.seq})`
   },
   "inbox.moved": (fact, sql) =>
     sql`UPDATE inbox SET status = ${fact.data.to}, seq = ${fact.seq},
@@ -286,11 +278,6 @@ const touchesActivity = (type: FactType) =>
 export const project = (fact: Fact, sql: SqlClient.SqlClient) =>
   Effect.gen(function* () {
     yield* (projectors[fact.type] as Projector<FactType>)(fact as never, sql)
-    if (fact.sessionId !== undefined)
-      yield* touchesActivity(fact.type)
-        ? sql`UPDATE session SET seq = ${fact.seq}, active_at = max(coalesce(active_at, 0), ${fact.at})
-            WHERE id = ${fact.sessionId}`
-        : sql`UPDATE session SET seq = ${fact.seq} WHERE id = ${fact.sessionId}`
-    if (fact.projectId !== undefined && fact.type.startsWith("project."))
-      yield* sql`UPDATE project SET seq = ${fact.seq} WHERE id = ${fact.projectId}`
+    if (fact.sessionId !== undefined && touchesActivity(fact.type))
+      yield* sql`UPDATE session SET active_at = max(coalesce(active_at, 0), ${fact.at}) WHERE id = ${fact.sessionId}`
   })

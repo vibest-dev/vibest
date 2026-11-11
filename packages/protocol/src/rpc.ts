@@ -753,7 +753,6 @@ export class VibestRpcs extends RpcGroup.make(
           model: Schema.optional(Schema.String),
           title: Schema.optional(Schema.String),
           runtime: Schema.optional(Schema.String),
-          parent: Schema.optional(Schema.String),
           reportTo: Schema.optional(Schema.String),
           request: Schema.String,
         },

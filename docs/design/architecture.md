@@ -98,7 +98,7 @@ subagents. Everything else in this list is planned; each item says what runs tod
 - **Delivery is by recipient.** `vibest send <id>` from the user, the main agent or any session reaches any unfinished
   session of the same project, the main agent included. A turn end writes only `turn.ended`; the reply text stays in
   `turn.reported` and is read as `turn.answer` with `vibest result`. vibest's own notices say only what an agent could
-  not say itself, and go to its creator (`report_to`, else the entry session, else `origin_report_to` through the
+  not say itself, and go to its creator (its living parent, else the entry session, else `origin_session` through the
   outbox): its harness exited, its turn ended in an error, it never started, it waits on a permission. An
   undeliverable message goes back to its sender. Completed and interrupted turns send nothing, and nothing says an
   agent went idle.

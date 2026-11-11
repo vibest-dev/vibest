@@ -95,7 +95,7 @@ const make = Effect.gen(function* () {
       EXISTS (
         SELECT 1 FROM turn t JOIN process p ON p.id = t.process_id
         WHERE t.session_id = ${sessionId} AND t.status IS NOT NULL
-          AND (p.resume = ${harnessSessionId} OR p.conversation = ${harnessSessionId})
+          AND p.conversation = ${harnessSessionId}
       )
       OR (
         EXISTS (SELECT 1 FROM project WHERE entry_session_id = ${sessionId})
@@ -239,9 +239,9 @@ const make = Effect.gen(function* () {
         origin: string | null
         entry: string | null
         name: string | null
-      }>`SELECT s.report_to_session_id AS creator, s.origin_report_to AS origin, p.entry_session_id AS entry,
+      }>`SELECT s.parent_session_id AS creator, s.origin_session AS origin, p.entry_session_id AS entry,
           c.name AS name
-        FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = s.report_to_session_id
+        FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = s.parent_session_id
         WHERE s.id = ${id}`.pipe(
         Effect.map(([row]) => {
           const creator = row?.creator ?? row?.origin ?? row?.entry
@@ -282,11 +282,6 @@ const make = Effect.gen(function* () {
             const n = (yield* selectRaw([notMain, sql`s.ended_at IS NULL`], running)).length
             if (n >= max) return false
           }
-          const [entry] =
-            origin === undefined && parentSessionId === undefined && row.agent !== "main"
-              ? yield* sql<{ id: string | null }>`SELECT entry_session_id AS id FROM project WHERE id = ${project}`
-              : []
-          const reportTo = parentSessionId ?? entry?.id ?? undefined
           const stopped = row.metadata.archived || row.metadata.removed
           yield* emit(SessionCreated, {
             sessionId: row.id,
@@ -297,7 +292,6 @@ const make = Effect.gen(function* () {
               name: row.name,
               directory: cwd,
               ...(parentSessionId === undefined ? {} : { parent: parentSessionId }),
-              ...(reportTo === undefined ? {} : { reportTo }),
               archiveOnCompletion: row.metadata.archive === true,
               ...(origin === undefined
                 ? {}
@@ -305,7 +299,6 @@ const make = Effect.gen(function* () {
                     origin: {
                       peer: origin.peer,
                       project: origin.project,
-                      ...(origin.parent === undefined ? {} : { parent: origin.parent }),
                       ...(origin.reportTo === undefined ? {} : { reportTo: origin.reportTo }),
                     },
                   }),

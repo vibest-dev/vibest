@@ -382,7 +382,7 @@ const checks: ReadonlyArray<Check> = [
           )
           const conversation = row<{ conversation: string }>(
             w,
-            "SELECT resume AS conversation FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+            "SELECT conversation FROM process WHERE session_id = ? ORDER BY id DESC LIMIT 1",
             launched.id,
           )!.conversation
           await visible("native-status-completed")
