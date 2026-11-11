@@ -103,21 +103,21 @@ const make = Effect.gen(function* () {
     })
 
   const running = Effect.fn("EntrySession.running")(function* (projectId: string, terminal: string) {
-    const coord = yield* db.entryOf(projectId)
-    if (!coord?.address || coord.address.id === "" || !coord.runtime) return null
-    const runtimeId = coord.runtime
-    if (coord.address.id === terminal) return null
+    const entry = yield* db.entryOf(projectId)
+    if (!entry?.address || entry.address.id === "" || !entry.runtime) return null
+    const runtimeId = entry.runtime
+    if (entry.address.id === terminal) return null
     const found = runtimes.find(runtimeId)
-    if (!restarting.has(coord.id)) {
+    if (!restarting.has(entry.id)) {
       if (found === undefined) return null
-      const presence = yield* entryIdle(found, coord.address).pipe(Effect.option)
+      const presence = yield* entryIdle(found, entry.address).pipe(Effect.option)
       if (Option.isNone(presence) || (presence.value !== "idle" && presence.value !== "busy")) return null
     }
     return {
-      harness: coord.harnessId,
-      place: placeOf(found ?? { id: runtimeId }, coord.address),
+      harness: entry.harnessId,
+      place: placeOf(found ?? { id: runtimeId }, entry.address),
       runtime: runtimeId,
-      address: encodeAddress(coord.address),
+      address: encodeAddress(entry.address),
     }
   })
 
@@ -168,7 +168,7 @@ const make = Effect.gen(function* () {
     let opened: Terminal | undefined
     let claimedId: string | undefined
     const command = yield* withHarness(
-      Launch.coordinatorCommand({
+      Launch.entryCommand({
         harness: chosen,
         root,
         provider: decision.provider ?? null,
@@ -302,7 +302,7 @@ const make = Effect.gen(function* () {
             }
           | undefined
         const command = yield* withHarness(
-          Launch.coordinatorCommand({
+          Launch.entryCommand({
             harness: input.harness,
             root: directory,
             provider: input.provider ?? null,
@@ -330,7 +330,7 @@ const make = Effect.gen(function* () {
             Effect.fail(new LaunchFailed({ message: error.message })),
           ),
         )
-        if (claimed === undefined) return yield* Effect.die("coordinator command returned without a session")
+        if (claimed === undefined) return yield* Effect.die("entry command returned without a session")
         const rt = runtimes.find(kind)
         if (rt?.present !== undefined)
           yield* rt
@@ -360,18 +360,18 @@ const make = Effect.gen(function* () {
   const stop = Effect.fn("EntrySession.stop")(function* (projectId: string, runtime: string, address: string) {
     return yield* projectLocked.withLock(projectId)(
       Effect.gen(function* () {
-        const coord = yield* db.entryOf(projectId)
-        const place = coord?.address
-        if (!coord?.runtime || !place || place.id === "" || !sameEntry(coord, runtime, address))
+        const entry = yield* db.entryOf(projectId)
+        const place = entry?.address
+        if (!entry?.runtime || !place || place.id === "" || !sameEntry(entry, runtime, address))
           return { result: "moved" as const }
-        if (restarting.has(coord.id))
+        if (restarting.has(entry.id))
           return {
             result: "unsupported" as const,
             reason: "vibest update is restarting it there; run vibest again once it is ready",
           }
         const h = yield* runtimes.route(runtime)
         return yield* stopAgent(h, place, {
-          pid: coord.pid,
+          pid: entry.pid,
           detach: db.detachEntry(projectId, runtime, place),
           reattach: db.reattachEntry(projectId, runtime, place),
           wait: HARNESS_EXIT_WAIT,

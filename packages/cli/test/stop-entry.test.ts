@@ -89,8 +89,8 @@ const workingPiMain = Effect.gen(function* () {
   })
   yield* db.noteConversation(started.sessionId, "conversation-1")
   const projectId = yield* projectOf(repo)
-  const coord = (yield* db.entryOf(projectId))!
-  const origin = { runtime: coord.runtime!, address: coord.address! }
+  const entry = (yield* db.entryOf(projectId))!
+  const origin = { runtime: entry.runtime!, address: entry.address! }
   const address = encodeAddress(origin.address)
   yield* db.insertSession(
     {

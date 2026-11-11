@@ -113,7 +113,10 @@ const reportSession = Effect.fn("reportSession")(function* (sessionId: string) {
       const headers = yield* piHeaders(sessionId, ctx)
       yield* connect(layout.socket).pipe(
         Effect.flatMap((client) =>
-          client["Session.Ready"]({ id: sessionId, conversation: harnessSessionId }, { headers }),
+          client["Session.Ready"](
+            { id: sessionId, conversation: { harness: "pi", id: harnessSessionId } },
+            { headers },
+          ),
         ),
         Effect.scoped,
         Effect.timeout("1 second"),

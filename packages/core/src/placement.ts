@@ -130,7 +130,7 @@ export const sessionPlacement = (deps: {
     undo: (a: A) => Effect.Effect<unknown, unknown, R2>,
   ) => Effect.acquireRelease(acquire, (a, exit) => (Exit.isFailure(exit) ? undo(a).pipe(Effect.ignore) : Effect.void))
 
-  const nearMain = (session: SessionRow, kind: string) =>
+  const nearEntry = (session: SessionRow, kind: string) =>
     db
       .entryOf(session.projectId)
       .pipe(
@@ -153,7 +153,7 @@ export const sessionPlacement = (deps: {
       readonly endedByCaller?: boolean
     },
   ) {
-    const near = input.near !== undefined ? input.near : yield* nearMain(session, h.id)
+    const near = input.near !== undefined ? input.near : yield* nearEntry(session, h.id)
     const remote = yield* db.startedByPeer(session.id)
     const choice = {
       harnessId: session.harnessId,

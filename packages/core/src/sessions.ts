@@ -38,7 +38,7 @@ import * as Engine from "./engine.ts"
 import { sessionExecutions } from "./executions.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox } from "./inbox.ts"
-import { coordinatorCommand, restartArgv } from "./launch.ts"
+import { entryCommand, restartArgv } from "./launch.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 import { sessionPlacement } from "./placement.ts"
@@ -879,7 +879,7 @@ export class Sessions extends Context.Service<
             yield* db.patchLive(entry.id, { ready: null })
             const root = entry.projectDirectory ?? (yield* db.projectDirectory(entry.projectId)) ?? ""
             const savedId = entry.harnessSessionId
-            const command = yield* coordinatorCommand({
+            const command = yield* entryCommand({
               harness: entry.harnessId,
               root,
               provider: entry.provider,

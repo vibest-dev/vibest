@@ -125,7 +125,7 @@ export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>
 export type CallerShape =
   | { readonly _tag: "Cli"; readonly repositoryRoot: string }
   | {
-      readonly _tag: "Coordinator"
+      readonly _tag: "Entry"
       readonly sessionId: string
       readonly projectId: string
       readonly repositoryRoot?: string
@@ -699,7 +699,7 @@ export class VibestRpcs extends RpcGroup.make(
       payload: {
         id: Schema.String,
         pid: Schema.optional(Schema.Number),
-        conversation: Schema.optional(Schema.String),
+        conversation: Schema.optional(Schema.Struct({ harness: Schema.String, id: Schema.String })),
       },
       success: Schema.Struct({ process: Schema.optional(Schema.Number) }),
       error: Schema.Union([Forbidden, NoSuchSession]),

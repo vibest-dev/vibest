@@ -306,7 +306,7 @@ export const openProject = (client: Pick<VibestClient, "Project.Open">) =>
 
 export type Exec = (file: string, args: ReadonlyArray<string>, env: Record<string, string>) => void
 
-const mainFlags = {
+const entryFlags = {
   fresh: Flag.Boolean("new").pipe(
     Flag.withDescription("Start a new conversation with the entry session instead of reopening the current one"),
     Flag.withDefault(false),
@@ -799,7 +799,7 @@ const integration = () =>
   )
 
 export const command = (host: Daemon.Host, replacements: LayerNode.Replacements, exec: Exec) =>
-  Command.make("vibest", mainFlags, startEntry(exec)).pipe(
+  Command.make("vibest", entryFlags, startEntry(exec)).pipe(
     Command.withDescription(
       "vibest: in a project directory, open its entry session here (--new: a new conversation); the entry session runs subagents in herdr panes",
     ),

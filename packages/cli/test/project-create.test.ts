@@ -352,7 +352,7 @@ describe("multi-repository isolated workspace", () => {
       yield* repositoryWithOneCommitOnMain(root, "app")
       yield* repositoryWithOneCommitOnMain(root, "sdk")
       const raw = yield* connect((yield* Layout).socket)
-      const command = yield* Launch.coordinatorCommand({
+      const command = yield* Launch.entryCommand({
         harness: "pi",
         root,
         provider: null,

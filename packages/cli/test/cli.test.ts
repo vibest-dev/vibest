@@ -214,7 +214,7 @@ describe("vibest CLI", () => {
   )
 
   test(
-    "archive: the Coordinator archives its own session through vibestd and git; rm does the same; a session, or another Coordinator, is refused",
+    "archive: the entry session archives its own session through vibestd and git; rm does the same; a session, or another entry session, is refused",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
@@ -223,7 +223,7 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const coord = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
+      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p1" },
       })
@@ -233,8 +233,8 @@ describe("vibest CLI", () => {
           {
             ...cli,
             VIBEST_AGENT: "coordinator",
-            VIBEST_SESSION_ID: coord.sessionId,
-            VIBEST_PROJECT_ID: String(coord.projectId),
+            VIBEST_SESSION_ID: entry.sessionId,
+            VIBEST_PROJECT_ID: String(entry.projectId),
           },
           args,
         )
@@ -257,7 +257,7 @@ describe("vibest CLI", () => {
         for (const r of [
           yield* vibest(
             repo,
-            { ...cli, VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_PROJECT_ID: String(coord.projectId) },
+            { ...cli, VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_PROJECT_ID: String(entry.projectId) },
             [command, id],
           ),
           yield* vibest(

@@ -11,10 +11,10 @@ export const make = Effect.gen(function* () {
       Stream.unwrap(
         Effect.gen(function* () {
           const c = yield* Caller
-          if (c._tag !== "Coordinator")
+          if (c._tag !== "Entry")
             return yield* new Forbidden({
               method: "Inbox.Subscribe",
-              message: "Inbox.Subscribe is the coordinator's",
+              message: "Inbox.Subscribe is the entry session's",
             })
           return inbox.stream(c.projectId)
         }),

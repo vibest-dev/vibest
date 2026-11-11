@@ -49,7 +49,7 @@ type Step<A, E, R> = Effect.Effect<A, E, R>
 
 export interface HerdrDaemon<E = never, R = never> {
   readonly republish: (directory: string | undefined) => Step<number, E, R>
-  readonly openMain: (
+  readonly openEntry: (
     directory: string,
   ) => Step<{ readonly action: "focused" | "runs in" | "opened"; readonly place: string }, E, R>
   readonly spawn: (directory: string, prompt: string) => Step<string, E, R>
@@ -156,7 +156,7 @@ export const perform = <E, R>(
         case "startup":
           return `republished ${yield* daemon.republish(projectDirectory(context))}`
         case "open-entry": {
-          const opened = yield* daemon.openMain(yield* requireDirectory(context))
+          const opened = yield* daemon.openEntry(yield* requireDirectory(context))
           return `${opened.action} ${opened.place}`
         }
         case "run": {
@@ -209,7 +209,7 @@ const toLive = (session: SessionInfo): LiveSession => ({
 
 const theDaemon = {
   republish: (directory: string | undefined) => ask(directory ?? "/", (client) => client.Republish()),
-  openMain: (directory: string) =>
+  openEntry: (directory: string) =>
     Effect.gen(function* () {
       const focused = yield* ask(directory, (client) => client["Project.FocusEntry"]({}))
       if (focused)

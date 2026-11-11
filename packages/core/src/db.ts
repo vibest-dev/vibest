@@ -28,6 +28,7 @@ import {
   type SpawnedBefore,
   type RepositoryRow,
   type Integration,
+  ENTRY_AGENT,
 } from "./db-rows.ts"
 import { makeStore } from "./db-store.ts"
 import { LayerNode } from "./effect/layer-node.ts"
@@ -405,7 +406,7 @@ const make = Effect.gen(function* () {
     sessionIdentity: (id: string) =>
       sql<{ id: string; projectId: string; agent: string; harness: string }>`SELECT a.id, a.project_id,
           coalesce(p.harness, '') AS harness,
-          CASE WHEN q.entry_session_id = a.id THEN 'coordinator' ELSE a.agent END AS agent
+          CASE WHEN q.entry_session_id = a.id THEN ${ENTRY_AGENT} ELSE a.agent END AS agent
         FROM session a JOIN project q ON q.id = a.project_id
         LEFT JOIN process p ON p.session_id = a.id AND p.id = a.process_id
         WHERE a.id = ${id}`.pipe(
@@ -483,7 +484,7 @@ const make = Effect.gen(function* () {
               yield* emit(SessionCreated, {
                 sessionId: id,
                 at,
-                data: { project, agent: "main", name: "main", directory: start.projectDirectory ?? "" },
+                data: { project, agent: "main", name: "entry", directory: start.projectDirectory ?? "" },
               })
               yield* emit(ProjectEntryChanged, { projectId: project, at, data: { session: id } })
               yield* notify({ type: "live.project", projectId: project })

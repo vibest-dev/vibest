@@ -21,7 +21,9 @@ release. Each release lists what broke, who is affected and how to migrate under
   `Project.StartMain`, `Project.MainPlace`, `Project.FocusCoordinator`, `Project.RunningCoordinator` and
   `Project.StopCoordinator` are `Project.EntrySession`, `Project.StartEntry`, `Project.EntryPlace`,
   `Project.FocusEntry`, `Project.RunningEntry` and `Project.StopEntry`; `CoordinatorSessionReady` is gone, the
-  integration reports the conversation with `Session.Ready` and a new optional `conversation`. The herdr action
+  integration reports the conversation with `Session.Ready` and a new optional `conversation` `{ harness, id }`
+  (ignored when `harness` is not the session's). The `Coordinator` caller shape is `Entry`. The entry session's `name`
+  in `vibest ls`, `Watch` and `List` JSON is `entry` (was `main`), and errors that named the coordinator for the project's entry session say "entry session". The herdr action
   `open-main` is `open-entry` (rebind a key set to `vibest.open-main`), the runtime `present` info key `mainSession`
   is `entrySession`, and CLI help and errors say "entry session" where they said "main agent". The protocol number
   is unchanged.

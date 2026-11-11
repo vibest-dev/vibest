@@ -54,7 +54,7 @@ export const remoteHandlers = (
       Effect.gen(function* () {
         const { c, scope } = yield* reach("List")
         if (c === undefined) return { _tag: "Peer", ...scope } satisfies ListScope
-        if (c._tag === "Coordinator") return { _tag: "Project", id: c.projectId } satisfies ListScope
+        if (c._tag === "Entry") return { _tag: "Project", id: c.projectId } satisfies ListScope
         if (all === true) return { _tag: "All" } satisfies ListScope
         return yield* deps.findAt(c.repositoryRoot).pipe(
           Effect.map((row): ListScope => (row === undefined ? { _tag: "Nothing" } : { _tag: "Project", id: row.id })),
@@ -105,7 +105,7 @@ export const remoteHandlers = (
       spawnOn: (machine: string, input: PayloadOf<"Spawn">, caller: Agent, project: string) =>
         remote.spawn(machine, input, {
           project,
-          ...(caller._tag === "Coordinator" ? { coordinator: caller.sessionId } : {}),
+          ...(caller._tag === "Entry" ? { coordinator: caller.sessionId } : {}),
         }),
 
       methods: {

@@ -527,7 +527,7 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
             }> = Effect.succeed({ sessionId, harnessSessionId, projectId: PROJECT }),
             provider: string | null = null,
           ) =>
-            Launch.coordinatorCommand({
+            Launch.entryCommand({
               harness: h,
               root: repo,
               provider,

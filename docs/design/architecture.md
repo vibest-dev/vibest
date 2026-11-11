@@ -321,7 +321,7 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
 - **Into a subagent** through herdr `agent.prompt`, text unchanged, then confirmed: within 8 s the state
   sequence must move or the agent must be working; otherwise press Enter and wait 8 s; otherwise paste once more
   and wait 8 s; otherwise `not_started` with a notice naming `vibest peek <id>` (CAO #479, #496, #566). No screen text is ever
-  pushed to an agent: a coordinator reads a terminal on demand with `vibest peek <id> [--lines N]`; vibestd.log keeps the tail.
+  pushed to an agent: a entry session reads a terminal on demand with `vibest peek <id> [--lines N]`; vibestd.log keeps the tail.
 - **Failure.** A Message that cannot be delivered is finalized `failed` and its text returned to the sender as a
   notice, once. A Message found `delivering` after a restart is finalized as "may have been delivered": never
   replayed blindly. herdr unreachable before handover leaves it `pending`.
@@ -380,7 +380,7 @@ How `packages/core/src/sessions.ts` keeps these:
   project's last live session ends, the entry session's terminal publishes the workspace alone; without a stored
   project directory its name cannot be given again and is left as it is (a known gap).
 - Starting the entry session (`launch.ts`): every check that can refuse the launch (harness, provider, binary, plugin,
-  temporary directory) runs before the coordinator session is recorded, since that supersedes the running main
+  temporary directory) runs before the entry session session is recorded, since that supersedes the running main
   Agent's launch. The shell a launch opens at the root runs the command and then stays, so a failed start (or a
   entry session the user quits) leaves its error and a shell, not a closing terminal. `VIBEST_HOME` is set last in its
   environment, so a caller's `--env` cannot point that shell at another vibestd.
@@ -473,7 +473,7 @@ back. A row that already exited is not closed again. A spawn reserves its worktr
 start cut off before its terminal was recorded is undone as a failed launch (its worktree goes when nothing can be
 lost, its reserved directory when still empty), while a resume or move falls back to its previous start.
 `--archive-on-idle` decides under the session's lock, at a completed execution end and whenever a row it sent or was sent leaves
-`pending`/`delivering`: a session with work again (a queued Message, a row still waiting in either direction, or a newer execution) stays, and a clean archive sends no notice, since each notice is a coordinator execution.
+`pending`/`delivering`: a session with work again (a queued Message, a row still waiting in either direction, or a newer execution) stays, and a clean archive sends no notice, since each notice is a entry session execution.
 
 ## 4. Patterns
 
@@ -1027,7 +1027,7 @@ the authentication; roles prevent mistakes, not attackers.
 
 **RPC methods** (`packages/protocol/src/rpc.ts`). Three middlewares: `ProtocolGate` (every method but `Ping`),
 `CallerGate` on scoped methods (resolves the caller for that request only, from its headers and the stored row; a
-session never declares itself coordinator), and `Admission` on methods that change something (see
+session never declares itself entry session), and `Admission` on methods that change something (see
 [drain admission](daemon.md#admission-while-draining)). Protocol-only methods take no caller: `Plugins`,
 `Harnesses.List` (each harness with `problem`, null when vibestd can start it, else why not, and the models it lists;
 the same preflight `Project.StartEntry` and `Spawn` route by, so the catalog and a start never disagree; `vibest models`
@@ -1037,14 +1037,14 @@ answers how many), the hooks' `ExecutionEnd` and `Prompt` (verbatim harness JSON
 prompt from the entry session or from vibest's own delivery is ignored). Of the rest:
 
 - `Spawn`: `harness` is optional when a routing plugin picks it; `agent` defaults to general and may not be the
-  coordinator; `machine` defaults to `local`; `peer` shares that session's worktree in a split of its pane;
-  `archive` archives the session once a completed result reached its coordinator.
-- `Send` queues and returns; vibestd delivers once the session is idle, and failures reach its coordinator as
+  entry session; `machine` defaults to `local`; `peer` shares that session's worktree in a split of its pane;
+  `archive` archives the session once a completed result reached its entry session.
+- `Send` queues and returns; vibestd delivers once the session is idle, and failures reach its entry session as
   notices. An `id` is a session id or a unique prefix of at least 8 characters, and the answer names the full id.
-- `Remove`: only the session's own coordinator or the user's command line. `Get` never waits. `Peek` reads the last
-  `lines` (default 30) of the terminal when asked: screen text is never pushed to an agent, so a coordinator looks
-  there itself when an execution ended without a reply. `Report` goes to the caller's own coordinator.
-  `Inbox.Subscribe` streams the coordinator's inbox batches (the Pi extension) instead of the runtime's prompt.
+- `Remove`: only the session's own entry session or the user's command line. `Get` never waits. `Peek` reads the last
+  `lines` (default 30) of the terminal when asked: screen text is never pushed to an agent, so a entry session looks
+  there itself when an execution ended without a reply. `Report` goes to the caller's own entry session.
+  `Inbox.Subscribe` streams the entry session's inbox batches (the Pi extension) instead of the runtime's prompt.
 - `SessionInfo.task` is the first row delivered from the user or the parent (`List` cuts it to 500 characters);
   `latest.summary` is `metadata.summary` when that is a string, else the output's first line.
 - `Launch` opens `vibest`'s entry session outside the repository's workspace: a tab there, or a new workspace at its
@@ -1176,8 +1176,8 @@ and are the acceptance for each part.
 | Starting an Agent                          | `spawn.ts`, `worktree.ts`, `harness.ts` (the `Harnesses` registry; the adapters are `packages/plugin-harnesses`) | session → Agent in a Run; Workspace types                                       | `sessions.test.ts`, `worktree-group.test.ts`                                                               |
 | Delivery and outcomes                      | `prompting.ts` (prompt), `sessions.ts` (executions), `inbox.ts`                                                  | execution state → Message `outcome`; coordinator → entry session                | `sessions.test.ts`, `self-heal.test.ts`                                                                    |
 | Results                                    | `replies.ts`                                                                                                     | add Run id                                                                      | `unit.test.ts`                                                                                             |
-| Interrupt and stop                         | `sessions.ts`, `archive.ts`, `remove.ts`, `processes.ts`                                                         | archive → `stop`; `--archive-on-idle` → `once`                                  | `remove.test.ts`, `stop-coordinator.test.ts`                                                               |
-| Entry session launch and resume            | `launch.ts`, `session/entry.ts`, `sessions.ts`                                                                   | coordinator → entry session of a Project                                        | `stop-coordinator.test.ts`                                                                                 |
+| Interrupt and stop                         | `sessions.ts`, `archive.ts`, `remove.ts`, `processes.ts`                                                         | archive → `stop`; `--archive-on-idle` → `once`                                  | `remove.test.ts`, `stop-entry.test.ts`                                                                     |
+| Entry session launch and resume            | `launch.ts`, `session/entry.ts`, `sessions.ts`                                                                   | coordinator → entry session of a Project                                        | `stop-entry.test.ts`                                                                                       |
 | Rules                                      | `rules.ts`                                                                                                       | subagent rules; entry session rules become builtin skills                       | `unit.test.ts`                                                                                             |
 | Knowledge                                  | `project.ts`                                                                                                     | directory realpath → Project id                                                 | `project.test.ts`                                                                                          |
 | Models                                     | `models.ts`                                                                                                      | Availability capability                                                         | `unit.test.ts`                                                                                             |

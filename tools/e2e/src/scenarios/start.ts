@@ -15,7 +15,7 @@ type Entry = {
   routing?: { trace: Array<{ hook: string }> }
 }
 
-const mains = async (w: World) =>
+const entryRows = async (w: World) =>
   (await w.json<{ sessions: Array<Entry> }>(["ls"]).then((l) => l.sessions)).filter((e) => e.agent === "main")
 const start = (w: World) =>
   w.startEntry({ harness: "pi", env: { PI_CODING_AGENT_DIR: w.config.pi }, timeoutMs: 60_000 })
@@ -211,10 +211,13 @@ const move = (harness: "claude" | "pi"): Check => ({
       await until("only a shell in A", shellOnly, 30_000).catch(async () =>
         fail(`A runs ${JSON.stringify(await foreground(socket, a))}`),
       )
-      const mains = (
+      const entryRows = (
         await w.json<{ sessions: Array<{ agent: string; address: { id: string } }> }>(["ls"]).then((l) => l.sessions)
       ).filter((e) => e.agent === "main")
-      expect(mains.length === 1 && mains[0]!.address.id.endsWith(b), `entry sessions: ${JSON.stringify(mains)}`)
+      expect(
+        entryRows.length === 1 && entryRows[0]!.address.id.endsWith(b),
+        `entry sessions: ${JSON.stringify(entryRows)}`,
+      )
     } finally {
       pi.stop()
       claude.stop()
@@ -241,19 +244,19 @@ const checks: ReadonlyArray<Check> = [
       if (!Bun.which("pi")) throw new Skip("pi not on PATH")
       if (!Bun.which("herdr")) throw new Skip("herdr not on PATH")
       await start(w)
-      await until("the entry session in vibest ls", async () => (await mains(w)).length === 1, 30_000)
-      const [main] = await mains(w)
-      expect(main!.harness === "pi", `entry session: ${JSON.stringify(main)}`)
+      await until("the entry session in vibest ls", async () => (await entryRows(w)).length === 1, 30_000)
+      const [entry] = await entryRows(w)
+      expect(entry!.harness === "pi", `entry session: ${JSON.stringify(entry)}`)
       expect(
-        main!.routing === undefined || main!.routing.trace.every((t) => typeof t.hook === "string"),
-        `routing: ${JSON.stringify(main)}`,
+        entry!.routing === undefined || entry!.routing.trace.every((t) => typeof t.hook === "string"),
+        `routing: ${JSON.stringify(entry)}`,
       )
       const socket = path.join(w.home, ".config", "herdr", "sessions", w.herdrSession, "herdr.sock")
-      await herdr(socket, "pane.close", { pane_id: main!.address.id.split("/").pop() })
+      await herdr(socket, "pane.close", { pane_id: entry!.address.id.split("/").pop() })
       await until(
         "the entry session's exit recorded",
         () =>
-          row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, main!.id)?.e != null,
+          row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, entry!.id)?.e != null,
         30_000,
       )
     },

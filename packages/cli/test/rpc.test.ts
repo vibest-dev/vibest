@@ -257,9 +257,13 @@ describe("vibest.sock", () => {
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const launch = yield* c["Project.EntrySession"]({ harness: "claude", fresh: false, terminal: "test/p1" })
       yield* raw["Session.Ready"](
-        { id: launch.sessionId, conversation: "s1" },
+        { id: launch.sessionId, conversation: { harness: "claude", id: "s1" } },
         {
-          headers: sessionHeaders({ sessionId: launch.sessionId, projectId: launch.projectId, pluginVersion: "1.2.3" }),
+          headers: sessionHeaders({
+            sessionId: launch.sessionId,
+            projectId: launch.projectId,
+            pluginVersion: "1.2.3",
+          }),
         },
       )
 
@@ -326,30 +330,49 @@ describe("vibest.sock", () => {
       const fromUser = yield* db.latestInbox(launch.sessionId, "send")
       assert.deepInclude(fromUser, { message: "from the user", sender: null })
       yield* raw["Session.Ready"](
-        { id: launch.sessionId, conversation: "stale" },
+        { id: launch.sessionId, conversation: { harness: "claude", id: "stale" } },
         {
-          headers: sessionHeaders({ sessionId: launch.sessionId, projectId: launch.projectId, pluginVersion: "1.2.3" }),
+          headers: sessionHeaders({
+            sessionId: launch.sessionId,
+            projectId: launch.projectId,
+            pluginVersion: "1.2.3",
+          }),
         },
       )
       yield* raw["Session.Ready"](
-        { id: launch.sessionId, conversation: "s2" },
+        { id: launch.sessionId, conversation: { harness: "claude", id: "s2" } },
         {
-          headers: sessionHeaders({ sessionId: launch.sessionId, projectId: launch.projectId, pluginVersion: "1.2.3" }),
+          headers: sessionHeaders({
+            sessionId: launch.sessionId,
+            projectId: launch.projectId,
+            pluginVersion: "1.2.3",
+          }),
+        },
+      )
+      yield* raw["Session.Ready"](
+        { id: launch.sessionId, conversation: { harness: "pi", id: "late-pi-report" } },
+        {
+          headers: sessionHeaders({
+            sessionId: launch.sessionId,
+            projectId: launch.projectId,
+            pluginVersion: "1.2.3",
+          }),
         },
       )
       assert.strictEqual(
         (yield* c["Project.EntrySession"]({ harness: "claude", fresh: false, terminal: "test/p1" })).harnessSessionId,
         "s2",
+        "a conversation reported by another harness than the session's is ignored",
       )
     }),
   )
 
   test(
-    "a Coordinator manages only the sessions it spawned, and another project's reads them but does not list them; the command line (the user) manages any",
+    "an entry session manages only the sessions it spawned, and another project's reads them but does not list them; the command line (the user) manages any",
     Effect.gen(function* () {
       const db = yield* Db
       const repo = yield* makeRepository
-      const asCoordinator = (root: string, paneId: string) =>
+      const asEntry = (root: string, paneId: string) =>
         Effect.gen(function* () {
           const raw = yield* client
           const launched = yield* asCli(raw, root)["Project.EntrySession"]({
@@ -359,8 +382,8 @@ describe("vibest.sock", () => {
           })
           return yield* asSession(raw, launched.sessionId, root)
         })
-      const a = yield* asCoordinator(repo, "p1")
-      const b = yield* asCoordinator(yield* makeRepository, "p2")
+      const a = yield* asEntry(repo, "p1")
+      const b = yield* asEntry(yield* makeRepository, "p2")
       const { id } = yield* a.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const others: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
@@ -372,7 +395,7 @@ describe("vibest.sock", () => {
       for (const call of others) {
         const exit = yield* Effect.exit(call)
         assert.strictEqual(failureTag(exit), "Forbidden")
-        assert.match(String(Exit.isFailure(exit) && Cause.pretty(exit.cause)), /belongs to another coordinator/)
+        assert.match(String(Exit.isFailure(exit) && Cause.pretty(exit.cause)), /belongs to another entry session/)
       }
       assert.deepInclude(yield* b.Get({ id }), { id, agent: "general" })
       assert.strictEqual((yield* b.List({})).sessions[0]?.agent, "main")
@@ -390,12 +413,12 @@ describe("vibest.sock", () => {
       )
       assert.deepStrictEqual(yield* db.pendingInbox(id), [])
       assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
-      yield* a.Send({ id, message: "from its own Coordinator" })
+      yield* a.Send({ id, message: "from its own entry session" })
       const user = asCli(yield* client, repo)
       yield* user.Send({ id, message: "from the user" })
       assert.deepStrictEqual(
         (yield* db.pendingInbox(id)).map((r) => r.message),
-        ["from its own Coordinator", "from the user"],
+        ["from its own entry session", "from the user"],
       )
       assert.strictEqual(
         failureTag(yield* Effect.exit(user.Remove({ id }))),
@@ -410,7 +433,7 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const repo = yield* makeRepository
-      const asCoordinator = (root: string, paneId: string) =>
+      const asEntry = (root: string, paneId: string) =>
         Effect.gen(function* () {
           const raw = yield* client
           const launched = yield* asCli(raw, root)["Project.EntrySession"]({
@@ -420,7 +443,7 @@ describe("vibest.sock", () => {
           })
           return yield* asSession(raw, launched.sessionId, root)
         })
-      const a = yield* asCoordinator(repo, "p1")
+      const a = yield* asEntry(repo, "p1")
       const { id } = yield* a.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (w) => w?.executionState === "open")
       type Client = Effect.Success<typeof client>

@@ -12022,7 +12022,20 @@
           "conversation": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "object",
+                "properties": {
+                  "harness": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "harness",
+                  "id"
+                ],
+                "additionalProperties": true
               },
               {
                 "type": "null"

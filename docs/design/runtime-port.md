@@ -118,8 +118,8 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
 - A subagent (`vibest run`) takes `--runtime <id>` on `Spawn`. Without it, it runs in its parent's runtime. With
   `--peer` and no `--runtime`, it runs in the peer's runtime on the peer's machine instead: it shares that session's
   worktree and splits a pane off it, so the default choice must not replace the peer. An explicit `--runtime` is kept,
-  and a peer on another runtime or machine is still refused. The parent lookup includes the coordinator, because
-  `getSession` leaves the live main row out. If the runtime that was chosen is not online, the start fails with the
+  and a peer on another runtime or machine is still refused. The parent lookup includes the entry session, because
+  `getSession` leaves the live entry row out. If the runtime that was chosen is not online, the start fails with the
   runtime's reason. No other fallback. A user plugin on `agent.start.before` may still return a `runtime`. A runtime
   already set stands.
 - vibest.json's `runtime` key is not a choice. The first time vibestd reads a file that still has it, it warns once
@@ -173,7 +173,7 @@ evidence files, never the runner terminal. Claude ignores keys at its first dial
 visible dialog text, pauses, reads it again, then answers only the scratch action.
 
 Caller detection is the environment keys in §4. Do not forge a herdr identity in E2E. Still open: launch a real
-Claude and Pi coordinator with built `vibest --harness <harness>` inside an isolated hc terminal; hold its fake model
+Claude and Pi entry session with built `vibest --harness <harness>` inside an isolated hc terminal; hold its fake model
 and assert native working, complete it and assert native done, then start another execution and interrupt it to assert
 idle, with the loaded vibest integration and no competing OSC writer. This is independent of worker result coverage.
 In the same follow-up, remove Cursor's coordinator exclusion from terminal status reporting and verify working/idle

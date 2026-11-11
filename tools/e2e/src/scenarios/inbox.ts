@@ -70,7 +70,7 @@ export const dropHerdrSession = async (w: World, session: string) => {
   }
 }
 
-const claudeMain = async (
+const claudeEntry = async (
   w: World,
   name: string,
   model: ReturnType<typeof delegatingModel>,
@@ -98,23 +98,23 @@ const claudeMain = async (
   const env = `PI_CODING_AGENT_DIR=${await piDir(w, `pi-${name}`, model.url)}`
   await w.daemon()
   await w.startEntry({ harness: "claude", session, cwd: repo, env: flags, timeoutMs: 120_000 })
-  let main = ""
+  let entryId = ""
   await until(
     "the entry session in vibest ls",
     async () => {
-      main =
+      entryId =
         (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
           (e) => e.agent === "main",
         )?.id ?? ""
-      return main !== ""
+      return entryId !== ""
     },
     60_000,
   )
-  const projectId = row<{ p: number }>(w, "SELECT project_id AS p FROM session WHERE id = ?", main)!.p
+  const projectId = row<{ p: number }>(w, "SELECT project_id AS p FROM session WHERE id = ?", entryId)!.p
   const conversation = () =>
-    row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, main)?.c ?? null
+    row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, entryId)?.c ?? null
   const pane = () => {
-    const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, main)?.r ?? "{}"
+    const runtime = row<{ r: string }>(w, `SELECT runtime AS r FROM ${SESSIONS} s WHERE id = ?`, entryId)?.r ?? "{}"
     const id = (JSON.parse(runtime) as { id?: string }).id ?? ""
     return id.split("/")[1] ?? ""
   }
@@ -124,7 +124,7 @@ const claudeMain = async (
   }
   await answerFolderTrust(screen, (key) => herdr(socket, "pane.send_keys", { pane_id: pane(), keys: [key] }))
   await until("the entry session's first poll", () => conversation() !== null, 120_000).catch(async (e: Error) => {
-    const peek = await w.vibest(["peek", main, "--lines", "40"], { cwd: repo })
+    const peek = await w.vibest(["peek", entryId, "--lines", "40"], { cwd: repo })
     const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")
     throw new Error(`${e.message}; its screen:\n${peek.stdout}${peek.stderr}\nvibestd.log:\n${log.slice(-3000)}`)
   })
@@ -132,7 +132,7 @@ const claudeMain = async (
     row<{ n: number }>(
       w,
       "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_session_id = ? AND status = 'delivered'",
-      main,
+      entryId,
       from,
     )?.n ?? 0
   const shown = async (line: string, marker: string) => {
@@ -188,7 +188,7 @@ const claudeMain = async (
   }
   return {
     repo,
-    main,
+    entryId,
     flags,
     config,
     projectId,
@@ -211,13 +211,13 @@ const claudeMain = async (
 const curl = async (
   w: World,
   route: string,
-  who: { main: string; projectId: number | string; protocol?: string },
+  who: { entryId: string; projectId: number | string; protocol?: string },
   body: object = {},
 ) => {
   const headers = {
     "vibest-protocol": who.protocol ?? String(PROTOCOL),
     "vibest-caller": "session",
-    "vibest-session-id": who.main,
+    "vibest-session-id": who.entryId,
     "vibest-project-id": String(who.projectId),
     "vibest-agent": "coordinator",
     "vibest-harness": "claude",
@@ -317,10 +317,10 @@ const checks: ReadonlyArray<Check> = [
       const model = delegatingModel("pi")
       const go = path.join(w.root, "cmmid-go")
       const wait = `until [ -e ${go} ]; do sleep 1; done`
-      let c: Awaited<ReturnType<typeof claudeMain>> | undefined
+      let c: Awaited<ReturnType<typeof claudeEntry>> | undefined
       let stopped: number | undefined
       try {
-        c = await claudeMain(w, "cmtwo", model, (r): Step => {
+        c = await claudeEntry(w, "cmtwo", model, (r): Step => {
           const last = text(lastUser(r))
           if (last.includes(wait)) return { tool: "Bash", input: { command: wait } }
           return last.includes('"tool_result"') ? "waited" : "ok"
@@ -391,7 +391,7 @@ const checks: ReadonlyArray<Check> = [
           row<{ n: number }>(
             w,
             "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND sender_session_id = ?",
-            c!.main,
+            c!.entryId,
             a,
           )?.n ?? 0
         const before = c.delivered(a)
@@ -419,7 +419,7 @@ const checks: ReadonlyArray<Check> = [
         stopped = await c.claudePid()
         expect(stopped !== undefined, "no claude process in the entry session's pane")
         process.kill(stopped!, "SIGSTOP")
-        const who = { main: c.main, projectId: c.projectId }
+        const who = { entryId: c.entryId, projectId: c.projectId }
         const status = (id: number) => row<{ s: string }>(w, "SELECT status AS s FROM inbox WHERE id = ?", id)?.s
         await w.ok(["send", a, "--", ask("cmcurl")], { cwd: c.repo })
         let polled: { ids: Array<number>; line: string; text: string } = { ids: [], line: "", text: "" }
@@ -507,11 +507,11 @@ const checks: ReadonlyArray<Check> = [
           env: { PI_CODING_AGENT_DIR: env.slice("PI_CODING_AGENT_DIR=".length) },
           timeoutMs: 60_000,
         })
-        const mains = async () =>
+        const entryRows = async () =>
           (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).filter(
             (e) => e.agent === "main",
           )
-        await until("the entry session in vibest ls", async () => (await mains()).length === 1, 30_000)
+        await until("the entry session in vibest ls", async () => (await entryRows()).length === 1, 30_000)
         const reached = (what: string, marker: string) =>
           until(what, () => model.seen.some((m) => m.includes("<agent-") && m.includes(marker)), 180_000).catch(
             (e: Error) => {
@@ -526,18 +526,18 @@ const checks: ReadonlyArray<Check> = [
         expect(restart.code === 0, `daemon restart exited ${restart.code}: ${restart.stdout}${restart.stderr}`)
         await w.ok(["send", model.sessionId(), ask("three")], { cwd: repo })
         await reached("the entry session's execution on a result after vibestd restarted", "done-three")
-        const main = (await mains())[0]!.id
+        const entryId = (await entryRows())[0]!.id
         await expectReplied(w, model.sessionId())
-        const toMain = () =>
+        const toEntry = () =>
           rows<{ status: string }>(
             w,
             "SELECT status FROM inbox WHERE session_id = ? AND kind = 'send' AND sender_session_id IS NOT NULL",
-            main,
+            entryId,
           ).map((r) => r.status)
         await until(
           "the entry session's four sends delivered",
-          () => JSON.stringify(toMain()) === JSON.stringify(Array(4).fill("delivered")),
-        ).catch(() => fail(`the entry session's send rows: ${JSON.stringify(toMain())}`))
+          () => JSON.stringify(toEntry()) === JSON.stringify(Array(4).fill("delivered")),
+        ).catch(() => fail(`the entry session's send rows: ${JSON.stringify(toEntry())}`))
       } finally {
         model.stop()
         claude.stop()
@@ -553,11 +553,11 @@ const checks: ReadonlyArray<Check> = [
     run: async (w) => {
       for (const bin of ["pi", "herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const model = delegatingModel("pi")
-      let c: Awaited<ReturnType<typeof claudeMain>> | undefined
+      let c: Awaited<ReturnType<typeof claudeEntry>> | undefined
       let sender: ReturnType<typeof Bun.serve> | undefined
       try {
-        c = await claudeMain(w, "cmsend", model)
-        const mainId = c.main
+        c = await claudeEntry(w, "cmsend", model)
+        const entryId = c.entryId
         sender = Bun.serve({
           port: 0,
           hostname: "127.0.0.1",
@@ -567,7 +567,7 @@ const checks: ReadonlyArray<Check> = [
             return new Response(
               messages.some((m) => m.role === "tool")
                 ? reply("done-cmsend\nstatus: completed")
-                : toolCall("call1", "bash", { command: `${binary} send ${mainId} -- hello-claude` }),
+                : toolCall("call1", "bash", { command: `${binary} send ${entryId} -- hello-claude` }),
               { headers: sseHeaders },
             )
           },
@@ -589,13 +589,17 @@ const checks: ReadonlyArray<Check> = [
             w,
             "SELECT id, status FROM inbox WHERE sender_session_id = ? AND session_id = ? AND kind = 'send'",
             sub,
-            mainId,
+            entryId,
           )
         await until("the send delivered", () => sent().some((r) => r.status === "delivered"), 180_000)
         expect(sent().length === 1, `${sent().length} sends from ${sub}: ${JSON.stringify(sent())}`)
         const fact = (sql: string) =>
-          row<{ n: number }>(w, `SELECT count(*) AS n FROM event WHERE aggregate = ? AND ${sql}`, mainId, sent()[0]!.id)
-            ?.n
+          row<{ n: number }>(
+            w,
+            `SELECT count(*) AS n FROM event WHERE aggregate = ? AND ${sql}`,
+            entryId,
+            sent()[0]!.id,
+          )?.n
         expect(
           fact("type = 'inbox.queued' AND seq = ?") === 1 &&
             fact(

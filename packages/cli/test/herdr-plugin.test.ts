@@ -50,7 +50,7 @@ const session = (patch: Partial<LiveSession> = {}): LiveSession => ({
 
 const fake = (over: Partial<HerdrDaemon> = {}): HerdrDaemon => ({
   republish: () => Effect.succeed(0),
-  openMain: () => Effect.succeed({ action: "focused", place: "w1:p1" }),
+  openEntry: () => Effect.succeed({ action: "focused", place: "w1:p1" }),
   spawn: () => Effect.succeed("abcd1234-abcd-4abc-8abc-abcd1234abcd"),
   interrupt: () => Effect.void,
   list: () => Effect.succeed([]),
@@ -156,7 +156,7 @@ describe("herdr plugin commands", () => {
           "open-entry",
           ctx(),
           fake({
-            openMain: () =>
+            openEntry: () =>
               Effect.sync(() => {
                 called = true
                 return { action: "opened" as const, place: "x" }

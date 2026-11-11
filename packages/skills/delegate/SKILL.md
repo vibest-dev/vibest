@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: Hand work to subagents with `vibest run` and keep talking with the user while they work. Only vibest's entry session (the coordinator) starts agents; a subagent must not use this skill. Use for any request to change, fix, build, investigate, research, test or verify code ("fix this bug", "add X", "look into why Y", "do these three things", "have an agent check it"), and whenever a task splits into independent parts that can run at the same time.
+description: Hand work to subagents with `vibest run` and keep talking with the user while they work. Only vibest's entry session starts agents; a subagent must not use this skill. Use for any request to change, fix, build, investigate, research, test or verify code ("fix this bug", "add X", "look into why Y", "do these three things", "have an agent check it"), and whenever a task splits into independent parts that can run at the same time.
 ---
 
 # Delegate

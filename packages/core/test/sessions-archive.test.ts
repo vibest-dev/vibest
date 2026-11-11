@@ -40,7 +40,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const db = yield* Db
-      const coord = yield* db.startEntry(yield* projectOf(repo), coordinator, false, {
+      const entry = yield* db.startEntry(yield* projectOf(repo), coordinator, false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -49,7 +49,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
       yield* settled
-      return { id, sessions, db, herdr, main: coord.sessionId, projectId: (yield* db.getSession(id))!.projectId }
+      return { id, sessions, db, herdr, main: entry.sessionId, projectId: (yield* db.getSession(id))!.projectId }
     })
 
   const askMain = (w: { readonly id: string; readonly main: string; readonly db: Db["Service"] }) =>
@@ -140,18 +140,18 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
-      const coord = yield* db.startEntry(yield* projectOf(repo), "claude", false, {
+      const entry = yield* db.startEntry(yield* projectOf(repo), "claude", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
-      yield* db.noteConversation(coord.sessionId, "claude-1")
+      yield* db.noteConversation(entry.sessionId, "claude-1")
       yield* herdr.seedAgent("test/coord")
       const projectId = yield* projectOf(repo)
       const sessions = yield* Sessions
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), archive: true })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
-      yield* db.insertSend(coord.sessionId, "a question", undefined, id)
+      yield* db.insertSend(entry.sessionId, "a question", undefined, id)
       yield* finishExecution({ id, sessions, herdr }, "status: completed")
       const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
       yield* letForkedArchiveRun

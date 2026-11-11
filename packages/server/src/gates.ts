@@ -1,4 +1,5 @@
 import { Db } from "@vibest/core/db"
+import { ENTRY_AGENT } from "@vibest/core/db-rows"
 import { Drain } from "@vibest/core/drain"
 import { NoSuchSession } from "@vibest/core/sessions"
 import {
@@ -156,9 +157,9 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
           `${method} claims project ${who.project}; session ${who.row.id} is in project ${who.row.projectId}`,
         )
       const row = who.row
-      if (row.agent === "coordinator") {
+      if (row.agent === ENTRY_AGENT) {
         return {
-          _tag: "Coordinator",
+          _tag: "Entry",
           sessionId: row.id,
           projectId: row.projectId,
           ...(repository._tag === "Some" ? { repositoryRoot: repository.value } : {}),

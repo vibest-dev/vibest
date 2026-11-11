@@ -1,4 +1,5 @@
 import { Db } from "@vibest/core/db"
+import { ENTRY_AGENT } from "@vibest/core/db-rows"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
 import { Harnesses } from "@vibest/core/harness"
@@ -66,7 +67,7 @@ export const make = Effect.gen(function* () {
       const who = yield* caller(request.headers)
       if ("status" in who) return who
       if (request.path === POLL_ROUTE || request.path === ACK_ROUTE) {
-        if (who.agent !== "coordinator") return failure(403, `session ${who.id} is not its project's entry session`)
+        if (who.agent !== ENTRY_AGENT) return failure(403, `session ${who.id} is not its project's entry session`)
         if (harnesses.find(who.harness)?.inbox !== "poll")
           return failure(403, `session ${who.id} runs ${who.harness}, which does not poll`)
         if (request.path === POLL_ROUTE) return ok(yield* inbox.poll(who.projectId))

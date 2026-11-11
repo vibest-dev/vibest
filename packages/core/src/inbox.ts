@@ -100,15 +100,15 @@ export class Inbox extends Context.Service<
           `deliver project ${projectId}`,
           projectId,
           Effect.gen(function* () {
-            const coord = yield* db.entryOf(projectId)
-            if (!coord?.address || coord.address.id === "" || !coord.runtime)
+            const entry = yield* db.entryOf(projectId)
+            if (!entry?.address || entry.address.id === "" || !entry.runtime)
               return yield* db.dropWaiting(projectId, "absent")
-            if (restarting.has(coord.id)) return
-            const address = encodeAddress(coord.address)
-            const guard = { projectId, runtime: coord.runtime, address }
-            const h = runtimes.find(coord.runtime)
+            if (restarting.has(entry.id)) return
+            const address = encodeAddress(entry.address)
+            const guard = { projectId, runtime: entry.runtime, address }
+            const h = runtimes.find(entry.runtime)
             if (h === undefined) return
-            const presence = yield* entryIdle(h, coord.address)
+            const presence = yield* entryIdle(h, entry.address)
             if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
           }).pipe(Engine.logFailure(`deliver to project ${projectId}`)),
         )
@@ -118,7 +118,7 @@ export class Inbox extends Context.Service<
           const projectId = yield* db.projectOfSession(id)
           return projectId !== undefined && (yield* db.entryOf(projectId))?.id === id ? projectId : undefined
         })
-      const ifMain = (id: string, then: (projectId: string) => Effect.Effect<void>) =>
+      const ifEntry = (id: string, then: (projectId: string) => Effect.Effect<void>) =>
         entryProjectOf(id).pipe(
           Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : then(projectId))),
         )
@@ -134,10 +134,10 @@ export class Inbox extends Context.Service<
       yield* engine.on((event) => {
         switch (event.type) {
           case "inbox.queued":
-            return wake(event.sessionId!).pipe(Effect.andThen(ifMain(event.sessionId!, deliver)))
+            return wake(event.sessionId!).pipe(Effect.andThen(ifEntry(event.sessionId!, deliver)))
           case "inbox.moved":
             return event.data.to === "pending"
-              ? wake(event.sessionId!).pipe(Effect.andThen(ifMain(event.sessionId!, deliver)))
+              ? wake(event.sessionId!).pipe(Effect.andThen(ifEntry(event.sessionId!, deliver)))
               : Effect.void
           case "live.state":
             return db

@@ -287,7 +287,7 @@ const sendChecks: ReadonlyArray<Check> = [
         )
         const written = await fs.readFile(refused, "utf8")
         expect(
-          written.includes("Forbidden") && written.includes("belongs to another coordinator"),
+          written.includes("Forbidden") && written.includes("belongs to another entry session"),
           `no Forbidden for the other project's session: ${written}`,
         )
         expect(written.includes(mainOf(w)), `the archived refusal does not name the entry session: ${written}`)

@@ -1,6 +1,7 @@
 import { projectActivity, unseenDone } from "@vibest/core/activity"
 import { type EngineEvent } from "@vibest/core/bus"
 import { type EntryRow, Db, type RuntimeAddress, type SessionBrief } from "@vibest/core/db"
+import { ENTRY_AGENT } from "@vibest/core/db-rows"
 import { entryIdle } from "@vibest/core/inbox"
 import type { ListScope } from "@vibest/core/remote"
 import { agentState, Runtimes, type Runtime, type Terminal } from "@vibest/core/runtimes"
@@ -39,7 +40,7 @@ export const toInfo = (session: SessionView, brief?: SessionBrief): SessionInfo 
 
 const entryInfo = (m: EntryRow, status: AgentStatus): SessionInfo => ({
   id: m.id,
-  name: "main",
+  name: "entry",
   agent: "main",
   harness: m.harnessId,
   provider: m.provider,
@@ -158,7 +159,7 @@ export const sessionListing = (deps: {
       if (identity === undefined) return []
       const ended: WatchEvent = { _tag: "SessionEnded", id, projectId: identity.projectId }
       const info =
-        identity.agent === "coordinator"
+        identity.agent === ENTRY_AGENT
           ? yield* listedEntry(yield* db.entryOf(identity.projectId))
           : yield* Effect.gen(function* () {
               const row = yield* db.getSession(id)

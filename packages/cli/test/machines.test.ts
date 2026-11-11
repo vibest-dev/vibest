@@ -489,16 +489,16 @@ const inboxOf = (recipient: string) =>
 describe("vibest run --machine and remote sessions", () => {
   it.effect("List has every machine with its state; an unreachable one gives no sessions and says why", () =>
     Effect.gen(function* () {
-      const { net, a, b, coordinator } = yield* twoMachines()
+      const { net, a, b, asEntry } = yield* twoMachines()
       const c = yield* repoStack(net)
       net.route("c-host", c.layout.socket)
       yield* a.cli(a.raw["Machine.Add"]({ name: "mc", target: "c-host" }))
-      const spawned = yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
-      yield* coordinator(a.raw.Spawn({ machine: "mc", prompt: "y", callerEnv: {} }))
+      const spawned = yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
+      yield* asEntry(a.raw.Spawn({ machine: "mc", prompt: "y", callerEnv: {} }))
       net.fail("c-host", 255, "ssh: connect to host c-host port 22: Connection refused")
       yield* net.cutAll("c-host")
       yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[1]?.state === "unreachable")
-      const listed = yield* coordinator(a.raw.List({}))
+      const listed = yield* asEntry(a.raw.List({}))
       assert.deepStrictEqual(
         listed.sessions.filter((row) => row.machine !== undefined).map((row) => [row.id, row.machine]),
         [[spawned.id, "mb"]],
@@ -601,29 +601,29 @@ describe("vibest run --machine and remote sessions", () => {
     "a forwarded run starts a B session and nothing on A; its result arrives once as a notice; B's row is then deleted",
     () =>
       Effect.gen(function* () {
-        const { a, b, main, coordinator } = yield* twoMachines()
-        const spawned = yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "do it there", callerEnv: {} }))
+        const { a, b, entry, asEntry } = yield* twoMachines()
+        const spawned = yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "do it there", callerEnv: {} }))
         assert.match(spawned.id, /^mb\/[0-9a-f-]{36}$/, "the address, as every other method answers")
         assert.isUndefined(yield* a.db.getSession(onB(spawned.id)), "A stores no session")
         assert.strictEqual(b.spawns[0]!.commit, COMMIT)
         yield* finish(b.db, onB(spawned.id), "General Agent completed")
-        const [notice] = yield* until(a.run(inboxOf(main)), (rows) => rows.length === 1)
+        const [notice] = yield* until(a.run(inboxOf(entry)), (rows) => rows.length === 1)
         assert.strictEqual(notice!.kind, "notice")
         assert.strictEqual(notice!.content, `${spawned.id.slice(0, 11)}: General Agent completed`)
         yield* until(b.run(outboxRows), (rows) => rows.length === 0)
         const address = spawned.id.slice(0, 11)
-        const got = yield* coordinator(a.raw.Get({ id: address }))
+        const got = yield* asEntry(a.raw.Get({ id: address }))
         assert.strictEqual(got.id, spawned.id)
         assert.strictEqual(got.machine, "mb")
-        assert.deepStrictEqual(yield* coordinator(a.raw.Send({ id: address, message: "more" })), {
+        assert.deepStrictEqual(yield* asEntry(a.raw.Send({ id: address, message: "more" })), {
           id: spawned.id,
         })
-        const listed = yield* coordinator(a.raw.List({}))
+        const listed = yield* asEntry(a.raw.List({}))
         assert.deepInclude(
           listed.sessions.map((row) => [row.id, row.machine]),
           [spawned.id, "mb"],
         )
-        assert.lengthOf(yield* a.run(inboxOf(main)), 1, "one notice")
+        assert.lengthOf(yield* a.run(inboxOf(entry)), 1, "one notice")
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
@@ -632,10 +632,10 @@ describe("vibest run --machine and remote sessions", () => {
     () =>
       Effect.gen(function* () {
         const term = callerPlugin("term", { env: ["TERM_PANE"], terminal: () => Effect.succeed("p1") })
-        const { net, a, b, coordinator } = yield* twoMachines({ a: { plugins: [term] } })
-        yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
-        yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: { TERM_PANE: "p1" } }))
-        yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: { TERM_PANE: "p1" }, runtime: "rex" }))
+        const { net, a, b, asEntry } = yield* twoMachines({ a: { plugins: [term] } })
+        yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
+        yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: { TERM_PANE: "p1" } }))
+        yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: { TERM_PANE: "p1" }, runtime: "rex" }))
         assert.deepStrictEqual(
           b.spawns.map((spawn) => spawn.runtime),
           ["fake", "term", "rex"],
@@ -645,7 +645,7 @@ describe("vibest run --machine and remote sessions", () => {
         yield* a.cli(a.raw["Machine.Add"]({ name: "mc", target: "c-host" }))
         yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[1]?.state === "connected")
         const failed = yield* Effect.flip(
-          coordinator(a.raw.Spawn({ machine: "mc", prompt: "x", harness: "pi", callerEnv: { TERM_PANE: "p1" } })),
+          asEntry(a.raw.Spawn({ machine: "mc", prompt: "x", harness: "pi", callerEnv: { TERM_PANE: "p1" } })),
         )
         assert.strictEqual(failed._tag, "NoRuntime")
         assert.include(failed.message, 'the runtime "term" is not loaded; loaded: herdr')
@@ -655,9 +655,9 @@ describe("vibest run --machine and remote sessions", () => {
 
   it.effect("the refused flags, an unknown machine and a machine that is not connected fail at once", () =>
     Effect.gen(function* () {
-      const { net, a, coordinator } = yield* twoMachines()
+      const { net, a, asEntry } = yield* twoMachines()
       const run = (more: object) =>
-        Effect.flip(coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {}, ...more })))
+        Effect.flip(asEntry(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {}, ...more })))
       assert.include((yield* run({ env: { A: "1" } })).message, "--env is not sent to another machine")
       assert.include((yield* run({ archive: true })).message, "--archive-on-idle")
       assert.include((yield* run({ agent: "reviewer" })).message, "--agent is not sent to another machine")
@@ -668,10 +668,10 @@ describe("vibest run --machine and remote sessions", () => {
       assert.include((yield* run({ prompt: "x".repeat(PROMPT_MAX + 1) })).message, "at most 1048576 bytes (1 MiB)")
       const big = yield* run({ prompt: "x".repeat(PROMPT_MAX + 1) })
       assert.strictEqual(big._tag, "PromptTooLarge", "B's error comes through unchanged")
-      const nosuch = yield* Effect.flip(coordinator(a.raw.Spawn({ machine: "nosuch", prompt: "x", callerEnv: {} })))
+      const nosuch = yield* Effect.flip(asEntry(a.raw.Spawn({ machine: "nosuch", prompt: "x", callerEnv: {} })))
       assert.strictEqual(nosuch._tag, "UnknownMachine")
       assert.strictEqual(nosuch.message, 'unknown machine "nosuch"; machines: mb')
-      const missing = yield* Effect.flip(coordinator(a.raw.Get({ id: "mb/deadbeef" })))
+      const missing = yield* Effect.flip(asEntry(a.raw.Get({ id: "mb/deadbeef" })))
       assert.strictEqual(missing._tag, "NoSuchSession")
       assert.strictEqual(missing.message, "no session deadbeef", "B's error and message, no machine prefix")
       net.fail("b-host", 255, "ssh: connect to host b-host port 22: Connection refused")
@@ -681,7 +681,7 @@ describe("vibest run --machine and remote sessions", () => {
       assert.strictEqual(down._tag, "MachineUnavailable")
       assert.include(down.message, "mb is unreachable: ")
       assert.match(down.message, /closed|refused/)
-      const forwarded = yield* Effect.flip(coordinator(a.raw.Get({ id: "mb/12345678" })))
+      const forwarded = yield* Effect.flip(asEntry(a.raw.Get({ id: "mb/12345678" })))
       assert.strictEqual(forwarded._tag, "MachineUnavailable")
       assert.include(forwarded.message, "mb is unreachable")
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
@@ -690,7 +690,7 @@ describe("vibest run --machine and remote sessions", () => {
   it.effect("a pipe cut after A's commit and before B got the ack gives one notice after reconnect", () =>
     Effect.gen(function* () {
       const cutOnce = { net: undefined as Net | undefined, done: false }
-      const { net, a, b, main, coordinator } = yield* twoMachines({
+      const { net, a, b, entry, asEntry } = yield* twoMachines({
         a: {
           db: (db) => ({
             ...db,
@@ -708,30 +708,30 @@ describe("vibest run --machine and remote sessions", () => {
         },
       })
       cutOnce.net = net
-      const spawned = yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
+      const spawned = yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {} }))
       yield* finish(b.db, onB(spawned.id), "once")
       yield* untilVirtual(b.run(outboxRows), (rows) => rows.length === 0)
       assert.isTrue(cutOnce.done)
-      assert.lengthOf(yield* a.run(inboxOf(main)), 1)
+      assert.lengthOf(yield* a.run(inboxOf(entry)), 1)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
   it.effect("results written while A is away, or after machine rm, arrive once when A connects again", () =>
     Effect.gen(function* () {
-      const { net, a, b, main, coordinator } = yield* twoMachines()
-      const first = yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "one", callerEnv: {} }))
-      const second = yield* coordinator(a.raw.Spawn({ machine: "mb", prompt: "two", callerEnv: {} }))
+      const { net, a, b, entry, asEntry } = yield* twoMachines()
+      const first = yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "one", callerEnv: {} }))
+      const second = yield* asEntry(a.raw.Spawn({ machine: "mb", prompt: "two", callerEnv: {} }))
       net.fail("b-host", 255, "ssh: connect to host b-host port 22: Connection refused")
       yield* net.cutAll("b-host")
       yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "unreachable")
       yield* finish(b.db, onB(first.id), "while away")
       net.route("b-host", b.layout.socket)
-      yield* untilVirtual(a.run(inboxOf(main)), (rows) => rows.length === 1)
+      yield* untilVirtual(a.run(inboxOf(entry)), (rows) => rows.length === 1)
       yield* a.cli(a.raw["Machine.Remove"]({ name: "mb" }))
       yield* finish(b.db, onB(second.id), "after rm")
       assert.lengthOf(yield* b.run(outboxRows), 1, "it waits on B")
       yield* a.cli(a.raw["Machine.Add"]({ name: "mb2", target: "b-host" }))
-      const rows = yield* until(a.run(inboxOf(main)), (r) => r.length === 2)
+      const rows = yield* until(a.run(inboxOf(entry)), (r) => r.length === 2)
       assert.strictEqual(rows[1]!.content, `mb2/${onB(second.id).slice(0, 8)}: after rm`)
       yield* until(b.run(outboxRows), (r) => r.length === 0)
     }).pipe(Effect.scoped, Effect.provide(Platform.services)),
