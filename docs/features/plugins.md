@@ -51,6 +51,13 @@ with the failed revision and its error, and neither it nor the plugins after it 
 A plugin folder found in the plugins folder and also named in `vibest.json` is one plugin: `vibest plugins` lists it
 once, active, and it runs with the options from `vibest.json`.
 
+## G10. A plugin folder with a package.json
+
+A plugin folder whose `package.json` maps `exports` loads the file the map names for `./server`, else for `.`, skipping a
+file that does not exist, and never a file the map does not export. While a package it imports is not
+installed it is listed as failed with the missing package; installing the package into its `node_modules` makes it
+active without editing the plugin or restarting vibestd.
+
 ## G11. A plugin disabled by a failing transform
 
 A plugin whose transform throws is disabled and listed as failed with the error. A reload caused by another plugin

@@ -1,5 +1,6 @@
 import fs from "node:fs"
 import module from "node:module"
+import os from "node:os"
 import path from "node:path"
 import url from "node:url"
 
@@ -16,12 +17,57 @@ const resolveLocal = (specifier: string, dir: string): { readonly file: string }
   }
 }
 
+const forgetCachedLookups = (directory: string) => {
+  try {
+    Bun.resolveSync(path.join(directory, ".vibest-forget"), directory)
+  } catch {
+    return
+  }
+}
+
+export const packageName = (specifier: string) =>
+  specifier
+    .split("/")
+    .slice(0, specifier.startsWith("@") ? 2 : 1)
+    .join("/")
+
+const home = os.homedir()
+
+const installRoots = (directory: string): ReadonlyArray<string> => {
+  const parent = path.dirname(directory)
+  if (parent === directory) return []
+  if (directory === home || fs.existsSync(path.join(directory, "package.json"))) return [directory]
+  return [directory, ...installRoots(parent)]
+}
+
+const installedFolders = (specifier: string, directory: string) =>
+  installRoots(directory).map((dir) => ({ dir, folder: path.join(dir, "node_modules", packageName(specifier)) }))
+
+const resolves = (specifier: string, directory: string) => {
+  try {
+    Bun.resolveSync(specifier, directory)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const loader = (file: string) =>
   file.endsWith("x") ? (file.endsWith("tsx") ? "tsx" : "jsx") : /\.[cm]?ts$/.test(file) ? "ts" : "js"
 
-export const graph = (entry: string) => {
+export const graph = (entry: string, provided: ReadonlySet<string>) => {
   const files = new Set<string>()
   const unresolved = new Set<string>()
+  const visitPackage = (specifier: string, directory: string) => {
+    const folders = installedFolders(specifier, directory)
+    const installed = folders.find(({ folder }) => fs.existsSync(folder))
+    if (installed === undefined) {
+      for (const { folder } of folders) unresolved.add(folder)
+      return
+    }
+    for (const dir of [installed.dir, installed.folder]) forgetCachedLookups(dir)
+    if (!resolves(specifier, directory)) unresolved.add(installed.folder)
+  }
   const visit = (file: string) => {
     if (files.has(file) || (file !== entry && file.split(path.sep).includes("node_modules"))) return
     files.add(file)
@@ -33,7 +79,11 @@ export const graph = (entry: string) => {
       return
     }
     for (const item of imports) {
-      if (!LOCAL.test(item.path)) continue
+      if (!LOCAL.test(item.path)) {
+        if (!module.isBuiltin(item.path) && !provided.has(packageName(item.path)))
+          visitPackage(item.path, path.dirname(file))
+        continue
+      }
       const resolved = resolveLocal(item.path, path.dirname(file))
       if ("file" in resolved) visit(resolved.file)
       else unresolved.add(path.dirname(resolved.missing))

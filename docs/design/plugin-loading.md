@@ -19,14 +19,22 @@ and `vibest/no-restricted-disable` reports a disable comment for that rule. What
 
 ## Loading and watching
 
-In `plugin-sources.ts`: a half-saved `vibest.json` keeps its last parsed plugin list. An
+In `plugin-sources.ts`: a half-saved `vibest.json` keeps its last parsed plugin list. A plugin directory whose
+`package.json` has a `name` and `exports` loads, as OpenCode's `Host.resolve`, the first existing file `exports` maps
+for `./server`, then for `.` (taking the first of the `bun`, `import` and `default` conditions), and nothing else; the
+mapped files are watched until one exists. vibest reads the map itself, because Bun's resolver keeps a lookup that
+failed once (for example while `package.json` was written before its entry), so a self-reference resolution would stay
+failed until vibestd restarts. Without `exports` it loads `server.*`, else `index.*`. An
 entry is imported by its real path, so imports resolve next to the real file and Bun never sees two paths for one
 module (its resolver keeps failing for files added later under a symlinked directory, such as /var on macOS); a
 dangling link is watched at its target until it appears. Imports are cached by the digests of the entry's local
 graph and of the listings of its unresolved import directories: an unchanged graph is not imported again, failed or
 not, so unrelated saves never repeat a broken plugin's import-time effects. An import that never settles times out
-like a setup. `node_modules` is neither watched nor evicted: a dependency installed later is retried only when the
-plugin's own graph changes, and an upgraded one already loaded needs a vibestd restart. While the watched
+like a setup. A package a plugin imports that does not resolve is watched at `node_modules/<package>` in every directory
+from the importing file up to the plugin's package root (the nearest `package.json`) or the user home, never `/`,
+and an installed folder that does not resolve yet (an install still writing) stays watched, so installing it imports
+the plugin again; `effect`, `@vibest/plugin` and their subpaths are supplied by vibestd and never watched; a package that resolves is neither watched
+nor evicted, and an upgraded package already loaded needs a vibestd restart. While the watched
 directories change the plugins are read again, because a change made before its watch began is not reported; after
 such a rewatch one more read follows a second later, because Bun 1.4's `fs.watch` on macOS sometimes drops other
 directories' events right after a watch closes (drop it when Bun no longer does). A teardown that times out is left
@@ -62,7 +70,11 @@ compiled binary nothing resolves a plugin's `effect` and `@vibest/plugin` import
 be a second effect instance, so `Bun.plugin` maps them to vibestd's own modules (`effect/X` is `effect.X` for every
 top-level module the root namespace exports). A plugin's graph is its entry and the local files it imports,
 transitively, outside `node_modules`; a local import that does not resolve yet adds its directory to the watched
-ones. Each load imports the entry and its local imports under keys of their own (`<file>?vibest-load=<n>`), after
+ones. Bun 1.4 remembers a package lookup that failed (the directory without `node_modules`, the missing package
+folder) for the life of the process, so once the graph finds a package installed it makes Bun forget the directory
+holding that `node_modules` and the package folder, by resolving a missing absolute path in each (a miss makes Bun
+drop the directory's cached listing and retry); without that the plugin's next import fails again until a restart.
+`packages/cli/test/plugin-source.test.ts` fails when Bun changes this. Each load imports the entry and its local imports under keys of their own (`<file>?vibest-load=<n>`), after
 dropping the previous and current graph from the module registry, so a changed transitive import is evaluated again
 and old revisions do not pile up: since Bun 1.4.3 a module whose top-level await never settled stays in the
 registry under its path, outside `require.cache`, and every later import of that path waits for it. `node_modules`
