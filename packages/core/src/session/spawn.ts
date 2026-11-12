@@ -35,7 +35,6 @@ import { describeSpawn, Plugins, type Routing } from "../plugins.ts"
 import { listProjectRepositories } from "../project-create.ts"
 import { sessionEnvelope } from "../replies.ts"
 import { machinesListing as machines, Runtimes } from "../runtimes.ts"
-import type { Platform } from "../session-types.ts"
 import { allocationParentBlocked, Git, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
 import { SessionLocks } from "./locks.ts"
 import { Move, type LimitMove } from "./move.ts"
@@ -86,7 +85,7 @@ const sessionSpawn = (deps: {
   readonly fs: FileSystem.FileSystem
   readonly path: Path.Path
   readonly crypto: Crypto.Crypto
-  readonly platform: Context.Context<Platform>
+  readonly git: Git["Service"]
   readonly scope: Scope.Scope
   readonly locks: ReturnType<typeof keyedLock<string>>
   readonly options: { readonly maxSessions: number | undefined }
@@ -107,7 +106,7 @@ const sessionSpawn = (deps: {
     fs,
     path,
     crypto,
-    platform,
+    git,
     scope,
     locks,
     worktreeOf,
@@ -116,6 +115,12 @@ const sessionSpawn = (deps: {
     onOwnLimit,
     options,
   } = deps
+  const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Git>) =>
+    effect.pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(Git, git),
+    )
   const machinesListing = machines(
     runtimes,
     harnesses.all.map((adapter) => adapter.id),
@@ -375,14 +380,14 @@ const sessionSpawn = (deps: {
                 ),
               ),
             )
-            .pipe(Effect.ensuring(leave), logged(`spawn ${id}`), Effect.provideContext(platform)),
+            .pipe(Effect.ensuring(leave), logged(`spawn ${id}`)),
           scope,
         )
       }),
     )
     yield* Deferred.await(held)
     return { id, harness: harnessId, provider, model, runtime: runtimeKind, ...routing }
-  }, Effect.provideContext(platform))
+  }, provided)
 
   return { spawn }
 }
@@ -402,7 +407,7 @@ const make = (options: { readonly maxSessions: number | undefined }) =>
       fs: yield* FileSystem.FileSystem,
       path: yield* Path.Path,
       crypto: yield* Crypto.Crypto,
-      platform: yield* Effect.context<Platform>(),
+      git: yield* Git,
       scope: yield* Effect.scope,
       locks: yield* SessionLocks,
       options,
@@ -438,7 +443,6 @@ export class Spawn extends Context.Service<Spawn, Effect.Success<ReturnType<type
     Plugins.node,
     Runtimes.node,
     SessionLocks.node,
-    PlatformNode.childProcessSpawner,
     PlatformNode.crypto,
     PlatformNode.fileSystem,
     PlatformNode.layout,

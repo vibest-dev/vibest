@@ -15,8 +15,6 @@ import { errorMessage } from "../plugins.ts"
 import { Processes } from "../processes.ts"
 import { noticeEnvelope } from "../replies.ts"
 import { agentState, type AgentSeen, peekHint, type Runtime, Runtimes, stateOf, type Terminal } from "../runtimes.ts"
-import type { Platform } from "../session-types.ts"
-import { Git } from "../worktree.ts"
 import { Executions } from "./executions.ts"
 import { SessionLive } from "./live.ts"
 import { SessionLocks } from "./locks.ts"
@@ -410,7 +408,6 @@ const make = Effect.gen(function* () {
   const processes = yield* Processes
   const { restarting } = yield* SessionLive
   const bus = yield* Bus
-  const platform = yield* Effect.context<Platform>()
   const scope = yield* Effect.scope
   const { locked } = yield* SessionLocks
   const { awaitReady, prompt } = yield* Executions
@@ -460,7 +457,7 @@ const make = Effect.gen(function* () {
     launchArgv,
     entryArgv,
     awaitReady,
-    prompt: (h, session, terminal, text) => prompt(h, session, terminal, text).pipe(Effect.provideContext(platform)),
+    prompt: (h, session, terminal, text) => prompt(h, session, terminal, text),
   })
 })
 
@@ -477,7 +474,6 @@ export class Restart extends Context.Service<Restart, Effect.Success<typeof make
       Bus.node,
       Db.node,
       Executions.node,
-      Git.node,
       Harness.node,
       Harnesses.node,
       Placement.node,
@@ -486,8 +482,6 @@ export class Restart extends Context.Service<Restart, Effect.Success<typeof make
       Runtimes.node,
       SessionLive.node,
       SessionLocks.node,
-      PlatformNode.childProcessSpawner,
-      PlatformNode.crypto,
       PlatformNode.fileSystem,
       PlatformNode.layout,
       PlatformNode.path,

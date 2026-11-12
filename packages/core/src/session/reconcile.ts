@@ -4,14 +4,11 @@ import { Clock, Context, Duration, Effect, Layer, Option, Ref } from "effect"
 import { Bus, type EngineEvent } from "../bus.ts"
 import { Db, type SessionRow, sessionEnded } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
 import * as Engine from "../engine.ts"
 import { Harnesses } from "../harness.ts"
 import { Inbox } from "../inbox.ts"
 import { Processes } from "../processes.ts"
 import { agentState, alive, paneTail, peekHint, Runtimes, stateOf, type Terminal } from "../runtimes.ts"
-import type { Platform } from "../session-types.ts"
-import { Git } from "../worktree.ts"
 import { Archive } from "./archive.ts"
 import { Delivery } from "./delivery.ts"
 import { CONFIRM_TIMEOUT } from "./executions.ts"
@@ -36,7 +33,6 @@ const make = Effect.gen(function* () {
   const exits = yield* Exits
   const { finishArchive } = yield* Archive
   const { notice, republish } = yield* Placement
-  const platform = yield* Effect.context<Platform>()
   const scope = yield* Effect.scope
   const engine = yield* Engine.make
   const { locked } = locks
@@ -143,8 +139,7 @@ const make = Effect.gen(function* () {
     })
   })
 
-  const checkSession = (id: string): Effect.Effect<unknown, unknown> =>
-    locked(id)(check(id)).pipe(Effect.provideContext(platform))
+  const checkSession = (id: string): Effect.Effect<unknown, unknown> => locked(id)(check(id))
 
   const checkLocked = (id: string): Effect.Effect<void> => logged(`check ${id}`)(checkSession(id))
 
@@ -173,10 +168,7 @@ const make = Effect.gen(function* () {
       case "process.ended":
         return forgetIfDone(event.sessionId!)
       case "live.reset":
-        return republish().pipe(
-          Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine })),
-          Effect.provideContext(platform),
-        )
+        return republish().pipe(Effect.andThen(reconcile({ runtime: event.runtime, machine: event.machine })))
       default:
         return Effect.void
     }
@@ -212,9 +204,7 @@ const make = Effect.gen(function* () {
     })
 
   const checkFailed = (id: string) =>
-    Effect.forkIn(locked(id, true)(check(id)).pipe(logged(`check ${id}`), Effect.provideContext(platform)), scope).pipe(
-      Effect.asVoid,
-    )
+    Effect.forkIn(locked(id, true)(check(id)).pipe(logged(`check ${id}`)), scope).pipe(Effect.asVoid)
 
   yield* engine.on(handle)
 
@@ -245,11 +235,6 @@ export class Reconcile extends Context.Service<Reconcile, Effect.Success<typeof 
       Runtimes.node,
       SessionLive.node,
       SessionLocks.node,
-      Git.node,
-      PlatformNode.childProcessSpawner,
-      PlatformNode.crypto,
-      PlatformNode.fileSystem,
-      PlatformNode.path,
     ],
   })
 }

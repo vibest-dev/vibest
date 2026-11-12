@@ -2,11 +2,8 @@ import { Clock, Context, Effect, Layer } from "effect"
 
 import { Db, type SessionRow } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
-import * as PlatformNode from "../effect/platform.ts"
 import { Inbox } from "../inbox.ts"
 import type { Runtime, Terminal } from "../runtimes.ts"
-import type { Platform } from "../session-types.ts"
-import { Git } from "../worktree.ts"
 import { Archive } from "./archive.ts"
 import { Move } from "./move.ts"
 import { Placement } from "./placement.ts"
@@ -23,7 +20,6 @@ const make = Effect.gen(function* () {
   const move = yield* Move
   const { undoCutOffStart } = yield* Archive
   const { notice, handTask, recount } = yield* Placement
-  const platform = yield* Effect.context<Platform>()
 
   const limitOf = Effect.fn("Exits.limitOf")(function* (session: SessionRow) {
     if (session.executionState !== "failed" || (yield* db.creatorOf(session.id)) === undefined) return undefined
@@ -46,7 +42,7 @@ const make = Effect.gen(function* () {
     if (task === "") return false
     yield* handTask(h, session, session.address, task)
     return true
-  }, Effect.provideContext(platform))
+  })
 
   const announceExit = (session: SessionRow, execution: number | undefined) =>
     Effect.gen(function* () {
@@ -124,18 +120,6 @@ export class Exits extends Context.Service<Exits, Effect.Success<typeof make>>()
   static readonly node = LayerNode.make({
     service: Exits,
     layer: Exits.layer,
-    deps: [
-      Archive.node,
-      Db.node,
-      Inbox.node,
-      Move.node,
-      Placement.node,
-      Git.node,
-      PlatformNode.childProcessSpawner,
-      PlatformNode.crypto,
-      PlatformNode.fileSystem,
-      PlatformNode.layout,
-      PlatformNode.path,
-    ],
+    deps: [Archive.node, Db.node, Inbox.node, Move.node, Placement.node],
   })
 }

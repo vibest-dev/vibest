@@ -10,19 +10,16 @@ import {
   SessionBusy,
   type UnknownAgent,
 } from "@vibest/schema/session"
-import { Context, Effect, Layer, Option, Ref } from "effect"
+import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
+import { ChildProcessSpawner } from "effect/process"
 
 import { Db, type SessionFilter, type SessionRow } from "./db.ts"
-import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import { HarnessUnavailable } from "./harness.ts"
-import { Inbox, text as inboxText } from "./inbox.ts"
-import { Plugins } from "./plugins.ts"
 import { projectRoot, workspaceGit } from "./project-create.ts"
-import * as Remove from "./remove.ts"
+import type * as Remove from "./remove.ts"
 import { Runtimes, RuntimeError } from "./runtimes.ts"
-import type { Platform } from "./session-types.ts"
 import { Archive } from "./session/archive.ts"
 import { Delivery, unreachable } from "./session/delivery.ts"
 import { SessionLive } from "./session/live.ts"
@@ -56,17 +53,12 @@ export {
   type Spawned,
 } from "./session/spawn.ts"
 
-export const TAIL_LINES = 30
-
 const SESSION_DEPS = [
   Archive.node,
   Db.node,
   Delivery.node,
-  Drain.node,
   Git.node,
-  Inbox.node,
   Placement.node,
-  Plugins.node,
   Reconcile.node,
   Restart.node,
   Runtimes.node,
@@ -74,9 +66,7 @@ const SESSION_DEPS = [
   SessionLocks.node,
   Spawn.node,
   PlatformNode.childProcessSpawner,
-  PlatformNode.crypto,
   PlatformNode.fileSystem,
-  PlatformNode.layout,
   PlatformNode.path,
 ] as const
 
@@ -139,22 +129,18 @@ export class Sessions extends Context.Service<
   static readonly make = Effect.gen(function* () {
     const db = yield* Db
     const runtimes = yield* Runtimes
-    const inbox = yield* Inbox
     const sessionLive = yield* SessionLive
-    const { track } = sessionLive
-    const platform = yield* Effect.context<Platform>()
-
     const locks = yield* SessionLocks
-
-    const live = (session: SessionRow) => runtimes.route(session.runtime)
-
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const git = yield* Git
     const { worktreeOf, republish } = yield* Placement
-
-    const delivery = yield* Delivery
+    const { send, interrupt, userPrompt, typeTaken } = yield* Delivery
     const reconcile = yield* Reconcile
-    const { send, interrupt, userPrompt } = delivery
-
     const { spawn } = yield* Spawn
+    const { remove } = yield* Archive
+    const { outdated, restart, restartLater } = yield* Restart
 
     const getRow = (id: string) =>
       db
@@ -165,71 +151,46 @@ export class Sessions extends Context.Service<
           ),
         )
 
-    const { remove } = yield* Archive
+    const peek = Effect.fn("Sessions.peek")(function* (id: string, lines: number) {
+      const session = yield* getRow(id)
+      if (session.exitedAt !== null || session.address.id === "")
+        return yield* new NoSuchSession({
+          id,
+          message: `${id} has no terminal to peek at (it exited or never started)`,
+        })
+      const h = yield* runtimes.route(session.runtime)
+      const text = yield* h
+        .read(session.address, Math.max(1, Math.min(Math.floor(lines), 500)))
+        .pipe(Effect.catchTag("RuntimeError", unreachable(session)))
+      return text.trimEnd()
+    })
 
-    const typeTaken = (id: string, execution: number) =>
-      locks.withLock(id)(
-        Effect.gen(function* () {
-          const session = yield* db.getSession(id)
-          if (session === undefined) return
-          const r = yield* track(id)
-          const rows = yield* db.unacceptedBatch(id, execution)
-          if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
-          const h = yield* live(session)
-          yield* Ref.set(r.prompting, true).pipe(
-            Effect.andThen(h.send(session.address, { text: inboxText(rows) })),
-            Effect.ensuring(Ref.set(r.prompting, false)),
-            Effect.ignore,
-          )
-        }).pipe(
-          Effect.catchTag("NoRuntime", () => Effect.void),
-          Effect.provideContext(platform),
-        ),
-      )
-
-    const peek = (id: string, lines: number) =>
-      Effect.gen(function* () {
-        const session = yield* getRow(id)
-        if (session.exitedAt !== null || session.address.id === "")
-          return yield* new NoSuchSession({
-            id,
-            message: `${id} has no terminal to peek at (it exited or never started)`,
-          })
-        const h = yield* live(session)
-        const text = yield* h
-          .read(session.address, Math.max(1, Math.min(Math.floor(lines), 500)))
-          .pipe(Effect.catchTag("RuntimeError", unreachable(session)))
-        return text.trimEnd()
-      })
-
-    const view = (session: SessionRow) =>
-      session.entry
-        ? Effect.map(db.sessionDirectory(session.id), (directory) => ({
-            ...session,
-            worktree: directory ?? "",
-            repositoryRoot: directory,
-            git: undefined,
-          }))
-        : Effect.gen(function* () {
-            const worktree = yield* worktreeOf(session)
-            const repos = yield* workspaceGit(worktree).pipe(Effect.orDie)
-            if (repos) {
-              const unsaved = repos.find((r) => !r.saved)
-              const git: GitState = {
-                branch: repos.map((r) => `${r.name}=${r.branch}`).join("\n"),
-                pushed: repos.every((r) => r.pushed),
-                saved: repos.every((r) => r.saved),
-                why: unsaved ? `${unsaved.name}: ${unsaved.why}` : "",
-              }
-              const repositoryRoot = (yield* projectRoot(worktree).pipe(Effect.orDie)).root
-              return { ...session, worktree, repositoryRoot, git } satisfies SessionView
-            }
-            const g = yield* gitState(worktree).pipe(Effect.orDie)
-            const repositoryRoot = g
-              ? yield* mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
-              : undefined
-            return { ...session, worktree, repositoryRoot, git: g } satisfies SessionView
-          })
+    const view = Effect.fn("Sessions.view")(
+      function* (session: SessionRow) {
+        const worktree = yield* worktreeOf(session)
+        const repos = yield* workspaceGit(worktree).pipe(Effect.orDie)
+        if (repos) {
+          const unsaved = repos.find((r) => !r.saved)
+          const git: GitState = {
+            branch: repos.map((r) => `${r.name}=${r.branch}`).join("\n"),
+            pushed: repos.every((r) => r.pushed),
+            saved: repos.every((r) => r.saved),
+            why: unsaved ? `${unsaved.name}: ${unsaved.why}` : "",
+          }
+          const repositoryRoot = (yield* projectRoot(worktree).pipe(Effect.orDie)).root
+          return { ...session, worktree, repositoryRoot, git } satisfies SessionView
+        }
+        const g = yield* gitState(worktree).pipe(Effect.orDie)
+        const repositoryRoot = g
+          ? yield* mainCheckout(worktree).pipe(Effect.option, Effect.map(Option.getOrUndefined))
+          : undefined
+        return { ...session, worktree, repositoryRoot, git: g } satisfies SessionView
+      },
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(Git, git),
+    )
 
     const unlocated = (session: SessionRow): SessionView => ({
       ...session,
@@ -238,18 +199,18 @@ export class Sessions extends Context.Service<
       git: undefined,
     })
 
-    const get = (id: string) => getRow(id).pipe(Effect.flatMap(view), Effect.provideContext(platform))
-    const list = (filter: SessionFilter = {}) =>
-      db.listSessions(filter).pipe(
-        Effect.flatMap((rows) =>
-          Effect.forEach(rows, (row) =>
-            view(row).pipe(Effect.catchTag("NoSuchSession", () => Effect.succeed(unlocated(row)))),
+    const get = Effect.fn("Sessions.get")((id: string) => getRow(id).pipe(Effect.flatMap(view)))
+    const list = Effect.fn("Sessions.list")((filter: SessionFilter = {}) =>
+      db
+        .listSessions(filter)
+        .pipe(
+          Effect.flatMap((rows) =>
+            Effect.forEach(rows, (row) =>
+              view(row).pipe(Effect.catchTag("NoSuchSession", () => Effect.succeed(unlocated(row)))),
+            ),
           ),
         ),
-        Effect.provideContext(platform),
-      )
-
-    const { outdated, restart, restartLater } = yield* Restart
+    )
 
     return Sessions.of({
       spawn,
