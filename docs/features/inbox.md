@@ -24,6 +24,11 @@ delivered and its execution's reply can be read.
 A Claude session takes a send when it is idle: the send is one inbox row delivered into one execution of its own, a send
 made while an execution runs waits until it ends and then opens the next execution, and every execution has its own reply.
 
+## S54. A first task is delivered once
+
+A session's first task is delivered once, as one execution that completes with its reply; no other message is delivered
+into that execution.
+
 ## S11. Claude entry session inbox
 
 A Claude entry session takes its messages from vibestd when it is idle, one batch at a time; the batch opens an execution

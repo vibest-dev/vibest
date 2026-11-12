@@ -8,6 +8,7 @@ export interface Tracked {
   readonly endedAt: Ref.Ref<number | undefined>
   readonly blockedNotified: Ref.Ref<boolean>
   readonly prompting: Ref.Ref<boolean>
+  readonly retyped: Ref.Ref<number | undefined>
   readonly stopping: Ref.Ref<boolean>
   readonly archiveTold: Ref.Ref<boolean>
   readonly launchRechecked: Ref.Ref<boolean>
@@ -18,6 +19,7 @@ const newTracked: Effect.Effect<Tracked> = Effect.all({
   endedAt: Ref.make<number | undefined>(undefined),
   blockedNotified: Ref.make(false),
   prompting: Ref.make(false),
+  retyped: Ref.make<number | undefined>(undefined),
   stopping: Ref.make(false),
   archiveTold: Ref.make(false),
   launchRechecked: Ref.make(false),

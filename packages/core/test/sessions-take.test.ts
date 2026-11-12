@@ -92,33 +92,82 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
-    "a batch Claude refused is typed into the pane once, and typing does not open a second execution",
+    "a batch Claude refused is typed once however often the refusal is reported",
     Effect.gen(function* () {
-      const { db, sessions, inbox, entryId } = yield* entryAsked
+      const { sessions, inbox, entryId } = yield* entryAsked
       const herdr = yield* FakeRuntime
       const { execution } = (yield* inbox.take(entryId, undefined))!
       const typed = Effect.map(herdr.callsTo("send"), (calls) => calls.filter((c) => c.text?.includes("a question")))
       yield* sessions.typeTaken(entryId, execution)
-      assert.lengthOf(yield* typed, 1)
-      yield* sessions.userPrompt(entryId, "a question")
       yield* sessions.typeTaken(entryId, execution)
       assert.lengthOf(yield* typed, 1)
-      assert.deepStrictEqual(yield* db.openExecution(entryId), execution)
-      assert.isTrue(yield* db.executionAccepted(entryId))
     }),
   )
 
   test(
-    "a taken batch the harness never accepts ends not_started whatever state the runtime reports",
+    "a batch accepted and closed before the fallback send is not typed, and typing opens no second execution",
     Effect.gen(function* () {
-      const { db, sessions, inbox, entryId, sender } = yield* entryAsked
+      const { db, sessions, inbox, entryId } = yield* entryAsked
       const herdr = yield* FakeRuntime
-      yield* inbox.take(entryId, undefined)
-      yield* herdr.updateAgent("test/coord", (agent) => ({ ...agent, status: "unknown" }))
-      yield* TestClock.adjust("9 seconds")
-      yield* sessions.check(entryId)
-      yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
+      const { execution } = (yield* inbox.take(entryId, undefined))!
+      yield* db.acceptExecution(entryId, execution)
+      yield* db.closeExecution(entryId, execution, "completed", {})
+      yield* sessions.typeTaken(entryId, execution)
+      const typed = yield* herdr.callsTo("send")
+      assert.lengthOf(
+        typed.filter((c) => c.text?.includes("a question")),
+        0,
+      )
       assert.isUndefined(yield* db.openExecution(entryId))
+    }),
+  )
+
+  test(
+    "typing the refused batch leaves the execution unaccepted until the harness reports it",
+    Effect.gen(function* () {
+      const { db, sessions, inbox, entryId } = yield* entryAsked
+      const { execution } = (yield* inbox.take(entryId, undefined))!
+      yield* sessions.typeTaken(entryId, execution)
+      assert.isFalse(yield* db.executionAccepted(entryId))
+      yield* sessions.userPrompt(entryId, "a question")
+      assert.isTrue(yield* db.executionAccepted(entryId))
+      assert.deepStrictEqual(yield* db.openExecution(entryId), execution)
+    }),
+  )
+
+  for (const status of ["working", "blocked", "unknown"] as const) {
+    test(
+      `a pulled batch the harness never accepted is not accepted by a ${status} runtime state`,
+      Effect.gen(function* () {
+        const { db, sessions, inbox, entryId, sender } = yield* entryAsked
+        const herdr = yield* FakeRuntime
+        yield* inbox.take(entryId, undefined)
+        yield* herdr.updateAgent("test/coord", (agent) => ({ ...agent, status, seq: agent.seq + 1 }))
+        yield* sessions.check(entryId)
+        assert.isFalse(yield* db.executionAccepted(entryId))
+        if (status === "blocked") return
+        yield* TestClock.adjust("9 seconds")
+        yield* sessions.check(entryId)
+        yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
+        assert.isUndefined(yield* db.openExecution(entryId))
+      }),
+    )
+  }
+
+  test(
+    "only a pulling session takes: a typed session's take is empty and leaves its rows pending, and a pulling session's rows are never typed",
+    Effect.gen(function* () {
+      const { sessions, inbox, entryId, sender } = yield* entryAsked
+      const herdr = yield* FakeRuntime
+      yield* sessions.check(entryId)
+      yield* TestClock.adjust("1 second")
+      const typedToEntry = Effect.map(herdr.callsTo("send"), (calls) =>
+        calls.filter((c) => c.terminal === "test/coord" && c.text?.includes("a question")),
+      )
+      assert.lengthOf(yield* typedToEntry, 0)
+      assert.deepStrictEqual(yield* inboxStatuses(sender), ["pending"])
+      assert.isDefined(yield* inbox.take(entryId, undefined))
+      assert.isUndefined(yield* inbox.take(sender, undefined))
     }),
   )
 })

@@ -401,7 +401,7 @@ export class Sessions extends Context.Service<
         const seen = maybe.value
         const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
         if (state !== undefined && session.status !== state) yield* db.setStatus(session.id, state)
-        if ((state === "working" || state === "blocked") && execution !== undefined)
+        if ((state === "working" || state === "blocked") && execution !== undefined && !inbox.pulls(session.harnessId))
           yield* db.acceptExecution(id, execution)
         const exited =
           state === undefined &&
@@ -595,12 +595,13 @@ export class Sessions extends Context.Service<
         locks.withLock(id)(
           Effect.gen(function* () {
             const session = yield* db.getSession(id)
-            if (session === undefined || (yield* db.openExecution(id)) !== execution) return
-            if (yield* db.executionAccepted(id)) return
-            const rows = yield* db.deliveredIn(id, execution)
-            if (rows.length === 0) return
-            const h = yield* live(session)
+            if (session === undefined) return
             const r = yield* track(id)
+            if ((yield* Ref.get(r.retyped)) === execution) return
+            const rows = yield* db.unacceptedBatch(id, execution)
+            if (rows === undefined || rows.length === 0) return
+            yield* Ref.set(r.retyped, execution)
+            const h = yield* live(session)
             yield* Ref.set(r.prompting, true).pipe(
               Effect.andThen(h.send(session.address, { text: inboxText(rows) })),
               Effect.ensuring(Ref.set(r.prompting, false)),
@@ -745,7 +746,8 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const id = yield* db.sessionAt(runtime, terminal)
           if (id === undefined) return
-          const execution = working ? yield* db.openExecution(id) : undefined
+          const session = working ? yield* db.getSession(id) : undefined
+          const execution = session && !inbox.pulls(session.harnessId) ? yield* db.openExecution(id) : undefined
           if (execution !== undefined) yield* db.acceptExecution(id, execution)
           yield* checkSession(id)
         })

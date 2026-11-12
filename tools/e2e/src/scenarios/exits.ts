@@ -6,7 +6,7 @@ import { PROTOCOL } from "../../../../packages/protocol/src/protocol.ts"
 import type { Check } from "../check.ts"
 import { ask, heldModel, piDir } from "../fake-model.ts"
 import { expect, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
-import { dropHerdrSession, project } from "./inbox.ts"
+import { curl, dropHerdrSession, project } from "./inbox.ts"
 
 export const piProject = async (w: World, name: string) => {
   for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
@@ -284,52 +284,83 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S24",
     title:
-      "vibestd killed (kill -9) right after a Pi subagent took a send: the row ends delivered, or failed with one notice when the harness never took it up, is not delivered again, and a later send is delivered",
+      "vibestd killed (kill -9) after a take the harness never accepted (the Pi subagent is stopped, curl takes for it): the next vibestd ends that execution not_started, fails the row once with one notice, and does not deliver it again",
     run: async (w) => {
       const p = await piProject(w, "s24")
+      let stopped: number | undefined
       try {
         p.model.release()
         const sub = await p.runSub("first")
         await until("idle", () => p.idle(sub), 60_000)
+        stopped = p.pid(sub) ?? undefined
+        expect(stopped !== undefined, "the subagent has no pid")
+        process.kill(stopped!, "SIGSTOP")
         const message = ask("cut")
-        const daemon = await w.daemonPid()
-        const sending = p.vibestSend(sub, message)
-        await until("the row taken", () => p.sendRow(sub, message)?.status === "delivered", 30_000)
-        await w.killDaemon(daemon)
-        await sending.catch(() => undefined)
+        await p.vibestSend(sub, message)
+        const projectId = row<{ p: string }>(w, `SELECT project_id AS p FROM ${SESSIONS} s WHERE id = ?`, sub)!.p
+        const taken = await curl(w, "/inbox/take", { entryId: sub, projectId }, "pi")
+        expect(taken.status === 200, `take answered ${taken.status}: ${JSON.stringify(taken.body)}`)
+        expect(p.sendRow(sub, message)?.status === "delivered", "the taken row is not delivered")
+        const open = row<{ id: number; accepted: number | null }>(
+          w,
+          "SELECT id, accepted_at AS accepted FROM execution WHERE session_id = ? AND outcome IS NULL",
+          sub,
+        )
+        expect(open !== undefined && open.accepted === null, `the taken execution: ${JSON.stringify(open)}`)
+        await w.killDaemon(await w.daemonPid())
         await p.startDaemon()
-        await until("idle again", () => p.idle(sub), 60_000)
-        const rows = row<{ n: number }>(
+        await until(
+          "the execution ends not_started",
+          () =>
+            row<{ o: string | null }>(
+              w,
+              "SELECT outcome AS o FROM execution WHERE id = ? AND session_id = ?",
+              open!.id,
+              sub,
+            )?.o === "not_started",
+          60_000,
+        )
+        await until(
+          "the row failed with its notice",
+          () => p.sendRow(sub, message)?.status === "failed" && p.notices(sub, "was not delivered") === 1,
+          30_000,
+        )
+        await Bun.sleep(3_000)
+        expect(p.sendRow(sub, message)?.status === "failed", "the failed row moved again")
+        expect(p.notices(sub, "was not delivered") === 1, "more than one notice")
+        const copies = row<{ n: number }>(
           w,
           "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ?",
           sub,
           message,
         )
-        expect(rows?.n === 1, `the cut-off row exists ${rows?.n} times`)
-        await until(
-          "the taken row settled",
-          () => p.sendRow(sub, message)?.status === "delivered" || p.notices(sub, "was not delivered") === 1,
-          30_000,
+        expect(copies?.n === 1, `the row exists ${copies?.n} times`)
+      } finally {
+        if (stopped !== undefined) process.kill(stopped, "SIGCONT")
+        await p.close()
+      }
+    },
+  },
+  {
+    id: "S54",
+    covers: ["S2"],
+    title:
+      "a Pi subagent's first task is delivered once, as one execution that completes with the reply, and no other row is delivered into it",
+    run: async (w) => {
+      const p = await piProject(w, "s54")
+      try {
+        p.model.release()
+        const sub = await p.runSub("first")
+        await until("idle", () => p.idle(sub), 60_000)
+        const tasks = row<{ n: number; executions: number }>(
+          w,
+          `SELECT count(*) AS n, count(DISTINCT execution_id) AS executions FROM inbox
+            WHERE session_id = ? AND kind = 'task' AND status = 'delivered' AND execution_id IS NOT NULL`,
+          sub,
         )
-        const settled = p.sendRow(sub, message)?.status
-        expect(
-          settled === "delivered" ? p.notices(sub, "was not delivered") === 0 : settled === "failed",
-          `the taken row ended ${settled} with ${p.notices(sub, "was not delivered")} notices`,
-        )
-        const later = ask("later")
-        await p.vibestSend(sub, later)
-        await until("the later send delivered", () => p.sendRow(sub, later)?.status === "delivered", 30_000).catch(
-          async (e: Error) => {
-            const screen = await herdr(p.socket, "pane.read", {
-              pane_id: p.pane(sub),
-              source: "visible",
-              strip_ansi: true,
-            })
-            throw new Error(
-              `${e.message}; its screen:\n${String((screen.read as { text?: string } | undefined)?.text ?? "")}`,
-            )
-          },
-        )
+        expect(tasks?.n === 1 && tasks.executions === 1, `the task: ${JSON.stringify(tasks)}`)
+        const executions = row<{ n: number }>(w, "SELECT count(*) AS n FROM execution WHERE session_id = ?", sub)
+        expect(executions?.n === 1 && p.lastEnd(sub)?.status === "completed", `executions ${executions?.n}`)
       } finally {
         await p.close()
       }
