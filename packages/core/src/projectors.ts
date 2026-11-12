@@ -2,7 +2,7 @@ import type { Fact, FactOf, FactType } from "@vibest/schema/event"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 
-export const PROJECTION_VERSION = 7
+export const PROJECTION_VERSION = 8
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -64,6 +64,7 @@ export const PROJECTION_SCHEMA = [
     typed        TEXT,
     started_at   INTEGER NOT NULL,
     accepted_at  INTEGER,
+    retyped_at   INTEGER,
     outcome      TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),
     failure      TEXT,
     failure_kind TEXT CHECK (failure_kind IN ('limit')),
@@ -231,7 +232,10 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
     sql`UPDATE execution SET accepted_at = ${fact.at}
       WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.execution} AND outcome IS NULL
         AND accepted_at IS NULL`,
-  "execution.retyped": () => Effect.void,
+  "execution.retyped": (fact, sql) =>
+    sql`UPDATE execution SET retyped_at = ${fact.at}
+      WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.execution} AND outcome IS NULL
+        AND retyped_at IS NULL`,
   "execution.ended": (fact, sql) =>
     Effect.andThen(
       sql`UPDATE execution SET outcome = ${fact.data.outcome}, reply = ${fact.data.reply ?? null},

@@ -20,7 +20,8 @@ release. Each release lists what broke, who is affected and how to migrate under
   after an Esc until someone types), the plugin reports the refusal for that execution and vibestd types the same batch
   into the pane, so the execution stays one and the batch is delivered once. A pulled batch is accepted only when the harness reports it (never from the runtime's working or blocked state), so a
   batch the harness never accepts ends `not_started` after the confirmation timeout whatever state the runtime
-  reports; the catalog adds `execution.retyped` (no read-model change; an older vibest cannot read a log that holds it),
+  reports; the catalog adds `execution.retyped` and the read model (projection 8) gives `execution` a `retyped_at` (an older
+  vibest cannot read a log that holds it),
   recorded in the same transaction that reads a refused batch, so a refusal reported again, also to a restarted
   vibestd, does not type it again while that execution is open and unaccepted.
 - **`vibest run` runs only inside a session** (users, scripts): a `vibest run` in a plain terminal is refused with a

@@ -327,9 +327,10 @@ export const inboxMethods = (store: Store) => {
         Effect.gen(function* () {
           if ((yield* openExecution(sessionId)) !== execution || (yield* acceptedAt(sessionId, execution)) !== null)
             return undefined
-          const [handed] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM event
-            WHERE aggregate = ${sessionId} AND type = 'execution.retyped' AND json_extract(data, '$.execution') = ${execution}`
-          if (handed!.n > 0) return undefined
+          const [handed] = yield* sql<{
+            at: number | null
+          }>`SELECT retyped_at AS at FROM execution WHERE session_id = ${sessionId} AND id = ${execution}`
+          if (handed?.at != null) return undefined
           yield* emit(ExecutionRetyped, { sessionId, data: { execution } })
           return yield* inbox(
             sql`m.session_id = ${sessionId} AND m.kind != 'task' AND m.status = 'delivered' AND m.execution_id = ${execution}`,
