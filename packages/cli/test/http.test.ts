@@ -224,7 +224,7 @@ describe("vibestd's HTTP API", () => {
         JSON.stringify({ hook_event_name: "ExecutionComplete", reason: "answer", last_assistant_message: "done" }),
       )
       const second = (yield* call(TAKE_ROUTE, { sessionId: entryId })).body as { text: string }
-      assert.strictEqual(second.text, "later")
+      assert.strictEqual(second.text, noticeEnvelope("later"))
     }),
   )
 

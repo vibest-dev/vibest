@@ -294,7 +294,7 @@ const checks: ReadonlyArray<Check> = [
         let main: Entry | undefined
         await until(
           `the entry session of ${name}`,
-          async () => (main = (await sessions(w, repo)).find((e) => e.agent === "main")) !== undefined,
+          async () => (main = (await sessions(w, repo)).find((e) => e.agent === "coordinator")) !== undefined,
           60_000,
         )
         return main!

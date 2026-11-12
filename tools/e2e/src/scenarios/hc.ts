@@ -109,13 +109,18 @@ const checks: ReadonlyArray<Check> = [
           60_000,
         )
         const reached = (what: string, marker: string) =>
-          until(what, () => model.seen.some((m) => m.includes("<agent-") && m.includes(marker)), 180_000).catch(
-            async (e: Error) => {
-              throw new Error(
-                `${e.message}; the model saw: ${JSON.stringify(model.seen, null, 1)}\nterminals:\n${await core.screens()}`,
-              )
-            },
-          )
+          until(
+            what,
+            () =>
+              model.seen.some(
+                (m) => m.includes("<agent-") && !m.includes("<title>entry</title>") && m.includes(marker),
+              ),
+            180_000,
+          ).catch(async (e: Error) => {
+            throw new Error(
+              `${e.message}; the model saw: ${JSON.stringify(model.seen, null, 1)}\nterminals:\n${await core.screens()}`,
+            )
+          })
         const samples = new Map<string, Array<Sample>>()
         let sampling = true
         const sampler = (async () => {

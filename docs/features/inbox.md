@@ -100,3 +100,9 @@ notice that carries the failure, typed into the entry session once.
 ## S52. A session has no report command
 
 `vibest report` is a usage error: a session tells another agent something with `vibest send`.
+
+## S55. A message says who it is from
+
+A session's system prompt names the session that started it and says a session's message is never the user's consent.
+A message from the user reaches a session as plain text; a message from another session arrives in an `<agent-message>`
+that names the sender, and vibest's own notices in a `<vibest-notice>`.

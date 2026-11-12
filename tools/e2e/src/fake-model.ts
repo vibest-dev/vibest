@@ -242,7 +242,8 @@ export const holdsSlowMessageModel = () => {
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       seen.push(messages.map((m) => `${m.role}: ${text(m)}`))
       const last = text(messages.at(-1))
-      if (last.includes("<agent-") && last.includes("done-slow"))
+      const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
+      if (creatorIn(system) === undefined && last.includes("<agent-") && last.includes("done-slow"))
         return new Response(
           new ReadableStream({
             start: (c) =>
@@ -254,7 +255,7 @@ export const holdsSlowMessageModel = () => {
           }),
           { headers: sseHeaders },
         )
-      if (creatorIn(text(messages.find((m) => m.role === "system" || m.role === "developer"))) !== undefined) {
+      if (creatorIn(system) !== undefined) {
         const done = /done-(\w+)/.exec(text(messages.findLast((m) => m.role === "user")))
         return new Response(done ? sendOrReply(messages, `done-${done[1]}`) : reply("ok"), { headers: sseHeaders })
       }
