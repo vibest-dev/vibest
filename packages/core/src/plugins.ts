@@ -13,14 +13,14 @@ import { Harnesses } from "./harness.ts"
 import * as Hooks from "./hooks.ts"
 import { errorMessage } from "./hooks.ts"
 import type { PluginsShape } from "./host.ts"
-import { type Candidate, makeSources, messageOf, PluginLoader } from "./plugin-sources.ts"
+import { type Candidate, keyOf, makeSources, messageOf, PluginLoader } from "./plugin-sources.ts"
 import { supervise } from "./plugin-supervisor.ts"
 import * as Registry from "./registry.ts"
 import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 export { AgentRefused, Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 
-export { type Candidate, pluginEntries, PluginLoader, WATCH_PROBE } from "./plugin-sources.ts"
+export { type Candidate, pluginEntries, PluginLoader } from "./plugin-sources.ts"
 export { DEBOUNCE, RECHECK } from "./plugin-supervisor.ts"
 export { errorMessage }
 
@@ -84,8 +84,6 @@ type Slot = {
   readonly loadedAt: number
   readonly stats: Stats
 }
-
-const keyOf = (c: Candidate) => JSON.stringify([c.source, c.revision, c.options])
 
 const info = (slot: Slot): PluginInfo => {
   const { candidate } = slot

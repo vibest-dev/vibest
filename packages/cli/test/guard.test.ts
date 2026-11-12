@@ -45,6 +45,8 @@ import {
 
 const source = ["/usr/bin/bun", "/src/main.ts"]
 const RUNTIME_PROGRAMS = new Set(["herdr"])
+const bareGuard = (agent: string, tool: string, input: Record<string, unknown>) =>
+  guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")(tool, input, "/")
 const blocked = (command: string) => shellBlock(command, source, RUNTIME_PROGRAMS)
 const namedRuntimes = (ids: ReadonlyArray<string>) =>
   Layer.succeed(Runtimes, {
@@ -508,8 +510,7 @@ layer(
     "every agent, every shell shape: vibest goes to vibest's own checks unless the command changes who it speaks as",
     () =>
       Effect.gen(function* () {
-        const as = (agent: string, tool: string, command: string) =>
-          guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")(tool, { command }, "/")
+        const as = (agent: string, tool: string, command: string) => bareGuard(agent, tool, { command })
         for (const agent of ["coordinator", "general"]) {
           for (const tool of ["Bash", "Shell"]) {
             for (const command of [
@@ -531,17 +532,14 @@ layer(
             ])
               assert.isString(yield* as(agent, tool, command), `${agent} ${tool}: ${command}`)
           }
-          assert.isString(
-            yield* guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")("Bash", {}, "/"),
-          )
+          assert.isString(yield* bareGuard(agent, "Bash", {}))
         }
       }),
   )
 
   it.effect("the coordinator does not start harness CLIs or run gh's credential and config commands", () =>
     Effect.gen(function* () {
-      const as = (agent: string, command: string) =>
-        guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")("Bash", { command }, "/")
+      const as = (agent: string, command: string) => bareGuard(agent, "Bash", { command })
       for (const command of [
         "claude -p x",
         "pi -p x",
@@ -563,8 +561,7 @@ layer(
 
   it.effect("a general agent does not run a terminal runtime at all, not even to ask for help", () =>
     Effect.gen(function* () {
-      const as = (agent: string, command: string) =>
-        guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")("Bash", { command }, "/")
+      const as = (agent: string, command: string) => bareGuard(agent, "Bash", { command })
       for (const command of ["herdr --help", "herdr", "ls && herdr status", "env A=1 /opt/bin/herdr --version"])
         assert.strictEqual(
           yield* as("general", command),
@@ -599,12 +596,7 @@ layer(
 
   it.effect("a session whose agent definition is not registered has every tool call refused", () =>
     Effect.gen(function* () {
-      const reason = yield* guardOf(
-        "/nonexistent/.vibest",
-        "/nonexistent",
-        "gone",
-        "/nonexistent/project",
-      )("Read", { file_path: "/tmp/a" }, "/")
+      const reason = yield* bareGuard("gone", "Read", { file_path: "/tmp/a" })
       assert.include(reason ?? "", "agent definition gone")
       assert.include(reason ?? "", "not registered")
     }),
@@ -624,8 +616,7 @@ layer(
           },
         })
       })
-      const as = (agent: string, tool: string, input: Record<string, unknown>) =>
-        guardOf("/nonexistent/.vibest", "/nonexistent", agent, "/nonexistent/project")(tool, input, "/")
+      const as = bareGuard
       assert.isUndefined(yield* as("plain", "Bash", { command: "git push" }))
       assert.isString(yield* as("plain", "Bash", { command: "herdr pane list" }))
       assert.isString(yield* as("plain", "Bash", { command: "vibest integration stop" }))

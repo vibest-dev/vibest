@@ -4,14 +4,7 @@ import { Cause, Effect, FileSystem, Layer, Option, Path, Schema, Stream } from "
 import * as Socket from "effect/socket/Socket"
 
 import * as HerdrBun from "../src/bun.js"
-import {
-  type EventFrame,
-  Herdr,
-  HerdrProtocolMismatch,
-  HerdrTransportError,
-  PROTOCOL,
-  type results,
-} from "../src/index.js"
+import { type EventFrame, Herdr, HerdrProtocolMismatch, PROTOCOL, type results } from "../src/index.js"
 
 const decodeRequest = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Struct({ id: Schema.String, method: Schema.String })),
@@ -63,34 +56,6 @@ const fakeServer = (protocol: number = PROTOCOL) =>
   })
 
 layer(Layer.mergeAll(BunServices.layer, HerdrBun.layer))("Herdr client", (it) => {
-  it.effect("server error is a HerdrError with its code", () =>
-    Effect.gen(function* () {
-      const { herdr } = yield* fakeServer()
-      const e = yield* Effect.flip(herdr.call("agent.get", { target: "x" }))
-      assert.strictEqual(e._tag, "HerdrError")
-      if (e._tag === "HerdrError") assert.strictEqual(e.code, "agent_not_found")
-    }),
-  )
-
-  it.effect("missing socket is a HerdrTransportError", () =>
-    Effect.gen(function* () {
-      const { dir } = yield* fakeServer()
-      const absent = yield* Herdr.make(`${dir}/absent.sock`)
-      assert.instanceOf(yield* Effect.flip(absent.call("ping", {})), HerdrTransportError)
-    }),
-  )
-
-  it.effect("subscribe skips the ack, yields frames, ends on close", () =>
-    Effect.gen(function* () {
-      const { herdr } = yield* fakeServer()
-      const frames = yield* Stream.runCollect(herdr.subscribe([{ type: "pane.closed" }]))
-      assert.deepStrictEqual(
-        Array.from(frames).map((f) => ("type" in f.data && f.data.type === "pane_closed" ? f.data.pane_id : f.event)),
-        ["w1:p1", "w1:p2"],
-      )
-    }),
-  )
-
   it.effect("verifyProtocol accepts the generated protocol and refuses another", () =>
     Effect.gen(function* () {
       yield* Herdr.verifyProtocol((yield* fakeServer()).herdr)

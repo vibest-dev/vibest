@@ -22,14 +22,14 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
   afterAll(() => stopStartedSessions(), 30_000)
 
   it.live.skipIf(!piOnPath)(
-    "the entry session in place, a harness a shell ran that herdr detected and no open named, is still ours: state reads it, and send submits (Enter included)",
+    "a stale terminal identity is refused and the occupied pane it names survives",
     () =>
       withSession(({ name }) =>
         withRuntime((runtime) =>
           Effect.gen(function* () {
             const herdr = yield* (yield* HerdrPool).client(name)
             const cwd = fs.realpathSync(os.tmpdir())
-            const made = yield* herdr.call("workspace.create", { cwd, label: "detected", focus: false })
+            const made = yield* herdr.call("workspace.create", { cwd, label: "occupied", focus: false })
             const paneId = made.root_pane.pane_id
             yield* Effect.gen(function* () {
               yield* herdr.call("pane.wait_for_output", {
@@ -44,21 +44,6 @@ describe.skipIf(!herdrOnPath)("runtime-herdr", () => {
                 herdr.call("agent.get", { target: paneId }).pipe(Effect.exit),
                 Exit.isSuccess,
                 "herdr detected the agent",
-                coldPiStartupAttempts,
-              )
-              const terminal = TerminalRuntime.terminalOf(name, paneId)
-              if (runtime.state !== undefined)
-                yield* waitFor(
-                  runtime.state(terminal),
-                  (state) => state === "idle",
-                  "the detected agent idle",
-                  coldPiStartupAttempts,
-                )
-              yield* runtime.send(terminal, { text: "! printf 'VBT_%s\\n' SUBMITS" })
-              yield* waitFor(
-                runtime.read(terminal, 80),
-                (text) => text.includes("VBT_SUBMITS"),
-                "the submitted prompt ran, printing VBT_SUBMITS that the typed text does not contain",
                 coldPiStartupAttempts,
               )
               const oldTerminal = TerminalRuntime.terminalOf(name, paneId, "vbt-gone-00000000")

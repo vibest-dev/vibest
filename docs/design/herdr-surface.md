@@ -317,4 +317,3 @@ fragile.
   are defined identically in the session and subscription event namespaces, so the events module emits them once. The schema has no method →
   result map (`ResponseResult` is one flat union), so `scripts/gen/method-result-map.ts` was found empirically
   against herdr 0.8.2; a method missing there is typed as the loose union, a typing gap and never a runtime bug.
-- **Tests.** `test/client.test.ts` runs against a fake herdr on a temp socket.
