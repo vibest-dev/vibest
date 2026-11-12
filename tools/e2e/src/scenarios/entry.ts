@@ -159,7 +159,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S10-resume",
     title:
-      "a Pi entry session whose pane closed after an execution: `vibest` reopens the same session and conversation (pi --session-id, the earlier prompt on screen); `vibest --new` starts a new session and conversation (no --session-id, the earlier prompt not on screen)",
+      "a Pi entry session whose execution shows in `vibest ls` and `vibest result` and whose pane closed after it: `vibest` reopens the same session and conversation (pi --session-id, the earlier prompt on screen); `vibest --new` starts a new session and conversation (no --session-id, the earlier prompt not on screen)",
     run: async (w) => {
       needs("pi", "herdr")
       const model = heldModel()
@@ -179,6 +179,25 @@ const checks: ReadonlyArray<Check> = [
         const prompt = ask("first")
         await execution(w, socket, first.pane, prompt, "done-first")
         const one = liveEntry(w)!
+        await until(
+          "Pi saved the conversation",
+          () => Bun.spawnSync(["find", `${env.PI_CODING_AGENT_DIR}/sessions`, "-name", "*.jsonl"]).stdout.length > 0,
+          30_000,
+        )
+        const resultOf = await w.json<{ reply?: { text: string | null } | null }>(["result", one.id], {
+          cwd: w.repository,
+        })
+        expect(
+          resultOf.reply?.text?.includes("done-first") === true,
+          `result of the entry session: ${JSON.stringify(resultOf)}`,
+        )
+        const listing = await w.json<{ sessions: Array<{ id: string; executionState: string }> }>(["ls"], {
+          cwd: w.repository,
+        })
+        expect(
+          listing.sessions.find((e) => e.id === one.id)?.executionState === "completed",
+          `vibest ls: ${JSON.stringify(listing.sessions.map((e) => [e.id, e.executionState]))}`,
+        )
         await exitEntry(w, socket, first.pane, one.id)
 
         const again = await start([], "the reopened entry session")

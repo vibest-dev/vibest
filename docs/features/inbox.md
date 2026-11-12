@@ -19,25 +19,35 @@ reply, no message has the session as sender, and the entry session's model gets 
 `vibest interrupt` stops a session's running execution, which sends and notifies nothing, and the next `vibest send` is
 delivered and its execution's reply can be read.
 
+## S53. A Claude session takes its messages when idle
+
+A Claude session takes a send when it is idle: the send is one inbox row delivered into one execution of its own, a send
+made while an execution runs waits until it ends and then opens the next execution, and every execution has its own reply.
+
+## S54. A first task is delivered once
+
+A session's first task is delivered once, as one execution that completes with its reply; no other message is delivered
+into that execution.
+
 ## S11. Claude entry session inbox
 
-A Claude entry session gets its messages from vibestd: it takes them, holds them while it works on them, and acknowledges
-each one; a message from a session still arrives as one line with its context after the conversation is cleared, and after the main
-agent is stopped and resumed in the same pane.
+A Claude entry session takes its messages from vibestd when it is idle, one batch at a time; the batch opens an execution
+and is recorded as that execution's input; a message from a session still arrives as one line with its context after the
+conversation is cleared, and after the entry session is stopped and resumed in the same pane.
 
 ## S12. Pi entry session inbox and its screen
 
-A Pi entry session gets each message from a session pushed into its own execution, also after a daemon restart; an execution of several tool calls
+A Pi entry session takes each message from a session when it is idle, in an execution of its own, also after a daemon restart; an execution of several tool calls
 shows on its screen as one collapsed group line.
 
 ## S13. Status changes reach vibestd at once
 
-A change in an agent's terminal status reaches vibestd without waiting for its next poll.
+A change in an agent's terminal status reaches vibestd without waiting for a timer.
 
 ## S15. Claude entry session across sessions and restarts
 
 A Claude entry session with two sessions gets each one's messages matched to it; a message that arrives mid-execution still
-arrives; a message taken by a poller that went away is offered again; delivery continues after `vibest daemon restart`.
+arrives once the execution it interrupted ends; delivery continues after `vibest daemon restart`.
 
 ## S18. A long first execution keeps its terminal
 

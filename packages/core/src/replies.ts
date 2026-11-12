@@ -11,10 +11,9 @@ export const jsonObject = (raw: string): Record<string, unknown> | undefined => 
   }
 }
 
-export const promptOf = (adapter: HarnessDefinition, entry: boolean, raw: string) => {
+export const promptOf = (adapter: HarnessDefinition, raw: string) => {
   const event = jsonObject(raw)
-  const prompt = event && adapter.userPrompt?.(event, entry)
-  return prompt?.text
+  return event && adapter.userPrompt?.(event)
 }
 
 export const isUsageLimitError = (error: string | undefined) => {
@@ -49,14 +48,9 @@ export type ObservedEnd = {
   readonly needsReady: boolean
 }
 
-export const executionEndOf = (
-  adapter: HarnessDefinition,
-  entry: boolean,
-  raw: string,
-  at: number,
-): ObservedEnd | undefined => {
+export const executionEndOf = (adapter: HarnessDefinition, raw: string, at: number): ObservedEnd | undefined => {
   const event = jsonObject(raw)
-  const payload = event && adapter.executionEnd?.(event, entry)?.end
+  const payload = event && adapter.executionEnd?.(event)?.end
   return payload ? executionEndFrom(adapter, payload, at) : undefined
 }
 

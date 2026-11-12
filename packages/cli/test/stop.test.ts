@@ -1,5 +1,3 @@
-import net from "node:net"
-
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect, protocolHeaders } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
@@ -9,7 +7,6 @@ import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders } from "@vibest/protocol/protocol"
-import { CALLER_HEADER, PROJECT_HEADER, PROTOCOL, PROTOCOL_HEADER, SESSION_HEADER } from "@vibest/protocol/protocol"
 import * as Server from "@vibest/server/server"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
 
@@ -18,7 +15,10 @@ import * as Platform from "#platform"
 import { TIMING } from "../src/replace.ts"
 import {
   authed,
+  CLAUDE,
+  CURSOR,
   FakeRuntime,
+  PI,
   FakeProcesses,
   makeRepository,
   testLayer,
@@ -229,43 +229,24 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
   )
 
   test(
-    "a Send and a Pi arrival deferred by the drain wake after a refused Stop, with nothing failed",
+    "a Send deferred by the drain wakes after a refused Stop, with nothing failed",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, herdr, c, worker } = yield* idleMainWithWorker(repo, "pi")
+      const { db, herdr, worker } = yield* idleMainWithWorker(repo, "pi")
       const sessions = yield* Sessions
       const drain = yield* Drain
       yield* herdr.endExecution(worker)
       yield* writeEnd(worker, "pi", { text: "status: completed" })
       yield* sessions.check(worker)
-      const got: Array<string> = []
-      const subscribed = yield* Effect.forkScoped(
-        c["Inbox.Subscribe"](undefined).pipe(
-          Stream.runForEach((body) =>
-            Effect.sync(() => {
-              got.push(body)
-            }),
-          ),
-        ),
-      )
       yield* until(db.getSession(worker), (w) => w?.executionState === "completed")
       const leave = drain.track("held short operation")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
       yield* sessions.send(worker, "after reopen")
-      yield* (yield* Inbox).enqueue({
-        sessionId: worker,
-        message: "arrival while draining",
-      })
       assert.isArray(yield* joinAdvancingClock(stopping))
       yield* leave
       yield* until(db.inboxWithStatus(worker, "delivered"), (rows) => rows.some((r) => r.message === "after reopen"))
-      yield* until(
-        Effect.sync(() => got),
-        (bodies) => bodies.some((b) => b.includes("arrival while draining")),
-      )
       assert.deepStrictEqual(yield* db.inboxWithStatus(worker, "failed"), [])
-      yield* Fiber.interrupt(subscribed)
     }),
   )
 
@@ -299,60 +280,22 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
   )
 
   test(
-    "a Pi batch on the wire blocks until its ACK; the drained close fails nothing",
+    "a take while the Stop drains hands out nothing; after a refused Stop it hands out the batch",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const { db, sessionId, worker, projectId } = yield* idleMainWithWorker(repo, "pi")
-      const layout = yield* Layout
-      const socket = yield* Effect.acquireRelease(
-        Effect.promise(
-          () =>
-            new Promise<net.Socket>((resolve, reject) => {
-              const s = net.connect(layout.socket)
-              s.on("error", reject)
-              s.once("connect", () => resolve(s))
-            }),
-        ),
-        (s) =>
-          Effect.sync(() => {
-            s.destroy()
-          }),
-      )
-      const headers = [
-        [PROTOCOL_HEADER, String(PROTOCOL)],
-        [CALLER_HEADER, "session"],
-        [SESSION_HEADER, sessionId],
-        [PROJECT_HEADER, String(projectId)],
-      ]
-      socket.write(JSON.stringify({ jsonrpc: "2.0", id: "s", method: "Inbox.Subscribe", params: null, headers }) + "\n")
-      yield* (yield* Inbox).enqueue({ sessionId: worker, message: "held" })
-      yield* until(db.latestInbox(worker, "notice"), (r) => r?.status === "delivering")
-      const stopping = yield* Effect.forkScoped(stopFromCli(repo))
-      yield* draining
-      assert.isFalse(yield* shutdownDone)
-      socket.write(JSON.stringify({ jsonrpc: "2.0", method: "@effect/rpc/Ack", params: { requestId: "s" } }) + "\n")
-      yield* until(db.latestInbox(worker, "notice"), (r) => r?.status === "delivered")
-      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
-      socket.destroy()
-      assert.strictEqual((yield* db.latestInbox(worker, "notice"))?.status, "delivered")
-    }),
-  )
-
-  test(
-    "a Claude ack settles a batch already leased while the Stop drains",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const { db, worker, projectId } = yield* idleMainWithWorker(repo, "claude")
+      const { sessionId } = yield* idleMainWithWorker(repo, "claude")
       const inbox = yield* Inbox
-      yield* inbox.enqueue({ sessionId: worker, message: "ack" })
-      const polled = yield* until(inbox.poll(projectId), (r) => r.ids.length > 0)
+      const drain = yield* Drain
+      yield* inbox.enqueue({ sessionId, message: "wait" })
+      const leave = drain.track("held short operation")
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
-      assert.deepStrictEqual((yield* inbox.poll(projectId)).ids, [], "a poll while draining hands out nothing new")
-      assert.deepStrictEqual(yield* inbox.ack(projectId, polled.ids), polled.ids)
-      assert.strictEqual((yield* db.latestInbox(worker, "notice"))?.status, "delivered")
-      assert.strictEqual(yield* joinAdvancingClock(stopping), "accepted")
+      assert.isUndefined(yield* inbox.take(sessionId, undefined))
+      assert.isArray(yield* joinAdvancingClock(stopping))
+      yield* leave
+      assert.lengthOf((yield* inbox.take(sessionId, undefined))!.ids, 1)
     }),
+    { harnesses: [{ ...CLAUDE, inbox: "poll" }, PI, CURSOR] },
   )
 
   test(

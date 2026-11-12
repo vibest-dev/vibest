@@ -264,7 +264,7 @@ const checks: ReadonlyArray<Check> = [
           `No restarted the entry session: ${JSON.stringify(kept)}`,
         )
         expect(kept?.version === old, `the kept agent's integration: ${kept?.version}`)
-        const refused = await fetch("http://vibestd/inbox/poll", {
+        const refused = await fetch("http://vibestd/inbox/take", {
           unix: path.join(w.vibestHome, "vibest-http.sock"),
           method: "POST",
           headers: { "vibest-protocol": "2", "vibest-session-id": before.id },

@@ -4,7 +4,7 @@ import { readPing } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { ProcessPlatform, Processes } from "@vibest/core/processes"
-import { projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
+import { entryPending, projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
 import { FakeProcesses } from "@vibest/core/test/lib/fake-processes"
 import {
   CLAUDE,
@@ -34,6 +34,7 @@ export {
   HARNESSES,
   PI,
   harnessesLayer,
+  entryPending,
   projectOf,
   runtimesLayer,
   subscriptionsLayer,

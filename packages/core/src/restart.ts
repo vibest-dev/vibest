@@ -280,7 +280,7 @@ export const sessionRestart = (deps: {
           return row?.id === id ? { ...row, ready: yield* db.readyAt(id) } : undefined
         }),
         locked: (effect) => effect,
-        reconcile: Effect.forkIn(inbox.deliver(projectId), deps.scope).pipe(Effect.asVoid),
+        reconcile: deps.checkLater(id),
         hint: "",
         onBack: () =>
           Effect.gen(function* () {
@@ -314,6 +314,7 @@ export const sessionRestart = (deps: {
   const outdated = Effect.gen(function* () {
     const agents = (yield* db.listSessions()).filter(
       (row) =>
+        !row.entry &&
         reports(row.harnessId) &&
         !current(row.metadata.integration) &&
         !(row.metadata.archived || row.metadata.removed) &&

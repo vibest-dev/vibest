@@ -156,12 +156,16 @@ export const claude: Harness.HarnessDefinition = {
     ),
     answer: claudeModels,
   },
-  userPrompt: (event, coordinator) => {
-    if (coordinator || event.hook_event_name !== "PromptSubmit") return undefined
+  userPrompt: (event) => {
+    if (event.hook_event_name !== "PromptSubmit") return undefined
+    if (event.origin === "vibest")
+      return typeof event.execution === "number"
+        ? { execution: event.execution, ...(event.refused === true ? { refused: true as const } : {}) }
+        : undefined
     if (event.origin !== "composer" && event.origin !== "bridge") return undefined
     return typeof event.text === "string" && event.text.trim() !== "" ? { text: event.text } : undefined
   },
-  executionEnd: (event, coordinator) =>
-    coordinator || event.hook_event_name !== "ExecutionComplete" ? undefined : { end: executionComplete(event) },
+  executionEnd: (event) =>
+    event.hook_event_name !== "ExecutionComplete" ? undefined : { end: executionComplete(event) },
   subscription: (home) => claudeSubscription(home).pipe(Effect.provide(platform)),
 }

@@ -92,9 +92,8 @@ subagents. Everything else in this list is planned; each item says what runs tod
 - **An addressable inbox per session** (planned): every row has a recipient (a session, or the **user**) and a
   sender (a session, or the user). One delivery path, locked per recipient, for entry sessions and subagents alike:
   natively when the harness integration polls or subscribes, typed into the terminal otherwise. A row for the user
-  is kept and read with `vibest inbox`. Today an entry session is never typed into: only a harness that polls (Claude)
-  or subscribes (Pi) can be one, and a subagent-only harness (Cursor) has no inbox mode. Subagents are typed into,
-  and a row with no session to go to is dropped.
+  is kept and read with `vibest inbox`. A harness that polls (Claude) or subscribes (Pi) pulls its batches when idle;
+  any other harness (Cursor) is typed into, whichever session it runs. A row with no session to go to is dropped.
 - **Delivery is by recipient.** `vibest send <id>` from the user reaches any unfinished session of the same project, the entry session included. A session reaches only the agent that started it, and sessions it started. An execution end writes only `execution.ended`, which carries the reply
   text, read as `execution.reply` with `vibest result`. vibest's own notices say only what an agent could
   not say itself, and go to its creator (its living parent, else the entry session, else `origin_session` through the
@@ -310,14 +309,14 @@ Delivery follows omac `inbox.ts` and `sessions.ts` (copied):
 - **Inbox.** One lock per receiver; read, mark `delivering`, deliver, mark `delivered` only on success. Consecutive
   Messages from one sender are delivered as one. Triggers: on write, on the receiver's status event, a 10 s
   reconcile tick, daemon start. A `blocked` receiver gets nothing.
-- **Into the entry session** natively where the CLI allows it, as its harness adapter's `inbox` says: `poll`, the
-  Claude plugin polls vibestd over HTTP on `vibest-http.sock` (each row handed out is leased for 30 s, its lease in
-  vibestd's memory; ack by row id, or give rows back; a project that stops polling for 5 s gets its leases back; only the
-  session's own harness may poll); `subscribe`, the Pi extension's subscription stream; `prompt`, typed through herdr
-  `agent.prompt`. No entry session pane: Messages are `dropped`. An entry session whose terminal the runtime cannot name
-  (reused, or its record dropped) is judged by its process. A `subscribe` batch counts as delivered once the RPC
-  client queued it (the next pull starts only after the socket Ack), not once `pi.sendMessage` returned: a dropped Ack
-  can mark a batch failed that the client already has (a known gap).
+- **Pull or type is a property of the harness.** A harness whose adapter declares `inbox` (`poll` for the Claude plugin
+  over HTTP on `vibest-http.sock`, `subscribe` for the Pi extension's subscription stream) pulls; the integration asks
+  for the next batch with `take` only while its session is idle, and the subscription stream carries only a wake-up.
+  Any other harness is typed through herdr `agent.prompt`. Entry sessions and spawned sessions follow the same rule.
+  `take` runs in one transaction: with an execution open it answers empty; otherwise it opens the execution, marks the
+  batch `delivered` and attaches it to that execution. The integration reports the execution accepted when the batch
+  reaches the model; a batch never used is settled by the confirmation timeout like a typed one (`not_started`). A
+  session with no process is resumed by the typed path's wake-up and then takes its message.
 - **Into a subagent** through herdr `agent.prompt`, text unchanged, then confirmed: within 8 s the state
   sequence must move or the agent must be working; otherwise press Enter and wait 8 s; otherwise paste once more
   and wait 8 s; otherwise `not_started` with a notice naming `vibest peek <id>` (CAO #479, #496, #566). No screen text is ever
@@ -1102,13 +1101,12 @@ per Project. See [session requests](daemon.md#session-requests).
 calls (the Claude plugin's `$.http.fetch`). Every route is `POST /<route>` with a JSON body, answered at once; the
 caller is named by the shared session headers.
 
-| Route                            | Answer                | What                                                                      |
-| -------------------------------- | --------------------- | ------------------------------------------------------------------------- |
-| `/inbox/poll`                    | `{ ids, line, text }` | the entry session's next batch, each row leased (Inbox.poll)              |
-| `/inbox/ack { ids, release? }`   | `{ acked }`           | delivered, or given back (Inbox.ack); a settlement                        |
-| `/hooks/<harness>/execution-end` | 204                   | the adapter's `executionEnd`, kept as the execution's reply; a settlement |
-| `/hooks/<harness>/prompt`        | 204                   | the adapter's `userPrompt`: the execution starts; a settlement            |
-| `/hooks/<harness>/guard`         | `{ deny? }`           | Guard.check with the session's own agent and project folder               |
+| Route                            | Answer                                  | What                                                                      |
+| -------------------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
+| `/inbox/take`                    | `{ execution, ids, line, text }` or 204 | the session's next batch when idle and no execution is open (Inbox.take)  |
+| `/hooks/<harness>/execution-end` | 204                                     | the adapter's `executionEnd`, kept as the execution's reply; a settlement |
+| `/hooks/<harness>/prompt`        | 204                                     | the adapter's `userPrompt`: the execution starts; a settlement            |
+| `/hooks/<harness>/guard`         | `{ deny? }`                             | Guard.check with the session's own agent and project folder               |
 
 Errors are `{ error }`: 409 another protocol (with `ProtocolMismatch`), 404 no such session or route, 403 another
 project, another harness than the session's, or a poll from what is not an entry session whose harness polls, 503 vibestd

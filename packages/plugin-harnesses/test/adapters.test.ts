@@ -44,10 +44,9 @@ describe("HarnessAdapter", () => {
   it("cursor reports its execution end at its response; its stop hook is not one", () => {
     const executionEnd = ADAPTERS.cursor.executionEnd!
     const reply = { hook_event_name: "afterAgentResponse", text: "done" }
-    assert.deepStrictEqual(executionEnd(reply, false), { end: reply })
+    assert.deepStrictEqual(executionEnd(reply), { end: reply })
     for (const status of ["completed", "aborted", "error"])
-      assert.isUndefined(executionEnd({ hook_event_name: "stop", status }, false))
-    assert.isUndefined(executionEnd(reply, true))
+      assert.isUndefined(executionEnd({ hook_event_name: "stop", status }))
   })
 
   it("claude reports every reason of the plugin's ExecutionComplete: answer as it is, aborted, refusal and error failed", () => {
@@ -58,10 +57,9 @@ describe("HarnessAdapter", () => {
       reason: "answer",
       last_assistant_message: "done",
     }
-    assert.deepStrictEqual(executionEnd(answer, false), { end: answer })
-    assert.isUndefined(executionEnd(answer, true))
+    assert.deepStrictEqual(executionEnd(answer), { end: answer })
     const aborted = { ...answer, reason: "aborted", last_assistant_message: "" }
-    assert.deepStrictEqual(executionEnd(aborted, false), {
+    assert.deepStrictEqual(executionEnd(aborted), {
       end: {
         ...aborted,
         aborted: true,
@@ -69,12 +67,11 @@ describe("HarnessAdapter", () => {
         error_details: "the execution was stopped in its terminal (Esc) before it ended",
       },
     })
-    assert.isUndefined(executionEnd(aborted, true))
     const error = { ...answer, reason: "error", last_assistant_message: "" }
-    assert.deepStrictEqual(executionEnd(error, false), {
+    assert.deepStrictEqual(executionEnd(error), {
       end: { ...error, error: "error", error_details: "the execution ended on an API error" },
     })
-    assert.deepStrictEqual(executionEnd({ ...error, last_assistant_message: " API Error: 500 " }, false), {
+    assert.deepStrictEqual(executionEnd({ ...error, last_assistant_message: " API Error: 500 " }), {
       end: {
         ...error,
         last_assistant_message: " API Error: 500 ",
@@ -83,10 +80,10 @@ describe("HarnessAdapter", () => {
       },
     })
     const refusal = { ...answer, reason: "refusal", refusal: { category: "cyber", explanation: "not that" } }
-    assert.deepStrictEqual(executionEnd(refusal, false), {
+    assert.deepStrictEqual(executionEnd(refusal), {
       end: { ...refusal, error: "refusal", error_details: "cyber: not that" },
     })
-    assert.deepStrictEqual(executionEnd({ ...refusal, refusal: { category: null, explanation: null } }, false), {
+    assert.deepStrictEqual(executionEnd({ ...refusal, refusal: { category: null, explanation: null } }), {
       end: {
         ...refusal,
         refusal: { category: null, explanation: null },
@@ -95,32 +92,38 @@ describe("HarnessAdapter", () => {
       },
     })
     for (const name of ["Stop", "StopFailure", "SubagentStop"])
-      assert.isUndefined(executionEnd({ ...answer, hook_event_name: name }, false), name)
-    assert.isUndefined(executionEnd({ ...answer, session_id: "" }, true))
+      assert.isUndefined(executionEnd({ ...answer, hook_event_name: name }), name)
   })
 
   it("claude reads a user prompt from the plugin's prompt.submit only when the person submitted it", () => {
     const userPrompt = ADAPTERS.claude.userPrompt!
     const typed = { hook_event_name: "PromptSubmit", text: "look here", origin: "composer" }
-    assert.deepStrictEqual(userPrompt(typed, false), { text: "look here" })
-    assert.deepStrictEqual(userPrompt({ ...typed, origin: "bridge" }, false), { text: "look here" })
-    assert.isUndefined(userPrompt(typed, true))
-    assert.isUndefined(userPrompt({ ...typed, text: "  " }, false))
+    assert.deepStrictEqual(userPrompt(typed), { text: "look here" })
+    assert.deepStrictEqual(userPrompt({ ...typed, origin: "bridge" }), { text: "look here" })
+    assert.isUndefined(userPrompt({ ...typed, text: "  " }))
     for (const origin of ["task-notification", "scheduled-trigger", "peer", "plugin", "sdk", "unclassified", undefined])
-      assert.isUndefined(userPrompt({ ...typed, origin }, false), String(origin))
-    assert.isUndefined(userPrompt({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" }, false))
+      assert.isUndefined(userPrompt({ ...typed, origin }), String(origin))
+    assert.isUndefined(userPrompt({ hook_event_name: "UserPromptSubmit", prompt: "look here", source: "user" }))
+  })
+
+  it("claude and pi read the report of a taken batch as the execution it started, not as a typed prompt", () => {
+    assert.deepStrictEqual(
+      ADAPTERS.claude.userPrompt!({ hook_event_name: "PromptSubmit", origin: "vibest", execution: 7 }),
+      { execution: 7 },
+    )
+    assert.isUndefined(ADAPTERS.claude.userPrompt!({ hook_event_name: "PromptSubmit", origin: "vibest" }))
+    assert.deepStrictEqual(ADAPTERS.pi.userPrompt!({ type: "accepted", execution: 7 }), { execution: 7 })
+    assert.isUndefined(ADAPTERS.pi.userPrompt!({ type: "accepted" }))
   })
 
   it("cursor reads a user prompt from beforeSubmitPrompt, and a thought or tool result as an execution at work", () => {
     const userPrompt = ADAPTERS.cursor.userPrompt!
     const event = { hook_event_name: "beforeSubmitPrompt", prompt: "look here" }
-    assert.deepStrictEqual(userPrompt(event, false), { text: "look here" })
-    assert.isUndefined(userPrompt(event, true))
-    assert.isUndefined(userPrompt({ hook_event_name: "beforeSubmitPrompt", prompt: "  " }, false))
-    assert.isUndefined(userPrompt({ hook_event_name: "afterAgentResponse", prompt: "look here" }, false))
+    assert.deepStrictEqual(userPrompt(event), { text: "look here" })
+    assert.isUndefined(userPrompt({ hook_event_name: "beforeSubmitPrompt", prompt: "  " }))
+    assert.isUndefined(userPrompt({ hook_event_name: "afterAgentResponse", prompt: "look here" }))
     for (const hook_event_name of ["afterAgentThought", "postToolUse"]) {
-      assert.deepStrictEqual(userPrompt({ hook_event_name }, false), { text: "" })
-      assert.isUndefined(userPrompt({ hook_event_name }, true))
+      assert.deepStrictEqual(userPrompt({ hook_event_name }), { text: "" })
     }
   })
 

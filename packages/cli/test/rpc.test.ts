@@ -106,7 +106,7 @@ describe("vibest.sock", () => {
         first,
       )
       assert.deepStrictEqual(
-        (yield* db.listSessions()).map((w) => w.id),
+        (yield* db.listSessions()).filter((w) => !w.entry).map((w) => w.id),
         [first.id],
       )
       const worktree = (yield* db.sessionDirectory(first.id))!
@@ -497,6 +497,7 @@ describe("vibest.sock", () => {
         ["List", c.List({ stopped: true })],
         ["Get", c.Get({ id })],
         ["Inbox.Subscribe", Stream.runDrain(c["Inbox.Subscribe"](undefined))],
+        ["Inbox.Take", c["Inbox.Take"](undefined)],
         ["Watch", Stream.runDrain(c.Watch(undefined))],
         ["Session.Seen", c["Session.Seen"]({ id: "x", finished: 0 })],
         ["Project.EntrySession", c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })],
@@ -529,7 +530,7 @@ describe("vibest.sock", () => {
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "ProtocolRejected", method)
       const w = yield* asSession(yield* client, id)
       for (const [method, call] of protectedCalls(w).filter(
-        ([m]) => m !== "Send" && m !== "Integration.Guard" && m !== "Spawn",
+        ([m]) => m !== "Send" && m !== "Integration.Guard" && m !== "Spawn" && !m.startsWith("Inbox."),
       ))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
       const child = yield* w.Spawn({ callerEnv: {}, harness: "pi", prompt: "from a session" })
@@ -756,10 +757,13 @@ describe("vibest.sock", () => {
       yield* herdr.seedAgent(pane)
       yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: pane })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "working" }))
+      yield* until(c.List({}), (list) => list.sessions[0]?.status === "working")
       assert.deepInclude((yield* c.List({})).sessions[0], { agent: "main", status: "working" })
       yield* herdr.updateAgent(pane, (a) => ({ ...a, status: "idle" }))
+      yield* until(c.List({}), (list) => list.sessions[0]?.status === "idle")
       assert.deepInclude((yield* c.List({})).sessions[0], { agent: "main", status: "idle" })
     }),
+    { statusEvents: true },
   )
 
   test(

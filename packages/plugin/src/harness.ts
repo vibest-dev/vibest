@@ -73,11 +73,10 @@ export interface HarnessDefinition {
   readonly checkEnvironment?: (home: string) => Effect.Effect<string | undefined>
   readonly subscription?: (home: string) => Effect.Effect<ReadonlyArray<SubscriptionRead>>
   readonly guardAnswer?: (reason: string | undefined) => unknown
-  readonly executionEnd?: (
+  readonly executionEnd?: (event: HarnessEvent) => { readonly end: Readonly<Record<string, unknown>> } | undefined
+  readonly userPrompt?: (
     event: HarnessEvent,
-    coordinator: boolean,
-  ) => { readonly end: Readonly<Record<string, unknown>> } | undefined
-  readonly userPrompt?: (event: HarnessEvent, coordinator: boolean) => { readonly text: string } | undefined
+  ) => { readonly text: string } | { readonly execution: number; readonly refused?: true } | undefined
   readonly conversationOf?: (event: HarnessEvent) => string | undefined
 }
 
