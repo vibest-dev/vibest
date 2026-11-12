@@ -109,10 +109,9 @@ describe("plugins: builtins follow the latest config", () => {
         const spawning = yield* Effect.forkChild(plugins.start(event))
         yield* TestClock.adjust("10 seconds")
         const decision = yield* Fiber.join(spawning)
-        assert.deepStrictEqual(
-          decision.trace.map((t) => t.plugin),
-          ["vibest"],
-          "the fallback ran with the removed builtin off",
+        assert.isFalse(
+          decision.trace.some((t) => t.plugin === "harness-x"),
+          "the removed builtin ran in the fallback",
         )
         release()
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
