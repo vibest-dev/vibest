@@ -78,7 +78,7 @@ export const spawnWorking = (repo: string, harness: HarnessId = "pi", extra: { r
     yield* (yield* FakeRuntime).seedAgent("test/coord")
     yield* settled
     const row = (yield* db.getSession(id))!
-    return { id, row, sessions, db }
+    return { id, row, sessions, db, entryId: entry.sessionId }
   })
 
 export const idleSession = (repo: string, extra: { readonly archive?: boolean } = {}) =>
