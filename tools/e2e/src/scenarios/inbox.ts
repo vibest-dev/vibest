@@ -80,18 +80,6 @@ const claudeEntry = async (
   const configTheResumeCheckReads = w.config.claude
   const flags = await claudeEnv(w, name, anthropic.url, configTheResumeCheckReads)
   const config = claudeConfigOf(flags)
-  const settingsFile = path.join(config, "settings.json")
-  const settings = JSON.parse(await fs.readFile(settingsFile, "utf8")) as { permissions?: { allow?: Array<string> } }
-  await fs.writeFile(
-    settingsFile,
-    JSON.stringify({
-      ...settings,
-      permissions: {
-        ...settings.permissions,
-        allow: [...(settings.permissions?.allow ?? []), "Bash"],
-      },
-    }),
-  )
   const session = `${w.herdrSession}-${name}`
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   const repo = await project(w, name)
