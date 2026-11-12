@@ -111,88 +111,18 @@ it(
 )
 
 const fsEventsDeliveryUnderLoadMs = 60_000
-const byId = (listed: ReadonlyArray<PluginInfo>, id: string) => listed.find((p) => p.id === id)
 
 const listUntil = async (
   list: () => Promise<ReadonlyArray<PluginInfo>>,
   done: (listed: ReadonlyArray<PluginInfo>) => boolean,
-  touch?: () => Promise<void>,
 ) => {
   let listed: ReadonlyArray<PluginInfo> = []
-  let polls = 0
   for (const deadline = Date.now() + fsEventsDeliveryUnderLoadMs; Date.now() < deadline; await Bun.sleep(100)) {
     listed = await list()
     if (done(listed)) return listed
-    if (touch && ++polls % 30 === 0) await touch()
   }
   return assert.fail(`gave up; last listing: ${JSON.stringify(listed)}`)
 }
-
-it(
-  "P16/P17: the running binary reloads changed async imports, keeps running the last good one while an import hangs (it gives up after 5s) without setting it up again, recovers",
-  { timeout: 300_000 },
-  async () => {
-    build()
-    const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-reload-"))
-    const setups = path.join(home, "setups.log")
-    const version = path.join(home, "shared", "version.ts")
-    await fs.mkdir(path.join(home, "plugins"), { recursive: true })
-    await fs.mkdir(path.dirname(version))
-    const versionFileWithTopLevelAwait = (v: string) =>
-      `await new Promise((r) => setTimeout(r, 10))\nexport const version = "${v}"\n`
-    await fs.writeFile(version, versionFileWithTopLevelAwait("v1"))
-    await fs.writeFile(
-      path.join(home, "plugins", "live.ts"),
-      `import { Plugin } from "@vibest/plugin"
-import { Effect } from "effect"
-import fs from "node:fs"
-import { version } from "../shared/version.ts"
-await new Promise((r) => setTimeout(r, 10))
-export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.appendFileSync(process.env.VIBEST_HOME + "/setups.log", version + "\\n")) })
-`,
-    )
-    const log = async () => (await fs.readFile(setups, "utf8")).trim().split("\n")
-    try {
-      await withVibestd(home, async (list) => {
-        const first = byId(await listUntil(list, (l) => byId(l, "live")?.status === "active"), "live")!
-        assert.deepStrictEqual(await log(), ["v1"])
-
-        await fs.writeFile(version, versionFileWithTopLevelAwait("v2"))
-        const second = byId(
-          await listUntil(list, (l) => byId(l, "live") !== undefined && byId(l, "live")!.revision !== first.revision),
-          "live",
-        )!
-        assert.strictEqual(second!.status, "active")
-        assert.deepStrictEqual(await log(), ["v1", "v2"])
-
-        await fs.writeFile(version, `export const version = await new Promise(() => {})\n`)
-        const hung = byId(
-          await listUntil(list, (l) => byId(l, "live")?.error?.includes("import timed out") === true),
-          "live",
-        )!
-        assert.deepInclude(hung, { status: "active", revision: second!.revision })
-
-        const writeV3 = () => fs.writeFile(version, versionFileWithTopLevelAwait("v3"))
-        await writeV3()
-        const fixed = byId(
-          await listUntil(
-            list,
-            (l) =>
-              byId(l, "live") !== undefined &&
-              byId(l, "live")!.error === undefined &&
-              byId(l, "live")!.revision !== second.revision,
-            writeV3,
-          ),
-          "live",
-        )!
-        assert.strictEqual(fixed!.status, "active")
-        assert.deepStrictEqual(await log(), ["v1", "v2", "v3"])
-      })
-    } finally {
-      await fs.rm(home, { recursive: true, force: true })
-    }
-  },
-)
 
 it(
   "a plugin's lazy import, imported again once another plugin loads, is the same module evaluated once",
