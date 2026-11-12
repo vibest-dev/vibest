@@ -155,7 +155,7 @@ export const make = (
             model: input.model,
             env: input.env,
             agent: input.agent,
-            peer: input.peer === undefined ? undefined : yield* db.resolveSession(input.peer),
+            share: input.share === undefined ? undefined : yield* db.resolveSession(input.share),
             archive: input.archive,
             runtime: input.runtime,
             parentSessionId: c.sessionId,

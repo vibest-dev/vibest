@@ -13132,7 +13132,7 @@
               }
             ]
           },
-          "peer": {
+          "share": {
             "anyOf": [
               {
                 "type": "string"

@@ -1,7 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
-import { peerAdmitPause } from "@vibest/core/sessions"
+import { shareAdmitPause } from "@vibest/core/sessions"
 import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
 import { TestClock } from "effect/testing"
 
@@ -12,7 +12,7 @@ import { makeRepository } from "./lib/session.ts"
 import { spawnInput, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
-  const peersSharingDirectory = (ownerId: string) =>
+  const sharersOfDirectory = (ownerId: string) =>
     Effect.gen(function* () {
       const db = yield* Db
       const shared = yield* db.sessionDirectory(ownerId)
@@ -25,12 +25,12 @@ describe.concurrent("Sessions", () => {
   const parkAdmitBeforeInsert = Effect.gen(function* () {
     const reached = yield* Deferred.make<void>()
     const go = yield* Deferred.make<void>()
-    peerAdmitPause.wait = Deferred.succeed(reached, undefined).pipe(Effect.andThen(Deferred.await(go)))
+    shareAdmitPause.wait = Deferred.succeed(reached, undefined).pipe(Effect.andThen(Deferred.await(go)))
     return { reached: Deferred.await(reached), release: Deferred.succeed(go, undefined).pipe(Effect.asVoid) }
   })
 
   test(
-    "owner archive cannot delete a clean worktree while run --peer is admitted",
+    "owner archive cannot delete a clean worktree while run --share is admitted",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
@@ -42,14 +42,16 @@ describe.concurrent("Sessions", () => {
       const cwd = yield* processes.holdCwd()
       const split = yield* herdr.hold("open")
       const reset = Effect.sync(() => {
-        peerAdmitPause.wait = Effect.void
+        shareAdmitPause.wait = Effect.void
       }).pipe(
         Effect.andThen(
           Effect.all([cwd.release(), split.release(), parked.release], { discard: true }).pipe(Effect.ignore),
         ),
       )
       yield* Effect.gen(function* () {
-        const spawning = yield* Effect.forkChild(owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id }))
+        const spawning = yield* Effect.forkChild(
+          owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id }),
+        )
         yield* parked.reached
         const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
         const listed = yield* Effect.race(
@@ -58,7 +60,7 @@ describe.concurrent("Sessions", () => {
         )
         if (listed) {
           yield* parked.release
-          yield* until(peersSharingDirectory(owner.id), (rows) => rows.length === 1)
+          yield* until(sharersOfDirectory(owner.id), (rows) => rows.length === 1)
           yield* cwd.release()
           const archived = (yield* Fiber.join(archiving))!
           const exists = yield* fs.exists(worktree)
@@ -69,14 +71,14 @@ describe.concurrent("Sessions", () => {
               String(exists),
           )
         }
-        assert.deepStrictEqual(yield* peersSharingDirectory(owner.id), [])
+        assert.deepStrictEqual(yield* sharersOfDirectory(owner.id), [])
         assert.isUndefined(archiving.pollUnsafe())
         yield* parked.release
-        yield* until(peersSharingDirectory(owner.id), (rows) => rows.length === 1)
+        yield* until(sharersOfDirectory(owner.id), (rows) => rows.length === 1)
         yield* cwd.release()
         const archived = (yield* Fiber.join(archiving))!
         assert.strictEqual(archived.worktree, "kept")
-        assert.include(archived.reasons.join("\n"), (yield* peersSharingDirectory(owner.id))[0]!.id)
+        assert.include(archived.reasons.join("\n"), (yield* sharersOfDirectory(owner.id))[0]!.id)
         assert.isTrue(yield* fs.exists(worktree))
         yield* split.release()
         yield* Fiber.join(spawning)
@@ -96,7 +98,9 @@ describe.concurrent("Sessions", () => {
       const worktree = yield* sessionWorktree(owner.id)
       const split = yield* herdr.hold("open")
       yield* Effect.gen(function* () {
-        const spawning = yield* Effect.forkChild(owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id }))
+        const spawning = yield* Effect.forkChild(
+          owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id }),
+        )
         yield* split.reached
         const admitted = yield* Fiber.join(spawning)
         const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
@@ -110,14 +114,14 @@ describe.concurrent("Sessions", () => {
         assert.isTrue(yield* fs.exists(worktree))
       }).pipe(Effect.ensuring(split.release().pipe(Effect.ignore)))
       yield* until(
-        owner.db.getSession((yield* peersSharingDirectory(owner.id))[0]!.id),
+        owner.db.getSession((yield* sharersOfDirectory(owner.id))[0]!.id),
         (w) => !!w && (w.startedAt !== null || w.exitedAt !== null),
       )
     }),
   )
 
   test(
-    "run --peer of an exited session takes the directory's lock, so another archive cannot delete the shared tree",
+    "run --share of an exited session takes the directory's lock, so another archive cannot delete the shared tree",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
@@ -125,7 +129,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
       const worktree = yield* sessionWorktree(owner.id)
-      const mid = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
+      const mid = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id })
       yield* until(owner.db.getSession(mid.id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       const midPane = (yield* herdr.agent(mid.id))!.terminal
       yield* herdr.runtime.close({ id: midPane })
@@ -134,14 +138,14 @@ describe.concurrent("Sessions", () => {
       const cwd = yield* processes.holdCwd()
       const split = yield* herdr.hold("open")
       const reset = Effect.sync(() => {
-        peerAdmitPause.wait = Effect.void
+        shareAdmitPause.wait = Effect.void
       }).pipe(
         Effect.andThen(
           Effect.all([cwd.release(), split.release(), parked.release], { discard: true }).pipe(Effect.ignore),
         ),
       )
       yield* Effect.gen(function* () {
-        const spawning = yield* Effect.forkChild(owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: mid.id }))
+        const spawning = yield* Effect.forkChild(owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: mid.id }))
         yield* parked.reached
         const archiving = yield* Effect.forkChild(owner.sessions.remove(owner.id))
         const listed = yield* Effect.race(
@@ -150,17 +154,15 @@ describe.concurrent("Sessions", () => {
         )
         if (listed) {
           yield* parked.release
-          yield* until(peersSharingDirectory(owner.id), (rows) =>
-            rows.some((s) => s.id !== mid.id && s.exitedAt === null),
-          )
+          yield* until(sharersOfDirectory(owner.id), (rows) => rows.some((s) => s.id !== mid.id && s.exitedAt === null))
           yield* cwd.release()
           const archived = (yield* Fiber.join(archiving))!
           assert.fail(
-            "owner archive listed before peer-of-peer insert and removed the tree: worktree=" + archived.worktree,
+            "owner archive listed before share-of-share insert and removed the tree: worktree=" + archived.worktree,
           )
         }
         yield* parked.release
-        yield* until(peersSharingDirectory(owner.id), (rows) => rows.some((s) => s.id !== mid.id))
+        yield* until(sharersOfDirectory(owner.id), (rows) => rows.some((s) => s.id !== mid.id))
         yield* cwd.release()
         const archived = (yield* Fiber.join(archiving))!
         assert.strictEqual(archived.worktree, "kept")
@@ -174,7 +176,7 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a failed peer launch closes only the new split pane and leaves the owner's pane and worktree",
+    "a failed share launch closes only the new split pane and leaves the owner's pane and worktree",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
@@ -185,7 +187,7 @@ describe.concurrent("Sessions", () => {
       const closesBefore = (yield* herdr.callsTo("close")).map((c) => c.terminal)
       const created = (yield* herdr.callsTo("open")).length
       const held = yield* herdr.hold("open")
-      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo, "claude")), peer: owner.id })
+      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo, "claude")), share: owner.id })
       yield* held.reached
       yield* held.release("failed")
       yield* until(owner.db.getSession(id), (w) => !!w && w.exitedAt !== null)

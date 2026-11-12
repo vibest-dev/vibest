@@ -337,7 +337,7 @@ How `packages/core/src/sessions.ts` keeps these:
 
 - Every operation on one session runs under that session's lock; different sessions proceed in parallel. A
   session directory has its own lock (`directory:<path>`), which an archive holds while it decides whether the
-  directory goes and a `--peer` spawn holds while it joins it. Per-session flags live in memory and are dropped once
+  directory goes and a `--share` spawn holds while it joins it. Per-session flags live in memory and are dropped once
   the session is no longer live and nothing is in flight on them (`forget`, under the lock).
 - Remove and archive close the execution and mark the session archived and exited under its lock. The aborted execution
   end their interrupt causes, landing during the interrupt or after the archive, writes nothing: an interrupted end
@@ -381,7 +381,7 @@ How `packages/core/src/sessions.ts` keeps these:
   detached worktree per repository. A failed start undoes its steps in reverse order, uninterruptibly, before the
   failure becomes a notice: the terminal, the system prompt file, the worktree (with git, without force; a refusal,
   or a reserved directory git left something in, stays for `vibest archive`). A failed resume closes its terminal
-  too. A terminal opens beside `--peer`'s, else beside the entry session's when that runs in the same runtime. When a
+  too. A terminal opens beside `--share`'s, else beside the entry session's when that runs in the same runtime. When a
   project's last live session ends, the entry session's terminal publishes the workspace alone; without a stored
   project directory its name cannot be given again and is left as it is (a known gap).
 - Starting the entry session (`launch.ts`): every check that can refuse the launch (harness, provider, binary, plugin,
@@ -534,7 +534,7 @@ entry session's integration delivers it as new input     ← back in the main co
   writes go to subagents.
 - **Where a subagent works** (`--workspace` overrides):
   - In a Project with git repositories: a new `isolated` Workspace made for this Agent; a reviewer shares the
-    implementer's Workspace with `--peer`.
+    implementer's Workspace with `--share`.
   - Without git repositories: `root`, and only one writing subagent at a time; the next one
     queues (the builtin harness choice refuses: one writing subagent at a time in such a Project).
 - **Stepping into a subagent's pane** is allowed, also after it answered (a `kept` Agent's pane stays open). It
@@ -1044,7 +1044,7 @@ answers how many), the hooks' `ExecutionEnd` and `Prompt` (verbatim harness JSON
 prompt from the entry session or from vibest's own delivery is ignored). Of the rest:
 
 - `Spawn`: `harness` is optional when a routing plugin picks it; `agent` defaults to general and may not be the
-  entry session; `machine` defaults to `local`; `peer` shares that session's worktree in a split of its pane;
+  entry session; `machine` defaults to `local`; `share` shares that session's worktree in a split of its pane;
   `archive` archives the session once a completed result reached its entry session.
 - `Send` queues and returns; vibestd delivers once the session is idle, and failures reach its entry session as
   notices. An `id` is a session id or a unique prefix of at least 8 characters, and the answer names the full id.

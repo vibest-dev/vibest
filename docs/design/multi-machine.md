@@ -139,7 +139,7 @@ their case; either gives `NoProject`.
 `vibest run --machine <name>` (a session, the entry session included) sends `Peer.Spawn` over the machine's connection with
 the project's one repository's `remote_url` and its repository identity, its `HEAD` (`Git.head`) and the
 calling session as `vibest-peer-by`, which B records as the creator; `Spawn` answers the address `<name>/<id>`, as every forwarded method does. A `Spawn` with no calling session is refused on A, before B is contacted, and B independently refuses a `Peer.Spawn` forwarded for the user.
-`--env`, `--peer`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the
+`--env`, `--share`, `--archive-on-idle`, `--agent` and `--session` are refused with it, by vibestd, after the
 reserved-name check every run gets. A stores nothing for the session.
 The caller's environment (`callerEnv`) is not forwarded: it names the caller's terminal on A (a pane id, a socket
 path), which means nothing on B. A sends a runtime kind instead. With `--runtime` it is that one; without it, the

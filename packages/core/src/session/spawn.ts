@@ -9,13 +9,16 @@ import {
   runnableNote,
   type RuntimeMachine,
 } from "@vibest/schema/session"
-import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Option, Path } from "effect"
+import { Clock, Config, Context, Crypto, Deferred, Effect, FileSystem, Layer, Option, Path } from "effect"
 import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 
-import { type Agents, unknownAgent } from "./agents.ts"
-import type { Db, NewSession, PeerStart, SessionRow } from "./db.ts"
-import type { Drain } from "./drain.ts"
+import { Agents, unknownAgent } from "../agents.ts"
+import { Db, type NewSession, type PeerStart, type SessionRow } from "../db.ts"
+import { Drain } from "../drain.ts"
+import { LayerNode } from "../effect/layer-node.ts"
+import * as PlatformNode from "../effect/platform.ts"
+import * as Engine from "../engine.ts"
 import {
   harnessCatalog,
   harnessOptions,
@@ -25,19 +28,20 @@ import {
   type HarnessId,
   preflight,
   unprovided,
-} from "./harness.ts"
-import { directoryLock, type keyedLock } from "./keyed-lock.ts"
-import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, type Layout, safeRepositoryDirectory } from "./paths.ts"
-import { describeSpawn, type Plugins, type Routing } from "./plugins.ts"
-import { listProjectRepositories } from "./project-create.ts"
-import { sessionEnvelope } from "./replies.ts"
-import { machinesListing as machines, type Runtimes } from "./runtimes.ts"
-import type { Platform } from "./session-types.ts"
-import type { LimitMove } from "./session/move.ts"
-import type { Placement } from "./session/placement.ts"
-import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
+} from "../harness.ts"
+import { directoryLock, type keyedLock } from "../keyed-lock.ts"
+import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, Layout, safeRepositoryDirectory } from "../paths.ts"
+import { describeSpawn, Plugins, type Routing } from "../plugins.ts"
+import { listProjectRepositories } from "../project-create.ts"
+import { sessionEnvelope } from "../replies.ts"
+import { machinesListing as machines, Runtimes } from "../runtimes.ts"
+import type { Platform } from "../session-types.ts"
+import { allocationParentBlocked, Git, mainCheckout, repositoryDirectoryName } from "../worktree.ts"
+import { SessionLocks } from "./locks.ts"
+import { Move, type LimitMove } from "./move.ts"
+import { Placement } from "./placement.ts"
 
-export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
+export const shareAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
 export const allocationNameSource: { leaves: ReadonlyArray<string> | undefined } = { leaves: undefined }
 
 export const defaultSessionName = (prompt: string) => (prompt.trim().split("\n")[0] ?? "").slice(0, 40) || "task"
@@ -53,7 +57,7 @@ export interface SpawnInput {
   readonly model?: string | undefined
   readonly env?: Record<string, string> | undefined
   readonly agent: string
-  readonly peer?: string | undefined
+  readonly share?: string | undefined
   readonly archive?: boolean | undefined
   readonly runtime?: string | undefined
   readonly parentSessionId?: string | undefined
@@ -70,7 +74,7 @@ export interface Spawned extends Routing {
   readonly runtime: string
 }
 
-export const sessionSpawn = (deps: {
+const sessionSpawn = (deps: {
   readonly db: Db["Service"]
   readonly runtimes: Runtimes["Service"]
   readonly harness: Harness["Service"]
@@ -136,9 +140,9 @@ export const sessionSpawn = (deps: {
       return rt
     })
 
-  const peerOf = (input: SpawnInput, id: string, runtime: string, machineId: string) =>
+  const shareOf = (input: SpawnInput, id: string, runtime: string, machineId: string) =>
     Effect.gen(function* () {
-      const refuse = (why: string) => new NoSuchSession({ id, message: `--peer ${id}: ${why}` })
+      const refuse = (why: string) => new NoSuchSession({ id, message: `--share ${id}: ${why}` })
       const p = yield* db.getSession(id)
       if (!p) return yield* refuse(`no session ${id}`)
       if (p.projectId !== input.projectId) return yield* refuse("it belongs to another project")
@@ -167,14 +171,14 @@ export const sessionSpawn = (deps: {
     const parent = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
     const parentRuntime = parent?.runtime || undefined
     const from = input.harness !== undefined ? undefined : parent
-    const namedPeer =
-      input.runtime === undefined && input.peer !== undefined ? yield* db.getSession(input.peer) : undefined
-    const followedPeer =
-      namedPeer !== undefined &&
-      namedPeer.projectId === input.projectId &&
-      !namedPeer.metadata.archived &&
-      !namedPeer.metadata.removed
-        ? namedPeer
+    const namedShare =
+      input.runtime === undefined && input.share !== undefined ? yield* db.getSession(input.share) : undefined
+    const followedShare =
+      namedShare !== undefined &&
+      namedShare.projectId === input.projectId &&
+      !namedShare.metadata.archived &&
+      !namedShare.metadata.removed
+        ? namedShare
         : undefined
     const decision = yield* plugins.start({
       project: root,
@@ -189,8 +193,8 @@ export const sessionSpawn = (deps: {
         Effect.provideService(Harnesses, harnesses),
       ),
       attempts: [],
-      machine: { id: followedPeer?.address.machine ?? input.machine.id },
-      runtime: followedPeer?.runtime ?? input.runtime,
+      machine: { id: followedShare?.address.machine ?? input.machine.id },
+      runtime: followedShare?.runtime ?? input.runtime,
       parentRuntime,
       machines: yield* machinesListing,
     })
@@ -331,12 +335,12 @@ export const sessionSpawn = (deps: {
         return { row: (yield* db.getSession(id))! }
       })
     const admitted =
-      input.peer === undefined
+      input.share === undefined
         ? yield* admit(undefined)
-        : yield* locks.withLock(directoryLock((yield* db.sessionDirectory(input.peer)) ?? ""))(
+        : yield* locks.withLock(directoryLock((yield* db.sessionDirectory(input.share)) ?? ""))(
             Effect.gen(function* () {
-              const shared = yield* peerOf(input, input.peer!, runtimeKind, decision.machine.id)
-              yield* peerAdmitPause.wait
+              const shared = yield* shareOf(input, input.share!, runtimeKind, decision.machine.id)
+              yield* shareAdmitPause.wait
               return yield* admit(shared)
             }),
           )
@@ -363,7 +367,7 @@ export const sessionSpawn = (deps: {
               Deferred.succeed(held, undefined).pipe(
                 Effect.andThen(
                   launch(rt, target, row, root, task, {
-                    splitFrom: input.peer,
+                    splitFrom: input.share,
                     env: input.env,
                     commit: input.commit,
                     onOwnLimit,
@@ -381,4 +385,65 @@ export const sessionSpawn = (deps: {
   }, Effect.provideContext(platform))
 
   return { spawn }
+}
+
+const make = (options: { readonly maxSessions: number | undefined }) =>
+  Effect.gen(function* () {
+    const { worktreeOf, launch } = yield* Placement
+    return sessionSpawn({
+      db: yield* Db,
+      runtimes: yield* Runtimes,
+      harness: yield* Harness,
+      harnesses: yield* Harnesses,
+      agents: yield* Agents,
+      plugins: yield* Plugins,
+      drain: yield* Drain,
+      layout: yield* Layout,
+      fs: yield* FileSystem.FileSystem,
+      path: yield* Path.Path,
+      crypto: yield* Crypto.Crypto,
+      platform: yield* Effect.context<Platform>(),
+      scope: yield* Effect.scope,
+      locks: yield* SessionLocks,
+      options,
+      worktreeOf,
+      logged: Engine.logFailure,
+      launch,
+      onOwnLimit: (yield* Move).rerun,
+    })
+  })
+
+export class Spawn extends Context.Service<Spawn, Effect.Success<ReturnType<typeof make>>>()("vibest/Spawn") {
+  static readonly make = make
+
+  static readonly layer = Layer.effect(
+    Spawn,
+    Config.option(Config.Int("VIBEST_MAX_SESSIONS")).pipe(
+      Effect.flatMap((max) => make({ maxSessions: Option.getOrUndefined(max) })),
+    ),
+  )
+
+  static readonly configured = (options: { readonly maxSessions: number | undefined }) =>
+    LayerNode.make({ service: Spawn, layer: Layer.effect(Spawn, make(options)), deps: Spawn.deps })
+
+  static readonly deps = [
+    Agents.node,
+    Db.node,
+    Drain.node,
+    Git.node,
+    Harness.node,
+    Harnesses.node,
+    Move.node,
+    Placement.node,
+    Plugins.node,
+    Runtimes.node,
+    SessionLocks.node,
+    PlatformNode.childProcessSpawner,
+    PlatformNode.crypto,
+    PlatformNode.fileSystem,
+    PlatformNode.layout,
+    PlatformNode.path,
+  ] as const
+
+  static readonly node = LayerNode.make({ service: Spawn, layer: Spawn.layer, deps: Spawn.deps })
 }

@@ -107,9 +107,7 @@ describe.concurrent("vibest rm: process proof", () => {
       assert.isTrue(row.metadata.archived)
       assert.isTrue(row.metadata.removed)
       assert.isTrue(yield* fs.exists(worktree))
-      const freshSessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
-        Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
-      )
+      const freshSessions = yield* Sessions.make.pipe(Effect.provideServiceEffect(SessionLocks, SessionLocks.make))
       assert.deepInclude(yield* freshSessions.remove(id), {
         processes: "exited",
         pane: "closed",

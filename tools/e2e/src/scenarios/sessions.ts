@@ -88,7 +88,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S1",
     title:
-      "vibest run pi --title --provider --model --env --session starts a Pi subagent in a new detached worktree of the repository at its HEAD, in that herdr session, on that provider and model, the --env value not stored; --peer runs a second one in the same worktree",
+      "vibest run pi --title --provider --model --env --session starts a Pi subagent in a new detached worktree of the repository at its HEAD, in that herdr session, on that provider and model, the --env value not stored; --share runs a second one in the same worktree",
     run: async (w) => {
       const p = await piProject(w, "s1")
       const second = heldModel()
@@ -140,14 +140,14 @@ const checks: ReadonlyArray<Check> = [
           const bytes = await fs.readFile(path.join(w.vibestHome, file), "latin1").catch(() => "")
           expect(!bytes.includes(subDir), `${file} stores the --env value`)
         }
-        const b = await run("s1peer", "--peer", a.slice(0, 8))
-        await answered(w, p, b, "s1peer")
-        const peer = (await ls(w, p)).find((e) => e.id === b)
+        const b = await run("s1share", "--share", a.slice(0, 8))
+        await answered(w, p, b, "s1share")
+        const sharer = (await ls(w, p)).find((e) => e.id === b)
         expect(
-          peer !== undefined &&
-            (await fs.realpath(peer.worktree)) === worktree &&
-            peer.address.id !== entry!.address.id,
-          `peer: ${JSON.stringify(peer)}, first: ${JSON.stringify(entry)}`,
+          sharer !== undefined &&
+            (await fs.realpath(sharer.worktree)) === worktree &&
+            sharer.address.id !== entry!.address.id,
+          `sharer: ${JSON.stringify(sharer)}, first: ${JSON.stringify(entry)}`,
         )
       } finally {
         second.stop()

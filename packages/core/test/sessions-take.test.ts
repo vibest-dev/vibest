@@ -105,9 +105,7 @@ describe.concurrent("an idle session takes its next batch", () => {
       const herdr = yield* FakeRuntime
       const { execution } = (yield* inbox.take(entryId, undefined))!
       yield* sessions.typeTaken(entryId, execution)
-      const restarted = yield* Sessions.make({ maxSessions: undefined }).pipe(
-        Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
-      )
+      const restarted = yield* Sessions.make.pipe(Effect.provideServiceEffect(SessionLocks, SessionLocks.make))
       yield* restarted.typeTaken(entryId, execution)
       const typed = yield* herdr.callsTo("send")
       assert.lengthOf(

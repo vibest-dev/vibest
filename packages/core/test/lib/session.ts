@@ -12,6 +12,7 @@ import { type Candidate, makeHost, Plugins } from "@vibest/core/plugins"
 import { Processes } from "@vibest/core/processes"
 import { SshHosts } from "@vibest/core/repository-url"
 import { HostEnv, make as makeRuntimes, Runtimes } from "@vibest/core/runtimes"
+import { Spawn } from "@vibest/core/session/spawn"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
 import * as VibestPlugin from "@vibest/plugin"
@@ -134,25 +135,21 @@ const defaultSsh = Layer.succeed(SshHosts, { hostName: (alias) => Effect.succeed
 
 const defaultTransport = Layer.succeed(MachineTransport, noTransport)
 
-const defaultSessions = Sessions.configured({ maxSessions: undefined })
+const defaultSpawn = Spawn.configured({ maxSessions: undefined })
 
-export const sessionsNode = (
-  maxSessions: number | undefined,
-  decorate?: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"],
-) => {
-  const configured = Sessions.configured({ maxSessions })
-  if (decorate === undefined) return configured
-  return LayerNode.make({
-    service: Sessions,
-    layer: Layer.effect(
-      Sessions,
-      Effect.gen(function* () {
-        return decorate(yield* Sessions, yield* Db)
-      }),
-    ),
-    deps: [configured, Db.node],
-  })
-}
+const sessionsDecorated = (decorate: (sessions: Sessions["Service"], db: Db["Service"]) => Sessions["Service"]) =>
+  Sessions.node.replace(
+    LayerNode.make({
+      service: Sessions,
+      layer: Layer.effect(
+        Sessions,
+        Effect.gen(function* () {
+          return decorate(yield* Sessions.make, yield* Db)
+        }),
+      ),
+      deps: Sessions.deps,
+    }),
+  )
 
 export const dbReplacement = (decorate: (db: Db["Service"]) => Db["Service"]) =>
   Db.node.replace(Db.node.mapLayer((layer) => Layer.effect(Db, Effect.map(Db, decorate)).pipe(Layer.provide(layer))))
@@ -194,7 +191,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       Harnesses.node.replace(harnessesLayer()),
       Subscriptions.node.replace(subscriptions),
       Plugins.node.replace(plugins),
-      Sessions.node.replace(defaultSessions),
+      Spawn.node.replace(defaultSpawn),
       SshHosts.node.replace(defaultSsh),
       MachineTransport.node.replace(defaultTransport),
       HostEnv.node.replace(noHostEnv),
@@ -258,7 +255,8 @@ export const sessionFrom = (options: TestOptions = {}) =>
       runtimeNode.replace(FakeRuntime.layer(options)),
       Harness.node.replace(harnessLayer(harnessStandIn(options))),
       Harnesses.node.replace(harnessesLayer(options.harnesses)),
-      Sessions.node.replace(sessionsNode(options.maxSessions, options.sessions)),
+      Spawn.node.replace(Spawn.configured({ maxSessions: options.maxSessions })),
+      ...(options.sessions === undefined ? [] : [sessionsDecorated(options.sessions)]),
       ...(options.db === undefined ? [] : [dbReplacement(options.db)]),
       SshHosts.node.replace(sshHosts(options.sshHosts)),
       MachineTransport.node.replace(transportLayer(options.transport)),

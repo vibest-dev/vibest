@@ -37,7 +37,7 @@ describe("systemPrompt: the definition body first, then facts that name the chan
   })
 
   it("a worktree shared with an earlier session says so", () => {
-    assert.include(facts({ peer: "e1" }), "shared with session e1")
+    assert.include(facts({ sharer: "e1" }), "shared with session e1")
   })
 
   it("every session is told what the two envelopes and the unwrapped text mean", () => {

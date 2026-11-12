@@ -7,7 +7,7 @@ counts as working.
 
 `vibest run`, run by an agent in a session (the entry session or another one), starts a session in a new worktree: a linked worktree of the
 repository, detached, at its HEAD. Its options work: `--title` names it, `--provider` and `--model` choose what it runs on, `--env` reaches the harness but is
-never stored, `--session` picks the herdr session it opens in, and `--peer` runs a second session in the same worktree
+never stored, `--session` picks the herdr session it opens in, and `--share` runs a second session in the same worktree
 in another pane. `vibest ls` shows the title, harness, provider, model and where it runs. The started session records the session that ran
 it as its creator. `vibest run` in a terminal that is not a session is refused and says to open a session with bare
 `vibest`: no worktree or pane is made.
