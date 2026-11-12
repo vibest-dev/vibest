@@ -38,7 +38,7 @@ import * as PlatformNode from "./effect/platform.ts"
 import * as Engine from "./engine.ts"
 import { sessionExecutions } from "./executions.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
-import { Inbox } from "./inbox.ts"
+import { Inbox, text as inboxText } from "./inbox.ts"
 import { definitionIn, entryCommand, restartArgv } from "./launch.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import { Layout, VibestCommand } from "./paths.ts"
@@ -157,6 +157,7 @@ export class Sessions extends Context.Service<
     readonly list: (filter?: SessionFilter) => Effect.Effect<ReadonlyArray<SessionView>>
     readonly check: (id: string) => Effect.Effect<void>
     readonly userPrompt: (id: string, text: string, at?: number, process?: number) => Effect.Effect<void>
+    readonly typeTaken: (id: string, execution: number) => Effect.Effect<void>
     readonly republish: Effect.Effect<number>
     readonly inMemory: Effect.Effect<{
       readonly tracked: number
@@ -406,7 +407,7 @@ export class Sessions extends Context.Service<
         const seen = maybe.value
         const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
         if (state !== undefined && session.status !== state) yield* db.setStatus(session.id, state)
-        if ((state === "working" || state === "blocked") && execution !== undefined)
+        if ((state === "working" || state === "blocked") && execution !== undefined && !inbox.pulls(session.harnessId))
           yield* db.acceptExecution(id, execution)
         const exited =
           state === undefined &&
@@ -456,6 +457,25 @@ export class Sessions extends Context.Service<
           if (s !== "working" && s !== "blocked") yield* deliverQueued(h, session, terminal)
           return
         }
+        const worked = yield* db.executionTaken(id)
+        const idle = s === "idle"
+        const ended = idle && worked
+        const now = yield* Clock.currentTimeMillis
+        const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - session.executionPromptedAt)
+        const unstarted = !worked && (idle || inbox.pulls(session.harnessId))
+        if (unstarted && unconfirmed <= 0) {
+          const reason = `vibest did not see ${id} start the execution it was sent (if it starts it late, that execution's reply is not collected)`
+          const closed =
+            execution !== undefined &&
+            (yield* db.closeExecution(id, execution, "not_started", {
+              notice: `task_not_started: ${reason}; it is idle and takes queued messages again.`,
+            }))
+          if (closed && execution !== undefined)
+            yield* inbox.undelivered(session, yield* db.deliveredIn(id, execution), reason)
+          if (closed) yield* deliverQueued(h, { ...session, executionState: "not_started" }, terminal)
+          return
+        }
+        if (unstarted) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
         if (s === "blocked") {
           if (!(yield* Ref.getAndSet(r.blockedNotified, true)) && !session.entry) {
             const since = new Date(yield* Clock.currentTimeMillis)
@@ -468,24 +488,6 @@ export class Sessions extends Context.Service<
           return
         }
         yield* Ref.set(r.blockedNotified, false)
-        const worked = yield* db.executionTaken(id)
-        const idle = s === "idle"
-        const ended = idle && worked
-        const now = yield* Clock.currentTimeMillis
-        const unconfirmed = Duration.toMillis(CONFIRM_TIMEOUT) - (now - session.executionPromptedAt)
-        if (idle && !ended && unconfirmed <= 0) {
-          const reason = `vibest did not see ${id} start the execution it was sent (if it starts it late, that execution's reply is not collected)`
-          const closed =
-            execution !== undefined &&
-            (yield* db.closeExecution(id, execution, "not_started", {
-              notice: `task_not_started: ${reason}; it is idle and takes queued messages again.`,
-            }))
-          if (closed && execution !== undefined)
-            yield* inbox.undelivered(session, yield* db.deliveredIn(id, execution), reason)
-          if (closed) yield* deliverQueued(h, { ...session, executionState: "not_started" }, terminal)
-          return
-        }
-        if (idle && !ended) yield* engine.arm(`miss:${id}`, Duration.millis(unconfirmed), checkSession(id))
         if (!ended) return yield* Ref.set(r.endedAt, undefined)
         const endedAt = yield* Ref.updateAndGet(r.endedAt, (e) => e ?? now)
         const grace = Duration.toMillis(HOOK_GRACE) - (now - endedAt!)
@@ -594,6 +596,26 @@ export class Sessions extends Context.Service<
           const row = yield* db.insertSend(id, message, request, sender)
           if (!row) return yield* new NoSuchSession({ id, message: `${id} was archived; run a new session` })
         })
+
+      const typeTaken = (id: string, execution: number) =>
+        locks.withLock(id)(
+          Effect.gen(function* () {
+            const session = yield* db.getSession(id)
+            if (session === undefined) return
+            const r = yield* track(id)
+            const rows = yield* db.unacceptedBatch(id, execution)
+            if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
+            const h = yield* live(session)
+            yield* Ref.set(r.prompting, true).pipe(
+              Effect.andThen(h.send(session.address, { text: inboxText(rows) })),
+              Effect.ensuring(Ref.set(r.prompting, false)),
+              Effect.ignore,
+            )
+          }).pipe(
+            Effect.catchTag("NoRuntime", () => Effect.void),
+            Effect.provideContext(platform),
+          ),
+        )
 
       const queued = (id: string, inboxId: number | undefined) =>
         Effect.gen(function* () {
@@ -728,7 +750,8 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const id = yield* db.sessionAt(runtime, terminal)
           if (id === undefined) return
-          const execution = working ? yield* db.openExecution(id) : undefined
+          const session = working ? yield* db.getSession(id) : undefined
+          const execution = session && !inbox.pulls(session.harnessId) ? yield* db.openExecution(id) : undefined
           if (execution !== undefined) yield* db.acceptExecution(id, execution)
           yield* checkSession(id)
         })
@@ -890,6 +913,7 @@ export class Sessions extends Context.Service<
         get,
         list,
         check: checkLocked,
+        typeTaken,
         userPrompt: (id: string, text: string, at?: number, process?: number) =>
           Effect.gen(function* () {
             const now = at ?? (yield* Clock.currentTimeMillis)

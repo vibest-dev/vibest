@@ -6,7 +6,7 @@ import { Bus } from "../bus.ts"
 import { AddressJson, Db, encodeAddress, type RuntimeAddress } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
 import * as PlatformNode from "../effect/platform.ts"
-import { Harness, harnessOptions, Harnesses, HarnessUnavailable, type HarnessId } from "../harness.ts"
+import { addPluginHint, Harness, harnessOptions, Harnesses, HarnessUnavailable, type HarnessId } from "../harness.ts"
 import { entryIdle } from "../inbox.ts"
 import { keyedLock } from "../keyed-lock.ts"
 import * as Launch from "../launch.ts"
@@ -175,7 +175,7 @@ const make = Effect.gen(function* () {
     if (decision.harness === undefined) return yield* firstStart
     if (harnesses.find(decision.harness) === undefined)
       return yield* new LaunchFailed({
-        message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")}`,
+        message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")}; ${addPluginHint}`,
       })
     const chosen = decision.harness
     const rt = yield* runtimes.route(decision.runtime)
@@ -289,7 +289,7 @@ const make = Effect.gen(function* () {
     if (harnesses.find(decision.harness) === undefined)
       return yield* new HarnessUnavailable({
         harness: decision.harness,
-        message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})`,
+        message: `unknown harness ${decision.harness}; loaded: ${harnessIds().join(", ")}; ${addPluginHint} (routed: ${describeSpawn({ ...decision, harness: decision.harness })})`,
       })
     if (decision.runtime === undefined)
       return yield* new NoRuntime({ message: "no terminal runtime was chosen for the entry session" })

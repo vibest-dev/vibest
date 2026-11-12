@@ -108,8 +108,9 @@ subagents. Everything else in this list is planned; each item says what runs tod
   project at a time" is the rule for moving this pointer, with today's y confirmation. A project may have none.
 - **Harnesses registered by plugins**: a plugin adds a `HarnessDefinition` with
   `context.harness.transform((editor) => editor.add(definition))`, like a runtime with `context.runtime.transform`.
-  The three builtin harnesses are the plugins `harness-pi`, `harness-claude` and `harness-cursor` in
-  `packages/plugin-harnesses`, loaded first; their integration files stay in `packages/integration/*`. A harness id is
+  The two builtin harnesses are the plugins `harness-pi` and `harness-claude` in
+  `packages/plugin-harnesses`, loaded first (Cursor is the same kind of plugin, built to `harnesses/cursor/plugin.js`
+  and added by the user); their integration files stay in `packages/integration/*`. A harness id is
   a plain string: a harness the database names but no plugin provides is unavailable ("no plugin provides harness
   X; loaded: …"), never a decode failure.
 - **One neutral integration event contract** (planned): every integration sends the same events over vibestd's
@@ -167,26 +168,26 @@ started, an entry session) cannot answer results with results (rule 4), and that
 **Packages.** Runtime dependencies flow one way: `schema` → `core` and `protocol` → `server`. `client` depends
 on `schema` and `protocol` only. Plugin types derive from the client API.
 
-| Package              | Role                                                                                                                                                                                                |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema`             | Browser-safe contracts: branded IDs, domain structs, event definitions, configuration schema, the Harness and Workspace type contracts.                                                             |
-| `protocol`           | The single `RpcGroup` (effect/rpc, JSON-RPC 2.0 as one JSON object per line), the protocol number, caller headers, tagged errors (copied from omac `rpc.ts`, `protocol.ts`).                        |
-| `core`               | Persistence, event bus, Run and Agent execution, scheduling framework, plugin host, ports.                                                                                                          |
-| `server`             | Handlers implementing `protocol`, the ACCESS table and admission, the daemon's service graph, the unix socket listener (omac `server.ts`, `daemon.ts`).                                             |
-| `client`             | Effect RPC client with the per-command Ping preflight and auto-start rules (omac `client.ts`).                                                                                                      |
-| `plugin`             | Plugin authoring API (an Effect or a Promise plugin).                                                                                                                                               |
-| `effect-herdr-sdk`   | Effect client for the herdr socket API.                                                                                                                                                             |
-| `runtime-herdr`      | Runtime port on herdr.                                                                                                                                                                              |
-| `plugin-harnesses`   | Builtin plugins `harness-pi`, `harness-claude`, `harness-cursor`: one `HarnessDefinition` per CLI (launch side, models, subscription reader, guard answer, how its vibest plugin loads).            |
-| `integration/claude` | The vibest Claude Code plugin: one hooks module whose native listeners forward Claude's events, run the guard, and deliver the inbox (omac's `packages/claude`). Loaded with `claude --plugin-dir`. |
-| `integration/pi`     | The vibest Pi extension (omac's `packages/pi-omac`), bundled to one `extension.mjs`. Loaded with `pi -e`.                                                                                           |
-| `integration/cursor` | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`). Loaded with `cursor-agent --plugin-dir`.                                                                          |
-| `plugin-git`         | Builtin: git folders as Repositories, `isolated` Workspaces.                                                                                                                                        |
-| `builtins`           | The builtin plugins in load order (`pre`): `harness-pi`, `harness-claude`, `harness-cursor`, `runtime-herdr-core`, `runtime-herdr`, `runtime-choice`. Only the binary's composition root reads it.  |
-| `plugin-guard`       | Builtin, on by default: the tool guard (omac `guard.ts`), through the harness integrations.                                                                                                         |
-| `plugin-knowledge`   | Builtin: the Project knowledge store (omac `project.ts`).                                                                                                                                           |
-| `plugin-skills`      | Builtin skills for the entry session: delegate, pipeline. Replaceable and removable.                                                                                                                |
-| `cli`                | Composition root of the Herdr TUI product.                                                                                                                                                          |
+| Package              | Role                                                                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema`             | Browser-safe contracts: branded IDs, domain structs, event definitions, configuration schema, the Harness and Workspace type contracts.                                                                       |
+| `protocol`           | The single `RpcGroup` (effect/rpc, JSON-RPC 2.0 as one JSON object per line), the protocol number, caller headers, tagged errors (copied from omac `rpc.ts`, `protocol.ts`).                                  |
+| `core`               | Persistence, event bus, Run and Agent execution, scheduling framework, plugin host, ports.                                                                                                                    |
+| `server`             | Handlers implementing `protocol`, the ACCESS table and admission, the daemon's service graph, the unix socket listener (omac `server.ts`, `daemon.ts`).                                                       |
+| `client`             | Effect RPC client with the per-command Ping preflight and auto-start rules (omac `client.ts`).                                                                                                                |
+| `plugin`             | Plugin authoring API (an Effect or a Promise plugin).                                                                                                                                                         |
+| `effect-herdr-sdk`   | Effect client for the herdr socket API.                                                                                                                                                                       |
+| `runtime-herdr`      | Runtime port on herdr.                                                                                                                                                                                        |
+| `plugin-harnesses`   | Builtin plugins `harness-pi`, `harness-claude` (and the Cursor plugin file users add): one `HarnessDefinition` per CLI (launch side, models, subscription reader, guard answer, how its vibest plugin loads). |
+| `integration/claude` | The vibest Claude Code plugin: one hooks module whose native listeners forward Claude's events, run the guard, and deliver the inbox (omac's `packages/claude`). Loaded with `claude --plugin-dir`.           |
+| `integration/pi`     | The vibest Pi extension (omac's `packages/pi-omac`), bundled to one `extension.mjs`. Loaded with `pi -e`.                                                                                                     |
+| `integration/cursor` | The vibest Cursor CLI plugin (hooks running `vibest integration guard` / `stop`). Loaded with `cursor-agent --plugin-dir`.                                                                                    |
+| `plugin-git`         | Builtin: git folders as Repositories, `isolated` Workspaces.                                                                                                                                                  |
+| `builtins`           | The builtin plugins in load order (`pre`): `harness-pi`, `harness-claude`, `runtime-herdr-core`, `runtime-herdr`, `runtime-choice`, `harness-default`. Only the binary's composition root reads it.           |
+| `plugin-guard`       | Builtin, on by default: the tool guard (omac `guard.ts`), through the harness integrations.                                                                                                                   |
+| `plugin-knowledge`   | Builtin: the Project knowledge store (omac `project.ts`).                                                                                                                                                     |
+| `plugin-skills`      | Builtin skills for the entry session: delegate, pipeline. Replaceable and removable.                                                                                                                          |
+| `cli`                | Composition root of the Herdr TUI product.                                                                                                                                                                    |
 
 Bun stays behind `platform/` directories and `bun.ts` adapters (`.agents/rules/bun-runtime-boundary.md`).
 
@@ -703,9 +704,11 @@ crashed: ...`, `plugin <id> timed out after 5s`), and the caller sees the plugin
 `agent.fail` an `AgentRefused` counts as a crash: a crash or a timeout fails that operation (the execution is left
 failed with the plugin error, no move). Nothing is skipped silently.
 
-**No default harness choice.** No builtin chooses or refuses a harness by quota. A new agent without a harness
-inherits its caller's harness, provider and model in core, before `agent.start.before` (§9); subscriptions are data in
-the hook events for a plugin that wants to route by quota.
+**Default harness.** No builtin chooses or refuses a harness by quota. A new agent without a harness inherits its
+caller's harness, provider and model in core, before `agent.start.before` (§9); subscriptions are data in the hook
+events for a plugin that wants to route by quota. The builtin `harness-default` (last of `pre`) returns claude from
+`start.before` when the harness is still unset and claude is available; remove it with `"-harness-default"` in
+`vibest.json` and choose in a plugin of your own.
 
 **Plugin API facts** (`@vibest/plugin`): vibestd maps this module and `effect` to its own instances when it loads a
 plugin, so a plugin imports both normally and bundles neither. A plugin's `effect` runs once per load in the plugin's
@@ -749,8 +752,8 @@ See [loading on Bun](plugin-loading.md#loading-on-bun) for resolution and module
 **Order:**
 
 ```
-builtin plugins         `@vibest/builtins` `pre`: harness-pi, harness-claude, harness-cursor,
-                        runtime-herdr-core, runtime-herdr, runtime-choice
+builtin plugins         `@vibest/builtins` `pre`: harness-pi, harness-claude,
+                        runtime-herdr-core, runtime-herdr, runtime-choice, harness-default
 user plugins            the plugins directory (sorted by name), then `vibest.json` `plugins`, in order
 ```
 
@@ -759,12 +762,12 @@ user plugins            the plugins directory (sorted by name), then `vibest.jso
 
 **Plugin entries** (as OpenCode's `plugins`): the ordered `plugins` list of `vibest.json`.
 
-| Entry                                  | Meaning                                                                                                                                                                                         |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `"./plugins/x.ts"`                     | add a local plugin: a `.ts`/`.js` file or a directory, by a path starting with `/` or `file://` (absolute, taken as is) or `./` or `../` (resolved from the vibest home)                        |
-| `{ "package": "…", "options": { … } }` | add a local plugin with options                                                                                                                                                                 |
-| `"@scope/vibest-plugin-x"`             | any other name is a package: not supported yet, listed as failed with `npm plugins are not supported yet`                                                                                       |
-| `"-check"`                             | remove the user plugins added before it (the plugins directory, earlier entries) whose id matches: an exact id, `prefix.*`, or `*` (which also removes failed ones); builtins cannot be removed |
+| Entry                                  | Meaning                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"./plugins/x.ts"`                     | add a local plugin: a `.ts`/`.js` file or a directory, by a path starting with `/` or `file://` (absolute, taken as is) or `./` or `../` (resolved from the vibest home)                                                                                                                                                                                      |
+| `{ "package": "…", "options": { … } }` | add a local plugin with options                                                                                                                                                                                                                                                                                                                               |
+| `"@scope/vibest-plugin-x"`             | any other name is a package: not supported yet, listed as failed with `npm plugins are not supported yet`                                                                                                                                                                                                                                                     |
+| `"-check"`                             | remove the plugins added before it whose id matches, builtins included (a builtin only by exact id; `*` and `prefix.*` match user plugins only, `*` also failed ones). Builtins are kept or removed from the config text at every activation, so removing and restoring one needs no restart. Example: `"-harness-default"` drops the builtin default harness |
 
 Files and directories in `~/.vibest/plugins/` are added without an entry, before the entries. A plugin reads its
 options from `context.options` (V2's `PluginOptions`) and they reload live:
@@ -790,7 +793,7 @@ configure (skills are builtin, §4.2).
 herdr runs the process; the adapter knows how this CLI wants to be started and told things (launch side) and
 loads vibest's plugin into the CLI so its work comes back as events (integration side). The contract is
 `HarnessDefinition` in `@vibest/plugin` (`packages/plugin/src/harness.ts`); `packages/plugin-harnesses` implements
-Claude Code, Cursor and Pi as the builtin plugins `harness-claude`, `harness-cursor` and `harness-pi`, each adding its
+Claude Code and Pi as the builtin plugins `harness-claude` and `harness-pi` (Cursor as a plugin file users add), each adding its
 definition with `context.harness.transform`. Core and the CLI hold no adapter: vibestd answers `Harnesses.List` (each
 row with its `binary`) and `Integration.Guard` from the registered definitions. A user plugin may add a harness or
 `update` a builtin one the same way. Each CLI runs as installed on

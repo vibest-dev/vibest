@@ -54,6 +54,7 @@ const make = Effect.gen(function* () {
     const prompt = promptOf(definition, raw)
     if (prompt === undefined) return
     if ("execution" in prompt) {
+      if (prompt.refused) return yield* sessions.typeTaken(who.id, prompt.execution)
       if (yield* db.acceptExecution(who.id, prompt.execution)) yield* db.setStatus(who.id, "working")
       return
     }

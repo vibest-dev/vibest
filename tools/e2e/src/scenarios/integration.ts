@@ -22,12 +22,14 @@ import {
   harnesses,
   herdr,
   row,
+  rows,
   SESSIONS,
   Skip,
   until,
   type World,
   writeEvidence,
 } from "../world.ts"
+import { addCursorPlugin } from "../world/plugins.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
@@ -217,6 +219,7 @@ const checks: ReadonlyArray<Check> = [
         "claude/hooks/register.mjs",
         "cursor/.cursor-plugin/plugin.json",
         "cursor/hooks/hooks.json",
+        "cursor/plugin.js",
         ...["pi", "claude", "cursor"].flatMap((h) => [
           `${h}/skills/delegate/SKILL.md`,
           `${h}/skills/pipeline/SKILL.md`,
@@ -239,7 +242,7 @@ const checks: ReadonlyArray<Check> = [
       "vibest finds its plugins: npm's launcher passes them, the bare binary looks beside its bin/; with none it refuses each harness, and says why",
     run: async (w) => {
       const beside = await w.vibest(["doctor"], { env: { VIBEST_HARNESSES: undefined }, timeoutMs: 120_000 })
-      for (const h of ["pi", "claude", "cursor"])
+      for (const h of ["pi", "claude"])
         expect(!new RegExp(`^  . ${h} .*plugin`, "m").test(beside.stdout), `${h}:\n${beside.stdout}`)
       const solo = path.join(w.root, "solo", "bin")
       await fs.mkdir(solo, { recursive: true })
@@ -260,7 +263,7 @@ const checks: ReadonlyArray<Check> = [
         } catch {}
       }
       const resolvedSolo = await fs.realpath(path.join(w.root, "solo"))
-      for (const h of ["pi", "claude", "cursor"])
+      for (const h of ["pi", "claude"])
         expect(
           new RegExp(
             `^  ✗ ${h} +vibest's ${h} plugin is missing: ${path.join(resolvedSolo, "harnesses", h)}$`,
@@ -312,6 +315,7 @@ const checks: ReadonlyArray<Check> = [
       const login = await w.run(w.repository, ["cursor-agent", "status"])
       if (!/Logged in/.test(login.stdout + login.stderr))
         throw new Skip(`cursor-agent is not logged in: ${(login.stdout + login.stderr).trim()}`)
+      await addCursorPlugin(w, harnesses)
       const repo = await newRepository(w, "cursor-execution")
       const projectHookLog = path.join(w.root, "project-hook.log")
       await fs.mkdir(path.join(repo, ".cursor"), { recursive: true })
@@ -440,6 +444,83 @@ const checks: ReadonlyArray<Check> = [
           expect(notices() === 0, `${notices()} notices after the Esc and two vibest interrupts, not none`)
         })
       } finally {
+        model.stop()
+      }
+    },
+  },
+  {
+    id: "S53",
+    covers: ["S2"],
+    title:
+      "Claude subagent (fake model) takes its messages when idle: a send is one inbox row delivered into one execution of its own, a send made while an execution runs waits and then opens the next execution, each execution has its own reply",
+    run: async (w) => {
+      for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      let release: () => void = () => undefined
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      let holding = false
+      const model = fakeAnthropic((r) => {
+        if (r.tools.length === 0 || subagentFolder(r.system) === undefined) return "ok"
+        const last = text(lastUser(r))
+        if (last.includes("FIRST-HOLD")) {
+          holding = true
+          return gate.then((): Step => "status: completed\nsummary: first-answer")
+        }
+        if (last.includes("SECOND-ASK")) return "status: completed\nsummary: second-answer"
+        return "status: completed\nsummary: e2e answer"
+      })
+      try {
+        const flags = await claudeEnv(w, "taking", model.url)
+        await withSession(w, "claude", envArgs(flags), "Answer once.", async ({ id }) => {
+          const settled = (want: string) => async () => (await executionState(w, id)) === want
+          await until("the task's result", settled("completed"), 120_000)
+          await w.ok(["send", id, "FIRST-HOLD"])
+          await until("the first send held at the model", () => holding, 60_000)
+          await until("its execution open", settled("open"), 60_000)
+          await w.ok(["send", id, "SECOND-ASK"])
+          await Bun.sleep(3_000)
+          const waiting = row<{ status: string; execution: number | null }>(
+            w,
+            "SELECT status, execution_id AS execution FROM inbox WHERE session_id = ? AND content LIKE '%SECOND-ASK%'",
+            id,
+          )
+          expect(
+            waiting?.status === "pending" && waiting.execution === null,
+            `the send made while busy: ${JSON.stringify(waiting)}`,
+          )
+          release()
+          await until(
+            "the second send's reply",
+            async () => (await latest(w, id))?.message.includes("second-answer") === true,
+            120_000,
+          )
+          const executions = rows<{ id: number; outcome: string; reply: string }>(
+            w,
+            "SELECT id, outcome, reply FROM execution WHERE session_id = ? ORDER BY id",
+            id,
+          )
+          expect(
+            executions.length === 3 && executions.every((e) => e.outcome === "completed"),
+            `executions: ${JSON.stringify(executions)}`,
+          )
+          expect(
+            executions[1]!.reply.includes("first-answer") && executions[2]!.reply.includes("second-answer"),
+            `replies: ${JSON.stringify(executions)}`,
+          )
+          const delivered = rows<{ content: string; status: string; execution: number }>(
+            w,
+            "SELECT content, status, execution_id AS execution FROM inbox WHERE session_id = ? AND kind = 'send' ORDER BY id",
+            id,
+          )
+          expect(
+            delivered.length === 2 &&
+              delivered.every((d) => d.status === "delivered") &&
+              delivered[0]!.execution === executions[1]!.id &&
+              delivered[1]!.execution === executions[2]!.id,
+            `rows: ${JSON.stringify(delivered)}`,
+          )
+        })
+      } finally {
+        release()
         model.stop()
       }
     },

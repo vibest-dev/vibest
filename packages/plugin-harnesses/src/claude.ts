@@ -139,7 +139,9 @@ export const claude: Harness.HarnessDefinition = {
   userPrompt: (event) => {
     if (event.hook_event_name !== "PromptSubmit") return undefined
     if (event.origin === "vibest")
-      return typeof event.execution === "number" ? { execution: event.execution } : undefined
+      return typeof event.execution === "number"
+        ? { execution: event.execution, ...(event.refused === true ? { refused: true as const } : {}) }
+        : undefined
     if (event.origin !== "composer" && event.origin !== "bridge") return undefined
     return typeof event.text === "string" && event.text.trim() !== "" ? { text: event.text } : undefined
   },

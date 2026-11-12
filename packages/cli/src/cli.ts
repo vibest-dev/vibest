@@ -10,6 +10,7 @@ import {
   withVibest,
 } from "@vibest/client/client"
 import type { LayerNode } from "@vibest/core/effect/layer-node"
+import { addPluginHint } from "@vibest/core/harness"
 import { askLine, askYesNo, interactive, Layout, VibestCommand } from "@vibest/core/paths"
 import { messageOf } from "@vibest/core/plugin-sources"
 import { describeSpawn } from "@vibest/core/plugins"
@@ -582,7 +583,7 @@ const modelsOf = (harness: string | undefined, provider: Option.Option<string>) 
     if (harness !== undefined && choices.length === 0)
       return yield* new HarnessUnavailable({
         harness,
-        message: `no plugin provides harness ${harness}; loaded: ${all.map((c) => c.harness).join(", ") || "none"}`,
+        message: `no plugin provides harness ${harness}; loaded: ${all.map((c) => c.harness).join(", ") || "none"}; ${addPluginHint}`,
       })
     const models = choices.flatMap((c) =>
       c.problem === null ? c.models.map((m) => ({ harness: c.harness, ...m })) : [],

@@ -20,6 +20,16 @@ release. Each release lists what broke, who is affected and how to migrate under
   appends the system prompt, every Claude session starts with all of Bash pre-approved (the coordinator had this before; subagents had only `vibest send`; permission rules the user sets to ask still apply), Cursor can run `coordinator` (its definition and session facts arrive in its first
   input), and the Pi extension serves every vibest session. The protocol number is unchanged; the contract snapshot is
   regenerated.
+- **Cursor is a plugin, claude is the default harness** (users of Cursor, and anyone relying on "no harness to
+  inherit"): vibest comes with the Claude and Pi integrations only. To use Cursor add the file
+  `harnesses/cursor/plugin.js` of the install directory to `plugins` in `~/.vibest/vibest.json` (or put it in
+  `~/.vibest/plugins/`); until then `--harness cursor` fails saying no plugin provides it, and a Cursor session cannot
+  resume or restart. The first bare `vibest` in a project with no `--harness` and no plugin choosing now starts Claude when
+  Claude is available. To choose differently write `"-harness-default"` in
+  `plugins` and pick the harness in a plugin of your own.
+- **`-<id>` removes builtin plugins** (plugin authors): an entry such as `"-runtime-choice"` now removes the builtin with
+  that exact id; `"-*"` and `"-prefix.*"` still match only user plugins. Builtins are kept or removed from the config
+  text at every activation, so un-removing one takes effect on the next reload without restarting vibestd.
 - **Pull or type depends only on the harness; the entry session is an ordinary session** (anyone reading
   `vibest.db` or `vibest ls`, harness integration and plugin authors): a harness that declares `inbox` (Claude, Pi)
   takes its next batch with `Inbox.Take` / `/inbox/take` when it is idle, for the entry session and spawned sessions
@@ -29,7 +39,12 @@ release. Each release lists what broke, who is affected and how to migrate under
   are gone, `Inbox.Subscribe` only wakes the session, and its access level is `session`. Entry executions are recorded
   like any other (an entry execution can be judged `lost`), and `vibest ls` shows the entry as an ordinary row. A
   session with no creator (the entry session) does not switch harness on a usage limit. The protocol number is
-  unchanged; the contract snapshot is regenerated.
+  unchanged; the contract snapshot is regenerated. When Claude refuses the plugin's submit of a taken batch (it does
+  after an Esc until someone types), the plugin reports the refusal for that execution and vibestd types the same batch
+  into the pane, so the execution stays one and the batch is delivered once. A pulled batch is accepted only when the harness reports it (never from the runtime's working or blocked state), so a
+  batch the harness never accepts ends `not_started` after the confirmation timeout whatever state the runtime
+  reports. The fallback types only a batch this vibestd process itself handed over, once; a batch taken by an earlier
+  vibestd is never typed, and ends `not_started` and fails its message with a notice after the confirmation timeout.
 - **`vibest run` runs only inside a session** (users, scripts): a `vibest run` in a plain terminal is refused with a
   pointer to bare `vibest`, which opens a session. Every session `vibest run` starts, here or on another machine, records
   the session that ran it as its creator; `NoCallingSession` is the new error. Any session, not only the entry

@@ -519,10 +519,10 @@ const packageHome = Effect.gen(function* () {
   return dir
 })
 
-const supervise = (dir: string) =>
+const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
   Plugins.layer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, loader)),
-    Layer.provide(Layer.succeed(Builtins, [])),
+    Layer.provide(Layer.succeed(Builtins, builtins)),
     Layer.provide(subscriptionsLayer),
     Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
@@ -698,6 +698,37 @@ describe("plugins: supervisor", () => {
       assert.strictEqual(watchers.open - before, 2, "x/ is no longer watched")
       yield* Scope.close(scope, Exit.void)
       assert.strictEqual(watchers.open, before, "vibestd's end closes every watcher")
+    }),
+  )
+
+  const builtinCandidate = (id: string) =>
+    candidate(
+      `builtin:${id}`,
+      id,
+      Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.succeed(undefined)) }),
+    )
+  const startedWith = (plugins: Plugins["Service"]) =>
+    plugins.start(event).pipe(Effect.map((s) => s.trace.map((t) => t.plugin)))
+
+  live(
+    "P1: -<id> removes a builtin by exact id, -* and -prefix.* never match builtins, and un-removing needs no restart",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* packageHome
+      const config = path.join(dir, "vibest.json")
+      const builtins = [builtinCandidate("harness-x"), builtinCandidate("runtime-y"), builtinCandidate("runtime-z")]
+      yield* fs.writeFileString(config, `{ "plugins": ["-*", "-runtime.*", "-runtime-*", "-harness-x"] }`)
+      const plugins = yield* supervise(dir, builtins)
+      assert.deepStrictEqual(yield* startedWith(plugins), ["runtime-y", "runtime-z"])
+      yield* fs.writeFileString(config, `{ "plugins": ["-runtime-y", "-harness-x"] }`)
+      yield* eventually(startedWith(plugins), (ids) => ids.join() === "runtime-z", "runtime-y removed")
+      yield* fs.writeFileString(config, `{ "plugins": [] }`)
+      yield* eventually(
+        startedWith(plugins),
+        (ids) => ids.join() === "harness-x,runtime-y,runtime-z",
+        "the builtins back after un-removing",
+      )
     }),
   )
 

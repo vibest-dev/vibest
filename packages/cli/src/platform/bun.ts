@@ -28,6 +28,8 @@ import * as effect from "effect"
 import { Effect, Layer, Stdio, Stream } from "effect"
 import * as HerdrBun from "effect-herdr-sdk/bun"
 import { FetchHttpClient } from "effect/http"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { SqlClient } from "effect/sql"
 
 import { graph, keyLocalImports, load, packageName, watch } from "./plugin-source.ts"
@@ -137,6 +139,8 @@ let mapped = false
 const provided: Readonly<Record<string, object>> = {
   effect,
   "@vibest/plugin": VibestPlugin,
+  "effect/process/ChildProcess": ChildProcess,
+  "effect/process/ChildProcessSpawner": ChildProcessSpawner,
   ...Object.fromEntries(
     Object.entries(effect).flatMap(([name, value]) =>
       /^[A-Z]/.test(name) && typeof value === "object" && value !== null ? [[`effect/${name}`, value]] : [],

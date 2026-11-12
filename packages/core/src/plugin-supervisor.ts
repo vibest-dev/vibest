@@ -1,7 +1,7 @@
-import { Duration, Effect, type Latch, Queue, Stream } from "effect"
+import { Duration, Effect, type Latch, Queue, Semaphore, Stream } from "effect"
 
 import { logFailure } from "./engine.ts"
-import { type Candidate, makeSources, makeWatcher } from "./plugin-sources.ts"
+import { type Candidate, makeSources, makeWatcher, type Operation } from "./plugin-sources.ts"
 
 export const DEBOUNCE = Duration.millis(100)
 export const RECHECK = Duration.seconds(1)
@@ -16,15 +16,29 @@ interface Host {
 const matches = (selector: string, id: string) =>
   selector === "*" || (selector.endsWith(".*") ? id.startsWith(selector.slice(0, -1)) : selector === id)
 
-export const resolve = Effect.fnUntraced(function* (sources: Sources) {
+const isBuiltin = (candidate: Candidate) => candidate.source.startsWith("builtin:")
+
+const removeMatching = (candidates: Array<Candidate>, target: string) => {
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const candidate = candidates[i]!
+    const p = candidate.plugin
+    if (isBuiltin(candidate) ? "id" in p && target === p.id : "error" in p ? target === "*" : matches(target, p.id))
+      candidates.splice(i, 1)
+  }
+}
+
+export const keptBuiltins = (builtins: ReadonlyArray<Candidate>, operations: ReadonlyArray<Operation>) => {
+  const kept = [...builtins]
+  for (const op of operations) if (op.type === "remove") removeMatching(kept, op.target)
+  return kept
+}
+
+export const resolve = Effect.fnUntraced(function* (sources: Sources, builtins: ReadonlyArray<Candidate> = []) {
   const { operations, watched } = yield* sources.operations
-  const candidates: Array<Candidate> = []
+  const candidates: Array<Candidate> = [...builtins]
   for (const op of operations) {
     if (op.type === "remove") {
-      for (let i = candidates.length - 1; i >= 0; i--) {
-        const p = candidates[i]!.plugin
-        if ("error" in p ? op.target === "*" : matches(op.target, p.id)) candidates.splice(i, 1)
-      }
+      removeMatching(candidates, op.target)
       continue
     }
     const candidate = yield* sources.load(op, watched)
@@ -43,6 +57,7 @@ export const supervise = Effect.fnUntraced(function* (
   sources: Sources,
 ) {
   const triggers = yield* Queue.sliding<void>(1)
+  const builtinTriggers = yield* Queue.sliding<void>(1)
   const changed = new Set<string>()
   let observed = 0
   host.ready.closeUnsafe()
@@ -51,19 +66,35 @@ export const supervise = Effect.fnUntraced(function* (
     observed++
     host.ready.closeUnsafe()
     Queue.offerUnsafe(triggers, undefined)
+    Queue.offerUnsafe(builtinTriggers, undefined)
   }
   const watcher = yield* makeWatcher(notify)
   const scope = yield* Effect.scope
+  const lock = yield* Semaphore.make(1)
+  let users: ReadonlyArray<Candidate> = []
+  const publish = (next?: ReadonlyArray<Candidate>) =>
+    lock.withPermits(1)(
+      Effect.gen(function* () {
+        if (next !== undefined) users = next
+        const { operations } = yield* sources.operations
+        yield* host.activate([...keptBuiltins(builtins, operations), ...users])
+      }),
+    )
+  yield* publish()
+  yield* Stream.fromQueue(builtinTriggers).pipe(
+    Stream.runForEach(() => publish().pipe(logFailure("plugins: builtin update failed"))),
+    Effect.forkScoped,
+  )
   const reload = Effect.gen(function* () {
     if (changed.size > 0) yield* Effect.log(`plugins: reloading after changes to ${[...changed].join(", ")}`)
     changed.clear()
-    let resolved = yield* resolve(sources)
+    let resolved = yield* resolve(sources, builtins)
     let rewatched = false
     while (yield* watcher.update(resolved.watched)) {
       rewatched = true
-      resolved = yield* resolve(sources)
+      resolved = yield* resolve(sources, builtins)
     }
-    yield* host.activate([...builtins, ...resolved.candidates])
+    yield* publish(resolved.candidates.filter((c) => !isBuiltin(c)))
     if (rewatched) yield* Effect.sleep(RECHECK).pipe(Effect.andThen(Effect.sync(() => notify())), Effect.forkIn(scope))
   }).pipe(logFailure("plugins: reload failed"))
   yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(

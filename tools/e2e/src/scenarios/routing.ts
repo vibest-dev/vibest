@@ -2,9 +2,11 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, heldModel } from "../fake-model.ts"
-import { replyOf, expect, herdr, readDb, Skip, until, type World } from "../world.ts"
+import { ask, claudeEnv, fakeAnthropic, heldModel } from "../fake-model.ts"
+import { expect, herdr, readDb, replyOf, Skip, until, type World } from "../world.ts"
+import { configurePlugins } from "../world/plugins.ts"
 import { piShadow } from "../world/shadow.ts"
+import { dropHerdrSession, project } from "./inbox.ts"
 
 type Entry = {
   id: string
@@ -42,6 +44,24 @@ export default Plugin.define({ id: ${JSON.stringify(id)}, effect: (ctx) => ${eff
     30_000,
   )
   return file
+}
+
+const withoutDefaultHarness = async (w: World) => {
+  await configurePlugins(w, (plugins) => [...plugins, "-harness-default"])
+  await until(
+    "harness-default removed",
+    async () => (await w.json<Array<{ id: string }>>(["plugins"])).every((p) => p.id !== "harness-default"),
+    30_000,
+  )
+}
+
+const withDefaultHarness = async (w: World) => {
+  await configurePlugins(w, (plugins) => plugins.filter((p) => p !== "-harness-default"))
+  await until(
+    "harness-default back",
+    async () => (await w.json<Array<{ id: string }>>(["plugins"])).some((p) => p.id === "harness-default"),
+    30_000,
+  )
 }
 
 const fakePi = async (w: World, name: string) => {
@@ -217,17 +237,19 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H6",
     title:
-      "`vibest` without `--harness`: a project's first start fails asking for it; after the Pi entry session exits, it restarts that harness",
+      "`vibest` without `--harness`: a project's first start with the default deliberately removed (`-harness-default`) fails asking for it; with the default back, a Pi entry session that exits is restarted on Pi (the default does not override reuse)",
     run: async (w) => {
       needs("pi", "herdr")
       const { model, dir } = await fakePi(w, "reuse")
       try {
         await w.daemon({ env: { PI_CODING_AGENT_DIR: dir } })
+        await withoutDefaultHarness(w)
         const first = await w.vibest(["--headless"], { timeoutMs: 60_000 })
         expect(
           first.code !== 0 && /no harness to inherit: pass --harness/.test(first.stderr + first.stdout),
           `first start without --harness: ${first.code} ${first.stderr}${first.stdout}`,
         )
+        await withDefaultHarness(w)
         await w.startEntry({ harness: "pi", env: { PI_CODING_AGENT_DIR: dir }, timeoutMs: 90_000 })
         const entryRow = await entrySession(w)
         const processes = () => {
@@ -255,6 +277,118 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         model.stop()
       }
+    },
+  },
+  {
+    id: "H7",
+    title:
+      "the default harness is Claude: a project's first bare `vibest` without --harness starts its entry session on Claude; a user plugin that picks Pi wins over the default; when Claude cannot start it fails `no harness to inherit`",
+    run: async (w) => {
+      needs("claude", "pi", "herdr")
+      const anthropic = fakeAnthropic(() => "ok")
+      const { model, dir } = await fakePi(w, "dflt")
+      const session = `${w.herdrSession}-dflt`
+      const startedIn = async (name: string, env: Record<string, string>) => {
+        const repo = await project(w, name)
+        await w.startEntry({ session, cwd: repo, env, timeoutMs: 120_000 })
+        let main: Entry | undefined
+        await until(
+          `the entry session of ${name}`,
+          async () => (main = (await sessions(w, repo)).find((e) => e.agent === "main")) !== undefined,
+          60_000,
+        )
+        return main!
+      }
+      try {
+        await w.daemon()
+        const claude = await startedIn("dflt-claude", await claudeEnv(w, "dflt", anthropic.url, w.config.claude))
+        expect(claude.harness === "claude", `first start without --harness: ${JSON.stringify(claude)}`)
+
+        const router = await writePlugin(
+          w,
+          "router",
+          `ctx.agent.hook("start.before", () => Effect.succeed({ harness: "pi" }))`,
+        )
+        const pi = await startedIn("dflt-pi", { PI_CODING_AGENT_DIR: dir })
+        expect(pi.harness === "pi", `a plugin picking Pi: ${JSON.stringify(pi)}`)
+        await fs.rm(router)
+        await until("router gone", async () =>
+          (await w.json<Array<{ id: string }>>(["plugins"])).every((p) => p.id !== "router"),
+        )
+
+        await writePlugin(
+          w,
+          "no-claude",
+          `ctx.harness.transform((editor) => editor.update("claude", (d) => { d.binary = "claude-not-installed" }))`,
+        )
+        await until(
+          "claude not startable",
+          async () =>
+            (await w.json<Array<Listed>>(["harness", "list"], { timeoutMs: 60_000 })).some(
+              (h) => h.harness === "claude" && !h.available,
+            ),
+          30_000,
+        )
+        const repo = await project(w, "dflt-none")
+        const refused = await w.vibest(["--headless"], { cwd: repo, timeoutMs: 60_000 })
+        expect(
+          refused.code !== 0 && /no harness to inherit/.test(refused.stderr + refused.stdout),
+          `claude unavailable: ${refused.code} ${refused.stderr}${refused.stdout}`,
+        )
+      } finally {
+        model.stop()
+        anthropic.stop()
+        await dropHerdrSession(w, session)
+      }
+    },
+  },
+  {
+    id: "G14",
+    title:
+      "`-<id>` in vibest.json removes a builtin plugin by exact id and `-*` does not; while slow user plugins are still importing, a first start already sees the removal (no Claude chosen); deleting the line brings the builtin back without restarting vibestd",
+    run: async (w) => {
+      needs("herdr")
+      const slow = [1, 2, 3, 4, 5, 6, 7].map((n) => path.join(w.vibestHome, "slow", `slow-${n}.ts`))
+      await fs.mkdir(path.join(w.vibestHome, "slow"), { recursive: true })
+      for (const [n, file] of slow.entries())
+        await fs.writeFile(
+          file,
+          `import { Plugin } from "@vibest/plugin"
+import { Effect } from "effect"
+await new Promise((resolve) => setTimeout(resolve, 4800))
+export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
+`,
+        )
+      await configurePlugins(w, () => ["-*", "-harness-default", ...slow])
+      await w.daemon()
+      const pid = await w.daemonPid()
+      const started = await w.vibest(["--headless"], { timeoutMs: 60_000 })
+      expect(
+        started.code !== 0 && /no harness to inherit/.test(started.stderr + started.stdout),
+        `first start while plugins import: ${started.code} ${started.stderr}${started.stdout}`,
+      )
+      const log = await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8")
+      expect(
+        log.includes("plugins still activating; going on with the active ones"),
+        "the start did not run before the first activation finished",
+      )
+      const active = async () =>
+        (await w.json<Array<{ id: string; status: string }>>(["plugins"], { timeoutMs: 60_000 })).filter(
+          (p) => p.status === "active",
+        )
+      await until(
+        "the slow plugins active",
+        async () => (await active()).filter((p) => p.id.startsWith("slow-")).length === 7,
+        60_000,
+      )
+      const ids = (await active()).map((p) => p.id)
+      expect(
+        !ids.includes("harness-default") && ids.includes("runtime-choice"),
+        `after -* and -harness-default: ${ids}`,
+      )
+      await configurePlugins(w, () => ["-*", ...slow])
+      await until("harness-default back", async () => (await active()).some((p) => p.id === "harness-default"), 60_000)
+      expect((await w.daemonPid()) === pid, "vibestd restarted")
     },
   },
   {
