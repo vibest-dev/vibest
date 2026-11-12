@@ -2,7 +2,7 @@ import { ExecutionAccepted, type InboxKind } from "@vibest/schema/event"
 import { InboxRow, InboxStatus, type ExecutionState } from "@vibest/schema/session"
 import { Effect } from "effect"
 
-import { encodeAddress, failureOf, type SessionPatch, type NewInboxRow, type ExecutionEnd } from "./db-rows.ts"
+import { encodeAddress, failureOf, type NewInboxRow, type ExecutionEnd } from "./db-rows.ts"
 import type { Store } from "./db-store.ts"
 import { type ObservedEnd } from "./replies.ts"
 
@@ -33,6 +33,7 @@ export const inboxMethods = (store: Store) => {
     insertInboxRow,
     endExecution,
     updateSession,
+    setStatus,
     dropWaiting,
     emit,
     currentProcessId,
@@ -236,7 +237,7 @@ export const inboxMethods = (store: Store) => {
           const open = (yield* openExecution(id)) ?? (typed ? yield* startExecution(id, at, typed) : undefined)
           if (open === undefined) return
           yield* accept(id, open)
-          yield* updateSession(id, { status: "working" })
+          yield* setStatus(id, "working")
         }),
       ).pipe(Effect.orDie),
 
@@ -263,7 +264,7 @@ export const inboxMethods = (store: Store) => {
             },
             end.at,
           )
-          yield* updateSession(id, { status: "idle" })
+          yield* setStatus(id, "idle")
           if (end.status === "failed" && !end.limited)
             yield* insertInboxRow(
               { sessionId: id, message: `${id}'s execution ended with an error: ${end.failure}` },
@@ -273,13 +274,11 @@ export const inboxMethods = (store: Store) => {
         }),
       ).pipe(Effect.orDie),
 
-    endExecution: (id: string, end: ExecutionEnd, patch: SessionPatch, notice: string | undefined, at?: number) =>
+    endExecution: (id: string, end: ExecutionEnd, notice: string | undefined, at?: number) =>
       tx(
         Effect.gen(function* () {
           const stamp = at === undefined ? undefined : Math.max(at, yield* now)
           yield* endExecution(id, end, stamp)
-          const { executionState: _, ...rest } = patch
-          yield* updateSession(id, rest)
           if (notice !== undefined) yield* insertInboxRow({ sessionId: id, message: notice }, stamp)
         }),
       ).pipe(Effect.orDie),

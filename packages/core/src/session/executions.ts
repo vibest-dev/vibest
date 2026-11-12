@@ -1,10 +1,11 @@
 import { NotReady } from "@vibest/schema/session"
-import { Clock, Duration, Effect, Option, PubSub, Ref, Schedule } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Option, PubSub, Ref, Schedule } from "effect"
 
-import { awaitEvent, awaitOn, Bus, type EngineEvent } from "./bus.ts"
-import type { Db, SessionRow } from "./db.ts"
-import type { Harnesses } from "./harness.ts"
-import type { HarnessDefinition } from "./host.ts"
+import { awaitEvent, awaitOn, Bus, type EngineEvent } from "../bus.ts"
+import { Db, type SessionRow } from "../db.ts"
+import { LayerNode } from "../effect/layer-node.ts"
+import { Harnesses } from "../harness.ts"
+import type { HarnessDefinition } from "../host.ts"
 import {
   agentState,
   type AgentState,
@@ -14,76 +15,76 @@ import {
   stateOf,
   type Terminal,
   type AgentSeen,
-} from "./runtimes.ts"
-import type { Tracked } from "./session/live.ts"
+} from "../runtimes.ts"
+import { SessionLive } from "./live.ts"
 
 export const READY_TIMEOUT = Duration.seconds(60)
 export const CONFIRM_TIMEOUT = Duration.seconds(8)
 export const STOP_WAIT = Duration.seconds(10)
 const STARTUP_DIALOG_POLL = Schedule.spaced("500 millis")
 
-export const sessionPrompting = (deps: {
-  readonly db: Pick<
-    Db["Service"],
-    | "readyAt"
-    | "updateSession"
-    | "openExecution"
-    | "startExecution"
-    | "closeExecution"
-    | "acceptExecution"
-    | "executionAccepted"
-  >
-  readonly harnesses: Pick<Harnesses["Service"], "get" | "find">
-  readonly bus: Bus["Service"]
-  readonly track: (id: string) => Effect.Effect<Tracked>
-}) => {
-  const { db, harnesses, bus, track } = deps
-  const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
-  const awaitReady = (h: Runtime, terminal: Terminal, adapter: HarnessDefinition, id: string) =>
-    Effect.gen(function* () {
-      const reports = adapter.ready === "integration"
-      if (h.state === undefined && !reports) return "unknown" as AgentState
-      const step = adapter.startup ? yield* adapter.startup : undefined
-      const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
-      const look = Effect.gen(function* () {
-        const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
-        const ready = (yield* db.readyAt(id)) !== undefined || (!reports && settled(seen))
-        return { seen, ready }
-      })
-      return yield* look.pipe(
-        Effect.flatMap((now) => {
-          if (now.ready || settled(now.seen) || step === undefined) return Effect.succeed(now)
-          return step({
-            screen,
-            sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),
-          }).pipe(Effect.as(now))
-        }),
-        Effect.repeat({ until: (now) => now.ready, schedule: STARTUP_DIALOG_POLL }),
-        Effect.timeoutOrElse({
-          duration: READY_TIMEOUT,
-          orElse: () =>
-            screen.pipe(
-              Effect.flatMap((tail) => Effect.logInfo(`not ready ${id}: terminal tail\n${tail.trim()}`)),
-              Effect.andThen(
-                Effect.fail(
-                  new NotReady({
-                    id,
-                    message: `${id} did not become ready in ${Duration.format(READY_TIMEOUT)} (a startup dialog vibest could not answer? open ${adapter.id} once in the repository and accept it)`,
-                  }),
+export const busy = (state: AgentState) => state === "working" || state === "blocked"
+
+export const busyOf = (seen: AgentSeen) => {
+  const state = stateOf(seen)
+  return state !== undefined && busy(state)
+}
+
+const settled = (seen: AgentSeen) => seen !== "absent" && seen !== "unknown"
+
+const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
+
+const make = Effect.gen(function* () {
+  const db = yield* Db
+  const harnesses = yield* Harnesses
+  const bus = yield* Bus
+  const { track } = yield* SessionLive
+
+  const awaitReady = Effect.fn("Executions.awaitReady")(
+    (h: Runtime, terminal: Terminal, adapter: HarnessDefinition, id: string) =>
+      Effect.gen(function* () {
+        const reports = adapter.ready === "integration"
+        if (h.state === undefined && !reports) return "unknown" as AgentState
+        const step = adapter.startup ? yield* adapter.startup : undefined
+        const screen = h.read(terminal, 40).pipe(Effect.orElseSucceed(() => ""))
+        const look = Effect.gen(function* () {
+          const seen: AgentSeen = h.state === undefined ? "unknown" : yield* agentState(h, terminal)
+          const ready = (yield* db.readyAt(id)) !== undefined || (!reports && settled(seen))
+          return { seen, ready }
+        })
+        return yield* look.pipe(
+          Effect.flatMap((now) => {
+            if (now.ready || settled(now.seen) || step === undefined) return Effect.succeed(now)
+            return step({
+              screen,
+              sendKeys: (keys) => h.send(terminal, { keys: [...keys] }).pipe(Effect.ignore),
+            }).pipe(Effect.as(now))
+          }),
+          Effect.repeat({ until: (now) => now.ready, schedule: STARTUP_DIALOG_POLL }),
+          Effect.timeoutOrElse({
+            duration: READY_TIMEOUT,
+            orElse: () =>
+              screen.pipe(
+                Effect.flatMap((tail) => Effect.logInfo(`not ready ${id}: terminal tail\n${tail.trim()}`)),
+                Effect.andThen(
+                  Effect.fail(
+                    new NotReady({
+                      id,
+                      message: `${id} did not become ready in ${Duration.format(READY_TIMEOUT)} (a startup dialog vibest could not answer? open ${adapter.id} once in the repository and accept it)`,
+                    }),
+                  ),
                 ),
               ),
-            ),
-        }),
-        Effect.map((now): AgentState => (reports && !settled(now.seen) ? "idle" : (stateOf(now.seen) ?? "unknown"))),
-      )
-    })
-
-  const sameTerminal = (a: Terminal, b: Terminal) => a.machine === b.machine && a.id === b.id
+          }),
+          Effect.map((now): AgentState => (reports && !settled(now.seen) ? "idle" : (stateOf(now.seen) ?? "unknown"))),
+        )
+      }),
+  )
 
   const pickedUp = (session: SessionRow, execution: number, state: "working" | "blocked") =>
     Effect.gen(function* () {
       yield* db.acceptExecution(session.id, execution)
-      yield* db.updateSession(session.id, { status: state })
+      yield* db.setStatus(session.id, state)
       return true
     })
 
@@ -118,13 +119,7 @@ export const sessionPrompting = (deps: {
       pickupNow(h, session, terminal, execution),
     )
 
-  const busy = (state: AgentState) => state === "working" || state === "blocked"
-  const busyOf = (seen: AgentSeen) => {
-    const state = stateOf(seen)
-    return state !== undefined && busy(state)
-  }
-
-  const settleAfterInterrupt = (
+  const settleAfterInterrupt = Effect.fn("Executions.settleAfterInterrupt")((
     h: Runtime,
     session: SessionRow,
     terminal: Terminal,
@@ -154,8 +149,13 @@ export const sessionPrompting = (deps: {
       STOP_WAIT,
       settledNow,
     ).pipe(Effect.provideService(Bus, bus))
-  }
-  const interruptAgent = (h: Runtime, session: SessionRow, terminal: Terminal) => {
+  })
+
+  const interruptAgent = Effect.fn("Executions.interruptAgent")((
+    h: Runtime,
+    session: SessionRow,
+    terminal: Terminal,
+  ) => {
     const key = harnesses.find(session.harnessId)?.interruptKey
     return settleAfterInterrupt(
       h,
@@ -163,9 +163,9 @@ export const sessionPrompting = (deps: {
       terminal,
       key === undefined ? Effect.void : h.send(terminal, { keys: [key] }).pipe(Effect.ignore),
     )
-  }
+  })
 
-  const prompt = Effect.fn("Sessions.prompt")(function* (
+  const prompt = Effect.fn("Executions.prompt")(function* (
     h: Runtime,
     session: SessionRow,
     terminal: Terminal,
@@ -186,12 +186,11 @@ export const sessionPrompting = (deps: {
     const standing = Effect.map(db.openExecution(session.id), (now) =>
       now === execution ? ("mine" as const) : now === undefined ? ("closed" as const) : ("busy" as const),
     )
-    const now = yield* Clock.currentTimeMillis
     yield* onHandover
     const r = yield* track(session.id)
     yield* Ref.set(r.endedAt, undefined)
     yield* Ref.set(r.blockedNotified, false)
-    yield* db.updateSession(session.id, { status: state, lastActive: now })
+    yield* db.setStatus(session.id, state)
     const send = Ref.set(r.prompting, true).pipe(
       Effect.andThen(h.send(terminal, { text })),
       Effect.ensuring(Ref.set(r.prompting, false)),
@@ -213,7 +212,7 @@ export const sessionPrompting = (deps: {
     if (delivered) return undefined
     if (state === "unknown" && adapter.ready === "runtime") {
       yield* db.acceptExecution(session.id, execution)
-      yield* db.updateSession(session.id, { status: "working" })
+      yield* db.setStatus(session.id, "working")
       return undefined
     }
     const settledElsewhere = Effect.map(standing, (left) => left !== "mine")
@@ -231,5 +230,25 @@ export const sessionPrompting = (deps: {
     return `task_not_started: ${session.id} did not start working on the message; ${peekHint(session.id)}`
   }, Effect.scoped)
 
-  return { awaitReady, busy, busyOf, settleAfterInterrupt, interruptAgent, prompt }
+  const finish = Effect.fn("Executions.finish")(function* (session: SessionRow, end: "failed", error: string) {
+    yield* db.endExecution(
+      session.id,
+      { outcome: end, failure: { message: error } },
+      `${session.id}'s execution ended with an error: ${error}`,
+    )
+  })
+
+  return { awaitReady, settleAfterInterrupt, interruptAgent, prompt, finish }
+})
+
+export class Executions extends Context.Service<Executions, Effect.Success<typeof make>>()("vibest/Executions") {
+  static readonly make = make
+
+  static readonly layer = Layer.effect(Executions, make)
+
+  static readonly node = LayerNode.make({
+    service: Executions,
+    layer: Executions.layer,
+    deps: [Db.node, Harnesses.node, Bus.node, SessionLive.node],
+  })
 }
