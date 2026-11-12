@@ -17,6 +17,7 @@ const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) => testEff
 const spawnInput = (repo: string) =>
   Effect.map(projectOf(repo), (projectId) => ({
     machine: { id: "local" },
+    agent: "general",
     root: repo,
     parentSessionId: "creator",
     projectId,
@@ -37,10 +38,16 @@ describe("placement: every session is a tab beside the project's entry session, 
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "main:coord" },
-      })
+      yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "main:coord" },
+        },
+        { agent: "coordinator" },
+      )
 
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
       yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
@@ -89,7 +96,7 @@ describe("placement: every session is a tab beside the project's entry session, 
         "pi",
         false,
         { runtime: RUNTIME, address: { machine: "local", id: "main:coord" } },
-        { projectDirectory: repo },
+        { projectDirectory: repo, agent: "coordinator" },
       )
 
       const a = yield* sessions.spawn(yield* spawnInput(repo))
@@ -118,10 +125,16 @@ describe("placement: every session is a tab beside the project's entry session, 
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("w1", repo)
       yield* herdr.addPane("w1:coord", "w1", repo)
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: "other",
-        address: { machine: "local", id: "w1:coord" },
-      })
+      yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: "other",
+          address: { machine: "local", id: "w1:coord" },
+        },
+        { agent: "coordinator" },
+      )
 
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
       yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "open")

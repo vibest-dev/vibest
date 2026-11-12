@@ -48,7 +48,6 @@ const REFUSED = [
   ["env", "--env"],
   ["peer", "--peer"],
   ["archive", "--archive-on-idle"],
-  ["agent", "--agent"],
   ["runtimeSession", "--session"],
 ] as const
 
@@ -203,6 +202,7 @@ const make = Effect.gen(function* () {
               repository: remote,
               ...(identity === undefined ? {} : { identity }),
               commit,
+              agent: input.agent,
               prompt: input.prompt,
               ...(input.harness === undefined ? {} : { harness: input.harness }),
               ...(input.provider === undefined ? {} : { provider: input.provider }),

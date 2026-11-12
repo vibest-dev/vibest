@@ -81,6 +81,7 @@ const workingPiEntry = Effect.gen(function* () {
   yield* herdr.updateAgent(paneId, (a) => ({ ...a, status: "working" }))
   yield* processes.set(HARNESS, "alive")
   const started = yield* c["Project.EntrySession"]({
+    agent: "coordinator",
     harness: "pi",
     fresh: false,
     terminal: paneId,
@@ -120,7 +121,7 @@ const workingPiEntry = Effect.gen(function* () {
   })
   const stop = c["Project.StopEntry"]({ runtime: origin.runtime, address })
   const startAt = (terminal: string, harness: "pi" | "claude" = "pi") =>
-    c["Project.EntrySession"]({ harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })
+    c["Project.EntrySession"]({ agent: "coordinator", harness, fresh: false, terminal, runtime: TEST_HERDR, pid: 5151 })
   const pending = Effect.map(entryPending(db, projectId), (rows) => rows.map((r) => r.message))
   return { db, herdr, processes, c, paneId, origin, projectId, started, stop, startAt, pending }
 })
@@ -283,13 +284,19 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
     "nothing signalled: a row that moved, a denied signal; unsupported with why: a PID never recorded (an older vibest), or no agent seen but a live (reused) PID; an exited PID moves without a signal",
     Effect.gen(function* () {
       const s = yield* workingPiEntry
-      const restore = s.db.startEntry(s.projectId, "pi", false, s.origin, { pid: HARNESS })
-      yield* s.db.startEntry(s.projectId, "pi", false, {
-        ...s.origin,
-        address: { machine: "local", id: "test/p9" },
-      })
+      const restore = s.db.startEntry(s.projectId, "pi", false, s.origin, { agent: "coordinator", pid: HARNESS })
+      yield* s.db.startEntry(
+        s.projectId,
+        "pi",
+        false,
+        {
+          ...s.origin,
+          address: { machine: "local", id: "test/p9" },
+        },
+        { agent: "coordinator" },
+      )
       assert.deepStrictEqual(yield* s.stop, { result: "moved" })
-      yield* s.db.startEntry(s.projectId, "pi", false, s.origin)
+      yield* s.db.startEntry(s.projectId, "pi", false, s.origin, { agent: "coordinator" })
       const old = yield* s.stop
       assert.strictEqual(old.result, "unsupported")
       assert.include(old.reason, "started by an older vibest")
@@ -319,7 +326,15 @@ describe("Project.StopEntry moves the entry session: SIGTERM to the recorded har
       for (const pane of ["test/p1", "test/p2"]) yield* herdr.seedAgent(pane)
       const exits = yield* Effect.all(
         ["test/p1", "test/p2"].map((terminal) =>
-          Effect.exit(c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal, runtime: TEST_HERDR })),
+          Effect.exit(
+            c["Project.EntrySession"]({
+              agent: "coordinator",
+              harness: "pi",
+              fresh: false,
+              terminal,
+              runtime: TEST_HERDR,
+            }),
+          ),
         ),
         { concurrency: "unbounded" },
       )

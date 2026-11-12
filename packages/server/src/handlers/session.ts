@@ -50,22 +50,21 @@ export const make = (
           }
           return yield* new NoSuchSession({ id, message: `no session ${id}` })
         }
-        if (c._tag === "Entry" && session.projectId !== c.projectId)
+        if (c._tag === "Session" && (yield* db.creatorOf(id))?.local !== c.sessionId)
           return yield* new Forbidden({
             method,
-            message: `${id} belongs to another entry session; only it or the user may manage it`,
+            message: `${id} was not started by this session; a session manages only the sessions it started`,
           })
         return id
       })
 
     const sendWithinProject = (
-      caller: Extract<CallerShape, { readonly _tag: "Session" | "Entry" }>,
+      caller: Extract<CallerShape, { readonly _tag: "Session" }>,
       input: string,
       p: PayloadOf<"Send">,
     ) =>
       Effect.gen(function* () {
-        const toOrigin =
-          caller._tag === "Session" ? yield* db.sendToOrigin(caller.sessionId, input, p.message) : undefined
+        const toOrigin = yield* db.sendToOrigin(caller.sessionId, input, p.message)
         if (toOrigin === false)
           return yield* new NoSuchSession({
             id: input,
@@ -114,12 +113,7 @@ export const make = (
       Spawn: (input) =>
         Effect.gen(function* () {
           const c = yield* Caller
-          if (c._tag !== "Entry" && c._tag !== "Session") return yield* new NoCallingSession()
-          if (input.agent === "coordinator" || input.agent === "main")
-            return yield* new Forbidden({
-              method: "Spawn",
-              message: `${input.agent} is reserved for the entry session (vibest)`,
-            })
+          if (c._tag !== "Session") return yield* new NoCallingSession()
           const project = yield* projectOf(c, "Spawn")
           if (input.machine !== undefined) return yield* spawnOn(input.machine, input, c.sessionId, project.id)
           return yield* sessions.spawn({
@@ -147,7 +141,7 @@ export const make = (
         routed.Send(p, (input) =>
           Effect.gen(function* () {
             const caller = yield* Caller
-            if (caller._tag === "Session" || caller._tag === "Entry") return yield* sendWithinProject(caller, input, p)
+            if (caller._tag === "Session") return yield* sendWithinProject(caller, input, p)
             const { scope } = yield* reach("Send")
             const target = yield* db.resolveSession(input, scope)
             if ((yield* db.sessionIdentity(target))?.entry) {

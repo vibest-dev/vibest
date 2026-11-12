@@ -55,8 +55,15 @@ const busyPiSubagent = Effect.gen(function* () {
   const sessions = yield* Sessions
   const repo = yield* makeRepository
   const key = yield* projectOf(repo)
-  yield* db.startEntry(key, "pi", false, { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } })
+  yield* db.startEntry(
+    key,
+    "pi",
+    false,
+    { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
+    { agent: "coordinator" },
+  )
   const { id } = yield* sessions.spawn({
+    agent: "general",
     machine: { id: "local" },
     root: repo,
     parentSessionId: "creator",
@@ -139,10 +146,16 @@ describe("restart in place", () => {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const projectId = yield* projectOf(yield* makeRepository)
-      yield* db.startEntry(projectId, harness, false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        projectId,
+        harness,
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       yield* herdr.seedAgent("test/coord")
       yield* herdr.updateAgent("test/coord", (a) => ({ ...a, status: "working" }))
       const entry = (yield* db.entryOf(projectId))!
@@ -230,10 +243,16 @@ describe("restart in place", () => {
       const processes = yield* FakeProcesses
       const herdr = yield* FakeRuntime
       const projectId = yield* projectOf(yield* makeRepository)
-      yield* db.startEntry(projectId, "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        projectId,
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       yield* herdr.seedAgent("test/coord")
       const id = (yield* db.entryOf(projectId))!.id
       yield* db.noteConversation(id, "conversation-1")
@@ -258,10 +277,16 @@ describe("restart in place", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const projectId = yield* projectOf(yield* makeRepository)
-      yield* db.startEntry(projectId, "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        projectId,
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       const id = (yield* db.entryOf(projectId))!.id
       yield* db.noteConversation(id, "conversation-1")
       yield* db.noteIntegration(id, { version: "0.0.0-old", protocol: PROTOCOL })

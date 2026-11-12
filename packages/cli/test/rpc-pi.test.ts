@@ -37,10 +37,16 @@ describe("vibest.sock", () => {
       yield* db.insertSession({ id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", ...general }, yield* projectOf("r"))
       yield* herdr.addPane("w1:p8", "ws", "/")
       yield* herdr.seedAgent("w1:p8")
-      const entry = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p8" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf("r"),
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "w1:p8" },
+        },
+        { agent: "coordinator" },
+      )
       const project = (yield* db.getSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))!.projectId
       const send = (sender: string, message: string) => db.insertSend(entry.sessionId, message, undefined, sender)
       yield* send("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "one")
@@ -78,10 +84,16 @@ describe("vibest.sock", () => {
       const inbox = yield* Inbox
       const db = yield* Db
       yield* herdr.seedAgent("w1:p8")
-      const entry = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p8" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf("r"),
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "w1:p8" },
+        },
+        { agent: "coordinator" },
+      )
       const c = yield* asSession(yield* client, entry.sessionId)
       const received = yield* c["Inbox.Subscribe"](undefined).pipe(Stream.take(2), Stream.runCollect, Effect.forkChild)
       yield* settled

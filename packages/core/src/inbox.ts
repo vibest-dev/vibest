@@ -41,9 +41,9 @@ export const line = (
   if (last.kind === "notice") return fit("Notice: ", last.message.trim().split("\n")[0] ?? "", more)
   const sender = last.sender ?? ""
   const session = who(sender)
-  const agent = session?.agent || "general"
-  const type = `${agent.charAt(0).toUpperCase()}${agent.slice(1)}`
-  return fit(`${type} Agent "`, session?.title ?? "", `" sent a message (${shortId(sender)})${more}`)
+  const type =
+    session === undefined ? "Agent" : `${session.agent.charAt(0).toUpperCase()}${session.agent.slice(1)} Agent`
+  return fit(`${type} "`, session?.title ?? "", `" sent a message (${shortId(sender)})${more}`)
 }
 
 export type Undelivered = ReadonlyArray<{

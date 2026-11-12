@@ -9,6 +9,7 @@ import {
   NoSuchSession,
   RuntimeUnreachable,
   SessionBusy,
+  type UnknownAgent,
 } from "@vibest/schema/session"
 import {
   Cause,
@@ -27,6 +28,7 @@ import {
   Ref,
 } from "effect"
 
+import { Agents } from "./agents.ts"
 import { sessionArchive } from "./archive.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
 import { Db, type SessionFilter, type SessionRow, sessionEnded } from "./db.ts"
@@ -37,7 +39,7 @@ import * as Engine from "./engine.ts"
 import { sessionExecutions } from "./executions.ts"
 import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox, text as inboxText } from "./inbox.ts"
-import { entryCommand, restartArgv } from "./launch.ts"
+import { definitionIn, entryCommand, restartArgv } from "./launch.ts"
 import { limitMoveBox, sessionMove } from "./move.ts"
 import { Layout, VibestCommand } from "./paths.ts"
 import { sessionPlacement } from "./placement.ts"
@@ -63,7 +65,7 @@ import { SessionLive } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
 import { sessionSpawn, type SpawnInput, type Spawned } from "./spawn.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
-import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
+import { projectText, systemPrompt, writeSystemPrompt } from "./system-prompt.ts"
 import { Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
 export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
   JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" ? { terminal: address.id } : {}) })
@@ -89,6 +91,7 @@ export const HOOK_GRACE = Duration.seconds(10)
 export const TAIL_LINES = 30
 
 const SESSION_DEPS = [
+  Agents.node,
   Bus.node,
   Db.node,
   Drain.node,
@@ -127,6 +130,7 @@ export class Sessions extends Context.Service<
       | LimitReached
       | HarnessUnavailable
       | NoCallingSession
+      | UnknownAgent
       | NoHarnessChosen
       | NoRuntime
       | AgentRefused
@@ -171,6 +175,7 @@ export class Sessions extends Context.Service<
       const runtimes = yield* Runtimes
       const harness = yield* Harness
       const harnesses = yield* Harnesses
+      const agents = yield* Agents
       const inbox = yield* Inbox
       const drain = yield* Drain
       const layout = yield* Layout
@@ -256,7 +261,6 @@ export class Sessions extends Context.Service<
         VIBEST_SESSION_ID: session.id,
         VIBEST_PROJECT_ID: session.projectId,
         VIBEST_PROJECT_DIR: layout.project(session.projectId),
-        VIBEST_AGENT: session.agent,
         VIBEST_HARNESS: session.harnessId,
         VIBEST_RUNTIME: runtimeEnv(session.runtime, { machine: session.address.machine, id: "" }),
         VIBEST_HOME: layout.home,
@@ -265,7 +269,8 @@ export class Sessions extends Context.Service<
 
       const systemPromptOf = (session: SessionRow) =>
         Effect.gen(function* () {
-          return sessionSystemPrompt({
+          return systemPrompt({
+            system: (yield* definitionIn(agents, session.agent)).system,
             id: session.id,
             peer: yield* db.earlierSharer(session.id),
             creator: yield* db.creatorLabel(session.id),
@@ -364,6 +369,7 @@ export class Sessions extends Context.Service<
         runtimes,
         harness,
         harnesses,
+        agents,
         plugins,
         drain,
         layout,
@@ -694,7 +700,7 @@ export class Sessions extends Context.Service<
         })
 
       const view = (session: SessionRow) =>
-        session.agent === "main"
+        session.entry
           ? Effect.map(db.sessionDirectory(session.id), (directory) => ({
               ...session,
               worktree: directory ?? "",
@@ -862,6 +868,7 @@ export class Sessions extends Context.Service<
             const savedId = entry.harnessSessionId
             const command = yield* entryCommand({
               harness: entry.harnessId,
+              agent: entry.agent,
               root,
               provider: entry.provider,
               model: entry.model,
@@ -875,6 +882,7 @@ export class Sessions extends Context.Service<
             })
             return restartArgv(command)
           }).pipe(
+            Effect.provideService(Agents, agents),
             Effect.provideService(Harness, harness),
             Effect.provideService(Harnesses, harnesses),
             Effect.provideService(Layout, layout),

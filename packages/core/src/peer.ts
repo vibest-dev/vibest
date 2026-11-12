@@ -72,6 +72,7 @@ const make = Effect.gen(function* () {
             projectId: target.id,
             name: input.title ?? defaultSessionName(input.prompt),
             prompt: input.prompt,
+            agent: input.agent,
             harness: input.harness,
             provider: input.provider,
             model: input.model,

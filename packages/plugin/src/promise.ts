@@ -3,6 +3,7 @@ import { Effect, type Scope, Stream } from "effect"
 
 import type { HarnessEditor } from "./harness.ts"
 import type {
+  AgentEditor,
   AgentHooks,
   AgentResults,
   Context,
@@ -34,6 +35,7 @@ export interface PromiseContext {
       name: Name,
       callback: (event: AgentHooks[Name]) => Awaitable<AgentResults[Name] | void>,
     ) => Promise<PromiseRegistration>
+    readonly transform: (callback: (editor: AgentEditor) => void) => Promise<PromiseRegistration>
   }
   readonly machine: {
     readonly hook: <Name extends keyof MachineHooks>(
@@ -88,6 +90,7 @@ export const fromPromise =
         options: host.options,
         agent: {
           hook: (name, callback) => register(host.agent.hook(name, (event) => refusable(() => callback(event)))),
+          transform: (callback) => register(host.agent.transform(callback)),
         },
         machine: {
           hook: (name, callback, options) =>

@@ -95,7 +95,7 @@ const entrySession = async (w: World) => {
   await until(
     "the entry session in vibest ls",
     async () => {
-      entry = (await sessions(w)).find((e) => e.agent === "main")
+      entry = (await sessions(w)).find((e) => e.agent === "coordinator")
       return entry !== undefined
     },
     60_000,
@@ -294,7 +294,7 @@ const checks: ReadonlyArray<Check> = [
         let main: Entry | undefined
         await until(
           `the entry session of ${name}`,
-          async () => (main = (await sessions(w, repo)).find((e) => e.agent === "main")) !== undefined,
+          async () => (main = (await sessions(w, repo)).find((e) => e.agent === "coordinator")) !== undefined,
           60_000,
         )
         return main!

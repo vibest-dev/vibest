@@ -5,6 +5,7 @@ import { AgentRefused, Plugin } from "@vibest/plugin"
 import { Effect, Layer } from "effect"
 
 import glmOnly from "../../plugin/examples/glm-only.ts"
+import { agentsLayer } from "./lib/agents.ts"
 import { testEffect } from "./lib/effect.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
 
@@ -23,7 +24,7 @@ const usableHarnesses = [
 
 const start = {
   project: "/r",
-  agentType: "general",
+  agent: "general",
   parentSessionId: undefined,
   prompt: "p",
   harness: undefined,
@@ -38,7 +39,7 @@ const start = {
 }
 const failed = {
   project: "/r",
-  agentType: "general",
+  agent: "general",
   parentSessionId: undefined,
   sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   reason: "limited" as const,
@@ -51,8 +52,11 @@ const failed = {
 }
 
 const pluginHost = Layer.provideMerge(
-  Layer.provideMerge(Layer.provideMerge(subscriptionsLayer, harnessesLayer()), runtimesLayer),
-  Bus.layer,
+  Layer.provideMerge(
+    Layer.provideMerge(Layer.provideMerge(subscriptionsLayer, harnessesLayer()), runtimesLayer),
+    Bus.layer,
+  ),
+  agentsLayer,
 )
 
 const it = testEffect(pluginHost)
@@ -234,7 +238,7 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
         const s = yield* p.start({ ...start, harness: "claude" })
         assert.deepStrictEqual([s.harness, s.provider, s.model], ["pi", "zai", "glm-5.3"])
         assert.deepStrictEqual(s.decidedBy, { harness: "glm-only", provider: "glm-only", model: "glm-only" })
-        const m = yield* p.start({ ...start, agentType: "main", harness: "claude" })
+        const m = yield* p.start({ ...start, agent: "coordinator", harness: "claude" })
         assert.deepStrictEqual([m.harness, m.provider, m.model], ["claude", undefined, undefined])
       }),
     ))

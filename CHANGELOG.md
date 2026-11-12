@@ -17,6 +17,19 @@ release. Each release lists what broke, who is affected and how to migrate under
 - **`-<id>` removes builtin plugins** (plugin authors): an entry such as `"-runtime-choice"` now removes the builtin with
   that exact id; `"-*"` and `"-prefix.*"` still match only user plugins. Builtins are kept or removed from the config
   text at every activation, so un-removing one takes effect on the next reload without restarting vibestd.
+- **Sessions run as agent definitions; no session is "main"** (users, plugin authors, anyone reading `vibest.db` or
+  `vibest ls`): a definition (`{ id, description, system, guard? }`, registered by a plugin with `agent.transform`)
+  decides a session's system prompt and its extra guard rules; the built-in ones are `coordinator` (what bare `vibest`
+  opens as the entry session; it has no tool allowlist or MCP restriction any more, and file edits outside the project
+  folder are refused by its guard) and `general` (what `vibest run` starts; `vibest run --agent <id>` picks another, and an
+  unknown id is refused before any worktree or pane is made). `main` is gone as an agent value; the `start.before` field
+  `agentType` is renamed `agent`; `VIBEST_AGENT` and the `vibest-agent` header are removed (the session id is the
+  identity); `GuardCall.session` loses `workingDirectory` and `vibest`. Every session can run `vibest run`, `ls`,
+  `project info` and the other agent commands, but manages (send, interrupt, peek, remove) only the sessions it started,
+  and sessions started by a session record it as their parent. `vibest update` is for the user only. The Pi entry session
+  appends the system prompt, every Claude session starts with all of Bash pre-approved (the coordinator had this before; subagents had only `vibest send`; permission rules the user sets to ask still apply), Cursor can run `coordinator` (its definition and session facts arrive in its first
+  input), and the Pi extension serves every vibest session. The protocol number is unchanged; the contract snapshot is
+  regenerated.
 - **Pull or type depends only on the harness; the entry session is an ordinary session** (anyone reading
   `vibest.db` or `vibest ls`, harness integration and plugin authors): a harness that declares `inbox` (Claude, Pi)
   takes its next batch with `Inbox.Take` / `/inbox/take` when it is idle, for the entry session and spawned sessions

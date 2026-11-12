@@ -26,12 +26,7 @@ const claudeStartup: NonNullable<Harness.HarnessDefinition["startup"]> = Effect.
     }),
 )
 
-const CLAUDE_INSPECT_TOOLS = ["Bash", "Read", "Grep", "Glob", "Skill"]
-
 const projectDirRules = (dir: string) => [`Read(/${dir}/**)`, `Edit(/${dir}/**)`]
-
-const vibestSend = (vibest: ReadonlyArray<string>) =>
-  [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd} send:*)`).join(",")
 
 const executionComplete = (event: Readonly<Record<string, unknown>>) => {
   if (event.reason === "answer") return event
@@ -113,28 +108,13 @@ export const claude: Harness.HarnessDefinition = {
   ready: "integration",
   checkProvider: noProvider("claude"),
   launchArgs: (i) => [
-    ...(i.resume ? ["--resume", i.sessionId!] : ["--session-id", i.sessionId!]),
+    ...(i.sessionId === null ? [] : [i.resume ? "--resume" : "--session-id", i.sessionId]),
     "--append-system-prompt-file",
     i.systemPromptFile,
     "--add-dir",
     i.projectDir,
     "--allowedTools",
-    [vibestSend(i.vibest), ...projectDirRules(i.projectDir)].join(","),
-    "--plugin-dir",
-    i.pluginDir,
-    ...opt("--model", i.model),
-  ],
-  coordinatorArgs: (i) => [
-    ...opt("--resume", i.sessionId),
-    "--append-system-prompt-file",
-    i.systemPromptFile,
-    "--strict-mcp-config",
-    "--tools",
-    [...CLAUDE_INSPECT_TOOLS, "Edit", "Write"].join(","),
-    "--add-dir",
-    i.projectDir,
-    "--allowedTools",
-    [...CLAUDE_INSPECT_TOOLS, ...projectDirRules(i.projectDir)].join(","),
+    ["Bash", ...projectDirRules(i.projectDir)].join(","),
     "--plugin-dir",
     i.pluginDir,
     ...opt("--model", i.model),

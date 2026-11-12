@@ -229,7 +229,7 @@ export const sessionMove = (deps: {
     const { root, cwd } = yield* deps.locate(session)
     const base = {
       project: root,
-      agentType: session.agent,
+      agent: session.agent,
       parentSessionId: source.parentSessionId,
       harnesses: options,
     }

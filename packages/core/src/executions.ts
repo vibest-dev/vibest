@@ -1,4 +1,4 @@
-import type { HarnessUnavailable, NotReady } from "@vibest/schema/session"
+import type { HarnessUnavailable, NotReady, UnknownAgent } from "@vibest/schema/session"
 import { Effect, Exit } from "effect"
 import type { FileSystem, Path } from "effect"
 
@@ -43,7 +43,11 @@ export const sessionExecutions = (deps: {
     session: SessionRow,
     terminal: Terminal,
     task: string,
-  ) => Effect.Effect<void, NotReady | RuntimeError | HarnessUnavailable, FileSystem.FileSystem | Path.Path>
+  ) => Effect.Effect<
+    void,
+    NotReady | RuntimeError | HarnessUnavailable | UnknownAgent,
+    FileSystem.FileSystem | Path.Path
+  >
 }) => {
   const { db } = deps
 

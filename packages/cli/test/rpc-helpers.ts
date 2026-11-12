@@ -40,10 +40,16 @@ export const asEntry = (raw: Effect.Success<typeof client>, repositoryRoot: stri
     const projectId = yield* projectOf(repositoryRoot)
     const entry =
       (yield* db.entryOf(projectId))?.id ??
-      (yield* db.startEntry(projectId, "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "test/entry" },
-      })).sessionId
+      (yield* db.startEntry(
+        projectId,
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "test/entry" },
+        },
+        { agent: "coordinator" },
+      )).sessionId
     return authed(raw, sessionHeaders({ sessionId: entry, repositoryRoot, projectId }))
   })
 

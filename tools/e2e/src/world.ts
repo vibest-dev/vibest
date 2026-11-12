@@ -569,7 +569,7 @@ export class World {
         if (!fs.existsSync(file)) return false
         const db = readDb(file)
         try {
-          return db.query("SELECT id FROM session WHERE agent = 'main' AND ended_at IS NULL").get() !== null
+          return db.query("SELECT id FROM session WHERE agent = 'coordinator' AND ended_at IS NULL").get() !== null
         } catch {
           return false
         } finally {

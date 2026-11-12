@@ -224,7 +224,7 @@ export const machineHooks = (
     const registration = { dispose: Effect.void }
     yield* Plugin.effectOf(plugin)({
       options,
-      agent: { hook: () => Effect.succeed(registration) },
+      agent: { hook: () => Effect.succeed(registration), transform: () => Effect.succeed(registration) },
       machine: {
         hook: (name, callback, hookOptions) =>
           name === "connect" || name === "remove"

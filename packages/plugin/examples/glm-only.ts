@@ -10,7 +10,7 @@ export default Plugin.define({
       if (provider === undefined && model === undefined) return
       yield* context.agent.hook("start.before", (event) =>
         Effect.succeed(
-          event.agentType === "main"
+          event.agent === "coordinator"
             ? undefined
             : {
                 harness: "pi",

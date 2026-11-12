@@ -56,13 +56,13 @@ const liveEntry = (w: World) =>
   row<EntryRow>(
     w,
     `SELECT s.id, s.directory, s.harness_session_id AS conversation, s.runtime FROM ${SESSIONS} s
-     WHERE s.agent_type = 'main' AND s.ended_at IS NULL ORDER BY s.created_at DESC LIMIT 1`,
+     WHERE s.agent_type = 'coordinator' AND s.ended_at IS NULL ORDER BY s.created_at DESC LIMIT 1`,
   )
 
 const processStarts = (w: World) =>
   row<{ n: number }>(
     w,
-    "SELECT count(*) AS n FROM process p JOIN session s ON s.id = p.session_id WHERE s.agent = 'main'",
+    "SELECT count(*) AS n FROM process p JOIN session s ON s.id = p.session_id WHERE s.agent = 'coordinator'",
   )?.n ?? 0
 
 const piReady = async (socket: string, what: string) => {
@@ -127,7 +127,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S10-launch",
     title:
-      "`vibest` from a plain terminal in a subdirectory opens the entry session in this run's herdr session at the repository root (the parent workspace), and its system prompt is $TMPDIR/vibest/<id>/system-prompt.md naming the project folder",
+      "`vibest` from a plain terminal in a subdirectory opens the entry session in this run's herdr session at the repository root (the parent workspace), and its system prompt (appended to Pi's own) is $TMPDIR/vibest/<id>/system-prompt.md naming the project folder",
     run: async (w) => {
       needs("pi", "herdr")
       const model = heldModel()
@@ -148,7 +148,7 @@ const checks: ReadonlyArray<Check> = [
         const terminal = (JSON.parse(entry.runtime ?? "{}") as { id?: string }).id ?? ""
         expect(terminal.startsWith(`${w.herdrSession}/`), `entry session terminal ${terminal}`)
         const file = path.join(w.root, "tmp", "vibest", entry.id, "system-prompt.md")
-        expect(flag(argv, "--system-prompt") === file, `pi argv: ${JSON.stringify(argv)}`)
+        expect(flag(argv, "--append-system-prompt") === file, `pi argv: ${JSON.stringify(argv)}`)
         const info = await w.json<{ directory: string }>(["project", "info"])
         expect((await Bun.file(file).text()).includes(info.directory), `${file} does not name ${info.directory}`)
       } finally {
@@ -328,6 +328,34 @@ const checks: ReadonlyArray<Check> = [
           const listed = await w.json<{ sessions: Array<{ id: string }> }>(["ls", "--all"], { cwd: other })
           expect(!listed.sessions.some((e) => e.id === id), `${task}'s run is listed in the other repository`)
         }
+      } finally {
+        model.stop()
+      }
+    },
+  },
+  {
+    id: "S42",
+    title:
+      "agent definitions: the entry session is the coordinator and vibest run starts a general session; an unknown --agent is refused before any worktree is made",
+    run: async (w) => {
+      needs("pi", "herdr", "git")
+      const model = heldModel()
+      model.release()
+      try {
+        const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-agents", model.url)}`
+        await w.daemon()
+        await w.entry({ cwd: w.repository })
+        const worktrees = async () => (await fs.readdir(path.join(w.vibestHome, "worktrees")).catch(() => [])).length
+        const before = await worktrees()
+        const refused = await w.viaEntry(["run", "--agent", "nosuch", "pi", "--env", env, "--", ask("no")])
+        expect(
+          refused.code !== 0 && refused.stderr.includes("nosuch"),
+          `unknown agent: ${refused.code} ${refused.stderr}`,
+        )
+        expect((await worktrees()) === before, "a worktree was made for the unknown agent")
+        const { id } = JSON.parse(await w.okViaEntry(["run", "pi", "--env", env, "--", ask("yes")])) as { id: string }
+        expect(row<{ agent: string }>(w, "SELECT agent FROM session WHERE id = ?", id)?.agent === "general", "agent")
+        expect(liveEntry(w)?.id !== undefined, "the entry session is not the coordinator")
       } finally {
         model.stop()
       }

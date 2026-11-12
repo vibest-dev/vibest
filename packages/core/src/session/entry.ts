@@ -1,6 +1,7 @@
 import { LaunchFailed, NoRuntime, type RuntimeMachine } from "@vibest/schema/session"
 import { Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 
+import { Agents, unknownAgent } from "../agents.ts"
 import { Bus } from "../bus.ts"
 import { AddressJson, Db, encodeAddress, type RuntimeAddress } from "../db.ts"
 import { LayerNode } from "../effect/layer-node.ts"
@@ -44,6 +45,9 @@ export const sameEntry = (
   )
 }
 
+const ENTRY_FIRST_INPUT =
+  "The user has opened this conversation and has not given a task yet. Wait for the user's instructions."
+
 const firstStart = new LaunchFailed({
   message: "no harness to inherit: pass --harness, for example `vibest --harness claude`",
 })
@@ -54,6 +58,7 @@ const make = Effect.gen(function* () {
   const runtimes = yield* Runtimes
   const restarting = (yield* SessionLive).restarting
   const plugins = yield* Plugins
+  const agents = yield* Agents
   const harness = yield* Harness
   const harnesses = yield* Harnesses
   const processes = yield* Processes
@@ -74,9 +79,18 @@ const make = Effect.gen(function* () {
     )
 
   const harnessIds = () => harnesses.all.map((definition) => definition.id)
+  const firstInputOf = (harness: HarnessId) =>
+    harnesses.find(harness)?.systemPromptInPrompt === true ? ENTRY_FIRST_INPUT : undefined
+
+  const known = (id: string) =>
+    agents.find(id) === undefined ? Effect.fail(unknownAgent(id, agents.all)) : Effect.void
+
+  const agentOf = (current: { readonly agent: string } | undefined, fresh: boolean, requested: string) =>
+    current === undefined || fresh ? requested : current.agent
 
   const decide = (input: {
     readonly root: string
+    readonly agent: string
     readonly current: { readonly harnessId: string; readonly runtime: string | null } | undefined
     readonly harness: string | undefined
     readonly provider: string | undefined
@@ -87,7 +101,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       return yield* plugins.start({
         project: input.root,
-        agentType: "main",
+        agent: input.agent,
         parentSessionId: undefined,
         prompt: "",
         harness: input.harness ?? input.current?.harnessId,
@@ -135,11 +149,16 @@ const make = Effect.gen(function* () {
     readonly argv: ReadonlyArray<string>
     readonly focus: boolean
     readonly runtime: string | undefined
+    readonly agent: string
   }) {
     const { projectId: id, root, at, argv } = input
     const current = yield* db.entryOf(id)
+    const fresh = argv.includes("--new")
+    const agent = agentOf(current, fresh, input.agent)
+    yield* known(agent)
     const decision = yield* decide({
       root,
+      agent,
       current,
       harness: Launch.flagValue(argv, "--harness"),
       provider: Launch.flagValue(argv, "--provider"),
@@ -164,12 +183,12 @@ const make = Effect.gen(function* () {
     const run = rt.run
     if (run === undefined)
       return yield* new LaunchFailed({ message: "this runtime cannot type a command into the pane it opened" })
-    const fresh = argv.includes("--new")
     let opened: Terminal | undefined
     let claimedId: string | undefined
     const command = yield* withHarness(
       Launch.entryCommand({
         harness: chosen,
+        agent,
         root,
         provider: decision.provider ?? null,
         model: decision.model ?? null,
@@ -197,6 +216,8 @@ const make = Effect.gen(function* () {
                   model: decision.model,
                   routing: { decidedBy: decision.decidedBy, trace: decision.trace },
                   projectDirectory: root,
+                  agent,
+                  firstInput: firstInputOf(chosen),
                   ...(existing === undefined || fresh ? { sessionId } : {}),
                 },
               )
@@ -258,9 +279,12 @@ const make = Effect.gen(function* () {
     readonly provider: string | undefined
     readonly model: string | undefined
     readonly runtime: string | undefined
+    readonly agent: string
   }) {
     const current = yield* db.entryOf(input.projectId)
-    const decision = yield* decide({ ...input, current, machine: "local" })
+    const agent = agentOf(current, false, input.agent)
+    yield* known(agent)
+    const decision = yield* decide({ ...input, agent, current, machine: "local" })
     if (decision.harness === undefined) return yield* firstStart
     if (harnesses.find(decision.harness) === undefined)
       return yield* new HarnessUnavailable({
@@ -285,8 +309,11 @@ const make = Effect.gen(function* () {
     readonly model: string | undefined
     readonly routing: unknown
     readonly pid: number | undefined
+    readonly agent: string
   }) {
     const { projectId, directory, terminal } = input
+    const agent = agentOf(yield* db.entryOf(projectId), input.fresh, input.agent)
+    yield* known(agent)
     const kind = input.runtime ?? (yield* onlyRuntime)
     if (kind === undefined) return yield* new NoRuntime({ message: "the entry session's runtime is not named" })
     return yield* projectLocked.withLock(projectId)(
@@ -304,6 +331,7 @@ const make = Effect.gen(function* () {
         const command = yield* withHarness(
           Launch.entryCommand({
             harness: input.harness,
+            agent,
             root: directory,
             provider: input.provider ?? null,
             model: input.model ?? null,
@@ -319,6 +347,8 @@ const make = Effect.gen(function* () {
                   routing: input.routing,
                   pid: input.pid,
                   projectDirectory: directory,
+                  agent,
+                  firstInput: firstInputOf(input.harness),
                 },
               )
               claimed = { ...saved, runtime: runtimeEnv(kind, address) }
@@ -390,6 +420,7 @@ export class EntrySession extends Context.Service<EntrySession, Effect.Success<t
     service: EntrySession,
     layer: EntrySession.layer,
     deps: [
+      Agents.node,
       Bus.node,
       Db.node,
       Harness.node,

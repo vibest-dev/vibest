@@ -36,9 +36,14 @@ export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, curren
 
   return {
     ofPeer: (session: Statement.Fragment, scope: PeerScope) =>
-      sql`EXISTS (SELECT 1 FROM session o WHERE o.id = ${session} AND o.origin_peer = ${scope.peer}
-        AND o.origin_project = ${scope.project}
-        ${scope.session === undefined ? sql`` : sql`AND o.origin_session = ${scope.session}`})`,
+      scope.session === undefined
+        ? sql`EXISTS (SELECT 1 FROM session o WHERE o.id = ${session} AND o.origin_peer = ${scope.peer}
+            AND o.origin_project = ${scope.project})`
+        : sql`EXISTS (WITH RECURSIVE line(id) AS (
+            SELECT ${session} UNION SELECT a.parent_session_id FROM session a JOIN line ON a.id = line.id
+              WHERE a.parent_session_id IS NOT NULL)
+          SELECT 1 FROM session o WHERE o.id IN (SELECT id FROM line) AND o.origin_peer = ${scope.peer}
+            AND o.origin_project = ${scope.project} AND o.origin_session = ${scope.session})`,
 
     queries: {
       machines: reads.machines.pipe(Effect.orDie),

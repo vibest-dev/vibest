@@ -119,7 +119,8 @@ const pair = (extra: ReadonlyArray<Plugin.Plugin> = [], options: { readonly late
     const added = yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
     yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
     const { asEntry: here } = yield* entryOn(a)
-    const spawn = (runtime = "view") => here(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {}, runtime }))
+    const spawn = (runtime = "view") =>
+      here(a.raw.Spawn({ agent: "general", machine: "mb", prompt: "x", callerEnv: {}, runtime }))
     const listed = (id: string) => Effect.map(here(a.raw.List({})), (r) => r.sessions.find((row) => row.id === id)!)
     return { net, A, B, a, b, added, here, spawn, listed, spawned }
   })

@@ -9,7 +9,6 @@ import { pi, piModels } from "../src/pi.ts"
 
 const ADAPTERS = { pi, claude, cursor }
 const IDS = ["pi", "claude", "cursor"] as const
-const hasNewline = (args: ReadonlyArray<string>) => args.some((a) => /[\r\n]/.test(a))
 
 const launchInput: Harness.LaunchInput = {
   worktree: "/h/.vibest/worktrees/abcd1234-abcd-4abc-8abc-abcd1234abcd",
@@ -127,59 +126,12 @@ describe("HarnessAdapter", () => {
     }
   })
 
-  it("Coordinator argv: rules, the inspection tools and file tools for the project folder, no MCP server at all; cursor cannot be one", () => {
-    const input: Harness.CoordinatorInput = {
-      root: "/repo",
-      projectDir: "/h/p",
-      systemPromptFile: "/tmp/vibest/c0ffee00-c0ff-4c0f-8c0f-c0ffee00c0ff/system-prompt.md",
-      provider: null,
-      model: "m",
-      sessionId: null,
-      pluginDir: "/opt/vibest/harnesses/x",
-      env: { VIBEST_AGENT: "coordinator", HERDR_PANE_ID: "w1:p1" },
-    }
-    const claude = ADAPTERS.claude.coordinatorArgs!(input)
-    assert.deepStrictEqual(
-      claude.slice(claude.indexOf("--strict-mcp-config"), claude.indexOf("--strict-mcp-config") + 7),
-      [
-        "--strict-mcp-config",
-        "--tools",
-        "Bash,Read,Grep,Glob,Skill,Edit,Write",
-        "--add-dir",
-        "/h/p",
-        "--allowedTools",
-        "Bash,Read,Grep,Glob,Skill,Read(//h/p/**),Edit(//h/p/**)",
-      ],
-    )
-    assert.notInclude(claude, "--mcp-config")
-    assert.include(claude, "--append-system-prompt-file")
-    assert.deepStrictEqual(ADAPTERS.pi.coordinatorArgs!(input), [
-      "--system-prompt",
-      input.systemPromptFile,
-      "--tools",
-      "read,bash,codemode,grep,find,ls,write,edit",
-      "--no-mcp",
-      "-e",
-      `${input.pluginDir}/extension.mjs`,
-      "--model",
-      "m",
-    ])
-    assert.isUndefined(ADAPTERS.cursor.coordinatorArgs)
-    assert.deepStrictEqual(ADAPTERS.pi.coordinatorArgs!({ ...input, sessionId: "s" }).slice(0, 2), [
-      "--session-id",
-      "s",
-    ])
-    assert.deepStrictEqual(ADAPTERS.claude.coordinatorArgs!({ ...input, sessionId: "s" }).slice(0, 2), [
-      "--resume",
-      "s",
-    ])
-    for (const id of ["pi", "claude"] as const)
-      assert.notInclude(ADAPTERS[id].coordinatorArgs!(input).join(" "), "session")
-    for (const id of IDS)
-      if (ADAPTERS[id].coordinatorArgs) assert.isFalse(hasNewline(ADAPTERS[id].coordinatorArgs!(input)))
+  it("an entry session with no conversation yet starts without a session id or resume flag", () => {
+    for (const id of ["claude", "pi"] as const)
+      assert.notInclude(ADAPTERS[id].launchArgs({ ...input, sessionId: null }).join(" "), "session")
   })
 
-  it("Sessions get no vibest MCP server: claude may run vibest send, and read and edit in the project folder", () => {
+  it("Sessions get no vibest MCP server: claude may run vibest, and read and edit in the project folder", () => {
     for (const id of IDS)
       assert.isEmpty(
         ADAPTERS[id].launchArgs(input).filter((a) => /mcp/i.test(a)),
@@ -188,7 +140,7 @@ describe("HarnessAdapter", () => {
     const claude = ADAPTERS.claude.launchArgs(input)
     assert.strictEqual(
       claude[claude.indexOf("--allowedTools") + 1],
-      `Bash(vibest send:*),Bash(/usr/bin/bun /src/main.ts send:*),Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
+      `Bash,Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
     )
     assert.strictEqual(claude[claude.indexOf("--add-dir") + 1], input.projectDir)
   })
