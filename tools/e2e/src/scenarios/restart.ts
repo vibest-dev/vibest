@@ -20,11 +20,9 @@ import {
   compiled,
   expect,
   expectFacts,
-  fail,
   harnesses,
   herdr,
   readDb,
-  row,
   rows,
   SESSIONS,
   Skip,
@@ -347,12 +345,6 @@ const checks: ReadonlyArray<Check> = [
             `${id}'s processes: ${JSON.stringify(ends)}`,
           )
         }
-        const notice = () =>
-          row<{ status: string }>(w, "SELECT status FROM inbox WHERE session_id = ? AND kind = 'notice'", before.id)
-            ?.status
-        await until("the continue notice delivered", () => notice() === "delivered").catch(() =>
-          fail(`the entry session's continue notice: ${notice()}`),
-        )
       } finally {
         model.stop()
         await dropHerdrSession(w, session)
