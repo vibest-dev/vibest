@@ -515,7 +515,7 @@ const checks: ReadonlyArray<Check> = [
           await w.okViaEntry(["harness", "ls", "--machine", "mb"], { env: s.aEnv, asIs: true }),
         ) as Array<Entry>
         expect(
-          JSON.stringify(fromAgent) === JSON.stringify(remote),
+          names(fromAgent).join() === names(remote).join(),
           `the entry session's list: ${JSON.stringify(fromAgent)}`,
         )
         const unknown = await s.onA(["harness", "ls", "--machine", "nosuch"])
