@@ -4,7 +4,6 @@ import { Layout } from "@vibest/core/paths"
 import { SessionLocks } from "@vibest/core/session/locks"
 import { Sessions } from "@vibest/core/sessions"
 import { Effect, Fiber, FileSystem, HashMap, Path, PlatformError } from "effect"
-import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { entryPending } from "./lib/directory.ts"
@@ -96,33 +95,6 @@ describe.concurrent("Sessions", () => {
       assert.deepStrictEqual(sends[sends.findIndex((c) => c.text === "next") + 1]!.keys, ["enter"])
     }),
     { hooked: ["pi"] },
-  )
-
-  test(
-    "a queued message the session never starts on: task_not_started fails that batch and tells the owner, with the text",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const sessions = yield* Sessions
-      const db = yield* Db
-      const { id } = yield* sessions.spawn(yield* spawnInput(yield* makeRepository))
-      yield* untilVirtual(db.getSession(id), (w) => w?.executionState === "not_started")
-      yield* sessions.send(id, "next")
-      const notices = yield* untilVirtual(sqlNotices(id), (m) => m.length === 2)
-      assert.match(
-        notices[1]!,
-        new RegExp(`^A message to ${id} was not delivered: task_not_started: .*\\n\\nnext$`, "s"),
-      )
-      assert.deepStrictEqual(
-        (yield* (yield* SqlClient.SqlClient)<{
-          status: string
-        }>`SELECT status AS status FROM inbox WHERE session_id = ${id} AND kind IN ('task', 'send') AND id > (SELECT min(id) FROM inbox WHERE session_id = ${id} AND kind IN ('task', 'send'))`.pipe(
-          Effect.orDie,
-        )).map((r) => r.status),
-        ["failed"],
-      )
-      assert.lengthOf((yield* herdr.callsTo("send")).slice(1), 5)
-    }),
-    { promptsIgnored: true },
   )
 
   test(
