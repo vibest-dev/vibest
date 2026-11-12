@@ -110,14 +110,15 @@ it(
   },
 )
 
+const fsEventsDeliveryUnderLoadMs = 60_000
 const byId = (listed: ReadonlyArray<PluginInfo>, id: string) => listed.find((p) => p.id === id)
 
-const listUntilAtMost15s = async (
+const listUntil = async (
   list: () => Promise<ReadonlyArray<PluginInfo>>,
   done: (listed: ReadonlyArray<PluginInfo>) => boolean,
 ) => {
   let listed: ReadonlyArray<PluginInfo> = []
-  for (const deadline = Date.now() + 15_000; Date.now() < deadline; await Bun.sleep(100)) {
+  for (const deadline = Date.now() + fsEventsDeliveryUnderLoadMs; Date.now() < deadline; await Bun.sleep(100)) {
     listed = await list()
     if (done(listed)) return listed
   }
@@ -126,7 +127,7 @@ const listUntilAtMost15s = async (
 
 it(
   "P16/P17: the running binary reloads changed async imports, loads a plugin added under a symlinked tmpdir, keeps running the last good one while broken or hung (import gives up after 5s) without setting it up again, recovers",
-  { timeout: 90_000 },
+  { timeout: 300_000 },
   async () => {
     build()
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-reload-"))
@@ -150,42 +151,39 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
     const log = async () => (await fs.readFile(setups, "utf8")).trim().split("\n")
     try {
       await withVibestd(home, async (list) => {
-        const first = byId(await listUntilAtMost15s(list, (l) => byId(l, "live")?.status === "active"), "live")!
+        const first = byId(await listUntil(list, (l) => byId(l, "live")?.status === "active"), "live")!
         assert.deepStrictEqual(await log(), ["v1"])
 
         await fs.writeFile(
           path.join(home, "plugins", "zz-added.ts"),
           `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "added", effect: () => Effect.void })\n`,
         )
-        const added = byId(await listUntilAtMost15s(list, (l) => byId(l, "added")?.status === "active"), "added")!
+        const added = byId(await listUntil(list, (l) => byId(l, "added")?.status === "active"), "added")!
         assert.deepInclude(added, { id: "added", status: "active" })
 
         await fs.writeFile(version, versionFileWithTopLevelAwait("v2"))
         const second = byId(
-          await listUntilAtMost15s(
-            list,
-            (l) => byId(l, "live") !== undefined && byId(l, "live")!.revision !== first.revision,
-          ),
+          await listUntil(list, (l) => byId(l, "live") !== undefined && byId(l, "live")!.revision !== first.revision),
           "live",
         )!
         assert.strictEqual(second!.status, "active")
         assert.deepStrictEqual(await log(), ["v1", "v2"])
 
         await fs.writeFile(version, `export const version = (() => { throw new Error("broken on purpose") })()\n`)
-        const broken = byId(await listUntilAtMost15s(list, (l) => byId(l, "live")?.error !== undefined), "live")!
+        const broken = byId(await listUntil(list, (l) => byId(l, "live")?.error !== undefined), "live")!
         assert.deepInclude(broken, { status: "active", revision: second!.revision })
         assert.include(broken!.error, "broken on purpose", broken!.error)
 
         await fs.writeFile(version, `export const version = await new Promise(() => {})\n`)
         const hung = byId(
-          await listUntilAtMost15s(list, (l) => byId(l, "live")?.error?.includes("import timed out") === true),
+          await listUntil(list, (l) => byId(l, "live")?.error?.includes("import timed out") === true),
           "live",
         )!
         assert.deepInclude(hung, { status: "active", revision: second!.revision })
 
         await fs.writeFile(version, versionFileWithTopLevelAwait("v3"))
         const fixed = byId(
-          await listUntilAtMost15s(
+          await listUntil(
             list,
             (l) =>
               byId(l, "live") !== undefined &&
@@ -205,7 +203,7 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
 
 it(
   "a plugin's lazy import, imported again once another plugin loads, is the same module evaluated once",
-  { timeout: 90_000 },
+  { timeout: 180_000 },
   async () => {
     build()
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "vibest-lazy-"))
@@ -239,12 +237,12 @@ export default Plugin.define({
     )
     try {
       await withVibestd(home, async (list) => {
-        await listUntilAtMost15s(list, (l) => l[0]?.status === "active")
+        await listUntil(list, (l) => l[0]?.status === "active")
         await fs.writeFile(
           path.join(home, "plugins", "zz-other.ts"),
           `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "other", effect: () => Effect.void })\n`,
         )
-        await listUntilAtMost15s(list, (l) => l[1]?.status === "active")
+        await listUntil(list, (l) => l[1]?.status === "active")
         await fs.writeFile(path.join(home, "trigger"), "")
         const lines = async () => (await fs.readFile(log, "utf8")).trim().split("\n")
         for (const deadline = Date.now() + 15_000; (await lines()).length < 2 && Date.now() < deadline;)

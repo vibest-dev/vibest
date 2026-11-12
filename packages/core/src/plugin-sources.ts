@@ -1,5 +1,5 @@
 import type * as VibestPlugin from "@vibest/plugin"
-import { Context, Crypto, Duration, Effect, FileSystem, Option, Path, Schema } from "effect"
+import { Context, Crypto, Duration, Effect, FileSystem, Latch, Option, Path, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
 import { LayerNode } from "./effect/layer-node.ts"
@@ -294,11 +294,16 @@ export const makeSources = Effect.fnUntraced(function* (
   return { operations, load, retain }
 })
 
-export const makeWatcher = (changed: (path: string) => void) =>
+export const WATCH_PROBE = ".plugins-watch"
+const PROBE_ATTEMPTS = 10
+
+export const makeWatcher = (changed: (path: string) => void, retry: Duration.Input) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const loader = yield* PluginLoader
+    const probe = path.join((yield* Layout).home, WATCH_PROBE)
+    const probeSeen = Latch.makeUnsafe(false)
     const running = new Map<string, { readonly key: string; readonly close: () => void }>()
     let current: Watched = { paths: new Set(), listings: new Set() }
     const stop = (dir: string) => {
@@ -351,7 +356,8 @@ export const makeWatcher = (changed: (path: string) => void) =>
         const watching = yield* Effect.try(() =>
           loader.watch(dir, (name) => {
             const file = path.join(dir, name)
-            if (current.listings.has(dir) || current.paths.has(file)) changed(file)
+            if (file === probe) probeSeen.openUnsafe()
+            else if (current.listings.has(dir) || current.paths.has(file)) changed(file)
           }),
         ).pipe(
           Effect.tapError((e) => Effect.logWarning(`cannot watch ${dir} for plugin changes: ${messageOf(e)}`)),
@@ -363,5 +369,13 @@ export const makeWatcher = (changed: (path: string) => void) =>
       }
       return rewatched
     })
-    return { update }
+
+    const live = Effect.gen(function* () {
+      for (let attempt = 1; attempt <= PROBE_ATTEMPTS; attempt++) {
+        probeSeen.closeUnsafe()
+        yield* fs.writeFileString(probe, `${attempt}\n`).pipe(Effect.ignore)
+        if (Option.isSome(yield* probeSeen.await.pipe(Effect.timeoutOption(retry)))) return
+      }
+    })
+    return { update, live }
   })
