@@ -29,6 +29,7 @@ import {
   type World,
   writeEvidence,
 } from "../world.ts"
+import { addCursorPlugin } from "../world/plugins.ts"
 import { dropHerdrSession, project as newRepository } from "./inbox.ts"
 
 const HERDR_TASK = "Run this shell command exactly as written: herdr pane list > herdr-ran.txt. Then reply with: pong"
@@ -218,6 +219,7 @@ const checks: ReadonlyArray<Check> = [
         "claude/hooks/register.mjs",
         "cursor/.cursor-plugin/plugin.json",
         "cursor/hooks/hooks.json",
+        "cursor/plugin.js",
         ...["pi", "claude", "cursor"].flatMap((h) => [
           `${h}/skills/delegate/SKILL.md`,
           `${h}/skills/pipeline/SKILL.md`,
@@ -240,7 +242,7 @@ const checks: ReadonlyArray<Check> = [
       "vibest finds its plugins: npm's launcher passes them, the bare binary looks beside its bin/; with none it refuses each harness, and says why",
     run: async (w) => {
       const beside = await w.vibest(["doctor"], { env: { VIBEST_HARNESSES: undefined }, timeoutMs: 120_000 })
-      for (const h of ["pi", "claude", "cursor"])
+      for (const h of ["pi", "claude"])
         expect(!new RegExp(`^  . ${h} .*plugin`, "m").test(beside.stdout), `${h}:\n${beside.stdout}`)
       const solo = path.join(w.root, "solo", "bin")
       await fs.mkdir(solo, { recursive: true })
@@ -261,7 +263,7 @@ const checks: ReadonlyArray<Check> = [
         } catch {}
       }
       const resolvedSolo = await fs.realpath(path.join(w.root, "solo"))
-      for (const h of ["pi", "claude", "cursor"])
+      for (const h of ["pi", "claude"])
         expect(
           new RegExp(
             `^  ✗ ${h} +vibest's ${h} plugin is missing: ${path.join(resolvedSolo, "harnesses", h)}$`,
@@ -313,6 +315,7 @@ const checks: ReadonlyArray<Check> = [
       const login = await w.run(w.repository, ["cursor-agent", "status"])
       if (!/Logged in/.test(login.stdout + login.stderr))
         throw new Skip(`cursor-agent is not logged in: ${(login.stdout + login.stderr).trim()}`)
+      await addCursorPlugin(w, harnesses)
       const repo = await newRepository(w, "cursor-execution")
       const projectHookLog = path.join(w.root, "project-hook.log")
       await fs.mkdir(path.join(repo, ".cursor"), { recursive: true })

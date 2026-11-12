@@ -30,7 +30,7 @@ import {
 import { makeJournal } from "./journal.ts"
 import { entryRow, decodeEntrySessions, decodeSessions, ledgerReads, sessionOf } from "./ledger-read.ts"
 import { Routing } from "./plugins.ts"
-import { envelope } from "./replies.ts"
+import { noticeEnvelope, sessionEnvelope } from "./replies.ts"
 import { SessionLive } from "./session/live.ts"
 
 type InboxKey = { readonly session: string; readonly id: number }
@@ -375,7 +375,7 @@ export const makeStore = Effect.gen(function* () {
 
   const queueForPeer = (
     peer: string,
-    originSession: string | null,
+    recipientSession: string | null,
     row: {
       readonly sessionId: string
       readonly content: string
@@ -384,11 +384,18 @@ export const makeStore = Effect.gen(function* () {
     },
   ) =>
     Effect.gen(function* () {
-      if (originSession === null) return false
+      if (recipientSession === null) return false
       if ((yield* sql`SELECT 1 FROM peer WHERE id = ${peer}`).length === 0) return false
       yield* emit(OutboxQueued, {
         ...(row.at === undefined ? {} : { at: row.at }),
-        data: { id: randomId(), peer, session: row.sessionId, kind: row.kind, content: row.content },
+        data: {
+          id: randomId(),
+          peer,
+          session: row.sessionId,
+          recipient: recipientSession,
+          kind: row.kind,
+          content: row.content,
+        },
       })
       yield* notify({ type: "live.outbox", peerId: peer })
       return true
@@ -407,20 +414,11 @@ export const makeStore = Effect.gen(function* () {
       return session !== undefined && !session.metadata.archived && !session.metadata.removed
     })
 
-  const renderedSend = (recipient: string, sender: string | undefined, message: string) =>
+  const renderedSend = (sender: string | undefined, message: string) =>
     Effect.gen(function* () {
       if (sender === undefined) return message
       const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sender}`
-      const [to] = yield* sql<{ creator: string | null; entry: string | null }>`SELECT
-          s.parent_session_id AS creator, p.entry_session_id AS entry
-        FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${recipient}`
-      const toEntry = to?.entry === recipient
-      if (!toEntry && (sender === to?.creator || sender === to?.entry)) return message
-      return envelope(
-        "agent-message",
-        [["agent-id", sender], ...(toEntry ? ([["title", from?.name ?? ""]] as const) : [])],
-        ["message", message],
-      )
+      return sessionEnvelope({ id: sender, title: from?.name }, message)
     })
 
   const queueSend = (recipient: string, sender: string | undefined, message: string, request?: string) =>
@@ -429,7 +427,7 @@ export const makeStore = Effect.gen(function* () {
         recipient,
         kind: "send",
         sender: sender ?? null,
-        content: yield* renderedSend(recipient, sender, message),
+        content: yield* renderedSend(sender, message),
         status: "pending",
         request,
       })
@@ -439,33 +437,32 @@ export const makeStore = Effect.gen(function* () {
   const noticeTo = (recipient: string, content: string) =>
     Effect.gen(function* () {
       if (!(yield* liveRecipient(recipient))) return false
-      yield* queueInbox({ recipient, kind: "notice", sender: null, content, status: "pending" })
+      yield* queueInbox({
+        recipient,
+        kind: "notice",
+        sender: null,
+        content: noticeEnvelope(content),
+        status: "pending",
+      })
       return true
     })
 
   const insertInboxRow = (row: NewInboxRow, at?: number) =>
     Effect.gen(function* () {
-      const [route] = yield* sql<{
-        recipient: string | null
-        project: string
-      }>`SELECT
-          CASE WHEN r.id IS NOT NULL AND r.ended_at IS NULL THEN r.id ELSE p.entry_session_id END AS recipient,
-          p.id AS project
-        FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session r ON r.id = s.parent_session_id
-        WHERE s.id = ${row.sessionId}`
+      const heir = yield* nearestAlive(row.sessionId)
+      if (heir === undefined) return undefined
       const insert = (recipient: string, status: "pending" | "dropped") =>
         queueInbox({
           recipient,
           kind: "notice",
           sender: row.sessionId,
-          content: row.message,
+          content: noticeEnvelope(row.message),
           status,
           at,
         }).pipe(Effect.flatMap((id) => inboxIn(recipient, [id])))
-      const origin = yield* origins(row.sessionId)
-      if (origin?.peer) {
+      if ("peer" in heir) {
         const [queued] = yield* insert(row.sessionId, "dropped")
-        yield* queueForPeer(origin.peer, origin.session, {
+        yield* queueForPeer(heir.peer, heir.session, {
           sessionId: row.sessionId,
           content: row.message,
           kind: "notice",
@@ -473,14 +470,11 @@ export const makeStore = Effect.gen(function* () {
         })
         return queued!
       }
-      const recipient = route?.recipient ?? null
-      const [entry] =
-        route === undefined
-          ? []
-          : yield* sql<{ id: string | null }>`SELECT entry_session_id AS id FROM project WHERE id = ${route.project}`
-      const toEntry = recipient !== null && recipient === entry?.id
-      const present = recipient !== null && (!toEntry || placed(route!.project, yield* currentProcess(recipient)))
-      const [queued] = yield* insert(recipient ?? row.sessionId, present ? "pending" : "dropped")
+      const [route] = yield* sql<{ project: string; entry: string | null }>`SELECT
+          s.project_id AS project, p.entry_session_id AS entry
+        FROM session s JOIN project p ON p.id = s.project_id WHERE s.id = ${heir.local}`
+      const present = route?.entry !== heir.local || placed(route.project, yield* currentProcess(heir.local))
+      const [queued] = yield* insert(heir.local, present ? "pending" : "dropped")
       return queued!
     })
 
@@ -625,17 +619,31 @@ export const makeStore = Effect.gen(function* () {
       })),
     )
 
-  const addressedCreator = (id: string) =>
-    sql<{ id: string | null }>`SELECT
-        CASE WHEN s.origin_peer IS NOT NULL THEN s.origin_session
-          WHEN r.id IS NOT NULL AND r.ended_at IS NULL THEN r.id
-          ELSE p.entry_session_id END AS id
-      FROM session s JOIN project p ON p.id = s.project_id
-      LEFT JOIN session r ON r.id = s.parent_session_id
-      WHERE s.id = ${id}`.pipe(
-      Effect.map((rows) => rows[0]?.id ?? undefined),
+  type Creator = { readonly local: string } | { readonly peer: string; readonly session: string } | undefined
+  const creatorOf = (id: string): Effect.Effect<Creator> =>
+    sql<{ parent: string | null; peer: string | null; session: string | null }>`SELECT
+        parent_session_id AS parent, origin_peer AS peer, origin_session AS session
+      FROM session WHERE id = ${id}`.pipe(
+      Effect.map(([row]): Creator => {
+        if (row === undefined) return undefined
+        if (row.peer !== null && row.session !== null) return { peer: row.peer, session: row.session }
+        if (row.parent !== null) return { local: row.parent }
+        return undefined
+      }),
       Effect.orDie,
     )
+
+  const nearestAlive = (id: string): Effect.Effect<Creator> =>
+    Effect.gen(function* () {
+      let current = id
+      for (;;) {
+        const creator = yield* creatorOf(current)
+        if (creator === undefined || "peer" in creator) return creator
+        if ((yield* sql`SELECT 1 FROM session WHERE id = ${creator.local} AND ended_at IS NULL`).length > 0)
+          return creator
+        current = creator.local
+      }
+    }).pipe(Effect.orDie)
 
   return {
     sql,
@@ -644,7 +652,8 @@ export const makeStore = Effect.gen(function* () {
     rename,
     archive,
     noteConversation,
-    addressedCreator,
+    creatorOf,
+    nearestAlive,
     now,
     sessionLive,
     moving,

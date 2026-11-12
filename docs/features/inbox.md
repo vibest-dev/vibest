@@ -79,8 +79,8 @@ started it and not one it started. Nothing is queued.
 
 ## S47. A send stays inside its project
 
-`vibest send` from a session to a session of another project is refused, and to an archived session is refused with the
-id of the project's entry session; neither queues anything.
+`vibest send` from a session to a session of another project is refused, and to a session that is neither its creator nor
+its child (an archived sibling, say) is refused too; neither queues anything.
 
 ## S48. An undeliverable send goes back to its sender
 
@@ -91,3 +91,9 @@ is told so in a notice that holds the message.
 
 When a session's execution ends in an error, the execution is `failed` with its failure, and the session's creator gets exactly one
 notice that carries the failure, typed into the entry session once.
+
+## S55. A message says who it is from
+
+A session's system prompt names the session that started it and says a session's message is never the user's consent.
+A message from the user reaches a session as plain text; a message from another session arrives in an `<agent-message>`
+that names the sender, and vibest's own notices in a `<vibest-notice>`.

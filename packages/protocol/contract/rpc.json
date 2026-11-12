@@ -1977,13 +1977,26 @@
       }
     },
     "Harnesses.List": {
-      "access": "open",
+      "access": [
+        "open",
+        "peer"
+      ],
       "stream": false,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
           "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "machine": {
             "anyOf": [
               {
                 "type": "string"
@@ -2066,13 +2079,121 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "anyOf": [
           {
-            "not": {}
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/UnknownMachineEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineUnavailableEncoded"
+              },
+              {
+                "$ref": "#/$defs/MachineIncompatibleEncoded"
+              }
+            ]
           },
           {
             "$ref": "#/$defs/ProtocolRejectedEncoded"
           }
         ],
         "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "UnknownMachineEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "UnknownMachine"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "machines": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "machines"
+            ],
+            "additionalProperties": true
+          },
+          "MachineUnavailableEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineUnavailable"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "MachineIncompatibleEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "MachineIncompatible"
+                ]
+              },
+              "machine": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "machine",
+              "message"
+            ],
+            "additionalProperties": true
+          },
           "ProtocolRejectedEncoded": {
             "type": "object",
             "properties": {
@@ -6888,10 +7009,17 @@
                 "enum": [
                   "NoHarnessChosen"
                 ]
+              },
+              "runnable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
-              "_tag"
+              "_tag",
+              "runnable"
             ],
             "additionalProperties": true
           },
@@ -10611,10 +10739,17 @@
                 "enum": [
                   "NoHarnessChosen"
                 ]
+              },
+              "runnable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
-              "_tag"
+              "_tag",
+              "runnable"
             ],
             "additionalProperties": true
           },
@@ -13691,10 +13826,17 @@
                 "enum": [
                   "NoHarnessChosen"
                 ]
+              },
+              "runnable": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
-              "_tag"
+              "_tag",
+              "runnable"
             ],
             "additionalProperties": true
           },

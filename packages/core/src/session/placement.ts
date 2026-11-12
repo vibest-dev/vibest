@@ -109,6 +109,7 @@ const make = Effect.gen(function* () {
     return systemPrompt({
       system: (yield* definitionIn(agents, session.agent)).system,
       id: session.id,
+      checkout: (yield* db.sessionIdentity(session.id))?.entry,
       peer: yield* db.earlierSharer(session.id),
       creator: yield* db.creatorLabel(session.id),
       projectDir: layout.project(session.projectId),
@@ -195,14 +196,14 @@ const make = Effect.gen(function* () {
     undo: (a: A) => Effect.Effect<unknown, unknown, R2>,
   ) => Effect.acquireRelease(acquire, (a, exit) => (Exit.isFailure(exit) ? undo(a).pipe(Effect.ignore) : Effect.void))
 
-  const nearEntry = (session: SessionRow, kind: string) =>
-    db
-      .entryOf(session.projectId)
-      .pipe(
-        Effect.map((entry) =>
-          entry?.runtime === kind && entry.address !== null && entry.address.id !== "" ? entry.address : undefined,
-        ),
-      )
+  const nearCreator = (session: SessionRow, kind: string) =>
+    Effect.gen(function* () {
+      const creator = yield* db.creatorOf(session.id)
+      const parent = creator !== undefined && "local" in creator ? yield* db.getSession(creator.local) : undefined
+      return parent?.runtime === kind && parent.exitedAt === null && parent.address.id !== ""
+        ? parent.address
+        : undefined
+    })
 
   const openTerminal = Effect.fn("Placement.openTerminal")(function* (
     h: Runtime,
@@ -218,7 +219,7 @@ const make = Effect.gen(function* () {
       readonly endedByCaller?: boolean
     },
   ) {
-    const near = input.near !== undefined ? input.near : yield* nearEntry(session, h.id)
+    const near = input.near !== undefined ? input.near : yield* nearCreator(session, h.id)
     const remote = yield* db.startedByPeer(session.id)
     const choice = {
       harnessId: session.harnessId,
@@ -361,7 +362,7 @@ const make = Effect.gen(function* () {
   )
 
   const storedDirectory = (projectId: string) =>
-    db.entryOf(projectId).pipe(Effect.map((entry) => entry?.projectDirectory))
+    db.projectDirectory(projectId).pipe(Effect.map((directory) => directory || undefined))
 
   const recount = Effect.fn("Placement.recount")(function* (kind: string, projectId: string) {
     const h = runtimes.find(kind)

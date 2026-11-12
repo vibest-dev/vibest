@@ -279,7 +279,7 @@ replacing a mirror row when B's vibestd moved to another hc session on the same 
 
 Read-model tables of the ledger (schema.md), written only by their facts: `machine.added`, `machine.connected` and
 `machine.removed`; `peer.seen`; `outbox.queued` and `outbox.acked`, all facts of the ledger aggregate (`meta.ledger`); `outbox.queued`
-names the session it is about in its data. No fact names a machine: everything in one ledger
+names the sending session and, when the receiver is not the sender's own creator (a send or notice that passes an ended creator on to the nearest living one on another machine), the receiving session (`recipient`) in its data. No fact names a machine: everything in one ledger
 is on this machine, and a session on B is only in B's ledger (A asks B for it).
 
 ```sql
@@ -301,7 +301,8 @@ CREATE TABLE outbox (              -- B: what this vibestd still has to deliver 
   id         TEXT PRIMARY KEY CHECK (length(id) = 36),  -- random UUIDv4; the dedupe key on A (inbox.peer_item)
   seq        INTEGER NOT NULL,     -- its outbox.queued in the ledger aggregate: the order it is sent in
   peer_id    TEXT NOT NULL,
-  session_id TEXT NOT NULL,        -- the peer session it is about and that sends it
+  session_id TEXT NOT NULL,        -- the session that sends it
+  recipient  TEXT,                 -- the session on the peer that receives it; null in rows from before it existed (then the sender's origin_session)
   kind       TEXT NOT NULL CHECK (kind IN ('send', 'notice')),
   content    TEXT NOT NULL,        -- the text, rendered on A by kind
   created_at INTEGER NOT NULL

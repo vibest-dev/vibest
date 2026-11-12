@@ -26,7 +26,9 @@ assigns to the event it is given instead of returning its decision.
 
 ## G5. A routing plugin picks the harness
 
-A plugin can pick the harness for `vibest run`. With a plugin that picks Pi, a run that names no harness starts a Pi session, `vibest ls`
+A plugin can pick the harness for `vibest run`. The builtin plugin `harness-default` picks Claude when nothing else has
+chosen (no `--harness`, nothing to inherit) and Claude is available; with `"-harness-default"` in `plugins` and no
+plugin of one's own, such a run fails saying there is no harness to inherit. With a plugin that picks Pi, the same run starts a Pi session, `vibest ls`
 names the plugin as the one that decided the harness (the `routing` field of `vibest ls` and `vibest result`; `vibest
 run` itself prints only `{"id":"<session id>"}`), and the result arrives.
 
@@ -76,3 +78,9 @@ A plugin defined as `{ id, setup }` with Promises loads like an Effect plugin: i
 `vibest run -- <task>` to a real Pi and `vibest ls` names it as the decider, its `event.subscribe` iterator gets the
 agent's `execution.ended`, and deleting its file unloads it and runs the cleanup its `setup` returned. Editing an Effect
 plugin into the `setup` form reloads it like any edit (G2).
+
+## G14. A builtin plugin can be removed
+
+`"-<id>"` in `vibest.json` removes the builtin plugin with that exact id (for example `"-harness-default"`); `"-*"` and
+`"-prefix.*"` never match builtins. The removal counts from the config text as soon as vibestd starts, even while slow
+user plugins are still importing, and deleting the line brings the builtin back without restarting vibestd.

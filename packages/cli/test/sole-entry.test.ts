@@ -34,7 +34,7 @@ const recordingClient = (stop: "stopped" | "running" | "moved" | "unsupported" =
   return { calls, run: soleEntry(client, "w1:p2", start) }
 }
 
-describe("soleEntry while the entry session runs in another terminal: only a y whose stop finished starts; anything else starts nothing and never asks to stop (or, after a failed stop, to start)", () => {
+describe("soleEntry while the entry session runs in another terminal", () => {
   for (const [name, terminal, stdin] of [
     ["N", true, typed("n\n")],
     ["empty", true, typed("\n")],
@@ -61,25 +61,20 @@ describe("soleEntry while the entry session runs in another terminal: only a y w
     }).pipe(Effect.provide(stdio(true, Stream.never))),
   )
 
-  it.effect("y but the stop did not finish (running) or the entry session moved meanwhile: fails, starts nothing", () =>
-    Effect.gen(function* () {
-      for (const result of ["running", "moved"] as const) {
-        const f = recordingClient(result)
-        const exit = yield* Effect.exit(f.run)
-        assert.isTrue(Exit.isFailure(exit), result)
-        assert.deepStrictEqual(f.calls, ["RunningEntry", "StopEntry"], result)
-      }
-    }).pipe(Effect.provide(stdio(true, typed("y\n")))),
-  )
-
-  it.effect("y but it cannot be moved from here: fails saying why, not that it did not exit; starts nothing", () =>
-    Effect.gen(function* () {
-      const f = recordingClient("unsupported")
-      const exit = yield* Effect.exit(f.run)
-      assert.isTrue(Exit.isFailure(exit))
-      assert.include(String(exit), "cannot be moved from here: it runs on another machine. Exit it there first")
-      assert.notInclude(String(exit), "did not exit")
-      assert.deepStrictEqual(f.calls, ["RunningEntry", "StopEntry"])
-    }).pipe(Effect.provide(stdio(true, typed("y\n")))),
+  it.effect(
+    "y without a finished stop (running, moved, unsupported) fails and starts nothing; unsupported says why",
+    () =>
+      Effect.gen(function* () {
+        for (const result of ["running", "moved", "unsupported"] as const) {
+          const f = recordingClient(result)
+          const exit = yield* Effect.exit(f.run)
+          assert.isTrue(Exit.isFailure(exit), result)
+          assert.deepStrictEqual(f.calls, ["RunningEntry", "StopEntry"], result)
+          if (result === "unsupported") {
+            assert.include(String(exit), "cannot be moved from here: it runs on another machine. Exit it there first")
+            assert.notInclude(String(exit), "did not exit")
+          }
+        }
+      }).pipe(Effect.provide(stdio(true, typed("y\n")))),
   )
 })

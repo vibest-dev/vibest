@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
+import { unwrapped } from "@vibest/core/replies"
 import { SessionLocks } from "@vibest/core/session/locks"
 import { Placement } from "@vibest/core/session/placement"
 import { Sessions } from "@vibest/core/sessions"
@@ -173,7 +174,7 @@ describe.concurrent("after a vibestd stop", () => {
   const typed = (text: string) =>
     Effect.map(
       Effect.flatMap(FakeRuntime, (herdr) => herdr.callsTo("send")),
-      (calls) => calls.filter((c) => c.text === text).length,
+      (calls) => calls.filter((c) => c.text !== undefined && unwrapped(c.text) === text).length,
     )
 
   test(

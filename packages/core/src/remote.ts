@@ -110,6 +110,13 @@ const make = Effect.gen(function* () {
         row === null ? row : { ...row, id: addressed(at.machine, row.id) },
       ),
 
+    harnesses: (machine: string, provider: string | undefined) =>
+      Effect.flatMap(machines.link(machine), (link) =>
+        link.call(
+          link.client["Harnesses.List"](provider === undefined ? {} : { provider }, { headers: peerHeaders(self.id) }),
+        ),
+      ),
+
     list: (scope: ListScope, by: string, stopped: boolean | undefined) =>
       Effect.gen(function* () {
         if (scope._tag === "Peer") return { sessions: [], machines: [] }
@@ -186,11 +193,8 @@ const make = Effect.gen(function* () {
             ),
           )
         const identity = yield* repositoryIdentity(remote)
-        const entry = yield* db.entryOf(from.project)
         const runtime =
-          input.runtime ??
-          callerKind(yield* plugins.settled.pipe(Effect.andThen(runtimes.callers)), input.callerEnv) ??
-          (entry?.runtime || undefined)
+          input.runtime ?? callerKind(yield* plugins.settled.pipe(Effect.andThen(runtimes.callers)), input.callerEnv)
         const viewer = runtime === undefined ? undefined : (yield* runtimes.all).find((r) => r.id === runtime)
         const ready =
           viewer?.locate === undefined || runtime === undefined

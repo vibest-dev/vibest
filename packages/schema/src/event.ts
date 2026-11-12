@@ -117,6 +117,7 @@ export const OutboxQueued = fact("outbox.queued", "ledger", {
   id: Text,
   peer: Text,
   session: Text,
+  recipient: optional(Text),
   kind: optional(Schema.Literals(["send", "notice"])),
   content: Schema.String,
 })

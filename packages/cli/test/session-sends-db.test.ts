@@ -35,130 +35,121 @@ const setup = Effect.gen(function* () {
 })
 
 describe("sends from sessions", () => {
-  it.effect("a session whose parent has ended sends to the entry session, not to that parent", () =>
+  it.effect("a send to the entry session waits as a pending row like a send to any session", () =>
     memory(
       Effect.gen(function* () {
         const { db, project, entryId } = yield* setup
-        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: A })
-        yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
-        assert.isDefined(yield* db.insertSend(entryId, "to the entry", undefined, B))
-        assert.isUndefined(yield* db.insertSend(A, "to the ended parent", undefined, B))
-        const creator = yield* db.creatorLabel(B)
-        assert.deepStrictEqual(creator, { id: entryId, label: "the entry session" })
-        const prompt = systemPrompt({
-          system: "",
-          id: B,
-          projectDir: "/w",
-          vibest: ["vibest"],
-          preferences: "",
-          memories: "",
-          creator,
-        })
-        assert.include(prompt, `send ${entryId} --`)
-        assert.notInclude(prompt, `send ${A} --`)
-      }),
-    ),
-  )
-
-  it.effect("a send dropped because the entry session is gone ends with one notice to its sender", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, entryId } = yield* setup
-        const sent = (yield* db.insertSend(entryId, "hello", undefined, A))!
-        yield* db.clearEntry(place.runtime, place.address)
-        assert.strictEqual((yield* db.inboxWithStatus(A, "pending")).filter((r) => r.kind === "notice").length, 1)
-        const [note] = yield* db.pendingInbox(A)
-        assert.include(note!.message, "was not delivered")
-        assert.include(note!.message, "hello")
-        assert.strictEqual(note!.recipient, A)
-        assert.strictEqual((yield* db.setInboxStatus(entryId, [sent.id], "dropped")).length, 0)
-      }),
-    ),
-  )
-
-  it.effect("a send in flight when vibestd stopped ends failed with one notice to its sender", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, entryId } = yield* setup
-        const sent = (yield* db.insertSend(entryId, "hello", undefined, A))!
-        yield* db.claim(entryId, [sent.id])
-        yield* db.recoverDelivering((_, messages) => messages.join("\n"))
-        assert.strictEqual((yield* db.inboxWithStatus(A, "pending")).length, 1)
-        assert.include((yield* db.pendingInbox(A))[0]!.message, "hello")
-      }),
-    ),
-  )
-
-  it.effect("when the sender is gone the notice goes to the sender's creator, not the recipient's", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, project, entryId } = yield* setup
-        yield* db.insertSession(session(X), project, { cwd: "/w", task: "x", parentSessionId: entryId })
-        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: A })
-        const sent = (yield* db.insertSend(B, "hello", undefined, A))!
-        yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
-        yield* db.claim(B, [sent.id])
-        yield* db.recoverDelivering(() => "cut")
-        assert.deepStrictEqual(yield* db.pendingInbox(X), [])
+        assert.isDefined(yield* db.insertSend(entryId, "hello", undefined, A))
         assert.deepStrictEqual(
-          (yield* entryPending(db, project)).map((r) => [r.kind, r.sender, r.message]),
-          [["notice", A, "cut"]],
+          (yield* entryPending(db, project)).map((r) => [r.kind, r.sender, r.recipient]),
+          [["send", A, entryId]],
         )
       }),
     ),
   )
 
-  it.effect("a send to the creator on another machine goes to the outbox as a notice", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, project } = yield* setup
-        const sql = yield* SqlClient.SqlClient
-        yield* db.notePeer({ id: "11111111-1111-4111-8111-111111111111", name: "other" })
-        yield* db.insertSession(session(B), project, {
-          cwd: "/w",
-          task: "b",
-          origin: {
-            peer: "11111111-1111-4111-8111-111111111111",
-            project: "p",
-            reportTo: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-          },
-        })
-        assert.isUndefined(yield* db.sendToOrigin(B, "eeeeeeee", "hi"))
-        assert.isTrue(yield* db.sendToOrigin(B, "dddddddd", "hi"))
-        const out = yield* sql<{ kind: string; content: string }>`SELECT kind, content FROM outbox`
-        assert.deepStrictEqual(out, [{ kind: "send", content: "hi" }])
-      }),
-    ),
+  it.effect(
+    "a session may send to the session that started it and to the sessions it started, and to no one else",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const { db, project, entryId } = yield* setup
+          yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: entryId })
+          yield* db.insertSession(session(X), project, { cwd: "/w", task: "x", parentSessionId: A })
+          assert.isFalse(yield* db.maySend(A, B))
+          assert.isFalse(yield* db.maySend(B, A))
+          assert.isFalse(yield* db.maySend(X, entryId))
+          assert.isTrue(yield* db.maySend(entryId, B))
+          assert.isTrue(yield* db.maySend(B, entryId))
+          assert.isTrue(yield* db.maySend(A, X))
+          assert.isTrue(yield* db.maySend(X, A))
+        }),
+      ),
   )
 
-  it.effect("a send to a creator on a machine vibestd does not know writes nothing and says so", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, project } = yield* setup
-        const sql = yield* SqlClient.SqlClient
-        yield* db.insertSession(session(B), project, {
-          cwd: "/w",
-          task: "b",
-          origin: { peer: "22222222-2222-4222-8222-222222222222", project: "p", reportTo: X },
-        })
-        assert.isFalse(yield* db.sendToOrigin(B, "cccccccc", "hi"))
-        assert.deepStrictEqual(yield* sql`SELECT 1 FROM outbox`, [])
-      }),
-    ),
+  it.effect(
+    "a session whose creator has ended still names it as its creator, and its notices go to the nearest creator above that is running",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const { db, project, entryId } = yield* setup
+          yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: A })
+          yield* db.updateSession(A, { metadata: { archived: true, removed: true } })
+          assert.deepStrictEqual(yield* db.nearestAlive(B), { local: entryId })
+          assert.isTrue(yield* db.maySend(B, A))
+          const creator = yield* db.creatorLabel(B)
+          assert.deepStrictEqual(creator, { id: A, label: `agent ${session(A).name}` })
+          const prompt = systemPrompt({
+            system: "",
+            id: B,
+            projectDir: "/w",
+            vibest: ["vibest"],
+            preferences: "",
+            memories: "",
+            creator,
+          })
+          assert.include(prompt, `send ${A} --`)
+          assert.include(prompt, "nearest session above it that is still running")
+        }),
+      ),
   )
 
-  it.effect("a send with no sender session that was cut tells its recipient", () =>
-    memory(
+  it.effect(
+    "a send to the nearest living creator on another machine reaches that machine's outbox from any depth",
+    () =>
+      memory(
+        Effect.gen(function* () {
+          const { db, project } = yield* setup
+          const peer = "11111111-1111-4111-8111-111111111111"
+          const reportTo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+          yield* db.notePeer({ id: peer, name: "other" })
+          yield* db.insertSession(session(B), project, {
+            cwd: "/w",
+            task: "b",
+            origin: { peer, project: "p", reportTo },
+          })
+          yield* db.insertSession(session(X), project, { cwd: "/w", task: "x", parentSessionId: B })
+          yield* db.updateSession(B, { metadata: { archived: true, removed: true } })
+          const heir = yield* db.nearestAlive(X)
+          assert.deepStrictEqual(heir, { peer, session: reportTo })
+          assert.isTrue(yield* db.sendToPeer(X, peer, reportTo, "report"))
+          const out = yield* db.outboxOf(peer)
+          assert.deepInclude(out[0]!, { kind: "send", content: "report", reportTo })
+          assert.isFalse(yield* db.sendToPeer(X, "22222222-2222-4222-8222-222222222222", reportTo, "report"))
+        }),
+      ),
+  )
+
+  it.effect(
+    "an item for an ended session whose nearest living creator is on another machine goes on to that machine, once",
+    () =>
       Effect.gen(function* () {
-        const { db, project, entryId } = yield* setup
-        const first = (yield* db.insertSend(entryId, "one"))!
-        yield* db.claim(entryId, [first.id])
-        yield* db.recoverDelivering(() => "cut")
-        assert.deepStrictEqual(
-          (yield* entryPending(db, project)).map((r) => [r.kind, r.message]),
-          [["notice", "cut"]],
-        )
-      }),
-    ),
+        const sql = yield* SqlClient.SqlClient
+        const { db, project } = yield* setup
+        const peer = "11111111-1111-4111-8111-111111111111"
+        const reportTo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        const middle = B
+        const ended = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        yield* db.notePeer({ id: peer, name: "other" })
+        yield* db.insertSession(session(middle), project, { origin: { peer, project: "p", reportTo } })
+        yield* db.insertSession(session(ended), project, { parentSessionId: middle })
+        yield* db.updateSession(middle, { metadata: { archived: true, removed: true } })
+        yield* db.updateSession(ended, { metadata: { archived: true, removed: true } })
+        const item = {
+          id: "7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f",
+          recipient: ended,
+          kind: "send" as const,
+          sender: "mb/cccccccc",
+          content: "report",
+        }
+        assert.strictEqual(yield* db.receivePeerItem(item), "queued")
+        assert.strictEqual(yield* db.receivePeerItem(item), "duplicate")
+        assert.deepStrictEqual(yield* sql`SELECT status FROM inbox WHERE session_id = ${ended}`, [
+          { status: "dropped" },
+        ])
+        const out = yield* db.outboxOf(peer)
+        assert.lengthOf(out, 1)
+        assert.deepInclude(out[0]!, { kind: "send", content: "mb/cccccccc: report", reportTo })
+      }).pipe(memory),
   )
 })
