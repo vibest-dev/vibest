@@ -1,6 +1,7 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
+import { Sessions } from "@vibest/core/sessions"
 import { Plugin } from "@vibest/plugin"
 import { Effect, Fiber, FileSystem, Path } from "effect"
 import { TestClock } from "effect/testing"
@@ -19,6 +20,38 @@ import {
 import { test, client, asCli, asEntry } from "./rpc-helpers.ts"
 
 describe("vibest.sock", () => {
+  test(
+    "Launch of a harness that takes its system prompt in the first input types the definition, the session facts and the wait line once",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const db = yield* Db
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      yield* c.Launch({
+        agent: "coordinator",
+        callerEnv: {},
+        argv: ["/bin/vibest", "--harness", "cursor"],
+        focus: false,
+        runtime: "herdr",
+      })
+      const entry = (yield* db.entryOf(yield* projectOf(repo)))!
+      yield* (yield* Sessions).check(entry.id)
+      const typed = yield* until(herdr.callsTo("send"), (calls) => calls.length > 0)
+      yield* (yield* Sessions).check(entry.id)
+      yield* TestClock.adjust("5 seconds")
+      assert.lengthOf(yield* herdr.callsTo("send"), 1)
+      const first = typed[0]!.text
+      assert.include(first, "## Session facts")
+      assert.include(first, `You are agent ${entry.id}`)
+      assert.include(first, "You were opened by the user in a terminal")
+      assert.notInclude(first, "You were started by")
+      assert.include(
+        first,
+        "The user has opened this conversation and has not given a task yet. Wait for the user's instructions.",
+      )
+    }),
+  )
+
   test(
     "Launch types the harness with an env prefix and does not put identity in the pane",
     Effect.gen(function* () {

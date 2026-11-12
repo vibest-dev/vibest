@@ -342,48 +342,6 @@ const checks: ReadonlyArray<Check> = [
       }
     },
   },
-  {
-    id: "S43",
-    tier: "agent",
-    title:
-      "Cursor (real model) as the entry session: vibest opens it as the coordinator, and the first input it receives carries the coordinator definition and the session facts",
-    run: async (w) => {
-      needs("cursor-agent", "herdr")
-      const login = await w.run(w.repository, ["cursor-agent", "status"])
-      if (!/Logged in/.test(login.stdout + login.stderr))
-        throw new Skip(`cursor-agent is not logged in: ${(login.stdout + login.stderr).trim()}`)
-      const session = `${w.herdrSession}-cursor-entry`
-      await w.daemon()
-      await w.startEntry({ harness: "cursor", session, cwd: w.repository, timeoutMs: 120_000 })
-      let id = ""
-      await until(
-        "the Cursor entry session",
-        async () => {
-          id = liveEntry(w)?.id ?? ""
-          return id !== ""
-        },
-        90_000,
-      )
-      expect(row<{ agent: string }>(w, "SELECT agent FROM session WHERE id = ?", id)?.agent === "coordinator", "agent")
-      const transcripts = path.join(
-        w.home,
-        ".cursor",
-        "projects",
-        (await fs.realpath(w.repository)).slice(1).replace(/[^a-zA-Z0-9]/g, "-"),
-      )
-      await until(
-        "the first input with the definition and the session facts in Cursor's transcript",
-        async () => {
-          const files = (await fs.readdir(transcripts, { recursive: true }).catch(() => [] as Array<string>)).filter(
-            (f) => f.endsWith(".jsonl"),
-          )
-          const texts = await Promise.all(files.map((f) => fs.readFile(path.join(transcripts, f), "utf8")))
-          return texts.some((t) => t.includes("Session facts") && t.includes(`You are agent ${id}`))
-        },
-        240_000,
-      )
-    },
-  },
 ]
 
 export default checks

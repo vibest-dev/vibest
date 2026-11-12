@@ -278,7 +278,7 @@ const make = Effect.gen(function* () {
     creatorLabel: (id: string) =>
       Effect.gen(function* () {
         const creator = yield* addressedCreator(id)
-        if (creator === undefined) return undefined
+        if (creator === undefined || creator === id) return undefined
         const [row] = yield* sql<{ entry: string | null; name: string | null }>`SELECT
             p.entry_session_id AS entry, c.name AS name
           FROM session s JOIN project p ON p.id = s.project_id LEFT JOIN session c ON c.id = ${creator}
