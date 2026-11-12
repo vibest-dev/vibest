@@ -256,10 +256,10 @@ const packageHome = Effect.gen(function* () {
   return dir
 })
 
-const supervise = (dir: string) =>
+const supervise = (dir: string, builtins: ReadonlyArray<Candidate> = []) =>
   Plugins.layer.pipe(
     Layer.provide(Layer.succeed(PluginLoader, loader)),
-    Layer.provide(Layer.succeed(Builtins, [])),
+    Layer.provide(Layer.succeed(Builtins, builtins)),
     Layer.provide(subscriptionsLayer),
     Layer.provide(harnessesLayer()),
     Layer.provide(Layer.effect(Layout, Layout.make(dir))),
@@ -304,6 +304,40 @@ const timers = Effect.gen(function* () {
   return { armed: isArmed, fire, clocked, rescanned }
 })
 describe("plugins: supervisor", () => {
+  const builtinCandidate = (id: string) =>
+    candidate(
+      `builtin:${id}`,
+      id,
+      Plugin.define({ id, effect: (ctx) => ctx.agent.hook("start.before", () => Effect.succeed(undefined)) }),
+    )
+  const startedWith = (plugins: Plugins["Service"]) =>
+    plugins.start(event).pipe(Effect.map((s) => s.trace.map((t) => t.plugin)))
+
+  it.effect(
+    "P1: -<id> removes a builtin by exact id, -* and -prefix.* never match builtins, and un-removing needs no restart",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const dir = yield* packageHome
+        const config = path.join(dir, "vibest.json")
+        const builtins = [builtinCandidate("harness-x"), builtinCandidate("runtime-y"), builtinCandidate("runtime-z")]
+        yield* fs.writeFileString(config, `{ "plugins": ["-*", "-runtime.*", "-runtime-*", "-harness-x"] }`)
+        const { clocked, rescanned } = yield* timers
+        const plugins = yield* clocked(supervise(dir, builtins))
+        assert.deepStrictEqual(yield* startedWith(plugins), ["runtime-y", "runtime-z"])
+        yield* fs.writeFileString(config, `{ "plugins": ["-runtime-y", "-harness-x"] }`)
+        yield* rescanned(startedWith(plugins), (ids) => ids.join() === "runtime-z", "runtime-y removed")
+        yield* fs.writeFileString(config, `{ "plugins": [] }`)
+        yield* rescanned(
+          startedWith(plugins),
+          (ids) => ids.join() === "harness-x,runtime-y,runtime-z",
+          "the builtins back after un-removing",
+        )
+      }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+    20_000,
+  )
+
   it.effect(
     "a save the watch never reports is found by the next periodic rescan, and an unchanged rescan sets nothing up again",
     () =>
