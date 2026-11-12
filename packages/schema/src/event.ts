@@ -81,7 +81,6 @@ export const ExecutionStarted = fact("execution.started", "session", {
   typed: optional(Text),
 })
 export const ExecutionAccepted = fact("execution.accepted", "session", { execution: Seq })
-export const ExecutionRetyped = fact("execution.retyped", "session", { execution: Seq })
 export const ExecutionOutcome = Schema.Literals(["completed", "failed", "interrupted", "lost", "not_started"])
 export const ExecutionEnded = fact("execution.ended", "session", {
   execution: Seq,
@@ -140,7 +139,6 @@ const definitions = [
   ProcessEnded,
   ExecutionStarted,
   ExecutionAccepted,
-  ExecutionRetyped,
   ExecutionEnded,
   InboxQueued,
   InboxMoved,

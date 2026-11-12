@@ -106,7 +106,7 @@ describe.concurrent("an idle session takes its next batch", () => {
   )
 
   test(
-    "a refusal reported again to a restarted vibestd types the batch no second time",
+    "a refusal reported again types the batch no second time, also through a rebuilt Sessions",
     Effect.gen(function* () {
       const { sessions, inbox, entryId } = yield* entryAsked
       const herdr = yield* FakeRuntime
@@ -121,6 +121,25 @@ describe.concurrent("an idle session takes its next batch", () => {
         typed.filter((c) => c.text?.includes("a question")),
         1,
       )
+    }),
+  )
+
+  test(
+    "a batch an earlier vibestd took is never typed by the fallback, and ends not_started with its message failed",
+    Effect.gen(function* () {
+      const { db, sessions, entryId, sender } = yield* entryAsked
+      const herdr = yield* FakeRuntime
+      const taken = (yield* db.takeInbox(entryId, undefined))!
+      yield* sessions.typeTaken(entryId, taken.execution)
+      const typed = yield* herdr.callsTo("send")
+      assert.lengthOf(
+        typed.filter((c) => c.text?.includes("a question")),
+        0,
+      )
+      yield* TestClock.adjust("9 seconds")
+      yield* sessions.check(entryId)
+      yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
+      assert.isUndefined(yield* db.openExecution(entryId))
     }),
   )
 

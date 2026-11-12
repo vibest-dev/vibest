@@ -390,12 +390,5 @@
     "at": 1793000056000,
     "type": "process.started",
     "data": "{\"harness\":\"claude\",\"routing\":{\"decidedBy\":{\"harness\":\"harness-choice\",\"model\":\"quota\"},\"trace\":[{\"plugin\":\"harness-choice\",\"hook\":\"harness.choose\",\"outcome\":\"ok\",\"ms\":2,\"changes\":[{\"field\":\"harness\",\"from\":\"cursor\",\"to\":\"claude\",\"overwrote\":\"user\"}]},{\"plugin\":\"quota\",\"hook\":\"model.choose\",\"outcome\":\"refused\",\"ms\":1,\"changes\":[],\"reason\":\"quota full\"},{\"plugin\":\"broken\",\"hook\":\"model.choose\",\"outcome\":\"crashed\",\"ms\":0.5,\"changes\":[],\"error\":\"TypeError: x is undefined\"}]},\"runtime\":\"herdr\"}"
-  },
-  {
-    "aggregate": "6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f",
-    "seq": 57,
-    "at": 1793000057000,
-    "type": "execution.retyped",
-    "data": "{\"execution\":30}"
   }
 ]

@@ -60,6 +60,7 @@ export class Inbox extends Context.Service<
     readonly pulls: (harnessId: string) => boolean
     readonly take: (sessionId: string, process: number | undefined) => Effect.Effect<Taken | undefined>
     readonly stream: (sessionId: string) => Stream.Stream<null>
+    readonly claimRetype: (sessionId: string, execution: number) => Effect.Effect<boolean>
     readonly undelivered: (session: SessionRow, rows: Undelivered, reason: string) => Effect.Effect<void>
     readonly dropQueue: (session: SessionRow, reason: string) => Effect.Effect<void>
   }
@@ -74,6 +75,8 @@ export class Inbox extends Context.Service<
 
       const pulls = (harnessId: string) => harnesses.find(harnessId)?.inbox !== undefined
 
+      const handedOver = new Set<string>()
+      const handedKey = (sessionId: string | undefined, execution: number) => `${sessionId}:${execution}`
       const waiting = new Map<string, Set<Queue.Queue<null>>>()
       const wake = (id: string | undefined) =>
         Effect.sync(() => {
@@ -81,8 +84,13 @@ export class Inbox extends Context.Service<
         })
       yield* engine.on((event) => {
         switch (event.type) {
-          case "inbox.queued":
           case "execution.ended":
+            return Effect.sync(() => handedOver.delete(handedKey(event.sessionId, event.data.execution))).pipe(
+              Effect.andThen(wake(event.sessionId)),
+            )
+          case "execution.accepted":
+            return Effect.sync(() => void handedOver.delete(handedKey(event.sessionId, event.data.execution)))
+          case "inbox.queued":
             return wake(event.sessionId)
           case "inbox.moved":
             return event.data.to === "pending" ? wake(event.sessionId) : Effect.void
@@ -118,6 +126,7 @@ export class Inbox extends Context.Service<
           if (session === undefined || !pulls(session.harnessId)) return undefined
           const taken = yield* drain.work(`take inbox of ${sessionId}`, db.takeInbox(sessionId, process))
           if (taken === undefined) return undefined
+          handedOver.add(handedKey(sessionId, taken.execution))
           const last = taken.rows.at(-1)!
           const sender = last.kind === "notice" || last.sender === null ? undefined : yield* db.getSession(last.sender)
           return {
@@ -156,7 +165,10 @@ export class Inbox extends Context.Service<
           .pendingInbox(session.id)
           .pipe(Effect.flatMap((rows) => (rows.length === 0 ? Effect.void : undelivered(session, rows, reason))))
 
-      return Inbox.of({ enqueue: db.insertInbox, pulls, take, stream, undelivered, dropQueue })
+      const claimRetype = (sessionId: string, execution: number) =>
+        Effect.sync(() => handedOver.delete(handedKey(sessionId, execution)))
+
+      return Inbox.of({ enqueue: db.insertInbox, pulls, take, stream, claimRetype, undelivered, dropQueue })
     }),
   )
 

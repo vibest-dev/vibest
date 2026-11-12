@@ -598,7 +598,7 @@ export class Sessions extends Context.Service<
             if (session === undefined) return
             const r = yield* track(id)
             const rows = yield* db.unacceptedBatch(id, execution)
-            if (rows === undefined || rows.length === 0) return
+            if (rows === undefined || rows.length === 0 || !(yield* inbox.claimRetype(id, execution))) return
             const h = yield* live(session)
             yield* Ref.set(r.prompting, true).pipe(
               Effect.andThen(h.send(session.address, { text: inboxText(rows) })),
