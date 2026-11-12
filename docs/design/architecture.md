@@ -920,7 +920,7 @@ again once its reading is free. A preflight miss, or a start or prompt that fail
 may use that harness again. A login already limited before start is left to `agent.start.before`: without a plugin
 that routes by quota, the agent starts and fails its execution the usual way when the limit hits.
 
-How the move runs (`move.ts`, under the session's lock): a choice the chains already ruled out (an unknown harness,
+How the move runs (`session/move.ts`, under the session's lock): a choice the chains already ruled out (an unknown harness,
 a login limited in this execution, a harness this move skipped) ends the move, since asking the same plugins again cannot
 change the answer; a limit from an earlier execution no longer rules a login out once its own usage row, refreshed after
 it, says it is free. The move stays on the session's own runtime and machine. It ends the old agent before the next

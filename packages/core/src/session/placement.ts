@@ -23,7 +23,6 @@ import * as PlatformNode from "../effect/platform.ts"
 import { encodeCommand, Harness, Harnesses, type HarnessUnavailable } from "../harness.ts"
 import { Inbox } from "../inbox.ts"
 import { definitionIn } from "../launch.ts"
-import type { LimitMove } from "../move.ts"
 import { Layout, VibestCommand } from "../paths.ts"
 import { messageOf } from "../plugin-sources.ts"
 import {
@@ -37,6 +36,7 @@ import { addressOf, RuntimeError, Runtimes, type Runtime, type Terminal } from "
 import { projectText, removeSystemPrompt, systemPrompt, writeSystemPrompt } from "../system-prompt.ts"
 import { addWorktree, copyIncluded, Git, mainCheckout, removeWorktree, repositoryDirectoryName } from "../worktree.ts"
 import { Executions } from "./executions.ts"
+import type { LimitMove } from "./move.ts"
 
 export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
   JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" ? { terminal: address.id } : {}) })

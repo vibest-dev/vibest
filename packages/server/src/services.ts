@@ -17,6 +17,7 @@ import { EntrySession } from "@vibest/core/session/entry"
 import { Executions } from "@vibest/core/session/executions"
 import { SessionLive } from "@vibest/core/session/live"
 import { SessionLocks } from "@vibest/core/session/locks"
+import { Move } from "@vibest/core/session/move"
 import { Placement } from "@vibest/core/session/placement"
 import { Sessions } from "@vibest/core/sessions"
 import { Subscriptions } from "@vibest/core/subscriptions/service"
@@ -38,6 +39,7 @@ export const services = LayerNode.group([
   SessionLocks.node,
   Executions.node,
   Placement.node,
+  Move.node,
   Sessions.node,
   Integration.node,
   Peers.node,

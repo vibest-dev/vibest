@@ -25,12 +25,12 @@ import {
   unprovided,
 } from "./harness.ts"
 import { directoryLock, type keyedLock } from "./keyed-lock.ts"
-import type { LimitMove } from "./move.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, type Layout, safeRepositoryDirectory } from "./paths.ts"
 import { describeSpawn, type Plugins, type Routing } from "./plugins.ts"
 import { listProjectRepositories } from "./project-create.ts"
 import { machinesListing as machines, type Runtimes } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
+import type { LimitMove } from "./session/move.ts"
 import type { Placement } from "./session/placement.ts"
 import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 
