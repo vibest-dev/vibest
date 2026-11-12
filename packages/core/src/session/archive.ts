@@ -1,73 +1,69 @@
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
-import { Cause, Context, Duration, Effect, FileSystem, Ref } from "effect"
+import { Cause, Context, Duration, Effect, FiberSet, FileSystem, Layer, Ref } from "effect"
 
-import { type Db, type SessionRow, sessionEnded } from "./db.ts"
-import { directoryLock, type keyedLock } from "./keyed-lock.ts"
-import { errorMessage } from "./plugins.ts"
-import type * as Remove from "./remove.ts"
-import { agentState, type Runtimes, type Runtime, type AgentSeen } from "./runtimes.ts"
-import type { Platform } from "./session-types.ts"
-import { type Executions, STOP_WAIT } from "./session/executions.ts"
-import type { SessionLive } from "./session/live.ts"
-import type { Placement } from "./session/placement.ts"
+import { Bus, type EngineEvent } from "../bus.ts"
+import { Db, type SessionRow, sessionEnded } from "../db.ts"
+import { Drain } from "../drain.ts"
+import { LayerNode } from "../effect/layer-node.ts"
+import * as PlatformNode from "../effect/platform.ts"
+import * as Engine from "../engine.ts"
+import { Inbox } from "../inbox.ts"
+import { directoryLock } from "../keyed-lock.ts"
+import { errorMessage } from "../plugins.ts"
+import { Processes } from "../processes.ts"
+import * as Remove from "../remove.ts"
+import { agentState, Runtimes, type Runtime } from "../runtimes.ts"
+import type { Platform } from "../session-types.ts"
+import { Git } from "../worktree.ts"
+import { busyOf, Executions, STOP_WAIT } from "./executions.ts"
+import { SessionLive } from "./live.ts"
+import { SessionLocks } from "./locks.ts"
+import { Placement } from "./placement.ts"
 
-export const sessionArchive = (deps: {
-  readonly db: Db["Service"]
-  readonly fs: FileSystem.FileSystem
-  readonly removal: Effect.Success<typeof Remove.make>
-  readonly locks: ReturnType<typeof keyedLock<string>>
-  readonly platform: Context.Context<Platform>
-  readonly getRow: (id: string) => Effect.Effect<SessionRow, NoSuchSession>
-  readonly live: (session: SessionRow) => ReturnType<Runtimes["Service"]["route"]>
-  readonly notice: (session: SessionRow, message: string) => Effect.Effect<unknown>
-  readonly dropQueue: (session: SessionRow, reason: string) => Effect.Effect<unknown>
-  readonly recount: Placement["Service"]["recount"]
-  readonly sessionLive: SessionLive["Service"]
-  readonly locked: (
-    id: string,
-    settlement?: boolean,
-  ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
-  readonly logged: (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<void | A, never, R>
-  readonly busyOf: (seen: AgentSeen) => boolean
-  readonly interruptAgent: Executions["Service"]["interruptAgent"]
-  readonly settleAfterInterrupt: Executions["Service"]["settleAfterInterrupt"]
-}) => {
-  const {
-    db,
-    fs,
-    removal,
-    locks,
-    platform,
-    getRow,
-    live,
-    notice,
-    dropQueue,
-    recount,
-    sessionLive,
-    locked,
-    logged,
-    busyOf,
-    interruptAgent,
-    settleAfterInterrupt,
-  } = deps
-  const undoCutOffStart = (h: Runtime, session: SessionRow) =>
-    Effect.gen(function* () {
-      const what = `${session.id} never finished starting (vibestd stopped while it started)`
-      if (yield* db.hadTerminal(session.id)) return yield* notice(session, `${what}.`)
-      const ended = yield* getRow(session.id)
-      const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(session.id)) ?? ""))(
-        removal.release({ h, session: ended, terminal: undefined, keepWorktree: false, reasons: [] }),
+const make = Effect.gen(function* () {
+  const db = yield* Db
+  const fs = yield* FileSystem.FileSystem
+  const runtimes = yield* Runtimes
+  const inbox = yield* Inbox
+  const drain = yield* Drain
+  const removal = yield* Remove.make
+  const locks = yield* SessionLocks
+  const sessionLive = yield* SessionLive
+  const { notice, recount } = yield* Placement
+  const { interruptAgent, settleAfterInterrupt } = yield* Executions
+  const platform = yield* Effect.context<Platform>()
+  const engine = yield* Engine.make
+  const archives = yield* FiberSet.make()
+  const { locked } = locks
+  const logged = Engine.logFailure
+  const live = (session: SessionRow) => runtimes.route(session.runtime)
+  const dropQueue = inbox.dropQueue
+  const getRow = (id: string) =>
+    db
+      .getSession(id)
+      .pipe(
+        Effect.flatMap((session) =>
+          session ? Effect.succeed(session) : Effect.fail(new NoSuchSession({ id, message: `no session ${id}` })),
+        ),
       )
-      let kept = out.worktree === "kept" ? out.reasons.join("; ") : undefined
-      if (
-        kept !== undefined &&
-        (yield* fs.readDirectory(out.path).pipe(Effect.orElseSucceed(() => ["?"]))).length === 0
-      ) {
-        yield* fs.remove(out.path, { recursive: true }).pipe(Effect.ignore)
-        kept = undefined
-      }
-      yield* notice(session, kept === undefined ? `${what}; its worktree was removed.` : `${what}; ${kept}.`)
-    })
+
+  const undoCutOffStart = Effect.fn("Archive.undoCutOffStart")(function* (h: Runtime, session: SessionRow) {
+    const what = `${session.id} never finished starting (vibestd stopped while it started)`
+    if (yield* db.hadTerminal(session.id)) return yield* notice(session, `${what}.`)
+    const ended = yield* getRow(session.id)
+    const out = yield* locks.withLock(directoryLock((yield* db.sessionDirectory(session.id)) ?? ""))(
+      removal.release({ h, session: ended, terminal: undefined, keepWorktree: false, reasons: [] }),
+    )
+    let kept = out.worktree === "kept" ? out.reasons.join("; ") : undefined
+    if (
+      kept !== undefined &&
+      (yield* fs.readDirectory(out.path).pipe(Effect.orElseSucceed(() => ["?"]))).length === 0
+    ) {
+      yield* fs.remove(out.path, { recursive: true }).pipe(Effect.ignore)
+      kept = undefined
+    }
+    yield* notice(session, kept === undefined ? `${what}; its worktree was removed.` : `${what}; ${kept}.`)
+  }, Effect.provideContext(platform))
 
   const release = (id: string) =>
     db.getSession(id).pipe(Effect.flatMap((row) => sessionLive.release(id, sessionEnded(row))))
@@ -119,17 +115,17 @@ export const sessionArchive = (deps: {
       return out
     })
 
-  const remove = (id: string, options: { readonly keepWorktree?: boolean | undefined } = {}) =>
-    Effect.gen(function* () {
+  const remove = Effect.fn("Archive.remove")(
+    function* (id: string, options: { readonly keepWorktree?: boolean | undefined } = {}) {
       yield* getRow(id)
       const { already } = yield* sessionLive.stop(id)
       if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
       const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(release(id))))!
       return out
-    }).pipe(
-      Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
-      Effect.provideContext(platform),
-    )
+    },
+    Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
+    Effect.provideContext(platform),
+  )
 
   const archiveIfIdle = (id: string) =>
     Effect.gen(function* () {
@@ -194,7 +190,7 @@ export const sessionArchive = (deps: {
       )
     })
 
-  const finishArchive = (id: string) =>
+  const finishArchive = Effect.fn("Archive.finishArchive")((id: string) =>
     locked(id)(
       Effect.gen(function* () {
         const session = yield* getRow(id)
@@ -210,7 +206,67 @@ export const sessionArchive = (deps: {
             `${id} was being archived when vibestd stopped: its terminal was ${out.pane === "kept" ? "not closed" : "closed"}, but its processes are ${out.processes === "alive" ? "still working in its worktree" : "not confirmed gone"}; run vibest archive ${id} again to check.`,
           )
       }),
-    ).pipe(logged(`archive ${id}`), Effect.provideContext(platform))
+    ).pipe(logged(`archive ${id}`), Effect.provideContext(platform)),
+  )
 
-  return { undoCutOffStart, remove, archiveIfIdle, finishArchive }
+  const archiveSoon = (ids: ReadonlyArray<string>) =>
+    Effect.forEach(
+      ids,
+      (id) =>
+        FiberSet.run(
+          archives,
+          drain.work(
+            `archive ${id}`,
+            archiveIfIdle(id).pipe(logged(`archive ${id}`), Effect.provideContext(platform)),
+            true,
+          ),
+        ),
+      { discard: true },
+    )
+
+  const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
+    switch (event.type) {
+      case "execution.ended":
+        return event.data.outcome === "completed" ? archiveSoon([event.sessionId!]) : Effect.void
+      case "inbox.moved":
+        return event.data.to === "pending" || event.data.to === "delivering"
+          ? Effect.void
+          : db.inboxParties(event.sessionId!, event.data.inbox).pipe(Effect.flatMap(archiveSoon))
+      default:
+        return Effect.void
+    }
+  }
+
+  yield* engine.on(handle)
+
+  return { undoCutOffStart, remove, finishArchive }
+})
+
+export class Archive extends Context.Service<Archive, Effect.Success<typeof make>>()("vibest/Archive") {
+  static readonly make = make
+
+  static readonly layer = Layer.effect(Archive, make)
+
+  static readonly node = LayerNode.make({
+    service: Archive,
+    layer: Archive.layer,
+    deps: [
+      Bus.node,
+      Db.node,
+      Drain.node,
+      Executions.node,
+      Inbox.node,
+      Placement.node,
+      Processes.node,
+      Runtimes.node,
+      SessionLive.node,
+      SessionLocks.node,
+      Git.node,
+      PlatformNode.childProcessSpawner,
+      PlatformNode.crypto,
+      PlatformNode.fileSystem,
+      PlatformNode.layout,
+      PlatformNode.path,
+    ],
+  })
 }

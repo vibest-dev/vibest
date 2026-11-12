@@ -19,7 +19,6 @@ import {
   Crypto,
   Duration,
   Effect,
-  FiberSet,
   FileSystem,
   Layer,
   Option,
@@ -29,7 +28,6 @@ import {
 } from "effect"
 
 import { Agents } from "./agents.ts"
-import { sessionArchive } from "./archive.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
 import { Db, type SessionFilter, type SessionRow, sessionEnded } from "./db.ts"
 import { Drain } from "./drain.ts"
@@ -59,7 +57,8 @@ import {
   type Terminal,
 } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
-import { busy, busyOf, CONFIRM_TIMEOUT, Executions, STOP_WAIT } from "./session/executions.ts"
+import { Archive } from "./session/archive.ts"
+import { busy, CONFIRM_TIMEOUT, Executions, STOP_WAIT } from "./session/executions.ts"
 import { SessionLive } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
 import { Placement, runtimeEnv } from "./session/placement.ts"
@@ -89,6 +88,7 @@ export const TAIL_LINES = 30
 
 const SESSION_DEPS = [
   Agents.node,
+  Archive.node,
   Bus.node,
   Db.node,
   Drain.node,
@@ -181,7 +181,6 @@ export class Sessions extends Context.Service<
       const crypto = yield* Crypto.Crypto
       const path = yield* Path.Path
       const plugins = yield* Plugins
-      const removal = yield* Remove.make
       const processes = yield* Processes
       const sessionLive = yield* SessionLive
       const { restarting, track } = sessionLive
@@ -235,7 +234,7 @@ export class Sessions extends Context.Service<
           )
         })
 
-      const { awaitReady, settleAfterInterrupt, interruptAgent, prompt, finish } = yield* Executions
+      const { awaitReady, interruptAgent, prompt, finish } = yield* Executions
       const {
         notice,
         worktreeOf,
@@ -451,24 +450,7 @@ export class Sessions extends Context.Service<
             ),
           )
 
-      const { undoCutOffStart, remove, archiveIfIdle, finishArchive } = sessionArchive({
-        db,
-        fs,
-        removal,
-        locks,
-        platform,
-        getRow,
-        live,
-        notice,
-        dropQueue: inbox.dropQueue,
-        recount,
-        sessionLive,
-        locked,
-        logged,
-        busyOf,
-        interruptAgent,
-        settleAfterInterrupt,
-      })
+      const { undoCutOffStart, remove, finishArchive } = yield* Archive
 
       const deliver = Effect.fn("Sessions.deliver")(function* (id: string) {
         const session = yield* getRow(id)
@@ -673,24 +655,11 @@ export class Sessions extends Context.Service<
       const handle = (event: EngineEvent): Effect.Effect<unknown, unknown> => {
         switch (event.type) {
           case "execution.ended":
-            return event.data.outcome === "failed"
-              ? checkFailed(event.sessionId!)
-              : deliverNext(event.sessionId!).pipe(
-                  Effect.andThen(event.data.outcome === "completed" ? archiveSoon([event.sessionId!]) : Effect.void),
-                )
+            return event.data.outcome === "failed" ? checkFailed(event.sessionId!) : deliverNext(event.sessionId!)
           case "inbox.moved":
-            return event.data.to === "pending" || event.data.to === "delivering"
-              ? Effect.void
-              : db
-                  .inboxParties(event.sessionId!, event.data.inbox)
-                  .pipe(
-                    Effect.flatMap(archiveSoon),
-                    Effect.andThen(
-                      event.data.to === "delivered"
-                        ? engine.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
-                        : Effect.void,
-                    ),
-                  )
+            return event.data.to === "delivered"
+              ? engine.arm(`miss:${event.sessionId!}`, CONFIRM_TIMEOUT, checkSession(event.sessionId!))
+              : Effect.void
           case "inbox.queued":
             return queued(event.sessionId!, event.seq)
           case "live.state":
@@ -739,22 +708,6 @@ export class Sessions extends Context.Service<
           })
           reconciles++
         })
-
-      const archives = yield* FiberSet.make()
-      const archiveSoon = (ids: ReadonlyArray<string>) =>
-        Effect.forEach(
-          ids,
-          (id) =>
-            FiberSet.run(
-              archives,
-              drain.work(
-                `archive ${id}`,
-                archiveIfIdle(id).pipe(logged(`archive ${id}`), Effect.provideContext(platform)),
-                true,
-              ),
-            ),
-          { discard: true },
-        )
 
       const checkFailed = (id: string) =>
         Effect.forkIn(
