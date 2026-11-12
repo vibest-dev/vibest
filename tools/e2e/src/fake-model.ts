@@ -95,6 +95,8 @@ export const entryModel = () => {
   return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
 }
 
+const projectFolderIn = (system: string) => /The project folder is (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)
+
 export const creatorIn = (system: string) => /started by ([0-9a-f-]{36})/.exec(system)?.[1]
 
 const sendToCreatorIn = (system: string) => /run `([^`]+ send [0-9a-f-]{36}) -- '<message>'`/.exec(system)?.[1]
@@ -306,8 +308,9 @@ export const fakeOpenAI = (
       const entryAnswer = entryRun(messages)
       if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
-      const main = /The project folder is (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)
-      const sub = /Project folder: (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)
+      const folder = projectFolderIn(system)
+      const main = creatorIn(system) === undefined ? folder : undefined
+      const sub = creatorIn(system) === undefined ? undefined : folder
       const who = main ? "main" : sub ? "pi" : undefined
       const tools = messages.filter((m) => m.role === "tool" && !isEntryRunResult(m))
       const last = messages.at(-1)
@@ -335,7 +338,8 @@ export type AnthropicRequest = {
   readonly results: ReadonlyArray<ToolResult>
 }
 
-export const subagentFolder = (system: string) => /Project folder: (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)?.[1]
+export const subagentFolder = (system: string) =>
+  creatorIn(system) === undefined ? undefined : projectFolderIn(system)?.[1]
 
 export const lastUser = (r: AnthropicRequest) => r.messages.findLast((m) => m.role === "user")
 

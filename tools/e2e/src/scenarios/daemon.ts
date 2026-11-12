@@ -92,7 +92,7 @@ const checks: ReadonlyArray<Check> = [
     title: "a caller claiming a session that does not exist is refused",
     run: async (w) => {
       await w.ok(["daemon"])
-      const r = await w.vibest(["ls"], { env: { VIBEST_AGENT: "general", VIBEST_SESSION_ID: "deadbeef" } })
+      const r = await w.vibest(["ls"], { env: { VIBEST_SESSION_ID: "deadbeef" } })
       expect(r.code !== 0, `ls as an unknown session exited 0: ${r.stdout}`)
       expect(/InvalidCaller|Forbidden|NoSuchSession/.test(r.stderr), `unexpected refusal: ${r.stderr}`)
     },

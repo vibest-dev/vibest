@@ -35,6 +35,8 @@ const memoryDb = () =>
     Layer.provide(SessionLive.layer),
   )
 
+const ENTRY = { agent: "coordinator" } as const
+
 describe("Db", () => {
   const fresh = <A, E>(program: Effect.Effect<A, E, Db>) => program.pipe(Effect.provide(database(":memory:")))
 
@@ -43,28 +45,34 @@ describe("Db", () => {
     () =>
       Effect.gen(function* () {
         const db = yield* Db
-        const first = yield* db.startEntry(yield* projectOf("r"), "pi", false, place)
+        const first = yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
         assert.isNull(first.harnessSessionId)
         yield* db.noteConversation(first.sessionId, "s1")
-        const again = yield* db.startEntry(yield* projectOf("r"), "pi", false, place)
+        const again = yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
         assert.strictEqual(again.sessionId, first.sessionId)
         assert.strictEqual(again.harnessSessionId, "s1")
         yield* db.noteConversation("0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", "x")
-        assert.strictEqual((yield* db.startEntry(yield* projectOf("r"), "pi", false, place)).harnessSessionId, "s1")
-        const renewed = yield* db.startEntry(yield* projectOf("r"), "pi", true, place)
+        assert.strictEqual(
+          (yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)).harnessSessionId,
+          "s1",
+        )
+        const renewed = yield* db.startEntry(yield* projectOf("r"), "pi", true, place, ENTRY)
         assert.notStrictEqual(renewed.sessionId, first.sessionId)
         assert.isNull(renewed.harnessSessionId)
         yield* db.noteConversation(renewed.sessionId, "s4")
-        assert.isNull((yield* db.startEntry(yield* projectOf("r"), "claude", false, place)).harnessSessionId)
+        assert.isNull((yield* db.startEntry(yield* projectOf("r"), "claude", false, place, ENTRY)).harnessSessionId)
         yield* db.noteConversation(renewed.sessionId, "c1")
         assert.strictEqual(
-          (yield* db.startEntry(yield* projectOf("r"), "pi", false, place)).sessionId,
+          (yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)).sessionId,
           renewed.sessionId,
         )
-        assert.isNull((yield* db.startEntry(yield* projectOf("r"), "pi", false, place)).harnessSessionId)
+        assert.isNull((yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)).harnessSessionId)
         yield* db.noteConversation(renewed.sessionId, "s6")
         yield* db.noteConversation(renewed.sessionId, "s7")
-        assert.strictEqual((yield* db.startEntry(yield* projectOf("r"), "pi", false, place)).harnessSessionId, "s7")
+        assert.strictEqual(
+          (yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)).harnessSessionId,
+          "s7",
+        )
         const sql = yield* SqlClient.SqlClient
         const [old] = yield* sql<{
           endedAt: number | null
@@ -91,7 +99,7 @@ describe("Db", () => {
       memory(
         Effect.gen(function* () {
           const db = yield* Db
-          const parent = yield* db.startEntry(yield* projectOf("r"), "pi", false, place)
+          const parent = yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
           yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), {
             cwd: "/w",
             task: "do it",
@@ -571,7 +579,7 @@ describe("Db", () => {
           "m",
         )
         assert.strictEqual(yield* noticeStatus("m"), "dropped")
-        yield* db.startEntry(yield* projectOf("r"), "pi", false, place)
+        yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)
         const row = yield* db.insertInbox({
           sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           message: "hi",
@@ -654,7 +662,7 @@ describe("Db", () => {
         yield* Effect.gen(function* () {
           const db = yield* Db
           assert.isTrue(yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r")))
-          assert.match((yield* db.startEntry(yield* projectOf("r"), "pi", false, place)).sessionId, ID)
+          assert.match((yield* db.startEntry(yield* projectOf("r"), "pi", false, place, ENTRY)).sessionId, ID)
         }).pipe(Effect.provide(database(file)))
         assert.strictEqual((yield* header(file)).applicationId, APPLICATION_ID)
         assert.deepStrictEqual(
@@ -975,12 +983,12 @@ describe("Db", () => {
           yield* db.updateSession(id, { executionState: "open", executionPromptedAt: 1 })
           yield* db.updateSession(id, { executionState: "completed" })
           assert.isTrue(yield* db.canResumeConversation(id, "pre"))
-          const entry = yield* db.startEntry(yield* projectOf("r"), "claude", false, place)
+          const entry = yield* db.startEntry(yield* projectOf("r"), "claude", false, place, ENTRY)
           assert.isFalse(yield* db.canResumeConversation(entry.sessionId, "c1"))
           yield* db.noteConversation(entry.sessionId, "c1")
           assert.isTrue(yield* db.canResumeConversation(entry.sessionId, "c1"))
           assert.strictEqual(
-            (yield* db.startEntry(yield* projectOf("r"), "claude", false, place)).harnessSessionId,
+            (yield* db.startEntry(yield* projectOf("r"), "claude", false, place, ENTRY)).harnessSessionId,
             "c1",
           )
         }),

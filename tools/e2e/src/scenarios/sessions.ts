@@ -195,7 +195,7 @@ const checks: ReadonlyArray<Check> = [
         const listed = await ls(w, p)
         const sub = listed.find((e) => e.id === a)
         expect(
-          listed.some((e) => e.agent === "main") &&
+          listed.some((e) => e.agent === "coordinator") &&
             sub !== undefined &&
             sub.latest?.summary.includes("done-s5") === true,
           `ls: ${JSON.stringify(listed)}`,

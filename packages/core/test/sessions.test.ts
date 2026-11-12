@@ -1,4 +1,5 @@
 import { assert, describe } from "@effect/vitest"
+import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harnesses } from "@vibest/core/harness"
@@ -15,7 +16,18 @@ import { entryPending, projectOf } from "./lib/directory.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { replyOf, sentBy, settled, EXECUTIONS, until, untilVirtual, writeEnd, systemPromptFile } from "./lib/observe.ts"
+import {
+  atMostEntryTracked,
+  replyOf,
+  sentBy,
+  settleEntry,
+  settled,
+  EXECUTIONS,
+  until,
+  untilVirtual,
+  writeEnd,
+  systemPromptFile,
+} from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, sessionWorktree, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
@@ -28,7 +40,7 @@ describe.concurrent("Sessions", () => {
         "pi",
         false,
         { runtime: RUNTIME, address: { machine: "local", id: "test/coord" } },
-        { provider: "openai", model: "fake-strong" },
+        { provider: "openai", model: "fake-strong", agent: "coordinator" },
       )
     })
   const chosen = (id: string) =>
@@ -105,6 +117,40 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "an agent definition lives while the scope of the plugin that registered it is open, and a later update overrides an earlier one",
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const reviewer = { id: "reviewer", description: "reviews", system: "Review." }
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* agents.transform((editor) => editor.add(reviewer))
+          yield* agents.transform((editor) => editor.update("reviewer", (definition) => (definition.system = "First.")))
+          yield* agents.transform((editor) =>
+            editor.update("reviewer", (definition) => (definition.system = "Second.")),
+          )
+          assert.strictEqual(agents.find("reviewer")?.system, "Second.")
+        }),
+      )
+      assert.isUndefined(agents.find("reviewer"))
+      assert.isDefined(agents.find("general"))
+    }),
+  )
+
+  test(
+    "a restart whose agent definition is gone fails with the unknown agent, and the session stays as it was",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const { id } = yield* spawnWorking(repo)
+      yield* (yield* Agents).transform((editor) => editor.remove("general"))
+      const before = yield* (yield* Db).getSession(id)
+      const [restarted] = yield* (yield* Sessions).restart([id])
+      assert.isFalse(restarted!.ok)
+      assert.include(restarted!.message, "general")
+      assert.deepStrictEqual(yield* (yield* Db).getSession(id), before)
+    }),
+  )
+
+  test(
     "spawn: detached worktree with copied files, env on the tab, rules, unchanged prompt",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -123,7 +169,7 @@ describe.concurrent("Sessions", () => {
       assert.isFalse(yield* fs.exists(path.join(wt, "CLAUDE.md")))
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.deepStrictEqual([placed.project, placed.cwd], [repo, wt])
-      assert.deepInclude(placed.env, { VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
+      assert.deepInclude(placed.env, { VIBEST_SESSION_ID: id, VIBEST_HOME: layout.home })
       assert.strictEqual(placed.env.VIBEST_PROJECT_DIR, layout.project((yield* (yield* Db).getSession(id))!.projectId))
       const identity = (yield* (yield* Db).sessionIdentity(id))!
       assert.deepInclude(placed.env, { VIBEST_PROJECT_ID: String(identity.projectId), VIBEST_HARNESS: "pi" })
@@ -328,13 +374,20 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), env: { VBT_TOKEN: "s3cret" } })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* sessions.check(id)
+      yield* settleEntry(sessions, entry.sessionId)
       assert.strictEqual((yield* herdr.callsTo("open"))[0]!.env.VBT_TOKEN, "s3cret")
       const stored = yield* sql<{
         metadata: string
@@ -345,7 +398,7 @@ describe.concurrent("Sessions", () => {
       )
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* sessions.check(id)
-      yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      yield* untilVirtual(sessions.inMemory, atMostEntryTracked)
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
       for (const open of (yield* herdr.callsTo("open")).slice(1)) assert.isUndefined(open.env.VBT_TOKEN)
@@ -356,15 +409,17 @@ describe.concurrent("Sessions", () => {
     "a session's in-memory flags, lock and live status go once it ends; resumed, its next execution ends as any execution does; archived, they go again with no check of its own",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      assert.deepInclude(yield* sessions.inMemory, { tracked: 1, locks: 0 })
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 1)
+      const { id, sessions, db, entryId } = yield* spawnWorking(yield* makeRepository)
+      yield* settleEntry(sessions, entryId)
+      const entryStatuses = (yield* (yield* SessionLive).size).statuses - 1
+      assert.deepInclude(yield* sessions.inMemory, { tracked: 2, locks: 0 })
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses + 1)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
       yield* settled
       assert.deepInclude(yield* db.getSession(id), { executionState: "failed" })
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 0)
-      yield* until(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
+      yield* until(sessions.inMemory, atMostEntryTracked)
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
       yield* sessions.check(id)
@@ -375,11 +430,11 @@ describe.concurrent("Sessions", () => {
       assert.deepInclude(yield* db.getSession(id), { executionState: "completed" })
       assert.include(yield* replyOf(id), "done again")
       yield* TestClock.adjust("10 seconds")
-      assert.strictEqual((yield* sessions.inMemory).tracked, 1)
+      assert.strictEqual((yield* sessions.inMemory).tracked, 2)
       assert.deepInclude(yield* db.getSession(id), { status: "idle" })
       yield* sessions.remove(id)
-      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 0)
-      yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, entryStatuses)
+      yield* untilVirtual(sessions.inMemory, atMostEntryTracked)
     }),
     { hooked: ["pi"] },
   )

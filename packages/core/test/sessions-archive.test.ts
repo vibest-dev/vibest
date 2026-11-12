@@ -12,7 +12,7 @@ import { entryPending, projectOf } from "./lib/directory.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { HARNESSES, PULLING_CLAUDE, PULLING_PI } from "./lib/harnesses.ts"
-import { replyOf, lastSentBy, settled, until, writeEnd } from "./lib/observe.ts"
+import { atMostEntryTracked, lastSentBy, replyOf, settled, until, writeEnd } from "./lib/observe.ts"
 import { makeRepository, type TestOptions } from "./lib/session.ts"
 import {
   spawnInput,
@@ -57,10 +57,16 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const db = yield* Db
-      const entry = yield* db.startEntry(yield* projectOf(repo), entryHarness, false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        entryHarness,
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       yield* herdr.seedAgent("test/coord")
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), ...input, archive: true })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
@@ -137,7 +143,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* letForkedArchiveRun
       assert.deepStrictEqual(yield* entryPending(w.db, w.projectId), [])
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
-      yield* until((yield* Sessions).inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      yield* until((yield* Sessions).inMemory, atMostEntryTracked)
     }),
   )
 
@@ -148,10 +154,16 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const db = yield* Db
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
-      const entry = yield* db.startEntry(yield* projectOf(repo), "pulling-claude", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        "pulling-claude",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       yield* db.noteConversation(entry.sessionId, "claude-1")
       yield* herdr.seedAgent("test/coord")
       const sessions = yield* Sessions

@@ -7,7 +7,13 @@ import { ask, delegatingModel, piDir } from "../fake-model.ts"
 import { agentName, binary, expect, readDb, redact, row, Skip, until, writeEvidence, type World } from "../world.ts"
 import { fakeSsh, sh, stopVibestd, subModel } from "./machines.ts"
 
-type Listed = { id: string; machine?: string; runtime?: string; address?: { machine: string; id: string } }
+type Listed = {
+  id: string
+  agent?: string
+  machine?: string
+  runtime?: string
+  address?: { machine: string; id: string }
+}
 type Profile = { id: string; label: string; target: string; session: string; enabled?: boolean }
 type MachineView = {
   runtimes?: Array<{ kind: string; status: string; here: { visible: boolean; as?: string; note?: string } }>
@@ -221,6 +227,26 @@ const checks: ReadonlyArray<Check> = [
           id.startsWith(r.id.slice(0, 8)),
         )
         expect(bRow?.runtime === "herdr", `B's row: ${JSON.stringify(bRow)}`)
+        expect(bRow?.agent === "general", `B's row ran as ${bRow?.agent}, not the default general`)
+        const unknown = await w.viaEntry(["run", "--machine", "mb", "--agent", "nosuch", "pi", "--", ask("hnone")], {
+          env: s.aEnv,
+          asIs: true,
+        })
+        expect(unknown.code !== 0 && unknown.stderr.includes("nosuch"), `unknown agent on B: ${unknown.stderr}`)
+        const coordinator = (
+          JSON.parse(
+            await w.okViaEntry(["run", "--machine", "mb", "--agent", "coordinator", "pi", "--", ask("hcoord")], {
+              env: s.aEnv,
+              asIs: true,
+            }),
+          ) as { id: string }
+        ).id
+        const onB = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions
+        expect(
+          onB.find((r) => coordinator.slice(3).startsWith(r.id.slice(0, 8)))?.agent === "coordinator",
+          `B's rows: ${JSON.stringify(onB.map((r) => [r.id, r.agent]))}`,
+        )
+        expect(onB.length === 2, `the refused run left a session on B: ${onB.length}`)
         const name = agentName(bRow!.id)
         const shown = async () =>
           (JSON.parse(await s!.okA(["ls"])) as { sessions: Array<Listed> }).sessions.find((r) =>

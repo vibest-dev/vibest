@@ -1,3 +1,4 @@
+import { Agents } from "@vibest/core/agents"
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { LayerNode } from "@vibest/core/effect/layer-node"
@@ -18,6 +19,7 @@ import type { DaemonIdentity } from "@vibest/protocol/rpc"
 import { randomId } from "@vibest/schema/id"
 import { Clock, ConfigProvider, Context, Deferred, type Duration, Effect, FileSystem, Layer, Path, Ref } from "effect"
 
+import { agentPlugin } from "../../../builtins/src/agent.ts"
 import { choicePlugin } from "../../../runtime-herdr/src/choice.ts"
 import * as App from "../../../server/src/app.ts"
 import * as Server from "../../../server/src/server.ts"
@@ -87,6 +89,7 @@ export const pluginsHost = (
   options: { readonly timeout?: Duration.Input; readonly activateLate?: boolean } = {},
 ) => {
   const candidates: ReadonlyArray<Candidate> = [
+    { source: "test:agent", revision: "-", options: {}, plugin: agentPlugin },
     { source: "test:runtime-choice", revision: "-", options: {}, plugin: choicePlugin() },
     ...added.map(candidateOf),
   ]
@@ -106,7 +109,7 @@ export const pluginsHost = (
         )
       }),
     ),
-    deps: [Bus.node, Harnesses.node, Runtimes.node, Subscriptions.node, platform, home],
+    deps: [Agents.node, Bus.node, Harnesses.node, Runtimes.node, Subscriptions.node, platform, home],
   })
 }
 
@@ -181,6 +184,7 @@ export const sessionLayer = (replacements: LayerNode.Replacements = [], plugins 
       runtimeNode,
       App.services,
       plugins,
+      Agents.node,
       readyOnStart,
     ]),
     [
