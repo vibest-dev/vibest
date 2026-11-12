@@ -176,6 +176,7 @@ describe.concurrent("Sessions", () => {
       const herdr = yield* FakeRuntime
       const { id, sessions } = yield* idleSession(yield* makeRepository)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
       const placed = (yield* herdr.callsTo("open")).length
       const held = yield* herdr.hold("open", id)
       yield* sessions.send(id, "again")
@@ -187,6 +188,25 @@ describe.concurrent("Sessions", () => {
         rows.some((message) => message.includes("A message to") && message.includes("again")),
       )
       assert.include(notice.at(-1)!, "open: failed")
+    }),
+    { hooked: ["pi"] },
+  )
+
+  test(
+    "an execution end that lands after the terminal died, with a send queued: the exit is recorded and fails the send; nothing resumes the session",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
+      yield* sessions.send(id, "queued")
+      const placed = (yield* herdr.callsTo("open")).length
+      yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* writeEnd(id, "pi", { text: "", error: "aborted", aborted: true })
+      yield* untilVirtual(db.getSession(id), (row) => row?.exitedAt != null)
+      assert.deepStrictEqual(
+        (yield* db.inboxWithStatus(id, "failed")).map((r) => r.message),
+        ["queued"],
+      )
+      assert.lengthOf(yield* herdr.callsTo("open"), placed)
     }),
     { hooked: ["pi"] },
   )
