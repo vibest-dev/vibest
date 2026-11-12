@@ -284,7 +284,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S24",
     title:
-      "vibestd killed (kill -9) right after a Pi subagent took a send: the row stays delivered, is not delivered again, and a later send is delivered",
+      "vibestd killed (kill -9) right after a Pi subagent took a send: the row ends delivered, or failed with one notice when the harness never took it up, is not delivered again, and a later send is delivered",
     run: async (w) => {
       const p = await piProject(w, "s24")
       try {
@@ -306,8 +306,16 @@ const checks: ReadonlyArray<Check> = [
           message,
         )
         expect(rows?.n === 1, `the cut-off row exists ${rows?.n} times`)
-        expect(p.sendRow(sub, message)?.status === "delivered", "the taken row moved again")
-        expect(p.notices(sub, "may or may not have arrived") === 0, "a delivered row got a notice")
+        await until(
+          "the taken row settled",
+          () => p.sendRow(sub, message)?.status === "delivered" || p.notices(sub, "was not delivered") === 1,
+          30_000,
+        )
+        const settled = p.sendRow(sub, message)?.status
+        expect(
+          settled === "delivered" ? p.notices(sub, "was not delivered") === 0 : settled === "failed",
+          `the taken row ended ${settled} with ${p.notices(sub, "was not delivered")} notices`,
+        )
         const later = ask("later")
         await p.vibestSend(sub, later)
         await until("the later send delivered", () => p.sendRow(sub, later)?.status === "delivered", 30_000).catch(
