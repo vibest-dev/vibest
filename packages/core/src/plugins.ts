@@ -20,7 +20,7 @@ import { machinesListing, Runtimes } from "./runtimes.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
 export { AgentRefused, Change, HookFailed, PluginInfo, Routing, TraceEntry } from "@vibest/schema/plugin"
 
-export { type Candidate, pluginEntries, PluginLoader } from "./plugin-sources.ts"
+export { type Candidate, pluginEntries, PluginLoader, WATCH_PROBE } from "./plugin-sources.ts"
 export { DEBOUNCE, RECHECK } from "./plugin-supervisor.ts"
 export { errorMessage }
 

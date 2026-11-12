@@ -1,4 +1,4 @@
-import { Duration, Effect, type Latch, Queue, Semaphore, Stream } from "effect"
+import { Duration, Effect, FiberHandle, type Latch, Queue, Semaphore, Stream } from "effect"
 
 import { logFailure } from "./engine.ts"
 import { type Candidate, makeSources, makeWatcher, type Operation } from "./plugin-sources.ts"
@@ -68,8 +68,8 @@ export const supervise = Effect.fnUntraced(function* (
     Queue.offerUnsafe(triggers, undefined)
     Queue.offerUnsafe(builtinTriggers, undefined)
   }
-  const watcher = yield* makeWatcher(notify)
-  const scope = yield* Effect.scope
+  const watcher = yield* makeWatcher(notify, RECHECK)
+  const rescanWhenLive = yield* FiberHandle.make()
   const lock = yield* Semaphore.make(1)
   let users: ReadonlyArray<Candidate> = []
   const publish = (next?: ReadonlyArray<Candidate>) =>
@@ -95,7 +95,8 @@ export const supervise = Effect.fnUntraced(function* (
       resolved = yield* resolve(sources, builtins)
     }
     yield* publish(resolved.candidates.filter((c) => !isBuiltin(c)))
-    if (rewatched) yield* Effect.sleep(RECHECK).pipe(Effect.andThen(Effect.sync(() => notify())), Effect.forkIn(scope))
+    if (rewatched)
+      yield* FiberHandle.run(rescanWhenLive, watcher.live.pipe(Effect.andThen(Effect.sync(() => notify()))))
   }).pipe(logFailure("plugins: reload failed"))
   yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
     Stream.runForEach(() =>

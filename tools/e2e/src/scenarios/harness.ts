@@ -74,9 +74,10 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "H8",
     title:
-      "Cursor is not built in: `vibest run cursor` is refused saying no plugin provides it and how to add one; adding the shipped harnesses/cursor/plugin.js to vibest.json makes `cursor` appear in `harness list`",
+      "Cursor is not built in: `vibest run cursor` from the entry session is refused saying no plugin provides it and how to add one; adding the shipped harnesses/cursor/plugin.js to vibest.json makes `cursor` appear in `harness list`",
     run: async (w) => {
-      const before = await w.vibest(["run", "cursor", "--", "hello"], { timeoutMs: 60_000 })
+      await w.entry()
+      const before = await w.viaEntry(["run", "cursor", "--", "hello"], { timeoutMs: 60_000 })
       expect(
         before.code !== 0 && /no plugin provides harness cursor/.test(before.stderr + before.stdout),
         `${before.code} ${before.stderr}${before.stdout}`,
