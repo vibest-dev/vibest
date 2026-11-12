@@ -5,18 +5,20 @@ import { Peers } from "@vibest/core/peer"
 import { address, type At, type ListScope, type PeerScope, Remote } from "@vibest/core/remote"
 import { Runtimes, runtimesHere } from "@vibest/core/runtimes"
 import type { NotInRepository } from "@vibest/core/worktree"
-import { PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
-import { Caller, Forbidden, type PayloadOf, VERSION } from "@vibest/protocol/rpc"
+import { PEER_BY_USER, PEER_PROJECT_HEADER } from "@vibest/protocol/protocol"
+import { Caller, type CallerShape, Forbidden, type PayloadOf, VERSION } from "@vibest/protocol/rpc"
 import type { ProjectMoved } from "@vibest/schema/session"
 import { Effect, Stream } from "effect"
 
 import type { Listing } from "../listing.ts"
-import type { Agent, Checks } from "./caller.ts"
+import type { Checks } from "./caller.ts"
 
 type Routed = "Send" | "Interrupt" | "Remove" | "Get" | "Peek"
 type Local<A, E, R> = (id: string) => Effect.Effect<A, E, R>
 
 const notPeer = (method: string) => new Forbidden({ method, message: `${method} is for another vibestd` })
+
+const byOf = (c: CallerShape) => (c._tag === "Entry" || c._tag === "Session" ? c.sessionId : PEER_BY_USER)
 
 const peerOf = (method: string) =>
   Effect.flatMap(Caller, (c) => (c._tag === "Peer" ? Effect.succeed(c.peerId) : Effect.fail(notPeer(method))))
@@ -28,7 +30,11 @@ const peerScope = (method: string) =>
       return Effect.fail(
         new Forbidden({ method, message: `${method} needs the calling project (${PEER_PROJECT_HEADER})` }),
       )
-    return Effect.succeed({ peer: c.peerId, project: c.projectId })
+    return Effect.succeed({
+      peer: c.peerId,
+      project: c.projectId,
+      ...(c.session === undefined ? {} : { session: c.session }),
+    })
   })
 
 export const remoteHandlers = (
@@ -54,7 +60,7 @@ export const remoteHandlers = (
       Effect.gen(function* () {
         const { c, scope } = yield* reach("List")
         if (c === undefined) return { _tag: "Peer", ...scope } satisfies ListScope
-        if (c._tag === "Coordinator") return { _tag: "Project", id: c.projectId } satisfies ListScope
+        if (c._tag === "Entry") return { _tag: "Project", id: c.projectId } satisfies ListScope
         if (all === true) return { _tag: "All" } satisfies ListScope
         return yield* deps.findAt(c.repositoryRoot).pipe(
           Effect.map((row): ListScope => (row === undefined ? { _tag: "Nothing" } : { _tag: "Project", id: row.id })),
@@ -69,15 +75,18 @@ export const remoteHandlers = (
       method: Routed,
       input: string,
       local: Local<A, E, R2>,
-      forwarded: (at: At, project: string) => Effect.Effect<B, F>,
+      forwarded: (at: At, project: string, by: string) => Effect.Effect<B, F>,
     ) => {
       const at = address(input)
       return at._tag === "Local"
         ? local(at.id)
         : deps.agent(method).pipe(
-            Effect.flatMap((c) => deps.projectOf(c, method)),
-            Effect.catchTags({ NotInRepository: refused(method), ProjectMoved: refused(method) }),
-            Effect.flatMap((project) => forwarded(at, project.id)),
+            Effect.flatMap((c) =>
+              deps.projectOf(c, method).pipe(
+                Effect.catchTags({ NotInRepository: refused(method), ProjectMoved: refused(method) }),
+                Effect.flatMap((project) => forwarded(at, project.id, byOf(c))),
+              ),
+            ),
           )
     }
 
@@ -85,35 +94,32 @@ export const remoteHandlers = (
       reach,
       routed: {
         Send: <A, E, R2>(p: PayloadOf<"Send">, local: Local<A, E, R2>) =>
-          routed("Send", p.id, local, (at, project) =>
-            remote.forward(at, project, (c, { id }, o) => c.Send({ ...p, id }, o)),
+          routed("Send", p.id, local, (at, project, by) =>
+            remote.forward(at, project, by, (c, { id }, o) => c.Send({ ...p, id }, o)),
           ),
         Interrupt: <A, E, R2>(p: PayloadOf<"Interrupt">, local: Local<A, E, R2>) =>
-          routed("Interrupt", p.id, local, (at, project) =>
-            remote.forward(at, project, (c, { id }, o) => c.Interrupt({ ...p, id }, o)),
+          routed("Interrupt", p.id, local, (at, project, by) =>
+            remote.forward(at, project, by, (c, { id }, o) => c.Interrupt({ ...p, id }, o)),
           ),
         Remove: <A, E, R2>(p: PayloadOf<"Remove">, local: Local<A, E, R2>) =>
-          routed("Remove", p.id, local, (at, project) =>
-            remote.forward(at, project, (c, { id }, o) => c.Remove({ ...p, id }, o)),
+          routed("Remove", p.id, local, (at, project, by) =>
+            remote.forward(at, project, by, (c, { id }, o) => c.Remove({ ...p, id }, o)),
           ),
         Get: <A, E, R2>(p: PayloadOf<"Get">, local: Local<A, E, R2>) =>
-          routed("Get", p.id, local, (at, project) => remote.get(at, project, p)),
+          routed("Get", p.id, local, (at, project, by) => remote.get(at, project, by, p)),
         Peek: <A, E, R2>(p: PayloadOf<"Peek">, local: Local<A, E, R2>) =>
-          routed("Peek", p.id, local, (at, project) => remote.peek(at, project, p)),
+          routed("Peek", p.id, local, (at, project, by) => remote.peek(at, project, by, p)),
       },
 
-      spawnOn: (machine: string, input: PayloadOf<"Spawn">, caller: Agent, project: string) =>
-        remote.spawn(machine, input, {
-          project,
-          ...(caller._tag === "Coordinator" ? { coordinator: caller.sessionId } : {}),
-        }),
+      spawnOn: (machine: string, input: PayloadOf<"Spawn">, session: string, project: string) =>
+        remote.spawn(machine, input, { project, session }),
 
       methods: {
         List: ({ stopped, all }: PayloadOf<"List">) =>
           Effect.gen(function* () {
             const scope = yield* listScope(all)
             const local = yield* deps.listed(scope, stopped === true)
-            const away = yield* remote.list(scope, stopped)
+            const away = yield* remote.list(scope, byOf(yield* Caller), stopped)
             return { sessions: [...local, ...away.sessions], machines: away.machines }
           }),
 
@@ -132,7 +138,12 @@ export const remoteHandlers = (
           Effect.gen(function* () {
             const scope = yield* peerScope("Peer.Spawn")
             if (scope === undefined) return yield* notPeer("Peer.Spawn")
-            return yield* peers.spawn(scope.peer, scope.project, input)
+            if (scope.session === undefined)
+              return yield* new Forbidden({
+                method: "Peer.Spawn",
+                message: "Peer.Spawn is started by a session; it is not run in the user's name",
+              })
+            return yield* peers.spawn(scope.peer, scope.project, scope.session, input)
           }),
 
         "Peer.Outbox": () => Stream.unwrap(Effect.map(peerOf("Peer.Outbox"), (peer) => peers.outbox(peer))),

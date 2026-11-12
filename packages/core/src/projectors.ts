@@ -2,7 +2,7 @@ import type { Fact, FactOf, FactType } from "@vibest/schema/event"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 
-export const PROJECTION_VERSION = 5
+export const PROJECTION_VERSION = 7
 
 export const PROJECTION_SCHEMA = [
   `CREATE TABLE project (
@@ -58,15 +58,17 @@ export const PROJECTION_SCHEMA = [
   `CREATE UNIQUE INDEX process_live ON process (session_id) WHERE ended_at IS NULL`,
   `CREATE INDEX process_terminal ON process (runtime, terminal) WHERE ended_at IS NULL AND terminal IS NOT NULL`,
   `CREATE TABLE execution (
-    session_id TEXT NOT NULL,
-    id         INTEGER NOT NULL,
-    process_id INTEGER,
-    typed      TEXT,
-    started_at INTEGER NOT NULL,
-    outcome    TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),
-    failure    TEXT,
-    reply      TEXT,
-    ended_at   INTEGER,
+    session_id   TEXT NOT NULL,
+    id           INTEGER NOT NULL,
+    process_id   INTEGER,
+    typed        TEXT,
+    started_at   INTEGER NOT NULL,
+    accepted_at  INTEGER,
+    outcome      TEXT CHECK (outcome IN ('completed', 'failed', 'interrupted', 'lost', 'not_started')),
+    failure      TEXT,
+    failure_kind TEXT CHECK (failure_kind IN ('limit')),
+    reply        TEXT,
+    ended_at     INTEGER,
     PRIMARY KEY (session_id, id)
   ) STRICT`,
   `CREATE UNIQUE INDEX execution_open ON execution (session_id) WHERE outcome IS NULL`,
@@ -104,6 +106,7 @@ export const PROJECTION_SCHEMA = [
     seq        INTEGER NOT NULL,
     peer_id    TEXT NOT NULL,
     session_id TEXT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('send', 'notice')),
     content    TEXT NOT NULL,
     created_at INTEGER NOT NULL
   ) STRICT`,
@@ -224,10 +227,15 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
     sql`INSERT INTO execution (session_id, id, process_id, typed, started_at)
         VALUES (${sessionIdOf(fact)}, ${fact.seq}, ${fact.data.process ?? null}, ${fact.data.typed ?? null},
           ${fact.at})`,
+  "execution.accepted": (fact, sql) =>
+    sql`UPDATE execution SET accepted_at = ${fact.at}
+      WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.execution} AND outcome IS NULL
+        AND accepted_at IS NULL`,
   "execution.ended": (fact, sql) =>
     Effect.andThen(
       sql`UPDATE execution SET outcome = ${fact.data.outcome}, reply = ${fact.data.reply ?? null},
-          failure = ${fact.data.failure?.message ?? null}, ended_at = ${fact.at}
+          failure = ${fact.data.failure?.message ?? null}, failure_kind = ${fact.data.failure?.kind ?? null},
+          ended_at = ${fact.at}
         WHERE session_id = ${sessionIdOf(fact)} AND id = ${fact.data.execution} AND outcome IS NULL`,
       fact.data.conversation === undefined
         ? Effect.void
@@ -259,8 +267,9 @@ export const projectors: { readonly [T in FactType]: Projector<T> } = {
       ON CONFLICT (id) DO UPDATE SET name = excluded.name, connected_at = excluded.connected_at`,
 
   "outbox.queued": (fact, sql) =>
-    sql`INSERT INTO outbox (id, seq, peer_id, session_id, content, created_at)
-      VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.peer}, ${fact.data.session}, ${fact.data.content}, ${fact.at})`,
+    sql`INSERT INTO outbox (id, seq, peer_id, session_id, kind, content, created_at)
+      VALUES (${fact.data.id}, ${fact.seq}, ${fact.data.peer}, ${fact.data.session}, ${fact.data.kind ?? "notice"},
+        ${fact.data.content}, ${fact.at})`,
   "outbox.acked": (fact, sql) =>
     sql`DELETE FROM outbox WHERE peer_id = ${fact.data.peer} AND ${sql.in("id", fact.data.ids)}`,
 }

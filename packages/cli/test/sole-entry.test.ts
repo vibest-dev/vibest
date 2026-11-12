@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit, Fiber, Sink, Stdio, Stream } from "effect"
 import { TestClock } from "effect/testing"
 
-import { soleMainAgent } from "../src/cli.ts"
+import { soleEntry } from "../src/cli.ts"
 
 const stdio = (terminal: boolean, stdin: Stream.Stream<Uint8Array>) =>
   Stdio.layerTest({
@@ -16,25 +16,25 @@ const typed = (text: string) => Stream.make(new TextEncoder().encode(text))
 const recordingClient = (stop: "stopped" | "running" | "moved" | "unsupported" = "stopped") => {
   const calls: Array<string> = []
   const client = {
-    "Project.RunningCoordinator": () =>
+    "Project.RunningEntry": () =>
       Effect.sync(() => {
-        calls.push("RunningCoordinator")
+        calls.push("RunningEntry")
         return { harness: "claude" as const, place: "herdr w1:p1", runtime: "herdr", address: "{}" }
       }),
-    "Project.StopCoordinator": () =>
+    "Project.StopEntry": () =>
       Effect.sync(() => {
-        calls.push("StopCoordinator")
+        calls.push("StopEntry")
         return stop === "unsupported" ? { result: stop, reason: "it runs on another machine" } : { result: stop }
       }),
-  } as unknown as Parameters<typeof soleMainAgent>[0]
+  } as unknown as Parameters<typeof soleEntry>[0]
   const start = Effect.sync(() => {
     calls.push("start")
     return "started"
   })
-  return { calls, run: soleMainAgent(client, "w1:p2", start) }
+  return { calls, run: soleEntry(client, "w1:p2", start) }
 }
 
-describe("soleMainAgent while the main agent runs in another terminal: only a y whose stop finished starts; anything else starts nothing and never asks to stop (or, after a failed stop, to start)", () => {
+describe("soleEntry while the entry session runs in another terminal: only a y whose stop finished starts; anything else starts nothing and never asks to stop (or, after a failed stop, to start)", () => {
   for (const [name, terminal, stdin] of [
     ["N", true, typed("n\n")],
     ["empty", true, typed("\n")],
@@ -46,8 +46,8 @@ describe("soleMainAgent while the main agent runs in another terminal: only a y 
         const f = recordingClient()
         const exit = yield* Effect.exit(f.run)
         assert.isTrue(Exit.isFailure(exit))
-        assert.include(String(exit), "the main agent (claude) runs in herdr w1:p1")
-        assert.deepStrictEqual(f.calls, ["RunningCoordinator"])
+        assert.include(String(exit), "the entry session (claude) runs in herdr w1:p1")
+        assert.deepStrictEqual(f.calls, ["RunningEntry"])
       }).pipe(Effect.provide(stdio(terminal, stdin))),
     )
 
@@ -57,17 +57,17 @@ describe("soleMainAgent while the main agent runs in another terminal: only a y 
       const fiber = yield* Effect.forkChild(Effect.exit(f.run))
       yield* TestClock.adjust("2 minutes")
       assert.isTrue(Exit.isFailure(yield* Fiber.join(fiber)))
-      assert.deepStrictEqual(f.calls, ["RunningCoordinator"])
+      assert.deepStrictEqual(f.calls, ["RunningEntry"])
     }).pipe(Effect.provide(stdio(true, Stream.never))),
   )
 
-  it.effect("y but the stop did not finish (running) or the main agent moved meanwhile: fails, starts nothing", () =>
+  it.effect("y but the stop did not finish (running) or the entry session moved meanwhile: fails, starts nothing", () =>
     Effect.gen(function* () {
       for (const result of ["running", "moved"] as const) {
         const f = recordingClient(result)
         const exit = yield* Effect.exit(f.run)
         assert.isTrue(Exit.isFailure(exit), result)
-        assert.deepStrictEqual(f.calls, ["RunningCoordinator", "StopCoordinator"], result)
+        assert.deepStrictEqual(f.calls, ["RunningEntry", "StopEntry"], result)
       }
     }).pipe(Effect.provide(stdio(true, typed("y\n")))),
   )
@@ -79,7 +79,7 @@ describe("soleMainAgent while the main agent runs in another terminal: only a y 
       assert.isTrue(Exit.isFailure(exit))
       assert.include(String(exit), "cannot be moved from here: it runs on another machine. Exit it there first")
       assert.notInclude(String(exit), "did not exit")
-      assert.deepStrictEqual(f.calls, ["RunningCoordinator", "StopCoordinator"])
+      assert.deepStrictEqual(f.calls, ["RunningEntry", "StopEntry"])
     }).pipe(Effect.provide(stdio(true, typed("y\n")))),
   )
 })

@@ -1,36 +1,23 @@
-import type { Polled } from "@vibest/protocol/protocol"
+import type { Taken } from "@vibest/protocol/protocol"
 import { shortId } from "@vibest/schema/id"
-import { Context, Duration, Effect, Layer, Queue, Stream } from "effect"
+import { Context, Effect, Layer, Queue, Stream } from "effect"
 
 import { Bus } from "./bus.ts"
-import { Db, encodeAddress, type InboxRow, type NewInboxRow, type RuntimeAddress } from "./db.ts"
+import { Db, type InboxRow, type NewInboxRow, type RuntimeAddress, type SessionRow } from "./db.ts"
 import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as Engine from "./engine.ts"
 import { Harnesses } from "./harness.ts"
-import { keyedLock } from "./keyed-lock.ts"
-import * as Leases from "./leases.ts"
-import { Restarting } from "./restarting.ts"
-import { agentState, alive, Runtimes, RuntimeError, type Runtime } from "./runtimes.ts"
-
-export const LEASE = Duration.seconds(30)
-export const AWAY = Duration.seconds(5)
+import { agentState, alive, RuntimeError, type Runtime } from "./runtimes.ts"
 
 export type Presence = "idle" | "busy" | "gone" | "unknown"
 
-export const coordinatorIdle = (h: Runtime, terminal: RuntimeAddress): Effect.Effect<Presence, RuntimeError> =>
+export const entryIdle = (h: Runtime, terminal: RuntimeAddress): Effect.Effect<Presence, RuntimeError> =>
   Effect.gen(function* () {
     const seen = yield* agentState(h, terminal)
     if (seen === "unknown" || seen === "absent") return (yield* alive(h, terminal)) ? "busy" : "gone"
     return seen === "idle" ? "idle" : "busy"
   })
-
-export const senderKey = (row: InboxRow) => (row.kind === "notice" ? "vibestd" : (row.sender ?? ""))
-export const nextBatch = (pending: ReadonlyArray<InboxRow>) => {
-  const first = pending[0] ? senderKey(pending[0]) : undefined
-  const other = pending.findIndex((r) => senderKey(r) !== first)
-  return other === -1 ? pending : pending.slice(0, other)
-}
 
 export const text = (batch: ReadonlyArray<InboxRow>) => batch.map((r) => r.message).join("\n\n")
 
@@ -59,19 +46,23 @@ export const line = (
   return fit(`${type} Agent "`, session?.title ?? "", `" sent a message (${shortId(sender)})${more}`)
 }
 
+export type Undelivered = ReadonlyArray<{
+  readonly id: number
+  readonly message: string
+  readonly kind?: string
+  readonly sender?: string | null
+}>
+
 export class Inbox extends Context.Service<
   Inbox,
   {
     readonly enqueue: (row: NewInboxRow) => Effect.Effect<InboxRow>
-    readonly deliver: (projectId: string) => Effect.Effect<void>
-    readonly stream: (projectId: string) => Stream.Stream<string>
-    readonly poll: (projectId: string) => Effect.Effect<Polled>
-    readonly ack: (
-      projectId: string,
-      ids: ReadonlyArray<number>,
-      release?: ReadonlyArray<number>,
-    ) => Effect.Effect<ReadonlyArray<number>>
-    readonly locks: Effect.Effect<number>
+    readonly pulls: (harnessId: string) => boolean
+    readonly take: (sessionId: string, process: number | undefined) => Effect.Effect<Taken | undefined>
+    readonly stream: (sessionId: string) => Stream.Stream<null>
+    readonly claimRetype: (sessionId: string, execution: number) => Effect.Effect<boolean>
+    readonly undelivered: (session: SessionRow, rows: Undelivered, reason: string) => Effect.Effect<void>
+    readonly dropQueue: (session: SessionRow, reason: string) => Effect.Effect<void>
   }
 >()("vibest/Inbox") {
   static readonly layer = Layer.effect(
@@ -79,210 +70,111 @@ export class Inbox extends Context.Service<
     Effect.gen(function* () {
       const db = yield* Db
       const drain = yield* Drain
-      const runtimes = yield* Runtimes
       const harnesses = yield* Harnesses
-      const restarting = yield* Restarting
-      const inboxOf = (id: string | null | undefined) => harnesses.find(id)?.inbox
-      const markDelivered = (sessionId: string, ids: ReadonlyArray<number>) =>
-        drain.work(
-          `settle inbox ${ids.join(",")}`,
-          Effect.uninterruptible(db.setInboxStatus(sessionId, ids, "delivered", "sending")),
-          true,
-        )
-
-      const locks = keyedLock<string>()
-
-      const withLock = <A, E, R>(label: string, projectId: string, body: Effect.Effect<A, E, R>, settlement = false) =>
-        drain.work(label, locks.withLock(projectId)(body), settlement)
-
-      const deliver = (projectId: string) =>
-        withLock(
-          `deliver project ${projectId}`,
-          projectId,
-          Effect.gen(function* () {
-            const coord = yield* db.coordinatorOf(projectId)
-            if (!coord?.address || coord.address.id === "" || !coord.runtime)
-              return yield* db.dropWaiting(projectId, "absent")
-            if (restarting.has(coord.id)) return
-            const address = encodeAddress(coord.address)
-            const guard = { projectId, runtime: coord.runtime, address }
-            const h = runtimes.find(coord.runtime)
-            if (h === undefined) return
-            const presence = yield* coordinatorIdle(h, coord.address)
-            if (presence === "gone") return yield* db.dropWaiting(projectId, guard)
-          }).pipe(Engine.logFailure(`deliver to project ${projectId}`)),
-        )
-
-      const mainOf = (id: string) =>
-        Effect.gen(function* () {
-          const projectId = yield* db.projectOfSession(id)
-          return projectId !== undefined && (yield* db.coordinatorOf(projectId))?.id === id ? projectId : undefined
-        })
-      const ifMain = (id: string, then: (projectId: string) => Effect.Effect<void>) =>
-        mainOf(id).pipe(Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : then(projectId))))
-
       const engine = yield* Engine.make
-      const leases = yield* Leases.make
-      let subscriptions = 0
-      const waiting = new Map<string, Set<Queue.Queue<void>>>()
-      const wake = (id: string) =>
+
+      const pulls = (harnessId: string) => harnesses.find(harnessId)?.inbox !== undefined
+
+      const handedOver = new Set<string>()
+      const handedKey = (sessionId: string | undefined, execution: number) => `${sessionId}:${execution}`
+      const waiting = new Map<string, Set<Queue.Queue<null>>>()
+      const wake = (id: string | undefined) =>
         Effect.sync(() => {
-          for (const signal of waiting.get(id) ?? []) Queue.offerUnsafe(signal, undefined)
+          for (const signal of (id === undefined ? undefined : waiting.get(id)) ?? []) Queue.offerUnsafe(signal, null)
         })
       yield* engine.on((event) => {
         switch (event.type) {
+          case "execution.ended":
+            return Effect.sync(() => handedOver.delete(handedKey(event.sessionId, event.data.execution))).pipe(
+              Effect.andThen(wake(event.sessionId)),
+            )
+          case "execution.accepted":
+            return Effect.sync(() => void handedOver.delete(handedKey(event.sessionId, event.data.execution)))
           case "inbox.queued":
-            return wake(event.sessionId!).pipe(Effect.andThen(ifMain(event.sessionId!, deliver)))
+            return wake(event.sessionId)
           case "inbox.moved":
-            return event.data.to === "pending"
-              ? wake(event.sessionId!).pipe(Effect.andThen(ifMain(event.sessionId!, deliver)))
-              : Effect.void
-          case "live.state":
-            return db
-              .coordinatorAt(event.runtime, event.terminal)
-              .pipe(Effect.flatMap((projectId) => (projectId === undefined ? Effect.void : deliver(projectId))))
+            return event.data.to === "pending" ? wake(event.sessionId) : Effect.void
           case "live.exited":
-            return drain.work("main agent exited", db.clearCoordinator(event.runtime, event.terminal))
+            return drain.work("entry session exited", db.clearEntry(event.runtime, event.terminal), true)
           default:
             return Effect.void
         }
       })
 
-      const claimNext = (
-        projectId: string,
-        mode: "subscribe" | "poll",
-        origin: { readonly runtime: string; readonly address: string; readonly harnessId: string } | undefined,
-        hold: (session: string, ids: ReadonlyArray<number>) => Effect.Effect<void>,
-      ) =>
-        withLock(
-          `claim project ${projectId}`,
-          projectId,
-          Effect.uninterruptible(
-            Effect.gen(function* () {
-              const current = yield* db.coordinatorOf(projectId)
-              if (!current || inboxOf(current.harnessId) !== mode || !current.address || !current.runtime)
-                return undefined
-              const address = encodeAddress(current.address)
-              if (
-                origin &&
-                (current.harnessId !== origin.harnessId ||
-                  current.runtime !== origin.runtime ||
-                  address !== origin.address)
-              )
-                return undefined
-              const pending = yield* db.coordinatorPending(projectId)
-              if (pending.length === 0) return undefined
-              const batch = nextBatch(pending)
-              const claimed = yield* db.claim(
-                current.id,
-                batch.map((r) => r.id),
-                { projectId, runtime: current.runtime, address, harnessId: current.harnessId },
-              )
-              if (claimed.length === 0) return undefined
-              yield* hold(current.id, claimed)
-              return batch.filter((r) => claimed.includes(r.id))
-            }),
-          ),
-        )
-
-      const stream = (projectId: string) =>
+      const stream = (sessionId: string) =>
         Stream.unwrap(
           Effect.gen(function* () {
-            const subscribed = yield* db.coordinatorOf(projectId)
-            const origin =
-              subscribed?.address && subscribed.runtime
-                ? {
-                    runtime: subscribed.runtime,
-                    address: encodeAddress(subscribed.address),
-                    harnessId: subscribed.harnessId,
-                  }
-                : undefined
-            const signal = yield* Queue.sliding<void>(1)
-            const main = subscribed?.id
-            if (main !== undefined)
-              yield* Effect.acquireRelease(
-                Effect.sync(() => waiting.set(main, (waiting.get(main) ?? new Set()).add(signal))),
-                () =>
-                  Effect.sync(() => {
-                    const open = waiting.get(main)
-                    open?.delete(signal)
-                    if (open?.size === 0) waiting.delete(main)
-                  }),
-              )
-            const recipient = `${projectId} subscription ${++subscriptions}`
-            const claimOne = () =>
-              origin === undefined || main === undefined
-                ? Effect.succeed(undefined)
-                : claimNext(projectId, "subscribe", origin, (session, ids) =>
-                    leases.hold(recipient, session, ids, undefined, (ended) => db.failLeased(main, ended)),
-                  ).pipe(Effect.map((rows) => (rows === undefined ? undefined : text(rows))))
-            return Stream.unfold(0, () =>
-              Effect.gen(function* () {
-                const ids = leases.held(recipient)
-                if (ids.length > 0 && main !== undefined)
-                  yield* Effect.uninterruptible(markDelivered(main, ids).pipe(Effect.andThen(leases.settle(main, ids))))
-                while (true) {
-                  const batch = yield* claimOne()
-                  if (batch !== undefined) return [batch, 0] as const
-                  yield* Queue.take(signal)
-                }
-              }),
-            ).pipe(Stream.ensuring(leases.expireAll(recipient)))
+            const signal = yield* Queue.sliding<null>(1)
+            yield* Effect.acquireRelease(
+              Effect.sync(() => waiting.set(sessionId, (waiting.get(sessionId) ?? new Set()).add(signal))),
+              () =>
+                Effect.sync(() => {
+                  const open = waiting.get(sessionId)
+                  open?.delete(signal)
+                  if (open?.size === 0) waiting.delete(sessionId)
+                }),
+            )
+            Queue.offerUnsafe(signal, null)
+            return Stream.fromQueue(signal)
           }),
         )
 
-      const released = (projectId: string) => (ids: ReadonlyArray<number>) =>
-        withLock(`end leases project ${projectId}`, projectId, db.releaseLeased(projectId, ids), true).pipe(
-          Effect.asVoid,
-        )
-
-      const poll = (projectId: string) =>
+      const take = (sessionId: string, process: number | undefined) =>
         Effect.gen(function* () {
-          yield* engine.arm(`away:${projectId}`, AWAY, leases.expireAll(projectId))
-          const empty: Polled = { ids: [], line: "", text: "" }
-          if ((yield* drain.phase) !== "open") return empty
-          const rows = yield* claimNext(projectId, "poll", undefined, (session, ids) =>
-            leases.hold(projectId, session, ids, LEASE, released(projectId)),
-          )
-          if (rows === undefined) return empty
-          const last = rows.at(-1)!
-          const session = last.kind === "notice" || last.sender === null ? undefined : yield* db.getSession(last.sender)
+          if ((yield* drain.phase) !== "open") return undefined
+          const session = yield* db.getSession(sessionId)
+          if (session === undefined || !pulls(session.harnessId)) return undefined
+          const taken = yield* drain.work(`take inbox of ${sessionId}`, db.takeInbox(sessionId, process))
+          if (taken === undefined) return undefined
+          handedOver.add(handedKey(sessionId, taken.execution))
+          const last = taken.rows.at(-1)!
+          const sender = last.kind === "notice" || last.sender === null ? undefined : yield* db.getSession(last.sender)
           return {
-            ids: rows.map((r) => r.id),
-            line: line(rows, () => session && { agent: session.agent, title: session.name }),
-            text: text(rows),
-          }
+            execution: taken.execution,
+            ids: taken.rows.map((r) => r.id),
+            line: line(taken.rows, () => sender && { agent: sender.agent, title: sender.name }),
+            text: text(taken.rows),
+          } satisfies Taken
         })
 
-      const ack = (projectId: string, ids: ReadonlyArray<number>, release: ReadonlyArray<number> = []) =>
-        withLock(
-          `ack inbox ${ids.join(",")}`,
-          projectId,
-          Effect.uninterruptible(
-            Effect.gen(function* () {
-              const main = yield* db.coordinatorOf(projectId)
-              const rows = yield* db.settleLeased(projectId, ids, release)
-              if (main !== undefined) yield* leases.settle(main.id, [...ids, ...release])
-              return rows.map((r) => r.id)
-            }),
-          ),
-          true,
-        )
+      const undelivered = (session: SessionRow, rows: Undelivered, reason: string) =>
+        db
+          .setInboxStatus(
+            session.id,
+            rows.map((r) => r.id),
+            "failed",
+          )
+          .pipe(
+            Effect.andThen(
+              Effect.forEach(
+                [...Map.groupBy(rows, (r) => (r.kind === "send" ? (r.sender ?? null) : null))],
+                ([sender, group]) => {
+                  const message = `A message to ${session.id} was not delivered: ${reason}\n\n${group.map((r) => r.message).join("\n\n")}`
+                  return sender === null
+                    ? db.insertInbox({ sessionId: session.id, message })
+                    : db.insertNoticeTo(sender, message)
+                },
+                { discard: true },
+              ),
+            ),
+            Effect.asVoid,
+          )
 
-      return Inbox.of({
-        enqueue: db.insertInbox,
-        deliver,
-        stream,
-        poll,
-        ack,
-        locks: Effect.sync(() => locks.size()),
-      })
+      const dropQueue = (session: SessionRow, reason: string) =>
+        db
+          .pendingInbox(session.id)
+          .pipe(Effect.flatMap((rows) => (rows.length === 0 ? Effect.void : undelivered(session, rows, reason))))
+
+      const claimRetype = (sessionId: string, execution: number) =>
+        Effect.sync(() => handedOver.delete(handedKey(sessionId, execution)))
+
+      return Inbox.of({ enqueue: db.insertInbox, pulls, take, stream, claimRetype, undelivered, dropQueue })
     }),
   )
 
   static readonly node = LayerNode.make({
     service: Inbox,
     layer: Inbox.layer,
-    deps: [Bus.node, Db.node, Drain.node, Harnesses.node, Restarting.node, Runtimes.node],
+    deps: [Bus.node, Db.node, Drain.node, Harnesses.node],
   })
 }

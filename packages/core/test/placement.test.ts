@@ -9,7 +9,7 @@ import { projectOf } from "./lib/directory.ts"
 import { testEffect } from "./lib/effect.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { until, writeResult } from "./lib/observe.ts"
+import { until, writeEnd } from "./lib/observe.ts"
 import { makeRepository, sessionLayer } from "./lib/session.ts"
 
 const test = <E, R>(name: string, program: Effect.Effect<void, E, R>) => testEffect(sessionLayer())(name, () => program)
@@ -18,6 +18,7 @@ const spawnInput = (repo: string) =>
   Effect.map(projectOf(repo), (projectId) => ({
     machine: { id: "local" },
     root: repo,
+    parentSessionId: "creator",
     projectId,
     name: "task",
     prompt: "do it",
@@ -25,9 +26,9 @@ const spawnInput = (repo: string) =>
     runtime: "herdr",
   }))
 
-describe("placement: every session is a tab beside the project's main agent, in vibest's own detached worktree", () => {
+describe("placement: every session is a tab beside the project's entry session, in vibest's own detached worktree", () => {
   test(
-    "a subagent is a tab in the main agent's workspace with its shell in a detached worktree; labelled, labelled again after a restart, archived without closing that workspace",
+    "a subagent is a tab in the entry session's workspace with its shell in a detached worktree; labelled, labelled again after a restart, archived without closing that workspace",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
@@ -36,13 +37,13 @@ describe("placement: every session is a tab beside the project's main agent, in 
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "main:coord" },
       })
 
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
       const wt = (yield* sessions.get(id)).worktree
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.deepStrictEqual([placed.near, placed.project, placed.cwd], ["main:coord", repo, wt])
@@ -65,8 +66,8 @@ describe("placement: every session is a tab beside the project's main agent, in 
       yield* PubSub.publish(herdr.events, { type: "reset" })
       yield* until(herdr.callsTo("present"), (calls) => calls.length > 1)
 
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: "status: completed" })
+      yield* herdr.endExecution(id)
       yield* sessions.check(id)
       assert.deepInclude(yield* sessions.remove(id), { pane: "closed", worktree: "removed" })
       assert.isFalse(yield* fs.exists(wt))
@@ -75,7 +76,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
   )
 
   test(
-    "the project workspace's live count is published again when a session's harness exits, and when the last one is archived the main agent's terminal publishes the count alone with no pane metadata",
+    "the project workspace's live count is published again when a session's harness exits, and when the last one is archived the entry session's terminal publishes the count alone with no pane metadata",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db
@@ -83,7 +84,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("main", repo)
       yield* herdr.addPane("main:coord", "main", repo)
-      yield* db.coordinatorLaunch(
+      yield* db.startEntry(
         yield* projectOf(repo),
         "pi",
         false,
@@ -93,8 +94,8 @@ describe("placement: every session is a tab beside the project's main agent, in 
 
       const a = yield* sessions.spawn(yield* spawnInput(repo))
       const b = yield* sessions.spawn({ ...(yield* spawnInput(repo)), name: "second" })
-      yield* until(db.getSession(a.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
-      yield* until(db.getSession(b.id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+      yield* until(db.getSession(a.id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
+      yield* until(db.getSession(b.id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
       yield* until(herdr.callsTo("present"), (calls) => calls.at(-1)!.info.live === "2")
 
       yield* herdr.updateAgent(a.id, (agent) => ({ ...agent, alive: false }))
@@ -109,7 +110,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
   )
 
   test(
-    "a main agent in another herdr session does not place near its pane id: the id repeats in every session; the workspace still resolves by the project",
+    "an entry session in another herdr session does not place near its pane id: the id repeats in every session; the workspace still resolves by the project",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const db = yield* Db
@@ -117,13 +118,13 @@ describe("placement: every session is a tab beside the project's main agent, in 
       const repo = yield* makeRepository
       yield* herdr.addWorkspace("w1", repo)
       yield* herdr.addPane("w1:coord", "w1", repo)
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: "other",
         address: { machine: "local", id: "w1:coord" },
       })
 
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))
-      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
       const placed = (yield* herdr.callsTo("open"))[0]!
       assert.strictEqual(placed.near, undefined)
       assert.strictEqual((yield* herdr.agent(id))!.terminal.split(":")[0], "w1")
@@ -140,7 +141,7 @@ describe("placement: every session is a tab beside the project's main agent, in 
       const here = yield* sessions.spawn(yield* spawnInput(repo))
       const there = yield* sessions.spawn({ ...(yield* spawnInput(repo)), origin: { peer: "a", project: "aproj" } })
       for (const id of [here.id, there.id])
-        yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.turnState === "open")
+        yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => w?.executionState === "open")
       const opened = yield* herdr.callsTo("open")
       const openOf = (id: string) => opened.find((call) => call.env.VIBEST_SESSION_ID === id)
       const hereOpen = openOf(here.id)

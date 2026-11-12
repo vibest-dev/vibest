@@ -42,14 +42,14 @@ exit uses it.
 
 `vibest update` sends `Daemon.Handoff` the same way, in the running vibestd's protocol, so a newer vibest hands over
 a vibestd of any older protocol that has the `handoff` capability. A handoff (like a Stop) accepts the stop in the
-same step that finds vibestd idle, and only then starts the new vibestd: from then on no turn end or other work is
+same step that finds vibestd idle, and only then starts the new vibestd: from then on no execution end or other work is
 admitted, so a started new vibestd always takes over, and a refused handoff has started nothing.
 
 After `vibest update` installs another version and vibestd answers Ping with that version, the old process does not
 offer the agent restarts itself: across a protocol change vibestd refuses it (`IncompatibleDaemon`). It runs the
 installed binary as `<installed vibest> update --restart-agents-after <pid> [--yes]` on the same terminal and exits
 with its status. The child runs only the restart offer, with `--yes` deciding as for `vibest update`, and passes
-`<pid>` (the parent's) to `Agents.Restart` as `after`, so a main Agent that ran `vibest update` is restarted only once
+`<pid>` (the parent's) to `Agents.Restart` as `after`, so an entry session that ran `vibest update` is restarted only once
 the outer command has exited. This hidden flag is a contract between versions: the old binary writes the call, the
 new one reads it, so every later version keeps accepting `--restart-agents-after <pid>` and `--yes` with this meaning.
 When vibestd still runs another version (a declined restart), the old process offers the restarts itself. A CLI older
@@ -73,7 +73,7 @@ Db and Runtimes depend on, so a commit is visible to whoever subscribed first. T
 (`packages/server/src/app.ts`, see [architecture §5](architecture.md#5-service-composition)): a service is built after
 every node in its `deps`, and the nodes the host supplies are replacements, so the daemon and the tests compile the
 same graph. The RPC and HTTP servers list the whole services group (`packages/server/src/services.ts`) in their
-`deps`, so the socket and the HTTP port bind only after every service is built, whatever the order of the roots. The main Agents' `vibest --env` values live
+`deps`, so the socket and the HTTP port bind only after every service is built, whatever the order of the roots. The entry sessions' `vibest --env` values live
 in vibestd's memory only (never stored, logged or sent); a handoff passes them to the next vibestd in its environment
 (`VIBEST_HANDOFF_ENV`), which `vibest daemon --import` reads and removes before anything starts, and a handoff first
 has the new binary check read-only that it can open the database (`vibest daemon import-check`, waited on for up to 120 s). The pairs go on the
@@ -84,13 +84,12 @@ variable a shell rc does not set, since an rc that exports the names themselves 
 
 Changes are counted at the RPC and HTTP entry until they end, failed or interrupted ones too, and refused once a
 `Daemon.Stop` drains (`DaemonStopping` over RPC, 503 over HTTP), except settlements of work already handed out: a
-hook's turn start (`Prompt`) or turn end (`TurnEnd`) and an inbox ack. While it drains these are still admitted;
-after the Stop is accepted they are refused too. Refused while draining, a spawn's first turn would never show its
-pickup proof (its launch then holds the drain open) and a turn end would lose its result. A turn end is one
-transaction that writes the round's `turn.ended` with its reply, without the session lock; a write that fails fails the request, so the caller sees a
-failure, not a silent retry. A turn start is stamped once, when the hook arrives: `userPrompt` notes the start before
-it may wait for the session's lock, held through a send's whole confirm, and stamps the round with the same time, so
-the pending send sees its pickup proof while it still waits.
+hook's execution start (`Prompt`) or execution end (`ExecutionEnd`) and an inbox ack. While it drains these are still admitted;
+after the Stop is accepted they are refused too. Refused while draining, a spawn's first execution would never show its
+pickup proof (its launch then holds the drain open) and an execution end would lose its result. An execution end is one
+transaction that writes the execution's `execution.ended` with its reply, without the session lock; a write that fails fails the request, so the caller sees a
+failure, not a silent retry. An execution start is written once, when the hook arrives, without the session's lock (held through a send's whole
+confirm): `userPrompt` accepts the open execution, so the pending send sees its pickup proof while it still waits.
 
 ## Session requests
 
@@ -101,12 +100,12 @@ and protocol a session's request carries are recorded on its row when they chang
 matches and before the protocol check, so an agent left on an old integration is known and `vibest update` restarts
 it; the `vibest` CLI an agent runs sends no plugin version and records nothing. The harness conversation id is taken
 from the session's own harness only, latest wins (a `/clear` changes it): a process of another harness under the same
-session id (an old main Agent after a switch) changes nothing. ACCESS roles: `open` (protocol only), `session` (a
-subagent), `agent` (a main Agent or the command line), `coordinator`, `owner` (a main Agent of the session's Project,
+session id (an old entry session after a switch) changes nothing. ACCESS roles: `open` (protocol only), `session` (a
+subagent), `agent` (an entry session or the command line), `coordinator`, `owner` (an entry session of the session's Project,
 or the command line) and `self` (a subagent's own terminal for its own id, or the command line at the Project root for
-its main Agent, its start after a restart). One main Agent per Project: every start passes one check that holds the
+its entry session, its start after a restart). One entry session per Project: every start passes one check that holds the
 Project's lock through the launch, as a stop does, so two starts at once cannot both pass; the check fails open
-(nothing running) when the runtime cannot be reached or cannot tell, and a main Agent that `vibest update` is
-restarting counts as running. A stop of a main Agent that is restarting is refused rather than waited for, since its
-next harness starts in seconds. A main Agent's working directory places it only in a Project without a directory;
+(nothing running) when the runtime cannot be reached or cannot tell, and an entry session that `vibest update` is
+restarting counts as running. A stop of an entry session that is restarting is refused rather than waited for, since its
+next harness starts in seconds. An entry session's working directory places it only in a Project without a directory;
 otherwise it starts sessions in its own Project wherever its shell is.

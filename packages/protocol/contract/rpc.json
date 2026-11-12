@@ -1,5 +1,5 @@
 {
-  "protocol": 9,
+  "protocol": 10,
   "capabilities": {
     "http": true,
     "handoff": true,
@@ -358,137 +358,6 @@
               "_tag",
               "id",
               "message"
-            ],
-            "additionalProperties": true
-          },
-          "ProtocolRejectedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProtocolRejected"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "protocol": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "mismatch": {
-                "type": "object",
-                "properties": {
-                  "protocol": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
-                    ]
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "action": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "protocol",
-                  "version",
-                  "message",
-                  "action"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "protocol",
-              "mismatch"
-            ],
-            "additionalProperties": true
-          }
-        }
-      }
-    },
-    "CoordinatorSessionReady": {
-      "access": "open",
-      "stream": false,
-      "payload": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string"
-          },
-          "harness": {
-            "type": "string"
-          },
-          "harnessSessionId": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "sessionId",
-          "harness",
-          "harnessSessionId"
-        ],
-        "additionalProperties": true
-      },
-      "success": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "null"
-      },
-      "error": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "anyOf": [
-          {
-            "not": {}
-          },
-          {
-            "$ref": "#/$defs/DaemonStoppingEncoded"
-          },
-          {
-            "$ref": "#/$defs/ProtocolRejectedEncoded"
-          }
-        ],
-        "$defs": {
-          "DaemonStoppingEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "DaemonStopping"
-                ]
-              },
-              "method": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method"
             ],
             "additionalProperties": true
           },
@@ -1163,6 +1032,137 @@
         }
       }
     },
+    "ExecutionEnd": {
+      "access": "open",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "harness",
+          "event"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "null"
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "not": {}
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "DaemonStoppingEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "DaemonStopping"
+                ]
+              },
+              "method": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
     "Get": {
       "access": [
         "agent",
@@ -1272,7 +1272,7 @@
               }
             ]
           },
-          "turnState": {
+          "executionState": {
             "type": "string",
             "enum": [
               "none",
@@ -1594,14 +1594,14 @@
               }
             ]
           },
-          "answer": {
+          "reply": {
             "anyOf": [
               {
                 "anyOf": [
                   {
                     "type": "object",
                     "properties": {
-                      "turn": {
+                      "execution": {
                         "anyOf": [
                           {
                             "type": "number"
@@ -1656,7 +1656,7 @@
                       }
                     },
                     "required": [
-                      "turn",
+                      "execution",
                       "status",
                       "text",
                       "failure",
@@ -1685,7 +1685,7 @@
           "status",
           "startedAt",
           "exitedAt",
-          "turnState",
+          "executionState",
           "projectId",
           "runtime",
           "address",
@@ -2144,7 +2144,7 @@
       }
     },
     "Inbox.Subscribe": {
-      "access": "coordinator",
+      "access": "session",
       "stream": true,
       "payload": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2152,7 +2152,7 @@
       },
       "success": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "string"
+        "type": "null"
       },
       "error": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2166,6 +2166,236 @@
           },
           {
             "not": {}
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "Inbox.Take": {
+      "access": "session",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "null"
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "execution": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Infinity",
+                      "-Infinity",
+                      "NaN"
+                    ]
+                  }
+                ]
+              },
+              "ids": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string",
+                      "enum": [
+                        "Infinity",
+                        "-Infinity",
+                        "NaN"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "line": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "execution",
+              "ids",
+              "line",
+              "text"
+            ],
+            "additionalProperties": true
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              }
+            ]
           },
           {
             "anyOf": [
@@ -3470,7 +3700,7 @@
                     }
                   ]
                 },
-                "turnState": {
+                "executionState": {
                   "type": "string",
                   "enum": [
                     "none",
@@ -3803,7 +4033,7 @@
                 "status",
                 "startedAt",
                 "exitedAt",
-                "turnState",
+                "executionState",
                 "projectId",
                 "runtime",
                 "address",
@@ -5894,7 +6124,7 @@
           "kind": {
             "type": "string",
             "enum": [
-              "result",
+              "send",
               "notice"
             ]
           },
@@ -6160,16 +6390,6 @@
               }
             ]
           },
-          "reportTo": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "request": {
             "type": "string"
           }
@@ -6366,6 +6586,9 @@
               },
               {
                 "$ref": "#/$defs/HarnessUnavailableEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoCallingSessionEncoded"
               },
               {
                 "$ref": "#/$defs/NoHarnessChosenEncoded"
@@ -6590,6 +6813,21 @@
               "_tag",
               "harness",
               "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoCallingSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoCallingSession"
+                ]
+              }
+            },
+            "required": [
+              "_tag"
             ],
             "additionalProperties": true
           },
@@ -7267,7 +7505,634 @@
         }
       }
     },
-    "Project.CoordinatorSession": {
+    "Project.Create": {
+      "access": "cli",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string"
+          },
+          "from": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "directory",
+          "from"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string"
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "branch": {
+                  "type": "string"
+                },
+                "origin": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "uncommitted": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "source",
+                "path",
+                "branch",
+                "uncommitted"
+              ],
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "directory",
+          "folders"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/ProjectCreateFailedEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/DaemonStoppingEncoded"
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProjectCreateFailedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProjectCreateFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "DaemonStoppingEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "DaemonStopping"
+                ]
+              },
+              "method": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method"
+            ],
+            "additionalProperties": true
+          },
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "Project.EntryPlace": {
+      "access": "cli",
+      "stream": false,
+      "payload": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "callerEnv": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "callerEnv"
+        ],
+        "additionalProperties": true
+      },
+      "success": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string"
+          },
+          "place": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "in": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "terminal"
+                        ]
+                      }
+                    ]
+                  },
+                  "runtime": {
+                    "type": "string"
+                  },
+                  "terminal": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "in",
+                  "runtime",
+                  "terminal"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "in": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "launch"
+                        ]
+                      }
+                    ]
+                  },
+                  "runtime": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "in",
+                  "runtime"
+                ],
+                "additionalProperties": true
+              }
+            ]
+          }
+        },
+        "required": [
+          "directory",
+          "place"
+        ],
+        "additionalProperties": true
+      },
+      "error": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/ForbiddenEncoded"
+              },
+              {
+                "$ref": "#/$defs/NotInRepositoryEncoded"
+              },
+              {
+                "$ref": "#/$defs/ProjectMovedEncoded"
+              },
+              {
+                "$ref": "#/$defs/LaunchFailedEncoded"
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InvalidCallerEncoded"
+              },
+              {
+                "$ref": "#/$defs/NoSuchSessionEncoded"
+              }
+            ]
+          },
+          {
+            "$ref": "#/$defs/ProtocolRejectedEncoded"
+          }
+        ],
+        "$defs": {
+          "InvalidCallerEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "InvalidCaller"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ForbiddenEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "Forbidden"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NotInRepositoryEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NotInRepository"
+                ]
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "path"
+            ],
+            "additionalProperties": true
+          },
+          "ProjectMovedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProjectMoved"
+                ]
+              },
+              "projectId": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "projectId",
+              "from",
+              "to"
+            ],
+            "additionalProperties": true
+          },
+          "LaunchFailedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "LaunchFailed"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "NoSuchSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoSuchSession"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "_tag",
+              "id",
+              "message"
+            ],
+            "additionalProperties": true
+          },
+          "ProtocolRejectedEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "ProtocolRejected"
+                ]
+              },
+              "method": {
+                "type": "string"
+              },
+              "protocol": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "mismatch": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "Infinity",
+                          "-Infinity",
+                          "NaN"
+                        ]
+                      }
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol",
+                  "version",
+                  "message",
+                  "action"
+                ],
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "_tag",
+              "method",
+              "protocol",
+              "mismatch"
+            ],
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "Project.EntrySession": {
       "access": "agent",
       "stream": false,
       "payload": {
@@ -7879,296 +8744,7 @@
         }
       }
     },
-    "Project.Create": {
-      "access": "cli",
-      "stream": false,
-      "payload": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "directory": {
-            "type": "string"
-          },
-          "from": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "directory",
-          "from"
-        ],
-        "additionalProperties": true
-      },
-      "success": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "directory": {
-            "type": "string"
-          },
-          "folders": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "source": {
-                  "type": "string"
-                },
-                "path": {
-                  "type": "string"
-                },
-                "branch": {
-                  "type": "string"
-                },
-                "origin": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "uncommitted": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              "required": [
-                "name",
-                "source",
-                "path",
-                "branch",
-                "uncommitted"
-              ],
-              "additionalProperties": true
-            }
-          }
-        },
-        "required": [
-          "directory",
-          "folders"
-        ],
-        "additionalProperties": true
-      },
-      "error": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "anyOf": [
-          {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/ProjectCreateFailedEncoded"
-              }
-            ]
-          },
-          {
-            "$ref": "#/$defs/DaemonStoppingEncoded"
-          },
-          {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
-          },
-          {
-            "$ref": "#/$defs/ProtocolRejectedEncoded"
-          }
-        ],
-        "$defs": {
-          "ForbiddenEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "Forbidden"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectCreateFailedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectCreateFailed"
-                ]
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "DaemonStoppingEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "DaemonStopping"
-                ]
-              },
-              "method": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method"
-            ],
-            "additionalProperties": true
-          },
-          "InvalidCallerEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "InvalidCaller"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "NoSuchSessionEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "NoSuchSession"
-                ]
-              },
-              "id": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "id",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "ProtocolRejectedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProtocolRejected"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "protocol": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "mismatch": {
-                "type": "object",
-                "properties": {
-                  "protocol": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
-                    ]
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "action": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "protocol",
-                  "version",
-                  "message",
-                  "action"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "protocol",
-              "mismatch"
-            ],
-            "additionalProperties": true
-          }
-        }
-      }
-    },
-    "Project.FocusCoordinator": {
+    "Project.FocusEntry": {
       "access": "cli",
       "stream": false,
       "payload": {
@@ -8669,344 +9245,6 @@
         }
       }
     },
-    "Project.MainPlace": {
-      "access": "cli",
-      "stream": false,
-      "payload": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "callerEnv": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "runtime": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "callerEnv"
-        ],
-        "additionalProperties": true
-      },
-      "success": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "directory": {
-            "type": "string"
-          },
-          "place": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "in": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "terminal"
-                        ]
-                      }
-                    ]
-                  },
-                  "runtime": {
-                    "type": "string"
-                  },
-                  "terminal": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "in",
-                  "runtime",
-                  "terminal"
-                ],
-                "additionalProperties": true
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "in": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "launch"
-                        ]
-                      }
-                    ]
-                  },
-                  "runtime": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "in",
-                  "runtime"
-                ],
-                "additionalProperties": true
-              }
-            ]
-          }
-        },
-        "required": [
-          "directory",
-          "place"
-        ],
-        "additionalProperties": true
-      },
-      "error": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "anyOf": [
-          {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/ForbiddenEncoded"
-              },
-              {
-                "$ref": "#/$defs/NotInRepositoryEncoded"
-              },
-              {
-                "$ref": "#/$defs/ProjectMovedEncoded"
-              },
-              {
-                "$ref": "#/$defs/LaunchFailedEncoded"
-              }
-            ]
-          },
-          {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/InvalidCallerEncoded"
-              },
-              {
-                "$ref": "#/$defs/NoSuchSessionEncoded"
-              }
-            ]
-          },
-          {
-            "$ref": "#/$defs/ProtocolRejectedEncoded"
-          }
-        ],
-        "$defs": {
-          "InvalidCallerEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "InvalidCaller"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "ForbiddenEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "Forbidden"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "NotInRepositoryEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "NotInRepository"
-                ]
-              },
-              "path": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "path"
-            ],
-            "additionalProperties": true
-          },
-          "ProjectMovedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProjectMoved"
-                ]
-              },
-              "projectId": {
-                "type": "string"
-              },
-              "from": {
-                "type": "string"
-              },
-              "to": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "projectId",
-              "from",
-              "to"
-            ],
-            "additionalProperties": true
-          },
-          "LaunchFailedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "LaunchFailed"
-                ]
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "NoSuchSessionEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "NoSuchSession"
-                ]
-              },
-              "id": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "id",
-              "message"
-            ],
-            "additionalProperties": true
-          },
-          "ProtocolRejectedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProtocolRejected"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "protocol": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "mismatch": {
-                "type": "object",
-                "properties": {
-                  "protocol": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
-                    ]
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "action": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "protocol",
-                  "version",
-                  "message",
-                  "action"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "protocol",
-              "mismatch"
-            ],
-            "additionalProperties": true
-          }
-        }
-      }
-    },
     "Project.Open": {
       "access": "cli",
       "stream": false,
@@ -9306,7 +9544,7 @@
         }
       }
     },
-    "Project.RunningCoordinator": {
+    "Project.RunningEntry": {
       "access": "agent",
       "stream": false,
       "payload": {
@@ -9879,7 +10117,7 @@
         }
       }
     },
-    "Project.StartMain": {
+    "Project.StartEntry": {
       "access": "agent",
       "stream": false,
       "payload": {
@@ -10414,7 +10652,7 @@
         }
       }
     },
-    "Project.StopCoordinator": {
+    "Project.StopEntry": {
       "access": "agent",
       "stream": false,
       "payload": {
@@ -12018,6 +12256,29 @@
                 "type": "null"
               }
             ]
+          },
+          "conversation": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "harness": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "harness",
+                  "id"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12027,7 +12288,32 @@
       },
       "success": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "null"
+        "type": "object",
+        "properties": {
+          "process": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "Infinity",
+                      "-Infinity",
+                      "NaN"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true
       },
       "error": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12206,7 +12492,7 @@
           "id": {
             "type": "string"
           },
-          "turn": {
+          "finished": {
             "anyOf": [
               {
                 "type": "number"
@@ -12224,7 +12510,7 @@
         },
         "required": [
           "id",
-          "turn"
+          "finished"
         ],
         "additionalProperties": true
       },
@@ -12835,6 +13121,9 @@
                 "$ref": "#/$defs/ProjectMovedEncoded"
               },
               {
+                "$ref": "#/$defs/NoCallingSessionEncoded"
+              },
+              {
                 "$ref": "#/$defs/NoHarnessChosenEncoded"
               },
               {
@@ -13197,6 +13486,21 @@
               "projectId",
               "from",
               "to"
+            ],
+            "additionalProperties": true
+          },
+          "NoCallingSessionEncoded": {
+            "type": "object",
+            "properties": {
+              "_tag": {
+                "type": "string",
+                "enum": [
+                  "NoCallingSession"
+                ]
+              }
+            },
+            "required": [
+              "_tag"
             ],
             "additionalProperties": true
           },
@@ -13683,137 +13987,6 @@
         }
       }
     },
-    "TurnEnd": {
-      "access": "open",
-      "stream": false,
-      "payload": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {
-          "sessionId": {
-            "type": "string"
-          },
-          "harness": {
-            "type": "string"
-          },
-          "event": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "sessionId",
-          "harness",
-          "event"
-        ],
-        "additionalProperties": true
-      },
-      "success": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "null"
-      },
-      "error": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "anyOf": [
-          {
-            "not": {}
-          },
-          {
-            "$ref": "#/$defs/DaemonStoppingEncoded"
-          },
-          {
-            "$ref": "#/$defs/ProtocolRejectedEncoded"
-          }
-        ],
-        "$defs": {
-          "DaemonStoppingEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "DaemonStopping"
-                ]
-              },
-              "method": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "_tag",
-              "method"
-            ],
-            "additionalProperties": true
-          },
-          "ProtocolRejectedEncoded": {
-            "type": "object",
-            "properties": {
-              "_tag": {
-                "type": "string",
-                "enum": [
-                  "ProtocolRejected"
-                ]
-              },
-              "method": {
-                "type": "string"
-              },
-              "protocol": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "mismatch": {
-                "type": "object",
-                "properties": {
-                  "protocol": {
-                    "anyOf": [
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "Infinity",
-                          "-Infinity",
-                          "NaN"
-                        ]
-                      }
-                    ]
-                  },
-                  "version": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "action": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "protocol",
-                  "version",
-                  "message",
-                  "action"
-                ],
-                "additionalProperties": true
-              }
-            },
-            "required": [
-              "_tag",
-              "method",
-              "protocol",
-              "mismatch"
-            ],
-            "additionalProperties": true
-          }
-        }
-      }
-    },
     "Watch": {
       "access": "cli",
       "stream": true,
@@ -13971,7 +14144,7 @@
                         }
                       ]
                     },
-                    "turnState": {
+                    "executionState": {
                       "type": "string",
                       "enum": [
                         "none",
@@ -14303,7 +14476,7 @@
                         }
                       ]
                     },
-                    "turn": {
+                    "finished": {
                       "anyOf": [
                         {
                           "anyOf": [
@@ -14336,7 +14509,7 @@
                     "status",
                     "startedAt",
                     "exitedAt",
-                    "turnState",
+                    "executionState",
                     "projectId",
                     "runtime",
                     "address",
@@ -14348,7 +14521,7 @@
                     "task",
                     "latest",
                     "parentId",
-                    "turn"
+                    "finished"
                   ],
                   "additionalProperties": true
                 }
@@ -14519,7 +14692,7 @@
                       }
                     ]
                   },
-                  "turnState": {
+                  "executionState": {
                     "type": "string",
                     "enum": [
                       "none",
@@ -14851,7 +15024,7 @@
                       }
                     ]
                   },
-                  "turn": {
+                  "finished": {
                     "anyOf": [
                       {
                         "anyOf": [
@@ -14884,7 +15057,7 @@
                   "status",
                   "startedAt",
                   "exitedAt",
-                  "turnState",
+                  "executionState",
                   "projectId",
                   "runtime",
                   "address",
@@ -14896,7 +15069,7 @@
                   "task",
                   "latest",
                   "parentId",
-                  "turn"
+                  "finished"
                 ],
                 "additionalProperties": true
               }

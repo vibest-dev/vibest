@@ -19,7 +19,7 @@ Project, with its new path, its memories, and worktrees that still work.
 
 ## P8. Agents use the Project folder with their file tools
 
-A Pi main agent, a Pi subagent and a Claude subagent each write and read the Project's artifacts with their own file
+A Pi entry session, a Pi subagent and a Claude subagent each write and read the Project's artifacts with their own file
 tools, without a permission prompt. Writing into another Project's folder is refused.
 
 ## P9. Creating a Project

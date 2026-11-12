@@ -21,7 +21,7 @@ import {
   type TestServices,
   until,
   untilVirtual,
-  writeResult,
+  writeEnd,
   systemPromptFile,
   projectOf,
   processesOn,
@@ -38,6 +38,7 @@ const workingSession = Effect.gen(function* () {
   const { id } = yield* sessions.spawn({
     machine: { id: "local" },
     root: repo,
+    parentSessionId: "creator",
     projectId: yield* projectOf(repo),
     name: "task",
     prompt: "do it",
@@ -56,8 +57,8 @@ const workingSession = Effect.gen(function* () {
 const idleSession = Effect.gen(function* () {
   const w = yield* workingSession
   const { id, sessions, herdr } = w
-  yield* writeResult(id, "pi", { text: "status: completed" })
-  yield* herdr.endTurn(id)
+  yield* writeEnd(id, "pi", { text: "status: completed" })
+  yield* herdr.endExecution(id)
   yield* sessions.check(id)
   return w
 })
@@ -163,11 +164,11 @@ describe.concurrent("vibest rm: process proof", () => {
       const worktreeDeletedOutsideVibest = (w: Effect.Success<typeof idleSession>) =>
         Effect.gen(function* () {
           yield* fs.remove(w.worktree, { recursive: true })
-          yield* writeResult(w.id, "pi", { text: `result of ${w.id}` })
+          yield* writeEnd(w.id, "pi", { text: `result of ${w.id}` })
           yield* fs.writeFileString(w.rules, `rules of ${w.id}`)
         })
 
-      const reportedTurnEndEvent = (id: string) =>
+      const reportedExecutionEndEvent = (id: string) =>
         eventsOf(id, "execution.ended").pipe(Effect.map((rows) => rows.at(-1)?.data.reply))
       const a = yield* idleSession
       yield* a.herdr.runtime.close({ id: a.pane })
@@ -180,14 +181,14 @@ describe.concurrent("vibest rm: process proof", () => {
         { processes: "exited", pane: "none", worktree: "gone" },
         "closed by hand: the check already saw the exit, so no terminal is left to close",
       )
-      assert.strictEqual(yield* reportedTurnEndEvent(a.id), `result of ${a.id}`)
+      assert.strictEqual(yield* reportedExecutionEndEvent(a.id), `result of ${a.id}`)
       assert.isFalse(yield* fs.exists(a.rules))
 
       const b = yield* idleSession
       yield* worktreeDeletedOutsideVibest(b)
       yield* settled
       assert.deepInclude(yield* b.sessions.remove(b.id), { processes: "exited", pane: "closed", worktree: "gone" })
-      assert.strictEqual(yield* reportedTurnEndEvent(b.id), `result of ${b.id}`)
+      assert.strictEqual(yield* reportedExecutionEndEvent(b.id), `result of ${b.id}`)
       assert.isFalse(yield* fs.exists(b.rules))
     }),
   )
@@ -319,7 +320,7 @@ describe.concurrent("vibest rm: process proof", () => {
   )
 
   test(
-    "a working session is interrupted, then its terminal closed and its processes confirmed; the turn ends interrupted",
+    "a working session is interrupted, then its terminal closed and its processes confirmed; the execution ends interrupted",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const { id, sessions, db, herdr, worktree } = yield* workingSession
@@ -332,7 +333,7 @@ describe.concurrent("vibest rm: process proof", () => {
         "one key press, the interrupt; the spawn's prompt text is a send without keys",
       )
       const row = (yield* db.getSession(id))!
-      assert.deepInclude(row, { status: "unknown", turnState: "interrupted" })
+      assert.deepInclude(row, { status: "unknown", executionState: "interrupted" })
       assert.isNotNull(row.exitedAt)
       assert.isFalse(yield* fs.exists(worktree))
     }),

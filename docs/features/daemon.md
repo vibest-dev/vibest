@@ -38,8 +38,8 @@ operation that has not finished refuses the restart and names itself.
 
 ## D8. Update with work in flight
 
-`vibest update` while an agent is mid-turn hands vibestd over without cutting the turn off: the agent's turn keeps
-running and its result arrives, and an agent on an old integration is restarted in place and continues its turn. The
+`vibest update` while an agent is mid-execution hands vibestd over without cutting the execution off: the agent's execution keeps
+running and its reply arrives, and an agent on an old integration is restarted in place and continues its execution. The
 handoff waits for unfinished daemon operations and deliveries; if they do not settle, it refuses and names each
 blocker.
 

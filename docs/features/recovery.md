@@ -1,26 +1,26 @@
 # Recovery
 
-What happens when a pane, a harness, herdr or vibestd dies mid-work: no answer is lost and nothing is sent twice. Each
+What happens when a pane, a harness, herdr or vibestd dies mid-work: no reply is lost and nothing is sent twice. Each
 capability below says what it is and when it counts as working.
 
 ## S8. Self-healing and a bad model
 
-A daemon killed mid-turn and a pane closed mid-turn are recovered as below (S21, S23). A run with a model its harness
+A daemon killed mid-execution and a pane closed mid-execution are recovered as below (S21, S23). A run with a model its harness
 does not list is refused before any pane opens, naming the model, and no session is created.
 
-## S21. Pane killed mid-turn
+## S21. Pane killed mid-execution
 
-When a session's pane is killed mid-turn, the turn fails with its failure, the session ends, and its creator gets one notice that carries the failure, how to
+When a session's pane is killed mid-execution, the execution fails with its failure, the session ends, and its creator gets one notice that carries the failure, how to
 peek and resume it, and the text of every send that was queued for it and not delivered; the time it took is recorded.
 
 ## S22. Harness killed
 
 When a session's harness process is killed and its pane stays, the same happens as in S21, and the pane still exists.
 
-## S23. vibestd restarted or killed around a turn end
+## S23. vibestd restarted or killed around an execution end
 
-When vibestd restarts mid-turn, or is killed right after a turn ends, exactly one completed turn results, carrying
-the turn's reply, and it sends nothing.
+When vibestd restarts mid-execution, or is killed right after an execution ends, exactly one completed execution results, carrying
+the execution's reply, and it sends nothing.
 
 ## S24. vibestd killed mid-delivery
 
@@ -40,7 +40,7 @@ launch, with one notice, and removes its worktree, or keeps it and says why.
 ## S29. vibestd killed before the first task was handed over
 
 When vibestd is killed before a session's first task reached it, the next vibestd types the task once, and the one
-turn it runs sends nothing.
+execution it runs sends nothing.
 
 ## S30. Archive cut off
 
@@ -49,5 +49,5 @@ archived and keeps its worktree.
 
 ## S51. Pane killed while idle
 
-When a session's pane is killed while it is idle, the session ends, its completed turn stays completed, and its creator
+When a session's pane is killed while it is idle, the session ends, its completed execution stays completed, and its creator
 gets exactly one notice that it exited, saying how to peek and resume it.

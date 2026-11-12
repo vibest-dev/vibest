@@ -6,6 +6,7 @@ import { accepts, cliHeaders, connect, probe, protocolHeaders, readPing, startDa
 import { Bus } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Layout, VibestCommand } from "@vibest/core/paths"
+import { SessionLive } from "@vibest/core/session/live"
 import { PROTOCOL, sessionHeaders } from "@vibest/protocol/protocol"
 import { PingResult, VERSION } from "@vibest/protocol/rpc"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
@@ -250,8 +251,8 @@ layer(Platform.services)(
                 status: "unknown",
                 startedAt: 1,
                 exitedAt: 1,
-                turnState: "completed",
-                turnPromptedAt: 0,
+                executionState: "completed",
+                executionPromptedAt: 0,
                 metadata: {},
                 createdAt: 1,
                 lastActive: 1,
@@ -260,7 +261,13 @@ layer(Platform.services)(
             )
             return (yield* db.insertSend("b0050001-b005-4b00-8b00-b0050001b005", "queued"))!
           }).pipe(
-            Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)), Layer.provide(Bus.layer))),
+            Effect.provide(
+              Db.layer.pipe(
+                Layer.provide(Platform.sqlite(layout.database)),
+                Layer.provide(Bus.layer),
+                Layer.provide(SessionLive.layer),
+              ),
+            ),
           )
           const env = { HOME: layout.home, VIBEST_HOME: layout.home }
           const daemon = yield* Effect.forkScoped(runVibest(layout.home, env, ["daemon", "--foreground"]))
@@ -291,7 +298,13 @@ layer(Platform.services)(
             const rows = yield* Effect.flatMap(Db, (db) =>
               db.pendingInbox("b0050001-b005-4b00-8b00-b0050001b005"),
             ).pipe(
-              Effect.provide(Db.layer.pipe(Layer.provide(Platform.sqlite(layout.database)), Layer.provide(Bus.layer))),
+              Effect.provide(
+                Db.layer.pipe(
+                  Layer.provide(Platform.sqlite(layout.database)),
+                  Layer.provide(Bus.layer),
+                  Layer.provide(SessionLive.layer),
+                ),
+              ),
             )
             assert.deepStrictEqual(rows, [pending])
           }).pipe(Effect.ensuring(Effect.ignore(stopRecorded(layout.daemonInfo))), TestClock.withLive, Effect.scoped)

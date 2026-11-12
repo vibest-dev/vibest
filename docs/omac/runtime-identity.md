@@ -563,7 +563,7 @@ Hello, HelloRequired, and connection annotations were removed. The live contract
 
 Codex: the coordinator's shell commands need `OMAC_SESSION_ID` (and the guard `OMAC_AGENT`). Claude's Bash already
 inherits them from the exec env; Codex hands its shell only the variables listed in `shell_environment_policy.set`, so
-`Launch.coordinatorCommand` puts both in the env passed to `coordinatorArgs`. This reverses 7759f49 (the launch id kept
+`Launch.entryCommand` puts both in the env passed to `coordinatorArgs`. This reverses 7759f49 (the launch id kept
 out of the shell policy; `launch.ts:84`): the assertion in `test/unit.test.ts` (~406-410) that Codex args do not contain
 the launch token is inverted. The id then shows in the Codex process's argv (`ps`); acceptable, since identities are
 self-declared by same-user processes, not authentication (SPEC §13).

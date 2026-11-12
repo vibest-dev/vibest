@@ -3,6 +3,8 @@ import { Effect } from "effect"
 import type { Statement } from "effect/sql"
 
 import type { Store } from "./db-store.ts"
+import type { PeerScope } from "./remote.ts"
+import { envelope } from "./replies.ts"
 
 export type MachineRow = {
   readonly name: string
@@ -22,6 +24,7 @@ export type OutboxRow = {
   readonly id: string
   readonly sessionId: string
   readonly content: string
+  readonly kind: "send" | "notice"
   readonly createdAt: number
   readonly reportTo: string
 }
@@ -32,9 +35,10 @@ export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, curren
     sql<MachineRow>`SELECT ${machineColumns} FROM machine WHERE name = ${name}`.pipe(Effect.map((rows) => rows[0]))
 
   return {
-    ofPeer: (session: Statement.Fragment, scope: { readonly peer: string; readonly project: string }) =>
+    ofPeer: (session: Statement.Fragment, scope: PeerScope) =>
       sql`EXISTS (SELECT 1 FROM session o WHERE o.id = ${session} AND o.origin_peer = ${scope.peer}
-        AND o.origin_project = ${scope.project})`,
+        AND o.origin_project = ${scope.project}
+        ${scope.session === undefined ? sql`` : sql`AND o.origin_session = ${scope.session}`})`,
 
     queries: {
       machines: reads.machines.pipe(Effect.orDie),
@@ -80,6 +84,8 @@ export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, curren
       receivePeerItem: (item: {
         readonly id: string
         readonly recipient: string
+        readonly kind: "send" | "notice"
+        readonly sender: string
         readonly content: string
       }): Effect.Effect<"unknown" | "duplicate" | "queued"> =>
         tx(
@@ -96,9 +102,12 @@ export const remoteQueries = ({ sql, reads, tx, emit, queueInbox, placed, curren
               (recipient !== route.entry || placed(route.project, yield* currentProcess(recipient)))
             yield* queueInbox({
               recipient: recipient ?? item.recipient,
-              kind: "notice",
+              kind: item.kind,
               sender: null,
-              content: item.content,
+              content:
+                item.kind === "send"
+                  ? envelope("agent-message", [["agent-id", item.sender]], ["message", item.content])
+                  : `${item.sender}: ${item.content}`,
               status: here ? "pending" : "dropped",
               peerItem: item.id,
             })

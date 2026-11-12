@@ -65,7 +65,7 @@ describe("@vibest/cursor", () => {
     assert.strictEqual(escaped.calls, "integration stop --harness cursor <{}>")
   })
 
-  it("a vibest agent's session start, turn activity and response go to `vibest integration ready`, `prompt` and `stop`; Cursor's own stop is not hooked", () => {
+  it("a vibest agent's session start, execution activity and response go to `vibest integration ready`, `prompt` and `stop`; Cursor's own stop is not hooked", () => {
     const hooks = JSON.parse(files["hooks/hooks.json"]!).hooks as Record<string, unknown>
     assert.deepStrictEqual(Object.keys(hooks).sort(), [
       "afterAgentResponse",

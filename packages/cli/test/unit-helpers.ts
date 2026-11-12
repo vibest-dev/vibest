@@ -1,17 +1,18 @@
 import { Bus } from "@vibest/core/bus"
-import { Db, type SessionRow } from "@vibest/core/db"
+import { Db, type NewSession } from "@vibest/core/db"
+import { SessionLive } from "@vibest/core/session/live"
 import { KIND as RUNTIME } from "@vibest/runtime-herdr/terminal-runtime"
 import { Layer } from "effect"
 
 import * as Platform from "#platform"
 
 export const database = (filename: string) =>
-  Db.layer.pipe(Layer.provide(Platform.sqlite(filename)), Layer.provide(Bus.layer))
+  Db.layer.pipe(Layer.provide(Platform.sqlite(filename)), Layer.provide(Bus.layer), Layer.provide(SessionLive.layer))
 
 export const session = (
   id: string,
-  patch: Partial<Omit<SessionRow, "projectId">> = {},
-): Omit<SessionRow, "projectId"> => ({
+  patch: Partial<Omit<NewSession, "projectId">> = {},
+): Omit<NewSession, "projectId"> => ({
   id,
   agent: "general",
   name: "n",
@@ -24,8 +25,8 @@ export const session = (
   status: "unknown",
   startedAt: null,
   exitedAt: null,
-  turnState: "none",
-  turnPromptedAt: 0,
+  executionState: "none",
+  executionPromptedAt: 0,
   metadata: {},
   createdAt: 1,
   lastActive: 1,

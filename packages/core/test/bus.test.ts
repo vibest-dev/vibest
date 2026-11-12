@@ -26,8 +26,8 @@ const session = {
   status: "unknown" as const,
   startedAt: null,
   exitedAt: null,
-  turnState: "none" as const,
-  turnPromptedAt: 0,
+  executionState: "none" as const,
+  executionPromptedAt: 0,
   metadata: {},
   createdAt: 1,
   lastActive: 1,
@@ -77,7 +77,7 @@ describe("bus", () => {
         const db = yield* Db
         const bus = yield* Bus
         const project = yield* projectOf("r")
-        yield* db.coordinatorLaunch(project, "pi", false, {
+        yield* db.startEntry(project, "pi", false, {
           runtime: "bench",
           address: { machine: "bench", id: "main" },
         })
@@ -89,8 +89,10 @@ describe("bus", () => {
           rows.map((row) => row.id),
         )
         const sub = yield* bus.subscribe
-        yield* db.recoverDelivering([], () => "")
-        const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
+        yield* db.recoverDelivering(() => "")
+        const published = (yield* PubSub.takeUpTo(sub, 10))
+          .filter(isStored)
+          .filter((event) => event.type === "inbox.moved")
         assert.deepStrictEqual(
           published.map((event) => [
             event.type,

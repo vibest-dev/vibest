@@ -12,7 +12,7 @@ const olderGet = {
   status: "idle",
   startedAt: null,
   exitedAt: null,
-  turnState: "completed",
+  executionState: "completed",
   projectId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   runtime: "herdr",
   address: { machine: "local", id: "t1" },
@@ -26,8 +26,8 @@ const olderGet = {
   result: null,
 }
 
-it("a Get response from an older vibestd without answer decodes", () => {
+it("a Get response from an older vibestd without reply decodes", () => {
   const decoded = Schema.decodeUnknownSync(SessionStatusInfo)(olderGet)
-  assert.isUndefined(decoded.answer)
-  assert.isNull(Schema.decodeUnknownSync(SessionStatusInfo)({ ...olderGet, answer: null }).answer)
+  assert.isUndefined(decoded.reply)
+  assert.isNull(Schema.decodeUnknownSync(SessionStatusInfo)({ ...olderGet, reply: null }).reply)
 })

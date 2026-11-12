@@ -22,6 +22,7 @@ import {
   harnesses,
   herdr,
   row,
+  rows,
   SESSIONS,
   Skip,
   until,
@@ -36,23 +37,25 @@ const HERDR_TASK = "Run this shell command exactly as written: herdr pane list >
 const listed = async (w: World, id: string, cwd = w.repository) =>
   (
     await w
-      .json<{ sessions: Array<{ id: string; status: string; turnState: string; worktree: string }> }>(["ls"], { cwd })
+      .json<{ sessions: Array<{ id: string; status: string; executionState: string; worktree: string }> }>(["ls"], {
+        cwd,
+      })
       .then((l) => l.sessions)
   ).find((e) => e.id === id)
-const turnState = async (w: World, id: string, cwd = w.repository) => (await listed(w, id, cwd))?.turnState
+const executionState = async (w: World, id: string, cwd = w.repository) => (await listed(w, id, cwd))?.executionState
 
 const latest = async (w: World, id: string, cwd = w.repository) => {
-  const answer = (
+  const reply = (
     await w.json<{
-      answer?: { turn: number; status: string; text: string | null; failure: string | null } | null
+      reply?: { execution: number; status: string; text: string | null; failure: string | null } | null
     }>(["result", id], { cwd })
-  ).answer
-  return answer ? { id: answer.turn, status: answer.status, message: answer.text || answer.failure || "" } : undefined
+  ).reply
+  return reply ? { id: reply.execution, status: reply.status, message: reply.text || reply.failure || "" } : undefined
 }
 
 const ends = async (w: World, id: string) =>
   (await fs.readFile(path.join(w.vibestHome, "vibestd.log"), "utf8").catch(() => "")).split("\n").flatMap((l) => {
-    const found = new RegExp(`turn end ${id} \\((\\w+), (\\w+)`).exec(l)
+    const found = new RegExp(`execution end ${id} \\((\\w+), (\\w+)`).exec(l)
     return found ? [{ harness: found[1]!, interrupted: found[2] === "interrupted" }] : []
   })
 
@@ -68,9 +71,10 @@ const withSession = async (
   const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
   await w.stopDaemon()
   await w.ok(["daemon"], { env: { CLAUDE_CONFIG_DIR: undefined } })
+  await w.entry({ ...options, session, processEnv: { CLAUDE_CONFIG_DIR: undefined } })
   let id = ""
   try {
-    const run = await w.ok(["run", harness, ...flags, "--session", session, "--", task], {
+    const run = await w.okViaEntry(["run", harness, ...flags, "--session", session, "--", task], {
       timeoutMs: 120_000,
       ...options,
     })
@@ -130,7 +134,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "I11",
     title:
-      "another vibest first on PATH (an older install): a Pi main agent, a Pi subagent and a Claude subagent still reach this build's vibestd through their integrations, and the other vibest never runs",
+      "another vibest first on PATH (an older install): a Pi entry session, a Pi subagent and a Claude subagent still reach this build's vibestd through their integrations, and the other vibest never runs",
     run: async (w) => {
       for (const bin of ["pi", "claude", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const other = path.join(w.root, "other-vibest")
@@ -155,7 +159,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const piEnv = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-other", pi.url)}`
         await w.daemon({ env })
-        await w.startMain({
+        await w.startEntry({
           harness: "pi",
           session,
           env: { PI_CODING_AGENT_DIR: piEnv.slice("PI_CODING_AGENT_DIR=".length) },
@@ -165,7 +169,10 @@ const checks: ReadonlyArray<Check> = [
         const run = async (flags: ReadonlyArray<string>) =>
           (
             JSON.parse(
-              await w.ok(["run", ...flags, "--session", session, "--", "Answer once."], { env, timeoutMs: 120_000 }),
+              await w.okViaEntry(["run", ...flags, "--session", session, "--", "Answer once."], {
+                env,
+                timeoutMs: 120_000,
+              }),
             ) as { id: string }
           ).id
         const subs = [
@@ -173,17 +180,17 @@ const checks: ReadonlyArray<Check> = [
           await run(["claude", ...envArgs(await claudeEnv(w, "other", claude.url))]),
         ]
         for (const id of subs) {
-          await until(`${id}'s result`, async () => (await turnState(w, id)) === "completed", 120_000)
+          await until(`${id}'s result`, async () => (await executionState(w, id)) === "completed", 120_000)
           expect(/pong/.test((await latest(w, id))?.message ?? ""), `${id}: ${(await latest(w, id))?.message}`)
         }
-        const main = (
+        const entry = (
           await w.json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"]).then((l) => l.sessions)
         ).find((e) => e.agent === "main")
-        expect(main !== undefined, "no main agent")
+        expect(entry !== undefined, "no entry session")
         await until(
-          "the Pi main agent's ready report",
+          "the Pi entry session's ready report",
           () =>
-            row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, main!.id)
+            row<{ c: string | null }>(w, `SELECT harness_session_id AS c FROM ${SESSIONS} s WHERE id = ?`, entry!.id)
               ?.c != null,
           60_000,
         )
@@ -270,7 +277,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I3",
     covers: ["R6", "R8"],
     title:
-      "Pi: vibest run pi (fake model) loads the built extension, which refuses the session's herdr call in process, and the reply lands as the turn's answer",
+      "Pi: vibest run pi (fake model) loads the built extension, which refuses the session's herdr call in process, and the reply lands as the execution's reply",
     run: async (w) => {
       for (const bin of ["pi", "herdr"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const ran = path.join(w.root, "pi-herdr-ran.txt")
@@ -283,7 +290,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-i3", model.url)}`
         await withSession(w, "pi", ["--env", env], "guard and result", async ({ id }) => {
-          await until("the session's result", async () => (await turnState(w, id)) === "completed", 120_000)
+          await until("the session's result", async () => (await executionState(w, id)) === "completed", 120_000)
           expect(
             results.some((r) => r.includes("Agents must not control a terminal runtime")),
             `the herdr call was not refused: ${JSON.stringify(results)}`,
@@ -301,7 +308,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I5",
     tier: "agent",
     title:
-      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks; asked to run herdr, herdr does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the turn's answer",
+      "Cursor (real model): vibest run cursor loads the built plugin beside the project's own hooks, which run with the session's process id; asked to run herdr, herdr does not run (whether the model tries or keeps to its rules is recorded), and the reply lands as the execution's reply",
     run: async (w, evidence) => {
       for (const bin of ["cursor-agent", "herdr"])
         if (!Bun.which(bin, { PATH: w.env().PATH! })) throw new Skip(`${bin} not on PATH`)
@@ -309,14 +316,14 @@ const checks: ReadonlyArray<Check> = [
       if (!/Logged in/.test(login.stdout + login.stderr))
         throw new Skip(`cursor-agent is not logged in: ${(login.stdout + login.stderr).trim()}`)
       await addCursorPlugin(w, harnesses)
-      const repo = await newRepository(w, "cursor-turn")
+      const repo = await newRepository(w, "cursor-execution")
       const projectHookLog = path.join(w.root, "project-hook.log")
       await fs.mkdir(path.join(repo, ".cursor"), { recursive: true })
       await fs.writeFile(
         path.join(repo, ".cursor/hooks.json"),
         JSON.stringify({
           version: 1,
-          hooks: { sessionStart: [{ command: `echo ran >> '${projectHookLog}'; echo {}` }] },
+          hooks: { sessionStart: [{ command: `echo "ran $VIBEST_PROCESS" >> '${projectHookLog}'; echo {}` }] },
         }),
       )
       for (const argv of [
@@ -334,11 +341,11 @@ const checks: ReadonlyArray<Check> = [
         async ({ id }) => {
           await until(
             "the session's result",
-            async () => ["completed", "failed"].includes((await turnState(w, id, repo)) ?? ""),
+            async () => ["completed", "failed"].includes((await executionState(w, id, repo)) ?? ""),
             240_000,
           )
           const message = (await latest(w, id, repo))?.message ?? ""
-          expect((await turnState(w, id, repo)) === "completed", `the turn did not complete: ${message}`)
+          expect((await executionState(w, id, repo)) === "completed", `the execution did not complete: ${message}`)
           const worktree = await fs.realpath((await listed(w, id, repo))!.worktree)
           expect(!(await Bun.file(path.join(worktree, "herdr-ran.txt")).exists()), "herdr ran: herdr-ran.txt exists")
           const transcripts = path.join(w.home, ".cursor", "projects", worktree.slice(1).replace(/[^a-zA-Z0-9]/g, "-"))
@@ -352,6 +359,12 @@ const checks: ReadonlyArray<Check> = [
           await writeEvidence(path.join(evidence, "I5-herdr-call.json"), `${JSON.stringify({ tried, transcripts })}\n`)
           expect(/\bpong\b/.test(message), message)
           expect(await Bun.file(projectHookLog).exists(), "the project's own sessionStart hook did not run")
+          const current = row<{ id: number }>(w, "SELECT process_id AS id FROM session WHERE id = ?", id)?.id
+          const hookRan = await Bun.file(projectHookLog).text()
+          expect(
+            current !== undefined && hookRan.includes(`ran ${current}\n`),
+            `the hooks did not get the session's process ${current}: ${hookRan}`,
+          )
         },
         { cwd: repo },
       )
@@ -361,7 +374,7 @@ const checks: ReadonlyArray<Check> = [
     id: "I7",
     covers: ["I4", "R7", "S4"],
     title:
-      "Claude (fake model): every main-loop turn end is the plugin's turn.complete: an answer is the turn's answer, Esc in the pane and `vibest interrupt` are each one interrupted turn with no text and no notice, also while a background shell keeps the terminal working; I4: vibest's plugin loads beside a plugin the user installed",
+      "Claude (fake model): every main-loop execution end is the plugin's turn.complete: an answer is the execution's reply, Esc in the pane and `vibest interrupt` are each one interrupted execution with no text and no notice, also while a background shell keeps the terminal working; I4: vibest's plugin loads beside a plugin the user installed",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const HOLD = "Keep working on this until you are stopped."
@@ -377,10 +390,10 @@ const checks: ReadonlyArray<Check> = [
         return new Promise<Step>(() => {})
       })
       try {
-        const flags = await claudeEnv(w, "turns", model.url)
+        const flags = await claudeEnv(w, "executions", model.url)
         const besideRan = await installBesidePlugin(w, claudeConfigOf(flags))
         await withSession(w, "claude", envArgs(flags), "Answer once.", async ({ id, socket }) => {
-          const settled = (want: string) => async () => (await turnState(w, id)) === want
+          const settled = (want: string) => async () => (await executionState(w, id)) === want
           await until("the answer's result", settled("completed"), 120_000)
           const first = await latest(w, id)
           expect(/summary: e2e answer/.test(first?.message ?? ""), `answer: ${first?.message.slice(0, 500)}`)
@@ -388,8 +401,8 @@ const checks: ReadonlyArray<Check> = [
           const aborted = async () => (await ends(w, id)).filter((e) => e.interrupted).length
 
           await w.ok(["send", id, HOLD])
-          await until("the held turn at the model", () => held === 1, 60_000)
-          await until("the held turn open", settled("open"), 60_000)
+          await until("the held execution at the model", () => held === 1, 60_000)
+          await until("the held execution open", settled("open"), 60_000)
           const esc = await w.run(w.root, ["herdr", "agent", "send-keys", agentName(id), "esc"], {
             env: { HERDR_SOCKET_PATH: socket },
           })
@@ -400,17 +413,17 @@ const checks: ReadonlyArray<Check> = [
             second?.status === "interrupted" && second.id !== first!.id && second.message === "",
             `Esc result: ${JSON.stringify(second)}`,
           )
-          expect((await aborted()) === 1, `turn ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
+          expect((await aborted()) === 1, `execution ends: ${JSON.stringify(await ends(w, id)).slice(0, 1000)}`)
           const notices = () =>
             row<{ n: number }>(w, "SELECT count(*) AS n FROM inbox WHERE sender_session_id = ? AND kind = 'notice'", id)
               ?.n
 
           await w.ok(["send", id, HOLD])
-          await until("the second held turn at the model", () => held === 2, 60_000)
-          await until("the second held turn open", settled("open"), 60_000)
+          await until("the second held execution at the model", () => held === 2, 60_000)
+          await until("the second held execution open", settled("open"), 60_000)
           await w.ok(["interrupt", id], { timeoutMs: 60_000 })
-          await until("the interrupted turn's turn.complete", async () => (await aborted()) === 2, 30_000)
-          await until("the turn interrupted", settled("interrupted"), 30_000)
+          await until("the interrupted execution's turn.complete", async () => (await aborted()) === 2, 30_000)
+          await until("the execution interrupted", settled("interrupted"), 30_000)
           const third = await latest(w, id)
           expect(
             third?.status === "interrupted" && third.id !== second!.id && third.message === "",
@@ -418,11 +431,11 @@ const checks: ReadonlyArray<Check> = [
           )
 
           await w.ok(["send", id, BACKGROUND])
-          await until("the background turn held at the model", () => held === 3, 60_000)
-          await until("the background turn open", settled("open"), 60_000)
+          await until("the background execution held at the model", () => held === 3, 60_000)
+          await until("the background execution open", settled("open"), 60_000)
           await w.ok(["interrupt", id], { timeoutMs: 60_000 })
-          await until("the background turn's turn.complete", async () => (await aborted()) === 3, 30_000)
-          await until("the background turn interrupted", settled("interrupted"), 30_000)
+          await until("the background execution's turn.complete", async () => (await aborted()) === 3, 30_000)
+          await until("the background execution interrupted", settled("interrupted"), 30_000)
           const fourth = await latest(w, id)
           expect(
             fourth?.status === "interrupted" && fourth.id !== third!.id && fourth.message === "",
@@ -431,6 +444,83 @@ const checks: ReadonlyArray<Check> = [
           expect(notices() === 0, `${notices()} notices after the Esc and two vibest interrupts, not none`)
         })
       } finally {
+        model.stop()
+      }
+    },
+  },
+  {
+    id: "S53",
+    covers: ["S2"],
+    title:
+      "Claude subagent (fake model) takes its messages when idle: a send is one inbox row delivered into one execution of its own, a send made while an execution runs waits and then opens the next execution, each execution has its own reply",
+    run: async (w) => {
+      for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
+      let release: () => void = () => undefined
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      let holding = false
+      const model = fakeAnthropic((r) => {
+        if (r.tools.length === 0 || subagentFolder(r.system) === undefined) return "ok"
+        const last = text(lastUser(r))
+        if (last.includes("FIRST-HOLD")) {
+          holding = true
+          return gate.then((): Step => "status: completed\nsummary: first-answer")
+        }
+        if (last.includes("SECOND-ASK")) return "status: completed\nsummary: second-answer"
+        return "status: completed\nsummary: e2e answer"
+      })
+      try {
+        const flags = await claudeEnv(w, "taking", model.url)
+        await withSession(w, "claude", envArgs(flags), "Answer once.", async ({ id }) => {
+          const settled = (want: string) => async () => (await executionState(w, id)) === want
+          await until("the task's result", settled("completed"), 120_000)
+          await w.ok(["send", id, "FIRST-HOLD"])
+          await until("the first send held at the model", () => holding, 60_000)
+          await until("its execution open", settled("open"), 60_000)
+          await w.ok(["send", id, "SECOND-ASK"])
+          await Bun.sleep(3_000)
+          const waiting = row<{ status: string; execution: number | null }>(
+            w,
+            "SELECT status, execution_id AS execution FROM inbox WHERE session_id = ? AND content LIKE '%SECOND-ASK%'",
+            id,
+          )
+          expect(
+            waiting?.status === "pending" && waiting.execution === null,
+            `the send made while busy: ${JSON.stringify(waiting)}`,
+          )
+          release()
+          await until(
+            "the second send's reply",
+            async () => (await latest(w, id))?.message.includes("second-answer") === true,
+            120_000,
+          )
+          const executions = rows<{ id: number; outcome: string; reply: string }>(
+            w,
+            "SELECT id, outcome, reply FROM execution WHERE session_id = ? ORDER BY id",
+            id,
+          )
+          expect(
+            executions.length === 3 && executions.every((e) => e.outcome === "completed"),
+            `executions: ${JSON.stringify(executions)}`,
+          )
+          expect(
+            executions[1]!.reply.includes("first-answer") && executions[2]!.reply.includes("second-answer"),
+            `replies: ${JSON.stringify(executions)}`,
+          )
+          const delivered = rows<{ content: string; status: string; execution: number }>(
+            w,
+            "SELECT content, status, execution_id AS execution FROM inbox WHERE session_id = ? AND kind = 'send' ORDER BY id",
+            id,
+          )
+          expect(
+            delivered.length === 2 &&
+              delivered.every((d) => d.status === "delivered") &&
+              delivered[0]!.execution === executions[1]!.id &&
+              delivered[1]!.execution === executions[2]!.id,
+            `rows: ${JSON.stringify(delivered)}`,
+          )
+        })
+      } finally {
+        release()
         model.stop()
       }
     },
@@ -475,11 +565,13 @@ const checks: ReadonlyArray<Check> = [
           envArgs(await claudeEnv(w, "guard", model.url)),
           "guard test",
           async ({ id, socket }) => {
-            await until("the session's result", async () => (await turnState(w, id)) === "completed", 180_000).catch(
-              (e: Error) => {
-                throw new Error(`${e.message}; the model got ${model.requests.length} requests`)
-              },
-            )
+            await until(
+              "the session's result",
+              async () => (await executionState(w, id)) === "completed",
+              180_000,
+            ).catch((e: Error) => {
+              throw new Error(`${e.message}; the model got ${model.requests.length} requests`)
+            })
             const last = model.requests.findLast((r) => subagentFolder(r.system) !== undefined)
             expect(last !== undefined, "the session never asked the model with its system prompt")
             const made = calls(last!.tools)

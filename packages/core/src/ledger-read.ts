@@ -5,7 +5,7 @@ import type { SqlClient, Statement } from "effect/sql"
 import type { MachineRow, OutboxRow } from "./db-remote.ts"
 import {
   attemptsOf,
-  CoordinatorRow,
+  EntryRow,
   MESSAGE_STATUSES,
   type MessageStatusName,
   SessionRow,
@@ -66,6 +66,21 @@ export type SessionColumns = {
   readonly tAt: number | null
   readonly tStatus: string | null
   readonly attempts: string | null
+  readonly parent: string | null
+  readonly entry: number
+  readonly pEndReason: string | null
+  readonly oId: number | null
+  readonly oProcess: number | null
+  readonly oAt: number | null
+  readonly oAccepted: number | null
+  readonly lId: number | null
+  readonly lProcess: number | null
+  readonly lOutcome: string | null
+  readonly lAt: number | null
+  readonly lEnded: number | null
+  readonly lReply: string | null
+  readonly lFailure: string | null
+  readonly lFailureKind: string | null
 }
 
 const integrationOf = (row: Pick<SessionColumns, "integrationVersion" | "integrationProtocol">) =>
@@ -78,15 +93,53 @@ const addressOf = (terminal: string | null) => JSON.stringify({ machine: LOCAL_M
 export type Live = {
   readonly status: AgentStatus
   readonly integration: Integration | undefined
-  readonly promptedAt: number | undefined
 }
 
-const NOT_LIVE: Live = { status: "unknown", integration: undefined, promptedAt: undefined }
+const NOT_LIVE: Live = { status: "unknown", integration: undefined }
+
+const processOf = (row: SessionColumns, integration: Integration | undefined) =>
+  row.pId === null
+    ? null
+    : {
+        id: row.pId,
+        harness: row.harness ?? "",
+        provider: row.provider,
+        model: row.model,
+        routing: row.routing === null ? null : (JSON.parse(row.routing) as unknown),
+        runtime: row.runtime ?? "",
+        machine: LOCAL_MACHINE,
+        terminal: row.terminal,
+        pid: row.pid,
+        conversation: row.conversation,
+        placedAt: row.placedAt,
+        readyAt: row.readyAt,
+        endedAt: row.pEnded,
+        endReason: row.pEndReason,
+        integration: integration ?? null,
+      }
+
+const openExecutionOf = (row: SessionColumns) =>
+  row.oId === null ? null : { id: row.oId, process: row.oProcess, startedAt: row.oAt ?? 0, acceptedAt: row.oAccepted }
+
+const lastExecutionOf = (row: SessionColumns) =>
+  row.lId === null
+    ? null
+    : {
+        id: row.lId,
+        process: row.lProcess,
+        outcome: row.lOutcome ?? "",
+        startedAt: row.lAt ?? 0,
+        endedAt: row.lEnded,
+        reply: row.lReply,
+        failure:
+          row.lFailure === null
+            ? null
+            : { message: row.lFailure, ...(row.lFailureKind === null ? {} : { kind: row.lFailureKind }) },
+      }
 
 export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
   const integration = live.integration ?? integrationOf(row)
   const attempts = attemptsOf(row.attempts)
-  const open = row.tId !== null && row.tStatus === null
   const metadata = {
     ...(integration === undefined ? {} : { integration }),
     ...(row.pid === null ? {} : { pid: row.pid }),
@@ -109,21 +162,27 @@ export const sessionOf = (row: SessionColumns, live: Live = NOT_LIVE) => {
     status: live.status,
     startedAt: row.placedAt,
     exitedAt: row.agent === "main" ? row.endedAt : row.pEnded,
-    turnState: row.tId === null ? "none" : (row.tStatus ?? "open"),
-    turnPromptedAt: (open ? live.promptedAt : undefined) ?? row.tAt ?? 0,
+    executionState: row.tId === null ? "none" : (row.tStatus ?? "open"),
+    executionPromptedAt: row.tAt ?? 0,
     metadata: JSON.stringify(metadata),
     createdAt: row.createdAt,
     lastActive: row.activeAt ?? row.createdAt,
+    endedAt: row.endedAt,
+    parentId: row.parent,
+    entry: row.entry === 1,
+    process: processOf(row, integration),
+    openExecution: openExecutionOf(row),
+    lastExecution: lastExecutionOf(row),
   }
 }
 
-export type CoordinatorColumns = SessionColumns & {
+export type EntryColumns = SessionColumns & {
   readonly projectDirectory: string | null
   readonly ownDirectory: string
 }
 
-export const coordinatorOf = (
-  row: CoordinatorColumns,
+export const entryRow = (
+  row: EntryColumns,
   live: { readonly integration: Integration | undefined; readonly moving: boolean } = {
     integration: undefined,
     moving: false,
@@ -134,6 +193,7 @@ export const coordinatorOf = (
   const directory = row.projectDirectory || row.ownDirectory
   return {
     id: row.id,
+    agent: row.agent,
     projectId: row.project,
     harnessId: row.harness ?? "",
     harnessSessionId: row.conversation,
@@ -152,7 +212,7 @@ export const coordinatorOf = (
 
 export const decodeSessions = Schema.decodeUnknownEffect(Schema.Array(SessionRow))
 const decodeInbox = Schema.decodeUnknownEffect(Schema.Array(InboxRow))
-export const decodeCoordinators = Schema.decodeUnknownEffect(Schema.Array(CoordinatorRow))
+export const decodeEntrySessions = Schema.decodeUnknownEffect(Schema.Array(EntryRow))
 
 type InboxColumns = {
   readonly id: number
@@ -166,19 +226,27 @@ type InboxColumns = {
 export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const sessionRows = (where: ReadonlyArray<Statement.Fragment>, filter?: Statement.Fragment) =>
     sql<SessionColumns>`SELECT * FROM (SELECT s.id, s.project_id AS project, s.agent, s.name,
-        s.created_at, s.ended_at, s.active_at,
+        s.created_at, s.ended_at, s.active_at, s.parent_session_id AS parent,
+        EXISTS (SELECT 1 FROM project q WHERE q.entry_session_id = s.id) AS entry,
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.placed_at, p.ready_at,
-        p.ended_at AS p_ended, t.id AS t_id, t.started_at AS t_at, t.outcome AS t_status,
+        p.ended_at AS p_ended, p.end_reason AS p_end_reason,
+        t.id AS t_id, t.started_at AS t_at, t.outcome AS t_status,
+        o.id AS o_id, o.process_id AS o_process, o.started_at AS o_at, o.accepted_at AS o_accepted,
+        l.id AS l_id, l.process_id AS l_process, l.outcome AS l_outcome, l.started_at AS l_at,
+        l.ended_at AS l_ended, l.reply AS l_reply, l.failure AS l_failure, l.failure_kind AS l_failure_kind,
         (SELECT json_group_array(json_object('harness', l.harness, 'provider', l.provider, 'at', l.ended_at))
           FROM (SELECT * FROM process WHERE session_id = s.id AND end_reason = 'limited' ORDER BY id) l) AS attempts
       FROM session s LEFT JOIN process p ON p.session_id = s.id AND p.id = s.process_id
         LEFT JOIN execution t ON t.session_id = s.id AND t.id = (SELECT max(id) FROM execution WHERE session_id = s.id)
+        LEFT JOIN execution o ON o.session_id = s.id AND o.outcome IS NULL
+        LEFT JOIN execution l ON l.session_id = s.id AND l.id = (SELECT id FROM execution
+          WHERE session_id = s.id AND outcome IS NOT NULL ORDER BY coalesce(ended_at, started_at) DESC, id DESC LIMIT 1)
       ${where.length === 0 ? sql`` : sql`WHERE ${sql.and(where)}`})
     ${filter === undefined ? sql`` : sql`WHERE ${filter}`} ORDER BY created_at, id`
 
-  const coordinatorRows = (project?: string) =>
-    sql<CoordinatorColumns>`SELECT s.id, s.project_id AS project, s.created_at, s.directory AS own_directory,
+  const entryRows = (project?: string) =>
+    sql<EntryColumns>`SELECT s.id, s.agent, s.project_id AS project, s.created_at, s.directory AS own_directory,
         q.directory AS project_directory,
         p.id AS p_id, p.harness, p.provider, p.model, p.routing, p.runtime, p.terminal, p.pid,
         p.integration_version, p.integration_protocol, p.conversation, p.ready_at, p.ended_at AS p_ended
@@ -230,9 +298,6 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
   const untakenTask = (id: string) =>
     sql<{ content: string }>`SELECT i.content FROM inbox i
       WHERE i.session_id = ${id} AND i.kind = 'task' AND i.execution_id IS NULL
-        AND NOT EXISTS (SELECT 1 FROM execution t WHERE t.session_id = ${id} AND t.outcome IS NOT NULL
-          AND (t.typed IS NOT NULL
-            OR EXISTS (SELECT 1 FROM inbox x WHERE x.session_id = t.session_id AND x.execution_id = t.id)))
       ORDER BY i.id LIMIT 1`.pipe(Effect.map((rows) => rows[0]?.content))
 
   const queuedBy = (session: string, request: string) =>
@@ -268,7 +333,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     )
 
   const outboxOf = (peer: string) =>
-    sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.content, o.created_at,
+    sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.kind, o.content, o.created_at,
         s.origin_session AS report_to
       FROM outbox o JOIN session s ON s.id = o.session_id WHERE o.peer_id = ${peer} ORDER BY o.seq`.pipe(
       Effect.map((rows) => rows.filter((row): row is OutboxRow => row.reportTo !== null)),
@@ -322,7 +387,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     spawnedBy,
     outboxOf,
     sessionRows,
-    coordinatorRows,
+    entryRows,
     inboxWhere,
     hasPeerItem: (item: string) =>
       sql`SELECT 1 FROM inbox WHERE peer_item = ${item}`.pipe(Effect.map((rows) => rows.length > 0)),

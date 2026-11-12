@@ -2,8 +2,8 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harnesses } from "@vibest/core/harness"
-import { Inbox } from "@vibest/core/inbox"
 import { Layout } from "@vibest/core/paths"
+import { SessionLive } from "@vibest/core/session/live"
 import { Sessions } from "@vibest/core/sessions"
 import { ID } from "@vibest/schema/id"
 import { Cause, Clock, Effect, Exit, Fiber, FileSystem, Path } from "effect"
@@ -11,19 +11,19 @@ import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { projectOf } from "./lib/directory.ts"
+import { entryPending, projectOf } from "./lib/directory.ts"
 import { FakeGit } from "./lib/fake-git.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { answerOf, sentBy, settled, TURNS, until, untilVirtual, writeResult, systemPromptFile } from "./lib/observe.ts"
+import { replyOf, sentBy, settled, EXECUTIONS, until, untilVirtual, writeEnd, systemPromptFile } from "./lib/observe.ts"
 import { makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, sessionWorktree, test, pick, sqlNotices } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
-  const withMain = (repo: string) =>
+  const withEntry = (repo: string) =>
     Effect.gen(function* () {
       const db = yield* Db
-      return yield* db.coordinatorLaunch(
+      return yield* db.startEntry(
         yield* projectOf(repo),
         "pi",
         false,
@@ -38,21 +38,21 @@ describe.concurrent("Sessions", () => {
     })
 
   test(
-    "spawn without a harness from the main agent inherits its harness, provider and model",
+    "spawn without a harness from the entry session inherits its harness, provider and model",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      const main = yield* withMain(repo)
-      const input = { ...(yield* spawnInput(repo)), harness: undefined, parentSessionId: main.sessionId }
+      const entry = yield* withEntry(repo)
+      const input = { ...(yield* spawnInput(repo)), harness: undefined, parentSessionId: entry.sessionId }
       const { id } = yield* (yield* Sessions).spawn(input)
       assert.deepStrictEqual(yield* chosen(id), ["pi", "openai", "fake-strong"])
     }),
   )
 
   test(
-    "spawn without a harness from a plain terminal inherits the project's main agent; an explicit harness drops its provider and model; a model alone keeps the rest",
+    "spawn without a harness from a plain terminal inherits the project's entry session; an explicit harness drops its provider and model; a model alone keeps the rest",
     Effect.gen(function* () {
       const repo = yield* makeRepository
-      yield* withMain(repo)
+      yield* withEntry(repo)
       const sessions = yield* Sessions
       const base = { ...(yield* spawnInput(repo)), harness: undefined }
       const inherited = yield* sessions.spawn(base)
@@ -115,7 +115,7 @@ describe.concurrent("Sessions", () => {
       const { id, row } = yield* spawnWorking(repo)
       assert.match(id, ID)
       assert.strictEqual(row.status, "working")
-      assert.strictEqual(row.turnState, "open")
+      assert.strictEqual(row.executionState, "open")
 
       const wt = yield* sessionWorktree(id)
       assert.deepStrictEqual(yield* (yield* FakeGit).git.linkedWorktrees(repo), [wt])
@@ -148,65 +148,65 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a turn end reported while vibestd drains (update, daemon restart) is still written: its check is a settlement",
+    "an execution end reported while vibestd drains (update, daemon restart) is still written: its check is a settlement",
     Effect.gen(function* () {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
       const drain = yield* Drain
       assert.isTrue(yield* drain.begin)
-      yield* writeResult(id, "pi", { text: "done while draining" })
-      const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
-      assert.strictEqual(w.turnState, "completed")
-      assert.include(yield* answerOf(id), "done while draining")
+      yield* writeEnd(id, "pi", { text: "done while draining" })
+      const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.executionState !== "open")
+      assert.strictEqual(w.executionState, "completed")
+      assert.include(yield* replyOf(id), "done while draining")
       yield* drain.reopen
     }),
   )
 
   test(
-    "hook result + TurnEnd ends the turn, keeps the reply as the turn's answer and sends nothing",
+    "hook result + ExecutionEnd ends the execution, keeps the reply as the execution's reply and sends nothing",
     Effect.gen(function* () {
       const { id, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "\nDone it.\nstatus: failed\n\n## Remember\nuse bun" })
-      const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
-      assert.strictEqual(w.turnState, "completed")
-      assert.strictEqual(yield* answerOf(id), "\nDone it.\nstatus: failed\n\n## Remember\nuse bun")
+      yield* writeEnd(id, "pi", { text: "\nDone it.\nstatus: failed\n\n## Remember\nuse bun" })
+      const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.executionState !== "open")
+      assert.strictEqual(w.executionState, "completed")
+      assert.strictEqual(yield* replyOf(id), "\nDone it.\nstatus: failed\n\n## Remember\nuse bun")
       assert.deepStrictEqual(yield* sentBy(id), [])
     }),
     { hooked: ["pi"] },
   )
 
   test(
-    "herdr's push of a status change runs the check: no poll, no TurnEnd",
+    "herdr's push of a status change runs the check: no poll, no ExecutionEnd",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeResult(id, "pi", { text: "status: completed" })
-      yield* herdr.endTurn(id)
-      const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
-      assert.deepStrictEqual(pick(w), { status: "idle", turnState: "completed" })
+      yield* writeEnd(id, "pi", { text: "status: completed" })
+      yield* herdr.endExecution(id)
+      const w = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.executionState !== "open")
+      assert.deepStrictEqual(pick(w), { status: "idle", executionState: "completed" })
     }),
     { hooked: ["pi"], statusEvents: true },
   )
 
   test(
-    "a typed round ends like any round: its answer is kept and nothing is sent; typing during an open round records nothing",
+    "a typed execution ends like any execution: its reply is kept and nothing is sent; typing during an open execution records nothing",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const repo = yield* makeRepository
       const { id, sessions, db } = yield* spawnWorking(repo)
-      const main = (yield* sql<{ id: string }>`SELECT entry_session_id AS id FROM project`)[0]!.id
-      yield* sessions.userPrompt(main, "hello")
+      const entryId = (yield* sql<{ id: string }>`SELECT entry_session_id AS id FROM project`)[0]!.id
+      yield* sessions.userPrompt(entryId, "hello")
       yield* sessions.userPrompt(id, "do it")
       yield* sessions.userPrompt(id, "and this")
       const working = yield* sql<{
         input: string
         inbox: number | null
-      }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = ${id} AND status = 'working'`
+      }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`
       assert.deepStrictEqual(
         working.map((row) => [row.input, row.inbox !== null]),
         [["do it", true]],
       )
-      yield* writeResult(id, "pi", { text: "status: completed\nsummary: done it" })
-      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
+      yield* writeEnd(id, "pi", { text: "status: completed\nsummary: done it" })
+      yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.executionState !== "open")
 
       const input = "a".repeat(2001)
       yield* sessions.userPrompt(id, input)
@@ -214,13 +214,16 @@ describe.concurrent("Sessions", () => {
         input: string
         inbox: number | null
         status: string
-      }>`SELECT input, inbox_id AS inbox, status FROM ${sql.literal(TURNS)} m
+      }>`SELECT input, inbox_id AS inbox, status FROM ${sql.literal(EXECUTIONS)} m
         WHERE session_id = ${id} AND status = 'working'`
       assert.deepStrictEqual(open, [{ input, inbox: null, status: "working" }])
-      yield* writeResult(id, "pi", { text: "status: completed\nsummary: typed" })
-      const done = yield* until(db.getSession(id), (w): w is NonNullable<typeof w> => !!w && w.turnState !== "open")
-      assert.strictEqual(done.turnState, "completed")
-      assert.strictEqual(yield* answerOf(id), "status: completed\nsummary: typed")
+      yield* writeEnd(id, "pi", { text: "status: completed\nsummary: typed" })
+      const done = yield* until(
+        db.getSession(id),
+        (w): w is NonNullable<typeof w> => !!w && w.executionState !== "open",
+      )
+      assert.strictEqual(done.executionState, "completed")
+      assert.strictEqual(yield* replyOf(id), "status: completed\nsummary: typed")
       assert.deepStrictEqual(yield* sentBy(id), [])
       assert.deepStrictEqual(yield* sql`SELECT id FROM inbox WHERE kind = 'notice'`.pipe(Effect.orDie), [])
     }),
@@ -253,6 +256,37 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
+    "a spawn with no creator is refused before anything is made",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const sessions = yield* Sessions
+      const repo = yield* makeRepository
+      const { parentSessionId: _, ...input } = yield* spawnInput(repo)
+      assert.strictEqual((yield* Effect.flip(sessions.spawn(input)))._tag, "NoCallingSession")
+      assert.strictEqual(
+        (yield* Effect.flip(sessions.spawn({ ...input, origin: { peer: "a".repeat(32), project: "p" } })))._tag,
+        "NoCallingSession",
+      )
+      assert.strictEqual(yield* herdr.callCount, 0)
+    }),
+  )
+
+  test(
+    "the session that ran vibest run is the creator, local or from another machine",
+    Effect.gen(function* () {
+      const db = yield* Db
+      const sessions = yield* Sessions
+      const repo = yield* makeRepository
+      const { parentSessionId: _, ...input } = yield* spawnInput(repo)
+      const local = yield* sessions.spawn({ ...input, parentSessionId: "creator" })
+      assert.deepStrictEqual(yield* db.creatorOf(local.id), { local: "creator" })
+      const peer = "a".repeat(32)
+      const remote = yield* sessions.spawn({ ...input, origin: { peer, project: "p", reportTo: "away" } })
+      assert.deepStrictEqual(yield* db.creatorOf(remote.id), { peer, session: "away" })
+    }),
+  )
+
+  test(
     "spawn refuses a model the harness does not list, naming the choices",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -267,19 +301,19 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "an ended turn waits for the hook (grace period), then is lost with a reason and the peek command, never the pane tail",
+    "an ended execution waits for the hook (grace period), then is lost with a reason and the peek command, never the pane tail",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* herdr.endTurn(id)
+      yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.strictEqual((yield* db.getSession(id))!.turnState, "open")
-      assert.deepStrictEqual(yield* db.coordinatorPending((yield* db.getSession(id))!.projectId), [])
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
+      assert.deepStrictEqual(yield* entryPending(db, (yield* db.getSession(id))!.projectId), [])
       yield* TestClock.adjust("11 seconds")
       yield* sessions.check(id)
-      assert.deepInclude(yield* db.getSession(id), { turnState: "lost", exitedAt: null })
+      assert.deepInclude(yield* db.getSession(id), { executionState: "lost", exitedAt: null })
       const row = yield* db.latestInbox(id, "notice")
-      assert.include(row!.message, "the turn ended without a report")
+      assert.include(row!.message, "the execution ended without a reply")
       assert.include(row!.message, `to see its terminal, run: vibest peek ${id}`)
       assert.notInclude(row!.message, "pane tail")
       assert.notInclude(row!.message, "terminal tail")
@@ -294,7 +328,7 @@ describe.concurrent("Sessions", () => {
       const repo = yield* makeRepository
       const sessions = yield* Sessions
       const db = yield* Db
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: RUNTIME,
         address: { machine: "local", id: "test/coord" },
       })
@@ -319,34 +353,33 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a session's in-memory flags, lock and live status go once it ends; resumed, its next turn ends as any turn does; archived, they go again with no check of its own",
+    "a session's in-memory flags, lock and live status go once it ends; resumed, its next execution ends as any execution does; archived, they go again with no check of its own",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
       const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
       assert.deepInclude(yield* sessions.inMemory, { tracked: 1, locks: 0 })
-      assert.strictEqual(yield* db.liveStatuses, 1)
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 1)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
       yield* Effect.all([sessions.check(id), sessions.check(id), sessions.check(id)], { concurrency: "unbounded" })
       yield* settled
-      assert.deepInclude(yield* db.getSession(id), { turnState: "failed" })
-      assert.strictEqual(yield* db.liveStatuses, 0)
+      assert.deepInclude(yield* db.getSession(id), { executionState: "failed" })
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 0)
       yield* until(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
       yield* sessions.send(id, "next")
       yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === "next"))
       yield* sessions.check(id)
-      assert.deepInclude(yield* db.getSession(id), { turnState: "open", exitedAt: null })
-      yield* writeResult(id, "pi", { text: "done again" })
-      yield* herdr.endTurn(id)
+      assert.deepInclude(yield* db.getSession(id), { executionState: "open", exitedAt: null })
+      yield* writeEnd(id, "pi", { text: "done again" })
+      yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      assert.deepInclude(yield* db.getSession(id), { turnState: "completed" })
-      assert.include(yield* answerOf(id), "done again")
+      assert.deepInclude(yield* db.getSession(id), { executionState: "completed" })
+      assert.include(yield* replyOf(id), "done again")
       yield* TestClock.adjust("10 seconds")
       assert.strictEqual((yield* sessions.inMemory).tracked, 1)
       assert.deepInclude(yield* db.getSession(id), { status: "idle" })
       yield* sessions.remove(id)
-      assert.strictEqual(yield* db.liveStatuses, 0)
+      assert.strictEqual((yield* (yield* SessionLive).size).statuses, 0)
       yield* untilVirtual(sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
-      assert.strictEqual(yield* (yield* Inbox).locks, 0)
     }),
     { hooked: ["pi"] },
   )
@@ -372,14 +405,14 @@ describe.concurrent("Sessions", () => {
       yield* Fiber.join(checking)
       for (let i = 0; i < 30; i++) yield* Effect.yieldNow
       yield* settled
-      assert.deepInclude(yield* db.getSession(id), { turnState: "failed" })
+      assert.deepInclude(yield* db.getSession(id), { executionState: "failed" })
       assert.isNotNull((yield* db.getSession(id))!.exitedAt)
       assert.lengthOf(yield* db.pendingInbox(id), 0)
       assert.lengthOf(yield* db.inboxWithStatus(id, "failed"), 1)
       assert.strictEqual(yield* opens(), before)
       const notices = yield* sqlNotices(id)
       assert.lengthOf(notices, 1)
-      assert.include(notices[0], "exited during a turn")
+      assert.include(notices[0], "exited during an execution")
       assert.include(notices[0], "Not delivered:\n\nqueued")
     }),
   )
@@ -398,7 +431,7 @@ describe.concurrent("Sessions", () => {
       yield* settled
       const row = (yield* db.getSession(id))!
       assert.isNotNull(row.exitedAt)
-      assert.strictEqual(row.turnState, "failed")
+      assert.strictEqual(row.executionState, "failed")
     }),
   )
 

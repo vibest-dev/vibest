@@ -152,7 +152,7 @@ export interface AgentFail extends AgentContext {
   readonly sessionId: string
   readonly reason: "limited"
   readonly error: string
-  readonly turn: string
+  readonly input: string
   readonly harness: string
   readonly provider: string | undefined
 }

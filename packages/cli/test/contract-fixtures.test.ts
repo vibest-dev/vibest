@@ -11,6 +11,7 @@ import { VERSION } from "@vibest/protocol/rpc"
 import { render, RPC_JSON } from "@vibest/protocol/scripts/contract"
 import * as Server from "@vibest/server/server"
 import { Effect, Layer, type Scope } from "effect"
+import { TestClock } from "effect/testing"
 
 import * as Platform from "#platform"
 
@@ -27,6 +28,7 @@ import {
   until,
   wire,
 } from "./fakes.ts"
+import { asEntry } from "./rpc-helpers.ts"
 
 const FIXTURES = path.join(import.meta.dirname, "..", "..", "..", "packages", "protocol", "contract", "fixtures")
 const RECORD = process.env["VIBEST_RECORD_FIXTURES"] === "1"
@@ -166,9 +168,9 @@ describe("contract", () => {
     Effect.gen(function* () {
       const layout = yield* Layout
       const repo = yield* makeRepository
-      const c = authed(yield* connect(layout.socket), cliHeaders(repo))
+      const c = yield* asEntry(yield* connect(layout.socket), repo)
       const { id } = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until((yield* Db).getSession(id), (row) => row?.turnState === "open")
+      yield* until((yield* Db).getSession(id), (row) => row?.executionState === "open")
       const worktree = (yield* (yield* Db).sessionDirectory(id))!
       const w = yield* wire
       yield* w.send(request(1, "Remove", { id }, cliHeaders("/")))
@@ -194,19 +196,20 @@ describe("contract", () => {
       const project = yield* projectOf(repo)
       yield* herdr.addPane("w1:p8", "ws", repo)
       yield* herdr.seedAgent("w1:p8")
-      const main = yield* db.coordinatorLaunch(
+      const entry = yield* db.startEntry(
         project,
         "pi",
         false,
         { runtime: "herdr", address: { machine: "local", id: "w1:p8" } },
         { projectDirectory: repo },
       )
-      const coordinator = authed(
+      const entryClient = authed(
         yield* connect(layout.socket),
-        sessionHeaders({ sessionId: main.sessionId, projectId: project }),
+        sessionHeaders({ sessionId: entry.sessionId, projectId: project }),
       )
-      const { id } = yield* coordinator.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
-      yield* until(db.getSession(id), (row) => row?.turnState === "open")
+      yield* TestClock.adjust("1 second")
+      const { id } = yield* entryClient.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      yield* until(db.getSession(id), (row) => row?.executionState === "open")
       yield* settled
       const worktree = (yield* db.sessionDirectory(id))!
       const w = yield* wire

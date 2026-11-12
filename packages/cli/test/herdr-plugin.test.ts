@@ -50,7 +50,7 @@ const session = (patch: Partial<LiveSession> = {}): LiveSession => ({
 
 const fake = (over: Partial<HerdrDaemon> = {}): HerdrDaemon => ({
   republish: () => Effect.succeed(0),
-  openMain: () => Effect.succeed({ action: "focused", place: "w1:p1" }),
+  openEntry: () => Effect.succeed({ action: "focused", place: "w1:p1" }),
   spawn: () => Effect.succeed("abcd1234-abcd-4abc-8abc-abcd1234abcd"),
   interrupt: () => Effect.void,
   list: () => Effect.succeed([]),
@@ -148,15 +148,15 @@ describe("herdr plugin context", () => {
 })
 
 describe("herdr plugin commands", () => {
-  it.effect("open-main without a directory does not ask to open one", () =>
+  it.effect("open-entry without a directory does not ask to open one", () =>
     Effect.gen(function* () {
       let called = false
       const error = yield* Effect.flip(
         shown(
-          "open-main",
+          "open-entry",
           ctx(),
           fake({
-            openMain: () =>
+            openEntry: () =>
               Effect.sync(() => {
                 called = true
                 return { action: "opened" as const, place: "x" }
@@ -170,7 +170,7 @@ describe("herdr plugin commands", () => {
   )
 
   it.effect(
-    "stop stops the session of the focused pane, or of the herdr agent name when the pane id moved; never the main agent",
+    "stop stops the session of the focused pane, or of the herdr agent name when the pane id moved; never the entry session",
     () =>
       Effect.gen(function* () {
         let removed = ""
@@ -210,7 +210,7 @@ describe("herdr plugin commands", () => {
         assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
 
         removed = ""
-        const main = yield* Effect.flip(
+        const failure = yield* Effect.flip(
           shown(
             "stop",
             ctx({ focusedPaneId: "w1:p1", focusedPaneAgent: "s-a1a10001a1a14a1a8a1aa1a10001a1" }),
@@ -227,7 +227,7 @@ describe("herdr plugin commands", () => {
             }),
           ),
         )
-        assert.strictEqual(main._tag, "NoFocusedSession")
+        assert.strictEqual(failure._tag, "NoFocusedSession")
         assert.strictEqual(removed, "")
       }),
   )
@@ -385,9 +385,9 @@ const served = Server.layer.pipe(
   Layer.provideMerge(testLayer()),
 )
 
-describe("herdr open-main", () => {
+describe("herdr open-entry", () => {
   it.effect(
-    "refuses a project that never had a main agent, launches the last one's harness, and focuses a running one",
+    "refuses a project that never had an entry session, launches the last one's harness, and focuses a running one",
     () =>
       Effect.gen(function* () {
         const layout = yield* Layout
@@ -399,25 +399,25 @@ describe("herdr open-main", () => {
           VIBEST_HOME: layout.home,
           HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_cwd: repo }),
         }
-        const never = yield* runVibest(repo, env, ["herdr", "open-main"])
+        const never = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.notStrictEqual(never.code, 0)
         assert.match(never.stderr, /no harness to inherit/)
         assert.strictEqual((yield* herdr.callsTo("open")).length, 0)
         const projectId = yield* projectOf(repo)
-        yield* db.coordinatorLaunch(projectId, "pi", false, {
+        yield* db.startEntry(projectId, "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "test/main" },
         })
-        const stopped = yield* runVibest(repo, env, ["herdr", "open-main"])
+        const stopped = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.strictEqual(stopped.code, 0, stopped.stderr)
         assert.match(stopped.stdout, /^opened /)
         assert.ok((yield* herdr.callsTo("open")).length > 0)
-        const main = (yield* db.coordinatorOf(projectId))!.address!.id
-        yield* herdr.seedAgent(main)
-        const again = yield* runVibest(repo, env, ["herdr", "open-main"])
+        const entryId = (yield* db.entryOf(projectId))!.address!.id
+        yield* herdr.seedAgent(entryId)
+        const again = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.strictEqual(again.code, 0, again.stderr)
         assert.match(again.stdout, /^focused /)
-        assert.strictEqual((yield* herdr.callsTo("focus")).at(-1)?.terminal, main)
+        assert.strictEqual((yield* herdr.callsTo("focus")).at(-1)?.terminal, entryId)
       }).pipe(Effect.provide(served)),
   )
 })

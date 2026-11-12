@@ -22,13 +22,13 @@ herdr plugin link ~/.local/share/vibest/versions/<version>/herdr-plugin
 
 ## Keybindings
 
-herdr 0.9.5 has no keybindings in the plugin manifest. Actions are `vibest.<action>` (`open-main`, `run`, `stop`, `runs`, `subscriptions`, `palette`). Add any you want to your own herdr `config.toml`. These chords are examples; pick ones you do not already use:
+herdr 0.9.5 has no keybindings in the plugin manifest. Actions are `vibest.<action>` (`open-entry`, `run`, `stop`, `runs`, `subscriptions`, `palette`). Add any you want to your own herdr `config.toml`. These chords are examples; pick ones you do not already use:
 
 ```toml
 [[keys.command]]
 key = "prefix+v"
 type = "plugin_action"
-command = "vibest.open-main"
+command = "vibest.open-entry"
 
 [[keys.command]]
 key = "prefix+r"

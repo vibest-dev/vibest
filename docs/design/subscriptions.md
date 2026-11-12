@@ -25,7 +25,7 @@ interface Limit { window: string; percent: number /* 0–100 */; status: "availa
   `time.update`. Plugins decide what a stale reading is worth.
 - Usage limits come only from official or CLI-provided sources. `limits: []` means unknown, not unlimited, and
   that is fine when a harness offers none. An API-key login has none; such an Agent only learns of a limit when
-  its turn fails (`agent.fail`, reason `limited`).
+  its execution fails (`agent.fail`, reason `limited`).
 - Two refresh paths per harness: a **poll** (no Agent needed, D10 asks for every harness on every machine) and
   **push** from a running Agent's integration plugin, which is fresher and free. Push overrides poll until the next poll.
 - vibestd keeps the rows in memory, one per `(harness, provider, machine "local")`. It polls once as it starts; after

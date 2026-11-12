@@ -10,12 +10,16 @@ import {
   makeRepository,
   savedSession,
   tempDirectory,
+  CLAUDE,
+  CURSOR,
+  PI,
   testLayer,
-  TURNS,
+  EXECUTIONS,
   type TestServices,
   until,
   untilVirtual,
   projectOf,
+  entryPending,
 } from "@vibest/cli/test/fakes"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
@@ -49,10 +53,12 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   },
 }))
 
+const pulling = () => testLayer({ harnesses: [{ ...PI, inbox: "subscribe" as const }, CLAUDE, CURSOR] })
+
 const served = Server.layer.pipe(
   Layer.provide(Layer.unwrap(Effect.map(Layout, (layout) => Platform.socketServer(layout.socket)))),
   Layer.provideMerge(Project.layer),
-  Layer.provideMerge(testLayer()),
+  Layer.provideMerge(pulling()),
 )
 
 const test = <E>(
@@ -126,9 +132,31 @@ const session = (env: Record<string, string>) =>
 
 const lease = () =>
   Object.getOwnPropertyDescriptor(UserMessageComponent.prototype, "vibestCompactUserMessagesLease")?.value
-const tuiStart = { mode: "tui", hasUI: true, sessionManager: { getSessionId: () => "s" }, ui: { notify: () => {} } }
+const tuiStart = {
+  mode: "tui",
+  hasUI: true,
+  isIdle: () => true,
+  sessionManager: { getSessionId: () => "s" },
+  ui: { notify: () => {} },
+}
 
-const turnEnd = (mode: string, sessionId: string, notes: Array<string> = []) => ({
+const finishExecution = (
+  s: { readonly emit: (event: string, e?: unknown, ctx?: unknown) => Effect.Effect<unknown> },
+  execution: number,
+) =>
+  Effect.gen(function* () {
+    yield* s.emit(
+      "message_start",
+      { message: { role: "custom", customType: "vibest", details: { execution } } },
+      tuiStart,
+    )
+    yield* s.emit("agent_end", { messages: [] }, tuiStart)
+    yield* s.emit("agent_settled", { aborted: false }, tuiStart)
+  })
+
+const executionOf = (message: unknown) => (message as { details: { execution: number } }).details.execution
+
+const executionEnd = (mode: string, sessionId: string, notes: Array<string> = []) => ({
   mode,
   sessionManager: { getSessionId: () => sessionId },
   ui: { notify: (message: string) => void notes.push(message) },
@@ -184,21 +212,18 @@ describe("pi-vibest", () => {
           status: "idle" as const,
           startedAt: 1,
           exitedAt: 1,
-          turnState: "none" as const,
-          turnPromptedAt: 0,
+          executionState: "none" as const,
+          executionPromptedAt: 0,
           metadata: {},
           createdAt: 1,
           lastActive: 1,
         }
         yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-        const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+        const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
-        yield* (yield* Inbox).enqueue({
-          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          message: "survives the gap",
-        })
+        yield* (yield* Inbox).enqueue({ sessionId: coord.sessionId, message: "survives the gap" })
         const notes: Array<string> = []
         const s = yield* session({
           VIBEST_AGENT: "coordinator",
@@ -222,13 +247,13 @@ describe("pi-vibest", () => {
           Effect.sync(() => s.messages.length),
           (n) => n === 1,
         )
-        assert.deepStrictEqual(s.messages[0]?.message, {
+        assert.deepInclude(s.messages[0]?.message, {
           customType: "vibest",
           content: "survives the gap",
           display: false,
         })
         assert.deepStrictEqual(notes, [])
-      }).pipe(Effect.scoped, Effect.provide(testLayer())),
+      }).pipe(Effect.scoped, Effect.provide(pulling())),
     15_000,
   )
 
@@ -254,8 +279,8 @@ describe("pi-vibest", () => {
             status: "idle",
             startedAt: 1,
             exitedAt: 1,
-            turnState: "none",
-            turnPromptedAt: 0,
+            executionState: "none",
+            executionPromptedAt: 0,
             metadata: {},
             createdAt: 1,
             lastActive: 1,
@@ -275,7 +300,7 @@ describe("pi-vibest", () => {
           Server.layer.pipe(Layer.provide(Platform.socketServer(layout.socket)), Layer.provide(Project.layer)),
         )
         yield* untilVirtual(db.readyAt(id), (at) => at !== undefined)
-      }).pipe(Effect.scoped, Effect.provide(testLayer())),
+      }).pipe(Effect.scoped, Effect.provide(pulling())),
     15_000,
   )
 
@@ -300,14 +325,14 @@ describe("pi-vibest", () => {
           status: "idle" as const,
           startedAt: 1,
           exitedAt: 1,
-          turnState: "none" as const,
-          turnPromptedAt: 0,
+          executionState: "none" as const,
+          executionPromptedAt: 0,
           metadata: {},
           createdAt: 1,
           lastActive: 1,
         }
         yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-        const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+        const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
           runtime: "herdr",
           address: { machine: "local", id: "w1:p8" },
         })
@@ -329,11 +354,11 @@ describe("pi-vibest", () => {
           { reason: "startup" },
           { ...tuiStart, ui: { notify: (message: string) => notes.push(message) } },
         )
-        const report = (message: string) =>
-          inbox.enqueue({ sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", message })
+        const report = (message: string) => inbox.enqueue({ sessionId: coord.sessionId, message })
         const contents = Effect.sync(() => s.messages.map((m) => (m.message as { content: string }).content))
         yield* report("first")
         yield* until(contents, (c) => c.length === 1)
+        yield* finishExecution(s, executionOf(s.messages[0]!.message))
         yield* Scope.close(first, Exit.void)
         yield* Layer.build(vibestd)
         yield* report("second")
@@ -347,10 +372,10 @@ describe("pi-vibest", () => {
         yield* TestClock.withLive(Effect.sleep("3 seconds"))
         assert.deepStrictEqual(yield* contents, ["first", "second"])
         assert.deepStrictEqual(
-          (yield* db.coordinatorPending(yield* projectOf("r"))).map((r) => r.message),
+          (yield* entryPending(db, yield* projectOf("r"))).map((r) => r.message),
           ["after shutdown"],
         )
-      }).pipe(Effect.scoped, Effect.provide(testLayer())),
+      }).pipe(Effect.scoped, Effect.provide(pulling())),
     30_000,
   )
 
@@ -414,7 +439,6 @@ describe("pi-vibest", () => {
         )
         assert.isFalse(
           [
-            "message_start",
             "message_update",
             "tool_execution_start",
             "tool_execution_end",
@@ -449,20 +473,20 @@ describe("pi-vibest", () => {
         status: "idle" as const,
         startedAt: 1,
         exitedAt: 1,
-        turnState: "none" as const,
-        turnPromptedAt: 0,
+        executionState: "none" as const,
+        executionPromptedAt: 0,
         metadata: {},
         createdAt: 1,
         lastActive: 1,
       }
       yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
       yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
-      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+      const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
       yield* inbox.enqueue({
-        sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        sessionId: coord.sessionId,
         message: "<agent-result>one</agent-result>",
       })
 
@@ -503,36 +527,39 @@ describe("pi-vibest", () => {
       yield* s.emit("session_start", { reason: "startup" }, { mode: "rpc" })
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.deepStrictEqual(s.messages, [])
-      assert.strictEqual((yield* db.coordinatorPending(yield* projectOf("r"))).length, 1)
-      yield* s.emit("session_start", { reason: "startup" }, { mode: "tui" })
+      assert.strictEqual((yield* entryPending(db, yield* projectOf("r"))).length, 1)
+      yield* s.emit("session_start", { reason: "startup" }, tuiStart)
       yield* until(
         Effect.sync(() => s.messages.length),
         (n) => n === 1,
       )
+      yield* finishExecution(s, executionOf(s.messages[0]!.message))
       yield* inbox.enqueue({
-        sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        sessionId: coord.sessionId,
         message: "<agent-message>two</agent-message>",
       })
       yield* until(
         Effect.sync(() => s.messages.length),
         (n) => n === 2,
       )
-      assert.deepStrictEqual(s.messages, [
-        {
-          message: { customType: "vibest", content: "<agent-result>one</agent-result>", display: false },
-          options: { triggerTurn: true, deliverAs: "followUp" },
-        },
-        {
-          message: { customType: "vibest", content: "<agent-message>two</agent-message>", display: false },
-          options: { triggerTurn: true, deliverAs: "followUp" },
-        },
-      ])
-      assert.deepStrictEqual(yield* db.coordinatorPending(yield* projectOf("r")), [])
+      assert.deepStrictEqual(
+        s.messages.map((m) => [
+          (m.message as { content: string }).content,
+          (m.message as { display: boolean }).display,
+          m.options,
+        ]),
+        [
+          ["<agent-result>one</agent-result>", false, { triggerTurn: true }],
+          ["<agent-message>two</agent-message>", false, { triggerTurn: true }],
+        ],
+      )
+      assert.notStrictEqual(executionOf(s.messages[0]!.message), executionOf(s.messages[1]!.message))
+      assert.deepStrictEqual(yield* entryPending(db, yield* projectOf("r")), [])
     }),
   )
 
   test(
-    "a subagent input event records what the user typed; an extension delivery and the coordinator do not",
+    "an input event records what the user typed, in any session; an extension delivery does not",
     Effect.gen(function* () {
       const db = yield* Db
       const sql = yield* SqlClient.SqlClient
@@ -548,14 +575,14 @@ describe("pi-vibest", () => {
         status: "idle" as const,
         startedAt: 1,
         exitedAt: 1,
-        turnState: "none" as const,
-        turnPromptedAt: 0,
+        executionState: "none" as const,
+        executionPromptedAt: 0,
         metadata: {},
         createdAt: 1,
         lastActive: 1,
       }
       yield* db.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
-      const coord = yield* db.coordinatorLaunch(yield* projectOf("r"), "pi", false, {
+      const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p7" },
       })
@@ -563,7 +590,7 @@ describe("pi-vibest", () => {
         sql<{
           input: string
           inbox: number | null
-        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(TURNS)} m WHERE session_id = 'abcd1234-abcd-4abc-8abc-abcd1234abcd' ORDER BY id`.pipe(
+        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = 'abcd1234-abcd-4abc-8abc-abcd1234abcd' ORDER BY id`.pipe(
           Effect.orDie,
         )
       const s = yield* session({
@@ -582,13 +609,14 @@ describe("pi-vibest", () => {
         VIBEST_PROJECT_ID: coord.projectId,
         VIBEST_COMMAND: '["vibest"]',
       })
-      assert.isFalse(coordinator.handlers.has("input"))
       yield* coordinator.emit("input", { type: "input", text: "the normal conversation", source: "interactive" })
       assert.deepStrictEqual(
         yield* sql<{
           n: number
-        }>`SELECT count(*) AS n FROM ${sql.literal(TURNS)} m WHERE session_id = ${coord.sessionId}`.pipe(Effect.orDie),
-        [{ n: 0 }],
+        }>`SELECT count(*) AS n FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${coord.sessionId}`.pipe(
+          Effect.orDie,
+        ),
+        [{ n: 1 }],
       )
     }),
   )
@@ -611,60 +639,61 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Coordinator: a TUI startup turn reports its session id once; /new, /resume and /fork report before the next turn",
+    "Coordinator: a TUI startup execution reports its session id once; /new, /resume and /fork report before the next execution",
     Effect.gen(function* () {
       const db = yield* Db
       const c = yield* cli
-      const launched = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
+      const launched = yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
       assert.isNull(launched.harnessSessionId)
       const saved = savedSession(launched.sessionId)
       const env = {
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: launched.sessionId,
+        VIBEST_PROJECT_ID: launched.projectId,
         VIBEST_LAUNCH_PID: String(process.pid),
         VIBEST_COMMAND: '["vibest"]',
       }
       const s = yield* session(env)
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("rpc", "child"))
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("print", "child"))
-      yield* s.emit("session_start", { type: "session_start", reason: "startup" }, turnEnd("tui", "s-startup"))
-      yield* s.emit("session_start", { type: "session_start", reason: "reload" }, turnEnd("tui", "s-reload"))
-      yield* s.emit("session_start", { type: "session_start", reason: "new" }, turnEnd("rpc", "s-rpc"))
-      yield* s.emit("session_start", { type: "session_start", reason: "new" }, turnEnd("print", "s-print"))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("rpc", "child"))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("print", "child"))
+      yield* s.emit("session_start", { type: "session_start", reason: "startup" }, executionEnd("tui", "s-startup"))
+      yield* s.emit("session_start", { type: "session_start", reason: "reload" }, executionEnd("tui", "s-reload"))
+      yield* s.emit("session_start", { type: "session_start", reason: "new" }, executionEnd("rpc", "s-rpc"))
+      yield* s.emit("session_start", { type: "session_start", reason: "new" }, executionEnd("print", "s-print"))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.isNull(yield* saved)
       assert.isFalse(
         ["child", "s-startup", "s-reload", "s-rpc", "s-print"].some((id) => valuesStoredByRefSet.includes(id)),
       )
       const s1 = `s1:${launched.sessionId}`
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", s1))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
       yield* until(
         Effect.sync(() => valuesStoredByRefSet.includes(s1)),
         Boolean,
       )
       assert.strictEqual(yield* saved, s1)
-      yield* db.reportCoordinatorSession(launched.sessionId, "pi", "other")
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", s1))
+      yield* db.noteConversation(launched.sessionId, "other")
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", s1))
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.strictEqual(yield* saved, "other")
-      yield* s.emit("session_start", { type: "session_start", reason: "new" }, turnEnd("tui", "s-new"))
+      yield* s.emit("session_start", { type: "session_start", reason: "new" }, executionEnd("tui", "s-new"))
       yield* until(saved, (id) => id === "s-new")
-      yield* s.emit("session_start", { type: "session_start", reason: "resume" }, turnEnd("tui", "s-resume"))
+      yield* s.emit("session_start", { type: "session_start", reason: "resume" }, executionEnd("tui", "s-resume"))
       yield* until(saved, (id) => id === "s-resume")
-      yield* s.emit("session_start", { type: "session_start", reason: "fork" }, turnEnd("tui", "s-fork"))
+      yield* s.emit("session_start", { type: "session_start", reason: "fork" }, executionEnd("tui", "s-fork"))
       yield* until(saved, (id) => id === "s-fork")
       yield* until(
         Effect.sync(() => valuesStoredByRefSet.includes("s-fork")),
         Boolean,
       )
       assert.strictEqual(
-        (yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })).harnessSessionId,
+        (yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })).harnessSessionId,
         "s-fork",
       )
-      yield* db.reportCoordinatorSession(launched.sessionId, "pi", "kept")
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s-fork"))
+      yield* db.noteConversation(launched.sessionId, "kept")
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
-      const renewed = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: true, terminal: "test/p1" })
+      const renewed = yield* c["Project.EntrySession"]({ harness: "pi", fresh: true, terminal: "test/p1" })
       assert.notStrictEqual(renewed.sessionId, launched.sessionId)
       assert.isNull(renewed.harnessSessionId)
       assert.isNull(yield* saved)
@@ -677,7 +706,7 @@ describe("pi-vibest", () => {
       const layout = yield* Layout
       const path = yield* Path.Path
       const c = yield* cli
-      const launched = yield* c["Project.CoordinatorSession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
+      const launched = yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
       const saved = savedSession(launched.sessionId)
       const home = yield* tempDirectory("pi-vibest-slow-")
       const first = {
@@ -706,22 +735,23 @@ describe("pi-vibest", () => {
       const s = yield* session({
         VIBEST_AGENT: "coordinator",
         VIBEST_SESSION_ID: launched.sessionId,
+        VIBEST_PROJECT_ID: launched.projectId,
         VIBEST_LAUNCH_PID: String(process.pid),
         VIBEST_COMMAND: '["vibest"]',
         VIBEST_HOME: home,
       })
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s1", notes))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s1", notes))
       yield* until(
         Effect.sync(() => first.held.length > 0),
         Boolean,
       )
-      yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s2", notes))
+      yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s2", notes))
       yield* until(saved, (id) => id === "s2")
       yield* until(
         Effect.sync(() => notes.length === 1),
         Boolean,
       )
-      assert.match(notes[0]!, /^vibest: the coordinator's conversation may not have been saved/)
+      assert.match(notes[0]!, /^vibest: the entry session's conversation may not have been saved/)
       first.released = true
       for (const chunk of first.held) first.upstream!.write(chunk)
       yield* until(
@@ -734,7 +764,7 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Coordinator: the turn never waits for the report; vibestd hanging or gone ends in a warning, and the next turn tries again",
+    "Coordinator: the execution never waits for the report; vibestd hanging or gone ends in a warning, and the next execution tries again",
     Effect.gen(function* () {
       const path = yield* Path.Path
       const hanging = yield* tempDirectory("pi-vibest-hang-")
@@ -755,15 +785,15 @@ describe("pi-vibest", () => {
           VIBEST_HOME: home,
         })
         const notes: Array<string> = []
-        for (const turn of [1, 2]) {
-          yield* s.emit("agent_end", { messages: [] }, turnEnd("tui", "s1", notes))
-          assert.strictEqual(notes.length, turn - 1, "the turn ended before its report did")
+        for (const execution of [1, 2]) {
+          yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s1", notes))
+          assert.strictEqual(notes.length, execution - 1, "the execution ended before its reply did")
           yield* until(
-            Effect.sync(() => notes.length === turn),
+            Effect.sync(() => notes.length === execution),
             Boolean,
           )
         }
-        assert.match(notes[0]!, /^vibest: the coordinator's conversation may not have been saved/)
+        assert.match(notes[0]!, /^vibest: the entry session's conversation may not have been saved/)
       }
     }),
     30000,

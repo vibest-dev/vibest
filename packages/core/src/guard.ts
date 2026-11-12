@@ -223,7 +223,7 @@ export const shellBlock = (
       return "Agents must not control a terminal runtime's agents, panes, tabs, workspaces or worktrees; vibest manages them."
     if (runtimePrograms.has(name) && !coordinator) return "Sessions do not run a terminal runtime; vibest manages it."
     if (coordinator && harnessClis.has(name))
-      return `The coordinator does not start ${name} itself: it would inherit the coordinator's identity and report its turns as the coordinator's. Start agents with vibest run.`
+      return `The coordinator does not start ${name} itself: it would inherit the coordinator's identity and report its executions as the coordinator's. Start agents with vibest run.`
     if (coordinator && name === "gh" && GH_UNSAFE.has(firstWord(rest)))
       return `gh ${firstWord(rest)} changes gh's credentials or what it runs; ask the user to.`
     const args = vibestArgs(vibest, p.argv)
@@ -235,7 +235,7 @@ export const shellBlock = (
       return `vibest ${firstWord(words)} manages connections between machines; only the user runs it.`
     const at = words.indexOf("integration")
     if (at !== -1 && words[at + 1] === "stop")
-      return "vibest integration stop is the harness's turn-end hook, not an agent command."
+      return "vibest integration stop is the harness's execution-end hook, not an agent command."
     if (at !== -1 && words[at + 1] === "prompt")
       return "vibest integration prompt is the harness's user-prompt hook, not an agent command."
     if (at !== -1 && words[at + 1] === "ready")

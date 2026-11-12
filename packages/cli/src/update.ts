@@ -228,7 +228,7 @@ export const restartAgents = (
     }
     yield* ask((client) => client["Agents.Restart"]({ ids: restartable.map((a) => a.id), after }))
     yield* Console.log(
-      `${command} has finished. vibestd restarts ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command has exited, main agents last; one that was working continues its turn (outcomes in ${(yield* Layout).home}/vibestd.log).`,
+      `${command} has finished. vibestd restarts ${restartable.map((a) => shortId(a.id)).join(", ")} in place once this command has exited, entry sessions last; one that was working continues its execution (outcomes in ${(yield* Layout).home}/vibestd.log).`,
     )
   })
 
@@ -237,7 +237,7 @@ export const update = Command.make(
   {
     yes: Flag.Boolean("yes").pipe(
       Flag.withDescription(
-        "Restart the agents still on the old integration without asking (a shell without a terminal, such as the main agent's)",
+        "Restart the agents still on the old integration without asking (a shell without a terminal, such as the entry session's)",
       ),
       Flag.withDefault(false),
     ),
@@ -245,9 +245,8 @@ export const update = Command.make(
   },
   ({ yes, restartAgentsAfter }) =>
     Effect.gen(function* () {
-      const isMainAgent =
-        Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT"))) === Guard.COORDINATOR
-      if (!isMainAgent) yield* userOnly("update")
+      const isEntry = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT"))) === Guard.COORDINATOR
+      if (!isEntry) yield* userOnly("update")
       if (Option.isSome(restartAgentsAfter))
         return yield* restartAgents(VERSION, yes, "vibest update", restartAgentsAfter.value)
       const self = yield* VibestCommand

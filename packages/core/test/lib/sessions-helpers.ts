@@ -10,7 +10,7 @@ import { KIND as RUNTIME } from "../../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./directory.ts"
 import { FakeRuntime } from "./fake-runtime.ts"
 import { CLAUDE } from "./harnesses.ts"
-import { settled, TURNS, until, writeResult } from "./observe.ts"
+import { settled, EXECUTIONS, until, writeEnd } from "./observe.ts"
 import { sessionFrom, type TestOptions, type TestServices } from "./session.ts"
 
 export const harnessOf = (argv: ReadonlyArray<string>) => (argv[0] === "cursor-agent" ? "cursor" : argv[0])
@@ -22,6 +22,7 @@ export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
       ({
         machine: { id: "local" },
         root: repo,
+        parentSessionId: "creator",
         projectId,
         name: "task",
         prompt: "do it",
@@ -32,13 +33,15 @@ export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
 
 export const claudeEnd = (reason: string) =>
   (
-    CLAUDE.turnEnd!(
-      { hook_event_name: "TurnComplete", session_id: "c1", reason, last_assistant_message: "" },
-      false,
-    ) as {
-      readonly result: object
+    CLAUDE.executionEnd!({
+      hook_event_name: "ExecutionComplete",
+      session_id: "c1",
+      reason,
+      last_assistant_message: "",
+    }) as {
+      readonly end: object
     }
-  ).result
+  ).end
 
 export const spawnWorking = (
   repo: string,
@@ -48,14 +51,14 @@ export const spawnWorking = (
   Effect.gen(function* () {
     const sessions = yield* Sessions
     const db = yield* Db
-    const main = yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+    const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
       runtime: RUNTIME,
       address: { machine: "local", id: "test/coord" },
     })
     const { id } = yield* sessions.spawn({
       ...(yield* spawnInput(repo, harness)),
       ...(extra.archive ? { archive: true } : {}),
-      ...(extra.underMain ? { parentSessionId: main.sessionId } : {}),
+      ...(extra.underMain ? { parentSessionId: entry.sessionId } : {}),
     })
     yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
     yield* sessions.check(id)
@@ -69,8 +72,8 @@ export const idleSession = (repo: string, extra: { readonly archive?: boolean } 
   Effect.gen(function* () {
     const herdr = yield* FakeRuntime
     const w = yield* spawnWorking(repo, "pi", extra)
-    yield* herdr.endTurn(w.id)
-    yield* writeResult(w.id, "pi", { text: "status: completed" })
+    yield* herdr.endExecution(w.id)
+    yield* writeEnd(w.id, "pi", { text: "status: completed" })
     yield* w.sessions.check(w.id)
     yield* settled
     return w
@@ -103,20 +106,20 @@ export const slowTest = <E>(
   options?: TestOptions,
 ) => it.effect(name, () => program.pipe(Effect.provide(sessionFrom(options))), { timeout: SPAWN_HEAVY_TEST_TIMEOUT })
 
-export const pick = (w: { readonly status: string; readonly turnState: string } | undefined) => ({
+export const pick = (w: { readonly status: string; readonly executionState: string } | undefined) => ({
   status: w?.status,
-  turnState: w?.turnState,
+  executionState: w?.executionState,
 })
-export const roundAndResultCounts = (sessionId: string) =>
+export const executionAndSentCounts = (sessionId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const [rounds] = yield* sql<{
+    const [executions] = yield* sql<{
       n: number
-    }>`SELECT count(*) AS n FROM ${sql.literal(TURNS)} m WHERE session_id = ${sessionId}`.pipe(Effect.orDie)
-    const [results] = yield* sql<{
+    }>`SELECT count(*) AS n FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${sessionId}`.pipe(Effect.orDie)
+    const [sent] = yield* sql<{
       n: number
-    }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${sessionId} AND kind = 'result'`.pipe(Effect.orDie)
-    return { rounds: rounds!.n, results: results!.n }
+    }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${sessionId}`.pipe(Effect.orDie)
+    return { executions: executions!.n, sent: sent!.n }
   })
 export const sqlNotices = (sessionId: string) =>
   Effect.gen(function* () {

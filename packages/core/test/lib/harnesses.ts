@@ -16,8 +16,7 @@ export const PI: HarnessDefinition = {
   ownSessionId: true,
   systemPromptInPrompt: false,
   interruptKey: "esc",
-  resultField: "text",
-  inbox: "subscribe",
+  replyField: "text",
   ready: "integration",
   launchArgs: (i) => [
     "--session-id",
@@ -37,14 +36,16 @@ export const PI: HarnessDefinition = {
     ...providerModel(i.provider, i.model),
   ],
   models: { args: () => [], answer: () => undefined },
-  turnEnd: (event, coordinator) =>
-    coordinator || event.type !== "agent_settled"
+  executionEnd: (event) =>
+    event.type !== "agent_settled"
       ? undefined
-      : { result: { text: typeof event.text === "string" ? event.text : "", error: "", aborted: false } },
-  userPrompt: (event, coordinator) =>
-    coordinator || event.type !== "input" || typeof event.text !== "string" || event.text.trim() === ""
-      ? undefined
-      : { text: event.text },
+      : { end: { text: typeof event.text === "string" ? event.text : "", error: "", aborted: false } },
+  userPrompt: (event) =>
+    event.type === "accepted" && typeof event.execution === "number"
+      ? { execution: event.execution }
+      : event.type !== "input" || typeof event.text !== "string" || event.text.trim() === ""
+        ? undefined
+        : { text: event.text },
 }
 
 const noProvider = (harness: string) => (provider: string | null) =>
@@ -56,8 +57,7 @@ export const CLAUDE: HarnessDefinition = {
   ownSessionId: true,
   systemPromptInPrompt: false,
   interruptKey: "esc",
-  resultField: "last_assistant_message",
-  inbox: "poll",
+  replyField: "last_assistant_message",
   ready: "integration",
   checkProvider: noProvider("claude"),
   launchArgs: (i) => [
@@ -77,11 +77,11 @@ export const CLAUDE: HarnessDefinition = {
     ...opt("--model", i.model),
   ],
   models: { args: () => [], answer: () => undefined },
-  turnEnd: (event, coordinator) =>
-    coordinator || event.hook_event_name !== "TurnComplete"
+  executionEnd: (event) =>
+    event.hook_event_name !== "ExecutionComplete"
       ? undefined
       : {
-          result:
+          end:
             event.reason === "answer"
               ? event
               : event.reason === "aborted"
@@ -89,14 +89,16 @@ export const CLAUDE: HarnessDefinition = {
                     ...event,
                     aborted: true,
                     error: "interrupted",
-                    error_details: "the turn was stopped in its terminal (Esc) before it ended",
+                    error_details: "the execution was stopped in its terminal (Esc) before it ended",
                   }
-                : { ...event, error: "error", error_details: "the turn ended on an API error" },
+                : { ...event, error: "error", error_details: "the execution ended on an API error" },
         },
-  userPrompt: (event, coordinator) =>
-    coordinator || event.hook_event_name !== "PromptSubmit" || typeof event.text !== "string" || !event.text.trim()
-      ? undefined
-      : { text: event.text },
+  userPrompt: (event) =>
+    event.hook_event_name === "PromptSubmit" && event.origin === "vibest" && typeof event.execution === "number"
+      ? { execution: event.execution }
+      : event.hook_event_name !== "PromptSubmit" || typeof event.text !== "string" || !event.text.trim()
+        ? undefined
+        : { text: event.text },
 }
 
 export const CURSOR: HarnessDefinition = {
@@ -105,7 +107,7 @@ export const CURSOR: HarnessDefinition = {
   ownSessionId: false,
   systemPromptInPrompt: true,
   interruptKey: "ctrl+c",
-  resultField: "text",
+  replyField: "text",
   ready: "runtime",
   checkProvider: noProvider("cursor"),
   launchArgs: (i) => [
@@ -118,16 +120,17 @@ export const CURSOR: HarnessDefinition = {
   guardAnswer: (reason) =>
     reason ? { permission: "deny", user_message: reason, agent_message: reason } : { permission: "allow" },
   conversationOf: (event) => (typeof event.conversation_id === "string" ? event.conversation_id : undefined),
-  turnEnd: (event, coordinator) =>
-    !coordinator && event.hook_event_name === "afterAgentResponse" ? { result: event } : undefined,
-  userPrompt: (event, coordinator) => {
-    if (coordinator) return undefined
+  executionEnd: (event) => (event.hook_event_name === "afterAgentResponse" ? { end: event } : undefined),
+  userPrompt: (event) => {
     if (event.hook_event_name === "afterAgentThought" || event.hook_event_name === "postToolUse") return { text: "" }
     return event.hook_event_name === "beforeSubmitPrompt" && typeof event.prompt === "string" && event.prompt.trim()
       ? { text: event.prompt }
       : undefined
   },
 }
+
+export const PULLING_PI: HarnessDefinition = { ...PI, id: "pulling-pi", inbox: "subscribe" }
+export const PULLING_CLAUDE: HarnessDefinition = { ...CLAUDE, id: "pulling-claude", inbox: "poll" }
 
 export const HARNESSES: ReadonlyArray<HarnessDefinition> = [PI, CLAUDE, CURSOR]
 

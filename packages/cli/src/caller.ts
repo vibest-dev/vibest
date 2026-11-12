@@ -7,8 +7,8 @@ export const caller = Effect.gen(function* () {
   const repositoryRoot = path.resolve(".")
   const sessionId = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_SESSION_ID"))) || undefined
   const agentName = Option.getOrUndefined(yield* Config.option(Config.String("VIBEST_AGENT")))
-  const coordinatorCwd = agentName === "coordinator" ? { repositoryRoot } : {}
-  const claim: Claim = sessionId ? { _tag: "session", sessionId, ...coordinatorCwd } : { _tag: "cli", repositoryRoot }
+  const entryCwd = agentName === "coordinator" ? { repositoryRoot } : {}
+  const claim: Claim = sessionId ? { _tag: "session", sessionId, ...entryCwd } : { _tag: "cli", repositoryRoot }
   return { claim, agent: sessionId !== undefined, sessionId }
 })
 

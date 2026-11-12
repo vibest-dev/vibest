@@ -15,7 +15,7 @@ import {
 } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 
-import type { CoordinatorRow, ProcessEndReason, SessionPatch, SessionRow } from "./db.ts"
+import type { EntryRow, ProcessEndReason, SessionPatch, SessionRow } from "./db.ts"
 import type { HarnessUnavailable } from "./harness.ts"
 import type { LimitMove } from "./move.ts"
 import { messageOf } from "./plugin-sources.ts"
@@ -25,7 +25,7 @@ import {
   listProjectRepositories,
   projectRoot,
 } from "./project-create.ts"
-import { isUsageLimitError } from "./results.ts"
+import { isUsageLimitError } from "./replies.ts"
 import { addressOf, type RuntimesShape, type Runtime, type Terminal } from "./runtimes.ts"
 import { RuntimeError } from "./runtimes.ts"
 import { removeSystemPrompt, type SystemPromptDirUnsafe } from "./system-prompt.ts"
@@ -48,14 +48,15 @@ export type LaunchOptions = {
 
 export const sessionPlacement = (deps: {
   readonly db: {
-    readonly coordinatorOf: (projectId: string) => Effect.Effect<CoordinatorRow | undefined>
+    readonly entryOf: (projectId: string) => Effect.Effect<EntryRow | undefined>
     readonly listSessions: (filter?: { readonly projectId?: string }) => Effect.Effect<ReadonlyArray<SessionRow>>
     readonly openExecution: (id: string) => Effect.Effect<number | undefined>
-    readonly closeExecution: (id: string, turn: number, status: "failed") => Effect.Effect<boolean>
+    readonly closeExecution: (id: string, execution: number, status: "failed") => Effect.Effect<boolean>
     readonly getSession: (id: string) => Effect.Effect<SessionRow | undefined>
     readonly updateSession: (id: string, patch: SessionPatch) => Effect.Effect<void>
     readonly endProcess: (id: string, reason: ProcessEndReason) => Effect.Effect<boolean>
     readonly startedByPeer: (id: string) => Effect.Effect<boolean>
+    readonly currentProcessId: (id: string) => Effect.Effect<number | undefined>
   }
   readonly runtimes: RuntimesShape
   readonly layout: {
@@ -74,7 +75,7 @@ export const sessionPlacement = (deps: {
   }
   readonly path: { readonly dirname: (path: string) => string }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
-  readonly vibestEnv: (session: SessionRow) => Readonly<Record<string, string>>
+  readonly vibestEnv: (session: SessionRow, process?: number) => Readonly<Record<string, string>>
   readonly launchArgv: (
     session: SessionRow,
     resume: boolean,
@@ -108,7 +109,11 @@ export const sessionPlacement = (deps: {
   const liveCount = (projectId: string) =>
     db
       .listSessions({ projectId })
-      .pipe(Effect.map((rows) => rows.filter((row) => !(row.metadata.archived || row.metadata.removed)).length))
+      .pipe(
+        Effect.map(
+          (rows) => rows.filter((row) => !row.entry && !(row.metadata.archived || row.metadata.removed)).length,
+        ),
+      )
 
   const show = (h: Runtime, session: SessionRow, terminal: Terminal, root: string) =>
     Effect.gen(function* () {
@@ -129,12 +134,12 @@ export const sessionPlacement = (deps: {
     undo: (a: A) => Effect.Effect<unknown, unknown, R2>,
   ) => Effect.acquireRelease(acquire, (a, exit) => (Exit.isFailure(exit) ? undo(a).pipe(Effect.ignore) : Effect.void))
 
-  const nearMain = (session: SessionRow, kind: string) =>
+  const nearEntry = (session: SessionRow, kind: string) =>
     db
-      .coordinatorOf(session.projectId)
+      .entryOf(session.projectId)
       .pipe(
-        Effect.map((main) =>
-          main?.runtime === kind && main.address !== null && main.address.id !== "" ? main.address : undefined,
+        Effect.map((entry) =>
+          entry?.runtime === kind && entry.address !== null && entry.address.id !== "" ? entry.address : undefined,
         ),
       )
 
@@ -152,7 +157,7 @@ export const sessionPlacement = (deps: {
       readonly endedByCaller?: boolean
     },
   ) {
-    const near = input.near !== undefined ? input.near : yield* nearMain(session, h.id)
+    const near = input.near !== undefined ? input.near : yield* nearEntry(session, h.id)
     const remote = yield* db.startedByPeer(session.id)
     const choice = {
       harnessId: session.harnessId,
@@ -161,12 +166,13 @@ export const sessionPlacement = (deps: {
       harnessSessionId: session.harnessSessionId,
     }
     yield* db.updateSession(session.id, { ...choice, address: { machine: session.address.machine, id: "" } })
+    const started = yield* db.currentProcessId(session.id)
     const opened = yield* h
       .open({
         project: input.project,
         cwd: input.cwd,
         argv: input.argv,
-        env: { ...input.env, ...deps.vibestEnv(session) },
+        env: { ...input.env, ...deps.vibestEnv(session, started) },
         label: `${shortId(session.id)} ${session.name}`.slice(0, 60),
         ...(near !== undefined ? { near } : {}),
         ...(input.split === true ? { split: true } : {}),
@@ -273,8 +279,8 @@ export const sessionPlacement = (deps: {
         Effect.gen(function* () {
           const e = Cause.squash(cause)
           const t = yield* Clock.currentTimeMillis
-          const turn = yield* db.openExecution(session.id)
-          if (turn !== undefined) yield* db.closeExecution(session.id, turn, "failed")
+          const execution = yield* db.openExecution(session.id)
+          if (execution !== undefined) yield* db.closeExecution(session.id, execution, "failed")
           yield* db.updateSession(session.id, {
             status: "unknown",
             exitedAt: t,
@@ -287,13 +293,13 @@ export const sessionPlacement = (deps: {
     )
 
   const storedDirectory = (projectId: string) =>
-    db.coordinatorOf(projectId).pipe(Effect.map((main) => main?.projectDirectory))
+    db.entryOf(projectId).pipe(Effect.map((entry) => entry?.projectDirectory))
 
   const recount = Effect.fn("Sessions.recount")(function* (kind: string, projectId: string) {
     const h = runtimes.find(kind)
     if (h === undefined) return
     const rows = (yield* db.listSessions({ projectId })).filter(
-      (row) => row.runtime === kind && !(row.metadata.archived || row.metadata.removed),
+      (row) => !row.entry && row.runtime === kind && !(row.metadata.archived || row.metadata.removed),
     )
     const stored = yield* storedDirectory(projectId)
     let shown = false
@@ -303,11 +309,11 @@ export const sessionPlacement = (deps: {
       shown = true
     }
     if (shown) return
-    const main = yield* db.coordinatorOf(projectId)
-    if (main?.runtime !== kind || !main.address || main.address.id === "" || stored === undefined) return
+    const entry = yield* db.entryOf(projectId)
+    if (entry?.runtime !== kind || !entry.address || entry.address.id === "" || stored === undefined) return
     if (h.present === undefined) return
     yield* h
-      .present(main.address, {
+      .present(entry.address, {
         agent: "",
         harness: "",
         title: "",
@@ -340,7 +346,7 @@ export const sessionPlacement = (deps: {
 
   const republish = Effect.fn("Sessions.republish")(function* () {
     const rows = (yield* db.listSessions()).filter(
-      (row) => !(row.metadata.archived || row.metadata.removed) && row.address.id !== "",
+      (row) => !row.entry && !(row.metadata.archived || row.metadata.removed) && row.address.id !== "",
     )
     const labelled = yield* Effect.forEach(rows, (session) =>
       Effect.gen(function* () {

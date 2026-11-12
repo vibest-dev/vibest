@@ -4,9 +4,17 @@ import { InboxKind } from "./event.ts"
 
 export const AgentStatus = Schema.Literals(["idle", "working", "blocked", "done", "unknown"])
 export type AgentStatus = typeof AgentStatus.Type
-export const TurnState = Schema.Literals(["none", "open", "completed", "failed", "interrupted", "lost", "not_started"])
-export type TurnState = typeof TurnState.Type
-export const InboxStatus = Schema.Literals(["pending", "sending", "delivered", "failed", "dropped"])
+export const ExecutionState = Schema.Literals([
+  "none",
+  "open",
+  "completed",
+  "failed",
+  "interrupted",
+  "lost",
+  "not_started",
+])
+export type ExecutionState = typeof ExecutionState.Type
+export const InboxStatus = Schema.Literals(["pending", "delivering", "delivered", "failed", "dropped"])
 export type InboxStatus = typeof InboxStatus.Type
 
 export const RuntimeAddress = Schema.Struct({
@@ -94,6 +102,11 @@ export class NotReady extends Schema.TaggedError<NotReady>()("NotReady", {
   id: Schema.String,
   message: Schema.String,
 }) {}
+export class NoCallingSession extends Schema.TaggedError<NoCallingSession>()("NoCallingSession", {}) {
+  override get message() {
+    return "vibest run is run by an agent in a session; to start working, run vibest in a terminal"
+  }
+}
 export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {}) {
   override get message() {
     return "no harness to inherit: name one, for example `vibest run claude -- <prompt>`"

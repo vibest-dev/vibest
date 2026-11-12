@@ -25,7 +25,7 @@ import {
   testLayer,
   type TestServices,
   until,
-  writeResult,
+  writeEnd,
   systemPromptFile,
   projectOf,
   callerPlugin,
@@ -45,19 +45,30 @@ const test = <E>(name: string, program: Effect.Effect<void, E, TestServices | Pr
 const coordinatorUpdate = (agent: string, args: ReadonlyArray<string>) =>
   agent === "coordinator" && args[0] === "update"
 
+const asEntryEnv = (
+  env: Record<string, string>,
+  entry: { readonly sessionId: string; readonly projectId: string },
+) => ({
+  ...env,
+  VIBEST_AGENT: "coordinator",
+  VIBEST_SESSION_ID: entry.sessionId,
+  VIBEST_PROJECT_ID: String(entry.projectId),
+})
+
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 describe("vibest CLI", () => {
   test(
-    "vibest run without a harness starts on the main agent's harness; auto is an unknown harness; a harness name alone is a missing prompt",
+    "vibest run without a harness starts on the entry session's harness; auto is an unknown harness; a harness name alone is a missing prompt",
     Effect.gen(function* () {
       const db = yield* Db
       const layout = yield* Layout
       const repo = yield* makeRepository
-      yield* db.coordinatorLaunch(yield* projectOf(repo), "claude", false, {
+      const entry = yield* db.startEntry(yield* projectOf(repo), "claude", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p1" },
       })
-      const run = (args: ReadonlyArray<string>) => vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args)
+      const run = (args: ReadonlyArray<string>) =>
+        vibest(repo, asEntryEnv({ HOME: layout.home, VIBEST_HOME: layout.home }, entry), args)
       const inherited = yield* run(["run", "--runtime", "herdr", "--", "do it"])
       assert.strictEqual(inherited.code, 0, inherited.stderr)
       const { id } = decodeJson(inherited.stdout) as { id: string }
@@ -81,14 +92,20 @@ describe("vibest CLI", () => {
       const db = yield* Db
       const layout = yield* Layout
       const repo = yield* makeRepository
-      const run = (args: ReadonlyArray<string>, stdin?: string) =>
-        vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args, stdin)
+      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "w1:p1" },
+      })
+      const user = { HOME: layout.home, VIBEST_HOME: layout.home }
+      const run = (args: ReadonlyArray<string>, stdin?: string) => vibest(repo, user, args, stdin)
+      const runAsEntry = (args: ReadonlyArray<string>, stdin?: string) =>
+        vibest(repo, asEntryEnv(user, entry), args, stdin)
 
       const task = `it's "$HOME" and \`x\`\nsecond line`
-      const spawned = yield* run(["run", "--runtime", "herdr", "pi", "-"], task)
+      const spawned = yield* runAsEntry(["run", "--runtime", "herdr", "pi", "-"], task)
       assert.strictEqual(spawned.code, 0, spawned.stderr)
       const { id } = decodeJson(spawned.stdout) as { id: string }
-      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      yield* until(db.getSession(id), (w) => w?.executionState === "open")
       yield* until(herdr.callsTo("send"), (calls) => calls.length > 0)
       assert.strictEqual((yield* herdr.callsTo("send"))[0]!.text, task)
 
@@ -97,31 +114,39 @@ describe("vibest CLI", () => {
         sessions: Array<{
           id: string
           status: string
-          turnState: string
+          executionState: string
           task: string
           latest: { status: string; summary: string; endedAt: number | null }
         }>
         machines: Array<unknown>
       }
       assert.deepStrictEqual(machines, [])
-      assert.deepInclude(listed[0], {
+      assert.deepInclude(
+        listed.find((w) => w.id === id),
+        {
+          id,
+          executionState: "open",
+          task,
+          latest: { status: "working", summary: "", endedAt: null },
+        },
+      )
+      assert.include(live, listed.find((w) => w.id === id)!.status)
+      assert.deepInclude(decodeJson((yield* run(["result", id])).stdout), {
         id,
-        turnState: "open",
+        executionState: "open",
         task,
-        latest: { status: "working", summary: "", endedAt: null },
+        reply: null,
       })
-      assert.include(live, listed[0]!.status)
-      assert.deepInclude(decodeJson((yield* run(["result", id])).stdout), { id, turnState: "open", task, answer: null })
-      yield* writeResult(id, "pi", { text: "kept finding\nstatus: completed" })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: "kept finding\nstatus: completed" })
+      yield* herdr.endExecution(id)
       yield* sessions.check(id)
       const done = decodeJson((yield* run(["result", id])).stdout) as {
-        answer: { status: string; text: string }
+        reply: { status: string; text: string }
         task: string
         latest: { status: string; summary: string; endedAt: number | null }
       }
-      assert.deepInclude(done.answer, { status: "completed" })
-      assert.include(done.answer.text, "kept finding")
+      assert.deepInclude(done.reply, { status: "completed" })
+      assert.include(done.reply.text, "kept finding")
       assert.strictEqual(done.task, task)
       assert.strictEqual(done.latest.status, "completed")
       assert.strictEqual(done.latest.summary, "kept finding")
@@ -142,15 +167,20 @@ describe("vibest CLI", () => {
       assert.strictEqual((yield* run(["frobnicate"])).code, 2)
       assert.strictEqual((yield* run(["status", id])).code, 2)
 
-      const { id: other } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "-"], "other")).stdout) as {
+      const { id: other } = decodeJson(
+        (yield* runAsEntry(["run", "--runtime", "herdr", "pi", "-"], "other")).stdout,
+      ) as {
         id: string
       }
-      yield* until(db.getSession(other), (w) => w?.turnState === "open")
+      yield* until(db.getSession(other), (w) => w?.executionState === "open")
       yield* db.updateSession(id, { status: "unknown", exitedAt: 1 })
       const ids = (args: ReadonlyArray<string>) =>
         run(args).pipe(
           Effect.map((r) =>
-            (decodeJson(r.stdout) as { sessions: Array<{ id: string }> }).sessions.map((w) => w.id).sort(),
+            (decodeJson(r.stdout) as { sessions: Array<{ id: string }> }).sessions
+              .map((w) => w.id)
+              .filter((w) => w !== entry.sessionId)
+              .sort(),
           ),
         )
       assert.deepStrictEqual(yield* ids(["ls"]), [other])
@@ -175,12 +205,18 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const printed = decodeJson((yield* vibest(repo, cli, ["run", "--runtime", "herdr", "pi", "do it"])).stdout) as {
+      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "w1:p1" },
+      })
+      const printed = decodeJson(
+        (yield* vibest(repo, asEntryEnv(cli, entry), ["run", "--runtime", "herdr", "pi", "do it"])).stdout,
+      ) as {
         id: string
       }
       assert.deepStrictEqual(Object.keys(printed), ["id"])
       const { id } = printed
-      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const asSession = (sessionId: string, args: ReadonlyArray<string>) =>
         Effect.flatMap(db.sessionIdentity(sessionId), (row) =>
           vibest(
@@ -195,11 +231,14 @@ describe("vibest CLI", () => {
           ),
         )
 
-      for (const args of [["ls"], ["interrupt", id], ["run", "pi", "x"], ["project", "info"]]) {
+      for (const args of [["ls"], ["interrupt", id], ["project", "info"]]) {
         const r = yield* asSession(id, args)
         assert.deepStrictEqual([r.code, r.stdout], [1, ""], args.join(" "))
         assert.match(r.stderr, /^Forbidden: /, args.join(" "))
       }
+      const started = yield* asSession(id, ["run", "--runtime", "herdr", "pi", "x"])
+      assert.strictEqual(started.code, 0, started.stderr)
+      assert.deepStrictEqual(yield* db.creatorOf((decodeJson(started.stdout) as { id: string }).id), { local: id })
       assert.match(
         (yield* asSession("0e0e0000-0e0e-40e0-80e0-0e0e00000e0e", ["send", id, "x"])).stderr,
         /^NoSuchSession: /,
@@ -209,7 +248,7 @@ describe("vibest CLI", () => {
   )
 
   test(
-    "archive: the Coordinator archives its own session through vibestd and git; rm does the same; a session, or another Coordinator, is refused",
+    "archive: the entry session archives its own session through vibestd and git; rm does the same; a session, or another entry session, is refused",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const herdr = yield* FakeRuntime
@@ -218,7 +257,7 @@ describe("vibest CLI", () => {
       const layout = yield* Layout
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
-      const coord = yield* db.coordinatorLaunch(yield* projectOf(repo), "pi", false, {
+      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w1:p1" },
       })
@@ -228,13 +267,13 @@ describe("vibest CLI", () => {
           {
             ...cli,
             VIBEST_AGENT: "coordinator",
-            VIBEST_SESSION_ID: coord.sessionId,
-            VIBEST_PROJECT_ID: String(coord.projectId),
+            VIBEST_SESSION_ID: entry.sessionId,
+            VIBEST_PROJECT_ID: String(entry.projectId),
           },
           args,
         )
       const otherRepo = yield* makeRepository
-      const other = yield* db.coordinatorLaunch(yield* projectOf(otherRepo), "pi", false, {
+      const other = yield* db.startEntry(yield* projectOf(otherRepo), "pi", false, {
         runtime: "herdr",
         address: { machine: "local", id: "w9:p9" },
       })
@@ -242,9 +281,9 @@ describe("vibest CLI", () => {
       for (const command of ["archive", "rm"] as const) {
         const spawned = yield* asCoord(["run", "pi", "--", "do it"])
         const { id } = decodeJson(spawned.stdout) as { id: string }
-        yield* until(db.getSession(id), (w) => w?.turnState === "open")
-        yield* writeResult(id, "pi", { text: "status: completed" })
-        yield* herdr.endTurn(id)
+        yield* until(db.getSession(id), (w) => w?.executionState === "open")
+        yield* writeEnd(id, "pi", { text: "status: completed" })
+        yield* herdr.endExecution(id)
         yield* sessions.check(id)
         const worktree = yield* db.sessionDirectory(id)
         if (worktree === undefined) return yield* Effect.die(`spawned ${id} has no worktree path`)
@@ -252,7 +291,7 @@ describe("vibest CLI", () => {
         for (const r of [
           yield* vibest(
             repo,
-            { ...cli, VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_PROJECT_ID: String(coord.projectId) },
+            { ...cli, VIBEST_AGENT: "general", VIBEST_SESSION_ID: id, VIBEST_PROJECT_ID: String(entry.projectId) },
             [command, id],
           ),
           yield* vibest(
@@ -295,7 +334,7 @@ describe("vibest CLI", () => {
         })
 
         const busy = decodeJson((yield* asCoord(["run", "pi", "--", "more"])).stdout) as { id: string }
-        yield* until(db.getSession(busy.id), (w) => w?.turnState === "open")
+        yield* until(db.getSession(busy.id), (w) => w?.executionState === "open")
         const stopped = yield* asCoord([command, busy.id])
         assert.strictEqual(stopped.code, 0, stopped.stderr)
         assert.deepInclude(decodeJson(stopped.stdout) as object, {
@@ -321,30 +360,36 @@ describe("vibest CLI", () => {
       const repo = yield* makeRepository
       const cli = { HOME: layout.home, VIBEST_HOME: layout.home }
       const run = (args: ReadonlyArray<string>) => vibest(repo, cli, args)
-      const { id } = decodeJson((yield* run(["run", "--runtime", "herdr", "pi", "do it"])).stdout) as { id: string }
-      yield* until(db.getSession(id), (w) => w?.turnState === "open")
+      const entry = yield* db.startEntry(yield* projectOf(repo), "pi", false, {
+        runtime: "herdr",
+        address: { machine: "local", id: "w1:p1" },
+      })
+      const { id } = decodeJson(
+        (yield* vibest(repo, asEntryEnv(cli, entry), ["run", "--runtime", "herdr", "pi", "do it"])).stdout,
+      ) as { id: string }
+      yield* until(db.getSession(id), (w) => w?.executionState === "open")
       const finding = "status: completed\nsummary: kept finding"
-      yield* writeResult(id, "pi", { text: finding })
-      yield* herdr.endTurn(id)
+      yield* writeEnd(id, "pi", { text: finding })
+      yield* herdr.endExecution(id)
       yield* sessions.check(id)
-      const before = decodeJson((yield* run(["result", id])).stdout) as { answer: { text: string } }
-      assert.include(before.answer.text, "kept finding")
+      const before = decodeJson((yield* run(["result", id])).stdout) as { reply: { text: string } }
+      assert.include(before.reply.text, "kept finding")
       assert.isTrue(yield* fs.exists(yield* systemPromptFile(id)))
 
       const archived = yield* run(["archive", id])
       assert.strictEqual(archived.code, 0, archived.stderr)
       assert.isFalse(yield* fs.exists(yield* systemPromptFile(id)))
 
-      const after = decodeJson((yield* run(["result", id])).stdout) as { id: string; answer: object }
+      const after = decodeJson((yield* run(["result", id])).stdout) as { id: string; reply: object }
       assert.strictEqual(after.id, id)
-      assert.deepStrictEqual(after.answer, before.answer)
+      assert.deepStrictEqual(after.reply, before.reply)
     }),
   )
 })
 
 describe("vibest CLI without vibestd", () => {
   it.effect(
-    "an agent's vibest does not start vibestd (it would run in the agent's sandbox); it says to ask the user; the main agent may still run update from its own shell",
+    "an agent's vibest does not start vibestd (it would run in the agent's sandbox); it says to ask the user; the entry session may still run update from its own shell",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -598,7 +643,19 @@ describe("vibest CLI without vibestd", () => {
         Effect.callback<void>((resume) => void server.listen(`${home}/vibest.sock`, () => resume(Effect.void))),
         () => Effect.sync(() => server.close()),
       )
-      return { calls, run: vibest(home, { HOME: home, VIBEST_HOME: home }, args) }
+      return {
+        calls,
+        run: vibest(
+          home,
+          {
+            HOME: home,
+            VIBEST_HOME: home,
+            VIBEST_AGENT: "general",
+            VIBEST_SESSION_ID: "dcba4321-dcba-4abc-8abc-dcba4321dcba",
+          },
+          args,
+        ),
+      }
     })
 
   it.effect(

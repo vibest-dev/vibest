@@ -25,21 +25,20 @@ does not carry SSH session settings into a home it switches to.
 
 ## H5. A run inherits the caller's harness
 
-`vibest run` without a harness takes the caller's harness, provider and model: from the main agent itself, and from a
-plain terminal in a project that has a main agent, the new session has the main agent's three. Naming a harness drops
-the provider and model. With nothing to inherit and nothing choosing a harness (the builtin default removed with
-`"-harness-default"`, or Claude not available, and no plugin picking one), it fails saying there is no harness to
+`vibest run` without a harness takes the caller's harness, provider and model: from the session that runs it. Naming a
+harness drops the provider and model. With nothing to inherit and nothing choosing a harness (the builtin default removed
+with `"-harness-default"`, or Claude not available, and no plugin picking one), it fails saying there is no harness to
 inherit; otherwise the default applies (H7).
 
-## H6. `vibest` reuses the main agent's last harness
+## H6. `vibest` reuses the entry session's last harness
 
-`vibest` without `--harness` starts the harness the project's main agent last used. A project's first start without
+`vibest` without `--harness` starts the harness the project's entry session last used. A project's first start without
 `--harness` runs on Claude when Claude is available, and fails asking for `--harness` when it is not or when
 `"-harness-default"` is in `vibest.json`'s `plugins`.
 
 ## H7. The default harness is Claude
 
-A project's first bare `vibest` without `--harness` starts its main agent on Claude when Claude is available. A user
+A project's first bare `vibest` without `--harness` starts its entry session on Claude when Claude is available. A user
 plugin that picks another harness wins over the default. When Claude cannot start the start fails saying there is no
 harness to inherit.
 

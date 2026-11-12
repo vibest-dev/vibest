@@ -3,31 +3,30 @@
 One ordinary Claude Code plugin, one hooks module. Every call to vibest is an HTTP request from `$.http.fetch` to
 vibestd's unix socket `<VIBEST_HOME>/vibest-http.sock`; the plugin runs no `vibest` process.
 
-- `turn.complete` posts each main-loop turn end to `/hooks/claude/turn-end` with its `reason`, the answer and the
+- `turn.complete` posts each main-loop execution end to `/hooks/claude/execution-end` with its `reason`, the answer and the
   current Claude session id. vibest maps the reason: `answer` is the result as it is; `aborted` is an interrupted
   (failed) result when the person pressed Esc, and nothing when `vibest interrupt` (or remove, archive) stopped the
-  turn; `refusal` and `error` are failed results. A subagent's loop (`agentId` set) reports nothing. For the
-  coordinator vibestd records only the conversation id.
+  execution; `refusal` and `error` are failed results. A subagent's loop (`agentId` set) reports nothing. For the
+  entry session vibestd records only the conversation id.
 - `prompt.submit` posts a worker's prompt with its `origin.kind` to `/hooks/claude/prompt`; vibest keeps only what
   the person submitted (`composer`, or `bridge` for Remote Control).
 - `tool.call` posts each tool call, a subagent's included, to `/hooks/claude/guard` and returns `{ deny }` when vibest
   refuses it. It tries for 2 s, then again after 100, 300 and 900 ms; when nothing answers, the call is refused.
-- The **coordinator inbox**: from `session.start`, a coordinator polls `/inbox/poll` every second. A batch comes as
+- The **inbox**: from `session.start`, a session asks `/inbox/take` every second while it is idle (after `session.start`
+  and `turn.complete`, never while an execution runs). A batch comes with its execution id as
   one short line (`<Type> Agent "<title>" completed (<id>) · +N more`) and its full text. The line is submitted with
   `$.prompt.submit` from the AbovePrompt `ui.render` hook, one batch per draw, and this module's own `prompt.submit`
-  hook attaches the full text as context. An accepted submit is acked by row id (`/inbox/ack`) on the next tick; a
+  hook attaches the full text as context. This module's own `prompt.submit` hook reports the batch's execution as accepted
+  (`PromptSubmit` with `origin: "vibest"` and the execution id) before the prompt goes on; a
   `drop` puts the batch back at the front of the queue. The submit has to come from inside a hook's call stack: a
   submit from a clock callback would skip this module's own `prompt.submit` hook as re-entry. The render hook awaits
   the submit before it returns: Claude Code reads the call against the hooks still running when it arrives, and under
   load a hook that returned at once had often settled first, so its own `prompt.submit` hook was skipped the same way
-  and the line went out without its full text. The module remembers the
-  row ids it has taken, so a batch handed out again after its lease ran out or vibestd restarted is not shown twice:
-  in a batch that mixes taken rows with new ones, the taken ones are acked and the new ones given back, so they come
-  alone. Full texts wait for `prompt.submit` for at most the last 100 lines. A one-line notice is its own full text and
+  and the line went out without its full text. Full texts wait for `prompt.submit` for at most the last 100 lines. A one-line notice is its own full text and
   is not attached again. Using the AbovePrompt render hook as a place to submit from is undocumented; E2E covers it.
 
-Reports (turn end, prompt) retry in the background after 1, 2, 4, 8, 15 and 30 s while vibestd does not take them.
-A failed report never blocks or continues a stopped turn. Five failed polls in a row put "vibestd unreachable" on the
+Reports (execution end, prompt) retry in the background after 1, 2, 4, 8, 15 and 30 s while vibestd does not take them.
+A failed report never blocks or continues a stopped execution. Five failed polls in a row put "vibestd unreachable" on the
 status line. `Session.Ready` goes with Claude Code's own pid, read as the `$PPID` of a command the module runs, since
 a restart signals that process. A failed hook is skipped unless its handler answers, so outside vibest every listener
 answers with a pass. The tool arguments sent to the guard are the `tool.call` input without its reserved keys
@@ -68,7 +67,7 @@ The generated files are ignored by Git. `test/distribution.test.ts` packs this p
 The launch side (arguments, models, resume, subscription reading) is the `claude` harness definition, added by the
 builtin plugin `harness-claude` in `packages/plugin-harnesses`; this package is only what runs inside Claude.
 
-Nothing to install. vibest starts each Claude session (and a Claude coordinator) with
+Nothing to install. vibest starts each Claude session (and a Claude entry session) with
 `claude --plugin-dir <@vibest/cli>/harnesses/claude`, which loads the plugin for that session only. vibest writes
 nothing into `~/.claude`. Plain `claude` sessions never load it, and in a Claude process without `VIBEST_AGENT` and
 `VIBEST_SESSION_ID` every listener returns `next` and sends nothing.
@@ -105,4 +104,4 @@ calls stay in `register` or the top-level `nativeHost`: `$.http.fetch`, `$.sessi
 
 Hooks modules are early access and may change between releases. `claude plugin validate` and `claude plugin test` have
 not been run on this revision. The E2E check I4 loads it with `--plugin-dir` into a real Claude: the guard refuses and the
-turn end reports.
+execution end reports.

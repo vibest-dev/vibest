@@ -5,7 +5,7 @@ import { claudeShadow, FAKE_ANTHROPIC_KEY, piShadow } from "./world/shadow.ts"
 
 export type Message = { role: string; content: unknown }
 
-export type Step = { readonly tool: string; readonly input: Record<string, unknown> } | string
+export type Step = { readonly tool: string; readonly input: Record<string, unknown>; readonly id?: string } | string
 
 export const text = (m: Message | undefined) =>
   m === undefined ? "" : typeof m.content === "string" ? m.content : JSON.stringify(m.content)
@@ -40,6 +40,60 @@ export const toolCall = (id: string, name: string, input: object) =>
       },
     ],
   }) + done("tool_calls")
+
+const ENTRY_RUN = /vbe-entry-run:(\d+):([A-Za-z0-9+/=]+)/
+const EXIT = /\nvbe-exit:(\d+)\s*$/
+
+export const entryRunMessage = (run: number, command: string) =>
+  `vbe-entry-run:${run}:${Buffer.from(`${command}; echo vbe-exit:$?`).toString("base64")}`
+
+const entryRunOutputs = new Map<string, string>()
+
+let entryRuns = 0
+
+export const nextEntryRun = () => ++entryRuns
+
+export const entryRunOutput = (run: number) => {
+  const output = entryRunOutputs.get(`entry-run-${run}`)
+  const exit = output === undefined ? undefined : EXIT.exec(`\n${output}`)
+  return exit ? { code: Number(exit[1]), output: `\n${output}`.slice(1, exit.index) } : undefined
+}
+
+const plain = (content: unknown) =>
+  typeof content === "string"
+    ? content
+    : Array.isArray(content)
+      ? content.map((c: { text?: string }) => c.text ?? "").join("")
+      : ""
+
+const entryCommand = (m: Message | undefined) => {
+  const found = m?.role === "user" && !text(m).includes('"tool_result"') ? ENTRY_RUN.exec(text(m)) : null
+  return found ? { id: `entry-run-${found[1]}`, command: Buffer.from(found[2]!, "base64").toString("utf8") } : undefined
+}
+
+export const isEntryRunResult = (m: Message) =>
+  (m as { tool_call_id?: unknown }).tool_call_id?.toString().startsWith("entry-run-") === true
+
+export const entryRun = (messages: ReadonlyArray<Message>) => {
+  for (const m of messages)
+    if (m.role === "tool" && isEntryRunResult(m))
+      entryRunOutputs.set(String((m as { tool_call_id?: unknown }).tool_call_id), plain(m.content).trim())
+  const run = entryCommand(messages.at(-1))
+  return run === undefined ? undefined : toolCall(run.id, "bash", { command: run.command })
+}
+
+export const entryModel = () => {
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    idleTimeout: 0,
+    fetch: async (req) => {
+      const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      return new Response(entryRun(messages) ?? reply("ok"), { headers: sseHeaders })
+    },
+  })
+  return { url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) }
+}
 
 export const creatorIn = (system: string) => /started by ([0-9a-f-]{36})/.exec(system)?.[1]
 
@@ -79,7 +133,7 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
       const done = /done-(\w+)/.exec(text(messages.findLast((m) => m.role === "user")))
       return done ? sendOrReply(messages, `done-${done[1]}`) : reply("ok")
     }
-    if (last?.role === "tool") {
+    if (last?.role === "tool" && !isEntryRunResult(last)) {
       const id = /"id":\s*\\?"([\w-]+)\\?"/.exec(body)?.[1]
       if (id && !sessionId) sessionId = id
       return reply("ok")
@@ -96,6 +150,8 @@ export const delegatingModel = (sub: string, options: { readonly heldMs?: number
     hostname: "127.0.0.1",
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const entryAnswer = entryRun(messages)
+      if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       seen.push(`${messages.at(-1)?.role}: ${text(messages.at(-1))}`)
       const last = messages.at(-1)
       const marker = /done-(\w+)/.exec(text(last))?.[1]
@@ -126,6 +182,8 @@ export const heldModel = () => {
     idleTimeout: 0,
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const entryAnswer = entryRun(messages)
+      if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const last = text(messages.at(-1))
       const task = last.includes("<agent-") ? null : /done-(\w+)/.exec(last)
       if (!task) return new Response(reply("ok"), { headers: sseHeaders })
@@ -166,7 +224,7 @@ export const heldModel = () => {
   }
 }
 
-export const holdsSlowResultModel = () => {
+export const holdsSlowMessageModel = () => {
   const seen: Array<ReadonlyArray<string>> = []
   const held: Array<() => void> = []
   const server = Bun.serve({
@@ -175,6 +233,8 @@ export const holdsSlowResultModel = () => {
     idleTimeout: 0,
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const entryAnswer = entryRun(messages)
+      if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       seen.push(messages.map((m) => `${m.role}: ${text(m)}`))
       const last = text(messages.at(-1))
       if (last.includes("<agent-") && last.includes("done-slow"))
@@ -215,6 +275,8 @@ export const usageLimitedModel = (limited: (path: string) => boolean) => {
     idleTimeout: 0,
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const entryAnswer = entryRun(messages)
+      if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const last = text(messages.at(-1))
       seen.push(`${new URL(req.url).pathname} ${last.slice(-80)}`)
       if (limited(new URL(req.url).pathname))
@@ -241,14 +303,17 @@ export const fakeOpenAI = (
     hostname: "127.0.0.1",
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const entryAnswer = entryRun(messages)
+      if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const system = text(messages.find((m) => m.role === "system" || m.role === "developer"))
       const main = /The project folder is (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)
       const sub = /Project folder: (\S+) \(VIBEST_PROJECT_DIR\)/.exec(system)
       const who = main ? "main" : sub ? "pi" : undefined
-      const tools = messages.filter((m) => m.role === "tool")
+      const tools = messages.filter((m) => m.role === "tool" && !isEntryRunResult(m))
       const last = messages.at(-1)
-      const mainTurnNotStartedBySubagentResult = who === "main" && tools.length === 0 && !text(last).includes("<agent-")
-      if (who === undefined || mainTurnNotStartedBySubagentResult)
+      const mainExecutionNotStartedBySubagentMessage =
+        who === "main" && tools.length === 0 && !text(last).includes("<agent-")
+      if (who === undefined || mainExecutionNotStartedBySubagentMessage)
         return new Response(answer("ok"), { headers: sseHeaders })
       if (tools.length > 3) return new Response(answer("ok"), { headers: sseHeaders })
       dirs[who] = (main ?? sub)![1]!
@@ -305,11 +370,18 @@ export const fakeAnthropic = (respond: (r: AnthropicRequest) => Step | Promise<S
         results,
       }
       requests.push(request)
-      const s = await respond(request)
+      for (const r of results)
+        if (r.tool_use_id.startsWith("entry-run-")) entryRunOutputs.set(r.tool_use_id, plain(r.content).trim())
+      const sinceAssistant = messages.slice(messages.findLastIndex((m) => m.role === "assistant") + 1)
+      const run = request.tools.includes("Bash")
+        ? entryCommand({ role: "user", content: sinceAssistant.map(text).join("\n") })
+        : undefined
+      const s =
+        run === undefined ? await respond(request) : { tool: "Bash", input: { command: run.command }, id: run.id }
       const content: Array<object> =
         typeof s === "string"
           ? [{ type: "text", text: s }]
-          : [{ type: "tool_use", id: `toolu_${results.length}`, name: s.tool, input: s.input }]
+          : [{ type: "tool_use", id: s.id ?? `toolu_${results.length}`, name: s.tool, input: s.input }]
       const stop = typeof s === "string" ? "end_turn" : "tool_use"
       const message = {
         id: `msg_${++n}`,

@@ -5,17 +5,19 @@ counts as working.
 
 ## S1. Running a session
 
-`vibest run` starts a session in a new worktree: a linked worktree of the repository, detached, at its HEAD. Its
-options work: `--title` names it, `--provider` and `--model` choose what it runs on, `--env` reaches the harness but is
+`vibest run`, run by an agent in a session (the entry session or another one), starts a session in a new worktree: a linked worktree of the
+repository, detached, at its HEAD. Its options work: `--title` names it, `--provider` and `--model` choose what it runs on, `--env` reaches the harness but is
 never stored, `--session` picks the herdr session it opens in, and `--peer` runs a second session in the same worktree
-in another pane. `vibest ls` shows the title, harness, provider, model and where it runs.
+in another pane. `vibest ls` shows the title, harness, provider, model and where it runs. The started session records the session that ran
+it as its creator. `vibest run` in a terminal that is not a session is refused and says to open a session with bare
+`vibest`: no worktree or pane is made.
 
 ## S5. Reading sessions
 
-`vibest result` has no `answer` before a session's first turn ends and then holds its reply as `answer` (the latest ended
-turn's status and reply text, kept in the turn row; a turn vibestd ended itself, lost or by an exit, has no text; a
-reply that arrives after vibestd gave its turn up as lost is a turn of its own, not attached back); `vibest status` says vibestd is
-running and which process it is; `vibest ls` lists the main agent and each session with its latest reply; after
+`vibest result` has no `reply` before a session's first execution ends and then holds its reply as `reply` (the latest ended
+execution's status and reply text, kept in the execution row; an execution vibestd ended itself, lost or by an exit, has no text; a
+reply that arrives after vibestd gave up its execution as lost is an execution of its own, not attached back); `vibest status` says vibestd is
+running and which process it is; `vibest ls` lists the entry session and each session with its latest reply; after
 `vibest archive`, only `vibest ls --all` lists the session, as exited.
 
 ## S6. Archiving
@@ -28,17 +30,17 @@ worktree go and the branch keeps them. `--keep-worktree` keeps a clean worktree 
 
 ## S7. Archive on idle
 
-`vibest run --archive-on-idle` archives the session the first time it is idle after a completed turn with nothing it sent
+`vibest run --archive-on-idle` archives the session the first time it is idle after a completed execution with nothing it sent
 or was sent still waiting, and sends no notice for a clean archive. `--archive-on-completion` is a usage error.
 
 ## S9. A limit on sessions
 
-`VIBEST_MAX_SESSIONS` limits how many sessions run at once, not counting the main agent: one more `vibest run` fails
-naming the limit, and starts once a session is archived.
+`VIBEST_MAX_SESSIONS` limits how many sessions run at once, not counting the entry session: one more `vibest run` by the
+entry session fails naming the limit, and starts once a session is archived.
 
 ## S20. Ids and peek
 
-`vibest run` answers a UUID; herdr names the agent `s-` and 30 characters of it; `vibest result` takes the first 8
+`vibest run` answers the session that ran it a UUID; herdr names the agent `s-` and 30 characters of it; `vibest result` takes the first 8
 characters and `vibest peek` 12; the session's system prompt is a file of its own. `vibest peek` prints the terminal, at
 most N lines with `--lines N`, and refuses an id it does not know.
 
@@ -54,3 +56,9 @@ environment, and terminals it opens later pass it on, so `vibest` there counts a
 refused there names the agent session the shell carries and the way out for a human: run it as
 `env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest <command>`, or open a terminal that was not started from an agent;
 that form then works. An agent that changes or clears those variables before running `vibest` is still refused.
+
+## S41. Who started a session
+
+`vibest run` in a terminal that is not a session is refused with `NoCallingSession`, which says to run `vibest` to open
+a session; no worktree or pane is made. A session started by `vibest run` records the session that ran it as its creator,
+whether the creator is the entry session or another session, and on another machine it records the session there.

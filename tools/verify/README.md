@@ -37,7 +37,7 @@ run fails at the end naming each failed leg:
 3. Prints `verify: passed.` when every leg passed.
 
 Areas: `daemon`, `project`, `plugins`, `harness`, `integration`, `update`, `start`, `inbox`, `exits`, `restart`, `hc`,
-`sessions`, `delivery`, `routing`, `main-agent`, `machines`, `terminal-status`; or check ids.
+`sessions`, `delivery`, `routing`, `entry`, `machines`, `terminal-status`; or check ids.
 
 Nothing is published: no GitHub Release, no npm package, nothing in `~/.local`.
 

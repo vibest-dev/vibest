@@ -161,7 +161,7 @@ const setup = async (w: World, options: { readonly bSession?: boolean } = {}) =>
   await w.stopDaemon()
   const daemonA = await w.run(w.repository, [binary, "daemon"], { env: aEnv })
   expect(daemonA.code === 0, `A: vibest daemon: ${daemonA.stderr}`)
-  await w.startMain({
+  await w.startEntry({
     harness: "pi",
     runtime: "hc",
     env: { PI_CODING_AGENT_DIR: piA },
@@ -190,12 +190,16 @@ const setup = async (w: World, options: { readonly bSession?: boolean } = {}) =>
   const notices = (address: string, marker: string) =>
     row<{ n: number }>(
       w,
-      "SELECT count(*) AS n FROM inbox WHERE content LIKE ? AND content LIKE ?",
-      `${address}:%`,
+      "SELECT count(*) AS n FROM inbox WHERE kind = 'send' AND content LIKE ? AND content LIKE ?",
+      `%<agent-id>${address}</agent-id>%`,
       `%done-${marker}%`,
     )?.n ?? 0
   const run = async (marker: string, machine = "mb") => {
-    const printed = (JSON.parse(await okA(["run", "--machine", machine, "pi", "--", ask(marker)])) as { id: string }).id
+    const printed = (
+      JSON.parse(
+        await w.okViaEntry(["run", "--machine", machine, "pi", "--", ask(marker)], { env: aEnv, asIs: true }),
+      ) as { id: string }
+    ).id
     expect(printed.startsWith(`${machine}/`) && /^[0-9a-f-]{36}$/.test(printed.slice(machine.length + 1)), printed)
     return printed.slice(0, machine.length + 9)
   }
@@ -217,7 +221,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M1",
     title:
-      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's main agent and none on A, A's main agent gets one notice with B's message, which the session sent itself, B's outbox empties; send, result, peek and archive forward to B",
+      "machine add over a fake ssh records B's id, B records A as a peer, a second name for the same B is refused; vibest run --machine without --runtime finds B's checkout cloned with another URL form (A's remote an ssh alias) and starts a session on B in the runtime of A's entry session and none on A, A's entry session gets one message from mb/<id> with what the session sent itself, B's outbox empties; send, result, peek and archive forward to B",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -249,12 +253,12 @@ const checks: ReadonlyArray<Check> = [
         const bRows = (JSON.parse(await s.okB(["ls"])) as { sessions: Array<Listed> }).sessions
         expect(
           bRows.some((r) => r.id?.startsWith(id8) && r.runtime === "hc"),
-          `B's ls (no --runtime: A sends its main agent's hc): ${JSON.stringify(bRows)}`,
+          `B's ls (no --runtime: A sends its entry session's hc): ${JSON.stringify(bRows)}`,
         )
         expect(row(w, "SELECT id FROM session WHERE id LIKE ?", `${id8}%`) === undefined, "A has a session row")
-        await until("the notice on A", () => s!.notices(address, "mone") === 1, 120_000)
+        await until("the message on A", () => s!.notices(address, "mone") === 1, 120_000)
         await until(
-          "A's main agent saw it",
+          "A's entry session saw it",
           () => s!.main.seen.some((m) => m.includes(address) && m.includes("done-mone")),
           120_000,
         )
@@ -305,7 +309,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M8",
     title:
-      "a turn that ends on B without a send queues nothing in B's outbox and gives A's main agent no notice; vibest result on A returns the turn's answer",
+      "an execution that ends on B without a send queues nothing in B's outbox and gives A's entry session no notice; vibest result on A returns the execution's reply",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -314,7 +318,7 @@ const checks: ReadonlyArray<Check> = [
         const address = await s.run("quietone")
         const id8 = address.slice(3)
         await until(
-          "B's turn completed",
+          "B's execution completed",
           () =>
             s!.bDb<{ n: number }>(
               "SELECT count(*) AS n FROM execution WHERE session_id LIKE ? AND outcome = 'completed'",
@@ -325,9 +329,9 @@ const checks: ReadonlyArray<Check> = [
         await Bun.sleep(3_000)
         const queued = s.bDb<{ n: number }>("SELECT count(*) AS n FROM event WHERE type = 'outbox.queued'")?.n
         expect(queued === 0, `${queued} outbox.queued facts on B`)
-        expect(s.notices(address, "quietone") === 0, "A got a notice for a turn end")
-        const got = JSON.parse(await s.okA(["result", address])) as { answer?: { text?: string | null } | null }
-        expect(got.answer?.text?.includes("done-quietone") === true, `result on A: ${JSON.stringify(got)}`)
+        expect(s.notices(address, "quietone") === 0, "A got a notice for an execution end")
+        const got = JSON.parse(await s.okA(["result", address])) as { reply?: { text?: string | null } | null }
+        expect(got.reply?.text?.includes("done-quietone") === true, `result on A: ${JSON.stringify(got)}`)
       } finally {
         await s?.stop()
       }
@@ -383,7 +387,7 @@ const checks: ReadonlyArray<Check> = [
         s = await setup(w)
         await s.okA(["machine", "add", "mb", "b-host"])
         const address = await s.run("m3")
-        await until("the notice on A", () => s!.notices(address, "m3") === 1, 120_000)
+        await until("the message on A", () => s!.notices(address, "m3") === 1, 120_000)
         const a2 = { ...s.aEnv, VIBEST_HOME: path.join(w.root, "a2") }
         await fs.mkdir(a2.VIBEST_HOME, { recursive: true })
         const added = await w.run(w.repository, [binary, "machine", "add", "mb", "b-host"], { env: a2 })
@@ -438,7 +442,7 @@ const checks: ReadonlyArray<Check> = [
       try {
         s = await setup(w)
         const failed = async (args: ReadonlyArray<string>, text: string) => {
-          const r = await s!.onA(args)
+          const r = args[0] === "run" ? await w.viaEntry(args, { env: s!.aEnv, asIs: true }) : await s!.onA(args)
           expect(r.code !== 0 && r.stderr.includes(text), `vibest ${args.join(" ")}: ${r.code} ${r.stderr}${r.stdout}`)
         }
         await failed(["run", "--machine", "nosuch", "pi", "--", "x"], `unknown machine "nosuch"`)
@@ -483,7 +487,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "M6",
     title:
-      "terminals on another machine: machine add mirrors B's hc core into A's hc; a run --machine row's address is A's hc terminal; typing into it on A starts a typed turn on B whose message arrives once; a rename in hc is followed; a mirror removed in hc is added back by the next ls and result; machine rm removes it from hc whatever its name",
+      "terminals on another machine: machine add mirrors B's hc core into A's hc; a run --machine row's address is A's hc terminal; typing into it on A starts a typed execution on B whose message arrives once; a rename in hc is followed; a mirror removed in hc is added back by the next ls and result; machine rm removes it from hc whatever its name",
     run: async (w) => {
       let s: Setup | undefined
       try {
@@ -546,9 +550,9 @@ const checks: ReadonlyArray<Check> = [
 
         const typed = await s.hcA("send", terminal, ask("mstep"))
         expect(typed.code === 0, `hc send on A: ${typed.stderr}`)
-        await until("B saw the typed turn", () => s!.subs.asked("mstep"), 120_000)
+        await until("B saw the typed execution", () => s!.subs.asked("mstep"), 120_000)
         await until(
-          "B recorded a typed turn",
+          "B recorded a typed execution",
           () =>
             (s!.bDb<{ n: number }>(
               "SELECT count(*) AS n FROM execution WHERE session_id = ? AND typed IS NOT NULL",
@@ -556,7 +560,7 @@ const checks: ReadonlyArray<Check> = [
             )?.n ?? 0) === 1,
           60_000,
         )
-        await until("the typed turn's notice", () => s!.notices(address, "mstep") === 1, 120_000)
+        await until("the typed execution's notice", () => s!.notices(address, "mstep") === 1, 120_000)
 
         const renamed = await s.hcA("machine", "rename", "mb", "mbx")
         expect(renamed.code === 0, `hc machine rename: ${renamed.stderr}`)

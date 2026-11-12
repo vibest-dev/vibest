@@ -2,12 +2,12 @@ import fs from "node:fs/promises"
 import path from "node:path"
 
 import type { Check } from "../check.ts"
-import { ask, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
-import { answerOf, expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
+import { ask, entryRun, heldModel, type Message, piDir, reply, sseHeaders, text, toolCall } from "../fake-model.ts"
+import { replyOf, expect, fail, herdr, row, SESSIONS, Skip, until, type World } from "../world.ts"
 import { dropHerdrSession, project } from "./inbox.ts"
 
 type Proc = { name: string; argv?: Array<string> | null }
-type Main = { id: string; directory: string; conversation: string | null; runtime: string | null }
+type EntryRow = { id: string; directory: string; conversation: string | null; runtime: string | null }
 
 const needs = (...bins: Array<string>) => {
   for (const bin of bins) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
@@ -52,8 +52,8 @@ const flag = (argv: ReadonlyArray<string>, name: string) => {
   return at === -1 ? undefined : argv[at + 1]
 }
 
-const liveMain = (w: World) =>
-  row<Main>(
+const liveEntry = (w: World) =>
+  row<EntryRow>(
     w,
     `SELECT s.id, s.directory, s.harness_session_id AS conversation, s.runtime FROM ${SESSIONS} s
      WHERE s.agent_type = 'main' AND s.ended_at IS NULL ORDER BY s.created_at DESC LIMIT 1`,
@@ -79,21 +79,21 @@ const piReady = async (socket: string, what: string) => {
   return found!
 }
 
-const turn = async (w: World, socket: string, pane: string, prompt: string, answer: string) => {
+const execution = async (w: World, socket: string, pane: string, prompt: string, answer: string) => {
   await herdr(socket, "agent.prompt", { target: pane, text: prompt })
   await until(`the answer ${answer} on screen`, async () => (await screen(socket, pane)).includes(answer), 60_000)
-  await until("the main agent's conversation", () => (liveMain(w)?.conversation ?? null) !== null, 30_000)
+  await until("the entry session's conversation", () => (liveEntry(w)?.conversation ?? null) !== null, 30_000)
   await until(
-    "the main agent idle after its turn",
+    "the entry session idle after its execution",
     async () => ["idle", "done"].includes(await status(socket, pane)),
     60_000,
   )
 }
 
-const exitMain = async (w: World, socket: string, pane: string, id: string) => {
+const exitEntry = async (w: World, socket: string, pane: string, id: string) => {
   await herdr(socket, "pane.close", { pane_id: pane })
   await until(
-    "the main agent's process.end",
+    "the entry session's process.end",
     () => row<{ e: number | null }>(w, `SELECT exited_at AS e FROM ${SESSIONS} s WHERE id = ?`, id)?.e != null,
     30_000,
   )
@@ -111,6 +111,8 @@ const toolsModel = (readme: string) => {
     hostname: "127.0.0.1",
     fetch: async (req) => {
       const { messages = [] } = (await req.json()) as { messages?: Array<Message> }
+      const entryAnswer = entryRun(messages)
+      if (entryAnswer !== undefined) return new Response(entryAnswer, { headers: sseHeaders })
       const user = messages.findLastIndex((m) => m.role === "user")
       const done = messages.slice(user + 1).filter((m) => m.role === "tool").length
       const step = text(messages[user]).includes("group-tools") ? steps[done] : undefined
@@ -125,7 +127,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S10-launch",
     title:
-      "`vibest` from a plain terminal in a subdirectory opens the main agent in this run's herdr session at the repository root (the parent workspace), and its system prompt is $TMPDIR/vibest/<id>/system-prompt.md naming the project folder",
+      "`vibest` from a plain terminal in a subdirectory opens the entry session in this run's herdr session at the repository root (the parent workspace), and its system prompt is $TMPDIR/vibest/<id>/system-prompt.md naming the project folder",
     run: async (w) => {
       needs("pi", "herdr")
       const model = heldModel()
@@ -136,16 +138,16 @@ const checks: ReadonlyArray<Check> = [
         const sub = path.join(w.repository, "src")
         await fs.mkdir(sub)
         const out = await w.ok(["--harness", "pi", "--headless"], { cwd: sub, env, timeoutMs: 60_000 })
-        expect(out.includes("the main agent is starting in"), `vibest printed: ${out}`)
+        expect(out.includes("the entry session is starting in"), `vibest printed: ${out}`)
         const socket = socketOf(w, w.herdrSession)
-        const { argv } = await piReady(socket, "the launched main agent")
-        await until("the main agent's row", () => liveMain(w) !== undefined, 30_000)
-        const main = liveMain(w)!
+        const { argv } = await piReady(socket, "the launched entry session")
+        await until("the entry session's row", () => liveEntry(w) !== undefined, 30_000)
+        const entry = liveEntry(w)!
         const root = await fs.realpath(w.repository)
-        expect(main.directory === root, `main agent directory ${main.directory}, not ${root}`)
-        const terminal = (JSON.parse(main.runtime ?? "{}") as { id?: string }).id ?? ""
-        expect(terminal.startsWith(`${w.herdrSession}/`), `main agent terminal ${terminal}`)
-        const file = path.join(w.root, "tmp", "vibest", main.id, "system-prompt.md")
+        expect(entry.directory === root, `entry session directory ${entry.directory}, not ${root}`)
+        const terminal = (JSON.parse(entry.runtime ?? "{}") as { id?: string }).id ?? ""
+        expect(terminal.startsWith(`${w.herdrSession}/`), `entry session terminal ${terminal}`)
+        const file = path.join(w.root, "tmp", "vibest", entry.id, "system-prompt.md")
         expect(flag(argv, "--system-prompt") === file, `pi argv: ${JSON.stringify(argv)}`)
         const info = await w.json<{ directory: string }>(["project", "info"])
         expect((await Bun.file(file).text()).includes(info.directory), `${file} does not name ${info.directory}`)
@@ -157,7 +159,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S10-resume",
     title:
-      "a Pi main agent whose pane closed after a turn: `vibest` reopens the same session and conversation (pi --session-id, the earlier prompt on screen); `vibest --new` starts a new session and conversation (no --session-id, the earlier prompt not on screen)",
+      "a Pi entry session whose execution shows in `vibest ls` and `vibest result` and whose pane closed after it: `vibest` reopens the same session and conversation (pi --session-id, the earlier prompt on screen); `vibest --new` starts a new session and conversation (no --session-id, the earlier prompt not on screen)",
     run: async (w) => {
       needs("pi", "herdr")
       const model = heldModel()
@@ -169,18 +171,37 @@ const checks: ReadonlyArray<Check> = [
         await w.daemon({ env })
         const start = async (extra: ReadonlyArray<string>, what: string) => {
           const before = processStarts(w)
-          await w.startMain({ harness: "pi", session, env, extra, timeoutMs: 60_000 })
+          await w.startEntry({ harness: "pi", session, env, extra, timeoutMs: 60_000 })
           await until(`${what}: a new process`, () => processStarts(w) > before, 60_000)
           return piReady(socket, what)
         }
-        const first = await start([], "the first main agent")
+        const first = await start([], "the first entry session")
         const prompt = ask("first")
-        await turn(w, socket, first.pane, prompt, "done-first")
-        const one = liveMain(w)!
-        await exitMain(w, socket, first.pane, one.id)
+        await execution(w, socket, first.pane, prompt, "done-first")
+        const one = liveEntry(w)!
+        await until(
+          "Pi saved the conversation",
+          () => Bun.spawnSync(["find", `${env.PI_CODING_AGENT_DIR}/sessions`, "-name", "*.jsonl"]).stdout.length > 0,
+          30_000,
+        )
+        const resultOf = await w.json<{ reply?: { text: string | null } | null }>(["result", one.id], {
+          cwd: w.repository,
+        })
+        expect(
+          resultOf.reply?.text?.includes("done-first") === true,
+          `result of the entry session: ${JSON.stringify(resultOf)}`,
+        )
+        const listing = await w.json<{ sessions: Array<{ id: string; executionState: string }> }>(["ls"], {
+          cwd: w.repository,
+        })
+        expect(
+          listing.sessions.find((e) => e.id === one.id)?.executionState === "completed",
+          `vibest ls: ${JSON.stringify(listing.sessions.map((e) => [e.id, e.executionState]))}`,
+        )
+        await exitEntry(w, socket, first.pane, one.id)
 
-        const again = await start([], "the reopened main agent")
-        expect(liveMain(w)?.id === one.id, `reopened ${liveMain(w)?.id}, not ${one.id}`)
+        const again = await start([], "the reopened entry session")
+        expect(liveEntry(w)?.id === one.id, `reopened ${liveEntry(w)?.id}, not ${one.id}`)
         expect(
           flag(again.argv, "--session-id") === one.conversation,
           `pi argv: ${JSON.stringify(again.argv)}, conversation ${one.conversation}`,
@@ -190,10 +211,10 @@ const checks: ReadonlyArray<Check> = [
           async () => (await screen(socket, again.pane)).includes("done-first"),
           30_000,
         )
-        await exitMain(w, socket, again.pane, one.id)
+        await exitEntry(w, socket, again.pane, one.id)
 
-        const fresh = await start(["--new"], "the --new main agent")
-        const two = liveMain(w)!
+        const fresh = await start(["--new"], "the --new entry session")
+        const two = liveEntry(w)!
         expect(two.id !== one.id, `--new kept session ${one.id}`)
         expect(
           two.conversation !== one.conversation && !fresh.argv.includes("--session-id"),
@@ -210,7 +231,7 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S12-tools",
     title:
-      "a Pi main agent's turn of two bash calls and a read (fake model) renders as one collapsed tool group: `Read 1 file · Ran 2 shell commands`",
+      "a Pi entry session's execution of two bash calls and a read (fake model) renders as one collapsed tool group: `Read 1 file · Ran 2 shell commands`",
     run: async (w) => {
       needs("pi", "herdr")
       const model = toolsModel(path.join(w.repository, "README.md"))
@@ -219,10 +240,10 @@ const checks: ReadonlyArray<Check> = [
       try {
         const env = { PI_CODING_AGENT_DIR: await piDir(w, "pi-tools", model.url) }
         await w.daemon({ env })
-        await w.startMain({ harness: "pi", session, env, timeoutMs: 60_000 })
-        const { pane } = await piReady(socket, "the main agent")
+        await w.startEntry({ harness: "pi", session, env, timeoutMs: 60_000 })
+        const { pane } = await piReady(socket, "the entry session")
         await herdr(socket, "agent.prompt", { target: pane, text: "group-tools" })
-        await until("the turn's reply", async () => (await screen(socket, pane)).includes("tools-done"), 60_000)
+        await until("the execution's reply", async () => (await screen(socket, pane)).includes("tools-done"), 60_000)
         await until(
           "one tool group line",
           async () => (await screen(socket, pane)).includes("Read 1 file · Ran 2 shell commands"),
@@ -278,9 +299,13 @@ const checks: ReadonlyArray<Check> = [
       try {
         const env = `PI_CODING_AGENT_DIR=${await piDir(w, "pi-repos", model.url)}`
         await w.daemon()
+        await w.entry({ cwd: shop })
+        await w.entry({ cwd: admin })
         const run = async (cwd: string, task: string) =>
           (
-            JSON.parse(await w.ok(["run", "pi", "--env", env, "--", ask(task)], { cwd, timeoutMs: 60_000 })) as {
+            JSON.parse(
+              await w.okViaEntry(["run", "pi", "--env", env, "--", ask(task)], { cwd, timeoutMs: 60_000 }),
+            ) as {
               id: string
             }
           ).id
@@ -289,7 +314,7 @@ const checks: ReadonlyArray<Check> = [
           [inShop!, shop, "shop", shop],
           [inAdmin!, admin, "admin", admin],
         ] as const) {
-          await until(`the ${task} answer`, async () => (await answerOf(w, id, cwd)).includes(`done-${task}`), 90_000)
+          await until(`the ${task} answer`, async () => (await replyOf(w, id, cwd)).includes(`done-${task}`), 90_000)
           const dir = row<{ d: string }>(w, "SELECT directory AS d FROM session WHERE id = ?", id)!.d
           expect(dir !== repo, `${task}'s run works in the checkout itself`)
           const common = await git(dir, "rev-parse", "--path-format=absolute", "--git-common-dir")

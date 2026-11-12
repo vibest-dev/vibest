@@ -11,12 +11,58 @@ release. Each release lists what broke, who is affected and how to migrate under
   inherit"): vibest comes with the Claude and Pi integrations only. To use Cursor add the file
   `harnesses/cursor/plugin.js` of the install directory to `plugins` in `~/.vibest/vibest.json` (or put it in
   `~/.vibest/plugins/`); until then `--harness cursor` fails saying no plugin provides it, and a Cursor session cannot
-  resume or restart. A run with no `--harness`, nothing to inherit and no plugin choosing now starts Claude (the first
-  bare `vibest` in a project too) when Claude is available. To choose differently write `"-harness-default"` in
+  resume or restart. The first bare `vibest` in a project with no `--harness` and no plugin choosing now starts Claude when
+  Claude is available. To choose differently write `"-harness-default"` in
   `plugins` and pick the harness in a plugin of your own.
 - **`-<id>` removes builtin plugins** (plugin authors): an entry such as `"-runtime-choice"` now removes the builtin with
   that exact id; `"-*"` and `"-prefix.*"` still match only user plugins. Builtins are kept or removed from the config
   text at every activation, so un-removing one takes effect on the next reload without restarting vibestd.
+- **Pull or type depends only on the harness; the entry session is an ordinary session** (anyone reading
+  `vibest.db` or `vibest ls`, harness integration and plugin authors): a harness that declares `inbox` (Claude, Pi)
+  takes its next batch with `Inbox.Take` / `/inbox/take` when it is idle, for the entry session and spawned sessions
+  alike; any other harness (Cursor) is typed into. vibestd does not hand out the next batch while an execution is open.
+  A pulled batch is `delivered` and attached to its execution when it is taken, and the integration reports the
+  execution accepted when the batch reaches the model; `/inbox/ack`, `Inbox.Ack`, the poll leases and the away timer
+  are gone, `Inbox.Subscribe` only wakes the session, and its access level is `session`. Entry executions are recorded
+  like any other (an entry execution can be judged `lost`), and `vibest ls` shows the entry as an ordinary row. A
+  session with no creator (the entry session) does not switch harness on a usage limit. The protocol number is
+  unchanged; the contract snapshot is regenerated. When Claude refuses the plugin's submit of a taken batch (it does
+  after an Esc until someone types), the plugin reports the refusal for that execution and vibestd types the same batch
+  into the pane, so the execution stays one and the batch is delivered once. A pulled batch is accepted only when the harness reports it (never from the runtime's working or blocked state), so a
+  batch the harness never accepts ends `not_started` after the confirmation timeout whatever state the runtime
+  reports. The fallback types only a batch this vibestd process itself handed over, once; a batch taken by an earlier
+  vibestd is never typed, and ends `not_started` and fails its message with a notice after the confirmation timeout.
+- **`vibest run` runs only inside a session** (users, scripts): a `vibest run` in a plain terminal is refused with a
+  pointer to bare `vibest`, which opens a session. Every session `vibest run` starts, here or on another machine, records
+  the session that ran it as its creator; `NoCallingSession` is the new error. Any session, not only the entry
+  session, can now run `vibest run`.
+- **An execution opens when its input is sent and is accepted once the harness takes it up** (anyone reading
+  `vibest.db`, harness and runtime plugin authors): a send that never sees the harness ready leaves no execution (no
+  `not_started` row); the catalog adds `execution.accepted` and an optional `failure.kind` (`limit`) on
+  `execution.ended`, and the read model (projection 6) adds `execution.accepted_at` and `execution.failure_kind`.
+  An execution end reported before its execution was accepted is ignored. vibestd starts each harness with
+  `VIBEST_PROCESS` (its process id), integrations send it as the `vibest-process` header, and `Session.Ready` answers
+  `{ process }`; an execution start or end from an earlier process of the session is dropped. A usage-limit move
+  vibestd stopped part way through is finished by the next check, and sessions ended at a limit are checked at start.
+  An older vibest cannot read a log that holds `execution.accepted`.
+- **The coordinator and main-agent names become entry** (RPC clients, `vibest` JSON readers, harness integration
+  authors): the project's entry session is what `vibest` opens in a terminal. RPCs `Project.CoordinatorSession`,
+  `Project.StartMain`, `Project.MainPlace`, `Project.FocusCoordinator`, `Project.RunningCoordinator` and
+  `Project.StopCoordinator` are `Project.EntrySession`, `Project.StartEntry`, `Project.EntryPlace`,
+  `Project.FocusEntry`, `Project.RunningEntry` and `Project.StopEntry`; `CoordinatorSessionReady` is gone, the
+  integration reports the conversation with `Session.Ready` and a new optional `conversation` `{ harness, id }`
+  (ignored when `harness` is not the session's). The `Coordinator` caller shape is `Entry`. The entry session's `name`
+  in `vibest ls` JSON is `entry` (was `main`), and errors that named the coordinator for the project's entry session say "entry session". The herdr action
+  `open-main` is `open-entry` (rebind a key set to `vibest.open-main`), the runtime `present` info key `mainSession`
+  is `entrySession`, and CLI help and errors say "entry session" where they said "main agent". The protocol number
+  is unchanged. A session whose agent is named `entry` is an ordinary session: the entry session is the one the project records.
+- **Another machine's vibestd is told who made a call** (anyone running vibest on two machines, and RPC clients): a
+  call forwarded as `<machine>/<id>` carries the header `vibest-peer-by` (`user` or the calling session's id), and the
+  other vibestd refuses a forwarded call without it. A session reaches on the other machine only the sessions it
+  started there, and what it sends is signed with its id. `Peer.Spawn` is run only by a session (`reportTo` is no longer a field; the
+  session in `vibest-peer-by` is the creator), so `vibest run --machine` outside a session is refused. What a session
+  on the other machine sends to its creator arrives as a message (`<agent-message>` naming `<machine>/<id>`), not as a
+  notice; `Peer.Outbox` items have `kind` `send` or `notice` (was `result` or `notice`), and the read model (projection 7) gives `outbox` a `kind`.
 - **Handoff database copies** (users): a handing-over vibestd no longer writes `vibest.db.before-<version>` (a copy of
   `vibest.db` and its `-wal`). Copies already in the home are left where they are. Copy the database yourself before
   `vibest update` if you want one.
@@ -26,8 +72,8 @@ release. Each release lists what broke, who is affected and how to migrate under
   `turn.started`/`turn.ended` are `execution.started`/`execution.ended` (`turn` → `execution`, `status` → `outcome`),
   `turn.reported` is gone, `session.created` has `project` and `agent` (was `role`) and no `archiveOnCompletion` or
   `reportTo`, `origin.reportTo` is `origin.session`, `inbox.queued` has no `turn`, `inbox.moved` has `execution`,
-  inbox kinds are `task`, `send` and `notice` only, `outbox.queued` names its `session` and has no `kind` (it is
-  always a notice), and `peer.seen` has no `callsMe`. The read model (projection 5) has table `execution` (`outcome`,
+  inbox kinds are `task`, `send` and `notice` only, `outbox.queued` names its `session` and has an optional `kind`
+  (`send` or `notice`, `notice` when absent), and `peer.seen` has no `callsMe`. The read model (projection 5) has table `execution` (`outcome`,
   `reply`) instead of `turn` (`status`, `answer`), `session.agent` instead of `role`, no `session.turn_id` (a session's
   latest execution is its highest `execution.id`), no `session.archive_on_idle`, `process.ready_seq`, `inbox.seq`
   (a task with no `execution_id` was never handed over), `outbox.kind` or `peer.calls_me`, and `process`, `execution`
@@ -36,6 +82,16 @@ release. Each release lists what broke, who is affected and how to migrate under
   vibestd and `vibest daemon import-check` refuse a database in the old shape as one from an older vibest and change
   nothing in it; there is no automatic conversion. Migrate: with vibestd stopped, move `vibest.db` aside with its
   `-wal` and `-shm` files to start empty (the message gives the command).
+- **turn is execution, and an execution's answer or result is its reply** (protocol 10: scripts reading CLI JSON,
+  RPC clients, harness and runtime plugin authors): session rows in `vibest ls`, `vibest result` and Watch have
+  `executionState` instead of `turnState`; `vibest result` (RPC `Get`) has `reply` instead of `answer`, and its
+  `turn` is `execution`; a Watch session's `turn` is `finished`, and `Session.Seen` takes `{ id, finished }`. The
+  RPC `TurnEnd` is `ExecutionEnd`, the hook route `/hooks/<harness>/turn-end` is `/hooks/<harness>/execution-end`,
+  and the Claude plugin's end event is `ExecutionComplete`. A `HarnessDefinition` has `executionEnd` (returning
+  `{ end }`, was `turnEnd` returning `{ result }`) and `replyField` (was `resultField`); a runtime's `Seen` has
+  `finished` (was `turn`) and `see(terminal, finished)`; `agent.fail` gets the limited execution's `input` (was
+  `turn`). Migrate: rename the fields; a vibest of another protocol is refused, so update every vibest together
+  (`vibest update`).
 - **`vibest run --archive-on-idle`** (users): the flag is no longer stored. A session started with it is still
   archived when it is idle after a completed turn, but only by the vibestd that started it: after a vibestd restart
   or `vibest update` it stays until archived by hand.

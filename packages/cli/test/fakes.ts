@@ -1,11 +1,10 @@
 import net from "node:net"
 
 import { readPing } from "@vibest/client/client"
-import { Bus, type EngineEvent } from "@vibest/core/bus"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { ProcessPlatform, Processes } from "@vibest/core/processes"
-import { projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
+import { entryPending, projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
 import { FakeProcesses } from "@vibest/core/test/lib/fake-processes"
 import {
   CLAUDE,
@@ -17,7 +16,7 @@ import {
   subscriptionsLayer,
 } from "@vibest/core/test/lib/harnesses"
 import { readDaemonInfo } from "@vibest/server/daemon"
-import { Effect, FileSystem, Layer, Option, PubSub, Stream } from "effect"
+import { Effect, FileSystem, Layer, Option, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import * as Platform from "#platform"
@@ -35,6 +34,7 @@ export {
   HARNESSES,
   PI,
   harnessesLayer,
+  entryPending,
   projectOf,
   runtimesLayer,
   subscriptionsLayer,
@@ -54,10 +54,7 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
           typeof input === "object" &&
           !Array.isArray(input) &&
           !("runtime" in input) &&
-          (prop === "Spawn" ||
-            prop === "Launch" ||
-            prop === "Project.CoordinatorSession" ||
-            prop === "Project.RunningCoordinator")
+          (prop === "Spawn" || prop === "Launch" || prop === "Project.EntrySession" || prop === "Project.RunningEntry")
             ? { ...input, runtime: TEST_HERDR }
             : input
         return (value as (payload: unknown, options?: { headers?: Record<string, string> }) => unknown).call(
@@ -69,26 +66,13 @@ export const authed = <C extends object>(client: C, headers: Record<string, stri
     },
   })
 
-export const busEvents = Effect.gen(function* () {
-  return yield* (yield* Bus).subscribe
-})
-
-export const nextTurnStart = (subscription: PubSub.Subscription<EngineEvent>, id: string): Effect.Effect<number> =>
-  PubSub.take(subscription).pipe(
-    Effect.flatMap((event) =>
-      event.type === "live.turn_start" && event.sessionId === id
-        ? Effect.succeed(event.at)
-        : nextTurnStart(subscription, id),
-    ),
-  )
-
 export const savedSession = (sessionId: string) =>
   Effect.gen(function* () {
     const db = yield* Db
     const projectId = yield* db.projectOfSession(sessionId)
     if (projectId === undefined) return null
-    const main = yield* db.coordinatorOf(projectId)
-    return main?.id === sessionId ? main.harnessSessionId : null
+    const entry = yield* db.entryOf(projectId)
+    return entry?.id === sessionId ? entry.harnessSessionId : null
   })
 
 const STDIN_FROM_FILE = 'f=$1; shift; exec "$@" <"$f"'
@@ -151,15 +135,15 @@ export {
 } from "@vibest/core/test/lib/session"
 export {
   GaveUp,
-  TURNS,
+  EXECUTIONS,
   eventsOf,
   processEnds,
-  resultText,
+  replyText,
   settled,
   systemPromptFile,
   until,
   untilVirtual,
-  writeResult,
+  writeEnd,
   yieldToIo,
 } from "@vibest/core/test/lib/observe"
 

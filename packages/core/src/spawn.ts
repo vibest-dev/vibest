@@ -2,6 +2,7 @@ import { newId } from "@vibest/schema/id"
 import {
   AllocationFailed,
   LimitReached,
+  NoCallingSession,
   NoHarnessChosen,
   NoRuntime,
   NoSuchSession,
@@ -11,7 +12,7 @@ import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Option, Path } fr
 import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 
-import type { Db, PeerStart, SessionRow } from "./db.ts"
+import type { Db, NewSession, PeerStart, SessionRow } from "./db.ts"
 import type { Drain } from "./drain.ts"
 import {
   harnessOptions,
@@ -149,23 +150,23 @@ export const sessionSpawn = (deps: {
     })
 
   const spawn = Effect.fn("Sessions.spawn")(function* (input: SpawnInput) {
+    if (input.parentSessionId === undefined && input.origin?.reportTo === undefined)
+      return yield* new NoCallingSession()
     const root = input.root
     const agent = input.agent ?? "general"
     const worker = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
-    const main =
-      worker === undefined && input.parentSessionId !== undefined ? yield* db.coordinatorOf(input.projectId) : undefined
+    const entry =
+      worker === undefined && input.parentSessionId !== undefined ? yield* db.entryOf(input.projectId) : undefined
     const parentRuntime =
       worker !== undefined
         ? worker.runtime || undefined
-        : main !== undefined && main.id === input.parentSessionId
-          ? main.runtime || undefined
+        : entry !== undefined && entry.id === input.parentSessionId
+          ? entry.runtime || undefined
           : undefined
     const from =
       input.harness !== undefined
         ? undefined
-        : (worker ??
-          main ??
-          (input.parentSessionId === undefined ? yield* db.coordinatorOf(input.projectId) : undefined))
+        : (worker ?? entry ?? (input.parentSessionId === undefined ? yield* db.entryOf(input.projectId) : undefined))
     const namedPeer =
       input.runtime === undefined && input.peer !== undefined ? yield* db.getSession(input.peer) : undefined
     const followedPeer =
@@ -261,7 +262,7 @@ export const sessionSpawn = (deps: {
           if (cwd === undefined)
             return yield* refuse(`no unused 4-hex worktree name under ${repository} after ${attempts} attempts`)
         }
-        const draft: Omit<SessionRow, "projectId"> = {
+        const draft: Omit<NewSession, "projectId"> = {
           id,
           agent,
           name: input.name,
@@ -274,8 +275,8 @@ export const sessionSpawn = (deps: {
           status: "unknown",
           startedAt: null,
           exitedAt: null,
-          turnState: "none",
-          turnPromptedAt: 0,
+          executionState: "none",
+          executionPromptedAt: 0,
           metadata: { routing },
           createdAt: now,
           lastActive: now,

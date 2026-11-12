@@ -1,55 +1,49 @@
 import { NoSuchSession, SessionBusy } from "@vibest/schema/session"
-import { Cause, Clock, Context, Duration, Effect, FileSystem, Ref } from "effect"
-import type { Scope } from "effect"
+import { Cause, Context, Duration, Effect, FileSystem, Ref } from "effect"
 
-import type { Db, SessionRow } from "./db.ts"
+import { type Db, type SessionRow, sessionEnded } from "./db.ts"
 import { directoryLock, type keyedLock } from "./keyed-lock.ts"
 import type { sessionPlacement } from "./placement.ts"
 import { errorMessage } from "./plugins.ts"
-import { type sessionPrompting, STOP_WAIT } from "./prompting.ts"
 import type * as Remove from "./remove.ts"
 import { agentState, type Runtimes, type Runtime, type AgentSeen } from "./runtimes.ts"
-import type { Platform, Tracked } from "./session-types.ts"
+import type { Platform } from "./session-types.ts"
+import { type Executions, STOP_WAIT } from "./session/executions.ts"
+import type { SessionLive } from "./session/live.ts"
 
 export const sessionArchive = (deps: {
   readonly db: Db["Service"]
   readonly fs: FileSystem.FileSystem
   readonly removal: Effect.Success<typeof Remove.make>
   readonly locks: ReturnType<typeof keyedLock<string>>
-  readonly scope: Scope.Scope
   readonly platform: Context.Context<Platform>
   readonly getRow: (id: string) => Effect.Effect<SessionRow, NoSuchSession>
   readonly live: (session: SessionRow) => ReturnType<Runtimes["Service"]["route"]>
   readonly notice: (session: SessionRow, message: string) => Effect.Effect<unknown>
   readonly dropQueue: (session: SessionRow, reason: string) => Effect.Effect<unknown>
   readonly recount: ReturnType<typeof sessionPlacement>["recount"]
-  readonly track: (id: string) => Effect.Effect<Tracked>
-  readonly stop: (id: string) => Effect.Effect<{ readonly r: Tracked; readonly already: boolean }>
-  readonly forget: (id: string) => Effect.Effect<void>
+  readonly sessionLive: SessionLive["Service"]
   readonly locked: (
     id: string,
     settlement?: boolean,
   ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   readonly logged: (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<void | A, never, R>
   readonly busyOf: (seen: AgentSeen) => boolean
-  readonly interruptAgent: ReturnType<typeof sessionPrompting>["interruptAgent"]
-  readonly settleAfterInterrupt: ReturnType<typeof sessionPrompting>["settleAfterInterrupt"]
+  readonly interruptAgent: Executions["Service"]["interruptAgent"]
+  readonly settleAfterInterrupt: Executions["Service"]["settleAfterInterrupt"]
 }) => {
   const {
     db,
     fs,
     removal,
     locks,
-    scope,
     platform,
     getRow,
     live,
     notice,
     dropQueue,
     recount,
-    track,
-    stop,
-    forget,
+    sessionLive,
     locked,
     logged,
     busyOf,
@@ -75,6 +69,9 @@ export const sessionArchive = (deps: {
       yield* notice(session, kept === undefined ? `${what}; its worktree was removed.` : `${what}; ${kept}.`)
     })
 
+  const release = (id: string) =>
+    db.getSession(id).pipe(Effect.flatMap((row) => sessionLive.release(id, sessionEnded(row))))
+
   const removeLocked = (
     id: string,
     options: { readonly keepWorktree?: boolean | undefined; readonly unlessPending?: boolean },
@@ -86,8 +83,8 @@ export const sessionArchive = (deps: {
       const seen = yield* agentState(h, terminal)
       const reasons: Array<string> = []
       const working = busyOf(seen)
-      const turn = yield* db.openExecution(id)
-      if (working || turn !== undefined) {
+      const execution = yield* db.openExecution(id)
+      if (working || execution !== undefined) {
         if (options.unlessPending) return undefined
         if (working) {
           const stopped = yield* interruptAgent(h, session, terminal)
@@ -97,14 +94,14 @@ export const sessionArchive = (deps: {
               : `${id} did not stop within ${Duration.format(STOP_WAIT)} of the interrupt key; its terminal closed anyway`,
           )
         }
-        if (turn !== undefined) yield* db.closeExecution(id, turn, "interrupted")
+        if (execution !== undefined) yield* db.closeExecution(id, execution, "interrupted")
         session = yield* getRow(id)
       }
       if (!(session.metadata.archived || session.metadata.removed)) {
         if (options.unlessPending) {
           if (!(yield* db.archiveIfNoPending(id))) return undefined
         } else {
-          yield* db.archive(id, yield* Clock.currentTimeMillis)
+          yield* db.archive(id)
           yield* dropQueue(session, `${id} was archived before it was delivered`)
         }
         session = yield* getRow(id)
@@ -125,11 +122,9 @@ export const sessionArchive = (deps: {
   const remove = (id: string, options: { readonly keepWorktree?: boolean | undefined } = {}) =>
     Effect.gen(function* () {
       yield* getRow(id)
-      const { r, already } = yield* stop(id)
+      const { already } = yield* sessionLive.stop(id)
       if (already) return yield* new SessionBusy({ id, message: `${id} is already being removed` })
-      const out = (yield* locked(id)(removeLocked(id, options)).pipe(
-        Effect.ensuring(Ref.set(r.stopping, false).pipe(Effect.andThen(Effect.forkIn(forget(id), scope)))),
-      ))!
+      const out = (yield* locked(id)(removeLocked(id, options)).pipe(Effect.ensuring(release(id))))!
       return out
     }).pipe(
       Effect.catchTag("PlatformError", () => Effect.die(new Error("a platform error blocked a remove"))),
@@ -138,7 +133,7 @@ export const sessionArchive = (deps: {
 
   const archiveIfIdle = (id: string) =>
     Effect.gen(function* () {
-      if (!(yield* db.archivesOnIdle(id))) return
+      if (!(yield* sessionLive.archivesOnIdle(id))) return
       const owner = yield* db.getSession(id)
       if (owner === undefined || owner.metadata.archived || owner.metadata.removed) return
       yield* locked(
@@ -146,7 +141,7 @@ export const sessionArchive = (deps: {
         true,
       )(
         Effect.gen(function* () {
-          const r = yield* track(id)
+          const r = yield* sessionLive.track(id)
           if (yield* Ref.getAndSet(r.stopping, true)) return
           yield* Effect.gen(function* () {
             const session = yield* getRow(id)
@@ -156,7 +151,7 @@ export const sessionArchive = (deps: {
                 Effect.flatMap((told) => (told ? Effect.void : notice(session, message))),
               )
             const skip = (why: string) => tell(`${id} not archived (vibest run --archive-on-idle): ${why}`)
-            if (session.turnState !== "completed") return yield* Ref.set(r.archiveTold, false)
+            if (session.executionState !== "completed") return yield* Ref.set(r.archiveTold, false)
             const h = yield* live(session)
             const terminal = session.address
             const seen = yield* agentState(h, terminal)
@@ -193,7 +188,7 @@ export const sessionArchive = (deps: {
                     ),
                   ),
             ),
-            Effect.ensuring(Ref.set(r.stopping, false).pipe(Effect.andThen(Effect.forkIn(forget(id), scope)))),
+            Effect.ensuring(release(id)),
           )
         }),
       )

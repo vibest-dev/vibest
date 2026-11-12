@@ -7,9 +7,12 @@ import {
   CWD_HEADER,
   HARNESS_HEADER,
   HARNESS_SESSION_HEADER,
+  PEER_BY_HEADER,
+  PEER_BY_USER,
   PEER_HEADER,
   PEER_PROJECT_HEADER,
   PLUGIN_VERSION_HEADER,
+  PROCESS_HEADER,
   PROJECT_HEADER,
   PROTOCOL,
   PROTOCOL_HEADER,
@@ -23,6 +26,7 @@ import {
   Caller,
   CallerGate,
   DaemonStopping,
+  FORWARDED_CALLS,
   InvalidCaller,
   PEER_CALLS,
   ProtocolGate,
@@ -34,7 +38,7 @@ import { ID } from "@vibest/schema/id"
 import { Effect, Layer, Option } from "effect"
 import * as Headers from "effect/http/Headers"
 
-const SETTLEMENTS: ReadonlySet<string> = new Set(["TurnEnd", "Prompt"])
+const SETTLEMENTS: ReadonlySet<string> = new Set(["ExecutionEnd", "Prompt"])
 
 export type Read = (name: string) => string | undefined
 
@@ -42,6 +46,11 @@ export const reader =
   (headers: Headers.Headers): Read =>
   (name) =>
     Option.getOrUndefined(Headers.get(headers, name))
+
+export const processOf = (read: Read) => {
+  const process = Number(read(PROCESS_HEADER))
+  return Number.isSafeInteger(process) && process > 0 ? process : undefined
+}
 
 export const admit = <A, E, R, A2, E2>(
   drain: Drain["Service"],
@@ -70,7 +79,7 @@ const noteConversation = (db: Db["Service"], read: Read, row: { id: string; harn
   Effect.gen(function* () {
     const conversation = read(HARNESS_SESSION_HEADER)
     if (!conversation || read(HARNESS_HEADER) !== row.harness) return
-    if (yield* db.noteHarnessSession(row.id, conversation))
+    if (yield* db.noteConversation(row.id, conversation, processOf(read)))
       yield* Effect.logInfo(`session ${row.id} is in conversation ${conversation}`)
   })
 
@@ -122,11 +131,18 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
       if (!PEER_CALLS.has(method)) return yield* bad(`a peer vibestd may not call ${method}`)
       if (method !== "Peer.Hello" && !(yield* db.peerKnown(peer)))
         return yield* bad(`peer ${peer} has not said Peer.Hello; call it first`)
+      const by = read(PEER_BY_HEADER)
+      if (
+        (by === undefined && FORWARDED_CALLS.has(method)) ||
+        (by !== undefined && by !== PEER_BY_USER && !ID.test(by))
+      )
+        return yield* bad(`${method} is forwarded for the user or for a session; ${PEER_BY_HEADER} says neither`)
       const project = read(PEER_PROJECT_HEADER)
       return {
         _tag: "Peer",
         peerId: peer,
         ...(project === undefined ? {} : { projectId: project }),
+        ...(by === undefined || by === PEER_BY_USER ? {} : { session: by }),
       } satisfies CallerShape
     }
     if (kind.value === "cli") {
@@ -150,9 +166,9 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
           `${method} claims project ${who.project}; session ${who.row.id} is in project ${who.row.projectId}`,
         )
       const row = who.row
-      if (row.agent === "coordinator") {
+      if (row.entry) {
         return {
-          _tag: "Coordinator",
+          _tag: "Entry",
           sessionId: row.id,
           projectId: row.projectId,
           ...(repository._tag === "Some" ? { repositoryRoot: repository.value } : {}),
@@ -164,14 +180,22 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
     return yield* bad(`${method} has caller ${kind.value}; expected cli or session`)
   })
 
-const noteIntegration = (db: Db["Service"], read: (name: string) => string | undefined): Effect.Effect<void> =>
+export const integrationOf = (read: Read) => {
+  const version = read(PLUGIN_VERSION_HEADER)
+  if (!version) return undefined
+  const protocol = Number(read(PROTOCOL_HEADER) ?? "0")
+  return { version, protocol: Number.isFinite(protocol) ? protocol : 0 }
+}
+
+const noteIntegration = (db: Db["Service"], read: Read): Effect.Effect<void> =>
   Effect.gen(function* () {
     const sessionId = read(SESSION_HEADER)
-    const version = read(PLUGIN_VERSION_HEADER)
-    if (!sessionId || !version) return
-    const protocol = Number(read(PROTOCOL_HEADER) ?? "0")
-    if (yield* db.noteIntegration(sessionId, { version, protocol: Number.isFinite(protocol) ? protocol : 0 }))
-      yield* Effect.logInfo(`session ${sessionId} runs integration ${version} (protocol ${protocol})`).pipe(
+    const integration = integrationOf(read)
+    if (!sessionId || !integration) return
+    if (yield* db.noteIntegration(sessionId, integration, processOf(read)))
+      yield* Effect.logInfo(
+        `session ${sessionId} runs integration ${integration.version} (protocol ${integration.protocol})`,
+      ).pipe(
         Effect.annotateLogs({
           agent: read(AGENT_HEADER) ?? "",
           harness: read(HARNESS_HEADER) ?? "",

@@ -16,7 +16,7 @@ import {
   projectOf,
   systemPromptFile,
 } from "./fakes.ts"
-import { test, client, asCli } from "./rpc-helpers.ts"
+import { test, client, asCli, asEntry } from "./rpc-helpers.ts"
 
 describe("vibest.sock", () => {
   test(
@@ -34,8 +34,8 @@ describe("vibest.sock", () => {
         runtime: "herdr",
       })
       const root = repo
-      const main = yield* db.coordinatorOf(yield* projectOf(repo))
-      assert.ok(main)
+      const entry = yield* db.entryOf(yield* projectOf(repo))
+      assert.ok(entry)
       assert.deepStrictEqual(opened, {
         runtime: "herdr",
         terminal: opened.terminal,
@@ -61,7 +61,7 @@ describe("vibest.sock", () => {
       const [ran] = yield* herdr.callsTo("run")
       assert.strictEqual(ran!.terminal, opened.terminal)
       assert.strictEqual(ran!.argv[0], "env")
-      assert.ok(ran!.argv.includes(`VIBEST_SESSION_ID=${main!.id}`))
+      assert.ok(ran!.argv.includes(`VIBEST_SESSION_ID=${entry!.id}`))
       assert.includeMembers([...ran!.argv], ["pi", "--model", "it's"])
       assert.deepStrictEqual(yield* herdr.callsTo("send"), [])
     }),
@@ -96,15 +96,15 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "Project.MainPlace names the detected terminal, and launches a named runtime that is not here",
+    "Project.EntryPlace names the detected terminal, and launches a named runtime that is not here",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
       const opened = yield* c["Project.Open"]({})
-      const here = yield* c["Project.MainPlace"]({ callerEnv: { HC_ID: "t1", HERDR_ID: "p1" } })
+      const here = yield* c["Project.EntryPlace"]({ callerEnv: { HC_ID: "t1", HERDR_ID: "p1" } })
       assert.strictEqual(here.directory, opened.directory)
       assert.deepStrictEqual(here.place, { in: "terminal", runtime: "herdr", terminal: "p1" })
-      assert.deepStrictEqual((yield* c["Project.MainPlace"]({ callerEnv: { HC_ID: "t1" }, runtime: "herdr" })).place, {
+      assert.deepStrictEqual((yield* c["Project.EntryPlace"]({ callerEnv: { HC_ID: "t1" }, runtime: "herdr" })).place, {
         in: "launch",
         runtime: "herdr",
       })
@@ -124,10 +124,10 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "Project.MainPlace issued while a runtime plugin is still activating waits for it and detects its caller",
+    "Project.EntryPlace issued while a runtime plugin is still activating waits for it and detects its caller",
     Effect.gen(function* () {
       const c = asCli(yield* client, yield* makeRepository)
-      const place = yield* c["Project.MainPlace"]({ callerEnv: { SLOW_ID: "s1" } }).pipe(Effect.forkChild)
+      const place = yield* c["Project.EntryPlace"]({ callerEnv: { SLOW_ID: "s1" } }).pipe(Effect.forkChild)
       yield* TestClock.withLive(Effect.sleep("200 millis"))
       yield* TestClock.adjust("1 second")
       assert.deepStrictEqual((yield* Fiber.join(place)).place, { in: "terminal", runtime: "slow", terminal: "s1" })
@@ -159,7 +159,7 @@ describe("vibest.sock", () => {
     "a runtime that is not ready is LaunchFailed with the plugin's missing message",
     Effect.gen(function* () {
       const c = asCli(yield* client, yield* makeRepository)
-      const refused = yield* Effect.flip(c["Project.MainPlace"]({ callerEnv: { HC_ID: "t1" } }))
+      const refused = yield* Effect.flip(c["Project.EntryPlace"]({ callerEnv: { HC_ID: "t1" } }))
       assert.strictEqual(refused._tag, "LaunchFailed")
       assert.strictEqual(refused.message, "hc socket is down")
     }),
@@ -176,13 +176,13 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "Project.CoordinatorSession returns the harness command and writes the system prompt before the claim is used",
+    "Project.EntrySession returns the harness command and writes the system prompt before the claim is used",
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const fs = yield* FileSystem.FileSystem
       const layout = yield* Layout
       const c = asCli(yield* client, repo)
-      const started = yield* c["Project.CoordinatorSession"]({
+      const started = yield* c["Project.EntrySession"]({
         harness: "pi",
         fresh: true,
         terminal: "test/p1",
@@ -203,7 +203,7 @@ describe("vibest.sock", () => {
       const db = yield* Db
       const c = asCli(yield* client, repo)
       const failed = yield* Effect.flip(
-        c["Project.CoordinatorSession"]({ harness: "pi", fresh: true, terminal: "test/p9", runtime: "herdr" }),
+        c["Project.EntrySession"]({ harness: "pi", fresh: true, terminal: "test/p9", runtime: "herdr" }),
       )
       assert.strictEqual(failed._tag, "HarnessUnavailable")
       assert.deepStrictEqual(yield* db.listSessions(), [])
@@ -216,10 +216,11 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const repo = yield* makeRepository
       const c = asCli(yield* client, repo)
+      const spawner = yield* asEntry(yield* client, repo)
       const herdr = yield* FakeRuntime
       const socket = JSON.stringify({ socketPath: "/h.sock" })
       const named = JSON.stringify({ session: "other" })
-      yield* c.Spawn({
+      yield* spawner.Spawn({
         harness: "pi",
         prompt: "do it",
         callerEnv: { HERDR_SOCKET_PATH: "/h.sock", SECRET: "no" },
@@ -277,10 +278,12 @@ describe("vibest.sock", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const herdr = yield* FakeRuntime
-      const c = asCli(yield* client, yield* makeRepository)
-      const before = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "in herdr", runtime: "herdr" })
-      const after = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "in hc", runtime: "hc" })
-      for (const id of [before.id, after.id]) yield* until(db.getSession(id), (s) => s?.turnState === "open")
+      const repo = yield* makeRepository
+      const c = asCli(yield* client, repo)
+      const spawner = yield* asEntry(yield* client, repo)
+      const before = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "in herdr", runtime: "herdr" })
+      const after = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "in hc", runtime: "hc" })
+      for (const id of [before.id, after.id]) yield* until(db.getSession(id), (s) => s?.executionState === "open")
       const rows = (yield* c.List({})).sessions
       assert.deepStrictEqual(
         [before.id, after.id].map((id) => rows.find((row) => row.id === id)?.runtime),
