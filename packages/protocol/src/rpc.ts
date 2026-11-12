@@ -323,7 +323,7 @@ export class VibestRpcs extends RpcGroup.make(
           agent: Schema.String,
           callerEnv: Schema.Record(Schema.String, Schema.String),
           runtimeSession: Schema.optional(Schema.String),
-          peer: Schema.optional(Schema.String),
+          share: Schema.optional(Schema.String),
           archive: Schema.optional(Schema.Boolean),
           runtime: Schema.optional(Schema.String),
           request: Schema.optional(Schema.String),

@@ -51,7 +51,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   const archiveSession = (
     repo: string,
     entryHarness: "pulling-claude" | "pulling-pi" = "pulling-claude",
-    input: { readonly peer?: string } = {},
+    input: { readonly share?: string } = {},
   ) =>
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -339,7 +339,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const fs = yield* FileSystem.FileSystem
       const repo = yield* makeRepository
       const owner = yield* archiveSession(repo)
-      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
+      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), share: owner.id })
       yield* until(owner.db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
       yield* askEntry(owner)
       yield* finishExecution(owner, "status: completed")
@@ -351,12 +351,12 @@ describe.concurrent("vibest run --archive-on-idle", () => {
   )
 
   test(
-    "run --peer: --keep-worktree keeps the directory at that archive only; the last session's archive removes it",
+    "run --share: --keep-worktree keeps the directory at that archive only; the last session's archive removes it",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const repo = yield* makeRepository
       const owner = yield* idleSession(repo)
-      const b = yield* archiveSession(repo, "pulling-claude", { peer: owner.id })
+      const b = yield* archiveSession(repo, "pulling-claude", { share: owner.id })
       const worktree = yield* sessionWorktree(owner.id)
       assert.include(
         (yield* owner.sessions.remove(owner.id, { keepWorktree: true }))!.reasons.join("\n"),

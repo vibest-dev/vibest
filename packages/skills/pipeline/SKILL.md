@@ -31,11 +31,11 @@ Its id is <implementer id>. The absolute plan path is the value of VIBEST_PROJEC
 
 ## 4. Review
 
-`--peer` shares the implementer's worktree: a pane split off the implementer's pane. Archiving the reviewer never removes that worktree.
-Read-only here is the prompt you pass, plus the peer git rule the session already has: no commit, and nothing that moves HEAD, a branch, or the index.
+`--share` shares the implementer's worktree: a pane split off the implementer's pane. Archiving the reviewer never removes that worktree.
+Read-only here is the prompt you pass, plus the shared-worktree git rule the session already has: no commit, and nothing that moves HEAD, a branch, or the index.
 
 ```
-vibest run [<harness>] --title 'Review <topic>' --peer <implementer id> -- 'Review the change on this branch against the plan at <absolute plan path>. Run git diff main...HEAD. Do not modify files, commit, or move HEAD. Look for bugs, missing tests, and departures from the plan; run the tests. Send me a message that starts with "verdict: approve" or "verdict: changes requested", then each comment with file and line.'
+vibest run [<harness>] --title 'Review <topic>' --share <implementer id> -- 'Review the change on this branch against the plan at <absolute plan path>. Run git diff main...HEAD. Do not modify files, commit, or move HEAD. Look for bugs, missing tests, and departures from the plan; run the tests. Send me a message that starts with "verdict: approve" or "verdict: changes requested", then each comment with file and line.'
 ```
 
 Its id is <reviewer id>. Do not pass `--archive-on-idle`: later reviews go to this reviewer with `vibest send`.

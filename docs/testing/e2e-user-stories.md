@@ -5,7 +5,7 @@ Each story is run for real: herdr, CLI agents, models, under the isolation of [e
 
 **Status** says what can be checked now:
 
-- **now**: today's code (omac semantics: coordinator, session, `run <harness>`, `--peer`, `--archive-on-idle`).
+- **now**: today's code (omac semantics: coordinator, session, `run <harness>`, `--share`, `--archive-on-idle`).
 - **after refactor**: needs the vibest domain (Run, `--agent`, `--in`, `once`/`kept`, DynamicWorkflow).
   Until then, the story is the acceptance test for that refactor.
 
@@ -60,13 +60,13 @@ one grouped Message.
 
 _As a developer, I want a planner to write the plan and an implementer to carry it out in the same place._
 
-| Step                                                                      | Expect                                                                      |
-| ------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| ask: "handoff: plan the CSV export with Claude, implement it with Cursor" | planner writes `PLAN.md` in its worktree and finishes                       |
-| entry session starts the implementer in the planner's worktree            | same worktree (`--peer` now; same Run later); it reads `PLAN.md`            |
-| archive both                                                              | the shared worktree is removed only by its owner; the peer never removes it |
+| Step                                                                      | Expect                                                                        |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| ask: "handoff: plan the CSV export with Claude, implement it with Cursor" | planner writes `PLAN.md` in its worktree and finishes                         |
+| entry session starts the implementer in the planner's worktree            | same worktree (`--share` now; same Run later); it reads `PLAN.md`             |
+| archive both                                                              | the shared worktree is removed only by its owner; the sharer never removes it |
 
-Status: now (`--peer`); after refactor as the `handoff` skill.
+Status: now (`--share`); after refactor as the `handoff` skill.
 
 ### S5. Advisor (type B, skill)
 

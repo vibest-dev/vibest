@@ -39,7 +39,7 @@ terminals encode to equal JSON.
 Required: `id`, `status()`, `events` (exited, state, reset, and seen from a runtime with `seen`: core reads a
 runtime only when one arrives, and once at start and on a reset), and on terminals `open`, `send`, `read`, `process`, `close`. `open`'s input
 beside the placement (`project`, `cwd`, `argv`, `env`, `label`) carries `near` (beside that terminal when possible),
-`split` (a split beside `near` instead of a tab of its own, `vibest run --peer`), `focus` (the user is waiting to
+`split` (a split beside `near` instead of a tab of its own, `vibest run --share`), `focus` (the user is waiting to
 see it), `target` (where the caller sits in this runtime, the value its own `caller.target` gave; herdr: the
 caller's herdr session or socket) and `remote` (another machine's vibestd started the agent, `Peer.Spawn`; herdr then opens it in its default
 session `default` and ignores `near`); each is the runtime's to honor as it can.
@@ -116,9 +116,9 @@ product keeps one instance per machine (one herdr session `vibest`, one rex serv
   `--runtime`. A terminal vibestd opened is marked `--in-parent` and already names `--runtime`; that name wins over
   another runtime's variables the shell inherited.
 - A subagent (`vibest run`) takes `--runtime <id>` on `Spawn`. Without it, it runs in its parent's runtime. With
-  `--peer` and no `--runtime`, it runs in the peer's runtime on the peer's machine instead: it shares that session's
-  worktree and splits a pane off it, so the default choice must not replace the peer. An explicit `--runtime` is kept,
-  and a peer on another runtime or machine is still refused. The parent lookup includes the entry session, because
+  `--share` and no `--runtime`, it runs in the shared session's runtime on its machine instead: it shares that session's
+  worktree and splits a pane off it, so the default choice must not replace the shared session's. An explicit `--runtime` is kept,
+  and a shared session on another runtime or machine is still refused. The parent lookup includes the entry session, because
   `getSession` leaves the live entry row out. If the runtime that was chosen is not online, the start fails with the
   runtime's reason. No other fallback. A user plugin on `agent.start.before` may still return a `runtime`. A runtime
   already set stands.

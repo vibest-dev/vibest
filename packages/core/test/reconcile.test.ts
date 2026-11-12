@@ -52,9 +52,7 @@ describe("reconcile: a terminal whose agent has not started", () => {
         projectId,
         { cwd: repo },
       )
-      const sessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
-        Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
-      )
+      const sessions = yield* Sessions.make.pipe(Effect.provideServiceEffect(SessionLocks, SessionLocks.make))
       yield* startupSettled(sessions)
       assert.isNull((yield* db.getSession(id))!.exitedAt)
       yield* herdr.seedAgent("w8:pending")

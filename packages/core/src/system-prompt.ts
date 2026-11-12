@@ -147,15 +147,15 @@ export interface SystemPromptInput {
   readonly preferences: string
   readonly memories: string
   readonly checkout?: boolean | undefined
-  readonly peer?: string | undefined
+  readonly sharer?: string | undefined
   readonly creator?: { readonly id: string; readonly label: string } | undefined
 }
 
 const directoryFact = (r: SystemPromptInput) =>
   r.checkout
     ? "Your working directory is the user's own checkout; do not change its files or its branch."
-    : r.peer
-      ? `Your working directory is shared with session ${r.peer}, which started earlier in it.`
+    : r.sharer
+      ? `Your working directory is shared with session ${r.sharer}, which started earlier in it.`
       : "Your working directory is a worktree that only you use."
 
 const facts = (r: SystemPromptInput) =>
