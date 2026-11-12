@@ -48,12 +48,6 @@ const limitFailure = (
   return text === "" ? `${named}: ${error}` : text
 }
 
-export const limitMoveBox = (): {
-  readonly move: {
-    rerun: LimitMove["rerun"]
-  }
-} => ({ move: { rerun: () => Effect.die("limit move not wired") as Effect.Effect<boolean> } })
-
 export const sessionMove = (deps: {
   readonly db: Pick<
     Db["Service"],
