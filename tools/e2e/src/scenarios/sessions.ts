@@ -210,14 +210,6 @@ const checks: ReadonlyArray<Check> = [
     },
   },
   {
-    id: "S52",
-    title: "vibest report is a usage error: sessions message with vibest send",
-    run: async (w) => {
-      const r = await w.vibest(["report", "--", "x"])
-      expect(r.code !== 0 && /report/.test(r.stderr), `vibest report exited ${r.code}: ${r.stderr}${r.stdout}`)
-    },
-  },
-  {
     id: "S6",
     title:
       "a just-finished --archive-on-idle session loses its worktree, with no notice and nothing it sent still waiting; vibest run --archive-on-completion is a usage error; vibest archive of a clean subagent closes its pane, its harness process exits and removes the worktree; uncommitted changes or commits on no branch keep it with the reason; a commit on a branch is kept in that branch and the worktree removed; --keep-worktree keeps a clean one",

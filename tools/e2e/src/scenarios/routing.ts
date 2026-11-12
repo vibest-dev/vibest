@@ -393,6 +393,7 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
   },
   {
     id: "G12",
+    covers: ["G2"],
     title:
       "a plugin's ctx.event.subscribe sees the ledger facts of a real Pi subagent in order (session.created, process.started, execution.started, execution.ended) and no live events; a new revision of the plugin gets the next agent's facts and the old one stops",
     run: async (w) => {

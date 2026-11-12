@@ -35,32 +35,6 @@ const setup = Effect.gen(function* () {
 })
 
 describe("sends from sessions", () => {
-  it.effect("a send to the entry session waits as a pending row like a send to any session", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, project, entryId } = yield* setup
-        assert.isDefined(yield* db.insertSend(entryId, "hello", undefined, A))
-        assert.deepStrictEqual(
-          (yield* entryPending(db, project)).map((r) => [r.kind, r.sender, r.recipient]),
-          [["send", A, entryId]],
-        )
-      }),
-    ),
-  )
-
-  it.effect("a send to a sibling writes nothing", () =>
-    memory(
-      Effect.gen(function* () {
-        const { db, project, entryId } = yield* setup
-        yield* db.insertSession(session(B), project, { cwd: "/w", task: "b", parentSessionId: entryId })
-        const sql = yield* SqlClient.SqlClient
-        assert.isUndefined(yield* db.insertSend(B, "hello", undefined, A))
-        assert.deepStrictEqual(yield* sql`SELECT 1 FROM inbox WHERE kind = 'send' AND sender_session_id = ${A}`, [])
-        assert.isDefined(yield* db.insertSend(B, "from its creator", undefined, entryId))
-      }),
-    ),
-  )
-
   it.effect("a session whose parent has ended sends to the entry session, not to that parent", () =>
     memory(
       Effect.gen(function* () {

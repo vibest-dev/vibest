@@ -1,7 +1,7 @@
-import { Duration, Effect, FiberHandle, type Latch, Queue, Semaphore, Stream } from "effect"
+import { Duration, Effect, type Latch, Queue, Semaphore, Stream } from "effect"
 
 import { logFailure } from "./engine.ts"
-import { type Candidate, makeSources, makeWatcher, type Operation } from "./plugin-sources.ts"
+import { type Candidate, keyOf, makeSources, makeWatcher, type Operation } from "./plugin-sources.ts"
 
 export const DEBOUNCE = Duration.millis(100)
 export const RECHECK = Duration.seconds(1)
@@ -68,16 +68,21 @@ export const supervise = Effect.fnUntraced(function* (
     Queue.offerUnsafe(triggers, undefined)
     Queue.offerUnsafe(builtinTriggers, undefined)
   }
-  const watcher = yield* makeWatcher(notify, RECHECK)
-  const rescanWhenLive = yield* FiberHandle.make()
+  const watcher = yield* makeWatcher(notify)
   const lock = yield* Semaphore.make(1)
   let users: ReadonlyArray<Candidate> = []
+  let activated: string | undefined
   const publish = (next?: ReadonlyArray<Candidate>) =>
     lock.withPermits(1)(
       Effect.gen(function* () {
         if (next !== undefined) users = next
         const { operations } = yield* sources.operations
-        yield* host.activate([...keptBuiltins(builtins, operations), ...users])
+        const candidates = [...keptBuiltins(builtins, operations), ...users]
+        const revisions = candidates.map(keyOf).join("\n")
+        if (revisions === activated) return
+        host.ready.closeUnsafe()
+        yield* host.activate(candidates)
+        activated = revisions
       }),
     )
   yield* publish()
@@ -89,15 +94,10 @@ export const supervise = Effect.fnUntraced(function* (
     if (changed.size > 0) yield* Effect.log(`plugins: reloading after changes to ${[...changed].join(", ")}`)
     changed.clear()
     let resolved = yield* resolve(sources, builtins)
-    let rewatched = false
-    while (yield* watcher.update(resolved.watched)) {
-      rewatched = true
-      resolved = yield* resolve(sources, builtins)
-    }
+    while (yield* watcher.update(resolved.watched)) resolved = yield* resolve(sources, builtins)
     yield* publish(resolved.candidates.filter((c) => !isBuiltin(c)))
-    if (rewatched)
-      yield* FiberHandle.run(rescanWhenLive, watcher.live.pipe(Effect.andThen(Effect.sync(() => notify()))))
   }).pipe(logFailure("plugins: reload failed"))
+  yield* Queue.offer(triggers, undefined).pipe(Effect.delay(RECHECK), Effect.forever, Effect.forkScoped)
   yield* Stream.concat(Stream.succeed(undefined), Stream.fromQueue(triggers).pipe(Stream.debounce(DEBOUNCE))).pipe(
     Stream.runForEach(() =>
       Effect.gen(function* () {

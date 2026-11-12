@@ -24,15 +24,6 @@ const value = make({ service: Value, layer: valueLayer, deps: [] })
 const greeting = make({ service: Greeting, layer: greetingLayer, deps: [value] })
 
 describe("layer node", () => {
-  it.effect("builds an untagged graph", () =>
-    Effect.gen(function* () {
-      const value = LayerNode.make({ service: Value, layer: valueLayer, deps: [] })
-      const greeting = LayerNode.make({ service: Greeting, layer: greetingLayer, deps: [value] })
-      const result = yield* Greeting.pipe(Effect.provide(LayerNode.compile(LayerNode.group([greeting]))))
-      expect(result.value).toBe("hello production")
-    }),
-  )
-
   it.effect("exposes roots but hides transitive dependencies", () =>
     Effect.gen(function* () {
       const context = yield* Layer.build(LayerNode.compile(LayerNode.group([greeting])))

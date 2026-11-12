@@ -15,8 +15,8 @@ import { describeSpawn, Plugins } from "../plugins.ts"
 import { Processes } from "../processes.ts"
 import { HARNESS_EXIT_WAIT, stopAgent } from "../remove.ts"
 import { machinesListing, Runtimes, type Terminal } from "../runtimes.ts"
-import { runtimeEnv } from "../sessions.ts"
 import { SessionLive } from "./live.ts"
+import { runtimeEnv } from "./placement.ts"
 
 export const PRESENT_TIMEOUT = Duration.seconds(5)
 
@@ -25,7 +25,7 @@ export class EntryRunning extends Schema.TaggedError<EntryRunning>()("EntryRunni
   place: Schema.String,
 }) {}
 
-export const placeOf = (runtime: { readonly id: string; readonly name?: string }, address: RuntimeAddress) => {
+const placeOf = (runtime: { readonly id: string; readonly name?: string }, address: RuntimeAddress) => {
   const name = runtime.name ?? runtime.id
   return address.id !== "" ? `${name} ${address.id}` : `${name} (not placed)`
 }
