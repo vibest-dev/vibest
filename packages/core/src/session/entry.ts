@@ -25,7 +25,7 @@ export class EntryRunning extends Schema.TaggedError<EntryRunning>()("EntryRunni
   place: Schema.String,
 }) {}
 
-export const placeOf = (runtime: { readonly id: string; readonly name?: string }, address: RuntimeAddress) => {
+const placeOf = (runtime: { readonly id: string; readonly name?: string }, address: RuntimeAddress) => {
   const name = runtime.name ?? runtime.id
   return address.id !== "" ? `${name} ${address.id}` : `${name} (not placed)`
 }

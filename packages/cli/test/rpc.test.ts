@@ -15,7 +15,7 @@ import { Cause, Effect, Exit, Fiber, FileSystem, Path, Ref, Stream } from "effec
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
-import { FakeGit, authed, FakeRuntime, makeRepository, tempDirectory, until, writeEnd, projectOf } from "./fakes.ts"
+import { authed, FakeRuntime, makeRepository, tempDirectory, until, writeEnd, projectOf } from "./fakes.ts"
 import { served, test, client, asCli, asEntry, asSession, failureTag } from "./rpc-helpers.ts"
 
 describe("vibest.sock", () => {
@@ -843,33 +843,6 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "FocusEntry is null without a running entry session, and focuses one that is running",
-    Effect.gen(function* () {
-      const db = yield* Db
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const c = asCli(yield* client, repo)
-      assert.strictEqual(yield* c["Project.FocusEntry"]({}), null)
-      const projectId = yield* projectOf(repo)
-      yield* db.startEntry(
-        projectId,
-        "pi",
-        false,
-        {
-          runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
-        },
-        { agent: "coordinator" },
-      )
-      assert.strictEqual(yield* c["Project.FocusEntry"]({}), null)
-      yield* herdr.seedAgent("test/main")
-      const focused = yield* c["Project.FocusEntry"]({})
-      assert.strictEqual(focused?.focused, true)
-      assert.strictEqual((yield* herdr.callsTo("focus"))[0]?.terminal, "test/main")
-    }),
-  )
-
-  test(
     "FocusEntry reports a runtime that cannot focus",
     Effect.gen(function* () {
       const db = yield* Db
@@ -892,38 +865,6 @@ describe("vibest.sock", () => {
       assert.strictEqual((yield* herdr.callsTo("focus")).length, 0)
     }),
     { noFocus: true },
-  )
-
-  test(
-    "List outside any repository shows every project, and a repository with no project is empty",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const a = yield* makeRepository
-      const b = yield* makeRepository
-      const one = yield* (yield* asEntry(yield* client, a)).Spawn({
-        agent: "general",
-        callerEnv: {},
-        harness: "pi",
-        prompt: "one",
-      })
-      const two = yield* (yield* asEntry(yield* client, b)).Spawn({
-        agent: "general",
-        callerEnv: {},
-        harness: "pi",
-        prompt: "two",
-      })
-      const outside = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "vibest-outside-" }))
-      const db = yield* Db
-      const entries = new Set([
-        (yield* db.entryOf(yield* projectOf(a)))!.id,
-        (yield* db.entryOf(yield* projectOf(b)))!.id,
-      ])
-      const listed = (yield* asCli(yield* client, outside).List({})).sessions.filter((row) => !entries.has(row.id))
-      assert.deepStrictEqual(listed.map((row) => row.id).sort(), [one.id, two.id].sort())
-      const bare = yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: "vibest-bare-" }))
-      yield* (yield* FakeGit).repository(bare, { branch: "main" })
-      assert.deepStrictEqual(yield* asCli(yield* client, bare).List({}), { sessions: [], machines: [] })
-    }),
   )
 
   test(

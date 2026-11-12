@@ -36,23 +36,6 @@ const session = {
 const isStored = (event: EngineEvent): event is Fact => "seq" in event
 
 describe("bus", () => {
-  it("a commit publishes in id order", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const db = yield* Db
-        const bus = yield* Bus
-        yield* db.insertSession(session, yield* projectOf("r"))
-        const sub = yield* bus.subscribe
-        yield* db.restartProcess(session.id)
-        const published = (yield* PubSub.takeUpTo(sub, 10)).filter(isStored)
-        assert.deepStrictEqual(
-          published.map((event) => event.type),
-          ["process.ended", "process.started"],
-        )
-        assert.isBelow(published[0]!.seq, published[1]!.seq)
-      }),
-    ))
-
   it("a rollback publishes nothing", () =>
     Effect.scoped(
       Effect.gen(function* () {

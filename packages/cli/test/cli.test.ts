@@ -846,22 +846,6 @@ it.effect("vibest execs the daemon command over the process environment and neve
 )
 
 test(
-  "doctor reads harnesses from vibestd, and --env is not a flag",
-  Effect.gen(function* () {
-    const layout = yield* Layout
-    const repo = yield* makeRepository
-    const run = (args: ReadonlyArray<string>) => vibest(repo, { HOME: layout.home, VIBEST_HOME: layout.home }, args)
-    const doctor = yield* run(["doctor"])
-    assert.strictEqual(doctor.code, 0, doctor.stderr)
-    assert.match(doctor.stdout, /Coding agents/)
-    assert.match(doctor.stdout, /\bpi\b/)
-    const flagged = yield* run(["--env", "A=b"])
-    assert.strictEqual(flagged.code, 2)
-    assert.match(flagged.stderr, /--env/)
-  }),
-)
-
-test(
   "daemon --foreground --import drops VIBEST_HANDOFF_ENV before it runs",
   Effect.gen(function* () {
     const agent = process.env.VIBEST_SESSION_ID

@@ -1,7 +1,7 @@
 # vibestd RPC contract
 
-What a client outside this TypeScript workspace (for example `apps/desktop`) builds against. Both files are generated
-and checked by `pnpm test`; never edit them by hand.
+What a client outside this TypeScript workspace (for example `apps/desktop`) builds against. Both are generated; never
+edit them by hand.
 
 - `rpc.json`: `{ protocol, capabilities, methods }`. Each method has its `access` (who may call it: `open`, `cli`,
   `agent`, `owner`, `session`, `self`, `peer`; a pair such as `["agent", "peer"]` when another
@@ -9,7 +9,8 @@ and checked by `pnpm test`; never edit them by hand.
   `payload`, `success` (for a stream: one element) and `error` (the method's errors and those of its middleware:
   `ProtocolRejected`, `InvalidCaller`, `NoSuchSession`, `DaemonStopping`). Regenerate with
   `pnpm --filter @vibest/protocol contract`.
-- `fixtures/*.ndjson`: lines recorded on `vibest.sock` against the real server with the test fakes. A line with a
+- `fixtures/*.ndjson`: lines recorded on `vibest.sock` against the real server with the test fakes, and checked by
+  `pnpm test`. A line with a
   `method` was sent by the client; a line without one was sent by vibestd. Ids, times, temp paths and the version are
   replaced by fixed values. Re-record with `VIBEST_RECORD_FIXTURES=1 pnpm test contract-fixtures` and review the diff.
 

@@ -362,6 +362,7 @@ const sendChecks: ReadonlyArray<Check> = [
 const checks: ReadonlyArray<Check> = [
   {
     id: "S2",
+    covers: ["S54"],
     title:
       "two sends to a busy Pi subagent are queued, then delivered once it is idle, merged into one prompt: one more execution, both rows delivered",
     run: async (w) => {

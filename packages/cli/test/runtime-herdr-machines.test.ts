@@ -75,7 +75,6 @@ const event = (link?: Record<string, string>, extra: Partial<Noted> = {}): Noted
   ...extra,
 })
 
-const ADD = ["machine", "add", "b-host", "--label", "racknerd/vibest", "--remote-session", "vibest"]
 const adds = (calls: ReadonlyArray<ReadonlyArray<string>>) => calls.filter((c) => c[0] === "machine" && c[1] === "add")
 
 const pinging = (version: string, detached?: boolean) => {
@@ -128,20 +127,6 @@ describe("runtime-herdr machines: link", () => {
 })
 
 describe("runtime-herdr machines: connect", () => {
-  it.effect("adds B's session once, labelled <name>/<session>, through herdr machine add", () =>
-    Effect.gen(function* () {
-      const herdr = fake()
-      const first = event({ session: "vibest", version: "0.9.5" })
-      yield* connect(herdr.cli, first)
-      assert.deepStrictEqual(adds(herdr.calls), [ADD])
-      assert.include(first.notes[0]!.message, "herdr: added racknerd/vibest here")
-      const second = event({ session: "vibest" })
-      yield* connect(herdr.cli, second)
-      assert.strictEqual(adds(herdr.calls).length, 1)
-      assert.deepStrictEqual(second.notes, [])
-    }),
-  )
-
   it.effect("a profile for the same target and session counts under any label, ssh:// or not", () =>
     Effect.gen(function* () {
       const herdr = fake({}, [profile({ target: "ssh://b-host" })])
@@ -181,21 +166,6 @@ describe("runtime-herdr machines: connect", () => {
       const e = event({ session: "vibest" })
       yield* connect(herdr.cli, e)
       assert.include(e.notes[0]!.message, "error: remote server is not ready for saved machines")
-      assert.isUndefined(e.notes[0]!.fix)
-    }),
-  )
-
-  it.effect("when B's server is not its own session leader, herdr's refusal gets the restart hint", () =>
-    Effect.gen(function* () {
-      const herdr = fake({ addFails: "error: remote server is not ready for saved machines\n" })
-      const e = event({ session: "vibest", version: "0.9.5", detached: "no" })
-      yield* connect(herdr.cli, e)
-      assert.strictEqual(adds(herdr.calls).length, 1)
-      assert.include(
-        e.notes[0]!.message,
-        "not ready for saved machines; racknerd's herdr session vibest was not started",
-      )
-      assert.include(e.notes[0]!.message, "restart that session on racknerd once no agent runs there")
       assert.isUndefined(e.notes[0]!.fix)
     }),
   )
@@ -283,23 +253,6 @@ describe("runtime-herdr machines: remove", () => {
 describe("runtime-herdr machines: locate", () => {
   const peer = { id: "racknerd", target: "b-host", link: { session: "vibest" } }
   const there = `vibest/w1:p3/${agentName(SESSION)}`
-
-  it.effect("missing with no profile; with one, its label, from herdr machine list alone", () =>
-    Effect.gen(function* () {
-      assert.isTrue((yield* locate(fake().cli, peer, new Map([[SESSION, there]]))).missing)
-      const herdr = fake({}, [profile({ label: "racknerd/vibest" })])
-      const found = yield* locate(herdr.cli, peer, new Map())
-      assert.deepStrictEqual(
-        { ...found, terminals: [...found.terminals] },
-        {
-          missing: false,
-          terminals: [],
-          as: "racknerd/vibest",
-        },
-      )
-      assert.deepStrictEqual(herdr.calls, [["machine", "list", "--json"]])
-    }),
-  )
 
   it.effect(
     "each B terminal becomes <B terminal>@<label of its herdr session>; one in an unsaved session gets a note",

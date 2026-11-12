@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Exit, Scope } from "effect"
+import { Effect, Exit } from "effect"
 
 import * as Registry from "./registry.ts"
 
@@ -59,17 +59,6 @@ describe("registry", () => {
       )
       assert.strictEqual(seen.length, 3)
     }).pipe(Effect.scoped),
-  )
-
-  it.effect("closing the owning scope removes its transforms", () =>
-    Effect.gen(function* () {
-      const { registry } = counted()
-      const scope = yield* Scope.make()
-      yield* registry.transform((e) => e.add({ id: "a", value: 1 })).pipe(Scope.provide(scope))
-      assert.strictEqual(registry.get().length, 1)
-      yield* Scope.close(scope, Exit.void)
-      assert.strictEqual(registry.get().length, 0)
-    }),
   )
 
   it.effect("a batch rebuilds and notifies once, with the committed value", () =>

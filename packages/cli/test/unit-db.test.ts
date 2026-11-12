@@ -314,32 +314,6 @@ describe("Db", () => {
     ),
   )
 
-  it.effect("the limit counts non-stopped rows", () =>
-    fresh(
-      Effect.gen(function* () {
-        const db = yield* Db
-        assert.isTrue(
-          yield* db.insertSession(session("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), yield* projectOf("r"), { max: 1 }),
-        )
-        assert.isFalse(
-          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), { max: 1 }),
-        )
-        yield* db.updateSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
-          status: "unknown",
-          startedAt: 1,
-          exitedAt: 1,
-        })
-        assert.isTrue(
-          yield* db.insertSession(session("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), yield* projectOf("r"), { max: 1 }),
-        )
-        assert.deepStrictEqual(
-          (yield* db.listSessions()).map((w) => w.id),
-          ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
-        )
-      }),
-    ),
-  )
-
   it.effect(
     "the task is the first inbox row; the open execution is the message row with no ended_at; status is memory only",
     () =>

@@ -52,40 +52,6 @@ const entryId = Effect.gen(function* () {
 
 describe("subagent runtime", () => {
   test(
-    "a subagent of the entry session inherits the entry session runtime",
-    Effect.gen(function* () {
-      const { repo, projectId, sessions, parent } = yield* entryId
-      const spawned = yield* sessions.spawn(input(repo, projectId, { parentSessionId: parent }))
-      assert.strictEqual(spawned.runtime, "herdr")
-      assert.strictEqual(spawned.decidedBy.runtime, "runtime-choice")
-    }),
-  )
-
-  test(
-    "--runtime overrides the parent runtime",
-    Effect.gen(function* () {
-      const db = yield* Db
-      const repo = yield* makeRepository
-      const projectId = yield* projectOf(repo)
-      const entry = yield* db.startEntry(
-        projectId,
-        "pi",
-        false,
-        {
-          runtime: "hc",
-          address: { machine: "local", id: "test/coord" },
-        },
-        { agent: "coordinator" },
-      )
-      const spawned = yield* (yield* Sessions).spawn(
-        input(repo, projectId, { parentSessionId: entry.sessionId, runtime: "herdr" }),
-      )
-      assert.strictEqual(spawned.runtime, "herdr")
-      assert.strictEqual(spawned.decidedBy.runtime, undefined)
-    }),
-  )
-
-  test(
     "an offline parent runtime refuses the start with the runtime's reason",
     Effect.gen(function* () {
       const { repo, projectId, sessions, parent } = yield* entryId

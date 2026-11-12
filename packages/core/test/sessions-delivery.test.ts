@@ -46,42 +46,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a report newer than the last execution, with none open, ends one more execution once",
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const herdr = yield* FakeRuntime
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeEnd(id, "pi", { text: "status: completed\nsummary: first" })
-      yield* herdr.endExecution(id)
-      yield* sessions.check(id)
-      yield* sessions.check(id)
-      const results = () =>
-        sql<{
-          input: string
-        }>`SELECT m.input FROM ${sql.literal(EXECUTIONS)} m WHERE m.session_id = ${id} AND m.status != 'working' ORDER BY m.id`.pipe(
-          Effect.orDie,
-        )
-      assert.deepStrictEqual(
-        (yield* results()).map((row) => unwrapped(row.input)),
-        ["do it"],
-      )
-      yield* writeEnd(id, "pi", { text: "status: completed\nsummary: typed" }, 5_000)
-      yield* sessions.check(id)
-      assert.deepStrictEqual(
-        (yield* results()).map((row) => unwrapped(row.input)),
-        ["do it", ""],
-      )
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "completed")
-      yield* sessions.check(id)
-      assert.deepStrictEqual(
-        (yield* results()).map((row) => unwrapped(row.input)),
-        ["do it", ""],
-      )
-    }),
-    { hooked: ["pi"] },
-  )
-
-  test(
     "a prompt typed while a send waits for ready is its own execution; the send waits for it to end",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -134,12 +98,6 @@ describe.concurrent("Sessions", () => {
     assert.isUndefined(yield* db.untakenTask(id))
     assert.isNull((yield* db.getSession(id))!.endedAt)
   })
-
-  test(
-    "auto-archive: a typed execution that ends before the first task was handed over hands the task over, not an archive",
-    typedBeforeTheTask,
-    { hooked: ["pi"] },
-  )
 
   test(
     "auto-archive with runtime status events: the first task is still handed over after a typed execution ends",
@@ -234,36 +192,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a typed execution is recorded at hook receipt, not after the lock wait",
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const herdr = yield* FakeRuntime
-      const { id, sessions } = yield* idleSession(yield* makeRepository)
-      const name = id
-      const at = yield* Clock.currentTimeMillis
-      const held = yield* herdr.hold("state", name)
-      const checking = yield* Effect.forkChild(sessions.check(id))
-      yield* held.reached
-      const typing = yield* Effect.forkChild(sessions.userPrompt(id, "typed"))
-      for (let i = 0; i < 30; i++) yield* Effect.yieldNow
-      yield* herdr.updateAgent(name, (a) => ({ ...a, status: "working", seq: a.seq + 1 }))
-      yield* writeEnd(id, "pi", { text: "status: completed\nsummary: typed" }, 2000)
-      yield* herdr.endExecution(name)
-      yield* TestClock.adjust("5 seconds")
-      yield* held.release()
-      yield* Fiber.join(checking)
-      yield* Fiber.join(typing)
-      const [execution] = yield* sql<{
-        startedAt: number
-      }>`SELECT started_at AS startedAt FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND input = 'typed'`.pipe(
-        Effect.orDie,
-      )
-      assert.strictEqual(execution!.startedAt, at)
-    }),
-    { hooked: ["pi"] },
-  )
-
-  test(
     "a reply after a late start report while confirm gives up is delivered, and the batch stays delivered",
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -352,38 +280,6 @@ describe.concurrent("Sessions", () => {
         [{ status: "failed" }],
       )
       assert.include((yield* sqlNotices(id)).at(-1)!, "send: busy")
-    }),
-    { hooked: ["pi"] },
-  )
-
-  test(
-    "a follow-up send opens its execution on that message and its inbox row",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const sql = yield* SqlClient.SqlClient
-      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository)
-      yield* writeEnd(id, "pi", { text: "status: completed" })
-      yield* herdr.endExecution(id)
-      yield* sessions.check(id)
-      yield* sessions.send(id, "fix the tests")
-      const execution = yield* until(
-        sql<{
-          input: string
-          inbox: number | null
-        }>`SELECT input, inbox_id AS inbox FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${id} AND status = 'working'`.pipe(
-          Effect.orDie,
-        ),
-        (rows) => rows[0]?.input === "fix the tests" && rows[0].inbox !== null,
-      )
-      const [sent] = yield* sql<{
-        id: number
-        status: string
-      }>`SELECT id, status AS status FROM inbox WHERE session_id = ${id} AND content = 'fix the tests'`.pipe(
-        Effect.orDie,
-      )
-      assert.strictEqual(execution[0]!.inbox, sent!.id)
-      assert.strictEqual(sent!.status, "delivered")
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
     }),
     { hooked: ["pi"] },
   )

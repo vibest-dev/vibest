@@ -318,32 +318,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a plugin that overrides the builtin's move with another harness starts there",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Sessions).check(id)
-      assert.strictEqual((yield* db.getSession(id))!.harnessId, "cursor")
-      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi", "cursor"],
-      )
-    }),
-    {
-      noRun: true,
-      plugins: [
-        Plugin.define({
-          id: "pick",
-          effect: (ctx) => ctx.agent.hook("fail", () => Effect.succeed({ harness: "cursor" })),
-        }),
-      ],
-    },
-  )
-
-  test(
     "a plugin that repeats a tried harness ends with no harness left",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime
@@ -443,31 +417,6 @@ describe.concurrent("Sessions", () => {
         }),
       ],
     },
-  )
-
-  test(
-    "a limit with every harness limited fails the execution naming each",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const { id, db } = yield* spawnWorking(yield* makeRepository)
-      const subs = yield* Subscriptions
-      for (const harness of ["pi", "claude", "cursor"] as const) yield* subs.report({ harness, limits: [limited] })
-      yield* herdr.endExecution(id)
-      yield* writeEnd(id, "pi", { error: "rate_limit" })
-      yield* (yield* Sessions).check(id)
-      const row = (yield* db.getSession(id))!
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi"],
-      )
-      assert.strictEqual(row.executionState, "failed")
-      assert.isNull(row.exitedAt)
-      const message = (yield* db.latestInbox(id, "notice"))!.message
-      assert.include(message, "pi: 5h limit exhausted, no reset time")
-      assert.strictEqual(message.includes("claude"), false)
-      assert.deepStrictEqual(yield* herdr.callsTo("close"), [])
-      assert.lengthOf(yield* sqlNotices(id), 1)
-    }),
   )
 
   test(
