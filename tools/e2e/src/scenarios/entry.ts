@@ -179,6 +179,11 @@ const checks: ReadonlyArray<Check> = [
         const prompt = ask("first")
         await execution(w, socket, first.pane, prompt, "done-first")
         const one = liveEntry(w)!
+        await until(
+          "Pi saved the conversation",
+          () => Bun.spawnSync(["find", `${env.PI_CODING_AGENT_DIR}/sessions`, "-name", "*.jsonl"]).stdout.length > 0,
+          30_000,
+        )
         await exitEntry(w, socket, first.pane, one.id)
 
         const again = await start([], "the reopened entry session")

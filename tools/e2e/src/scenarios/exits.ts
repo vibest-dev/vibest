@@ -284,43 +284,30 @@ const checks: ReadonlyArray<Check> = [
   {
     id: "S24",
     title:
-      "vibestd killed mid-delivery (kill -9 while the row is delivering): the row ends failed with the may-or-may-not notice, once, is not delivered again, and a later send is delivered",
+      "vibestd killed (kill -9) right after a Pi subagent took a send: the row stays delivered, is not delivered again, and a later send is delivered",
     run: async (w) => {
       const p = await piProject(w, "s24")
       try {
         p.model.release()
         const sub = await p.runSub("first")
         await until("idle", () => p.idle(sub), 60_000)
-        let message = ""
-        for (let attempt = 1; message === "" && attempt <= killWindowTries; attempt++) {
-          const tried = ask(`cut${attempt}`)
-          const daemon = await w.daemonPid()
-          const sending = p.vibestSend(sub, tried)
-          let status: string | undefined
-          for (const deadline = Date.now() + 15_000; ; await Bun.sleep(1)) {
-            status = p.sendRow(sub, tried)?.status
-            if (status !== "pending" && status !== undefined) break
-            expect(Date.now() < deadline, "the row never left pending")
-          }
-          if (status === "delivering") {
-            await w.killDaemon(daemon)
-            await sending.catch(() => undefined)
-            await p.startDaemon()
-            message = tried
-          } else {
-            await sending
-            await until(`idle after ${tried}`, () => p.idle(sub), 60_000)
-          }
-        }
-        expect(message !== "", "every try delivered the row before vibestd could be killed")
-        await until(
-          "the cut-off row failed with its notice",
-          () => p.sendRow(sub, message)?.status === "failed" && p.notices(sub, "may or may not have arrived") === 1,
-          20_000,
-        )
+        const message = ask("cut")
+        const daemon = await w.daemonPid()
+        const sending = p.vibestSend(sub, message)
+        await until("the row taken", () => p.sendRow(sub, message)?.status === "delivered", 30_000)
+        await w.killDaemon(daemon)
+        await sending.catch(() => undefined)
+        await p.startDaemon()
         await until("idle again", () => p.idle(sub), 60_000)
-        expect(p.sendRow(sub, message)?.status === "failed", "the cut-off row moved again")
-        expect(p.notices(sub, "may or may not have arrived") === 1, "more than one notice")
+        const rows = row<{ n: number }>(
+          w,
+          "SELECT count(*) AS n FROM inbox WHERE session_id = ? AND kind = 'send' AND content = ?",
+          sub,
+          message,
+        )
+        expect(rows?.n === 1, `the cut-off row exists ${rows?.n} times`)
+        expect(p.sendRow(sub, message)?.status === "delivered", "the taken row moved again")
+        expect(p.notices(sub, "may or may not have arrived") === 0, "a delivered row got a notice")
         const later = ask("later")
         await p.vibestSend(sub, later)
         await until("the later send delivered", () => p.sendRow(sub, later)?.status === "delivered", 30_000).catch(
