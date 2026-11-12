@@ -86,7 +86,7 @@ const lastExecution = (w: World, sub: string) =>
   )
 
 const entryIdOf = (w: World) =>
-  row<{ id: string }>(w, "SELECT id FROM session WHERE agent = 'main' AND ended_at IS NULL")!.id
+  row<{ id: string }>(w, "SELECT id FROM session WHERE agent = 'coordinator' AND ended_at IS NULL")!.id
 
 const sendsFrom = (w: World, sender: string, recipient: string) =>
   rows<{ id: number; status: string; execution: number | null; content: string }>(
@@ -363,6 +363,7 @@ const sendChecks: ReadonlyArray<Check> = [
 const checks: ReadonlyArray<Check> = [
   {
     id: "S2",
+    covers: ["S54"],
     title:
       "two sends to a busy Pi subagent are queued, then delivered once it is idle, merged into one prompt: one more execution, both rows delivered",
     run: async (w) => {
@@ -634,7 +635,7 @@ const checks: ReadonlyArray<Check> = [
         }
         const refusedHere = await typed(`${binary} machine ls`, hinted)
         expect(refusedHere.includes(`session=${id}`), `the new terminal did not inherit the identity: ${refusedHere}`)
-        const wayOut = "env -u VIBEST_SESSION_ID -u VIBEST_AGENT vibest machine ls"
+        const wayOut = "env -u VIBEST_SESSION_ID vibest machine ls"
         expect(
           refusedHere.includes("Forbidden") &&
             refusedHere.includes(`This shell carries agent session ${id}`) &&

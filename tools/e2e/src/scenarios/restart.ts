@@ -187,7 +187,7 @@ const checks: ReadonlyArray<Check> = [
           }
         }
         const entryId = () =>
-          read(`s.agent_type = 'main' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
+          read(`s.agent_type = 'coordinator' AND s.ended_at IS NULL AND s.directory LIKE ?`, `%/${path.basename(repo)}`)
         const subRow = (id: string) => read("s.id = ?", id)
         const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
         const listed = async (id: string) =>
@@ -454,9 +454,8 @@ const checks: ReadonlyArray<Check> = [
         expect((await listed(id))?.pane_id === pane, `the subagent's pane changed: ${pane}`)
         expect(processOf() !== oldProcess, `the restarted subagent is still process ${oldProcess}`)
         const LATE = "a late reply from the harness the restart replaced"
-        const agent = rows<{ agent: string }>(w, "SELECT agent FROM session WHERE id = ?", id)[0]!.agent
         const late = await w.run(repo, [wrapper, "integration", "stop", "--harness", "pi"], {
-          env: { ...env, VIBEST_SESSION_ID: id, VIBEST_AGENT: agent, VIBEST_PROCESS: String(oldProcess) },
+          env: { ...env, VIBEST_SESSION_ID: id, VIBEST_PROCESS: String(oldProcess) },
           stdin: JSON.stringify({ type: "agent_settled", text: LATE, error: "", aborted: false }),
         })
         expect(late.code === 0, `the old process's execution end was not taken: ${late.stderr}`)
@@ -474,33 +473,24 @@ const checks: ReadonlyArray<Check> = [
     id: "U4",
     covers: ["D8"],
     title:
-      "vibest update run by a Claude entry session itself (fake model): the CLI hands the restart to vibestd and returns; vibestd restarts it in its pane on the same conversation, its inbox gets the continue notice and that execution ends with a reply, and vibest update runs once",
+      "vibest update run by a Claude entry session (fake model) is refused: the tool result says it is for the user, the session keeps running on the same process and conversation, and nothing is installed or restarted",
     run: async (w) => {
       for (const bin of ["herdr", "claude"]) if (!Bun.which(bin)) throw new Skip(`${bin} not on PATH`)
       const session = `${w.herdrSession}-cupdate`
       const socket = path.join(w.home, ".config", "herdr", "sessions", session, "herdr.sock")
       const UPDATE = "Run vibest update --yes now."
-      const NOTICE =
-        "vibest update is done and restarted this agent; do not run it again, continue the interrupted work."
       let updates = 0
-      let noticed = false
-      let wrapper = "vibest"
       const model = fakeAnthropic((r) => {
         const last = text(lastUser(r))
         if (last.includes(UPDATE)) {
           if (r.tools.length > 0) updates++
-          return { tool: "Bash", input: { command: `${wrapper} update --yes` } }
-        }
-        if (last.includes(NOTICE)) {
-          noticed = true
-          return "CONTINUED"
+          return { tool: "Bash", input: { command: "vibest update --yes" } }
         }
         return last.includes('"tool_result"') ? "UPDATED" : "ok"
       })
       try {
         const repo = await project(w, "claude-update")
         const install = await oldInstall(w, "cupdate")
-        wrapper = install.wrapper
         const configTheResumeCheckReads = w.config.claude
         const flags = await claudeEnv(w, "cupdate", model.url, configTheResumeCheckReads)
         const vibest = async (args: ReadonlyArray<string>, timeoutMs = 120_000) => {
@@ -522,7 +512,7 @@ const checks: ReadonlyArray<Check> = [
               db
                 .query<EntryRow, [string]>(
                   `SELECT id, harness_session_id AS conversation, runtime, pid, version
-                   FROM ${SESSIONS} s WHERE agent_type = 'main' AND ended_at IS NULL AND directory = ?`,
+                   FROM ${SESSIONS} s WHERE agent_type = 'coordinator' AND ended_at IS NULL AND directory = ?`,
                 )
                 .get(repo) ?? undefined
             )
@@ -561,7 +551,6 @@ const checks: ReadonlyArray<Check> = [
         ).catch(failWith)
         const before = entryId()!
 
-        await install.point(binary)
         await typeAndEnter(
           screen,
           {
@@ -572,42 +561,17 @@ const checks: ReadonlyArray<Check> = [
         )
 
         await until(
-          "the entry session restarted on this integration",
-          () => {
-            const row = entryId()
-            return (
-              row !== undefined &&
-              row.pid != null &&
-              row.pid !== before.pid &&
-              row.version !== install.old &&
-              row.version !== null
-            )
-          },
-          240_000,
-        ).catch(failWith)
-        expect(!alive(before.pid!), `the old Claude ${before.pid} still runs`)
-        expect(entryId()?.id === before.id, `the entry session's session changed: ${before.id} -> ${entryId()?.id}`)
-        expect(
-          entryId()?.conversation === before.conversation,
-          `the conversation changed: ${before.conversation} -> ${entryId()?.conversation}`,
-        )
-        expect(
-          entryId()?.runtime === before.runtime,
-          `the terminal changed: ${before.runtime} -> ${entryId()?.runtime}`,
-        )
-        const asked = () => model.requests.findIndex((r) => text(lastUser(r)).includes(UPDATE))
-        await until(
-          "the continue notice in a request after the update",
-          () => model.requests.slice(asked() + 1).some((r) => text(lastUser(r)).includes(NOTICE)),
-          180_000,
-        ).catch(failWith)
-        await until(
-          "the execution on the continue notice ended with its reply",
-          async () => noticed && /[⏺●] CONTINUED\s+\S.*· done/.test(await screen()),
+          "the refusal reached the model",
+          () => model.requests.some((r) => text(lastUser(r)).includes("Forbidden")),
           120_000,
         ).catch(failWith)
+        await until("the entry session replies", async () => /[⏺●] UPDATED/.test(await screen()), 120_000).catch(
+          failWith,
+        )
         expect(updates === 1, `vibest update was asked for ${updates} times`)
-        expect(entryId()?.pid !== null && alive(entryId()!.pid!), "the restarted entry session is not running")
+        expect(entryId()?.pid === before.pid && alive(before.pid!), "the entry session's harness was restarted")
+        expect(entryId()?.conversation === before.conversation, "the conversation changed")
+        expect(entryId()?.version === install.old, `the integration changed to ${entryId()?.version}`)
       } finally {
         model.stop()
         await dropHerdrSession(w, session)

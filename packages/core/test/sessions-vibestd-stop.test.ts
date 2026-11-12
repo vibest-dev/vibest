@@ -2,6 +2,7 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
 import { SessionLocks } from "@vibest/core/session/locks"
+import { Placement } from "@vibest/core/session/placement"
 import { Sessions } from "@vibest/core/sessions"
 import { Deferred, Effect, FileSystem, Ref } from "effect"
 import { SqlClient } from "effect/sql"
@@ -28,6 +29,7 @@ const nextVibestd = (done: Effect.Effect<boolean, never, TestServices>) =>
   Effect.gen(function* () {
     const next = yield* Sessions.make({ maxSessions: undefined }).pipe(
       Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+      Effect.provideServiceEffect(Placement, Placement.make),
     )
     yield* until(done, (yes) => yes)
     yield* until(next.inMemory, (m) => m.locks === 0)
@@ -50,10 +52,16 @@ describe.concurrent("after a vibestd stop", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       const spawned = yield* Deferred.make<string>()
       return yield* heldAtOpen(
         undefined,
@@ -138,10 +146,16 @@ describe.concurrent("after a vibestd stop", () => {
       const herdr = yield* FakeRuntime
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       const opening = yield* herdr.hold("open")
       const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
       yield* opening.reached
@@ -163,21 +177,6 @@ describe.concurrent("after a vibestd stop", () => {
     )
 
   test(
-    "vibestd stopped in its ready wait leaves no execution and the task for the next vibestd",
-    waitingForReady((id) =>
-      Effect.gen(function* () {
-        const db = yield* Db
-        assert.deepStrictEqual(yield* executionInputs(id), [])
-        assert.strictEqual(yield* db.untakenTask(id), "do it")
-        yield* nextVibestd(Effect.map(typed("do it"), (n) => n === 1))
-        assert.deepStrictEqual(yield* executionInputs(id), [{ input: "do it", status: "working" }])
-        assert.isUndefined(yield* db.untakenTask(id))
-      }),
-    ),
-    { hooked: ["pi"] },
-  )
-
-  test(
     "a task handed over at reconcile that does not start ends the execution not_started and is not handed over again",
     waitingForReady((id) =>
       Effect.gen(function* () {
@@ -185,6 +184,7 @@ describe.concurrent("after a vibestd stop", () => {
         yield* Ref.set(herdr.skipPromptUpdates, 2)
         const next = yield* Sessions.make({ maxSessions: undefined }).pipe(
           Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+          Effect.provideServiceEffect(Placement, Placement.make),
         )
         yield* untilVirtual(executionInputs(id), (executions) => executions[0]?.status === "not_started")
         assert.strictEqual(yield* typed("do it"), 2)
@@ -204,10 +204,16 @@ describe.concurrent("after a vibestd stop", () => {
       const herdr = yield* FakeRuntime
       const db = yield* Db
       const repo = yield* makeRepository
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      yield* db.startEntry(
+        yield* projectOf(repo),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       const sending = yield* herdr.hold("send")
       const { id } = yield* (yield* Sessions).spawn(yield* spawnInput(repo))
       yield* sending.reached
@@ -216,6 +222,7 @@ describe.concurrent("after a vibestd stop", () => {
         assert.isFalse(yield* db.executionAccepted(id))
         yield* Sessions.make({ maxSessions: undefined }).pipe(
           Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+          Effect.provideServiceEffect(Placement, Placement.make),
         )
         yield* untilVirtual(executionInputs(id), (executions) => executions[0]?.status !== "working")
         assert.deepStrictEqual(

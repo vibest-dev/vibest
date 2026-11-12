@@ -118,10 +118,9 @@ export const sessionToStop = (
   paneId: string | undefined,
   agent: string | undefined,
 ) => {
-  const live = sessions.filter((session) => session.agent !== "main")
-  const byPane = paneId === undefined ? undefined : live.find((session) => session.paneId === paneId)
+  const byPane = paneId === undefined ? undefined : sessions.find((session) => session.paneId === paneId)
   if (byPane) return byPane.id
-  return agent === undefined ? undefined : live.find((session) => agentName(session.id) === agent)?.id
+  return agent === undefined ? undefined : sessions.find((session) => agentName(session.id) === agent)?.id
 }
 
 export const ACTIONS = [
@@ -216,13 +215,14 @@ const theDaemon = {
         return { action: focused.focused ? ("focused" as const) : ("runs in" as const), place: focused.place }
       const self = yield* VibestCommand
       const opened = yield* ask(directory, (client) =>
-        client.Launch({ argv: [...self], focus: true, runtime: KIND, callerEnv: callerEnvOf() }),
+        client.Launch({ argv: [...self], agent: "coordinator", focus: true, runtime: KIND, callerEnv: callerEnvOf() }),
       )
       return { action: "opened" as const, place: opened.place }
     }),
   spawn: (directory: string, prompt: string) =>
     Effect.gen(function* () {
-      return (yield* ask(directory, (client) => client.Spawn({ prompt, callerEnv: callerEnvOf() }))).id
+      return (yield* ask(directory, (client) => client.Spawn({ prompt, agent: "general", callerEnv: callerEnvOf() })))
+        .id
     }),
   interrupt: (id: string) => ask("/", (client) => client.Interrupt({ id })).pipe(Effect.asVoid),
   list: (directory: string | undefined) =>

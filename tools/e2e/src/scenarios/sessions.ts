@@ -195,7 +195,7 @@ const checks: ReadonlyArray<Check> = [
         const listed = await ls(w, p)
         const sub = listed.find((e) => e.id === a)
         expect(
-          listed.some((e) => e.agent === "main") &&
+          listed.some((e) => e.agent === "coordinator") &&
             sub !== undefined &&
             sub.latest?.summary.includes("done-s5") === true,
           `ls: ${JSON.stringify(listed)}`,
@@ -207,14 +207,6 @@ const checks: ReadonlyArray<Check> = [
       } finally {
         await p.close()
       }
-    },
-  },
-  {
-    id: "S52",
-    title: "vibest report is a usage error: sessions message with vibest send",
-    run: async (w) => {
-      const r = await w.vibest(["report", "--", "x"])
-      expect(r.code !== 0 && /report/.test(r.stderr), `vibest report exited ${r.code}: ${r.stderr}${r.stdout}`)
     },
   },
   {

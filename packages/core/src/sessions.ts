@@ -9,6 +9,7 @@ import {
   NoSuchSession,
   RuntimeUnreachable,
   SessionBusy,
+  type UnknownAgent,
 } from "@vibest/schema/session"
 import {
   Cause,
@@ -27,6 +28,7 @@ import {
   Ref,
 } from "effect"
 
+import { Agents } from "./agents.ts"
 import { sessionArchive } from "./archive.ts"
 import { Bus, type EngineEvent } from "./bus.ts"
 import { Db, type SessionFilter, type SessionRow, sessionEnded } from "./db.ts"
@@ -35,12 +37,11 @@ import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
 import * as Engine from "./engine.ts"
 import { sessionExecutions } from "./executions.ts"
-import { encodeCommand, Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
+import { Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
 import { Inbox, text as inboxText } from "./inbox.ts"
 import { entryCommand, restartArgv } from "./launch.ts"
-import { limitMoveBox, sessionMove } from "./move.ts"
+import { sessionMove } from "./move.ts"
 import { Layout, VibestCommand } from "./paths.ts"
-import { sessionPlacement } from "./placement.ts"
 import { errorMessage, Plugins } from "./plugins.ts"
 import { Processes } from "./processes.ts"
 import { projectRoot, workspaceGit } from "./project-create.ts"
@@ -61,12 +62,10 @@ import type { Platform } from "./session-types.ts"
 import { busy, busyOf, CONFIRM_TIMEOUT, Executions, STOP_WAIT } from "./session/executions.ts"
 import { SessionLive } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
+import { Placement, runtimeEnv } from "./session/placement.ts"
 import { sessionSpawn, type SpawnInput, type Spawned } from "./spawn.ts"
 import { Subscriptions } from "./subscriptions/service.ts"
-import { projectText, sessionSystemPrompt, writeSystemPrompt } from "./system-prompt.ts"
 import { Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
-export const runtimeEnv = (runtime: string, address: { readonly machine: string; readonly id: string }) =>
-  JSON.stringify({ runtime, machine: address.machine, ...(address.id !== "" ? { terminal: address.id } : {}) })
 
 export {
   AllocationFailed,
@@ -89,6 +88,7 @@ export const HOOK_GRACE = Duration.seconds(10)
 export const TAIL_LINES = 30
 
 const SESSION_DEPS = [
+  Agents.node,
   Bus.node,
   Db.node,
   Drain.node,
@@ -97,6 +97,7 @@ const SESSION_DEPS = [
   Harness.node,
   Harnesses.node,
   Inbox.node,
+  Placement.node,
   Plugins.node,
   Processes.node,
   Runtimes.node,
@@ -127,6 +128,7 @@ export class Sessions extends Context.Service<
       | LimitReached
       | HarnessUnavailable
       | NoCallingSession
+      | UnknownAgent
       | NoHarnessChosen
       | NoRuntime
       | AgentRefused
@@ -171,13 +173,13 @@ export class Sessions extends Context.Service<
       const runtimes = yield* Runtimes
       const harness = yield* Harness
       const harnesses = yield* Harnesses
+      const agents = yield* Agents
       const inbox = yield* Inbox
       const drain = yield* Drain
       const layout = yield* Layout
       const fs = yield* FileSystem.FileSystem
       const crypto = yield* Crypto.Crypto
       const path = yield* Path.Path
-      const vibest = yield* VibestCommand
       const plugins = yield* Plugins
       const removal = yield* Remove.make
       const processes = yield* Processes
@@ -200,22 +202,6 @@ export class Sessions extends Context.Service<
         )
       const locked = locks.locked
       const logged = Engine.logFailure
-
-      const notice = (session: SessionRow, message: string) => inbox.enqueue({ sessionId: session.id, message })
-
-      const worktreeOf = (session: SessionRow) =>
-        db.sessionDirectory(session.id).pipe(
-          Effect.flatMap((directory) =>
-            directory
-              ? Effect.succeed(directory)
-              : Effect.fail(
-                  new NoSuchSession({
-                    id: session.id,
-                    message: `${session.id} records no directory; nothing was deleted`,
-                  }),
-                ),
-          ),
-        )
 
       const live = (session: SessionRow) => runtimes.route(session.runtime)
 
@@ -250,94 +236,27 @@ export class Sessions extends Context.Service<
         })
 
       const { awaitReady, settleAfterInterrupt, interruptAgent, prompt, finish } = yield* Executions
+      const {
+        notice,
+        worktreeOf,
+        systemPromptOf,
+        launchArgv,
+        handTask,
+        launch,
+        resume,
+        republish,
+        recount,
+        openTerminal,
+        show,
+        locate,
+      } = yield* Placement
 
-      const vibestEnv = (session: SessionRow, process?: number) => ({
-        ...(process === undefined ? {} : { VIBEST_PROCESS: String(process) }),
-        VIBEST_SESSION_ID: session.id,
-        VIBEST_PROJECT_ID: session.projectId,
-        VIBEST_PROJECT_DIR: layout.project(session.projectId),
-        VIBEST_AGENT: session.agent,
-        VIBEST_HARNESS: session.harnessId,
-        VIBEST_RUNTIME: runtimeEnv(session.runtime, { machine: session.address.machine, id: "" }),
-        VIBEST_HOME: layout.home,
-        VIBEST_COMMAND: encodeCommand(vibest),
-      })
-
-      const systemPromptOf = (session: SessionRow) =>
-        Effect.gen(function* () {
-          return sessionSystemPrompt({
-            id: session.id,
-            peer: yield* db.earlierSharer(session.id),
-            creator: yield* db.creatorLabel(session.id),
-            projectDir: layout.project(session.projectId),
-            vibest,
-            ...(yield* projectText(layout.project(session.projectId))),
-          })
-        })
-
-      const launchArgv = Effect.fn("Sessions.launchArgv")(function* (session: SessionRow, resume: boolean) {
-        const file = yield* systemPromptOf(session).pipe(
-          Effect.flatMap((text) => writeSystemPrompt(session.id, text)),
-          Effect.provideContext(platform),
-        )
-        const adapter = yield* harnesses.get(session.harnessId)
-        const pluginDir = yield* harness.plugin(adapter.id)
-        const id = session.harnessSessionId
-        const resumeThis = resume && id !== null && (yield* db.canResumeConversation(session.id, id))
-        return [
-          adapter.binary,
-          ...adapter.launchArgs({
-            worktree: yield* worktreeOf(session),
-            projectDir: layout.project(session.projectId),
-            systemPromptFile: file,
-            provider: session.provider,
-            model: session.model,
-            sessionId: id,
-            resume: resumeThis,
-            pluginDir,
-            vibest,
-            env: vibestEnv(session),
-          }),
-        ]
-      })
-
-      const limit = limitMoveBox()
       const { deliverQueued } = sessionExecutions({
         db,
         pulls: (session) => inbox.pulls(session.harnessId),
         undelivered: inbox.undelivered,
         prompt,
-        handTask: (h, session, terminal, task) => handTask(h, session, terminal, task),
-      })
-
-      const handTask = (h: Runtime, session: SessionRow, terminal: Terminal, task: string) =>
-        Effect.gen(function* () {
-          const first = (yield* harnesses.get(session.harnessId)).systemPromptInPrompt
-            ? `${yield* systemPromptOf(session)}\n\n# Task\n\n${task}`
-            : task
-          const notStarted = yield* prompt(h, session, terminal, first, db.linkTask(session.id))
-          if (notStarted) yield* notice(session, notStarted)
-        })
-
-      const afterOpen = (h: Runtime, session: SessionRow, terminal: Terminal, root: string, firstPrompt: string) =>
-        Effect.gen(function* () {
-          yield* show(h, session, terminal, root)
-          yield* handTask(h, session, terminal, firstPrompt)
-        })
-
-      const { launch, resume, republish, recount, openTerminal, show, locate } = sessionPlacement({
-        db,
-        runtimes,
-        layout,
-        fs,
-        path,
-        worktreeOf,
-        vibestEnv,
-        launchArgv,
-        notice,
-        prompt,
-        limitMove: limit.move,
-        afterOpen,
+        handTask,
       })
 
       const move = sessionMove({
@@ -357,13 +276,13 @@ export class Sessions extends Context.Service<
         terminate: processes.terminate,
         platform,
       })
-      limit.move.rerun = move.rerun
 
       const { spawn } = sessionSpawn({
         db,
         runtimes,
         harness,
         harnesses,
+        agents,
         plugins,
         drain,
         layout,
@@ -377,6 +296,7 @@ export class Sessions extends Context.Service<
         worktreeOf,
         logged,
         launch,
+        onOwnLimit: move.rerun,
       })
 
       const check = Effect.fn("Sessions.check")(function* (id: string) {
@@ -503,7 +423,7 @@ export class Sessions extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const rerun = (terminal: Terminal | undefined) =>
-            limit.move.rerun(h, session, terminal, "", false, limited.failure, limited.execution)
+            move.rerun(h, session, terminal, "", false, limited.failure, limited.execution)
           if (session.exitedAt !== null) return yield* rerun(undefined)
           const successor = (yield* db.currentProcessId(session.id)) !== limited.process
           if (!successor || exited) return yield* rerun(session.address.id === "" ? undefined : session.address)
@@ -568,7 +488,8 @@ export class Sessions extends Context.Service<
         const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
         if (state !== undefined && busy(state)) return
         if (state === undefined && !(yield* alive(h, terminal))) {
-          if (session.exitedAt !== null && (yield* db.pendingInbox(id)).length === 0) return
+          if (session.exitedAt === null) return yield* check(id)
+          if ((yield* db.pendingInbox(id)).length === 0) return
           if (!(yield* harnesses.get(session.harnessId)).ownSessionId && !session.harnessSessionId)
             return yield* new NoSuchSession({
               id,
@@ -694,7 +615,7 @@ export class Sessions extends Context.Service<
         })
 
       const view = (session: SessionRow) =>
-        session.agent === "main"
+        session.entry
           ? Effect.map(db.sessionDirectory(session.id), (directory) => ({
               ...session,
               worktree: directory ?? "",
@@ -854,7 +775,7 @@ export class Sessions extends Context.Service<
         scope,
         locked: (id) => locked(id),
         checkLater: (id) => Effect.forkIn(checkLocked(id), scope).pipe(Effect.asVoid),
-        launchArgv: (session, resume) => launchArgv(session, resume).pipe(Effect.provideContext(platform)),
+        launchArgv,
         entryArgv: (entry) =>
           Effect.gen(function* () {
             yield* db.patchLive(entry.id, { ready: null })
@@ -862,6 +783,7 @@ export class Sessions extends Context.Service<
             const savedId = entry.harnessSessionId
             const command = yield* entryCommand({
               harness: entry.harnessId,
+              agent: entry.agent,
               root,
               provider: entry.provider,
               model: entry.model,
@@ -875,6 +797,7 @@ export class Sessions extends Context.Service<
             })
             return restartArgv(command)
           }).pipe(
+            Effect.provideService(Agents, agents),
             Effect.provideService(Harness, harness),
             Effect.provideService(Harnesses, harnesses),
             Effect.provideService(Layout, layout),
@@ -912,7 +835,7 @@ export class Sessions extends Context.Service<
             const prompting = yield* Ref.get((yield* track(id)).prompting)
             yield* db.startObserved(id, prompting || text.trim() === "" ? undefined : text, now, process)
           }),
-        republish: republish().pipe(Effect.provideContext(platform)),
+        republish: republish(),
         inMemory: Effect.gen(function* () {
           return { tracked: (yield* sessionLive.size).tracked, locks: locks.size(), reconciles }
         }),

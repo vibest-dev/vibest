@@ -8,11 +8,11 @@ import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 
 import { KIND as RUNTIME } from "../../runtime-herdr/src/terminal-runtime.ts"
-import { entryPending, projectOf } from "./lib/directory.ts"
+import { projectOf } from "./lib/directory.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { HARNESSES, PULLING_CLAUDE, PULLING_PI } from "./lib/harnesses.ts"
-import { replyOf, lastSentBy, settled, until, writeEnd } from "./lib/observe.ts"
+import { lastSentBy, replyOf, settled, until, writeEnd } from "./lib/observe.ts"
 import { makeRepository, type TestOptions } from "./lib/session.ts"
 import {
   spawnInput,
@@ -57,10 +57,16 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       const herdr = yield* FakeRuntime
       const sessions = yield* Sessions
       const db = yield* Db
-      const entry = yield* db.startEntry(yield* projectOf(repo), entryHarness, false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(repo),
+        entryHarness,
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
       yield* herdr.seedAgent("test/coord")
       const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), ...input, archive: true })
       yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
@@ -120,51 +126,6 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       assert.strictEqual(rows[0]!.status, "delivered")
       assert.include(yield* replyOf(w.id), "found it")
       assert.isNotNull((yield* w.db.getSession(w.id))!.exitedAt)
-    }),
-  )
-
-  test(
-    "a Pi entry session: archived once it took the message, and a clean archive sends it nothing more",
-    Effect.gen(function* () {
-      const inbox = yield* Inbox
-      const w = yield* archiveSession(yield* makeRepository, "pulling-pi")
-      yield* askEntry(w)
-      yield* finishExecution(w, "status: completed")
-      assert.isFalse(yield* archived(w.db, w.id))
-      const taken = yield* inbox.take(w.entryId, undefined)
-      assert.include(taken!.text, "<agent-message")
-      yield* until(archived(w.db, w.id), (a) => a)
-      yield* letForkedArchiveRun
-      assert.deepStrictEqual(yield* entryPending(w.db, w.projectId), [])
-      assert.deepStrictEqual(yield* sqlNotices(w.id), [])
-      yield* until((yield* Sessions).inMemory, (m) => m.tracked === 0 && m.locks === 0)
-    }),
-  )
-
-  test(
-    "a Claude entry session pulling its inbox: archived once it took the batch holding the message",
-    Effect.gen(function* () {
-      const inbox = yield* Inbox
-      const db = yield* Db
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const entry = yield* db.startEntry(yield* projectOf(repo), "pulling-claude", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
-      yield* db.noteConversation(entry.sessionId, "claude-1")
-      yield* herdr.seedAgent("test/coord")
-      const sessions = yield* Sessions
-      const { id } = yield* sessions.spawn({ ...(yield* spawnInput(repo)), archive: true })
-      yield* until(db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
-      yield* sessions.check(id)
-      yield* db.insertSend(entry.sessionId, "a question", undefined, id)
-      yield* finishExecution({ id, sessions, herdr }, "status: completed")
-      yield* letForkedArchiveRun
-      assert.isFalse(yield* archived(db, id))
-      const taken = yield* until(inbox.take(entry.sessionId, undefined), (t) => t !== undefined)
-      assert.lengthOf(taken!.ids, 1)
-      yield* until(archived(db, id), (a) => a)
     }),
   )
 

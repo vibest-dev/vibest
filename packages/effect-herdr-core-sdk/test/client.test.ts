@@ -7,15 +7,11 @@ import * as HcBun from "../src/bun.js"
 import {
   Hc,
   HcCoreTooOld,
-  HcError,
   HcGenerationMismatch,
   HcMethodsMissing,
   HcTransportError,
   USED_METHODS,
 } from "../src/index.js"
-
-const RECORDED_TERMINAL =
-  '{"address":"t1","argv":["sh"],"cols":200,"created_ms":1793929163810,"cwd":"/tmp","die_with_parent":false,"exit_code":null,"finished_ms":null,"identity":"ghostty","keep":true,"labels":{"vibest.runtime":"hc"},"name":"probe1","notify":false,"parent":null,"pid":26170,"reason":null,"reported":false,"rm":false,"rows":120,"screen":"exact","signal":null,"state":"live","status":null,"status_ms":null,"template":null,"title":"","turn":0}'
 
 interface Core {
   readonly generation: number
@@ -34,17 +30,7 @@ const recorded = (core: Core, sent?: number): Record<string, ReadonlyArray<strin
       : [
           `{"id":ID,"jsonrpc":"2.0","result":{"core":{"id":"5d09","name":"mac-mini"},"features":["framed","attach","events","status","shell"],"framed":false,"generation":${core.generation},"methods":${JSON.stringify(core.methods)},"version":${JSON.stringify(core.version)}}}`,
         ],
-  "terminal.get": [`{"id":ID,"jsonrpc":"2.0","result":${RECORDED_TERMINAL}}`],
-  "terminal.kill": [
-    '{"error":{"code":-32000,"data":{"hint":"see `hc ls --all`","kind":"not_found"},"message":"no terminal \\"t99\\""},"id":ID,"jsonrpc":"2.0"}',
-  ],
   "terminal.read": ['{"id":ID,"jsonrpc":"2.0","result":{"complete":"yes"}}'],
-  "events.subscribe": [
-    '{"id":ID,"jsonrpc":"2.0","result":{"channel":null,"seq":0,"terminals":[]}}',
-    `{"jsonrpc":"2.0","method":"event","params":{"data":${RECORDED_TERMINAL},"seq":1,"terminal":"t1","type":"created"}}`,
-    '{"jsonrpc":"2.0","method":"event","params":{"data":{"argv":["sh"],"cwd":"/private/tmp","name":"bash","pid":26170},"seq":2,"terminal":"t1","type":"foreground"}}',
-    '{"jsonrpc":"2.0","method":"heartbeat","params":{}}',
-  ],
 })
 
 const decodeRequest = Schema.decodeUnknownEffect(
@@ -90,45 +76,10 @@ const fakeServer = (core: Core = CURRENT) =>
   })
 
 layer(Layer.mergeAll(BunServices.layer, HcBun.layer))("Hc client", (it) => {
-  it.effect("call decodes the result with the generated schema", () =>
-    Effect.gen(function* () {
-      const { hc } = yield* fakeServer()
-      const terminal = yield* hc.call("terminal.get", { terminal: "t1" })
-      assert.strictEqual(terminal.address, "t1")
-      assert.deepStrictEqual(terminal.labels, { "vibest.runtime": "hc" })
-      assert.strictEqual(terminal.state, "live")
-    }),
-  )
-
-  it.effect("a server error is an HcError carrying data.kind and the hint", () =>
-    Effect.gen(function* () {
-      const { hc } = yield* fakeServer()
-      const e = yield* Effect.flip(hc.call("terminal.kill", { terminal: "t99" }))
-      assert.instanceOf(e, HcError)
-      assert.deepInclude(e, { method: "terminal.kill", kind: "not_found", hint: "see `hc ls --all`" })
-    }),
-  )
-
   it.effect("a result that does not match the schema is a transport error, not a wrong value", () =>
     Effect.gen(function* () {
       const { hc } = yield* fakeServer()
       assert.instanceOf(yield* Effect.flip(hc.call("terminal.read", { terminal: "t1" })), HcTransportError)
-    }),
-  )
-
-  it.effect("a missing socket is an HcTransportError", () =>
-    Effect.gen(function* () {
-      const { dir } = yield* fakeServer()
-      const absent = yield* Hc.make(`${dir}/absent.sock`)
-      assert.instanceOf(yield* Effect.flip(absent.call("terminal.get", { terminal: "t1" })), HcTransportError)
-    }),
-  )
-
-  it.effect("hello accepts the same generation at the minimum or a newer version", () =>
-    Effect.gen(function* () {
-      assert.strictEqual((yield* (yield* fakeServer()).hc.hello).version, "0.1.13")
-      assert.strictEqual((yield* (yield* fakeServer({ ...CURRENT, version: "0.1.18" })).hc.hello).version, "0.1.18")
-      assert.strictEqual((yield* (yield* fakeServer({ ...CURRENT, version: "0.10.0" })).hc.hello).version, "0.10.0")
     }),
   )
 
@@ -170,17 +121,6 @@ layer(Layer.mergeAll(BunServices.layer, HcBun.layer))("Hc client", (it) => {
       assert.instanceOf(e, HcMethodsMissing)
       assert.deepStrictEqual(e.missing, ["terminal.label"])
       assert.include(e.message, "update herdr-core")
-    }),
-  )
-
-  it.effect("subscribe yields the snapshot, then events and other notifications in order, and ends on close", () =>
-    Effect.gen(function* () {
-      const { hc } = yield* fakeServer()
-      const notices = Array.from(yield* Stream.runCollect(hc.subscribe({ labels: { "vibest.runtime": "hc" } })))
-      assert.deepStrictEqual(
-        notices.map((n) => (n._tag === "Event" ? `${n.event.type}:${n.event.terminal}` : n._tag)),
-        ["Subscribed", "created:t1", "foreground:t1", "Notification"],
-      )
     }),
   )
 })

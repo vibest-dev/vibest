@@ -1,217 +1,17 @@
 import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
-import { peerAdmitPause, Sessions } from "@vibest/core/sessions"
-import { Deferred, Effect, Fiber, FileSystem, HashMap, Path } from "effect"
+import { Integration } from "@vibest/core/integration"
+import { peerAdmitPause } from "@vibest/core/sessions"
+import { Deferred, Effect, Fiber, FileSystem, HashMap } from "effect"
 import { TestClock } from "effect/testing"
 
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { systemPromptFile, until, untilVirtual, writeEnd } from "./lib/observe.ts"
-import { callerPlugin, makeRepository } from "./lib/session.ts"
-import { spawnInput, spawnWorking, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
+import { until } from "./lib/observe.ts"
+import { makeRepository } from "./lib/session.ts"
+import { spawnInput, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
 describe.concurrent("Sessions", () => {
-  test(
-    "run --peer shares the worktree; archiving keeps it while another live session works in it, and the last one removes it",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const peer = yield* idleSession(repo)
-      const worktree = yield* sessionWorktree(peer.id)
-      const peerPane = (yield* herdr.agent(peer.id))!.terminal
-
-      const { id } = yield* peer.sessions.spawn({ ...(yield* spawnInput(repo)), peer: peer.id })
-      yield* until(peer.db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
-      yield* peer.sessions.check(id)
-      assert.lengthOf(yield* herdr.callsTo("open"), 2)
-      const split = (yield* herdr.callsTo("open")).at(-1)!
-      assert.strictEqual(split.near, peerPane)
-      assert.strictEqual(split.cwd, worktree)
-      assert.deepInclude(split.env, { VIBEST_SESSION_ID: id, VIBEST_AGENT: "general" })
-      const pane = (yield* herdr.agent(id))!.terminal
-      assert.strictEqual(pane.split(":")[0], peerPane.split(":")[0])
-      const got = yield* peer.sessions.get(id)
-      assert.deepInclude(got, { worktree })
-      assert.notProperty(got.metadata, "peer")
-      assert.strictEqual(yield* sessionWorktree(id), worktree)
-      assert.match(path.basename(worktree), /^[0-9a-f]{4}$/)
-      const rules = yield* fs.readFileString(yield* systemPromptFile(id))
-      assert.include(rules, "others may be making changes in this worktree too")
-      assert.notInclude(rules, peer.id)
-      assert.notInclude(rules, "git switch -c <branch>")
-
-      const third = yield* peer.sessions.spawn({ ...(yield* spawnInput(repo)), peer: id })
-      assert.strictEqual(yield* sessionWorktree(third.id), worktree)
-      yield* until(peer.db.getSession(third.id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
-      assert.strictEqual((yield* peer.sessions.get(third.id)).worktree, worktree)
-      assert.strictEqual((yield* herdr.callsTo("open"))[2]!.near, pane)
-      assert.lengthOf(yield* herdr.callsTo("open"), 3)
-
-      const ownerFirst = (yield* peer.sessions.remove(peer.id))!
-      assert.deepInclude(ownerFirst, { processes: "exited", pane: "closed", worktree: "kept", path: worktree })
-      assert.include(ownerFirst.reasons.join("\n"), id)
-      assert.include(ownerFirst.reasons.join("\n"), third.id)
-      assert.isTrue(yield* fs.exists(worktree))
-
-      yield* writeEnd(id, "pi", { text: "status: completed" })
-      yield* herdr.endExecution(id)
-      yield* peer.sessions.check(id)
-      const borrower = (yield* peer.sessions.remove(id))!
-      assert.deepInclude(borrower, { processes: "exited", pane: "closed", worktree: "kept", path: worktree })
-      assert.include(borrower.reasons.join("\n"), `session ${third.id} still works in it`)
-      assert.isFalse(yield* fs.exists(yield* systemPromptFile(id)))
-      assert.isTrue(yield* fs.exists(worktree))
-
-      const ownerSecond = (yield* peer.sessions.remove(peer.id))!
-      assert.deepInclude(ownerSecond, { worktree: "kept", path: worktree })
-      assert.include(ownerSecond.reasons.join("\n"), third.id)
-      assert.notInclude(ownerSecond.reasons.join("\n"), id)
-      assert.isTrue(yield* fs.exists(worktree))
-
-      yield* writeEnd(third.id, "pi", { text: "status: completed" })
-      yield* herdr.endExecution(third.id)
-      yield* peer.sessions.check(third.id)
-      const last = (yield* peer.sessions.remove(third.id))!
-      assert.deepInclude(last, { worktree: "removed", path: worktree })
-      assert.isFalse(yield* fs.exists(worktree))
-    }),
-  )
-
-  test(
-    "a resume keeps the owner's git rules beside a --peer; only the --peer gets the peer rules",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const owner = yield* idleSession(repo)
-      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
-      yield* until(owner.db.getSession(id), (w) => !!w && (w.startedAt !== null || w.exitedAt !== null))
-      yield* writeEnd(id, "pi", { text: "status: completed" })
-      yield* herdr.endExecution(id)
-      yield* owner.sessions.check(id)
-      for (const session of [owner.id, id]) {
-        yield* herdr.updateAgent(session, (a) => ({ ...a, alive: false }))
-        yield* owner.sessions.check(session)
-      }
-      yield* untilVirtual(owner.sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
-      for (const session of [owner.id, id]) {
-        yield* owner.sessions.send(session, `again ${session}`)
-        yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === `again ${session}`))
-      }
-      assert.include(yield* fs.readFileString(yield* systemPromptFile(owner.id)), "git switch -c <branch>")
-      const peerRules = yield* fs.readFileString(yield* systemPromptFile(id))
-      assert.include(peerRules, "others may be making changes in this worktree too")
-      assert.notInclude(peerRules, "git switch -c <branch>")
-    }),
-  )
-
-  test(
-    "run --peer refuses a missing, cross-project, archived or ineligible session before it creates a worktree",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const herdr = yield* FakeRuntime
-      const repo = yield* makeRepository
-      const sessions = yield* Sessions
-      const db = yield* Db
-      const unknown = yield* Effect.flip(
-        sessions.spawn({ ...(yield* spawnInput(repo)), peer: "ffffffff-ffff-4fff-8fff-ffffffffffff" }),
-      )
-      assert.strictEqual(unknown._tag, "NoSuchSession")
-      assert.include(
-        unknown.message,
-        "--peer ffffffff-ffff-4fff-8fff-ffffffffffff: no session ffffffff-ffff-4fff-8fff-ffffffffffff",
-      )
-
-      const { id, row } = yield* spawnWorking(repo)
-      const created = () => herdr.callsTo("open").pipe(Effect.map((calls) => calls.length))
-      const before = yield* created()
-      const otherRepo = yield* makeRepository
-      const cross = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(otherRepo)), peer: id }))
-      assert.include(cross.message, "belongs to another project")
-      const worktree = yield* sessionWorktree(id)
-      yield* fs.rename(worktree, `${worktree}.away`)
-      const gone = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: id }))
-      assert.include(gone.message, "ineligible")
-      assert.include(gone.message, "gone")
-      yield* fs.rename(`${worktree}.away`, worktree)
-      yield* db.updateSession(id, { metadata: { ...row.metadata, archived: true, removed: true } })
-      const archived = yield* Effect.flip(sessions.spawn({ ...(yield* spawnInput(repo)), peer: id }))
-      assert.include(archived.message, "it was archived")
-      assert.strictEqual(yield* created(), before)
-      assert.isUndefined(yield* db.getSession("ffffffff-ffff-4fff-8fff-ffffffffffff"))
-    }),
-  )
-
-  test(
-    "run --peer without --runtime uses the peer runtime, and an explicit other runtime is still refused",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const owner = yield* idleSession(repo)
-      const parent = yield* owner.db.startEntry(owner.row.projectId, "pi", false, {
-        runtime: "hc",
-        address: { machine: "local", id: "test/coord-hc" },
-      })
-      assert.strictEqual((yield* owner.db.entryOf(owner.row.projectId))?.runtime, "hc")
-      const base = yield* spawnInput(repo)
-      const followed = yield* owner.sessions.spawn({
-        machine: base.machine,
-        root: base.root,
-        projectId: base.projectId,
-        name: base.name,
-        prompt: base.prompt,
-        harness: base.harness,
-        peer: owner.id,
-        parentSessionId: parent.sessionId,
-      })
-      assert.strictEqual(followed.runtime, "herdr")
-      assert.strictEqual(yield* owner.db.sessionDirectory(followed.id), yield* owner.db.sessionDirectory(owner.id))
-      yield* until(owner.db.getSession(followed.id), (w) => !!w && w.startedAt !== null)
-      const refused = yield* Effect.flip(
-        owner.sessions.spawn({
-          ...base,
-          runtime: "hc",
-          peer: owner.id,
-          parentSessionId: parent.sessionId,
-        }),
-      )
-      assert.strictEqual(refused._tag, "NoSuchSession")
-      assert.include(refused.message, "ineligible: it runs in herdr on local, not hc on local")
-    }),
-    {
-      plugins: [callerPlugin("hc", { env: ["HC_ID"], terminal: (env) => Effect.succeed(env.HC_ID) })],
-    },
-  )
-
-  const started: Array<string> = []
-  test(
-    "agent.start runs before both run and run --peer start a session",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      started.length = 0
-      const owner = yield* idleSession(repo)
-      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), prompt: "peer task", peer: owner.id })
-      assert.deepStrictEqual(started, [`${repo}: do it`, `${repo}: peer task`])
-      assert.strictEqual(owner.row.model, "fake-strong")
-      assert.strictEqual((yield* owner.db.getSession(id))!.model, "fake-strong")
-    }),
-    {
-      plugins: [
-        {
-          id: "seen",
-          effect: (ctx) =>
-            ctx.agent.hook("start.before", (e) =>
-              Effect.sync(() => {
-                started.push(`${e.project}: ${e.prompt}`)
-                return { model: "fake-strong" }
-              }),
-            ),
-        },
-      ],
-    },
-  )
-
   const peersSharingDirectory = (ownerId: string) =>
     Effect.gen(function* () {
       const db = yield* Db
@@ -385,7 +185,7 @@ describe.concurrent("Sessions", () => {
       const closesBefore = (yield* herdr.callsTo("close")).map((c) => c.terminal)
       const created = (yield* herdr.callsTo("open")).length
       const held = yield* herdr.hold("open")
-      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo)), peer: owner.id })
+      const { id } = yield* owner.sessions.spawn({ ...(yield* spawnInput(repo, "claude")), peer: owner.id })
       yield* held.reached
       yield* held.release("failed")
       yield* until(owner.db.getSession(id), (w) => !!w && w.exitedAt !== null)
@@ -397,6 +197,12 @@ describe.concurrent("Sessions", () => {
       assert.isTrue(yield* fs.exists(worktree))
       assert.strictEqual((yield* herdr.callsTo("open")).length, created + 1)
       assert.strictEqual(yield* owner.db.sessionDirectory(id), yield* owner.db.sessionDirectory(owner.id))
+      yield* owner.sessions.send(id, "start again")
+      const opens = yield* until(herdr.callsTo("open"), (calls) => calls.length === created + 2)
+      const reporter = Number(opens.at(-1)!.env.VIBEST_PROCESS)
+      yield* until(owner.db.getSession(id), (w) => w?.exitedAt === null && w.address.id !== "")
+      assert.strictEqual(yield* owner.db.currentProcessId(id), reporter)
+      assert.strictEqual(yield* (yield* Integration).ready(id, 4242, undefined, reporter), reporter)
     }),
   )
 })

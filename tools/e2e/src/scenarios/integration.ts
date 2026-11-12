@@ -185,7 +185,7 @@ const checks: ReadonlyArray<Check> = [
         }
         const entry = (
           await w.json<{ sessions: Array<{ id: string; agent: string }> }>(["ls"]).then((l) => l.sessions)
-        ).find((e) => e.agent === "main")
+        ).find((e) => e.agent === "coordinator")
         expect(entry !== undefined, "no entry session")
         await until(
           "the Pi entry session's ready report",

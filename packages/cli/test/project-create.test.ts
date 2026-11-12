@@ -1,8 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { cliHeaders, connect } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
-import { Harness } from "@vibest/core/harness"
-import * as Launch from "@vibest/core/launch"
 import { Layout } from "@vibest/core/paths"
 import { Project } from "@vibest/core/project"
 import {
@@ -284,10 +282,16 @@ describe("multi-repository isolated workspace", () => {
       yield* fs.makeDirectory(root)
       const app = yield* repositoryWithOneCommitOnMain(root, "app")
       const sdk = yield* repositoryWithOneCommitOnMain(root, "sdk")
-      const entry = yield* db.startEntry(yield* projectOf(root), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
+      const entry = yield* db.startEntry(
+        yield* projectOf(root),
+        "pi",
+        false,
+        {
+          runtime: RUNTIME,
+          address: { machine: "local", id: "test/coord" },
+        },
+        { agent: "coordinator" },
+      )
 
       const spawned = yield* runVibest(
         root,
@@ -344,43 +348,6 @@ describe("multi-repository isolated workspace", () => {
   )
 
   sessionTest(
-    "vibest in a multi-repository project starts the entry session",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const db = yield* Db
-      const parent = yield* scopedRealPathTempDirectory("vibest-multi-")
-      const root = path.join(parent, "combo")
-      yield* fs.makeDirectory(root)
-      yield* repositoryWithOneCommitOnMain(root, "app")
-      yield* repositoryWithOneCommitOnMain(root, "sdk")
-      const raw = yield* connect((yield* Layout).socket)
-      const command = yield* Launch.entryCommand({
-        harness: "pi",
-        root,
-        provider: null,
-        model: null,
-        session: authed(raw, cliHeaders(root))["Project.EntrySession"]({
-          harness: "pi",
-          fresh: false,
-          terminal: "home:p1",
-        }),
-      }).pipe(
-        Effect.provide(
-          Layer.succeed(Harness, {
-            available: () => Effect.succeed(true),
-            plugin: (id) => Effect.succeed(`/vibest/harnesses/${id}`),
-            models: () => Effect.succeed([]),
-          }),
-        ),
-      )
-      assert.strictEqual(command.env.VIBEST_AGENT, "coordinator")
-      const entry = yield* db.entryOf(yield* projectOf(root))
-      assert.strictEqual(entry?.projectDirectory, root)
-    }),
-  )
-
-  sessionTest(
     "the entry session of a multi-repository project starts a session from inside one of its repositories",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -394,6 +361,7 @@ describe("multi-repository isolated workspace", () => {
       yield* repositoryWithOneCommitOnMain(root, "sdk")
       const raw = yield* connect(layout.socket)
       const { sessionId, projectId } = yield* authed(raw, cliHeaders(root))["Project.EntrySession"]({
+        agent: "coordinator",
         harness: "pi",
         fresh: false,
         terminal: "coord",
@@ -401,7 +369,7 @@ describe("multi-repository isolated workspace", () => {
       const { id } = yield* authed(
         raw,
         sessionHeaders({ sessionId, repositoryRoot: app, projectId: String(projectId) }),
-      ).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      ).Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => !!row && (row.startedAt !== null || row.exitedAt !== null))
       const row = (yield* db.getSession(id))!
       assert.strictEqual(row.projectId, (yield* db.projectAt(root))?.id)
@@ -429,6 +397,7 @@ describe("multi-repository isolated workspace", () => {
       const raw = yield* connect((yield* Layout).socket)
       const cli = authed(raw, cliHeaders(root))
       const { sessionId, projectId } = yield* cli["Project.EntrySession"]({
+        agent: "coordinator",
         harness: "pi",
         fresh: false,
         terminal: "coord",
@@ -436,14 +405,14 @@ describe("multi-repository isolated workspace", () => {
       const { id } = yield* authed(
         raw,
         sessionHeaders({ sessionId, repositoryRoot: workspace, projectId: String(projectId) }),
-      ).Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      ).Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* until(db.getSession(id), (row) => row?.executionState === "open")
       assert.strictEqual((yield* db.getSession(id))!.projectId, (yield* db.projectAt(root))?.id)
       assert.isUndefined(yield* db.projectAt(workspace))
       assert.strictEqual((yield* herdr.callsTo("open"))[0]!.project, root)
 
       const listed = yield* liveDaemon().list(workspace)
-      assert.deepStrictEqual(listed.map((session) => session.agent).sort(), ["general", "main"])
+      assert.deepStrictEqual(listed.map((session) => session.agent).sort(), ["coordinator", "general"])
       assert.deepStrictEqual(
         (yield* liveDaemon().list(root)).map((session) => session.id).sort(),
         listed.map((session) => session.id).sort(),

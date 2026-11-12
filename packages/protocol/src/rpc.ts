@@ -34,6 +34,7 @@ import {
   RuntimeIncompatible,
   RuntimeUnreachable,
   SessionBusy,
+  UnknownAgent,
   ExecutionState,
 } from "@vibest/schema/session"
 import { Subscription } from "@vibest/schema/subscription"
@@ -126,12 +127,11 @@ export class ProjectCreateFailed extends Schema.TaggedError<ProjectCreateFailed>
 export type CallerShape =
   | { readonly _tag: "Cli"; readonly repositoryRoot: string }
   | {
-      readonly _tag: "Entry"
+      readonly _tag: "Session"
       readonly sessionId: string
       readonly projectId: string
       readonly repositoryRoot?: string
     }
-  | { readonly _tag: "Session"; readonly sessionId: string; readonly projectId: string }
   | {
       readonly _tag: "Peer"
       readonly peerId: string
@@ -320,7 +320,7 @@ export class VibestRpcs extends RpcGroup.make(
           provider: Schema.optional(Schema.String),
           model: Schema.optional(Schema.String),
           env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-          agent: Schema.optional(Schema.String),
+          agent: Schema.String,
           callerEnv: Schema.Record(Schema.String, Schema.String),
           runtimeSession: Schema.optional(Schema.String),
           peer: Schema.optional(Schema.String),
@@ -356,6 +356,7 @@ export class VibestRpcs extends RpcGroup.make(
           NoHarnessChosen,
           NoRuntime,
           AgentRefused,
+          UnknownAgent,
           NoSuchSession,
           AmbiguousSession,
           RuntimeUnreachable,
@@ -374,7 +375,7 @@ export class VibestRpcs extends RpcGroup.make(
   ),
   scoped(
     Rpc.make("Integration.Guard", {
-      payload: { harness: Schema.String, agent: Schema.String, input: Schema.String },
+      payload: { harness: Schema.String, input: Schema.String },
       success: Schema.Struct({ answer: Schema.optional(Schema.Unknown) }),
       error: Schema.Union([HarnessUnavailable, InvalidCaller]),
     }),
@@ -392,6 +393,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Launch", {
         payload: {
           argv: Schema.Array(Schema.String),
+          agent: Schema.String,
           focus: Schema.Boolean,
           callerEnv: Schema.Record(Schema.String, Schema.String),
           runtimeSession: Schema.optional(Schema.String),
@@ -412,6 +414,7 @@ export class VibestRpcs extends RpcGroup.make(
           LaunchFailed,
           NoRuntime,
           AgentRefused,
+          UnknownAgent,
         ]),
       }),
     ),
@@ -526,6 +529,7 @@ export class VibestRpcs extends RpcGroup.make(
       Rpc.make("Project.EntrySession", {
         payload: {
           harness: Schema.String,
+          agent: Schema.String,
           fresh: Schema.Boolean,
           terminal: Schema.String,
           runtime: Schema.optional(Schema.String),
@@ -554,6 +558,7 @@ export class VibestRpcs extends RpcGroup.make(
           RuntimeIncompatible,
           HarnessUnavailable,
           LaunchFailed,
+          UnknownAgent,
         ]),
       }),
     ),
@@ -562,6 +567,7 @@ export class VibestRpcs extends RpcGroup.make(
     Rpc.make("Project.StartEntry", {
       payload: {
         harness: Schema.optional(Schema.String),
+        agent: Schema.String,
         provider: Schema.optional(Schema.String),
         model: Schema.optional(Schema.String),
         runtime: Schema.optional(Schema.String),
@@ -583,6 +589,7 @@ export class VibestRpcs extends RpcGroup.make(
         HarnessUnavailable,
         NoRuntime,
         LaunchFailed,
+        UnknownAgent,
       ]),
     }),
   ),
@@ -766,6 +773,7 @@ export class VibestRpcs extends RpcGroup.make(
           repository: Schema.String,
           identity: Schema.optional(Schema.String),
           commit: Schema.String,
+          agent: Schema.String,
           prompt: Schema.String,
           harness: Schema.optional(Schema.String),
           provider: Schema.optional(Schema.String),
@@ -795,6 +803,7 @@ export class VibestRpcs extends RpcGroup.make(
           NoHarnessChosen,
           NoRuntime,
           AgentRefused,
+          UnknownAgent,
           NoSuchSession,
           RuntimeUnreachable,
           RuntimeIncompatible,
@@ -840,7 +849,7 @@ export const ACCESS = {
   ExecutionEnd: "open",
   Prompt: "open",
   Spawn: "agent",
-  Launch: "agent",
+  Launch: "cli",
   List: ["agent", "peer"],
   Get: ["agent", "peer"],
   "Inbox.Subscribe": "session",
@@ -849,11 +858,11 @@ export const ACCESS = {
   "Session.Seen": "cli",
   "Project.Open": "cli",
   "Project.EntryPlace": "cli",
-  "Project.EntrySession": "agent",
-  "Project.StartEntry": "agent",
+  "Project.EntrySession": "cli",
+  "Project.StartEntry": "cli",
   "Project.FocusEntry": "cli",
   "Project.RunningEntry": "agent",
-  "Project.StopEntry": "agent",
+  "Project.StopEntry": "cli",
   "Project.Create": "cli",
   "Project.Info": "agent",
   "Project.Search": "agent",

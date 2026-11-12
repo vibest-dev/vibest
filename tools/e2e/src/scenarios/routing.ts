@@ -95,7 +95,7 @@ const entrySession = async (w: World) => {
   await until(
     "the entry session in vibest ls",
     async () => {
-      entry = (await sessions(w)).find((e) => e.agent === "main")
+      entry = (await sessions(w)).find((e) => e.agent === "coordinator")
       return entry !== undefined
     },
     60_000,
@@ -294,7 +294,7 @@ const checks: ReadonlyArray<Check> = [
         let main: Entry | undefined
         await until(
           `the entry session of ${name}`,
-          async () => (main = (await sessions(w, repo)).find((e) => e.agent === "main")) !== undefined,
+          async () => (main = (await sessions(w, repo)).find((e) => e.agent === "coordinator")) !== undefined,
           60_000,
         )
         return main!
@@ -393,6 +393,7 @@ export default Plugin.define({ id: "slow-${n + 1}", effect: () => Effect.void })
   },
   {
     id: "G12",
+    covers: ["G2"],
     title:
       "a plugin's ctx.event.subscribe sees the ledger facts of a real Pi subagent in order (session.created, process.started, execution.started, execution.ended) and no live events; a new revision of the plugin gets the next agent's facts and the old one stops",
     run: async (w) => {

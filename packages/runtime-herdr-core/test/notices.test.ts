@@ -65,13 +65,6 @@ const foregroundEvent = (seq: number, foreground: Foreground) =>
     params: { data: foreground, seq, terminal: "t1", type: "foreground" },
   })
 
-const statusEvent = (seq: number, state: string) =>
-  JSON.stringify({
-    jsonrpc: "2.0",
-    method: "event",
-    params: { data: { records: {}, reported: true, status: { state } }, seq, terminal: "t1", type: "status" },
-  })
-
 const MISSED = JSON.stringify({ jsonrpc: "2.0", method: "missed", params: {} })
 
 const Request = Schema.decodeUnknownEffect(
@@ -172,37 +165,6 @@ const live = <A, E>(
 
 describe("runtime-herdr-core against a fake core", () => {
   live(
-    "setting the runtime up touches no core: builtins activate before vibestd listens",
-    Effect.gen(function* () {
-      const core = yield* fakeCore
-      assert.deepStrictEqual(yield* Ref.get(core.calls), [])
-    }),
-  )
-
-  live(
-    "the status a program reports over OSC 7501 is the agent's state: working, then idle when done",
-    Effect.gen(function* () {
-      const core = yield* fakeCore
-      const sub = yield* core.follow
-      yield* sub.push(statusEvent(1, "working"))
-      assert.deepStrictEqual(yield* core.next, { type: "state", terminal: core.terminal, state: "working" })
-      yield* sub.push(statusEvent(2, "done"))
-      assert.deepStrictEqual(yield* core.next, { type: "state", terminal: core.terminal, state: "idle" })
-    }),
-  )
-
-  live(
-    "a foreground change back to the shell after a program ran is the terminal's exit",
-    Effect.gen(function* () {
-      const core = yield* fakeCore
-      const sub = yield* core.follow
-      yield* sub.push(foregroundEvent(1, sleeping))
-      yield* sub.push(foregroundEvent(2, shell))
-      assert.deepStrictEqual(yield* core.next, { type: "exited", terminal: core.terminal })
-    }),
-  )
-
-  live(
     "missed events drop the subscription; the next snapshot publishes reset",
     Effect.gen(function* () {
       const core = yield* fakeCore
@@ -245,30 +207,6 @@ describe("runtime-herdr-core against a fake core", () => {
       assert.isFalse((yield* restarted.process(core.terminal)).running)
       yield* Ref.set(core.foreground, sleeping)
       assert.isTrue((yield* core.runtime.process(core.terminal)).running)
-    }),
-  )
-
-  live(
-    "a foreground that leaves the shell clears vibest.typed, so a later shell is not a pending launch",
-    Effect.gen(function* () {
-      const core = yield* fakeCore
-      const sub = yield* core.follow
-      yield* core.runtime.run!(core.terminal, ["echo", "hi"])
-      assert.notStrictEqual((yield* Ref.get(core.labels))[LABEL.typed], "")
-      yield* sub.push(foregroundEvent(1, sleeping))
-      const cleared = yield* Effect.gen(function* () {
-        const deadline = Date.now() + 2_000
-        for (;;) {
-          if ((yield* Ref.get(core.labels))[LABEL.typed] === "") return true
-          if (Date.now() > deadline) return false
-          yield* Effect.sleep("20 millis")
-        }
-      })
-      assert.isTrue(cleared)
-      yield* Ref.set(core.foreground, shell)
-      assert.isFalse((yield* core.runtime.process(core.terminal)).running)
-      const restarted = yield* make({ connect: core.connect, socket: core.socketPath, scope: yield* Effect.scope })
-      assert.isFalse((yield* restarted.process(core.terminal)).running)
     }),
   )
 

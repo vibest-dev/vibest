@@ -147,7 +147,9 @@ describe("a vibestd restart", () => {
       const id = yield* Effect.gen(function* () {
         const db = yield* Db
         const place = { runtime: "fake", address: { machine: "local", id: "a" } }
-        const { sessionId } = yield* db.startEntry(yield* projectOf("a"), "claude", false, place)
+        const { sessionId } = yield* db.startEntry(yield* projectOf("a"), "claude", false, place, {
+          agent: "coordinator",
+        })
         const row = yield* db.insertInbox({ sessionId, message: "a" })
         assert.deepStrictEqual(yield* db.claim(sessionId, [row.id]), [row.id])
         return row.id

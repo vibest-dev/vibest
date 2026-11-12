@@ -167,30 +167,26 @@ const cli = Effect.gen(function* () {
   return authed(yield* connect((yield* Layout).socket), cliHeaders(root))
 })
 
-describe("pi-vibest", () => {
-  test(
-    "Pi owns all terminal reports; vibest never writes a competing status",
-    Effect.gen(function* () {
-      for (const agent of ["general", "coordinator"]) {
-        const s = yield* session({ VIBEST_AGENT: agent, VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd" })
-        for (const mode of ["tui", "rpc", "print", "json"]) {
-          const ctx = { ...tuiStart, mode, isIdle: () => true }
-          yield* s.emit("session_start", { reason: "startup" }, ctx)
-          yield* s.emit("input", { source: "interactive", text: "hello" }, ctx)
-          yield* s.emit("agent_start", {}, ctx)
-          for (const kind of ["confirm", "select", "input", "editor", "custom"]) {
-            yield* s.emit("ui_prompt_start", { reason: "ui_prompt", kind }, ctx)
-            yield* s.emit("ui_prompt_end", { reason: "ui_prompt", kind }, ctx)
-          }
-          yield* s.emit("agent_end", { messages: [] }, ctx)
-          yield* s.emit("agent_settled", { aborted: false }, ctx)
-          yield* s.emit("agent_settled", { aborted: true }, ctx)
-        }
-        assert.deepStrictEqual(s.statuses, [])
-      }
-    }),
-  )
+const idleRow = <H extends "pi" | "claude">(harnessId: H) => ({
+  agent: "general",
+  name: "n",
+  harnessId,
+  provider: null,
+  model: null,
+  harnessSessionId: null,
+  runtime: "herdr",
+  address: { machine: "local", id: "test/p0" },
+  status: "idle" as const,
+  startedAt: 1,
+  exitedAt: 1,
+  executionState: "none" as const,
+  executionPromptedAt: 0,
+  metadata: {},
+  createdAt: 1,
+  lastActive: 1,
+})
 
+describe("pi-vibest", () => {
   it.effect(
     "Coordinator: while no vibestd answers it waits without starting one, then subscribes to the next vibestd",
     () =>
@@ -200,29 +196,18 @@ describe("pi-vibest", () => {
         const fs = yield* FileSystem.FileSystem
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
-        const row = {
-          agent: "general",
-          name: "n",
-          harnessId: "pi" as const,
-          provider: null,
-          model: null,
-          harnessSessionId: null,
-          runtime: "herdr",
-          address: { machine: "local", id: "test/p0" },
-          status: "idle" as const,
-          startedAt: 1,
-          exitedAt: 1,
-          executionState: "none" as const,
-          executionPromptedAt: 0,
-          metadata: {},
-          createdAt: 1,
-          lastActive: 1,
-        }
+        const row = idleRow("pi")
         yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-        const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
-          runtime: "herdr",
-          address: { machine: "local", id: "w1:p8" },
-        })
+        const coord = yield* db.startEntry(
+          yield* projectOf("r"),
+          "pi",
+          false,
+          {
+            runtime: "herdr",
+            address: { machine: "local", id: "w1:p8" },
+          },
+          { agent: "coordinator" },
+        )
         yield* (yield* Inbox).enqueue({ sessionId: coord.sessionId, message: "survives the gap" })
         const notes: Array<string> = []
         const s = yield* session({
@@ -265,28 +250,7 @@ describe("pi-vibest", () => {
         const layout = yield* Layout
         const id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         const project = yield* projectOf("r")
-        yield* db.insertSession(
-          {
-            id,
-            agent: "general",
-            name: "n",
-            harnessId: "pi",
-            provider: null,
-            model: null,
-            harnessSessionId: null,
-            runtime: "herdr",
-            address: { machine: "local", id: "test/p0" },
-            status: "idle",
-            startedAt: 1,
-            exitedAt: 1,
-            executionState: "none",
-            executionPromptedAt: 0,
-            metadata: {},
-            createdAt: 1,
-            lastActive: 1,
-          },
-          project,
-        )
+        yield* db.insertSession({ id, ...idleRow("pi") }, project)
         const s = yield* session({
           VIBEST_AGENT: "general",
           VIBEST_SESSION_ID: id,
@@ -313,29 +277,18 @@ describe("pi-vibest", () => {
         const layout = yield* Layout
         const runtime = yield* FakeRuntime
         yield* runtime.addPane("w1:p8", "ws", "/")
-        const row = {
-          agent: "general",
-          name: "n",
-          harnessId: "claude" as const,
-          provider: null,
-          model: null,
-          harnessSessionId: null,
-          runtime: "herdr",
-          address: { machine: "local", id: "test/p0" },
-          status: "idle" as const,
-          startedAt: 1,
-          exitedAt: 1,
-          executionState: "none" as const,
-          executionPromptedAt: 0,
-          metadata: {},
-          createdAt: 1,
-          lastActive: 1,
-        }
+        const row = idleRow("claude")
         yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
-        const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
-          runtime: "herdr",
-          address: { machine: "local", id: "w1:p8" },
-        })
+        const coord = yield* db.startEntry(
+          yield* projectOf("r"),
+          "pi",
+          false,
+          {
+            runtime: "herdr",
+            address: { machine: "local", id: "w1:p8" },
+          },
+          { agent: "coordinator" },
+        )
         const vibestd = Server.layer.pipe(
           Layer.provide(Platform.socketServer(layout.socket)),
           Layer.provide(Project.layer),
@@ -380,17 +333,15 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Coordinator TUI, with or without VIBEST_SESSION_ID: grouped tools and the user-message lease, released at shutdown and taken again after a reload",
+    "Session TUI: grouped tools and the user-message lease, released at shutdown and taken again after a reload",
     Effect.gen(function* () {
       const render = UserMessageComponent.prototype.render
       const paint = Object.getOwnPropertyDescriptor(TuiAltScreen.prototype, "doRender")?.value
       for (const env of [
         {
-          VIBEST_AGENT: "coordinator",
           VIBEST_SESSION_ID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
           VIBEST_COMMAND: '["vibest"]',
         },
-        { VIBEST_AGENT: "coordinator" },
       ]) {
         for (const _load of ["startup", "reload"]) {
           const s = yield* session(env)
@@ -418,20 +369,12 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "Other agents and plain Pi: no TUI handlers, no renderer, no lease; without VIBEST_AGENT only session_shutdown",
+    "Plain Pi, without VIBEST_SESSION_ID: no TUI handlers, no renderer, no lease; only session_shutdown",
     Effect.gen(function* () {
       const render = UserMessageComponent.prototype.render
-      for (const env of [
-        {},
-        {
-          VIBEST_AGENT: "general",
-          VIBEST_SESSION_ID: "abcd1234-abcd-4abc-8abc-abcd1234abcd",
-          VIBEST_COMMAND: '["vibest"]',
-        },
-        { VIBEST_AGENT: "general" },
-      ]) {
+      for (const env of [{}, { VIBEST_AGENT: "general" }]) {
         const s = yield* session(env)
-        if (env.VIBEST_AGENT === undefined) assert.deepStrictEqual([...s.handlers.keys()], ["session_shutdown"])
+        assert.deepStrictEqual([...s.handlers.keys()], ["session_shutdown"])
         assert.deepStrictEqual(s.renderers, [])
         assert.deepStrictEqual(
           yield* s.emit("resources_discover", { type: "resources_discover", cwd: "/", reason: "startup" }),
@@ -461,30 +404,19 @@ describe("pi-vibest", () => {
       const inbox = yield* Inbox
       const db = yield* Db
       yield* runtime.addPane("w1:p7", "ws", "/")
-      const row = {
-        agent: "general",
-        name: "n",
-        harnessId: "pi" as const,
-        provider: null,
-        model: null,
-        harnessSessionId: null,
-        runtime: "herdr",
-        address: { machine: "local", id: "test/p0" },
-        status: "idle" as const,
-        startedAt: 1,
-        exitedAt: 1,
-        executionState: "none" as const,
-        executionPromptedAt: 0,
-        metadata: {},
-        createdAt: 1,
-        lastActive: 1,
-      }
+      const row = idleRow("pi")
       yield* db.insertSession({ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ...row }, yield* projectOf("r"))
       yield* db.insertSession({ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", ...row }, yield* projectOf("r"))
-      const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p7" },
-      })
+      const coord = yield* db.startEntry(
+        yield* projectOf("r"),
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "w1:p7" },
+        },
+        { agent: "coordinator" },
+      )
       yield* inbox.enqueue({
         sessionId: coord.sessionId,
         message: "<agent-result>one</agent-result>",
@@ -510,8 +442,7 @@ describe("pi-vibest", () => {
       assert.deepStrictEqual(yield* bash("VIBEST_SESSION_ID= vibest rm abcd1234-abcd-4abc-8abc-abcd1234abcd"), [
         {
           block: true,
-          reason:
-            "vibest runs with the agent's own VIBEST_SESSION_ID and VIBEST_AGENT; a command that changes or clears them is refused.",
+          reason: "vibest runs with the agent's own VIBEST_SESSION_ID; a command that changes or clears it is refused.",
         },
       ])
       assert.deepStrictEqual(yield* s.emit("tool_call", { toolName: "write", input: { path: "a" } }, { cwd: "/" }), [
@@ -521,9 +452,6 @@ describe("pi-vibest", () => {
             "The coordinator edits files only in the project folder (VIBEST_PROJECT_DIR); hand other changes to a session.",
         },
       ])
-      const start = { systemPromptOptions: { sections: { ponytail: "be lazy" } as Record<string, string> } }
-      yield* s.emit("before_agent_start", start)
-      assert.deepStrictEqual(start.systemPromptOptions.sections, {})
       yield* s.emit("session_start", { reason: "startup" }, { mode: "rpc" })
       yield* TestClock.withLive(Effect.sleep("300 millis"))
       assert.deepStrictEqual(s.messages, [])
@@ -563,29 +491,18 @@ describe("pi-vibest", () => {
     Effect.gen(function* () {
       const db = yield* Db
       const sql = yield* SqlClient.SqlClient
-      const row = {
-        agent: "general",
-        name: "n",
-        harnessId: "pi" as const,
-        provider: null,
-        model: null,
-        harnessSessionId: null,
-        runtime: "herdr",
-        address: { machine: "local", id: "test/p0" },
-        status: "idle" as const,
-        startedAt: 1,
-        exitedAt: 1,
-        executionState: "none" as const,
-        executionPromptedAt: 0,
-        metadata: {},
-        createdAt: 1,
-        lastActive: 1,
-      }
+      const row = idleRow("pi")
       yield* db.insertSession({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", ...row }, yield* projectOf("r"))
-      const coord = yield* db.startEntry(yield* projectOf("r"), "pi", false, {
-        runtime: "herdr",
-        address: { machine: "local", id: "w1:p7" },
-      })
+      const coord = yield* db.startEntry(
+        yield* projectOf("r"),
+        "pi",
+        false,
+        {
+          runtime: "herdr",
+          address: { machine: "local", id: "w1:p7" },
+        },
+        { agent: "coordinator" },
+      )
       const messages = () =>
         sql<{
           input: string
@@ -622,28 +539,16 @@ describe("pi-vibest", () => {
   )
 
   test(
-    "VIBEST_AGENT without VIBEST_SESSION_ID: the guard still applies, only the result file is left out",
-    Effect.gen(function* () {
-      const layout = yield* Layout
-      const s = yield* session({ VIBEST_AGENT: "general", VIBEST_COMMAND: '["vibest"]' })
-      assert.deepStrictEqual([...s.handlers.keys()].sort(), ["session_shutdown", "tool_call"])
-      const call = (toolName: string, input: object) => s.emit("tool_call", { toolName, input }, { cwd: "/" })
-      assert.deepStrictEqual(yield* call("read", { path: `${layout.projects}/k/memories/a.md` }), [
-        {
-          block: true,
-          reason:
-            "The projects directory is off limits to sessions, except this project's folder (VIBEST_PROJECT_DIR).",
-        },
-      ])
-    }),
-  )
-
-  test(
     "Coordinator: a TUI startup execution reports its session id once; /new, /resume and /fork report before the next execution",
     Effect.gen(function* () {
       const db = yield* Db
       const c = yield* cli
-      const launched = yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
+      const launched = yield* c["Project.EntrySession"]({
+        agent: "coordinator",
+        harness: "pi",
+        fresh: false,
+        terminal: "test/p1",
+      })
       assert.isNull(launched.harnessSessionId)
       const saved = savedSession(launched.sessionId)
       const env = {
@@ -687,13 +592,19 @@ describe("pi-vibest", () => {
         Boolean,
       )
       assert.strictEqual(
-        (yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })).harnessSessionId,
+        (yield* c["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: false, terminal: "test/p1" }))
+          .harnessSessionId,
         "s-fork",
       )
       yield* db.noteConversation(launched.sessionId, "kept")
       yield* s.emit("agent_end", { messages: [] }, executionEnd("tui", "s-fork"))
       assert.strictEqual(yield* saved, "kept")
-      const renewed = yield* c["Project.EntrySession"]({ harness: "pi", fresh: true, terminal: "test/p1" })
+      const renewed = yield* c["Project.EntrySession"]({
+        agent: "coordinator",
+        harness: "pi",
+        fresh: true,
+        terminal: "test/p1",
+      })
       assert.notStrictEqual(renewed.sessionId, launched.sessionId)
       assert.isNull(renewed.harnessSessionId)
       assert.isNull(yield* saved)
@@ -706,7 +617,12 @@ describe("pi-vibest", () => {
       const layout = yield* Layout
       const path = yield* Path.Path
       const c = yield* cli
-      const launched = yield* c["Project.EntrySession"]({ harness: "pi", fresh: false, terminal: "test/p1" })
+      const launched = yield* c["Project.EntrySession"]({
+        agent: "coordinator",
+        harness: "pi",
+        fresh: false,
+        terminal: "test/p1",
+      })
       const saved = savedSession(launched.sessionId)
       const home = yield* tempDirectory("pi-vibest-slow-")
       const first = {

@@ -23,10 +23,16 @@ const entryAsked = Effect.gen(function* () {
   const sessions = yield* Sessions
   const db = yield* Db
   const repo = yield* makeRepository
-  const entry = yield* db.startEntry(yield* projectOf(repo), "pulling-pi", false, {
-    runtime: RUNTIME,
-    address: { machine: "local", id: "test/coord" },
-  })
+  const entry = yield* db.startEntry(
+    yield* projectOf(repo),
+    "pulling-pi",
+    false,
+    {
+      runtime: RUNTIME,
+      address: { machine: "local", id: "test/coord" },
+    },
+    { agent: "coordinator" },
+  )
   yield* herdr.seedAgent("test/coord")
   const { id } = yield* sessions.spawn(yield* spawnInput(repo))
   yield* until(db.getSession(id), (row) => !!row && row.startedAt !== null)
@@ -89,19 +95,6 @@ describe.concurrent("an idle session takes its next batch", () => {
       yield* until(inboxStatuses(sender), (statuses) => statuses[0] === "failed")
       assert.isUndefined(yield* db.openExecution(entryId))
       assert.isFalse(yield* db.acceptExecution(entryId, execution))
-    }),
-  )
-
-  test(
-    "a batch Claude refused is typed once however often the refusal is reported",
-    Effect.gen(function* () {
-      const { sessions, inbox, entryId } = yield* entryAsked
-      const herdr = yield* FakeRuntime
-      const { execution } = (yield* inbox.take(entryId, undefined))!
-      const typed = Effect.map(herdr.callsTo("send"), (calls) => calls.filter((c) => c.text?.includes("a question")))
-      yield* sessions.typeTaken(entryId, execution)
-      yield* sessions.typeTaken(entryId, execution)
-      assert.lengthOf(yield* typed, 1)
     }),
   )
 

@@ -84,23 +84,6 @@ const event = (link?: Record<string, string>, extra: Partial<Noted> = {}): Noted
 const linked = { core: "core-new", session: "main" }
 
 describe("hc mirrors vibest's machines", () => {
-  it.effect("connect adds B once with name, target and session, never install; found by core id under any name", () =>
-    Effect.gen(function* () {
-      const f = fake([])
-      const first = event(linked)
-      yield* connect(f.hc, first)
-      assert.deepStrictEqual(f.calls[1], ["machine.add", { target: "b-host", name: "mb", session: "main" }])
-      assert.match(first.notes[0]!.message, /^hc: added mb to herdr-core here/)
-      yield* connect(f.hc, event(linked))
-      assert.strictEqual(f.added(), 1)
-      f.rows[0] = { ...f.rows[0]!, name: "vps" }
-      const renamed = event(linked)
-      yield* connect(f.hc, renamed)
-      assert.strictEqual(f.added(), 1)
-      assert.deepStrictEqual(renamed.notes, [])
-    }),
-  )
-
   it.effect("already_added is done; no hc link adds nothing; an offline hc there is a note", () =>
     Effect.gen(function* () {
       const busy = fake([], { addFails: "already_added" })

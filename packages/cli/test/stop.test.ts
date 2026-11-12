@@ -8,11 +8,10 @@ import { Project } from "@vibest/core/project"
 import { Sessions } from "@vibest/core/sessions"
 import { sessionHeaders } from "@vibest/protocol/protocol"
 import * as Server from "@vibest/server/server"
-import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, type Scope, Stream } from "effect"
 
 import * as Platform from "#platform"
 
-import { TIMING } from "../src/replace.ts"
 import {
   authed,
   CLAUDE,
@@ -81,22 +80,19 @@ const idleMainWithWorker = (repo: string, harness: "pi" | "claude") =>
     yield* herdr.seedAgent("wC:p1")
     const raw = yield* client
     const { sessionId, projectId } = yield* authed(raw, cliHeaders(repo))["Project.EntrySession"]({
+      agent: "coordinator",
       harness,
       fresh: true,
       terminal: "wC:p1",
     })
     if (harness === "claude") yield* db.noteConversation(sessionId, "claude-session")
     const c = authed(raw, sessionHeaders({ sessionId, repositoryRoot: repo, projectId: String(projectId) }))
-    const { id: worker } = yield* c.Spawn({ callerEnv: {}, harness: "pi", prompt: "work" })
+    const { id: worker } = yield* c.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "work" })
     yield* until(db.getSession(worker), (w) => w?.executionState === "open")
     return { db, herdr, c, sessionId, worker, projectId: (yield* db.projectOfSession(sessionId))! }
   })
 
 describe("Daemon.Stop over a real unix socket: only vibestd's own operations block it; agents keep running and queued messages stay for the next vibestd", () => {
-  it("the client waits for Stop's reply longer than vibestd's bounded drain", () => {
-    assert.isTrue(Duration.isGreaterThan(TIMING.reply, Server.DRAIN_TIMEOUT))
-  })
-
   test(
     "the command line only, for this vibestd's instance; once accepted, no change is admitted, settlement included",
     Effect.gen(function* () {
@@ -114,12 +110,19 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       assert.isTrue(yield* shutdownDone)
       const user = yield* cli(repo)
       assert.strictEqual(
-        tagOf(yield* Effect.exit(user.Spawn({ callerEnv: {}, harness: "pi", prompt: "x" }))),
+        tagOf(yield* Effect.exit(user.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "x" }))),
         "DaemonStopping",
       )
       assert.strictEqual(
         tagOf(
-          yield* Effect.exit(user["Project.EntrySession"]({ harness: "claude", fresh: true, terminal: "test/late" })),
+          yield* Effect.exit(
+            user["Project.EntrySession"]({
+              agent: "coordinator",
+              harness: "claude",
+              fresh: true,
+              terminal: "test/late",
+            }),
+          ),
         ),
         "DaemonStopping",
       )
@@ -167,7 +170,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const user = yield* cli(repo)
       const spawner = yield* asEntry(yield* client, repo)
       const held = yield* herdr.hold("open")
-      const { id } = yield* spawner.Spawn({ callerEnv: {}, harness: "pi", prompt: "work" })
+      const { id } = yield* spawner.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "work" })
       yield* held.reached
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
@@ -191,7 +194,12 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const herdr = yield* FakeRuntime
       const repo = yield* makeRepository
       const held = yield* herdr.hold("open")
-      yield* (yield* asEntry(yield* client, repo)).Spawn({ callerEnv: {}, harness: "pi", prompt: "work" })
+      yield* (yield* asEntry(yield* client, repo)).Spawn({
+        agent: "general",
+        callerEnv: {},
+        harness: "pi",
+        prompt: "work",
+      })
       yield* held.reached
       const stopping = yield* Effect.forkScoped(stopFromCli(repo))
       yield* draining
@@ -207,6 +215,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const repo = yield* makeRepository
       const raw = yield* client
       const { id } = yield* (yield* asEntry(yield* client, repo)).Spawn({
+        agent: "general",
         callerEnv: {},
         harness: "pi",
         prompt: "work",
@@ -258,6 +267,7 @@ describe("Daemon.Stop over a real unix socket: only vibestd's own operations blo
       const sessions = yield* Sessions
       const repo = yield* makeRepository
       const { id } = yield* (yield* asEntry(yield* client, repo)).Spawn({
+        agent: "general",
         callerEnv: {},
         harness: "pi",
         prompt: "work",

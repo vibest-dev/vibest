@@ -102,7 +102,7 @@ const checks: ReadonlyArray<Check> = [
           async () => {
             entryId =
               (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
-                (e) => e.agent === "main",
+                (e) => e.agent === "coordinator",
               )?.id ?? ""
             return entryId !== ""
           },
@@ -266,7 +266,7 @@ const checks: ReadonlyArray<Check> = [
           async () => {
             entryId =
               (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
-                (e) => e.agent === "main",
+                (e) => e.agent === "coordinator",
               )?.id ?? ""
             return entryId !== ""
           },
@@ -354,7 +354,7 @@ const checks: ReadonlyArray<Check> = [
           async () => {
             entryId =
               (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).find(
-                (e) => e.agent === "main",
+                (e) => e.agent === "coordinator",
               )?.id ?? ""
             return entryId !== ""
           },
@@ -451,7 +451,7 @@ const checks: ReadonlyArray<Check> = [
           "the entry session in vibest ls",
           async () =>
             (await w.json<{ sessions: Array<Entry> }>(["ls"], { cwd: repo }).then((l) => l.sessions)).some(
-              (e) => e.agent === "main",
+              (e) => e.agent === "coordinator",
             ),
           60_000,
         )

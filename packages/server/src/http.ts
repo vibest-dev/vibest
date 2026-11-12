@@ -1,7 +1,6 @@
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { LayerNode } from "@vibest/core/effect/layer-node"
-import { COORDINATOR } from "@vibest/core/guard"
 import { Harnesses } from "@vibest/core/harness"
 import { Inbox } from "@vibest/core/inbox"
 import { Integration } from "@vibest/core/integration"
@@ -87,7 +86,7 @@ export const make = Effect.gen(function* () {
         )
       if (hook.hook === "prompt")
         return yield* admitted("hook prompt", true, integration.prompt(who, request.body).pipe(Effect.as(ok())))
-      return yield* integration.guard(who.entry ? COORDINATOR : who.agent, request.body, who.projectId).pipe(
+      return yield* integration.guard(who.id, request.body).pipe(
         Effect.map((reason) => ok(reason === undefined ? {} : { deny: reason })),
         Effect.catch((e) =>
           Effect.succeed(ok({ deny: `vibest could not check this tool call (${String(e)}); it is refused.` })),

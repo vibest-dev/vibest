@@ -4,6 +4,7 @@ import { readPing } from "@vibest/client/client"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { ProcessPlatform, Processes } from "@vibest/core/processes"
+import { agentsLayer } from "@vibest/core/test/lib/agents"
 import { entryPending, projectOf, tempDirectory } from "@vibest/core/test/lib/directory"
 import { FakeProcesses } from "@vibest/core/test/lib/fake-processes"
 import {
@@ -26,6 +27,7 @@ import { FakeGit } from "./fake-git.ts"
 import { FakeRuntime } from "./fake-runtime.ts"
 
 export {
+  agentsLayer,
   CLAUDE,
   CURSOR,
   FakeGit,

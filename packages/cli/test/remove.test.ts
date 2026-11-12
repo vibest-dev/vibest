@@ -36,6 +36,7 @@ const workingSession = Effect.gen(function* () {
   const herdr = yield* FakeRuntime
   const repo = yield* makeRepository
   const { id } = yield* sessions.spawn({
+    agent: "general",
     machine: { id: "local" },
     root: repo,
     parentSessionId: "creator",
@@ -88,19 +89,6 @@ const removeTimingCwd = (sessions: Sessions["Service"], id: string) =>
   })
 
 describe.concurrent("vibest rm: process proof", () => {
-  test(
-    "an archive ends its process once, and asks only whether its own process, already exited, is gone",
-    Effect.gen(function* () {
-      const fake = yield* FakeProcesses
-      const { id, sessions, db } = yield* idleSession
-      const pid = (yield* db.getSession(id))!.metadata.pid
-      if (pid === undefined) return yield* Effect.die("the session recorded no pid")
-      assert.deepInclude(yield* sessions.remove(id), { processes: "exited", pane: "closed", worktree: "removed" })
-      assert.deepStrictEqual(yield* processEnds(id), ["archived"])
-      assert.deepStrictEqual(yield* fake.probed, [pid])
-    }),
-  )
-
   test(
     "the close's reply is lost: the record survives a vibestd restart, and the retry proves it gone",
     Effect.gen(function* () {

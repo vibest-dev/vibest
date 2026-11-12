@@ -29,7 +29,7 @@ export const make = Effect.gen(function* () {
       yield* noteOpen(db, read, sessionId)
       const row = yield* db.sessionIdentity(sessionId)
       if (!row || row.harness !== harness) return
-      yield* run({ id: row.id, agent: row.agent, entry: row.entry, harness, process: processOf(read) })
+      yield* run({ id: row.id, entry: row.entry, harness, process: processOf(read) })
     }).pipe(Effect.orDie)
 
   return {
@@ -47,21 +47,18 @@ export const make = Effect.gen(function* () {
         return provider === undefined ? choices : forProvider(choices, harnesses, provider)
       }),
 
-    "Integration.Guard": ({
-      harness,
-      agent,
-      input,
-    }: {
-      readonly harness: string
-      readonly agent: string
-      readonly input: string
-    }) =>
+    "Integration.Guard": ({ harness, input }: { readonly harness: string; readonly input: string }) =>
       Effect.gen(function* () {
         const definition = harnesses.find(harness)
         if (definition === undefined) return yield* unprovided(harness, harnesses.all)
         const caller = yield* Caller
+        if (caller._tag !== "Session")
+          return yield* new InvalidCaller({
+            method: "Integration.Guard",
+            message: "Integration.Guard checks the tool call of a session",
+          })
         const reason = yield* integration
-          .guard(agent, input, caller._tag === "Cli" ? undefined : caller.projectId)
+          .guard(caller.sessionId, input)
           .pipe(Effect.mapError((e) => new InvalidCaller({ method: "Integration.Guard", message: String(e) })))
         const answer = definition.guardAnswer === undefined ? reason : definition.guardAnswer(reason)
         return answer === undefined ? {} : { answer }

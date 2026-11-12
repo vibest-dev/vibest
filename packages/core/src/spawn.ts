@@ -12,6 +12,7 @@ import { Clock, Context, Crypto, Deferred, Effect, FileSystem, Option, Path } fr
 import type { Scope } from "effect"
 import { Hex } from "effect/encoding"
 
+import { type Agents, unknownAgent } from "./agents.ts"
 import type { Db, NewSession, PeerStart, SessionRow } from "./db.ts"
 import type { Drain } from "./drain.ts"
 import {
@@ -24,12 +25,13 @@ import {
   unprovided,
 } from "./harness.ts"
 import { directoryLock, type keyedLock } from "./keyed-lock.ts"
+import type { LimitMove } from "./move.ts"
 import { ALLOCATION_LEAF, ALLOCATION_NAME_ATTEMPTS, type Layout, safeRepositoryDirectory } from "./paths.ts"
-import type { sessionPlacement } from "./placement.ts"
 import { describeSpawn, type Plugins, type Routing } from "./plugins.ts"
 import { listProjectRepositories } from "./project-create.ts"
 import { machinesListing as machines, type Runtimes } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
+import type { Placement } from "./session/placement.ts"
 import { allocationParentBlocked, mainCheckout, repositoryDirectoryName } from "./worktree.ts"
 
 export const peerAdmitPause: { wait: Effect.Effect<void> } = { wait: Effect.void }
@@ -47,7 +49,7 @@ export interface SpawnInput {
   readonly provider?: string | undefined
   readonly model?: string | undefined
   readonly env?: Record<string, string> | undefined
-  readonly agent?: string | undefined
+  readonly agent: string
   readonly peer?: string | undefined
   readonly archive?: boolean | undefined
   readonly runtime?: string | undefined
@@ -70,6 +72,7 @@ export const sessionSpawn = (deps: {
   readonly runtimes: Runtimes["Service"]
   readonly harness: Harness["Service"]
   readonly harnesses: Harnesses["Service"]
+  readonly agents: Agents["Service"]
   readonly plugins: Plugins["Service"]
   readonly drain: Drain["Service"]
   readonly layout: Layout["Service"]
@@ -82,13 +85,15 @@ export const sessionSpawn = (deps: {
   readonly options: { readonly maxSessions: number | undefined }
   readonly worktreeOf: (session: SessionRow) => Effect.Effect<string, NoSuchSession>
   readonly logged: (what: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<void | A, never, R>
-  readonly launch: ReturnType<typeof sessionPlacement>["launch"]
+  readonly launch: Placement["Service"]["launch"]
+  readonly onOwnLimit: LimitMove["rerun"]
 }) => {
   const {
     db,
     runtimes,
     harness,
     harnesses,
+    agents,
     plugins,
     drain,
     layout,
@@ -101,6 +106,7 @@ export const sessionSpawn = (deps: {
     worktreeOf,
     logged,
     launch,
+    onOwnLimit,
     options,
   } = deps
   const machinesListing = machines(
@@ -153,7 +159,8 @@ export const sessionSpawn = (deps: {
     if (input.parentSessionId === undefined && input.origin?.reportTo === undefined)
       return yield* new NoCallingSession()
     const root = input.root
-    const agent = input.agent ?? "general"
+    const agent = input.agent
+    if (agents.find(agent) === undefined) return yield* unknownAgent(agent, agents.all)
     const worker = input.parentSessionId === undefined ? undefined : yield* db.getSession(input.parentSessionId)
     const entry =
       worker === undefined && input.parentSessionId !== undefined ? yield* db.entryOf(input.projectId) : undefined
@@ -178,7 +185,7 @@ export const sessionSpawn = (deps: {
         : undefined
     const decision = yield* plugins.start({
       project: root,
-      agentType: agent,
+      agent,
       parentSessionId: input.parentSessionId,
       prompt: input.prompt,
       harness: input.harness ?? from?.harnessId,
@@ -337,6 +344,7 @@ export const sessionSpawn = (deps: {
                     splitFrom: input.peer,
                     env: input.env,
                     commit: input.commit,
+                    onOwnLimit,
                   }),
                 ),
               ),

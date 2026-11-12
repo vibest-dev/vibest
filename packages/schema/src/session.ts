@@ -107,6 +107,15 @@ export class NoCallingSession extends Schema.TaggedError<NoCallingSession>()("No
     return "vibest run is run by an agent in a session; to start working, run vibest in a terminal"
   }
 }
+export class UnknownAgent extends Schema.TaggedError<UnknownAgent>()("UnknownAgent", {
+  agent: Schema.String,
+  known: Schema.Array(Schema.Struct({ id: Schema.String, description: Schema.String })),
+}) {
+  override get message() {
+    const known = this.known.map((definition) => `${definition.id} (${definition.description})`).join("; ")
+    return `no agent definition ${this.agent}; registered: ${known || "none"}`
+  }
+}
 export class NoHarnessChosen extends Schema.TaggedError<NoHarnessChosen>()("NoHarnessChosen", {}) {
   override get message() {
     return "no harness to inherit: name one, for example `vibest run claude -- <prompt>`"

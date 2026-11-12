@@ -6,6 +6,7 @@ import { herdrCommands } from "@vibest/runtime-herdr/commands"
 import { plugin as runtimeHerdr } from "@vibest/runtime-herdr/plugin"
 import type { Effect } from "effect"
 
+import { agentPlugin } from "./agent.ts"
 import { harnessDefaultPlugin } from "./harness-default.ts"
 
 export interface Builtin {
@@ -23,6 +24,7 @@ const builtin = (plugin: Plugin.Plugin): Builtin => ({
 })
 
 export const pre: ReadonlyArray<Builtin> = [
+  builtin(agentPlugin),
   builtin(piPlugin),
   builtin(claudePlugin),
   builtin(runtimeHerdrCore),

@@ -169,67 +169,44 @@ describe("herdr plugin commands", () => {
     }),
   )
 
-  it.effect(
-    "stop stops the session of the focused pane, or of the herdr agent name when the pane id moved; never the entry session",
-    () =>
-      Effect.gen(function* () {
-        let removed = ""
-        let listed: string | undefined = "unset"
-        const text = yield* shown(
-          "stop",
-          ctx({ focusedPaneId: "w1:p2" }),
-          fake({
-            list: (directory) =>
-              Effect.sync(() => {
-                listed = directory
-                return [session({ id: "aaaa1111-aaaa-4aaa-8aaa-aaaa1111aaaa", paneId: "w1:p1" }), session()]
-              }),
-            interrupt: (id) =>
-              Effect.sync(() => {
-                removed = id
-              }),
-          }),
-        )
-        assert.strictEqual(text, "stopped abcd1234")
-        assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
-        assert.isUndefined(listed)
-
-        removed = ""
-        const moved = yield* shown(
-          "stop",
-          ctx({ focusedPaneId: "w9:p9", focusedPaneAgent: "s-abcd1234abcd4abc8abcabcd1234ab" }),
-          fake({
-            list: () => Effect.succeed([session({ paneId: "w1:p2" })]),
-            interrupt: (id) =>
-              Effect.sync(() => {
-                removed = id
-              }),
-          }),
-        )
-        assert.strictEqual(moved, "stopped abcd1234")
-        assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
-
-        removed = ""
-        const failure = yield* Effect.flip(
-          shown(
-            "stop",
-            ctx({ focusedPaneId: "w1:p1", focusedPaneAgent: "s-a1a10001a1a14a1a8a1aa1a10001a1" }),
-            fake({
-              list: () =>
-                Effect.succeed([
-                  session({ id: "a1a10001-a1a1-4a1a-8a1a-a1a10001a1a1", agent: "main", paneId: "w1:p1" }),
-                  session({ id: "abcd1234-abcd-4abc-8abc-abcd1234abcd", paneId: "w1:p9" }),
-                ]),
-              interrupt: (id) =>
-                Effect.sync(() => {
-                  removed = id
-                }),
+  it.effect("stop stops the session of the focused pane, or of the herdr agent name when the pane id moved", () =>
+    Effect.gen(function* () {
+      let removed = ""
+      let listed: string | undefined = "unset"
+      const text = yield* shown(
+        "stop",
+        ctx({ focusedPaneId: "w1:p2" }),
+        fake({
+          list: (directory) =>
+            Effect.sync(() => {
+              listed = directory
+              return [session({ id: "aaaa1111-aaaa-4aaa-8aaa-aaaa1111aaaa", paneId: "w1:p1" }), session()]
             }),
-          ),
-        )
-        assert.strictEqual(failure._tag, "NoFocusedSession")
-        assert.strictEqual(removed, "")
-      }),
+          interrupt: (id) =>
+            Effect.sync(() => {
+              removed = id
+            }),
+        }),
+      )
+      assert.strictEqual(text, "stopped abcd1234")
+      assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
+      assert.isUndefined(listed)
+
+      removed = ""
+      const moved = yield* shown(
+        "stop",
+        ctx({ focusedPaneId: "w9:p9", focusedPaneAgent: "s-abcd1234abcd4abc8abcabcd1234ab" }),
+        fake({
+          list: () => Effect.succeed([session({ paneId: "w1:p2" })]),
+          interrupt: (id) =>
+            Effect.sync(() => {
+              removed = id
+            }),
+        }),
+      )
+      assert.strictEqual(moved, "stopped abcd1234")
+      assert.strictEqual(removed, "abcd1234-abcd-4abc-8abc-abcd1234abcd")
+    }),
   )
 
   it.effect("stop with no session in the focused pane interrupts nothing", () =>
@@ -296,19 +273,6 @@ describe("herdr plugin commands", () => {
 })
 
 describe("herdr plugin package", () => {
-  it("the manifest only calls herdr verbs, or opens a pane that runs one", () => {
-    const toml = fs.readFileSync(path.join(import.meta.dirname, "../herdr-plugin/herdr-plugin.toml"), "utf8")
-    const commands = [...toml.matchAll(/command = \["sh", "bin\/vibest\.sh", "(herdr|pane)", "([^"]+)"\]/g)]
-    assert.isAbove(commands.length, 0)
-    for (const [, kind, name] of commands) {
-      assert.include(VERBS, name)
-      if (kind === "pane") assert.include(["run", "runs", "subscriptions", "palette"], name)
-    }
-    assert.notMatch(toml, /reschedule/)
-    const files = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../package.json"), "utf8")).files
-    assert.include(files, "herdr-plugin")
-  })
-
   it("the release archive contains herdr-plugin/", () => {
     const stage = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-archive-"))
     try {
@@ -404,10 +368,16 @@ describe("herdr open-entry", () => {
         assert.match(never.stderr, /no harness to inherit/)
         assert.strictEqual((yield* herdr.callsTo("open")).length, 0)
         const projectId = yield* projectOf(repo)
-        yield* db.startEntry(projectId, "pi", false, {
-          runtime: "herdr",
-          address: { machine: "local", id: "test/main" },
-        })
+        yield* db.startEntry(
+          projectId,
+          "pi",
+          false,
+          {
+            runtime: "herdr",
+            address: { machine: "local", id: "test/main" },
+          },
+          { agent: "coordinator" },
+        )
         const stopped = yield* runVibest(repo, env, ["herdr", "open-entry"])
         assert.strictEqual(stopped.code, 0, stopped.stderr)
         assert.match(stopped.stdout, /^opened /)

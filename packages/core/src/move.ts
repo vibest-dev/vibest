@@ -48,12 +48,6 @@ const limitFailure = (
   return text === "" ? `${named}: ${error}` : text
 }
 
-export const limitMoveBox = (): {
-  readonly move: {
-    rerun: LimitMove["rerun"]
-  }
-} => ({ move: { rerun: () => Effect.die("limit move not wired") as Effect.Effect<boolean> } })
-
 export const sessionMove = (deps: {
   readonly db: Pick<
     Db["Service"],
@@ -229,7 +223,7 @@ export const sessionMove = (deps: {
     const { root, cwd } = yield* deps.locate(session)
     const base = {
       project: root,
-      agentType: session.agent,
+      agent: session.agent,
       parentSessionId: source.parentSessionId,
       harnesses: options,
     }

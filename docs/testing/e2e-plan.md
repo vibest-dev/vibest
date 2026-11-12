@@ -30,10 +30,6 @@ copy of the user's settings; only the model is fake.
 | Releases      | `npm_config_registry` and `VIBEST_DOWNLOAD_URL` point at a local stand-in that names this checkout's version as the latest, so `vibest update` and the update notice never reach npm or GitHub and never install into the user's global npm                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Secrets       | values of secret-looking login variables and `VIBEST_E2E_ENV` values, and the user's model, provider and account values (Claude `model`, Pi `defaultProvider`/`defaultModel`, Cursor model fields and account ids), are shown as `<redacted>` in output and evidence; the run fails if evidence still holds one                                                                                                                                                                                                                                                                                                                                |
 
-A test that starts the built vibestd itself (`test/plugin-binary.test.ts`) asks it over its socket, never through the
-`vibest` CLI: the CLI starts a vibestd of its own when a Ping is slow and would leave a second, untracked one behind. It
-gives vibestd a `PATH` of the system directories only, so vibestd does not poll the harnesses the user installed.
-
 Every process a test or a check starts that could outlive it is recorded in the run's reap file
 (`<tmpdir>/vibest-reap-<run pid>` or `vibest-reap-e2e-<run pid>`, `tools/reap.ts`) with its command and start time:
 herdr servers, vibestd daemons, herdr-core cores and, under `pnpm test`, every Bun process a test starts (vitest's setup
@@ -48,7 +44,7 @@ vibestd, herdr and herdr-core are never touched.
 
 ## 2. Layers
 
-**L0, already automated, no keys.** `pnpm test`; `HERDR_LIVE=1 pnpm test` inside a herdr pane (the two live files);
+**L0, already automated, no keys.** `pnpm test`;
 `pnpm verify` runs build, typecheck and test, installs vibest as a user does (install.sh from a release archive, and npm
 from the packed `@vibest/cli`, both while the unit tests run), then runs the gate on the curl install and, at the same
 time, a smoke set (I1, I2, U1, U9, U10, H1) on the npm install; the npm install gets the full gate when its file layout
@@ -169,12 +165,12 @@ What the checks that drive real herdr panes rely on:
   the check creates.
 - herdr drops a started agent's name when it is not marked ready within `agent.start`'s 120 s, and refuses
   `agent.prompt` until the agent is ready; it marks an agent ready only once the agent is read (S18, S19). S18 proves in
-  the gate that `agent.start` has resolved (the terminal is recorded) while the first execution is still held, and a unit
-  test pins the 120 s window; S18-slow waits the window out.
+  the gate that `agent.start` has resolved (the terminal is recorded) while the first execution is still held; S18-slow
+  waits the window out.
 - With herdr's own Pi hook installed (`herdr integration install pi`), herdr reads Pi's state from the hook alone, and an
   idle Pi sends it nothing more (S19).
-- Pi can open more than one model stream for one execution: S26 releases every stream held at that moment before the next
-  execution starts.
+- Pi can open more than one model stream for one execution: a check that holds the model releases every stream held at
+  that moment before the next execution starts.
 - A fake usage limit is an error inside the stream: Pi reports its message as the execution's error, and retries a failed
   request, so every retry fails too (U5, U8).
 - The user-file invariant hashes only the keys the shadows read: the user's own Claude and Pi sessions rewrite other
@@ -218,10 +214,6 @@ above it the checks run nearly one at a time; that is the price of not flaking u
 CPU seconds over 60 idle seconds. It seeds the sessions in a temp home under a runtime kind that is not registered, so no
 runtime is called. `vibest ls` prints JSON already; it has no `--json` flag.
 
-In `pnpm test`, `cli.test.ts` starts a fresh Bun process for each `vibest` (about 0.3 s, several seconds on a loaded
-machine), up to twenty per test, so its tests run one at a time: run together they share the CPU, and on a two-core CI
-runner they cost twice as much (23 s for the file against 12 s in execution).
-
 The unit fakes (`packages/cli/test/fakes.ts`): `until` polls up to 2000 times 10 ms, about 20 s, under the 30 s test
 timeout. `withStdin` feeds a command from a file, not a pipe, so a command that exits without reading raises no EPIPE.
 Each node layer of a process chain gets a `-` filler argument, which Bun running as node drops. The test layer gives
@@ -240,7 +232,7 @@ it; the install beside `pi` is the one to use.
 The capabilities are specified in [docs/features](../features/), one file per area, in plain language: each has an id
 and says when it counts as working. Those files are for the agent that leads a verification (the `verify-features`
 skill, `.agents/skills/verify-features/SKILL.md`); no script reads them. Each E2E check carries the id of the capability
-it is about in its name (`S10-start` and `S10-pi` are about `S10`) and lists in `covers` the other ids it also proves;
+it is about in its name (`S10-launch` and `S10-pi` are about `S10`) and lists in `covers` the other ids it also proves;
 `bun tools/e2e/src/main.ts --list` prints every check's id, tier and covers as JSON. I6 is the runner's own check after
 every run.
 
@@ -254,7 +246,7 @@ a real model. No script can prove these, so the verifying agent does them by han
   real model cannot be held between hook events.
 - S39 depends on timing: the Claude plugin polls every second and the Pi stream claims each message as it is queued, so
   whether two reports share one delivery depends on when they are queued.
-- S13 has no assertion: S25 and S26 only record how long a status change takes to reach vibestd, so the verifying
+- S13 has no assertion: S25 only records how long a status change takes to reach vibestd, so the verifying
   agent checks by hand that the change arrives without waiting for the next poll.
 
 Notes on particular checks:
@@ -273,9 +265,9 @@ Notes on particular checks:
   under HOME. H4 puts a sentinel Cursor CLI on PATH and fails if it runs; when a World changes HOME it removes the
   inherited SSH session variables, which H4 checks in a spawned process.
 - The guard rules themselves are `guard.test.ts`; without a vibest agent, or when vibestd cannot check the call,
-  `vibest integration guard` fails with no answer (`cli.test.ts`). Cursor's deny and allow answers through vibestd are
+  `vibest integration guard` fails with no answer. Cursor's deny and allow answers through vibestd are
   `guard.test.ts`; a stop refused with each unsettled daemon operation or delivery named (D7, and D8, whose handoff
-  drains the same way) is `stop.test.ts`; which installer U1 runs is `update.test.ts`; an entry session restarting through
+  drains the same way) is `stop.test.ts`; an entry session restarting through
   `VIBEST_COMMAND` (I11) is `restart.test.ts`.
 - The machines checks run two vibest homes on one host: A's vibestd dials B through a fake `ssh` first on its PATH,
   which runs the line with B's environment; agents on both sides run in isolated hc cores on fake models.

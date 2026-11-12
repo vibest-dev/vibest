@@ -8,11 +8,11 @@ export const make = ({ scope, machineFromCaller, cliOnly, resolveAt }: Checks) =
   Effect.gen(function* () {
     const entrySession = yield* EntrySession
     return {
-      Launch: ({ argv, focus, runtime, callerEnv, runtimeSession }) =>
+      Launch: ({ argv, agent, focus, runtime, callerEnv, runtimeSession }) =>
         Effect.gen(function* () {
-          const { id, directory } = yield* scope("Launch")
+          const { id, directory } = yield* cliOnly("Launch").pipe(Effect.flatMap((c) => resolveAt(c.repositoryRoot)))
           const at = yield* machineFromCaller({ callerEnv, runtimeSession })
-          return yield* entrySession.launch({ projectId: id, root: directory, at, argv, focus, runtime })
+          return yield* entrySession.launch({ projectId: id, root: directory, at, argv, focus, runtime, agent })
         }).pipe(
           Effect.catchTag("EntryRunning", (e) =>
             Effect.fail(
@@ -24,19 +24,24 @@ export const make = ({ scope, machineFromCaller, cliOnly, resolveAt }: Checks) =
           ),
         ),
 
-      "Project.StartEntry": ({ harness, provider, model, runtime }) =>
+      "Project.StartEntry": ({ harness, agent, provider, model, runtime }) =>
         Effect.gen(function* () {
-          const { id, directory } = yield* scope("Project.StartEntry")
-          return yield* entrySession.start({ projectId: id, root: directory, harness, provider, model, runtime })
+          const { id, directory } = yield* cliOnly("Project.StartEntry").pipe(
+            Effect.flatMap((c) => resolveAt(c.repositoryRoot)),
+          )
+          return yield* entrySession.start({ projectId: id, root: directory, harness, agent, provider, model, runtime })
         }),
 
-      "Project.EntrySession": ({ harness, fresh, terminal, runtime, provider, model, routing, pid }) =>
+      "Project.EntrySession": ({ harness, agent, fresh, terminal, runtime, provider, model, routing, pid }) =>
         Effect.gen(function* () {
-          const { id, directory } = yield* scope("Project.EntrySession")
+          const { id, directory } = yield* cliOnly("Project.EntrySession").pipe(
+            Effect.flatMap((c) => resolveAt(c.repositoryRoot)),
+          )
           return yield* entrySession.claim({
             projectId: id,
             directory,
             harness,
+            agent,
             fresh,
             terminal,
             runtime,
@@ -76,7 +81,7 @@ export const make = ({ scope, machineFromCaller, cliOnly, resolveAt }: Checks) =
 
       "Project.StopEntry": ({ runtime, address }) =>
         Effect.gen(function* () {
-          const { id } = yield* scope("Project.StopEntry")
+          const { id } = yield* cliOnly("Project.StopEntry").pipe(Effect.flatMap((c) => resolveAt(c.repositoryRoot)))
           return yield* entrySession
             .stop(id, runtime, address)
             .pipe(

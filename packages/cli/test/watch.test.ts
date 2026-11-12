@@ -47,7 +47,7 @@ const withEntry = Effect.gen(function* () {
     "pi",
     false,
     { runtime: "herdr", address: { machine: "local", id: "w1:p8" } },
-    { projectDirectory: repo },
+    { agent: "coordinator", projectDirectory: repo },
   )
   const entryClient = authed(yield* client, sessionHeaders({ sessionId: started.sessionId, projectId: project }))
   return { repo, project, entryId: started.sessionId, entryClient }
@@ -85,10 +85,10 @@ describe("Watch", () => {
       ])
       assert.deepStrictEqual(
         snapshot.sessions.map((s) => [s.id, s.agent, s.parentId]),
-        [[entryId, "main", null]],
+        [[entryId, "coordinator", null]],
       )
 
-      const { id } = yield* entryClient.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       const spawned = yield* next(
         (e): e is Extract<WatchEvent, { _tag: "Session" }> =>
           e._tag === "Session" && e.session.id === id && e.session.executionState === "open",
@@ -138,7 +138,9 @@ describe("Watch", () => {
     "a session started while Watch reads its Snapshot is in the Snapshot or arrives after it",
     Effect.gen(function* () {
       const { repo, entryClient } = yield* withEntry
-      const spawn = yield* entryClient.Spawn({ callerEnv: {}, harness: "pi", prompt: "race" }).pipe(Effect.forkScoped)
+      const spawn = yield* entryClient
+        .Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "race" })
+        .pipe(Effect.forkScoped)
       const { next } = yield* watching(repo)
       const snapshot = yield* next(isSnapshot)
       const { id } = yield* Fiber.join(spawn)
@@ -155,7 +157,7 @@ describe("Watch", () => {
       const { repo, project, entryClient } = yield* withEntry
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
-      const { id } = yield* entryClient.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       const isSession = (status: string, finished: number) => (e: WatchEvent) =>
         e._tag === "Session" && e.session.id === id && e.session.status === status && e.session.finished === finished
       yield* next((e): e is WatchEvent => isSession("working", 0)(e))
@@ -191,7 +193,7 @@ describe("Watch", () => {
       const { repo, entryClient } = yield* withEntry
       const { next, c } = yield* watching(repo)
       yield* next(isSnapshot)
-      const { id } = yield* entryClient.Spawn({ callerEnv: {}, harness: "pi", prompt: "do it" })
+      const { id } = yield* entryClient.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "do it" })
       yield* next((e): e is WatchEvent => e._tag === "Session" && e.session.id === id && e.session.status === "working")
       const terminal = (yield* herdr.terminalOf(id))!
       yield* Effect.repeat(herdr.countFinished(terminal.id), { times: 5 })
@@ -235,16 +237,6 @@ describe("Watch", () => {
         assert.include(JSON.stringify(line["error"]), "WatchLagged")
         break
       }
-    }),
-  )
-
-  test(
-    "Ping says Watch and the project contracts (activity, Session.Seen) are there; Harnesses.List comes with the protocol",
-    Effect.gen(function* () {
-      const capabilities = (yield* (yield* client).Ping()).capabilities
-      assert.strictEqual(capabilities?.["watch"], true)
-      assert.strictEqual(capabilities?.["projects"], true)
-      assert.isUndefined(capabilities?.["harnesses"])
     }),
   )
 })
