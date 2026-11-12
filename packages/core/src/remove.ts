@@ -167,8 +167,7 @@ export const make = Effect.gen(function* () {
           : yield* confirmExited
       const processState: ProcessState = confirmed.state
       if (processState === "exited" && session.exitedAt === null) {
-        const t = yield* Clock.currentTimeMillis
-        yield* db.updateSession(id, { status: "unknown", exitedAt: t, lastActive: t, end: "archived" })
+        yield* db.endProcess(id, "archived")
       }
       let shared = false
       const g = exists ? yield* gitState(worktree) : undefined
