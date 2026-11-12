@@ -355,8 +355,12 @@ How `packages/core/src/sessions.ts` keeps these:
   will try the next harness; a broken connection is not a refusal (the text may have arrived), so the execution stays.
 - A check decides nothing for an exited session (the next Message resumes it), an archived one, or one whose harness
   vibestd is restarting. A delivery already waiting on that session does not resume once the exit has failed its
-  queued sends; it decides only after that, and the next message is what resumes it. Unreachable or `unknown` status
-  is no answer. No agent, while that terminal's process is
+  queued sends; it decides only after that, and the next message is what resumes it. A delivery that finds the
+  terminal gone before any exit was recorded records that exit first (the check), so only a recorded exit is ever
+  resumed. An interrupted execution end reported once the session's terminal is closed is the harness aborting as it
+  exits (Pi aborts its execution on SIGHUP before it shuts down): it is not written, and the check records the exit
+  in its place, so the result does not depend on whether the report or the runtime's exit event comes first.
+  Unreachable or `unknown` status is no answer. No agent, while that terminal's process is
   running, is not an exit: the shell may still be starting it. That keep arms one re-check after the start
   timeout; the re-check does not arm another, and it still exits only if the runtime then reports the process gone.
   A harness whose reported

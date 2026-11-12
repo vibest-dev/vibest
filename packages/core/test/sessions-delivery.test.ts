@@ -489,6 +489,7 @@ describe.concurrent("Sessions", () => {
       yield* herdr.endExecution(id)
       yield* sessions.check(id)
       yield* herdr.updateAgent(id, (a) => ({ ...a, alive: false }))
+      yield* sessions.check(id)
       yield* settled
       const held = yield* herdr.hold("state", id)
       yield* sessions.send(id, "first")
