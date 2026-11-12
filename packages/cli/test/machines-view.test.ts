@@ -9,7 +9,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { FakeRuntime, PluginHost, until, untilVirtual, yieldToIo } from "./fakes.ts"
-import { entryIn, fakeSpawns, Net, onB, repoStack } from "./machines-fakes.ts"
+import { entryOn, fakeSpawns, Net, onB, repoStack } from "./machines-fakes.ts"
 
 type Side = {
   readonly id: string
@@ -118,7 +118,7 @@ const pair = (extra: ReadonlyArray<Plugin.Plugin> = [], options: { readonly late
     net.route("b-host", b.layout.socket)
     const added = yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
     yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
-    const here = yield* entryIn(a)
+    const { asEntry: here } = yield* entryOn(a)
     const spawn = (runtime = "view") => here(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {}, runtime }))
     const listed = (id: string) => Effect.map(here(a.raw.List({})), (r) => r.sessions.find((row) => row.id === id)!)
     return { net, A, B, a, b, added, here, spawn, listed, spawned }

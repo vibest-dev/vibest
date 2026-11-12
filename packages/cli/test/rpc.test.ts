@@ -520,10 +520,7 @@ describe("vibest.sock", () => {
         ["Machine.Add", c["Machine.Add"]({ name: "m", target: "h" })],
         ["Machine.List", c["Machine.List"]()],
         ["Machine.Remove", c["Machine.Remove"]({ name: "m" })],
-        [
-          "Peer.Spawn",
-          c["Peer.Spawn"]({ repository: "r", commit: "abc1234", prompt: "x", reportTo: id, request: "q" }),
-        ],
+        ["Peer.Spawn", c["Peer.Spawn"]({ repository: "r", commit: "abc1234", prompt: "x", request: "q" })],
         ["Peer.Outbox", Stream.runDrain(c["Peer.Outbox"](undefined))],
         ["Peer.Ack", c["Peer.Ack"]({ ids: [] })],
       ]

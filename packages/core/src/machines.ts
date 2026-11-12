@@ -330,7 +330,9 @@ const make = Effect.gen(function* () {
       const outcome = yield* db.receivePeerItem({
         id: item.id,
         recipient: item.recipient,
-        content: `${address}: ${item.content}${item.cut ? `… (full text: vibest result ${address})` : ""}`,
+        kind: item.kind,
+        sender: address,
+        content: `${item.content}${item.cut ? `… (full text: vibest result ${address})` : ""}`,
       })
       if (outcome === "unknown")
         yield* Effect.logWarning(

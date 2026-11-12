@@ -31,6 +31,13 @@ release. Each release lists what broke, who is affected and how to migrate under
   `open-main` is `open-entry` (rebind a key set to `vibest.open-main`), the runtime `present` info key `mainSession`
   is `entrySession`, and CLI help and errors say "entry session" where they said "main agent". The protocol number
   is unchanged. A session whose agent is named `entry` is an ordinary session: the entry session is the one the project records.
+- **Another machine's vibestd is told who made a call** (anyone running vibest on two machines, and RPC clients): a
+  call forwarded as `<machine>/<id>` carries the header `vibest-peer-by` (`user` or the calling session's id), and the
+  other vibestd refuses a forwarded call without it. A session reaches on the other machine only the sessions it
+  started there, and what it sends is signed with its id. `Peer.Spawn` is run only by a session (`reportTo` is no longer a field; the
+  session in `vibest-peer-by` is the creator), so `vibest run --machine` outside a session is refused. What a session
+  on the other machine sends to its creator arrives as a message (`<agent-message>` naming `<machine>/<id>`), not as a
+  notice; `Peer.Outbox` items have `kind` `send` or `notice` (was `result` or `notice`), and the read model (projection 7) gives `outbox` a `kind`.
 - **Handoff database copies** (users): a handing-over vibestd no longer writes `vibest.db.before-<version>` (a copy of
   `vibest.db` and its `-wal`). Copies already in the home are left where they are. Copy the database yourself before
   `vibest update` if you want one.
@@ -40,8 +47,8 @@ release. Each release lists what broke, who is affected and how to migrate under
   `turn.started`/`turn.ended` are `execution.started`/`execution.ended` (`turn` → `execution`, `status` → `outcome`),
   `turn.reported` is gone, `session.created` has `project` and `agent` (was `role`) and no `archiveOnCompletion` or
   `reportTo`, `origin.reportTo` is `origin.session`, `inbox.queued` has no `turn`, `inbox.moved` has `execution`,
-  inbox kinds are `task`, `send` and `notice` only, `outbox.queued` names its `session` and has no `kind` (it is
-  always a notice), and `peer.seen` has no `callsMe`. The read model (projection 5) has table `execution` (`outcome`,
+  inbox kinds are `task`, `send` and `notice` only, `outbox.queued` names its `session` and has an optional `kind`
+  (`send` or `notice`, `notice` when absent), and `peer.seen` has no `callsMe`. The read model (projection 5) has table `execution` (`outcome`,
   `reply`) instead of `turn` (`status`, `answer`), `session.agent` instead of `role`, no `session.turn_id` (a session's
   latest execution is its highest `execution.id`), no `session.archive_on_idle`, `process.ready_seq`, `inbox.seq`
   (a task with no `execution_id` was never handed over), `outbox.kind` or `peer.calls_me`, and `process`, `execution`

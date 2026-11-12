@@ -132,7 +132,12 @@ export type CallerShape =
       readonly repositoryRoot?: string
     }
   | { readonly _tag: "Session"; readonly sessionId: string; readonly projectId: string }
-  | { readonly _tag: "Peer"; readonly peerId: string; readonly projectId?: string }
+  | {
+      readonly _tag: "Peer"
+      readonly peerId: string
+      readonly projectId?: string
+      readonly session?: string
+    }
 
 export class Caller extends Context.Service<Caller, CallerShape>()("vibest/Caller") {}
 
@@ -753,7 +758,6 @@ export class VibestRpcs extends RpcGroup.make(
           model: Schema.optional(Schema.String),
           title: Schema.optional(Schema.String),
           runtime: Schema.optional(Schema.String),
-          reportTo: Schema.optional(Schema.String),
           request: Schema.String,
         },
         success: Schema.Struct({
@@ -864,6 +868,10 @@ export const PEER_CALLS: ReadonlySet<string> = new Set(
   Object.entries(ACCESS)
     .filter(([, access]) => ([] as ReadonlyArray<string>).concat(access).includes("peer"))
     .map(([method]) => method),
+)
+
+export const FORWARDED_CALLS: ReadonlySet<string> = new Set(
+  [...PEER_CALLS].filter((method) => method !== "Ping" && !method.startsWith("Peer.")),
 )
 
 export const CAPABILITIES = {

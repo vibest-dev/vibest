@@ -140,8 +140,8 @@ const setup = async (w: World, evidence: string) => {
   const notices = (address: string, marker: string) =>
     row<{ n: number }>(
       w,
-      "SELECT count(*) AS n FROM inbox WHERE content LIKE ? AND content LIKE ?",
-      `${address}:%`,
+      "SELECT count(*) AS n FROM inbox WHERE kind = 'send' AND content LIKE ? AND content LIKE ?",
+      `%<agent-id>${address}</agent-id>%`,
       `%done-${marker}%`,
     )?.n ?? 0
   const stop = async () => {

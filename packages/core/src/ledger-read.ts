@@ -333,7 +333,7 @@ export const ledgerReads = (sql: SqlClient.SqlClient) => {
     )
 
   const outboxOf = (peer: string) =>
-    sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.content, o.created_at,
+    sql<OutboxRow & { reportTo: string | null }>`SELECT o.id, o.session_id, o.kind, o.content, o.created_at,
         s.origin_session AS report_to
       FROM outbox o JOIN session s ON s.id = o.session_id WHERE o.peer_id = ${peer} ORDER BY o.seq`.pipe(
       Effect.map((rows) => rows.filter((row): row is OutboxRow => row.reportTo !== null)),

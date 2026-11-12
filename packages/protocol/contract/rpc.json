@@ -5894,7 +5894,7 @@
           "kind": {
             "type": "string",
             "enum": [
-              "result",
+              "send",
               "notice"
             ]
           },
@@ -6151,16 +6151,6 @@
             ]
           },
           "runtime": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reportTo": {
             "anyOf": [
               {
                 "type": "string"

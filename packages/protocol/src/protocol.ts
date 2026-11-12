@@ -39,11 +39,15 @@ export const PROCESS_HEADER = "vibest-process"
 export const PEER_HEADER = "vibest-peer"
 export const PEER_PROJECT_HEADER = "vibest-peer-project"
 
-export const peerHeaders = (peer: string, project?: string): Record<string, string> => ({
+export const PEER_BY_HEADER = "vibest-peer-by"
+export const PEER_BY_USER = "user"
+
+export const peerHeaders = (peer: string, project?: string, by?: string): Record<string, string> => ({
   [PROTOCOL_HEADER]: String(PROTOCOL),
   [CALLER_HEADER]: "peer",
   [PEER_HEADER]: peer,
   ...(project === undefined ? {} : { [PEER_PROJECT_HEADER]: project }),
+  ...(by === undefined ? {} : { [PEER_BY_HEADER]: by }),
 })
 
 export const POLL_ROUTE = "/inbox/poll"

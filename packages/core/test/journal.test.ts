@@ -167,7 +167,7 @@ const story = Effect.gen(function* () {
       })
       yield* emit(Catalog["outbox.queued"], {
         at: 511,
-        data: { id: ITEM_2, peer: PEER, session: REMOTE, content: "archived" },
+        data: { id: ITEM_2, peer: PEER, session: REMOTE, kind: "send", content: "archived" },
       })
       yield* emit(Catalog["outbox.acked"], { at: 520, data: { peer: PEER, ids: [ITEM] } })
       const notice = yield* emit(Catalog["inbox.queued"], {
@@ -546,6 +546,7 @@ describe("journal projectors", () => {
           seq: queued!.seq,
           peerId: PEER,
           sessionId: REMOTE,
+          kind: "send",
           content: "archived",
           createdAt: 511,
         },
