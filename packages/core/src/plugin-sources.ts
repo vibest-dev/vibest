@@ -295,7 +295,6 @@ export const makeSources = Effect.fnUntraced(function* (
 })
 
 export const WATCH_PROBE = ".plugins-watch"
-const PROBE_ATTEMPTS = 10
 
 export const makeWatcher = (changed: (path: string) => void, retry: Duration.Input) =>
   Effect.gen(function* () {
@@ -371,9 +370,13 @@ export const makeWatcher = (changed: (path: string) => void, retry: Duration.Inp
     })
 
     const live = Effect.gen(function* () {
-      for (let attempt = 1; attempt <= PROBE_ATTEMPTS; attempt++) {
+      for (let attempt = 1; ; attempt++) {
         probeSeen.closeUnsafe()
-        yield* fs.writeFileString(probe, `${attempt}\n`).pipe(Effect.ignore)
+        yield* fs
+          .writeFileString(probe, `${attempt}\n`)
+          .pipe(
+            Effect.catch((e) => Effect.logWarning(`cannot write ${probe} to check the plugin watch: ${messageOf(e)}`)),
+          )
         if (Option.isSome(yield* probeSeen.await.pipe(Effect.timeoutOption(retry)))) return
       }
     })

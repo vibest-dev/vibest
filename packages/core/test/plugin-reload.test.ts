@@ -4,6 +4,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { Bus } from "@vibest/core/bus"
 import { Harnesses } from "@vibest/core/harness"
 import { Layout } from "@vibest/core/paths"
+import { makeSources } from "@vibest/core/plugin-sources"
+import { resolve } from "@vibest/core/plugin-supervisor"
 import {
   Builtins,
   type Candidate,
@@ -788,7 +790,7 @@ describe("plugins: supervisor", () => {
   )
 
   it.effect(
-    "a change Bun dropped while it rebuilt its watch is found by the rescan once a probe shows the watch is live; a lost probe is written again; then it stops",
+    "a change Bun dropped while it rebuilt its watch is found by the rescan once a probe write is reported, however many go unreported first; then it stops",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -821,9 +823,12 @@ describe("plugins: supervisor", () => {
         const afterRemoval = vibestJsonReads.count
         yield* fs.writeFileString(path.join(plugins, "a.ts"), pluginFile("a", "drop-a", `"a2"`))
         assert.strictEqual((yield* service.start(event)).model, "a1", "the dropped save is not seen yet")
-        yield* fire(RECHECK)
-        assert.strictEqual(vibestJsonReads.count, afterRemoval, "no rescan before the watch is shown live")
-        yield* probeArrives
+        for (let unreported = 0; unreported < 11; unreported++) yield* fire(RECHECK)
+        yield* armed(RECHECK)
+        assert.strictEqual(yield* fs.readFileString(path.join(dir, WATCH_PROBE)), "12\n", "the probe is still written")
+        assert.strictEqual(vibestJsonReads.count, afterRemoval, "no rescan before the probe is reported")
+        assert.strictEqual((yield* service.start(event)).model, "a1", "the save is still missed")
+        yield* watchSees(dir, WATCH_PROBE)
         yield* fire(DEBOUNCE)
         assert.strictEqual((yield* service.start(event)).model, "a2", "the rescan finds the save")
         assert.isAbove(vibestJsonReads.count, afterRemoval)
@@ -882,33 +887,34 @@ describe("plugins: supervisor", () => {
       ),
     15_000,
   )
+})
 
-  it.effect("an unchanged plugin that failed to import is not imported again when another plugin reloads", () =>
+describe("plugins: sources", () => {
+  it.effect("a plugin that failed to import is imported again only after its file changes", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const dir = yield* packageHome
-      const plugins = path.join(dir, "plugins")
-      watchGate.hold = true
-      yield* fs.writeFileString(
-        path.join(plugins, "broken.ts"),
-        `globalThis.__vibestReload["import:unchanged-broken"] = (globalThis.__vibestReload["import:unchanged-broken"] ?? 0) + 1\nthrow new Error("broken on purpose")\n`,
+      const file = path.join(dir, "plugins", "broken.ts")
+      yield* fs.writeFileString(file, "v1\n")
+      let imports = 0
+      const rejecting: PluginLoader["Service"] = {
+        ...loader,
+        load: () => {
+          imports++
+          return Promise.reject(new Error("broken on purpose"))
+        },
+      }
+      const sources = yield* makeSources("5 seconds").pipe(
+        Effect.provideService(PluginLoader, rejecting),
+        Effect.provide(Layer.effect(Layout, Layout.make(dir))),
       )
-      yield* fs.writeFileString(path.join(plugins, "other.ts"), pluginFile("other", "unchanged-other", `"o1"`))
-      const { fire, clocked } = yield* timers
-      const service = yield* clocked(supervise(dir))
-      assert.include((yield* service.list)[0]!.error, "broken on purpose")
-      const imports = count("import:unchanged-broken")
-
-      yield* fs.writeFileString(path.join(plugins, "other.ts"), pluginFile("other", "unchanged-other", `"o2"`))
-      yield* watchSees(plugins, "other.ts")
-      yield* fire(DEBOUNCE)
-      assert.strictEqual((yield* service.start(event)).model, "o2")
-      assert.strictEqual(count("import:unchanged-broken"), imports)
-    }).pipe(
-      Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
-      Effect.scoped,
-      Effect.provide(Platform.services),
-    ),
+      yield* resolve(sources)
+      yield* resolve(sources)
+      assert.strictEqual(imports, 1)
+      yield* fs.writeFileString(file, "v2\n")
+      yield* resolve(sources)
+      assert.strictEqual(imports, 2)
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 })

@@ -40,8 +40,8 @@ such a rewatch one more read follows, timed by a probe. On macOS Bun 1.4 serves 
 one FSEvents stream and rebuilds it, from "now", on a separate thread whenever a watch is added or closed; events in
 every watched directory are lost until the new stream runs, which under CPU load can take well over a second. So after a
 rewatch vibestd writes `.plugins-watch` in `VIBEST_HOME` (always watched for `vibest.json`) and reads the plugins
-again when that write is reported, writing it again each second it is not; after ten unreported writes it reads them
-anyway. This narrows the loss, it does not rule it out: a stream rebuilt again after the probe was reported, or events
+again only when that write is reported, writing it again each second until it is (a failed write is logged, not taken
+as reported). This narrows the loss, it does not rule it out: a stream rebuilt again after the probe was reported, or events
 macOS itself drops under heavy load, still go unseen until the next change (drop the probe when Bun no longer rebuilds
 the stream). A teardown that times out is left
 running, so an old revision's finalizers can overlap the new setup.
