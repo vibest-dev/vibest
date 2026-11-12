@@ -1,4 +1,5 @@
 import { assert, describe } from "@effect/vitest"
+import { Agents } from "@vibest/core/agents"
 import { Db } from "@vibest/core/db"
 import { Drain } from "@vibest/core/drain"
 import { Harnesses } from "@vibest/core/harness"
@@ -101,6 +102,40 @@ describe.concurrent("Sessions", () => {
       const [restarted] = yield* sessions.restart([id])
       assert.isFalse(restarted!.ok)
       assert.include(restarted!.message, "no loaded plugin provides its harness")
+    }),
+  )
+
+  test(
+    "an agent definition lives while the scope of the plugin that registered it is open, and a later update overrides an earlier one",
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const reviewer = { id: "reviewer", description: "reviews", system: "Review." }
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* agents.transform((editor) => editor.add(reviewer))
+          yield* agents.transform((editor) => editor.update("reviewer", (definition) => (definition.system = "First.")))
+          yield* agents.transform((editor) =>
+            editor.update("reviewer", (definition) => (definition.system = "Second.")),
+          )
+          assert.strictEqual(agents.find("reviewer")?.system, "Second.")
+        }),
+      )
+      assert.isUndefined(agents.find("reviewer"))
+      assert.isDefined(agents.find("general"))
+    }),
+  )
+
+  test(
+    "a restart whose agent definition is gone fails with the unknown agent, and the session stays as it was",
+    Effect.gen(function* () {
+      const repo = yield* makeRepository
+      const { id } = yield* spawnWorking(repo)
+      yield* (yield* Agents).transform((editor) => editor.remove("general"))
+      const before = yield* (yield* Db).getSession(id)
+      const [restarted] = yield* (yield* Sessions).restart([id])
+      assert.isFalse(restarted!.ok)
+      assert.include(restarted!.message, "general")
+      assert.deepStrictEqual(yield* (yield* Db).getSession(id), before)
     }),
   )
 

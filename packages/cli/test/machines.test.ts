@@ -300,6 +300,27 @@ const outboxRows = Effect.flatMap(
 const finish = (db: Db["Service"], session: string, message: string) => db.insertInbox({ sessionId: session, message })
 
 describe("another machine's vibestd runs agents here", () => {
+  it.effect("Peer.Spawn for an agent id machine B does not know is refused before any session is made", () =>
+    Effect.gen(function* () {
+      const b = yield* repoStack(undefined, { sessions: (sessions) => sessions })
+      const call = yield* b.as(randomId(), "aproj")
+      const refused = yield* Effect.flip(
+        call(
+          b.raw["Peer.Spawn"]({
+            agent: "reviewer",
+            repository: REMOTE,
+            commit: COMMIT,
+            prompt: "x",
+            request: randomId(),
+          }),
+        ),
+      )
+      assert.strictEqual(refused._tag, "UnknownAgent")
+      assert.include(refused.message, "reviewer")
+      assert.deepStrictEqual((yield* call(b.raw.List({}))).sessions, [])
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
   it.effect("Peer.Spawn records peer.start and no parent; a retry finds it; no project or commit fails clearly", () =>
     Effect.gen(function* () {
       const b = yield* peerB

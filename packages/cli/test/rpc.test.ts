@@ -548,6 +548,15 @@ describe("vibest.sock", () => {
             .some((access) => access === "agent" || access === "session" || access === "open"),
       ))
         assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden", method)
+      const entryBefore = yield* db.entryOf((yield* db.getSession(id))!.projectId)
+      const entryCalls: ReadonlyArray<Effect.Effect<unknown, { readonly _tag: string }>> = [
+        w["Project.StopEntry"]({ runtime: "herdr", address: "{}" }),
+        w["Project.EntrySession"]({ agent: "coordinator", harness: "pi", fresh: true, terminal: "test/p1" }),
+        w["Project.StartEntry"]({ agent: "coordinator", runtime: "herdr" }),
+        w.Launch({ agent: "coordinator", callerEnv: {}, argv: [], focus: false }),
+      ]
+      for (const call of entryCalls) assert.strictEqual(failureTag(yield* Effect.exit(call)), "Forbidden")
+      assert.deepStrictEqual(yield* db.entryOf((yield* db.getSession(id))!.projectId), entryBefore)
       const child = yield* w.Spawn({ agent: "general", callerEnv: {}, harness: "pi", prompt: "from a session" })
       assert.deepStrictEqual(yield* db.creatorOf(child.id), { local: id })
 
