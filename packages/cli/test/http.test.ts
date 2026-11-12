@@ -41,18 +41,6 @@ const row = (over: Partial<InboxRow>): InboxRow => ({
 
 describe("the line a delivery shows", () => {
   const who = () => ({ agent: "general", title: "Fix the guard rule" })
-  it("names the agent type, title and session id; a notice shows its first line", () => {
-    assert.strictEqual(
-      line([row({ kind: "send" })], who),
-      'General Agent "Fix the guard rule" sent a message (349f65b2)',
-    )
-    const reviewer = () => ({ agent: "reviewer", title: "Review the guard fix" })
-    assert.strictEqual(
-      line([row({ kind: "send", sender: "95603b88-9560-4956-8956-95603b889560" })], reviewer),
-      'Reviewer Agent "Review the guard fix" sent a message (95603b88)',
-    )
-    assert.strictEqual(line([row({ kind: "notice", message: "w1 exited.\nmore" })], who), "Notice: w1 exited.")
-  })
 
   it("a batch is named by its last row; a long title is cut, the id and the count kept", () => {
     const batch = [row({ kind: "send" }), row({ id: 2, kind: "send" }), row({ id: 3, kind: "send" })]

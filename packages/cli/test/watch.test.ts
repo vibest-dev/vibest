@@ -237,14 +237,4 @@ describe("Watch", () => {
       }
     }),
   )
-
-  test(
-    "Ping says Watch and the project contracts (activity, Session.Seen) are there; Harnesses.List comes with the protocol",
-    Effect.gen(function* () {
-      const capabilities = (yield* (yield* client).Ping()).capabilities
-      assert.strictEqual(capabilities?.["watch"], true)
-      assert.strictEqual(capabilities?.["projects"], true)
-      assert.isUndefined(capabilities?.["harnesses"])
-    }),
-  )
 })

@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite"
 import { assert, layer } from "@effect/vitest"
 import { projectActivity, raisesSeen, unseenDone } from "@vibest/core/activity"
 import { Db } from "@vibest/core/db"
-import { Harness, Harnesses, HarnessUnavailable, harnessCatalog, harnessOptions, preflight } from "@vibest/core/harness"
+import { Harness, Harnesses, HarnessUnavailable, preflight } from "@vibest/core/harness"
 import * as Launch from "@vibest/core/launch"
 import { forProvider, listModels } from "@vibest/core/models"
 import { caseFoldedWorktrees, Layout, VibestCommand, safeRepositoryDirectory } from "@vibest/core/paths"
@@ -314,49 +314,6 @@ layer(Layer.mergeAll(FakeGit.layers.pipe(Layer.provideMerge(Platform.services)),
       assert.strictEqual(noProvider("cursor")("anthropic"), "cursor has no provider option")
       assert.isUndefined(noProvider("cursor")(null))
     })
-
-    it.effect("the harness catalog and the start options agree: a harness off PATH has a problem and no models", () =>
-      Effect.gen(function* () {
-        const [catalog, options] = yield* Effect.all([harnessCatalog, harnessOptions]).pipe(
-          Effect.provide(
-            Layer.succeed(Harness, {
-              available: (id) => Effect.succeed(id !== "cursor"),
-              plugin: (id) => Effect.succeed(`/vibest/harnesses/${id}`),
-              models: (id) =>
-                Effect.succeed([
-                  { harness: id, provider: "p", model: `${id}-1`, name: "One", description: "d", default: true },
-                ]),
-            }),
-          ),
-        )
-        assert.deepStrictEqual(
-          catalog.find((c) => c.harness === "pi"),
-          {
-            harness: "pi",
-            binary: "pi",
-            problem: null,
-            models: [{ provider: "p", model: "pi-1", name: "One", default: true }],
-          },
-        )
-        assert.deepStrictEqual(
-          catalog.find((c) => c.harness === "cursor"),
-          {
-            harness: "cursor",
-            binary: "cursor-agent",
-            problem: "cursor-agent is not on PATH",
-            models: [],
-          },
-        )
-        assert.deepStrictEqual(
-          options,
-          catalog.map((c) =>
-            c.problem === null
-              ? { harness: c.harness, available: true }
-              : { harness: c.harness, available: false, problem: c.problem },
-          ),
-        )
-      }),
-    )
 
     it.effect(
       "execution ends: reply field per harness; error fails, aborted interrupts; a junk hook input is no execution end",

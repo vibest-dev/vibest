@@ -60,7 +60,7 @@ The plugin directory holds exactly:
 `$.plugin` has no version, so the build inlines it. Bun writes each module's path relative to the working directory
 into the bundle, so the build pins the working directory and the bytes do not vary.
 
-The generated files are ignored by Git. `test/distribution.test.ts` packs this package and checks the extracted files.
+The generated files are ignored by Git.
 
 ## Use
 

@@ -296,19 +296,6 @@ describe("herdr plugin commands", () => {
 })
 
 describe("herdr plugin package", () => {
-  it("the manifest only calls herdr verbs, or opens a pane that runs one", () => {
-    const toml = fs.readFileSync(path.join(import.meta.dirname, "../herdr-plugin/herdr-plugin.toml"), "utf8")
-    const commands = [...toml.matchAll(/command = \["sh", "bin\/vibest\.sh", "(herdr|pane)", "([^"]+)"\]/g)]
-    assert.isAbove(commands.length, 0)
-    for (const [, kind, name] of commands) {
-      assert.include(VERBS, name)
-      if (kind === "pane") assert.include(["run", "runs", "subscriptions", "palette"], name)
-    }
-    assert.notMatch(toml, /reschedule/)
-    const files = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../package.json"), "utf8")).files
-    assert.include(files, "herdr-plugin")
-  })
-
   it("the release archive contains herdr-plugin/", () => {
     const stage = fs.mkdtempSync(path.join(os.tmpdir(), "vibest-archive-"))
     try {

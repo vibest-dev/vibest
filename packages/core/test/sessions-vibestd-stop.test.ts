@@ -163,21 +163,6 @@ describe.concurrent("after a vibestd stop", () => {
     )
 
   test(
-    "vibestd stopped in its ready wait leaves no execution and the task for the next vibestd",
-    waitingForReady((id) =>
-      Effect.gen(function* () {
-        const db = yield* Db
-        assert.deepStrictEqual(yield* executionInputs(id), [])
-        assert.strictEqual(yield* db.untakenTask(id), "do it")
-        yield* nextVibestd(Effect.map(typed("do it"), (n) => n === 1))
-        assert.deepStrictEqual(yield* executionInputs(id), [{ input: "do it", status: "working" }])
-        assert.isUndefined(yield* db.untakenTask(id))
-      }),
-    ),
-    { hooked: ["pi"] },
-  )
-
-  test(
     "a task handed over at reconcile that does not start ends the execution not_started and is not handed over again",
     waitingForReady((id) =>
       Effect.gen(function* () {

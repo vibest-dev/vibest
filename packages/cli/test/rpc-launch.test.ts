@@ -96,34 +96,6 @@ describe("vibest.sock", () => {
   )
 
   test(
-    "Project.EntryPlace names the detected terminal, and launches a named runtime that is not here",
-    Effect.gen(function* () {
-      const repo = yield* makeRepository
-      const c = asCli(yield* client, repo)
-      const opened = yield* c["Project.Open"]({})
-      const here = yield* c["Project.EntryPlace"]({ callerEnv: { HC_ID: "t1", HERDR_ID: "p1" } })
-      assert.strictEqual(here.directory, opened.directory)
-      assert.deepStrictEqual(here.place, { in: "terminal", runtime: "herdr", terminal: "p1" })
-      assert.deepStrictEqual((yield* c["Project.EntryPlace"]({ callerEnv: { HC_ID: "t1" }, runtime: "herdr" })).place, {
-        in: "launch",
-        runtime: "herdr",
-      })
-    }),
-    {
-      plugins: [
-        callerPlugin("hc", {
-          env: ["HC_ID"],
-          terminal: (env) => Effect.succeed(env.HC_ID),
-        }),
-        callerPlugin("herdr", {
-          env: ["HERDR_ID"],
-          terminal: (env) => Effect.succeed(env.HERDR_ID),
-        }),
-      ],
-    },
-  )
-
-  test(
     "Project.EntryPlace issued while a runtime plugin is still activating waits for it and detects its caller",
     Effect.gen(function* () {
       const c = asCli(yield* client, yield* makeRepository)

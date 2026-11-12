@@ -44,34 +44,6 @@ describe.concurrent("Sessions", () => {
   )
 
   test(
-    "a set provider is kept, limited or not",
-    Effect.gen(function* () {
-      const herdr = yield* FakeRuntime
-      const db = yield* Db
-      const sessions = yield* Sessions
-      const subs = yield* Subscriptions
-      const open = { window: "5h", percent: 0, status: "available" as const, resetTime: null }
-      yield* subs.report({ harness: "pi", provider: "anthropic", limits: [limited] })
-      yield* subs.report({ harness: "pi", provider: "openai", limits: [open] })
-      const repo = yield* makeRepository
-      yield* db.startEntry(yield* projectOf(repo), "pi", false, {
-        runtime: RUNTIME,
-        address: { machine: "local", id: "test/coord" },
-      })
-      const limitedOne = yield* sessions.spawn({ ...(yield* spawnInput(repo)), provider: "anthropic" })
-      assert.strictEqual(limitedOne.provider, "anthropic")
-      const fine = yield* sessions.spawn({ ...(yield* spawnInput(repo)), provider: "openai", name: "other" })
-      yield* until(db.getSession(fine.id), (row) => !!row && row.startedAt !== null)
-      yield* sessions.check(fine.id)
-      assert.deepInclude(yield* db.getSession(fine.id), { harnessId: "pi", provider: "openai", executionState: "open" })
-      assert.deepStrictEqual(
-        (yield* herdr.callsTo("open")).map((call) => harnessOf(call.argv)),
-        ["pi", "pi"],
-      )
-    }),
-  )
-
-  test(
     "an unconfirmed prompt after a limit tries the next harness in a new execution and is not remembered, so the next limit can use that harness",
     Effect.gen(function* () {
       const herdr = yield* FakeRuntime

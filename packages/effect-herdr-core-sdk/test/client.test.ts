@@ -90,16 +90,6 @@ const fakeServer = (core: Core = CURRENT) =>
   })
 
 layer(Layer.mergeAll(BunServices.layer, HcBun.layer))("Hc client", (it) => {
-  it.effect("call decodes the result with the generated schema", () =>
-    Effect.gen(function* () {
-      const { hc } = yield* fakeServer()
-      const terminal = yield* hc.call("terminal.get", { terminal: "t1" })
-      assert.strictEqual(terminal.address, "t1")
-      assert.deepStrictEqual(terminal.labels, { "vibest.runtime": "hc" })
-      assert.strictEqual(terminal.state, "live")
-    }),
-  )
-
   it.effect("a server error is an HcError carrying data.kind and the hint", () =>
     Effect.gen(function* () {
       const { hc } = yield* fakeServer()

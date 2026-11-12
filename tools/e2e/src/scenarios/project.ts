@@ -39,31 +39,8 @@ const filesExecution =
 
 const checks: ReadonlyArray<Check> = [
   {
-    id: "P1",
-    title:
-      "project info names the project folder (projects/<project id>), its preferences.md, docs, memories and artifacts",
-    run: async (w) => {
-      const info = await w.json<Info>(["project", "info"])
-      const id = path.basename(info.directory)
-      expect(
-        path.dirname(info.directory) === path.join(w.vibestHome, "projects") && /^[0-9a-f-]{36}$/.test(id),
-        `directory: ${JSON.stringify(info)}`,
-      )
-      for (const [key, rel] of [
-        ["preferences", "preferences.md"],
-        ["docs", "docs"],
-        ["memories", "memories"],
-        ["artifacts", "artifacts"],
-      ] as const)
-        expect(info[key] === path.join(info.directory, rel), `${key}: ${JSON.stringify(info)}`)
-      for (const gone of ["read", "write", "list", "delete"]) {
-        const r = await w.vibest(["project", gone, "docs", "a.md"])
-        expect(r.code !== 0, `project ${gone} exited 0`)
-      }
-    },
-  },
-  {
     id: "P2",
+    covers: ["P1"],
     title: "project search finds text in docs, memories and artifacts files, as kind/path:line: text",
     run: async (w) => {
       const info = await w.json<Info>(["project", "info"])

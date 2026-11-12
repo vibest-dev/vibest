@@ -48,7 +48,7 @@ vibestd, herdr and herdr-core are never touched.
 
 ## 2. Layers
 
-**L0, already automated, no keys.** `pnpm test`; `HERDR_LIVE=1 pnpm test` inside a herdr pane (the two live files);
+**L0, already automated, no keys.** `pnpm test`;
 `pnpm verify` runs build, typecheck and test, installs vibest as a user does (install.sh from a release archive, and npm
 from the packed `@vibest/cli`, both while the unit tests run), then runs the gate on the curl install and, at the same
 time, a smoke set (I1, I2, U1, U9, U10, H1) on the npm install; the npm install gets the full gate when its file layout
@@ -169,12 +169,12 @@ What the checks that drive real herdr panes rely on:
   the check creates.
 - herdr drops a started agent's name when it is not marked ready within `agent.start`'s 120 s, and refuses
   `agent.prompt` until the agent is ready; it marks an agent ready only once the agent is read (S18, S19). S18 proves in
-  the gate that `agent.start` has resolved (the terminal is recorded) while the first execution is still held, and a unit
-  test pins the 120 s window; S18-slow waits the window out.
+  the gate that `agent.start` has resolved (the terminal is recorded) while the first execution is still held; S18-slow
+  waits the window out.
 - With herdr's own Pi hook installed (`herdr integration install pi`), herdr reads Pi's state from the hook alone, and an
   idle Pi sends it nothing more (S19).
-- Pi can open more than one model stream for one execution: S26 releases every stream held at that moment before the next
-  execution starts.
+- Pi can open more than one model stream for one execution: a check that holds the model releases every stream held at
+  that moment before the next execution starts.
 - A fake usage limit is an error inside the stream: Pi reports its message as the execution's error, and retries a failed
   request, so every retry fails too (U5, U8).
 - The user-file invariant hashes only the keys the shadows read: the user's own Claude and Pi sessions rewrite other
@@ -254,7 +254,7 @@ a real model. No script can prove these, so the verifying agent does them by han
   real model cannot be held between hook events.
 - S39 depends on timing: the Claude plugin polls every second and the Pi stream claims each message as it is queued, so
   whether two reports share one delivery depends on when they are queued.
-- S13 has no assertion: S25 and S26 only record how long a status change takes to reach vibestd, so the verifying
+- S13 has no assertion: S25 only records how long a status change takes to reach vibestd, so the verifying
   agent checks by hand that the change arrives without waiting for the next poll.
 
 Notes on particular checks:

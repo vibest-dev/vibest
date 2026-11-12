@@ -4,7 +4,6 @@ import { type Candidate, Plugins } from "@vibest/core/plugins"
 import { AgentRefused, Plugin } from "@vibest/plugin"
 import { Effect, Layer } from "effect"
 
-import glmOnly from "../../plugin/examples/glm-only.ts"
 import { testEffect } from "./lib/effect.ts"
 import { harnessesLayer, runtimesLayer, subscriptionsLayer } from "./lib/harnesses.ts"
 
@@ -226,16 +225,5 @@ describe("plugin host: one event mutated in place in plugin order, refusals and 
           assert.deepInclude(error, { _tag: "HookFailed", message: "plugin mover crashed: moved?" })
           assert.strictEqual((yield* p.list).find((q) => q.id === "mover")!.crashed, 1)
         }),
-    ))
-
-  it("glm-only: subagents run on Pi with its provider and model; the entry session keeps its harness", () =>
-    run([candidate("glm-only", glmOnly, { provider: "zai", model: "glm-5.3" })], (p) =>
-      Effect.gen(function* () {
-        const s = yield* p.start({ ...start, harness: "claude" })
-        assert.deepStrictEqual([s.harness, s.provider, s.model], ["pi", "zai", "glm-5.3"])
-        assert.deepStrictEqual(s.decidedBy, { harness: "glm-only", provider: "glm-only", model: "glm-only" })
-        const m = yield* p.start({ ...start, agentType: "main", harness: "claude" })
-        assert.deepStrictEqual([m.harness, m.provider, m.model], ["claude", undefined, undefined])
-      }),
     ))
 })

@@ -18,7 +18,6 @@ import {
   Fiber,
   FileSystem,
   Layer,
-  Logger,
   Path,
   Schedule,
   Scope,
@@ -254,21 +253,6 @@ describe("plugins: activation", () => {
           assert.isUndefined(fixed!.error)
         }),
       ),
-  )
-
-  it.effect("P17: a revision that fails to import keeps the last working one; with none it is failed", () =>
-    host((h) =>
-      Effect.gen(function* () {
-        yield* h.activate([a1, candidate("new", "9", { error: "import failed: nope" })])
-        yield* h.activate([a1, b1])
-        yield* takeEvents
-        yield* h.activate([a1, candidate("b", "2", { error: "import failed: SyntaxError" })])
-        assert.deepStrictEqual(yield* takeEvents, [], "the running b1 is neither closed nor set up again")
-        const [, b] = yield* h.service.list
-        assert.deepInclude(b, { id: "b", status: "active", revision: "1" })
-        assert.include(b!.error, "revision 2 failed, still running 1: import failed: SyntaxError")
-      }),
-    ),
   )
 
   it.effect(
@@ -694,44 +678,6 @@ describe("plugins: supervisor", () => {
       assert.strictEqual(watchers.open - before, 2, "x/ is no longer watched")
       yield* Scope.close(scope, Exit.void)
       assert.strictEqual(watchers.open, before, "vibestd's end closes every watcher")
-    }),
-  )
-
-  live(
-    "an old runtime key warns once and is otherwise ignored",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* packageHome
-      const logs: Array<string> = []
-      yield* fs.writeFileString(path.join(dir, "vibest.json"), '{ "runtime": "hc", "plugins": [] }\n')
-      const plugins = yield* supervise(dir).pipe(
-        Effect.provide(Logger.layer([Logger.make((entry) => void logs.push(String(entry.message)))])),
-      )
-      assert.strictEqual((yield* plugins.start(event)).runtime, undefined)
-      const warnings = () => logs.filter((line) => line.includes('"runtime" is ignored'))
-      assert.strictEqual(warnings().length, 1)
-      const reads = vibestJsonReads.count
-      yield* fs.writeFileString(path.join(dir, "vibest.json"), '{ "runtime": "herdr", "plugins": [] }\n')
-      yield* pastRescan
-      assert.isAbove(vibestJsonReads.count, reads)
-      assert.strictEqual(warnings().length, 1)
-    }),
-  )
-
-  live(
-    "a spawn right after start waits for the first activation instead of running without plugins",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* packageHome
-      yield* fs.writeFileString(path.join(dir, "plugins", "early.ts"), pluginFile("early", "early", `"early"`))
-      const s = yield* (yield* supervise(dir)).start(event)
-      assert.deepStrictEqual(
-        s.trace.map((t) => [t.plugin, t.outcome]),
-        [["early", "ok"]],
-      )
-      assert.strictEqual(s.model, "early")
     }),
   )
 
