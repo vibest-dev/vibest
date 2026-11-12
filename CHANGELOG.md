@@ -7,6 +7,12 @@ release. Each release lists what broke, who is affected and how to migrate under
 
 ### Breaking changes
 
+- **Starting and stopping the entry session is user-only** (RPC clients, agents): `Launch`, `Project.StartEntry`,
+  `Project.EntrySession` and `Project.StopEntry` refuse a session calling them, including the entry session itself.
+  Ask the user to run these operations from a terminal that carries no agent session.
+- **The read model is projection version 8** (anyone upgrading or reading `vibest.db`): `outbox` gains `recipient` so a
+  message whose creator has ended reaches the nearest living creator, including on another machine. vibestd rebuilds
+  the projection from the event log on first start after upgrading; no manual step is needed.
 - **`vibest run --peer` is `--share`** (agents and scripts that start a session in another session's worktree): the flag,
   the `Spawn` field `peer` and its refusal text are renamed; `peer` now names only another machine's vibestd.
 - **Cursor is a plugin, claude is the default harness** (users of Cursor, and anyone relying on "no harness to
