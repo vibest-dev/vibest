@@ -1,24 +1,27 @@
 import { PROTOCOL } from "@vibest/protocol/protocol"
 import { VERSION } from "@vibest/protocol/rpc"
-import { Duration, Effect, Exit, Fiber, Option, Schedule, type Scope } from "effect"
+import { Context, Duration, Effect, Exit, Fiber, FileSystem, Layer, Option, Path, Schedule, type Scope } from "effect"
 
-import { awaitEvent, Bus, type EngineEvent } from "./bus.ts"
-import type { EntryRow, Db, SessionRow } from "./db.ts"
-import type { HarnessId } from "./harness.ts"
-import type { HarnessDefinition, HarnessesShape } from "./host.ts"
-import { errorMessage } from "./plugins.ts"
-import type { Processes } from "./processes.ts"
-import { noticeEnvelope } from "./replies.ts"
-import {
-  agentState,
-  type AgentSeen,
-  peekHint,
-  type Runtime,
-  type Runtimes,
-  stateOf,
-  type Terminal,
-} from "./runtimes.ts"
-import type { SessionLive } from "./session/live.ts"
+import { Agents } from "../agents.ts"
+import { awaitEvent, Bus, type EngineEvent } from "../bus.ts"
+import { type EntryRow, Db, type SessionRow } from "../db.ts"
+import { LayerNode } from "../effect/layer-node.ts"
+import * as PlatformNode from "../effect/platform.ts"
+import { Harness, type HarnessId, Harnesses } from "../harness.ts"
+import type { HarnessDefinition, HarnessesShape } from "../host.ts"
+import { entryCommand, restartArgv } from "../launch.ts"
+import { Layout, VibestCommand } from "../paths.ts"
+import { errorMessage } from "../plugins.ts"
+import { Processes } from "../processes.ts"
+import { noticeEnvelope } from "../replies.ts"
+import { agentState, type AgentSeen, peekHint, type Runtime, Runtimes, stateOf, type Terminal } from "../runtimes.ts"
+import type { Platform } from "../session-types.ts"
+import { Git } from "../worktree.ts"
+import { Executions } from "./executions.ts"
+import { SessionLive } from "./live.ts"
+import { SessionLocks } from "./locks.ts"
+import { Placement, runtimeEnv } from "./placement.ts"
+import { Reconcile } from "./reconcile.ts"
 
 export interface Outdated {
   readonly id: string
@@ -93,7 +96,7 @@ interface Target {
   readonly reconcile: Effect.Effect<void>
 }
 
-export const sessionRestart = (deps: {
+const sessionRestart = (deps: {
   readonly db: Db["Service"]
   readonly bus: Bus["Service"]
   readonly runtimes: Runtimes["Service"]
@@ -393,4 +396,101 @@ export const sessionRestart = (deps: {
     }).pipe(Effect.asVoid)
 
   return { outdated, restart, restartLater }
+}
+
+const make = Effect.gen(function* () {
+  const db = yield* Db
+  const runtimes = yield* Runtimes
+  const harness = yield* Harness
+  const harnesses = yield* Harnesses
+  const agents = yield* Agents
+  const layout = yield* Layout
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const processes = yield* Processes
+  const { restarting } = yield* SessionLive
+  const bus = yield* Bus
+  const platform = yield* Effect.context<Platform>()
+  const scope = yield* Effect.scope
+  const { locked } = yield* SessionLocks
+  const { awaitReady, prompt } = yield* Executions
+  const { launchArgv } = yield* Placement
+  const reconcile = yield* Reconcile
+  const vibestCommand = yield* VibestCommand
+
+  const entryArgv = (entry: EntryRow) =>
+    Effect.gen(function* () {
+      yield* db.patchLive(entry.id, { ready: null })
+      const root = entry.projectDirectory ?? (yield* db.projectDirectory(entry.projectId)) ?? ""
+      const savedId = entry.harnessSessionId
+      const command = yield* entryCommand({
+        harness: entry.harnessId,
+        agent: entry.agent,
+        root,
+        provider: entry.provider,
+        model: entry.model,
+        session: Effect.succeed({
+          sessionId: entry.id,
+          harnessSessionId: savedId !== null && (yield* db.canResumeConversation(entry.id, savedId)) ? savedId : null,
+          projectId: entry.projectId,
+          ...(entry.runtime && entry.address ? { runtime: runtimeEnv(entry.runtime, entry.address) } : {}),
+        }),
+      })
+      return restartArgv(command)
+    }).pipe(
+      Effect.provideService(Agents, agents),
+      Effect.provideService(Harness, harness),
+      Effect.provideService(Harnesses, harnesses),
+      Effect.provideService(Layout, layout),
+      Effect.provideService(VibestCommand, vibestCommand),
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+    )
+
+  return sessionRestart({
+    db,
+    bus,
+    runtimes,
+    harnesses,
+    processes,
+    restarting,
+    scope,
+    locked: (id) => locked(id),
+    checkLater: (id) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid),
+    launchArgv,
+    entryArgv,
+    awaitReady,
+    prompt: (h, session, terminal, text) => prompt(h, session, terminal, text).pipe(Effect.provideContext(platform)),
+  })
+})
+
+export class Restart extends Context.Service<Restart, Effect.Success<typeof make>>()("vibest/Restart") {
+  static readonly make = make
+
+  static readonly layer = Layer.effect(Restart, make)
+
+  static readonly node = LayerNode.make({
+    service: Restart,
+    layer: Restart.layer,
+    deps: [
+      Agents.node,
+      Bus.node,
+      Db.node,
+      Executions.node,
+      Git.node,
+      Harness.node,
+      Harnesses.node,
+      Placement.node,
+      Processes.node,
+      Reconcile.node,
+      Runtimes.node,
+      SessionLive.node,
+      SessionLocks.node,
+      PlatformNode.childProcessSpawner,
+      PlatformNode.crypto,
+      PlatformNode.fileSystem,
+      PlatformNode.layout,
+      PlatformNode.path,
+    ],
+  })
 }

@@ -10,32 +10,26 @@ import {
   SessionBusy,
   type UnknownAgent,
 } from "@vibest/schema/session"
-import { Context, Effect, FileSystem, Layer, Option, Path, Ref } from "effect"
+import { Context, Effect, Layer, Option, Ref } from "effect"
 
-import { Agents } from "./agents.ts"
-import { Bus } from "./bus.ts"
 import { Db, type SessionFilter, type SessionRow } from "./db.ts"
 import { Drain } from "./drain.ts"
 import { LayerNode } from "./effect/layer-node.ts"
 import * as PlatformNode from "./effect/platform.ts"
-import { Harness, Harnesses, HarnessUnavailable } from "./harness.ts"
+import { HarnessUnavailable } from "./harness.ts"
 import { Inbox, text as inboxText } from "./inbox.ts"
-import { entryCommand, restartArgv } from "./launch.ts"
-import { Layout, VibestCommand } from "./paths.ts"
 import { Plugins } from "./plugins.ts"
-import { Processes } from "./processes.ts"
 import { projectRoot, workspaceGit } from "./project-create.ts"
 import * as Remove from "./remove.ts"
-import { type Outdated, type Restarted, sessionRestart } from "./restart.ts"
 import { Runtimes, RuntimeError } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
 import { Archive } from "./session/archive.ts"
 import { Delivery, unreachable } from "./session/delivery.ts"
-import { Executions } from "./session/executions.ts"
 import { SessionLive } from "./session/live.ts"
 import { SessionLocks } from "./session/locks.ts"
-import { Placement, runtimeEnv } from "./session/placement.ts"
+import { Placement } from "./session/placement.ts"
 import { Reconcile } from "./session/reconcile.ts"
+import { type Outdated, Restart, type Restarted } from "./session/restart.ts"
 import { Spawn, type SpawnInput, type Spawned } from "./session/spawn.ts"
 import { Git, gitState, type GitState, mainCheckout } from "./worktree.ts"
 
@@ -65,21 +59,16 @@ export {
 export const TAIL_LINES = 30
 
 const SESSION_DEPS = [
-  Agents.node,
   Archive.node,
-  Bus.node,
   Db.node,
   Delivery.node,
   Drain.node,
-  Executions.node,
   Git.node,
-  Harness.node,
-  Harnesses.node,
   Inbox.node,
   Placement.node,
   Plugins.node,
-  Processes.node,
   Reconcile.node,
+  Restart.node,
   Runtimes.node,
   SessionLive.node,
   SessionLocks.node,
@@ -150,27 +139,16 @@ export class Sessions extends Context.Service<
   static readonly make = Effect.gen(function* () {
     const db = yield* Db
     const runtimes = yield* Runtimes
-    const harness = yield* Harness
-    const harnesses = yield* Harnesses
-    const agents = yield* Agents
     const inbox = yield* Inbox
-    const layout = yield* Layout
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
-    const processes = yield* Processes
     const sessionLive = yield* SessionLive
-    const { restarting, track } = sessionLive
-    const bus = yield* Bus
+    const { track } = sessionLive
     const platform = yield* Effect.context<Platform>()
-    const scope = yield* Effect.scope
 
     const locks = yield* SessionLocks
-    const locked = locks.locked
 
     const live = (session: SessionRow) => runtimes.route(session.runtime)
 
-    const { awaitReady, prompt } = yield* Executions
-    const { worktreeOf, launchArgv, republish } = yield* Placement
+    const { worktreeOf, republish } = yield* Placement
 
     const delivery = yield* Delivery
     const reconcile = yield* Reconcile
@@ -271,50 +249,7 @@ export class Sessions extends Context.Service<
         Effect.provideContext(platform),
       )
 
-    const vibestCommand = yield* VibestCommand
-    const { outdated, restart, restartLater } = sessionRestart({
-      db,
-      bus,
-      runtimes,
-      harnesses,
-      processes,
-      restarting,
-      scope,
-      locked: (id) => locked(id),
-      checkLater: (id) => Effect.forkIn(reconcile.check(id), scope).pipe(Effect.asVoid),
-      launchArgv,
-      entryArgv: (entry) =>
-        Effect.gen(function* () {
-          yield* db.patchLive(entry.id, { ready: null })
-          const root = entry.projectDirectory ?? (yield* db.projectDirectory(entry.projectId)) ?? ""
-          const savedId = entry.harnessSessionId
-          const command = yield* entryCommand({
-            harness: entry.harnessId,
-            agent: entry.agent,
-            root,
-            provider: entry.provider,
-            model: entry.model,
-            session: Effect.succeed({
-              sessionId: entry.id,
-              harnessSessionId:
-                savedId !== null && (yield* db.canResumeConversation(entry.id, savedId)) ? savedId : null,
-              projectId: entry.projectId,
-              ...(entry.runtime && entry.address ? { runtime: runtimeEnv(entry.runtime, entry.address) } : {}),
-            }),
-          })
-          return restartArgv(command)
-        }).pipe(
-          Effect.provideService(Agents, agents),
-          Effect.provideService(Harness, harness),
-          Effect.provideService(Harnesses, harnesses),
-          Effect.provideService(Layout, layout),
-          Effect.provideService(VibestCommand, vibestCommand),
-          Effect.provideService(FileSystem.FileSystem, fs),
-          Effect.provideService(Path.Path, path),
-        ),
-      awaitReady,
-      prompt: (h, session, terminal, text) => prompt(h, session, terminal, text).pipe(Effect.provideContext(platform)),
-    })
+    const { outdated, restart, restartLater } = yield* Restart
 
     return Sessions.of({
       spawn,
