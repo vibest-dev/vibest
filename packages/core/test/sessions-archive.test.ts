@@ -12,7 +12,7 @@ import { entryPending, projectOf } from "./lib/directory.ts"
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
 import { HARNESSES, PULLING_CLAUDE, PULLING_PI } from "./lib/harnesses.ts"
-import { replyOf, lastSentBy, settled, until, writeEnd } from "./lib/observe.ts"
+import { atMostEntryTracked, lastSentBy, replyOf, settled, until, writeEnd } from "./lib/observe.ts"
 import { makeRepository, type TestOptions } from "./lib/session.ts"
 import {
   spawnInput,
@@ -143,7 +143,7 @@ describe.concurrent("vibest run --archive-on-idle", () => {
       yield* letForkedArchiveRun
       assert.deepStrictEqual(yield* entryPending(w.db, w.projectId), [])
       assert.deepStrictEqual(yield* sqlNotices(w.id), [])
-      yield* until((yield* Sessions).inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      yield* until((yield* Sessions).inMemory, atMostEntryTracked)
     }),
   )
 

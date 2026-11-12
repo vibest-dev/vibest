@@ -6,7 +6,7 @@ import { TestClock } from "effect/testing"
 
 import { FakeProcesses } from "./lib/fake-processes.ts"
 import { FakeRuntime } from "./lib/fake-runtime.ts"
-import { systemPromptFile, until, untilVirtual, writeEnd } from "./lib/observe.ts"
+import { atMostEntryTracked, systemPromptFile, until, untilVirtual, writeEnd } from "./lib/observe.ts"
 import { callerPlugin, makeRepository } from "./lib/session.ts"
 import { spawnInput, spawnWorking, idleSession, sessionWorktree, test } from "./lib/sessions-helpers.ts"
 
@@ -93,7 +93,7 @@ describe.concurrent("Sessions", () => {
         yield* herdr.updateAgent(session, (a) => ({ ...a, alive: false }))
         yield* owner.sessions.check(session)
       }
-      yield* untilVirtual(owner.sessions.inMemory, (m) => m.tracked === 0 && m.locks === 0)
+      yield* untilVirtual(owner.sessions.inMemory, atMostEntryTracked)
       for (const session of [owner.id, id]) {
         yield* owner.sessions.send(session, `again ${session}`)
         yield* until(herdr.callsTo("send"), (calls) => calls.some((c) => c.text === `again ${session}`))
