@@ -35,6 +35,12 @@ An unknown machine, vibest missing on the target, ssh failing, the target being 
 behind the target, a commit the target does not have, and agents running `connect` or `machine add`: each fails with its
 own message.
 
+## M9. Listing another machine's harnesses
+
+`vibest harness ls --machine <name>` prints the harnesses of that machine in the shape of the local list, asked of that
+machine's vibestd each time, so a plugin only B has shows up; an agent can run it. An unknown machine and a machine that
+is not connected fail with their own message and print no list.
+
 ## M6. B's herdr-core terminals on A
 
 Adding a machine shows B's herdr-core terminals in A's herdr-core: a session on B is addressed by its terminal on A;

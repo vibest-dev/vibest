@@ -6,7 +6,9 @@ counts as working.
 ## H1. Listing harnesses
 
 `vibest harness list` shows one entry per loaded harness (Claude and Pi, and Cursor once its plugin is added) with its binary, whether it can start, and its
-default model. A harness whose CLI is missing says so.
+default model. A harness whose CLI is missing says so. `--machine <name>` lists another machine's harnesses (see
+[machines.md](machines.md) M9). The list is the whole machine's; the default model is the harness's global default, which a repository's
+own harness settings may change in its project, and vibest does not read them.
 
 ## H2. Listing models
 

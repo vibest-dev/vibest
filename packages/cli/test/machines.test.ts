@@ -169,6 +169,24 @@ describe("machine add, ls and rm", () => {
       }).pipe(Effect.scoped, Effect.provide(Platform.services)),
   )
 
+  it.effect("harness list --machine asks B's vibestd; a peer is not passed on; an unknown machine is named", () =>
+    Effect.gen(function* () {
+      const net = new Net()
+      const a = yield* stack(net)
+      const b = yield* stack(net)
+      net.route("b-host", b.layout.socket)
+      yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
+      const there = yield* b.cli(b.raw["Harnesses.List"]({}))
+      assert.deepStrictEqual(yield* a.cli(a.raw["Harnesses.List"]({ machine: "mb" })), there)
+      const second = yield* Effect.flip(
+        RpcClient.withHeaders(b.raw["Harnesses.List"]({ machine: "mc" }), peerHeaders(a.id)),
+      )
+      assert.strictEqual(second._tag, "Forbidden")
+      const unknown = yield* Effect.flip(a.cli(a.raw["Harnesses.List"]({ machine: "nosuch" })))
+      assert.strictEqual(unknown._tag, "UnknownMachine")
+    }).pipe(Effect.scoped, Effect.provide(Platform.services)),
+  )
+
   it.effect("two adds of one name at once: one is added, the other fails as MachineFailed", () =>
     Effect.gen(function* () {
       const net = new Net()
