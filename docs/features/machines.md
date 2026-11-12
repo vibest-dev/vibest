@@ -6,7 +6,7 @@ One machine's vibestd (A) can run agents on another machine (B) over ssh. Design
 ## M1. Adding a machine and running on it
 
 `vibest machine add` records B, B records A as a peer, and a second name for the same B is refused. `vibest run
---machine`, run by A's entry session, starts a session on B and none on A; A's entry session gets one notice with the message the session sent, and nothing stays
+--machine`, run by A's entry session, starts a session on B and none on A; A's entry session gets one message from `<machine>/<id>` with what the session sent, and nothing stays
 waiting on B. `send`, `result`, `peek`, `ls` and `archive` reach the session on B.
 
 ## M8. A remote execution end sends nothing
@@ -21,7 +21,9 @@ meanwhile `vibest ls` shows the machine as not connected.
 
 ## M3. Two machines on one B
 
-Two machines using the same B are two peers, and each gets only its own messages and sessions.
+Two machines using the same B are two peers, and each gets only its own messages and sessions. A session on A
+reaches on B only the sessions it started, and B refuses a forwarded call that does not say whether the user or a session
+made it, and a `vibest run --machine` that no session made.
 
 ## M4. Removing and re-adding a machine
 

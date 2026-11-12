@@ -7,6 +7,8 @@ import {
   CWD_HEADER,
   HARNESS_HEADER,
   HARNESS_SESSION_HEADER,
+  PEER_BY_HEADER,
+  PEER_BY_USER,
   PEER_HEADER,
   PEER_PROJECT_HEADER,
   PLUGIN_VERSION_HEADER,
@@ -24,6 +26,7 @@ import {
   Caller,
   CallerGate,
   DaemonStopping,
+  FORWARDED_CALLS,
   InvalidCaller,
   PEER_CALLS,
   ProtocolGate,
@@ -128,11 +131,18 @@ export const resolveCaller = (db: Db["Service"], headers: Headers.Headers, metho
       if (!PEER_CALLS.has(method)) return yield* bad(`a peer vibestd may not call ${method}`)
       if (method !== "Peer.Hello" && !(yield* db.peerKnown(peer)))
         return yield* bad(`peer ${peer} has not said Peer.Hello; call it first`)
+      const by = read(PEER_BY_HEADER)
+      if (
+        (by === undefined && FORWARDED_CALLS.has(method)) ||
+        (by !== undefined && by !== PEER_BY_USER && !ID.test(by))
+      )
+        return yield* bad(`${method} is forwarded for the user or for a session; ${PEER_BY_HEADER} says neither`)
       const project = read(PEER_PROJECT_HEADER)
       return {
         _tag: "Peer",
         peerId: peer,
         ...(project === undefined ? {} : { projectId: project }),
+        ...(by === undefined || by === PEER_BY_USER ? {} : { session: by }),
       } satisfies CallerShape
     }
     if (kind.value === "cli") {

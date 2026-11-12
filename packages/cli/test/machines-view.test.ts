@@ -11,7 +11,7 @@ import { TestClock } from "effect/testing"
 import * as Platform from "#platform"
 
 import { FakeRuntime, PluginHost, until, untilVirtual, yieldToIo } from "./fakes.ts"
-import { fakeSpawns, Net, onB, repoStack } from "./machines-fakes.ts"
+import { entryOn, fakeSpawns, Net, onB, repoStack } from "./machines-fakes.ts"
 
 type Side = {
   readonly id: string
@@ -121,7 +121,8 @@ const pair = (extra: ReadonlyArray<Plugin.Plugin> = [], options: { readonly late
     const added = yield* a.cli(a.raw["Machine.Add"]({ name: "mb", target: "b-host" }))
     yield* until(a.cli(a.raw["Machine.List"]()), (rows) => rows[0]?.state === "connected")
     const here = <A, E>(effect: Effect.Effect<A, E>) => RpcClient.withHeaders(effect, cliHeaders(a.directory))
-    const spawn = (runtime = "view") => here(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {}, runtime }))
+    const { asEntry } = yield* entryOn(a)
+    const spawn = (runtime = "view") => asEntry(a.raw.Spawn({ machine: "mb", prompt: "x", callerEnv: {}, runtime }))
     const listed = (id: string) => Effect.map(here(a.raw.List({})), (r) => r.sessions.find((row) => row.id === id)!)
     return { net, A, B, a, b, added, here, spawn, listed, spawned }
   })

@@ -158,7 +158,7 @@ export const make = (
               return { id: target }
             }
             const id = yield* managed("Send", input)
-            yield* sessions.send(id, p.message, p.request)
+            yield* sessions.send(id, p.message, p.request, caller._tag === "Peer" ? caller.session : undefined)
             return { id }
           }),
         ),

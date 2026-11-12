@@ -4,7 +4,7 @@ import { Effect } from "effect"
 
 import { encodeAddress, failureOf, type SessionPatch, type NewInboxRow, type ExecutionEnd } from "./db-rows.ts"
 import type { Store } from "./db-store.ts"
-import { envelope, type ObservedEnd } from "./replies.ts"
+import { type ObservedEnd } from "./replies.ts"
 
 export const inboxMethods = (store: Store) => {
   const {
@@ -82,17 +82,10 @@ export const inboxMethods = (store: Store) => {
           const origin = yield* origins(sessionId)
           const creator = origin?.session
           if (!origin?.peer || !creator || target.length < 8 || !creator.startsWith(target)) return undefined
-          const [from] = yield* sql<{ name: string }>`SELECT name FROM session WHERE id = ${sessionId}`
           const written = yield* queueForPeer(origin.peer, creator, {
             sessionId,
-            content: envelope(
-              "agent-message",
-              [
-                ["agent-id", sessionId],
-                ["title", from?.name ?? ""],
-              ],
-              ["message", message],
-            ),
+            kind: "send",
+            content: message,
           })
           return written
         }),

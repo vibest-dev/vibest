@@ -368,7 +368,7 @@
     "seq": 53,
     "at": 1793000053000,
     "type": "outbox.queued",
-    "data": "{\"id\":\"7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f\",\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"session\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"content\":\"All 42 tests pass.\"}"
+    "data": "{\"id\":\"7c1e2d3f-4a5b-4c6d-9e7f-8a9b0c1d2e3f\",\"peer\":\"3e4f5a6b-7c8d-4e9f-8a0b-1c2d3e4f5a6b\",\"session\":\"6c1d9e2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f\",\"kind\":\"send\",\"content\":\"All 42 tests pass.\"}"
   },
   {
     "aggregate": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
