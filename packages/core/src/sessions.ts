@@ -667,14 +667,6 @@ export class Sessions extends Context.Service<
             return onTerminal(event.runtime, event.terminal, event.state === "working")
           case "live.exited":
             return onTerminal(event.runtime, event.terminal, false)
-          case "session.ended":
-            return db
-              .creatorOf(event.sessionId!)
-              .pipe(
-                Effect.flatMap((creator) =>
-                  creator !== undefined && "local" in creator ? archiveSoon([creator.local]) : Effect.void,
-                ),
-              )
           case "process.ended":
             return forgetIfDone(event.sessionId!)
           case "live.reset":

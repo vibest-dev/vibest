@@ -232,6 +232,14 @@ const make = Effect.gen(function* () {
         return event.data.to === "pending" || event.data.to === "delivering"
           ? Effect.void
           : db.inboxParties(event.sessionId!, event.data.inbox).pipe(Effect.flatMap(archiveSoon))
+      case "session.ended":
+        return db
+          .creatorOf(event.sessionId!)
+          .pipe(
+            Effect.flatMap((creator) =>
+              creator !== undefined && "local" in creator ? archiveSoon([creator.local]) : Effect.void,
+            ),
+          )
       default:
         return Effect.void
     }
