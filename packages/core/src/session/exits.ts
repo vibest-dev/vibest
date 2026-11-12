@@ -104,7 +104,9 @@ const make = Effect.gen(function* () {
       )
   })
 
-  const settle = Effect.fn("Exits.settle")(function* (h: Runtime, session: SessionRow) {
+  const settle = Effect.fn("Exits.settle")(function* (h: Runtime, id: string) {
+    const session = yield* db.getSession(id)
+    if (session === undefined) return
     const execution = session.executionState === "open" ? yield* db.openExecution(session.id) : undefined
     const limited = yield* limitOf(session)
     if (limited !== undefined && (yield* afterLimit(h, session, limited, true))) return

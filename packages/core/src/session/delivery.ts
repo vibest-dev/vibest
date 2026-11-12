@@ -141,7 +141,7 @@ const make = Effect.gen(function* () {
     const state = stateOf(seen) === "unknown" ? undefined : stateOf(seen)
     if (state !== undefined && busy(state)) return
     if (state === undefined && !(yield* alive(h, terminal))) {
-      if (session.exitedAt === null) return yield* exits.settle(h, session)
+      if (session.exitedAt === null) return yield* exits.settle(h, id)
       if ((yield* db.pendingInbox(id)).length === 0) return
       if (!(yield* harnesses.get(session.harnessId)).ownSessionId && !session.harnessSessionId)
         return yield* new NoSuchSession({
