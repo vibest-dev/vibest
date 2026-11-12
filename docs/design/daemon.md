@@ -49,7 +49,7 @@ After `vibest update` installs another version and vibestd answers Ping with tha
 offer the agent restarts itself: across a protocol change vibestd refuses it (`IncompatibleDaemon`). It runs the
 installed binary as `<installed vibest> update --restart-agents-after <pid> [--yes]` on the same terminal and exits
 with its status. The child runs only the restart offer, with `--yes` deciding as for `vibest update`, and passes
-`<pid>` (the parent's) to `Agents.Restart` as `after`, so an entry session that ran `vibest update` is restarted only once
+`<pid>` (the parent's) to `Agents.Restart` as `after`, so an entry session whose terminal the user ran it in is restarted only once
 the outer command has exited. This hidden flag is a contract between versions: the old binary writes the call, the
 new one reads it, so every later version keeps accepting `--restart-agents-after <pid>` and `--yes` with this meaning.
 When vibestd still runs another version (a declined restart), the old process offers the restarts itself. A CLI older
