@@ -140,7 +140,7 @@ describe("HarnessAdapter", () => {
     const claude = ADAPTERS.claude.launchArgs(input)
     assert.strictEqual(
       claude[claude.indexOf("--allowedTools") + 1],
-      `Bash(vibest:*),Bash(/usr/bin/bun /src/main.ts:*),Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
+      `Bash,Read(/${input.projectDir}/**),Edit(/${input.projectDir}/**)`,
     )
     assert.strictEqual(claude[claude.indexOf("--add-dir") + 1], input.projectDir)
   })

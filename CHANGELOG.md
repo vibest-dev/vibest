@@ -17,7 +17,7 @@ release. Each release lists what broke, who is affected and how to migrate under
   identity); `GuardCall.session` loses `workingDirectory` and `vibest`. Every session can run `vibest run`, `ls`,
   `project info` and the other agent commands, but manages (send, interrupt, peek, remove) only the sessions it started,
   and sessions started by a session record it as their parent. `vibest update` is for the user only. The Pi entry session
-  appends the system prompt, Cursor can run `coordinator` (its definition and session facts arrive in its first
+  appends the system prompt, every Claude session starts with all of Bash pre-approved (the coordinator had this before; subagents had only `vibest send`; permission rules the user sets to ask still apply), Cursor can run `coordinator` (its definition and session facts arrive in its first
   input), and the Pi extension serves every vibest session. The protocol number is unchanged; the contract snapshot is
   regenerated.
 - **Pull or type depends only on the harness; the entry session is an ordinary session** (anyone reading

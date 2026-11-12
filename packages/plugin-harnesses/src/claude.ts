@@ -28,9 +28,6 @@ const claudeStartup: NonNullable<Harness.HarnessDefinition["startup"]> = Effect.
 
 const projectDirRules = (dir: string) => [`Read(/${dir}/**)`, `Edit(/${dir}/**)`]
 
-const vibestCommands = (vibest: ReadonlyArray<string>) =>
-  [...new Set(["vibest", vibest.join(" ")])].map((cmd) => `Bash(${cmd}:*)`).join(",")
-
 const executionComplete = (event: Readonly<Record<string, unknown>>) => {
   if (event.reason === "answer") return event
   if (event.reason === "aborted")
@@ -117,7 +114,7 @@ export const claude: Harness.HarnessDefinition = {
     "--add-dir",
     i.projectDir,
     "--allowedTools",
-    [vibestCommands(i.vibest), ...projectDirRules(i.projectDir)].join(","),
+    ["Bash", ...projectDirRules(i.projectDir)].join(","),
     "--plugin-dir",
     i.pluginDir,
     ...opt("--model", i.model),
