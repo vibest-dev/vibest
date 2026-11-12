@@ -24,6 +24,7 @@
   "scripts": {
     "build": "bun scripts/build.ts",
     "prepack": "bun run build",
-    "typecheck": "tsrs --noEmit --fast"
+    "typecheck": "tsrs --noEmit --fast",
+    "test": "cd ../../.. && bun ./node_modules/vitest/vitest.mjs run packages/integration/cursor"
   }
 }

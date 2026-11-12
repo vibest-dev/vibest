@@ -9,7 +9,8 @@ import { SqlClient } from "effect/sql"
 import { KIND as RUNTIME } from "../../../runtime-herdr/src/terminal-runtime.ts"
 import { projectOf } from "./directory.ts"
 import { FakeRuntime } from "./fake-runtime.ts"
-import { settled, until, writeEnd } from "./observe.ts"
+import { CLAUDE } from "./harnesses.ts"
+import { settled, EXECUTIONS, until, writeEnd } from "./observe.ts"
 import { sessionFrom, type TestOptions, type TestServices } from "./session.ts"
 
 export const harnessOf = (argv: ReadonlyArray<string>) => (argv[0] === "cursor-agent" ? "cursor" : argv[0])
@@ -30,6 +31,18 @@ export const spawnInput = (repo: string, harness: HarnessId = "pi") =>
         runtime: "herdr",
       }) as const,
   )
+
+export const claudeEnd = (reason: string) =>
+  (
+    CLAUDE.executionEnd!({
+      hook_event_name: "ExecutionComplete",
+      session_id: "c1",
+      reason,
+      last_assistant_message: "",
+    }) as {
+      readonly end: object
+    }
+  ).end
 
 export const spawnWorking = (
   repo: string,
@@ -104,6 +117,17 @@ export const pick = (w: { readonly status: string; readonly executionState: stri
   status: w?.status,
   executionState: w?.executionState,
 })
+export const executionAndSentCounts = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [executions] = yield* sql<{
+      n: number
+    }>`SELECT count(*) AS n FROM ${sql.literal(EXECUTIONS)} m WHERE session_id = ${sessionId}`.pipe(Effect.orDie)
+    const [sent] = yield* sql<{
+      n: number
+    }>`SELECT count(*) AS n FROM inbox WHERE sender_session_id = ${sessionId}`.pipe(Effect.orDie)
+    return { executions: executions!.n, sent: sent!.n }
+  })
 export const sqlNotices = (sessionId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient

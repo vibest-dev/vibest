@@ -1,0 +1,122 @@
+import { assert, describe } from "@effect/vitest"
+import { Effect, Fiber, FileSystem } from "effect"
+import { TestClock } from "effect/testing"
+
+import { entryPending } from "./lib/directory.ts"
+import { FakeGit } from "./lib/fake-git.ts"
+import { FakeRuntime } from "./lib/fake-runtime.ts"
+import { untilVirtual, writeEnd } from "./lib/observe.ts"
+import { makeRepository } from "./lib/session.ts"
+import {
+  claudeEnd,
+  spawnWorking,
+  idleSession,
+  sessionWorktree,
+  test,
+  executionAndSentCounts,
+  sqlNotices,
+} from "./lib/sessions-helpers.ts"
+
+describe.concurrent("Sessions", () => {
+  test(
+    "a Send accepted just before vibest rm does not bring the removed session back; its message fails once",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions } = yield* idleSession(yield* makeRepository)
+      const counts = Effect.all([herdr.callsTo("open"), herdr.callsTo("send")]).pipe(
+        Effect.map((calls) => calls.map((c) => c.length)),
+      )
+      const before = yield* counts
+      const held = yield* herdr.hold("state", id)
+      const removing = yield* Effect.forkChild(sessions.remove(id, { keepWorktree: true }))
+      yield* held.reached
+      yield* sessions.send(id, "late")
+      yield* held.release()
+      assert.deepInclude(yield* Fiber.join(removing), { worktree: "kept" })
+      yield* TestClock.withLive(Effect.sleep("100 millis"))
+      yield* sessions.check(id)
+      assert.deepStrictEqual(yield* counts, before)
+      const notices = yield* sqlNotices(id)
+      assert.deepStrictEqual(
+        notices.filter((m) => m.endsWith("\n\nlate")),
+        [`A message to ${id} was not delivered: ${id} was archived before it was delivered\n\nlate`],
+      )
+      assert.deepInclude(yield* sessions.remove(id), { worktree: "removed" })
+    }),
+  )
+
+  test(
+    "remove of a worktree that is gone, or not this repository's, reconciles its processes and leaves the directory alone",
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const repo = yield* makeRepository
+      const a = yield* idleSession(repo)
+      yield* fs.remove(yield* sessionWorktree(a.id), { recursive: true })
+      assert.deepInclude((yield* a.sessions.remove(a.id))!, { pane: "closed", workspace: "none", worktree: "gone" })
+      assert.isNotNull((yield* a.db.getSession(a.id))!.exitedAt)
+
+      const b = yield* idleSession(repo)
+      const wb = yield* sessionWorktree(b.id)
+      const fakeGit = yield* FakeGit
+      yield* fakeGit.git.removeWorktree(repo, wb)
+      yield* fs.makeDirectory(wb)
+      yield* fakeGit.repository(wb)
+      yield* fs.writeFileString(`${wb}/mine.txt`, "the user's")
+      const out = (yield* b.sessions.remove(b.id))!
+      assert.deepInclude(out, { worktree: "kept" })
+      assert.match(out.reasons.join("\n"), /not a worktree of its repository/)
+      assert.isTrue(yield* fs.exists(`${wb}/mine.txt`))
+    }),
+  )
+
+  for (const harness of ["claude", "pi"] as const)
+    test(
+      `remove of a working ${harness} session: the aborted execution end of its interrupt is no result, written during the interrupt or after`,
+      Effect.gen(function* () {
+        const herdr = yield* FakeRuntime
+        const repo = yield* makeRepository
+        const aborted = harness === "claude" ? claudeEnd("aborted") : { text: "", error: "aborted", aborted: true }
+        const during = yield* spawnWorking(repo, harness)
+        const held = yield* herdr.hold("send", during.id)
+        const removing = yield* Effect.forkChild(during.sessions.remove(during.id))
+        yield* held.reached
+        yield* writeEnd(during.id, harness, aborted, 60_000)
+        yield* held.release()
+        yield* Fiber.join(removing)
+        const after = yield* spawnWorking(repo, harness)
+        yield* after.sessions.remove(after.id)
+        yield* writeEnd(after.id, harness, aborted, 60_000)
+        yield* TestClock.adjust("2 minutes")
+        for (const { id, sessions, db } of [during, after]) {
+          const row = (yield* db.getSession(id))!
+          assert.isTrue(row.metadata.archived, id)
+          yield* sessions.check(id)
+          assert.deepStrictEqual(yield* executionAndSentCounts(id), { executions: 1, sent: 0 }, id)
+          assert.strictEqual((yield* db.getSession(id))!.executionState, "interrupted", id)
+          assert.deepStrictEqual(yield* entryPending(db, row.projectId), [])
+        }
+      }),
+      harness === "pi" ? { hooked: ["pi"] } : undefined,
+    )
+
+  test(
+    "interrupt that does not take: SessionBusy, the execution stays open, so the late aborted turn.complete is delivered as an interrupted result",
+    Effect.gen(function* () {
+      const herdr = yield* FakeRuntime
+      const { id, sessions, db } = yield* spawnWorking(yield* makeRepository, "claude")
+      const interrupting = yield* Effect.forkChild(sessions.interrupt(id))
+      yield* untilVirtual(
+        Effect.sync(() => interrupting.pollUnsafe()),
+        (exit) => exit !== undefined,
+      )
+      assert.strictEqual((yield* Effect.flip(Fiber.join(interrupting)))._tag, "SessionBusy")
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "open")
+      yield* writeEnd(id, "claude", claudeEnd("aborted"))
+      yield* herdr.endExecution(id)
+      yield* sessions.check(id)
+      assert.strictEqual((yield* db.getSession(id))!.executionState, "interrupted")
+      assert.isUndefined(yield* db.latestInbox(id, "notice"))
+    }),
+    { interruptIgnored: true },
+  )
+})
