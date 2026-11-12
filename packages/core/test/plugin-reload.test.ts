@@ -475,7 +475,7 @@ const waiters = new Set<() => void>()
 const wake = () => {
   for (const waiter of waiters) waiter()
 }
-const untilSignal = (ready: () => boolean, what: string) =>
+const untilSignal = (ready: () => boolean, what: string, within: Duration.Input = "10 seconds") =>
   Effect.callback<void>((resume) => {
     const check = () => {
       if (!ready()) return
@@ -485,12 +485,7 @@ const untilSignal = (ready: () => boolean, what: string) =>
     waiters.add(check)
     check()
     return Effect.sync(() => waiters.delete(check))
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: fsEventsDeliveryUnderLoad,
-      orElse: () => Effect.die(`gave up waiting for ${what}`),
-    }),
-  )
+  }).pipe(Effect.timeoutOrElse({ duration: within, orElse: () => Effect.die(`gave up waiting for ${what}`) }))
 
 const watchers = { open: 0 }
 const watchGate: { hold: boolean; listeners: Map<string, (name: string) => void> } = {
@@ -578,7 +573,7 @@ const timers = Effect.gen(function* () {
 const pastDebounce = Effect.sleep("150 millis")
 const pastRescan = Effect.suspend(() => {
   const start = vibestJsonReads.count
-  return untilSignal(() => vibestJsonReads.count > start, "a rescan")
+  return untilSignal(() => vibestJsonReads.count > start, "a rescan", fsEventsDeliveryUnderLoad)
 })
 
 const live = <E>(
@@ -886,5 +881,34 @@ describe("plugins: supervisor", () => {
         Effect.provide(Platform.services),
       ),
     15_000,
+  )
+
+  it.effect("an unchanged plugin that failed to import is not imported again when another plugin reloads", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* packageHome
+      const plugins = path.join(dir, "plugins")
+      watchGate.hold = true
+      yield* fs.writeFileString(
+        path.join(plugins, "broken.ts"),
+        `globalThis.__vibestReload["import:unchanged-broken"] = (globalThis.__vibestReload["import:unchanged-broken"] ?? 0) + 1\nthrow new Error("broken on purpose")\n`,
+      )
+      yield* fs.writeFileString(path.join(plugins, "other.ts"), pluginFile("other", "unchanged-other", `"o1"`))
+      const { fire, clocked } = yield* timers
+      const service = yield* clocked(supervise(dir))
+      assert.include((yield* service.list)[0]!.error, "broken on purpose")
+      const imports = count("import:unchanged-broken")
+
+      yield* fs.writeFileString(path.join(plugins, "other.ts"), pluginFile("other", "unchanged-other", `"o2"`))
+      yield* watchSees(plugins, "other.ts")
+      yield* fire(DEBOUNCE)
+      assert.strictEqual((yield* service.start(event)).model, "o2")
+      assert.strictEqual(count("import:unchanged-broken"), imports)
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => void (watchGate.hold = false))),
+      Effect.scoped,
+      Effect.provide(Platform.services),
+    ),
   )
 })

@@ -36,12 +36,14 @@ and an installed folder that does not resolve yet (an install still writing) sta
 the plugin again; `effect`, `@vibest/plugin` and their subpaths are supplied by vibestd and never watched; a package that resolves is neither watched
 nor evicted, and an upgraded package already loaded needs a vibestd restart. While the watched
 directories change the plugins are read again, because a change made before its watch began is not reported; after
-such a rewatch one more read follows once the watch is live. On macOS Bun 1.4 serves every `fs.watch` of a process from
+such a rewatch one more read follows, timed by a probe. On macOS Bun 1.4 serves every `fs.watch` of a process from
 one FSEvents stream and rebuilds it, from "now", on a separate thread whenever a watch is added or closed; events in
-every watched directory are lost until the new stream runs, which under CPU load takes well over a second. So after a
+every watched directory are lost until the new stream runs, which under CPU load can take well over a second. So after a
 rewatch vibestd writes `.plugins-watch` in `VIBEST_HOME` (always watched for `vibest.json`) and reads the plugins
-again when that write is reported, writing it again each second it is not, ten times at most (drop the probe when Bun
-no longer rebuilds the stream). A teardown that times out is left
+again when that write is reported, writing it again each second it is not; after ten unreported writes it reads them
+anyway. This narrows the loss, it does not rule it out: a stream rebuilt again after the probe was reported, or events
+macOS itself drops under heavy load, still go unseen until the next change (drop the probe when Bun no longer rebuilds
+the stream). A teardown that times out is left
 running, so an old revision's finalizers can overlap the new setup.
 
 ## Machine hooks
