@@ -2,6 +2,7 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Integration } from "@vibest/core/integration"
 import { SessionLocks } from "@vibest/core/session/locks"
+import { Placement } from "@vibest/core/session/placement"
 import { Sessions } from "@vibest/core/sessions"
 import { Deferred, Effect, FileSystem, Ref } from "effect"
 import { SqlClient } from "effect/sql"
@@ -28,6 +29,7 @@ const nextVibestd = (done: Effect.Effect<boolean, never, TestServices>) =>
   Effect.gen(function* () {
     const next = yield* Sessions.make({ maxSessions: undefined }).pipe(
       Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+      Effect.provideServiceEffect(Placement, Placement.make),
     )
     yield* until(done, (yes) => yes)
     yield* until(next.inMemory, (m) => m.locks === 0)
@@ -197,6 +199,7 @@ describe.concurrent("after a vibestd stop", () => {
         yield* Ref.set(herdr.skipPromptUpdates, 2)
         const next = yield* Sessions.make({ maxSessions: undefined }).pipe(
           Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+          Effect.provideServiceEffect(Placement, Placement.make),
         )
         yield* untilVirtual(executionInputs(id), (executions) => executions[0]?.status === "not_started")
         assert.strictEqual(yield* typed("do it"), 2)
@@ -234,6 +237,7 @@ describe.concurrent("after a vibestd stop", () => {
         assert.isFalse(yield* db.executionAccepted(id))
         yield* Sessions.make({ maxSessions: undefined }).pipe(
           Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+          Effect.provideServiceEffect(Placement, Placement.make),
         )
         yield* untilVirtual(executionInputs(id), (executions) => executions[0]?.status !== "working")
         assert.deepStrictEqual(

@@ -2,6 +2,7 @@ import { assert, describe } from "@effect/vitest"
 import { Db } from "@vibest/core/db"
 import { Layout } from "@vibest/core/paths"
 import { SessionLocks } from "@vibest/core/session/locks"
+import { Placement } from "@vibest/core/session/placement"
 import { Sessions } from "@vibest/core/sessions"
 import { Effect, Fiber, FileSystem, HashMap, Path, PlatformError } from "effect"
 import { SqlClient } from "effect/sql"
@@ -280,6 +281,7 @@ describe.concurrent("Sessions", () => {
       })
       const sessions = yield* Sessions.make({ maxSessions: undefined }).pipe(
         Effect.provideServiceEffect(SessionLocks, SessionLocks.make),
+        Effect.provideServiceEffect(Placement, Placement.make),
         Effect.provideService(FileSystem.FileSystem, faulty),
       )
       const { id } = yield* sessions.spawn(yield* spawnInput(repo))

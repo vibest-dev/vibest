@@ -3,13 +3,13 @@ import { Cause, Context, Duration, Effect, FileSystem, Ref } from "effect"
 
 import { type Db, type SessionRow, sessionEnded } from "./db.ts"
 import { directoryLock, type keyedLock } from "./keyed-lock.ts"
-import type { sessionPlacement } from "./placement.ts"
 import { errorMessage } from "./plugins.ts"
 import type * as Remove from "./remove.ts"
 import { agentState, type Runtimes, type Runtime, type AgentSeen } from "./runtimes.ts"
 import type { Platform } from "./session-types.ts"
 import { type Executions, STOP_WAIT } from "./session/executions.ts"
 import type { SessionLive } from "./session/live.ts"
+import type { Placement } from "./session/placement.ts"
 
 export const sessionArchive = (deps: {
   readonly db: Db["Service"]
@@ -21,7 +21,7 @@ export const sessionArchive = (deps: {
   readonly live: (session: SessionRow) => ReturnType<Runtimes["Service"]["route"]>
   readonly notice: (session: SessionRow, message: string) => Effect.Effect<unknown>
   readonly dropQueue: (session: SessionRow, reason: string) => Effect.Effect<unknown>
-  readonly recount: ReturnType<typeof sessionPlacement>["recount"]
+  readonly recount: Placement["Service"]["recount"]
   readonly sessionLive: SessionLive["Service"]
   readonly locked: (
     id: string,
