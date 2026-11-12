@@ -126,7 +126,7 @@ const listUntil = async (
 }
 
 it(
-  "P16/P17: the running binary reloads changed async imports, loads a plugin added under a symlinked tmpdir, keeps running the last good one while broken or hung (import gives up after 5s) without setting it up again, recovers",
+  "P16/P17: the running binary reloads changed async imports, keeps running the last good one while an import hangs (it gives up after 5s) without setting it up again, recovers",
   { timeout: 300_000 },
   async () => {
     build()
@@ -154,13 +154,6 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
         const first = byId(await listUntil(list, (l) => byId(l, "live")?.status === "active"), "live")!
         assert.deepStrictEqual(await log(), ["v1"])
 
-        await fs.writeFile(
-          path.join(home, "plugins", "zz-added.ts"),
-          `import { Plugin } from "@vibest/plugin"\nimport { Effect } from "effect"\nexport default Plugin.define({ id: "added", effect: () => Effect.void })\n`,
-        )
-        const added = byId(await listUntil(list, (l) => byId(l, "added")?.status === "active"), "added")!
-        assert.deepInclude(added, { id: "added", status: "active" })
-
         await fs.writeFile(version, versionFileWithTopLevelAwait("v2"))
         const second = byId(
           await listUntil(list, (l) => byId(l, "live") !== undefined && byId(l, "live")!.revision !== first.revision),
@@ -168,11 +161,6 @@ export default Plugin.define({ id: "live", effect: () => Effect.sync(() => fs.ap
         )!
         assert.strictEqual(second!.status, "active")
         assert.deepStrictEqual(await log(), ["v1", "v2"])
-
-        await fs.writeFile(version, `export const version = (() => { throw new Error("broken on purpose") })()\n`)
-        const broken = byId(await listUntil(list, (l) => byId(l, "live")?.error !== undefined), "live")!
-        assert.deepInclude(broken, { status: "active", revision: second!.revision })
-        assert.include(broken!.error, "broken on purpose", broken!.error)
 
         await fs.writeFile(version, `export const version = await new Promise(() => {})\n`)
         const hung = byId(

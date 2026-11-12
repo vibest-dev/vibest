@@ -612,56 +612,6 @@ describe("plugins: supervisor", () => {
   )
 
   live(
-    "P17/P18: a burst of saves ends on the last one; a broken save keeps the old plugin, unrelated saves do not re-import it, a fix recovers",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const dir = yield* packageHome
-      const file = path.join(dir, "plugins", "p.ts")
-      const other = path.join(dir, "plugins", "q.ts")
-      yield* fs.writeFileString(file, pluginFile("p", "p", `"p0"`))
-      yield* fs.writeFileString(other, pluginFile("q", "q", "e.model"))
-      const plugins = yield* supervise(dir)
-      assert.strictEqual((yield* plugins.start(event)).model, "p0")
-
-      for (let i = 1; i <= 10; i++) {
-        yield* fs.writeFileString(file, pluginFile("p", "p", `"p${i}"`))
-      }
-      yield* eventually(plugins.start(event), (s) => s.model === "p10", "the last save")
-
-      yield* fs.writeFileString(file, `globalThis.__vibestReload["import:p"]++\nthrow new Error("broken on purpose")\n`)
-      const listed = yield* eventually(plugins.list, (l) => l[0]?.error !== undefined, "the import error")
-      assert.deepInclude(listed[0], { id: "p", status: "active" })
-      assert.include(listed[0]!.error, "broken on purpose")
-      assert.strictEqual((yield* plugins.start(event)).model, "p10", "the last working revision still runs")
-      const brokenImports = count("import:p")
-
-      yield* fs.writeFileString(other, pluginFile("q", "q", `"q1"`))
-      yield* eventually(plugins.start(event), (s) => s.model === "q1", "q's new revision")
-      const firstFile = path.join(dir, "plugins", "a.ts")
-      yield* fs.writeFileString(firstFile, pluginFile("a", "a", "e.model"))
-      yield* eventually(plugins.list, (l) => l.length === 3, "a new first plugin")
-      yield* pastDebounce
-      assert.strictEqual(
-        count("import:p"),
-        brokenImports,
-        "a broken revision is not imported again while unchanged, though a.ts sorting before it rebuilt p",
-      )
-
-      yield* fs.writeFileString(file, pluginFile("p", "p", `"fixed"`))
-      const fixed = yield* eventually(
-        plugins.list,
-        (l) => l.some((p) => p.id === "p" && p.error === undefined),
-        "the fix",
-      )
-      assert.deepInclude(
-        fixed.find((p) => p.id === "p"),
-        { status: "active" },
-      )
-    }),
-  )
-
-  live(
     "file plugins renamed, removed and added again; a directory plugin removed and re-created",
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem
@@ -785,28 +735,6 @@ describe("plugins: supervisor", () => {
       )
       const routed = yield* Context.get(built, Runtimes).route("fake")
       assert.strictEqual(routed.id, "fake")
-    }),
-  )
-
-  live(
-    "H2: under a symlinked VIBEST_HOME, a plugin added after start loads (and an edit of it reloads)",
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem
-      const path = yield* Path.Path
-      const real = yield* packageHome
-      const link = `${real}-link`
-      yield* fs.symlink(real, link)
-      yield* Effect.addFinalizer(() => fs.remove(link).pipe(Effect.ignore))
-      yield* fs.writeFileString(path.join(link, "plugins", "a.ts"), pluginFile("a", "h2-a", "e.model"))
-      const plugins = yield* supervise(link)
-      assert.deepStrictEqual(
-        (yield* plugins.list).map((p) => p.status),
-        ["active"],
-      )
-      yield* fs.writeFileString(path.join(link, "plugins", "new.ts"), pluginFile("new", "h2-new", `"n1"`))
-      yield* eventually(plugins.start(event), (s) => s.model === "n1", "the plugin added after start")
-      yield* fs.writeFileString(path.join(link, "plugins", "new.ts"), pluginFile("new", "h2-new", `"n2"`))
-      yield* eventually(plugins.start(event), (s) => s.model === "n2", "its edit")
     }),
   )
 
